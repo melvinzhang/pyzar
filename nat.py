@@ -4,9 +4,11 @@ Module stack:
   ``fusion.py`` -- primitive HOL Light kernel.
   ``axioms.py`` -- bool definitions and the 3 logical axioms (ETA, SELECT, INFINITY).
   ``logic.py``  -- derived bool inference rules + Diaconescu's EM.
-  ``num.py``    -- num signature, Peano Axioms 3-5, INDUCT.
+  ``num.py``    -- num carved from ind; Peano 3/4/5 derived as theorems;
+                   INDUCT and NUM_RECURSION.
   ``nat.py``    -- this file: addition, multiplication, Landau Theorems 1-36.
 
+The whole development rests on only the 3 logical axioms in axioms.py.
 Each theorem is proved using only the 10 primitive inference rules
 (REFL, TRANS, MK_COMB, ABS, BETA, ASSUME, EQ_MP, DEDUCT_ANTISYM_RULE,
 INST, INST_TYPE) plus rules imported from ``logic.py`` and ``num.py``.
@@ -15,43 +17,42 @@ Run ``python nat.py`` -- the kernel rejects any unsound step, so a clean
 finish prints 20 step-confirmation lines and means every theorem is valid.
 
 Coverage:
-  #1  All 5 Peano axioms (Axiom 1 by typing; Axiom 2's existence by
-      taking SUC as a total function; Axioms 3, 4, 5 as new_axioms in num.py).
+  #1  All 5 Peano axioms derived as theorems in num.py
+      (Axiom 1 by typing; Axiom 2's existence by taking SUC as a total
+      function; Axioms 3, 4, 5 from carving num out of ind via INFINITY_AX).
   #2  Theorems 1, 2, 3, 5, 6, 7, 8, 9 (both existence and mutual-exclusion
-      halves of the trichotomy).  Definition 1 (addition) admitted as
-      Landau's recursion equations (the existence-half proof of
-      Theorem 4 needs the primitive-recursion principle for num,
-      derivable from Axiom 5 but out of scope here).
+      halves of the trichotomy).  Definition 1 (addition): the recursion
+      equations ADD_1, ADD_SUC are derived from NUM_RECURSION rather than
+      admitted (Theorem 4's existence half is num.py's NUM_RECURSION).
   #3  Definitions 2, 3, 4, 5 and Theorems 10-17, 18, 19 (a/b/c), 20,
       21, 22 (a/b), 23, 24, 25, 26, 27.
-  #4  Definition 6 (multiplication, parallel to Definition 1) and
+  #4  Definition 6 (multiplication, parallel to Definition 1, equations
+      MUL_1 and MUL_SUC likewise derived from NUM_RECURSION) and
       Theorems 29, 30, 31, 32 (a/b/c), 33, 34, 35 (a/b), 36.
 """
 
 from fusion import (
-    Var, Const, Comb, Abs,
+    Var, Comb, Abs,
     bool_ty, aty, mk_abs, mk_comb, mk_const, mk_eq, mk_fun_ty,
-    mk_type, new_axiom, new_constant, new_type,
-    type_of, dest_eq, dest_comb, dest_abs,
-    rator, rand, freesl, frees, vfree_in, variant, aconv,
+    dest_eq,
+    rator, rand,
     REFL, TRANS, MK_COMB, ABS, BETA, ASSUME, EQ_MP,
     DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
-    concl, hyp, HolError, new_basic_definition,
+    hyp, new_basic_definition,
 )
 from axioms import (
-    T, F,
-    T_DEF, AND_DEF, IMP_DEF, FORALL_DEF, EXISTS_DEF, F_DEF, NOT_DEF,
+    F,
     SELECT_AX,
     mk_and, mk_imp, mk_forall, mk_exists, mk_not,
 )
 from logic import (
-    pp, pp_thm,
-    AP_TERM, AP_THM, BETA_CONV, BETA_NORM, SYM, TRUTH, EQT_ELIM, EQT_INTRO,
-    SPEC, GEN, CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP, UNDISCH,
-    CONTR, NOT_ELIM, NOT_INTRO, EQF_INTRO, EQF_ELIM,
-    OR_DEF, mk_or, DISJ1, DISJ2, DISJ_CASES,
-    MK_EQ, NE_SYM, REWRITE_NE, EXISTS,
-    EXCLUDED_MIDDLE, NOT_NOT_ELIM, NOT_EX_TO_FORALL_NOT, NOT_FORALL_TO_EX_NOT,
+    pp_thm,
+    AP_TERM, AP_THM, BETA_CONV, SYM,
+    SPEC, GEN, CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP,
+    CONTR, NOT_ELIM, NOT_INTRO,
+    mk_or, DISJ1, DISJ2, DISJ_CASES,
+    NE_SYM, REWRITE_NE, EXISTS,
+    EXCLUDED_MIDDLE, NOT_NOT_ELIM, NOT_EX_TO_FORALL_NOT,
     PROVE_HYP, ELIM_EX,
     _INFIX,
 )

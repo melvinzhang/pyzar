@@ -1,48 +1,374 @@
 """Peano signature and induction.
 
-Introduces the natural-number type `num`, the constants `1` and `SUC`,
-admits Peano's axioms 3-5 (distinctness of successors, injectivity, induction),
-and provides the convenience rule `INDUCT` that packages Axiom 5 for
-Landau-style proofs.
+Defines the natural-number type `num` as the inductive subset of `ind`
+generated from a fixed base point IND_1 closed under a fixed one-to-one
+non-onto function IND_SUC (carved out of `ind` via INFINITY_AX).  From this
+construction the three Peano axioms (distinctness of successors, injectivity,
+induction) are *derived* as theorems, not admitted.  The convenience rule
+`INDUCT` (which packages Axiom 5 for Landau-style proofs) and the primitive
+recursion theorem `NUM_RECURSION` follow.
 
-Primitive recursion (`num_RECURSION`) is the natural next inhabitant of this
-module: once it is proved here, addition and multiplication can be introduced
-in `nat.py` via specification rather than admitted as axioms.
+Mirrors `nums.ml` from HOL Light.
 """
 
 from fusion import (
     Var, Abs, Comb,
-    aty, bool_ty, mk_abs, mk_comb, mk_const, mk_eq, mk_fun_ty,
-    mk_type, new_axiom, new_constant, new_type,
+    aty, bty, bool_ty, mk_abs, mk_comb, mk_const, mk_eq, mk_fun_ty,
+    mk_type, new_constant, new_type,
+    new_basic_definition, new_basic_type_definition,
     rator, rand, dest_eq, type_of,
-    REFL, TRANS, MK_COMB, ASSUME, EQ_MP, INST, INST_TYPE, HolError,
+    REFL, TRANS, MK_COMB, ABS, ASSUME, EQ_MP, INST, INST_TYPE, HolError,
 )
 from axioms import (
-    SELECT_AX,
+    SELECT_AX, INFINITY_AX, ONE_ONE_DEF, ONTO_DEF,
+    ind_ty,
     mk_and, mk_imp, mk_forall, mk_exists, mk_not,
 )
 from logic import (
-    AP_TERM, AP_THM, BETA_CONV, SYM, SPEC, GEN,
+    AP_TERM, AP_THM, BETA_CONV, BETA_NORM, SYM, SPEC, GEN,
     CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP, EXISTS,
-    PROVE_HYP, ELIM_EX, NOT_ELIM, CONTR,
+    PROVE_HYP, ELIM_EX, NOT_ELIM, NOT_INTRO, CONTR,
+    NOT_FORALL_TO_EX_NOT, NOT_EX_TO_FORALL_NOT, NE_SYM,
 )
 
 
 # ---------------------------------------------------------------------------
-# num signature.
+# Step 1.  Extract IND_SUC : ind->ind from INFINITY_AX.
+#
+#   INFINITY_AX : |- ?f. ONE_ONE f /\ ~(ONTO f).
+#   IND_SUC := @f. ONE_ONE f /\ ~(ONTO f).
 # ---------------------------------------------------------------------------
 
-new_type("num", 0)
-num_ty = mk_type("num", [])
+_ind_ind = mk_fun_ty(ind_ty, ind_ty)
+_one_one_ind = mk_const("ONE_ONE", [(ind_ty, aty), (ind_ty, bty)])
+_onto_ind    = mk_const("ONTO",    [(ind_ty, aty), (ind_ty, bty)])
 
-new_constant("1", num_ty)
+_f_ii = Var("f", _ind_ind)
+_INFTY_PRED = mk_abs(_f_ii,
+    mk_and(mk_comb(_one_one_ind, _f_ii),
+           mk_not(mk_comb(_onto_ind, _f_ii))))   # \f. ONE_ONE f /\ ~(ONTO f)
+
+_select_ii = mk_const("@", [(_ind_ind, aty)])
+
+IND_SUC_DEF = new_basic_definition(
+    mk_eq(Var("IND_SUC", _ind_ind),
+          mk_comb(_select_ii, _INFTY_PRED)))     # |- IND_SUC = @(\f. ONE_ONE f /\ ~ONTO f)
+IND_SUC = mk_const("IND_SUC", [])
+
+
+def _prove_ind_suc_props():
+    """ Returns (ONE_ONE IND_SUC, ~(ONTO IND_SUC)). """
+    # SELECT_AX[ind->ind, with predicate _INFTY_PRED, witnessed by INFINITY_AX]
+    # First unfold the existential of INFINITY_AX into its predicate form.
+    # INFINITY_AX : ?f. ONE_ONE f /\ ~(ONTO f).
+    # Use ELIM_EX to obtain {INFINITY_AX_concl} |- ONE_ONE w /\ ~(ONTO w)
+    # where w = @(\f. ...).  But the witness emitted by ELIM_EX is exactly
+    # @(\f. ONE_ONE f /\ ~ONTO f) = IND_SUC (after unfolding IND_SUC_DEF).
+    pred = _INFTY_PRED
+    hyp_ex = INFINITY_AX._concl
+
+    def body_fn(th_at_w):
+        # th_at_w : {body_at_w} |- ONE_ONE w /\ ~(ONTO w)   where w = @pred
+        return th_at_w
+
+    th_at_w = ELIM_EX(pred, hyp_ex, body_fn)         # {hyp_ex} |- ONE_ONE w /\ ~(ONTO w)
+    th_at_w = PROVE_HYP(INFINITY_AX, th_at_w)        # |- ONE_ONE w /\ ~(ONTO w)
+
+    # Now rewrite w (= @pred) into IND_SUC using SYM(IND_SUC_DEF).
+    # th_at_w mentions w syntactically as `Comb(@, pred)`. SYM(IND_SUC_DEF)
+    # is `|- @pred = IND_SUC`. We rewrite by AP_TERM through both conjuncts.
+    sel_eq_indsuc = SYM(IND_SUC_DEF)              # |- @pred = IND_SUC
+    # ONE_ONE @pred = ONE_ONE IND_SUC
+    one_one_eq = AP_TERM(_one_one_ind, sel_eq_indsuc)
+    # ONTO @pred = ONTO IND_SUC
+    onto_eq    = AP_TERM(_onto_ind, sel_eq_indsuc)
+    # ~(ONTO @pred) = ~(ONTO IND_SUC)
+    NOT_C = mk_const("~", [])
+    not_onto_eq = AP_TERM(NOT_C, onto_eq)
+    # combined equality on conjunction:
+    AND_C = mk_const("/\\", [])
+    conj_eq = MK_COMB(AP_TERM(AND_C, one_one_eq), not_onto_eq)
+    # rewrite th_at_w using conj_eq.
+    th_at_indsuc = EQ_MP(conj_eq, th_at_w)        # |- ONE_ONE IND_SUC /\ ~(ONTO IND_SUC)
+    return CONJUNCT1(th_at_indsuc), CONJUNCT2(th_at_indsuc)
+
+
+ONE_ONE_IND_SUC, NOT_ONTO_IND_SUC = _prove_ind_suc_props()
+
+
+# ---------------------------------------------------------------------------
+# Step 2.  Extract IND_1 : ind such that  !x. ~(IND_SUC x = IND_1).
+#
+#   ~ONTO IND_SUC      gives, after unfolding ONTO,   ~(!y. ?x. y = IND_SUC x).
+#   classically:                                   ?y. ~(?x. y = IND_SUC x)
+#                                                  ?y. !x. ~(y = IND_SUC x)
+#                                       hence       ?y. !x. ~(IND_SUC x = y).
+#   IND_1 := @z. !x. ~(IND_SUC x = z).
+# ---------------------------------------------------------------------------
+
+_x_ind = Var("x", ind_ty)
+_y_ind = Var("y", ind_ty)
+_z_ind = Var("z", ind_ty)
+
+
+def _prove_exists_witness():
+    """ |- ?z. !x. ~(IND_SUC x = z). """
+    # Step a: unfold ~(ONTO IND_SUC) using ONTO_DEF.
+    # ONTO_DEF : |- ONTO = \f. !y. ?x. y = f x   (polymorphic).  Instantiate at ind->ind.
+    onto_def_ind = INST_TYPE([(ind_ty, aty), (ind_ty, bty)], ONTO_DEF)
+    # AP_THM at IND_SUC:  |- ONTO IND_SUC = (\f. ...) IND_SUC.
+    eq1 = AP_THM(onto_def_ind, IND_SUC)
+    # BETA-reduce the RHS to the unfolded body.
+    eq2 = TRANS(eq1, BETA_CONV(rand(eq1._concl)))   # |- ONTO IND_SUC = !y. ?x. y = IND_SUC x
+    # Negate both sides:
+    NOT_C = mk_const("~", [])
+    not_eq = AP_TERM(NOT_C, eq2)                     # |- ~(ONTO IND_SUC) = ~(!y. ?x. y = IND_SUC x)
+    not_forall = EQ_MP(not_eq, NOT_ONTO_IND_SUC)     # |- ~(!y. ?x. y = IND_SUC x)
+
+    # Step b: NOT_FORALL_TO_EX_NOT to get ?y. ~(?x. y = IND_SUC x).
+    inner_pred = mk_abs(_y_ind,
+                    mk_exists(_x_ind, mk_eq(_y_ind, mk_comb(IND_SUC, _x_ind))))
+    ex_not = NOT_FORALL_TO_EX_NOT(not_forall, inner_pred)
+    # ex_not : |- ?y. ~(?x. y = IND_SUC x)
+
+    # Step c: For each y in scope, convert ~(?x. y = IND_SUC x) to !x. ~(y = IND_SUC x)
+    # via NOT_EX_TO_FORALL_NOT, then to !x. ~(IND_SUC x = y) by NE_SYM.
+    # We use ELIM_EX: pull out the witness y from ex_not, do the conversion,
+    # then re-EXISTS over z.
+    ex_pred_outer = mk_abs(_y_ind,
+                       mk_not(mk_exists(_x_ind, mk_eq(_y_ind, mk_comb(IND_SUC, _x_ind)))))
+
+    def body_fn(th_at_y):
+        # th_at_y : {body_at_y} |- ~(?x. y' = IND_SUC x)  with y' = @ex_pred_outer.
+        # The witness here is @ex_pred_outer, but we keep using `_y_ind` symbolically:
+        # ELIM_EX substitutes via vsubst, so th_at_y uses the actual witness term.
+        # We use NOT_EX_TO_FORALL_NOT with pred = \x. y' = IND_SUC x.
+        # Recover y' from the structure of th_at_y._concl.
+        # th_at_y._concl  = ~(?x. y' = IND_SUC x).
+        not_ex_term = th_at_y._concl
+        ex_term = rand(not_ex_term)              # ?x. y' = IND_SUC x
+        ex_pred = rand(ex_term)                  # \x. y' = IND_SUC x  (Abs)
+        # Apply NOT_EX_TO_FORALL_NOT.
+        forall_not = NOT_EX_TO_FORALL_NOT(th_at_y, ex_pred)
+        # forall_not : |- !x. ~(y' = IND_SUC x)
+        # Now rewrite each instance via NE_SYM under GEN.
+        spec_x = SPEC(_x_ind, forall_not)        # |- ~(y' = IND_SUC x)
+        sym_x  = NE_SYM(spec_x)                  # |- ~(IND_SUC x = y')
+        forall_swapped = GEN(_x_ind, sym_x)      # |- !x. ~(IND_SUC x = y')
+        # Existentially introduce z over y'.
+        # Pred:  \z. !x. ~(IND_SUC x = z)
+        target_pred = mk_abs(_z_ind,
+                          mk_forall(_x_ind,
+                              mk_not(mk_eq(mk_comb(IND_SUC, _x_ind), _z_ind))))
+        # The witness is the actual y' inside th_at_y, which is dest_eq's lhs of
+        # an inner equality. Recover it from forall_swapped's body.
+        # forall_swapped._concl = !x. ~(IND_SUC x = y'). Extract y' from inside:
+        body_forall = rand(forall_swapped._concl)  # \x. ~(IND_SUC x = y')
+        # The body of the inner Abs has the form ~(IND_SUC x = y').
+        not_eq_inside = body_forall.body          # ~(IND_SUC x = y')
+        eq_inside = rand(not_eq_inside)            # IND_SUC x = y'
+        y_witness = rand(eq_inside)                # y'
+        return EXISTS(target_pred, y_witness, forall_swapped)
+
+    final = ELIM_EX(ex_pred_outer, ex_not._concl, body_fn)
+    final = PROVE_HYP(ex_not, final)
+    return final
+
+
+_EXISTS_WITNESS = _prove_exists_witness()  # |- ?z. !x. ~(IND_SUC x = z)
+
+
+# Define IND_1 = @z. !x. ~(IND_SUC x = z).
+_select_ind = mk_const("@", [(ind_ty, aty)])
+_witness_pred = mk_abs(_z_ind,
+                   mk_forall(_x_ind,
+                       mk_not(mk_eq(mk_comb(IND_SUC, _x_ind), _z_ind))))
+IND_1_DEF = new_basic_definition(
+    mk_eq(Var("IND_1", ind_ty), mk_comb(_select_ind, _witness_pred)))
+IND_1 = mk_const("IND_1", [])
+
+
+def _prove_ind_suc_neq_ind_1():
+    """ |- !x. ~(IND_SUC x = IND_1). """
+    # SELECT_AX gives:  P x ==> P (@P).  Specialise at _witness_pred.
+    sel_inst = INST_TYPE([(ind_ty, aty)], SELECT_AX)
+    sel_pq = SPEC(_z_ind, SPEC(_witness_pred, sel_inst))
+    # |- _witness_pred z ==> _witness_pred (@_witness_pred)
+    # Pull the existential body via ELIM_EX.
+    def body_fn(th_at_z):
+        # th_at_z : {body_at_z} |- !x. ~(IND_SUC x = z')   where z' = @_witness_pred
+        return th_at_z
+
+    raw = ELIM_EX(_witness_pred, _EXISTS_WITNESS._concl, body_fn)
+    raw = PROVE_HYP(_EXISTS_WITNESS, raw)
+    # raw : |- !x. ~(IND_SUC x = w)   where w = @_witness_pred.
+    # Rewrite w to IND_1 using SYM(IND_1_DEF).
+    sel_eq_ind1 = SYM(IND_1_DEF)                  # |- @_witness_pred = IND_1
+    # The conclusion of `raw` is `!x. ~(IND_SUC x = w)`.  We need to substitute
+    # w by IND_1 inside the equation `IND_SUC x = w`.  Build the abstraction
+    # `\w. !x. ~(IND_SUC x = w)`, AP_TERM to sel_eq_ind1, and EQ_MP raw.
+    w_var = Var("w", ind_ty)
+    big_pred = mk_abs(w_var,
+                  mk_forall(_x_ind,
+                      mk_not(mk_eq(mk_comb(IND_SUC, _x_ind), w_var))))
+    # |- (\w. !x. ~(IND_SUC x = w)) (@_witness_pred) = (\w. ...) IND_1
+    func_eq = AP_TERM(big_pred, sel_eq_ind1)
+    # Beta-normalise both sides.
+    func_eq_norm_lhs = BETA_CONV(mk_comb(big_pred, mk_comb(_select_ind, _witness_pred)))
+    func_eq_norm_rhs = BETA_CONV(mk_comb(big_pred, IND_1))
+    # |- (\w. ...) (@_witness_pred) = !x. ~(IND_SUC x = @_witness_pred)
+    # |- (\w. ...) IND_1 = !x. ~(IND_SUC x = IND_1)
+    bridge = TRANS(SYM(func_eq_norm_lhs), TRANS(func_eq, func_eq_norm_rhs))
+    # bridge : |- !x. ~(IND_SUC x = w) = !x. ~(IND_SUC x = IND_1)
+    return EQ_MP(bridge, raw)
+
+
+IND_SUC_NEQ_IND_1 = _prove_ind_suc_neq_ind_1()  # |- !x. ~(IND_SUC x = IND_1)
+
+
+# ---------------------------------------------------------------------------
+# Step 3.  Define the inductive predicate NUM_REP on ind.
+#
+#   NUM_REP a := !P. P IND_1 /\ (!i. P i ==> P (IND_SUC i)) ==> P a.
+# ---------------------------------------------------------------------------
+
+_a_ind  = Var("a", ind_ty)
+_i_ind  = Var("i", ind_ty)
+_P_ind  = Var("P", mk_fun_ty(ind_ty, bool_ty))
+
+NUM_REP_DEF = new_basic_definition(
+    mk_eq(Var("NUM_REP", mk_fun_ty(ind_ty, bool_ty)),
+          mk_abs(_a_ind,
+              mk_forall(_P_ind,
+                  mk_imp(
+                      mk_and(mk_comb(_P_ind, IND_1),
+                             mk_forall(_i_ind,
+                                 mk_imp(mk_comb(_P_ind, _i_ind),
+                                        mk_comb(_P_ind, mk_comb(IND_SUC, _i_ind))))),
+                      mk_comb(_P_ind, _a_ind))))))
+NUM_REP = mk_const("NUM_REP", [])
+
+
+def _NUM_REP_unfold(a_term):
+    r""" |- NUM_REP a = (!P. P IND_1 /\ (!i. P i ==> P (IND_SUC i)) ==> P a). """
+    # AP_THM NUM_REP_DEF a, then BETA.
+    eq = AP_THM(NUM_REP_DEF, a_term)
+    return TRANS(eq, BETA_CONV(rand(eq._concl)))
+
+
+# ---------------------------------------------------------------------------
+# Step 4.  Witness existence:  |- ?a. NUM_REP a.   (witness: IND_1.)
+# ---------------------------------------------------------------------------
+
+def _prove_NUM_REP_IND_1():
+    """ |- NUM_REP IND_1. """
+    # Goal: !P. (P IND_1 /\ closure) ==> P IND_1.
+    P_IND_1 = mk_comb(_P_ind, IND_1)
+    closure = mk_forall(_i_ind,
+                  mk_imp(mk_comb(_P_ind, _i_ind),
+                         mk_comb(_P_ind, mk_comb(IND_SUC, _i_ind))))
+    big_hyp = mk_and(P_IND_1, closure)
+    h = ASSUME(big_hyp)
+    th = CONJUNCT1(h)                                  # {hyp} |- P IND_1
+    inner = GEN(_P_ind, DISCH(big_hyp, th))            # |- !P. hyp ==> P IND_1
+    # Re-fold via NUM_REP_unfold reversed.
+    eq = _NUM_REP_unfold(IND_1)                        # |- NUM_REP IND_1 = !P. ...
+    return EQ_MP(SYM(eq), inner)
+
+
+NUM_REP_IND_1 = _prove_NUM_REP_IND_1()
+
+
+def _prove_NUM_REP_IND_SUC():
+    """ |- !i. NUM_REP i ==> NUM_REP (IND_SUC i). """
+    # Assume NUM_REP i. Show NUM_REP (IND_SUC i):
+    #   for any P, hyp = P IND_1 /\ closure(P).  Then closure gives P i ==> P(IND_SUC i),
+    #   and NUM_REP i applied at P + hyp gives P i, hence P (IND_SUC i).
+    NR_i = mk_comb(NUM_REP, _i_ind)
+    NR_si = mk_comb(NUM_REP, mk_comb(IND_SUC, _i_ind))
+    h_NRi = ASSUME(NR_i)
+    # Goal: !P. (P IND_1 /\ closure) ==> P (IND_SUC i).
+    P_IND_1 = mk_comb(_P_ind, IND_1)
+    closure = mk_forall(_i_ind,
+                  mk_imp(mk_comb(_P_ind, _i_ind),
+                         mk_comb(_P_ind, mk_comb(IND_SUC, _i_ind))))
+    big_hyp = mk_and(P_IND_1, closure)
+    h_hyp = ASSUME(big_hyp)
+    # Convert h_NRi to its unfolded form: !P. hyp ==> P i.
+    eq_unfold_i = _NUM_REP_unfold(_i_ind)
+    h_NRi_unfold = EQ_MP(eq_unfold_i, h_NRi)
+    # SPEC at P, MP at h_hyp.
+    P_i = MP(SPEC(_P_ind, h_NRi_unfold), h_hyp)        # {NR_i, hyp} |- P i
+    # Closure: !i. P i ==> P (IND_SUC i).
+    cl = CONJUNCT2(h_hyp)
+    cl_at_i = SPEC(_i_ind, cl)                          # {hyp} |- P i ==> P (IND_SUC i)
+    P_si = MP(cl_at_i, P_i)                             # {NR_i, hyp} |- P (IND_SUC i)
+    inner = GEN(_P_ind, DISCH(big_hyp, P_si))           # {NR_i} |- !P. hyp ==> P (IND_SUC i)
+    eq_unfold_si = _NUM_REP_unfold(mk_comb(IND_SUC, _i_ind))
+    NR_si_th = EQ_MP(SYM(eq_unfold_si), inner)          # {NR_i} |- NUM_REP (IND_SUC i)
+    return GEN(_i_ind, DISCH(NR_i, NR_si_th))
+
+
+NUM_REP_IND_SUC_CLOSED = _prove_NUM_REP_IND_SUC()  # |- !i. NUM_REP i ==> NUM_REP (IND_SUC i)
+
+
+_EXISTS_NUM_REP = EXISTS(mk_abs(_a_ind, mk_comb(NUM_REP, _a_ind)),
+                         IND_1, NUM_REP_IND_1)        # |- ?a. (\a. NUM_REP a) a
+# Strictly: EXISTS produces `?a. (\a. NUM_REP a) a`; but new_basic_type_definition
+# wants `|- P x` with P being the predicate.  We must ensure the predicate is
+# closed and equals (\a. NUM_REP a).  The conclusion of EXISTS already has the
+# right shape: `(\a. NUM_REP a) IND_1` -> we need to BETA-reduce.  Actually
+# new_basic_type_definition reads `P = fun, x = arg` from the Comb, so passing
+# `(\a. NUM_REP a) IND_1` is fine -- the predicate becomes `\a. NUM_REP a`.
+
+# However, for cleanliness we want `NUM_REP IND_1` directly as the existence
+# theorem -- but new_basic_type_definition will then take P = NUM_REP and
+# x = IND_1, which requires P closed; NUM_REP is a constant, so it has no free
+# vars, perfect.  Use NUM_REP_IND_1 directly.
+
+
+# ---------------------------------------------------------------------------
+# Step 5.  Carve out `num` as a subtype of `ind`.
+# ---------------------------------------------------------------------------
+
+MK_DEST, DEST_MK = new_basic_type_definition(
+    "num", ("mk_num", "dest_num"), NUM_REP_IND_1)
+# MK_DEST : |- mk_num (dest_num a) = a              (a : num)
+# DEST_MK : |- NUM_REP r = (dest_num (mk_num r) = r) (r : ind)
+
+num_ty = mk_type("num", [])
+mk_num = mk_const("mk_num", [])
+dest_num = mk_const("dest_num", [])
+
+
+# ---------------------------------------------------------------------------
+# Step 6.  Define the constants `1` and `SUC` on num.
+#
+#   1 = mk_num IND_1.
+#   SUC = \n:num. mk_num (IND_SUC (dest_num n)).
+# ---------------------------------------------------------------------------
+
+ONE_DEF = new_basic_definition(
+    mk_eq(Var("1", num_ty), mk_comb(mk_num, IND_1)))
 ONE = mk_const("1", [])
 
-new_constant("SUC", mk_fun_ty(num_ty, num_ty))
+_n_num = Var("n", num_ty)
+SUC_DEF = new_basic_definition(
+    mk_eq(Var("SUC", mk_fun_ty(num_ty, num_ty)),
+          mk_abs(_n_num,
+              mk_comb(mk_num,
+                  mk_comb(IND_SUC, mk_comb(dest_num, _n_num))))))
 SUC = mk_const("SUC", [])
+
 
 def mk_suc(t):
     return mk_comb(SUC, t)
+
+
+def _SUC_unfold(n_term):
+    """ |- SUC n = mk_num (IND_SUC (dest_num n)). """
+    eq = AP_THM(SUC_DEF, n_term)
+    return TRANS(eq, BETA_CONV(rand(eq._concl)))
 
 
 # Standard variable names re-used throughout the arithmetic development.
@@ -56,27 +382,242 @@ P = Var("P", mk_fun_ty(num_ty, bool_ty))
 
 
 # ---------------------------------------------------------------------------
-# Peano Axioms 3, 4, 5.
+# Step 7.  Lemma: |- !n:num. NUM_REP (dest_num n).
+#
+#   Strategy: from MK_DEST a:    mk_num (dest_num a) = a.
+#   Apply dest_num:               dest_num (mk_num (dest_num a)) = dest_num a.
+#   Use DEST_MK at r := dest_num a:
+#                                  NUM_REP (dest_num a)
+#                                = (dest_num (mk_num (dest_num a)) = dest_num a).
+#   The RHS holds; EQ_MP backwards yields NUM_REP (dest_num a).
 # ---------------------------------------------------------------------------
 
-# Axiom 3:   |- !x. ~(x' = 1)
-AXIOM_3 = new_axiom(mk_forall(x, mk_not(mk_eq(mk_suc(x), ONE))))
+def _prove_NUM_REP_dest_num():
+    """ |- !n. NUM_REP (dest_num n). """
+    a_var = Var("a", num_ty)                           # the bound variable for GEN
+    # MK_DEST_a : |- mk_num (dest_num a) = a.  But MK_DEST has bound var `a`.
+    # Already in MK_DEST.  We INST nothing; just SPEC-like access.
+    # MK_DEST itself is `|- mk_num (dest_num a) = a`, where a is the free Var.
+    # Inspect its concl to grab the right Var name.
+    # Per new_basic_type_definition: a = Var("a", num_ty).
+    # Apply dest_num to both sides:
+    md = MK_DEST                                        # |- mk_num (dest_num a) = a
+    md_dest = AP_TERM(dest_num, md)                     # |- dest_num (mk_num (dest_num a)) = dest_num a
+    # DEST_MK : |- NUM_REP r = (dest_num (mk_num r) = r), where r = Var("r", ind_ty).
+    # INST r := dest_num a in DEST_MK.
+    r_var = Var("r", ind_ty)
+    da = mk_comb(dest_num, a_var)                       # dest_num a
+    dm_inst = INST([(da, r_var)], DEST_MK)              # |- NUM_REP (dest_num a) = (dest_num (mk_num (dest_num a)) = dest_num a)
+    NR_da = EQ_MP(SYM(dm_inst), md_dest)                # |- NUM_REP (dest_num a)
+    return GEN(a_var, NR_da)
 
-# Axiom 4:   |- !x y. x' = y' ==> x = y
-AXIOM_4 = new_axiom(
-    mk_forall(x, mk_forall(y,
-        mk_imp(mk_eq(mk_suc(x), mk_suc(y)),
-               mk_eq(x, y)))))
 
-# Axiom 5 (induction):
-#   |- !P. P 1 /\ (!x. P x ==> P (x')) ==> !x. P x
-INDUCTION = new_axiom(
-    mk_forall(P,
-        mk_imp(
-            mk_and(mk_comb(P, ONE),
-                   mk_forall(x, mk_imp(mk_comb(P, x),
-                                       mk_comb(P, mk_suc(x))))),
-            mk_forall(x, mk_comb(P, x)))))
+NUM_REP_dest_num = _prove_NUM_REP_dest_num()
+
+
+# ---------------------------------------------------------------------------
+# Step 8.  Working facts about ONE_ONE and ONTO unfolded at IND_SUC.
+# ---------------------------------------------------------------------------
+
+def _ONE_ONE_unfold_at_IND_SUC():
+    """ |- ONE_ONE IND_SUC = !x1 x2. IND_SUC x1 = IND_SUC x2 ==> x1 = x2. """
+    one_one_def_ind = INST_TYPE([(ind_ty, aty), (ind_ty, bty)], ONE_ONE_DEF)
+    eq1 = AP_THM(one_one_def_ind, IND_SUC)
+    return TRANS(eq1, BETA_CONV(rand(eq1._concl)))
+
+
+_ONE_ONE_IND_SUC_unfold = EQ_MP(_ONE_ONE_unfold_at_IND_SUC(), ONE_ONE_IND_SUC)
+# _ONE_ONE_IND_SUC_unfold : |- !x1 x2. IND_SUC x1 = IND_SUC x2 ==> x1 = x2
+
+
+# ---------------------------------------------------------------------------
+# Step 9.  Prove AXIOM_3 :  |- !x. ~(SUC x = 1).
+# ---------------------------------------------------------------------------
+
+def _prove_AXIOM_3():
+    """ |- !x. ~(SUC x = 1). """
+    # Assume SUC x = 1.  By SUC_DEF and ONE_DEF, this is
+    #   mk_num (IND_SUC (dest_num x)) = mk_num IND_1.
+    h_eq = ASSUME(mk_eq(mk_suc(x), ONE))                       # {SUC x = 1} |- SUC x = 1
+    # Replace SUC x and 1 by their definitions on each side.
+    SUC_x_eq = _SUC_unfold(x)                                  # |- SUC x = mk_num (IND_SUC (dest_num x))
+    h_unfold = TRANS(SYM(SUC_x_eq), TRANS(h_eq, ONE_DEF))      # {SUC x = 1} |- mk_num (IND_SUC (dest_num x)) = mk_num IND_1
+    # Apply dest_num to both sides:
+    h_dest = AP_TERM(dest_num, h_unfold)                       # {SUC x = 1} |- dest_num (mk_num (IND_SUC (dest_num x))) = dest_num (mk_num IND_1)
+    # Peel via DEST_MK at IND_SUC (dest_num x) and at IND_1 (using NUM_REP closure).
+    # First: NUM_REP IND_1.  And NUM_REP (IND_SUC (dest_num x)).
+    NR_dx = SPEC(x, NUM_REP_dest_num)                          # |- NUM_REP (dest_num x)
+    NR_si_dx = MP(SPEC(mk_comb(dest_num, x), NUM_REP_IND_SUC_CLOSED), NR_dx)
+    # NR_si_dx : |- NUM_REP (IND_SUC (dest_num x))
+    # DEST_MK at r := IND_SUC (dest_num x):
+    r_var = Var("r", ind_ty)
+    s_dx = mk_comb(IND_SUC, mk_comb(dest_num, x))
+    dm_at_sdx = INST([(s_dx, r_var)], DEST_MK)                 # |- NUM_REP (IND_SUC (dest_num x)) = (dest_num (mk_num (IND_SUC (dest_num x))) = IND_SUC (dest_num x))
+    eq_lhs_peel = EQ_MP(dm_at_sdx, NR_si_dx)                   # |- dest_num (mk_num (IND_SUC (dest_num x))) = IND_SUC (dest_num x)
+    # DEST_MK at r := IND_1:
+    dm_at_ind1 = INST([(IND_1, r_var)], DEST_MK)               # |- NUM_REP IND_1 = (dest_num (mk_num IND_1) = IND_1)
+    eq_rhs_peel = EQ_MP(dm_at_ind1, NUM_REP_IND_1)             # |- dest_num (mk_num IND_1) = IND_1
+    # Combine:  IND_SUC (dest_num x) = dest_num (mk_num (IND_SUC (dest_num x))) = dest_num (mk_num IND_1) = IND_1.
+    h_peel = TRANS(SYM(eq_lhs_peel), TRANS(h_dest, eq_rhs_peel))
+    # h_peel : {SUC x = 1} |- IND_SUC (dest_num x) = IND_1
+    # Contradicts IND_SUC_NEQ_IND_1 specialized to dest_num x.
+    neq_at_dx = SPEC(mk_comb(dest_num, x), IND_SUC_NEQ_IND_1)  # |- ~(IND_SUC (dest_num x) = IND_1)
+    th_F = MP(NOT_ELIM(neq_at_dx), h_peel)                     # {SUC x = 1} |- F
+    th_disch = NOT_INTRO(DISCH(mk_eq(mk_suc(x), ONE), th_F))   # |- ~(SUC x = 1)
+    return GEN(x, th_disch)
+
+
+AXIOM_3 = _prove_AXIOM_3()
+
+
+# ---------------------------------------------------------------------------
+# Step 10.  Prove AXIOM_4 :  |- !x y. SUC x = SUC y ==> x = y.
+# ---------------------------------------------------------------------------
+
+def _prove_AXIOM_4():
+    """ |- !x y. SUC x = SUC y ==> x = y. """
+    h_eq = ASSUME(mk_eq(mk_suc(x), mk_suc(y)))                 # {SUC x = SUC y} |- ...
+    SUC_x_eq = _SUC_unfold(x)                                  # |- SUC x = mk_num (IND_SUC (dest_num x))
+    SUC_y_eq = _SUC_unfold(y)                                  # |- SUC y = mk_num (IND_SUC (dest_num y))
+    h_unfold = TRANS(SYM(SUC_x_eq), TRANS(h_eq, SUC_y_eq))     # {...} |- mk_num (IND_SUC (dx)) = mk_num (IND_SUC (dy))
+    # Apply dest_num.
+    h_dest = AP_TERM(dest_num, h_unfold)                       # |- dest_num (mk_num (IND_SUC (dx))) = dest_num (mk_num (IND_SUC (dy)))
+    # Peel via DEST_MK using NUM_REP closure for both sides.
+    r_var = Var("r", ind_ty)
+    NR_dx = SPEC(x, NUM_REP_dest_num)
+    NR_dy = SPEC(y, NUM_REP_dest_num)
+    NR_si_dx = MP(SPEC(mk_comb(dest_num, x), NUM_REP_IND_SUC_CLOSED), NR_dx)
+    NR_si_dy = MP(SPEC(mk_comb(dest_num, y), NUM_REP_IND_SUC_CLOSED), NR_dy)
+    s_dx = mk_comb(IND_SUC, mk_comb(dest_num, x))
+    s_dy = mk_comb(IND_SUC, mk_comb(dest_num, y))
+    eq_dx_peel = EQ_MP(INST([(s_dx, r_var)], DEST_MK), NR_si_dx)
+    eq_dy_peel = EQ_MP(INST([(s_dy, r_var)], DEST_MK), NR_si_dy)
+    # eq_dx_peel : |- dest_num (mk_num (IND_SUC (dx))) = IND_SUC (dx)
+    # eq_dy_peel : |- dest_num (mk_num (IND_SUC (dy))) = IND_SUC (dy)
+    h_peeled = TRANS(SYM(eq_dx_peel), TRANS(h_dest, eq_dy_peel))
+    # h_peeled : {SUC x = SUC y} |- IND_SUC (dx) = IND_SUC (dy)
+    # Use ONE_ONE IND_SUC.
+    oo = SPEC(mk_comb(dest_num, y),
+              SPEC(mk_comb(dest_num, x), _ONE_ONE_IND_SUC_unfold))
+    # oo : |- IND_SUC (dx) = IND_SUC (dy) ==> dx = dy.
+    dx_eq_dy = MP(oo, h_peeled)                                # {SUC x = SUC y} |- dx = dy
+    # Apply mk_num:  mk_num (dx) = mk_num (dy).
+    mk_app = AP_TERM(mk_num, dx_eq_dy)                         # {...} |- mk_num (dx) = mk_num (dy)
+    # MK_DEST gives mk_num (dest_num x) = x  for any num x.
+    # MK_DEST has the form: |- mk_num (dest_num a) = a where a is a Var of type num.
+    a_var = Var("a", num_ty)
+    md_x = INST([(x, a_var)], MK_DEST)                          # |- mk_num (dest_num x) = x
+    md_y = INST([(y, a_var)], MK_DEST)                          # |- mk_num (dest_num y) = y
+    x_eq_y = TRANS(SYM(md_x), TRANS(mk_app, md_y))              # {SUC x = SUC y} |- x = y
+    return GEN(x, GEN(y, DISCH(mk_eq(mk_suc(x), mk_suc(y)), x_eq_y)))
+
+
+AXIOM_4 = _prove_AXIOM_4()
+
+
+# ---------------------------------------------------------------------------
+# Step 11.  Prove INDUCTION :  |- !P. P 1 /\ (!x. P x ==> P (SUC x)) ==> !x. P x.
+#
+# Strategy:  Define Q i := NUM_REP i /\ P (mk_num i)  on ind.
+#            Show Q IND_1   and  !i. Q i ==> Q (IND_SUC i).
+#            For any num a, NUM_REP_dest_num gives NUM_REP (dest_num a);
+#            apply NUM_REP at Q to obtain Q (dest_num a),
+#            hence P (mk_num (dest_num a)) = P a (via MK_DEST).
+# ---------------------------------------------------------------------------
+
+def _prove_INDUCTION():
+    r""" |- !P. P 1 /\ (!x. P x ==> P (SUC x)) ==> !x. P x. """
+    base_term = mk_comb(P, ONE)
+    step_term = mk_forall(x,
+                    mk_imp(mk_comb(P, x),
+                           mk_comb(P, mk_suc(x))))
+    big_hyp = mk_and(base_term, step_term)
+    h = ASSUME(big_hyp)
+    base_th = CONJUNCT1(h)                       # {hyp} |- P 1
+    step_th = CONJUNCT2(h)                       # {hyp} |- !x. P x ==> P (SUC x)
+
+    # Build Q = \i:ind. NUM_REP i /\ P (mk_num i).
+    NR_i = mk_comb(NUM_REP, _i_ind)
+    P_mki = mk_comb(P, mk_comb(mk_num, _i_ind))
+    Q_body = mk_and(NR_i, P_mki)
+    Q_lam = mk_abs(_i_ind, Q_body)
+
+    def Q_unfold(i_term):
+        r""" |- Q i = NUM_REP i /\ P (mk_num i)  (with i_term substituted). """
+        return BETA_CONV(mk_comb(Q_lam, i_term))
+
+    # ----- Q IND_1. -----
+    # NUM_REP IND_1 : NUM_REP_IND_1.
+    # P (mk_num IND_1) = P 1  via SYM(ONE_DEF) under AP_TERM P.
+    one_eq_mki1 = SYM(ONE_DEF)                           # |- mk_num IND_1 = 1   actually wait:
+    # ONE_DEF : |- 1 = mk_num IND_1.  SYM(ONE_DEF) : |- mk_num IND_1 = 1.
+    # We have base_th : P 1; we need P (mk_num IND_1).
+    # AP_TERM P on ONE_DEF:  |- P 1 = P (mk_num IND_1).
+    P_eq = AP_TERM(P, ONE_DEF)                           # |- P 1 = P (mk_num IND_1)
+    P_mk_ind1 = EQ_MP(P_eq, base_th)                     # {hyp} |- P (mk_num IND_1)
+    Q_at_IND_1_inner = CONJ(NUM_REP_IND_1, P_mk_ind1)    # {hyp} |- NUM_REP IND_1 /\ P (mk_num IND_1)
+    Q_at_IND_1 = EQ_MP(SYM(Q_unfold(IND_1)), Q_at_IND_1_inner)   # {hyp} |- Q IND_1
+
+    # ----- !i. Q i ==> Q (IND_SUC i). -----
+    h_Qi = ASSUME(mk_comb(Q_lam, _i_ind))                # {Q i} |- Q i
+    Qi_inner = EQ_MP(Q_unfold(_i_ind), h_Qi)             # {Q i} |- NUM_REP i /\ P (mk_num i)
+    NR_i_th = CONJUNCT1(Qi_inner)
+    P_mki_th = CONJUNCT2(Qi_inner)
+    # NUM_REP (IND_SUC i):
+    NR_si_th = MP(SPEC(_i_ind, NUM_REP_IND_SUC_CLOSED), NR_i_th)   # {Q i} |- NUM_REP (IND_SUC i)
+    # P (mk_num (IND_SUC i)) :
+    # SUC (mk_num i) by SUC_DEF = mk_num (IND_SUC (dest_num (mk_num i))).
+    # By DEST_MK with NR_i_th: dest_num (mk_num i) = i.
+    r_var = Var("r", ind_ty)
+    dm_at_i = INST([(_i_ind, r_var)], DEST_MK)           # |- NUM_REP i = (dest_num (mk_num i) = i)
+    di_eq_i = EQ_MP(dm_at_i, NR_i_th)                    # {Q i} |- dest_num (mk_num i) = i
+    # IND_SUC applied:
+    isdi_eq_isi = AP_TERM(IND_SUC, di_eq_i)              # {Q i} |- IND_SUC (dest_num (mk_num i)) = IND_SUC i
+    # mk_num applied:
+    mki_si = AP_TERM(mk_num, isdi_eq_isi)                # {Q i} |- mk_num (IND_SUC (dest_num (mk_num i))) = mk_num (IND_SUC i)
+    # SUC_DEF unfolded at (mk_num i):  SUC (mk_num i) = mk_num (IND_SUC (dest_num (mk_num i))).
+    suc_mk_i_eq = _SUC_unfold(mk_comb(mk_num, _i_ind))
+    # |- SUC (mk_num i) = mk_num (IND_SUC (dest_num (mk_num i)))
+    # Combine: SUC (mk_num i) = mk_num (IND_SUC i).
+    SUC_mki_eq_mk_si = TRANS(suc_mk_i_eq, mki_si)        # {Q i} |- SUC (mk_num i) = mk_num (IND_SUC i)
+    # From step_th: !x. P x ==> P (SUC x).
+    step_at_mki = SPEC(mk_comb(mk_num, _i_ind), step_th) # {hyp} |- P (mk_num i) ==> P (SUC (mk_num i))
+    P_SUC_mki = MP(step_at_mki, P_mki_th)                # {hyp, Q i} |- P (SUC (mk_num i))
+    # Rewrite:  P (SUC (mk_num i)) = P (mk_num (IND_SUC i)).
+    P_eq2 = AP_TERM(P, SUC_mki_eq_mk_si)                 # {Q i} |- P (SUC (mk_num i)) = P (mk_num (IND_SUC i))
+    P_mk_si = EQ_MP(P_eq2, P_SUC_mki)                    # {hyp, Q i} |- P (mk_num (IND_SUC i))
+    # Combine to get Q (IND_SUC i) inner.
+    Q_si_inner = CONJ(NR_si_th, P_mk_si)                 # {hyp, Q i} |- NUM_REP (IND_SUC i) /\ P (mk_num (IND_SUC i))
+    Q_si = EQ_MP(SYM(Q_unfold(mk_comb(IND_SUC, _i_ind))), Q_si_inner)   # {hyp, Q i} |- Q (IND_SUC i)
+    Q_step_imp = DISCH(mk_comb(Q_lam, _i_ind), Q_si)     # {hyp} |- Q i ==> Q (IND_SUC i)
+    Q_step_all = GEN(_i_ind, Q_step_imp)                 # {hyp} |- !i. Q i ==> Q (IND_SUC i)
+
+    # Combine for NUM_REP usage:
+    Q_closure = CONJ(Q_at_IND_1, Q_step_all)             # {hyp} |- Q IND_1 /\ (!i. Q i ==> Q (IND_SUC i))
+
+    # Now for any num a:  NUM_REP_dest_num gives NUM_REP (dest_num a);
+    # NUM_REP unfolded and instantiated at Q gives Q (dest_num a).
+    NR_da = SPEC(x, NUM_REP_dest_num)                    # |- NUM_REP (dest_num x)
+    da = mk_comb(dest_num, x)                            # dest_num x
+    eq_unfold_da = _NUM_REP_unfold(da)                   # |- NUM_REP (dest_num x) = !P. ... ==> P (dest_num x)
+    NR_da_unfold = EQ_MP(eq_unfold_da, NR_da)            # |- !P. ... ==> P (dest_num x)
+    # SPEC at Q_lam.
+    NR_da_at_Q = SPEC(Q_lam, NR_da_unfold)               # |- (Q IND_1 /\ closure(Q)) ==> Q (dest_num x)
+    Q_at_da = MP(NR_da_at_Q, Q_closure)                  # {hyp} |- Q (dest_num x)
+    # Unfold:
+    Q_at_da_inner = EQ_MP(Q_unfold(da), Q_at_da)         # {hyp} |- NUM_REP (dest_num x) /\ P (mk_num (dest_num x))
+    P_mk_dx = CONJUNCT2(Q_at_da_inner)                   # {hyp} |- P (mk_num (dest_num x))
+    # MK_DEST: mk_num (dest_num x) = x.
+    a_var = Var("a", num_ty)
+    md_x = INST([(x, a_var)], MK_DEST)                   # |- mk_num (dest_num x) = x
+    P_eq3 = AP_TERM(P, md_x)                             # |- P (mk_num (dest_num x)) = P x
+    P_x = EQ_MP(P_eq3, P_mk_dx)                          # {hyp} |- P x
+
+    forall_x = GEN(x, P_x)                               # {hyp} |- !x. P x
+    return GEN(P, DISCH(big_hyp, forall_x))
+
+
+INDUCTION = _prove_INDUCTION()
 
 
 # ---------------------------------------------------------------------------
