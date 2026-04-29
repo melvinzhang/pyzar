@@ -63,6 +63,7 @@ from num import (
     x, y, z, u, v, w, P,
     AXIOM_3, AXIOM_4, INDUCTION, INDUCT, INDUCT_PROVE, NUM_RECURSION,
 )
+from tactics import REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV
 
 
 # ---------------------------------------------------------------------------
@@ -343,12 +344,11 @@ def _prove_add_unique():
     h_g1    = CONJUNCT1(h_rest2)
     h_gstep = CONJUNCT2(h_rest2)
 
-    body_y = mk_eq(mk_comb(f_var, y), mk_comb(g_var, y))
-    base = TRANS(h_f1, SYM(h_g1))                       # |- f 1 = g 1
-    def step_fn(IH):
-        fs = SPEC(y, h_fstep)                           # f (SUC y) = SUC (f y)
-        gs = SPEC(y, h_gstep)                           # g (SUC y) = SUC (g y)
-        return TRANS_CHAIN([fs, AP_TERM(SUC, IH), SYM(gs)])
+    body_y  = mk_eq(mk_comb(f_var, y), mk_comb(g_var, y))
+    body_1  = mk_eq(mk_comb(f_var, ONE), mk_comb(g_var, ONE))
+    body_ys = mk_eq(mk_comb(f_var, mk_suc(y)), mk_comb(g_var, mk_suc(y)))
+    base = REWRITE_PROVE([h_f1, h_g1], body_1)
+    step_fn = lambda IH: REWRITE_PROVE([h_fstep, h_gstep, IH], body_ys)
     forall_y = INDUCT_PROVE(y, body_y, base, step_fn)
     return GENL([x, f_var, g_var], DISCH(hyps, forall_y))
 
@@ -362,24 +362,12 @@ ADD_UNIQUE = _prove_add_unique()
 # ---------------------------------------------------------------------------
 
 def _prove_satz_5():
-    body_z = mk_eq(mk_add(mk_add(x, y), z), mk_add(x, mk_add(y, z)))
-    x_plus = mk_comb(PLUS, x)
-
-    # Base z = 1:  (x+y)+1 = SUC(x+y) = x + SUC y = x + (y+1).
-    base = TRANS_CHAIN([
-        SPEC(mk_add(x, y), ADD_1),                   # (x+y)+1 = SUC(x+y)
-        SYM(SPECL([x, y], ADD_SUC)),                  # SUC(x+y) = x+SUC y
-        AP_TERM(x_plus, SYM(SPEC(y, ADD_1))),         # x+SUC y = x+(y+1)
-    ])
-
-    def step_fn(IH):
-        return TRANS_CHAIN([
-            SPECL([mk_add(x, y), z], ADD_SUC),        # (x+y)+SUC z = SUC((x+y)+z)
-            AP_TERM(SUC, IH),                          # SUC((x+y)+z) = SUC(x+(y+z))
-            SYM(SPECL([x, mk_add(y, z)], ADD_SUC)),    # SUC(x+(y+z)) = x+SUC(y+z)
-            AP_TERM(x_plus, SYM(SPECL([y, z], ADD_SUC))),   # x+SUC(y+z) = x+(y+SUC z)
-        ])
-
+    body_z  = mk_eq(mk_add(mk_add(x, y), z), mk_add(x, mk_add(y, z)))
+    body_1  = mk_eq(mk_add(mk_add(x, y), ONE), mk_add(x, mk_add(y, ONE)))
+    body_zs = mk_eq(mk_add(mk_add(x, y), mk_suc(z)),
+                     mk_add(x, mk_add(y, mk_suc(z))))
+    base = REWRITE_PROVE([ADD_1, ADD_SUC], body_1)
+    step_fn = lambda IH: REWRITE_PROVE([ADD_SUC, IH], body_zs)
     return GENL([x, y], INDUCT_PROVE(z, body_z, base, step_fn))
 
 SATZ_5 = _prove_satz_5()
@@ -394,23 +382,21 @@ SATZ_5 = _prove_satz_5()
 # ---------------------------------------------------------------------------
 
 def _prove_one_plus():
-    body_y = mk_eq(mk_add(ONE, y), mk_suc(y))
-    base = SPEC(ONE, ADD_1)                                   # |- 1 + 1 = SUC 1
-    step_fn = lambda IH: TRANS(SPECL([ONE, y], ADD_SUC),       # 1+SUC y = SUC(1+y)
-                                AP_TERM(SUC, IH))               # SUC(1+y) = SUC(SUC y)
+    body_y  = mk_eq(mk_add(ONE, y), mk_suc(y))
+    body_1  = mk_eq(mk_add(ONE, ONE), mk_suc(ONE))
+    body_ys = mk_eq(mk_add(ONE, mk_suc(y)), mk_suc(mk_suc(y)))
+    base = REWRITE_PROVE([ADD_1], body_1)
+    step_fn = lambda IH: REWRITE_PROVE([ADD_SUC, IH], body_ys)
     return INDUCT_PROVE(y, body_y, base, step_fn)
 
 ONE_PLUS = _prove_one_plus()
 
 def _prove_suc_plus():
-    body_y = mk_eq(mk_add(mk_suc(x), y), mk_suc(mk_add(x, y)))
-    base = TRANS(SPEC(mk_suc(x), ADD_1),                       # SUC x + 1 = SUC(SUC x)
-                  AP_TERM(SUC, SYM(SPEC(x, ADD_1))))            # SUC(SUC x) = SUC(x+1)
-    step_fn = lambda IH: TRANS_CHAIN([
-        SPECL([mk_suc(x), y], ADD_SUC),                         # SUC x + SUC y = SUC(SUC x + y)
-        AP_TERM(SUC, IH),                                       # SUC(SUC x + y) = SUC(SUC(x+y))
-        AP_TERM(SUC, SYM(SPECL([x, y], ADD_SUC))),              # SUC(SUC(x+y)) = SUC(x+SUC y)
-    ])
+    body_y  = mk_eq(mk_add(mk_suc(x), y), mk_suc(mk_add(x, y)))
+    body_1  = mk_eq(mk_add(mk_suc(x), ONE), mk_suc(mk_add(x, ONE)))
+    body_ys = mk_eq(mk_add(mk_suc(x), mk_suc(y)), mk_suc(mk_add(x, mk_suc(y))))
+    base = REWRITE_PROVE([ADD_1], body_1)
+    step_fn = lambda IH: REWRITE_PROVE([ADD_SUC, IH], body_ys)
     return GEN(x, INDUCT_PROVE(y, body_y, base, step_fn))
 
 SUC_PLUS = _prove_suc_plus()
@@ -423,13 +409,11 @@ SUC_PLUS = _prove_suc_plus()
 # ---------------------------------------------------------------------------
 
 def _prove_satz_6():
-    body_x = mk_eq(mk_add(x, y), mk_add(y, x))
-    base = TRANS(SPEC(y, ONE_PLUS), SYM(SPEC(y, ADD_1)))      # |- 1 + y = y + 1
-    step_fn = lambda IH: TRANS_CHAIN([
-        SPECL([x, y], SUC_PLUS),                               # SUC x + y = SUC(x+y)
-        AP_TERM(SUC, IH),                                      # SUC(x+y) = SUC(y+x)
-        SYM(SPECL([y, x], ADD_SUC)),                           # SUC(y+x) = y + SUC x
-    ])
+    body_x  = mk_eq(mk_add(x, y), mk_add(y, x))
+    body_1  = mk_eq(mk_add(ONE, y), mk_add(y, ONE))
+    body_xs = mk_eq(mk_add(mk_suc(x), y), mk_add(y, mk_suc(x)))
+    base = REWRITE_PROVE([ONE_PLUS, ADD_1], body_1)
+    step_fn = lambda IH: REWRITE_PROVE([SUC_PLUS, ADD_SUC, IH], body_xs)
     forall_x = INDUCT_PROVE(x, body_x, base, step_fn)
     return GENL([x, y], SPEC(x, forall_x))
 
@@ -1510,12 +1494,11 @@ def _prove_mul_unique():
     h_g1    = CONJUNCT1(h_rest2)
     h_gstep = CONJUNCT2(h_rest2)
 
-    body_y = mk_eq(mk_comb(f_var, y), mk_comb(g_var, y))
-    base = TRANS(h_f1, SYM(h_g1))
-    def step_fn(IH):
-        fs = SPEC(y, h_fstep)                           # f (SUC y) = f y + x
-        gs = SPEC(y, h_gstep)                           # g (SUC y) = g y + x
-        return TRANS_CHAIN([fs, AP_THM(AP_TERM(PLUS, IH), x), SYM(gs)])
+    body_y  = mk_eq(mk_comb(f_var, y), mk_comb(g_var, y))
+    body_1  = mk_eq(mk_comb(f_var, ONE), mk_comb(g_var, ONE))
+    body_ys = mk_eq(mk_comb(f_var, mk_suc(y)), mk_comb(g_var, mk_suc(y)))
+    base = REWRITE_PROVE([h_f1, h_g1], body_1)
+    step_fn = lambda IH: REWRITE_PROVE([h_fstep, h_gstep, IH], body_ys)
     forall_y = INDUCT_PROVE(y, body_y, base, step_fn)
     return GENL([x, f_var, g_var], DISCH(hyps, forall_y))
 
@@ -1527,13 +1510,11 @@ MUL_UNIQUE = _prove_mul_unique()
 # SUC_MUL :  |- !x y. (SUC x) * y = x * y + y.
 
 def _prove_one_mul():
-    body_y = mk_eq(mk_mul(ONE, y), y)
-    base = SPEC(ONE, MUL_1)                              # |- 1 * 1 = 1
-    step_fn = lambda IH: TRANS_CHAIN([
-        SPECL([ONE, y], MUL_SUC),                        # 1 * SUC y = 1*y + 1
-        AP_THM(AP_TERM(PLUS, IH), ONE),                  # 1*y + 1 = y + 1
-        SPEC(y, ADD_1),                                  # y + 1 = SUC y
-    ])
+    body_y  = mk_eq(mk_mul(ONE, y), y)
+    body_1  = mk_eq(mk_mul(ONE, ONE), ONE)
+    body_ys = mk_eq(mk_mul(ONE, mk_suc(y)), mk_suc(y))
+    base = REWRITE_PROVE([MUL_1], body_1)
+    step_fn = lambda IH: REWRITE_PROVE([MUL_SUC, ADD_1, IH], body_ys)
     return INDUCT_PROVE(y, body_y, base, step_fn)
 
 ONE_MUL = _prove_one_mul()
@@ -1572,13 +1553,11 @@ SUC_MUL = _prove_suc_mul()
 # Theorem 29 (commutative law of multiplication):  |- !x y. x * y = y * x.
 
 def _prove_satz_29():
-    body_x = mk_eq(mk_mul(x, y), mk_mul(y, x))
-    base = TRANS(SPEC(y, ONE_MUL), SYM(SPEC(y, MUL_1)))
-    step_fn = lambda IH: TRANS_CHAIN([
-        SPECL([x, y], SUC_MUL),                            # SUC x * y = x*y + y
-        AP_THM(AP_TERM(PLUS, IH), y),                      # x*y + y = y*x + y
-        SYM(SPECL([y, x], MUL_SUC)),                       # y*x + y = y * SUC x
-    ])
+    body_x  = mk_eq(mk_mul(x, y), mk_mul(y, x))
+    body_1  = mk_eq(mk_mul(ONE, y), mk_mul(y, ONE))
+    body_xs = mk_eq(mk_mul(mk_suc(x), y), mk_mul(y, mk_suc(x)))
+    base = REWRITE_PROVE([ONE_MUL, MUL_1], body_1)
+    step_fn = lambda IH: REWRITE_PROVE([SUC_MUL, MUL_SUC, IH], body_xs)
     forall_x = INDUCT_PROVE(x, body_x, base, step_fn)
     return GENL([x, y], SPEC(x, forall_x))
 
@@ -1588,20 +1567,12 @@ SATZ_29 = _prove_satz_29()
 # Theorem 30 (distributive):  |- !x y z. x * (y + z) = x*y + x*z.   Induction on z.
 
 def _prove_satz_30():
-    body_z = mk_eq(mk_mul(x, mk_add(y, z)), mk_add(mk_mul(x, y), mk_mul(x, z)))
-    base = TRANS_CHAIN([
-        AP_TERM(mk_comb(TIMES, x), SPEC(y, ADD_1)),      # x*(y+1) = x*SUC y
-        SPECL([x, y], MUL_SUC),                           # x*SUC y = x*y + x
-        AP_TERM(mk_comb(PLUS, mk_mul(x, y)), SYM(SPEC(x, MUL_1))),  # = x*y + x*1
-    ])
-    step_fn = lambda IH: TRANS_CHAIN([
-        AP_TERM(mk_comb(TIMES, x), SPECL([y, z], ADD_SUC)),  # x*(y+SUC z) = x*SUC(y+z)
-        SPECL([x, mk_add(y, z)], MUL_SUC),                   # = x*(y+z) + x
-        AP_THM(AP_TERM(PLUS, IH), x),                        # = (x*y + x*z) + x
-        SPECL([mk_mul(x, y), mk_mul(x, z), x], SATZ_5),      # = x*y + (x*z + x)
-        AP_TERM(mk_comb(PLUS, mk_mul(x, y)),
-                 SYM(SPECL([x, z], MUL_SUC))),               # = x*y + x*SUC z
-    ])
+    body_z  = mk_eq(mk_mul(x, mk_add(y, z)), mk_add(mk_mul(x, y), mk_mul(x, z)))
+    body_1  = mk_eq(mk_mul(x, mk_add(y, ONE)), mk_add(mk_mul(x, y), mk_mul(x, ONE)))
+    body_zs = mk_eq(mk_mul(x, mk_add(y, mk_suc(z))),
+                     mk_add(mk_mul(x, y), mk_mul(x, mk_suc(z))))
+    base = REWRITE_PROVE([ADD_1, MUL_1, MUL_SUC], body_1)
+    step_fn = lambda IH: REWRITE_PROVE([ADD_SUC, MUL_SUC, SATZ_5, IH], body_zs)
     return GENL([x, y], INDUCT_PROVE(z, body_z, base, step_fn))
 
 SATZ_30 = _prove_satz_30()
@@ -1610,15 +1581,11 @@ SATZ_30 = _prove_satz_30()
 # Theorem 31 (associative law of multiplication):  |- !x y z. (x*y) * z = x * (y*z).   Induction on z.
 
 def _prove_satz_31():
-    body_z = mk_eq(mk_mul(mk_mul(x, y), z), mk_mul(x, mk_mul(y, z)))
-    base = TRANS(SPEC(mk_mul(x, y), MUL_1),                # (x*y)*1 = x*y
-                  AP_TERM(mk_comb(TIMES, x), SYM(SPEC(y, MUL_1))))   # = x*(y*1)
-    step_fn = lambda IH: TRANS_CHAIN([
-        SPECL([mk_mul(x, y), z], MUL_SUC),                 # (x*y)*SUC z = (x*y)*z + (x*y)
-        AP_THM(AP_TERM(PLUS, IH), mk_mul(x, y)),           # = x*(y*z) + x*y
-        SYM(SPECL([x, mk_mul(y, z), y], SATZ_30)),         # = x*(y*z + y)
-        AP_TERM(mk_comb(TIMES, x), SYM(SPECL([y, z], MUL_SUC))),  # = x*(y*SUC z)
-    ])
+    body_z  = mk_eq(mk_mul(mk_mul(x, y), z), mk_mul(x, mk_mul(y, z)))
+    body_1  = mk_eq(mk_mul(mk_mul(x, y), ONE), mk_mul(x, mk_mul(y, ONE)))
+    body_zs = mk_eq(mk_mul(mk_mul(x, y), mk_suc(z)), mk_mul(x, mk_mul(y, mk_suc(z))))
+    base = REWRITE_PROVE([MUL_1], body_1)
+    step_fn = lambda IH: REWRITE_PROVE([MUL_SUC, SATZ_30, IH], body_zs)
     return GENL([x, y], INDUCT_PROVE(z, body_z, base, step_fn))
 
 SATZ_31 = _prove_satz_31()
