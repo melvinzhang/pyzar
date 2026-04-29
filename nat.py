@@ -743,6 +743,29 @@ def PROVE_LT(a_t, b_t, witness, eq_th):
     return EQ_MP(SYM(UNFOLD_LT(a_t, b_t)), EXISTS(pred, witness, eq_th))
 
 
+def CHOOSE_GT(h_gt, body_fn):
+    """h_gt : ... |- a > b.  Calls body_fn(eq, witness) with
+       eq : ... |- a = b + witness.  Returns body_fn's result with the
+       existential discharged."""
+    a_t = rand(rator(h_gt._concl))
+    b_t = rand(h_gt._concl)
+    ex = EQ_MP(UNFOLD_GT(a_t, b_t), h_gt)
+    pred = mk_abs(u, mk_eq(a_t, mk_add(b_t, u)))
+    return PROVE_HYP(ex, ELIM_EX(pred, ex._concl,
+                                  lambda eq: body_fn(eq, rand(rand(eq._concl)))))
+
+
+def CHOOSE_LT(h_lt, body_fn):
+    """h_lt : ... |- a < b.  Calls body_fn(eq, witness) with
+       eq : ... |- b = a + witness."""
+    a_t = rand(rator(h_lt._concl))
+    b_t = rand(h_lt._concl)
+    ex = EQ_MP(UNFOLD_LT(a_t, b_t), h_lt)
+    pred = mk_abs(v, mk_eq(b_t, mk_add(a_t, v)))
+    return PROVE_HYP(ex, ELIM_EX(pred, ex._concl,
+                                  lambda eq: body_fn(eq, rand(rand(eq._concl)))))
+
+
 # Theorem 10:  |- !x y. (x = y) \/ (x > y) \/ (x < y).    By Theorem 9 + Definitions 2, 3.
 
 def _prove_satz_10():
@@ -833,21 +856,13 @@ SATZ_14 = _prove_satz_14()
 # Theorem 15 (transitivity of order):  |- !x y z. x < y ==> y < z ==> x < z.
 
 def _prove_satz_15():
-    pred_v_def = mk_abs(v, mk_eq(y, mk_add(x, v)))
-    pred_w_def = mk_abs(w, mk_eq(z, mk_add(y, w)))
-    ex_v = EQ_MP(UNFOLD_LT(x, y), ASSUME(mk_lt(x, y)))     # ?v. y = x + v
-    ex_w = EQ_MP(UNFOLD_LT(y, z), ASSUME(mk_lt(y, z)))     # ?w. z = y + w
-
-    def _from_v(eq_y):
-        v0 = rand(rand(eq_y._concl))
-        def _from_w(eq_z):
-            w0 = rand(rand(eq_z._concl))
+    def _from_v(eq_y, v0):
+        def _from_w(eq_z, w0):
             z_eq = REWRITE_PROVE([eq_z, eq_y, SATZ_5],
                                   mk_eq(z, mk_add(x, mk_add(v0, w0))))
             return PROVE_LT(x, z, mk_add(v0, w0), z_eq)
-        return ELIM_EX(pred_w_def, ex_w._concl, _from_w)
-    th_lt = PROVE_HYP(ex_v, PROVE_HYP(ex_w,
-                ELIM_EX(pred_v_def, ex_v._concl, _from_v)))
+        return CHOOSE_LT(ASSUME(mk_lt(y, z)), _from_w)
+    th_lt = CHOOSE_LT(ASSUME(mk_lt(x, y)), _from_v)
     return GENL([x, y, z], DISCHL([mk_lt(x, y), mk_lt(y, z)], th_lt))
 
 SATZ_15 = _prove_satz_15()
@@ -940,15 +955,11 @@ SATZ_18 = _prove_satz_18()
 #   19c:  x < y      ==>  x + z < y + z
 
 def _prove_satz_19a():
-    h = ASSUME(mk_gt(x, y))
-    ex_u = EQ_MP(UNFOLD_GT(x, y), h)
-    pred_u = mk_abs(u, mk_eq(x, mk_add(y, u)))
-    def _from(eq_x):
-        u0 = rand(rand(eq_x._concl))
+    def _from(eq_x, u0):
         path = REWRITE_AC_PROVE([eq_x], PLUS, SATZ_5, SATZ_6,
                                  mk_eq(mk_add(x, z), mk_add(mk_add(y, z), u0)))
         return PROVE_GT(mk_add(x, z), mk_add(y, z), u0, path)
-    th_gt = PROVE_HYP(ex_u, ELIM_EX(pred_u, ex_u._concl, _from))
+    th_gt = CHOOSE_GT(ASSUME(mk_gt(x, y)), _from)
     return GENL([x, y, z], DISCH(mk_gt(x, y), th_gt))
 
 SATZ_19A = _prove_satz_19a()
@@ -1074,17 +1085,13 @@ SATZ_24 = _prove_satz_24()
 # Proof: y = x + u, u >= 1, so y = x + u >= x + 1 (Theorem 23).
 
 def _prove_satz_25():
-    h = ASSUME(mk_gt(y, x))
-    ex_u = EQ_MP(UNFOLD_GT(y, x), h)                            # ?u. y = x + u
-    pred_u = mk_abs(u, mk_eq(y, mk_add(x, u)))
-    def _from(eq_y):
-        u0 = rand(rand(eq_y._concl))
+    def _from(eq_y, u0):
         u_ge_1 = SPEC(u0, SATZ_24)
         s23 = SPECL([x, x, u0, ONE], SATZ_23)
         sum_ge = MP(MP(s23, EQ_TO_GE(REFL(x))), u_ge_1)         # x+u0 >= x+1
         rewrite = MK_COMB(AP_TERM(GE, SYM(eq_y)), REFL(mk_add(x, ONE)))
         return EQ_MP(rewrite, sum_ge)
-    th_full = PROVE_HYP(ex_u, ELIM_EX(pred_u, ex_u._concl, _from))
+    th_full = CHOOSE_GT(ASSUME(mk_gt(y, x)), _from)
     return GENL([x, y], DISCH(mk_gt(y, x), th_full))
 
 SATZ_25 = _prove_satz_25()
@@ -1120,14 +1127,8 @@ def _prove_satz_26():
 
 def CONTRA_LT_GT(a_t, b_t, h_lt, h_gt):
     """ |- a < b,  |- a > b   =>   {a<b, a>b} |- F. """
-    ex_v = EQ_MP(UNFOLD_LT(a_t, b_t), h_lt)
-    ex_u = EQ_MP(UNFOLD_GT(a_t, b_t), h_gt)
-    pred_v = mk_abs(v, mk_eq(b_t, mk_add(a_t, v)))
-    pred_u = mk_abs(u, mk_eq(a_t, mk_add(b_t, u)))
-    def _inner_v(eq_v):
-        v0 = rand(rand(eq_v._concl))
-        def _inner_u(eq_u):
-            u0 = rand(rand(eq_u._concl))
+    def _inner_v(eq_v, v0):
+        def _inner_u(eq_u, u0):
             # Avoid rewriter loop (eq_v↔eq_u cycle): chain  eq_v then rewrite RHS only.
             rhs_eq = REWRITE_PROVE([eq_u, SATZ_5],
                           mk_eq(mk_add(a_t, v0), mk_add(b_t, mk_add(u0, v0))))
@@ -1135,38 +1136,30 @@ def CONTRA_LT_GT(a_t, b_t, h_lt, h_gt):
             ne   = SPECL([mk_add(u0, v0), b_t], SATZ_7)
             ne_f = REWRITE_NE(ne, REFL(b_t), SPECL([mk_add(u0, v0), b_t], SATZ_6))
             return MP(NOT_ELIM(ne_f), chain)
-        return ELIM_EX(pred_u, ex_u._concl, _inner_u)
-    return PROVE_HYP(ex_v, PROVE_HYP(ex_u,
-                ELIM_EX(pred_v, ex_v._concl, _inner_v)))
+        return CHOOSE_GT(h_gt, _inner_u)
+    return CHOOSE_LT(h_lt, _inner_v)
 
 
 def CONTRA_LT_EQ(a_t, b_t, h_lt, h_eq):
     """ |- a < b,  |- a = b   =>   F. """
-    rewrite = MK_COMB(AP_TERM(LT, h_eq), REFL(b_t))
-    th_bb = EQ_MP(rewrite, h_lt)
-    ex_v = EQ_MP(UNFOLD_LT(b_t, b_t), th_bb)
-    pred_v = mk_abs(v, mk_eq(b_t, mk_add(b_t, v)))
-    def _inner(eq):
-        v0 = rand(rand(eq._concl))
+    th_bb = EQ_MP(MK_COMB(AP_TERM(LT, h_eq), REFL(b_t)), h_lt)
+    def _inner(eq, v0):
         comm = SPECL([v0, b_t], SATZ_6)
         ne   = SPECL([v0, b_t], SATZ_7)
         ne_f = REWRITE_NE(ne, REFL(b_t), comm)
         return MP(NOT_ELIM(ne_f), eq)
-    return PROVE_HYP(ex_v, ELIM_EX(pred_v, ex_v._concl, _inner))
+    return CHOOSE_LT(th_bb, _inner)
 
 
 def CONTRA_GT_EQ(a_t, b_t, h_gt, h_eq):
     """ |- a > b,  |- a = b   =>   F. """
-    ex_u = EQ_MP(UNFOLD_GT(a_t, b_t), h_gt)
-    pred_u = mk_abs(u, mk_eq(a_t, mk_add(b_t, u)))
-    def _inner(eq_a):
-        u0 = rand(rand(eq_a._concl))
+    def _inner(eq_a, u0):
         chain = TRANS(SYM(h_eq), eq_a)                       # b = b + u0
         comm = SPECL([u0, b_t], SATZ_6)
         ne   = SPECL([u0, b_t], SATZ_7)
         ne_f = REWRITE_NE(ne, REFL(b_t), comm)
         return MP(NOT_ELIM(ne_f), chain)
-    return PROVE_HYP(ex_u, ELIM_EX(pred_u, ex_u._concl, _inner))
+    return CHOOSE_GT(h_gt, _inner)
 
 
 SATZ_26 = _prove_satz_26()
@@ -1593,17 +1586,13 @@ RIGHT_DISTRIB = _prove_right_distrib()
 # We prove the three pieces; same template as Theorem 19.
 
 def _prove_satz_32a():
-    h = ASSUME(mk_gt(x, y))
-    ex_u = EQ_MP(UNFOLD_GT(x, y), h)
-    pred_u = mk_abs(u, mk_eq(x, mk_add(y, u)))
-    def _from(eq_x):
-        u0 = rand(rand(eq_x._concl))
+    def _from(eq_x, u0):
         # x*z = (y+u0)*z = y*z + u0*z   [eq_x then RIGHT_DISTRIB].
         path = REWRITE_PROVE([eq_x, RIGHT_DISTRIB],
                               mk_eq(mk_mul(x, z),
                                     mk_add(mk_mul(y, z), mk_mul(u0, z))))
         return PROVE_GT(mk_mul(x, z), mk_mul(y, z), mk_mul(u0, z), path)
-    th_gt = PROVE_HYP(ex_u, ELIM_EX(pred_u, ex_u._concl, _from))
+    th_gt = CHOOSE_GT(ASSUME(mk_gt(x, y)), _from)
     return GENL([x, y, z], DISCH(mk_gt(x, y), th_gt))
 
 SATZ_32A = _prove_satz_32a()
