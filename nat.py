@@ -23,12 +23,13 @@ Coverage:
   #2  Theorems 1, 2, 3, 5, 6, 7, 8, 9 (both existence and mutual-exclusion
       halves of the trichotomy).  Definition 1 (addition): the recursion
       equations ADD_1, ADD_SUC are derived from NUM_RECURSION rather than
-      admitted (Theorem 4's existence half is num.py's NUM_RECURSION).
+      admitted (Theorem 4's existence half is num.py's NUM_RECURSION;
+      uniqueness half is ADD_UNIQUE).
   #3  Definitions 2, 3, 4, 5 and Theorems 10-17, 18, 19 (a/b/c), 20,
       21, 22 (a/b), 23, 24, 25, 26, 27.
   #4  Definition 6 (multiplication, parallel to Definition 1, equations
-      MUL_1 and MUL_SUC likewise derived from NUM_RECURSION) and
-      Theorems 29, 30, 31, 32 (a/b/c), 33, 34, 35 (a/b), 36.
+      MUL_1 and MUL_SUC likewise derived from NUM_RECURSION; uniqueness
+      half MUL_UNIQUE) and Theorems 29, 30, 31, 32 (a/b/c), 33, 34, 35 (a/b), 36.
 """
 
 from fusion import (
@@ -319,6 +320,51 @@ def _prove_add_eqs():
 
 
 ADD_1, ADD_SUC = _prove_add_eqs()
+
+
+# ---------------------------------------------------------------------------
+# Theorem 4, Part A (uniqueness half).
+# Landau: at fixed x, any two functions a_y, b_y satisfying  a_1 = x'  and
+# a_{y'} = (a_y)'  agree on all y.  Routine induction on y.
+#   ADD_UNIQUE :  |- !x f g.
+#       f 1 = SUC x /\ (!y. f (SUC y) = SUC (f y)) /\
+#       g 1 = SUC x /\ (!y. g (SUC y) = SUC (g y))
+#       ==> !y. f y = g y.
+# ---------------------------------------------------------------------------
+
+def _prove_add_unique():
+    f_var = Var("f", mk_fun_ty(num_ty, num_ty))
+    g_var = Var("g", mk_fun_ty(num_ty, num_ty))
+    f_1 = mk_eq(mk_comb(f_var, ONE), mk_suc(x))
+    f_step = mk_forall(y, mk_eq(mk_comb(f_var, mk_suc(y)),
+                                 mk_suc(mk_comb(f_var, y))))
+    g_1 = mk_eq(mk_comb(g_var, ONE), mk_suc(x))
+    g_step = mk_forall(y, mk_eq(mk_comb(g_var, mk_suc(y)),
+                                 mk_suc(mk_comb(g_var, y))))
+    hyps = mk_and(f_1, mk_and(f_step, mk_and(g_1, g_step)))
+    h_all = ASSUME(hyps)
+    h_f1    = CONJUNCT1(h_all)
+    h_rest  = CONJUNCT2(h_all)
+    h_fstep = CONJUNCT1(h_rest)
+    h_rest2 = CONJUNCT2(h_rest)
+    h_g1    = CONJUNCT1(h_rest2)
+    h_gstep = CONJUNCT2(h_rest2)
+
+    body_y = mk_eq(mk_comb(f_var, y), mk_comb(g_var, y))
+    pred = mk_abs(y, body_y)
+
+    base = TRANS(h_f1, SYM(h_g1))                       # |- f 1 = g 1
+    IH = ASSUME(body_y)                                 # {f y = g y}
+    fs = SPEC(y, h_fstep)                               # |- f (SUC y) = SUC (f y)
+    gs = SPEC(y, h_gstep)                               # |- g (SUC y) = SUC (g y)
+    suc_eq = AP_TERM(SUC, IH)                           # |- SUC (f y) = SUC (g y)
+    step_inner = TRANS(fs, TRANS(suc_eq, SYM(gs)))      # |- f (SUC y) = g (SUC y)
+    step = GEN(y, DISCH(body_y, step_inner))
+
+    forall_y = INDUCT(pred, base, step)                 # {hyps} |- !y. f y = g y
+    return GEN(x, GEN(f_var, GEN(g_var, DISCH(hyps, forall_y))))
+
+ADD_UNIQUE = _prove_add_unique()
 
 
 # ---------------------------------------------------------------------------
@@ -1598,6 +1644,49 @@ def _prove_mul_eqs():
 MUL_1, MUL_SUC = _prove_mul_eqs()
 
 
+# ---------------------------------------------------------------------------
+# Theorem 28, Part A (uniqueness half).  Mirror of ADD_UNIQUE.
+#   MUL_UNIQUE :  |- !x f g.
+#       f 1 = x /\ (!y. f (SUC y) = f y + x) /\
+#       g 1 = x /\ (!y. g (SUC y) = g y + x)
+#       ==> !y. f y = g y.
+# ---------------------------------------------------------------------------
+
+def _prove_mul_unique():
+    f_var = Var("f", mk_fun_ty(num_ty, num_ty))
+    g_var = Var("g", mk_fun_ty(num_ty, num_ty))
+    f_1 = mk_eq(mk_comb(f_var, ONE), x)
+    f_step = mk_forall(y, mk_eq(mk_comb(f_var, mk_suc(y)),
+                                 mk_add(mk_comb(f_var, y), x)))
+    g_1 = mk_eq(mk_comb(g_var, ONE), x)
+    g_step = mk_forall(y, mk_eq(mk_comb(g_var, mk_suc(y)),
+                                 mk_add(mk_comb(g_var, y), x)))
+    hyps = mk_and(f_1, mk_and(f_step, mk_and(g_1, g_step)))
+    h_all = ASSUME(hyps)
+    h_f1    = CONJUNCT1(h_all)
+    h_rest  = CONJUNCT2(h_all)
+    h_fstep = CONJUNCT1(h_rest)
+    h_rest2 = CONJUNCT2(h_rest)
+    h_g1    = CONJUNCT1(h_rest2)
+    h_gstep = CONJUNCT2(h_rest2)
+
+    body_y = mk_eq(mk_comb(f_var, y), mk_comb(g_var, y))
+    pred = mk_abs(y, body_y)
+
+    base = TRANS(h_f1, SYM(h_g1))                       # |- f 1 = g 1
+    IH = ASSUME(body_y)
+    fs = SPEC(y, h_fstep)                               # |- f (SUC y) = f y + x
+    gs = SPEC(y, h_gstep)                               # |- g (SUC y) = g y + x
+    sum_eq = AP_THM(AP_TERM(PLUS, IH), x)               # |- f y + x = g y + x
+    step_inner = TRANS(fs, TRANS(sum_eq, SYM(gs)))      # |- f (SUC y) = g (SUC y)
+    step = GEN(y, DISCH(body_y, step_inner))
+
+    forall_y = INDUCT(pred, base, step)
+    return GEN(x, GEN(f_var, GEN(g_var, DISCH(hyps, forall_y))))
+
+MUL_UNIQUE = _prove_mul_unique()
+
+
 # Helpers (from Landau's "construction in the proof of Theorem 28"):
 # ONE_MUL :  |- !y. 1 * y = y.
 # SUC_MUL :  |- !x y. (SUC x) * y = x * y + y.
@@ -2114,6 +2203,7 @@ if __name__ == "__main__":
     print("Step 6 OK -- Definition 1 (addition) installed.")
     print("  ADD_1     :", pp_thm(ADD_1))
     print("  ADD_SUC   :", pp_thm(ADD_SUC))
+    print("  ADD_UNIQUE:", pp_thm(ADD_UNIQUE))
     print("Step 7 OK -- Theorem 5 (associativity of addition) proved.")
     print("  SATZ_5    :", pp_thm(SATZ_5))
     print("Step 8 OK -- Theorem 6 (commutativity of addition) proved.")
@@ -2154,6 +2244,7 @@ if __name__ == "__main__":
     print("  SATZ_25   :", pp_thm(SATZ_25))
     print("  SATZ_26   :", pp_thm(SATZ_26))
     print("Step 18 OK -- Definition 6 + Theorems 29-36 proved (Theorem 28 = Definition 6).")
+    print("  MUL_UNIQUE:", pp_thm(MUL_UNIQUE))
     print("  ONE_MUL   :", pp_thm(ONE_MUL))
     print("  SUC_MUL   :", pp_thm(SUC_MUL))
     print("  SATZ_29   :", pp_thm(SATZ_29))
