@@ -1,19 +1,22 @@
 """Formalisation of Landau's *Foundations of Analysis*, Chapter 1.
 
-Built on the primitive HOL Light kernel in ``fusion.py`` plus the boolean
-infrastructure / 3 logical axioms (ETA, SELECT, INFINITY) from ``axioms.py``,
-and the boolean-logic derived rules / classical helpers in ``logic.py``.
+Module stack:
+  ``fusion.py`` -- primitive HOL Light kernel.
+  ``axioms.py`` -- bool definitions and the 3 logical axioms (ETA, SELECT, INFINITY).
+  ``logic.py``  -- derived bool inference rules + Diaconescu's EM.
+  ``num.py``    -- num signature, Peano Axioms 3-5, INDUCT.
+  ``nat.py``    -- this file: addition, multiplication, Landau Theorems 1-36.
 
 Each theorem is proved using only the 10 primitive inference rules
 (REFL, TRANS, MK_COMB, ABS, BETA, ASSUME, EQ_MP, DEDUCT_ANTISYM_RULE,
-INST, INST_TYPE) plus the rules imported from ``logic.py``.
+INST, INST_TYPE) plus rules imported from ``logic.py`` and ``num.py``.
 
 Run ``python nat.py`` -- the kernel rejects any unsound step, so a clean
 finish prints 20 step-confirmation lines and means every theorem is valid.
 
 Coverage:
   #1  All 5 Peano axioms (Axiom 1 by typing; Axiom 2's existence by
-      taking SUC as a total function; Axioms 3, 4, 5 as new_axioms).
+      taking SUC as a total function; Axioms 3, 4, 5 as new_axioms in num.py).
   #2  Theorems 1, 2, 3, 5, 6, 7, 8, 9 (both existence and mutual-exclusion
       halves of the trichotomy).  Definition 1 (addition) admitted as
       Landau's recursion equations (the existence-half proof of
@@ -23,9 +26,6 @@ Coverage:
       21, 22 (a/b), 23, 24, 25, 26, 27.
   #4  Definition 6 (multiplication, parallel to Definition 1) and
       Theorems 29, 30, 31, 32 (a/b/c), 33, 34, 35 (a/b), 36.
-
-Theorem 27 (well-ordering) uses excluded middle, derived in ``logic.py``
-from SELECT_AX by Diaconescu's argument.
 """
 
 from fusion import (
@@ -54,83 +54,11 @@ from logic import (
     EXCLUDED_MIDDLE, NOT_NOT_ELIM, NOT_EX_TO_FORALL_NOT, NOT_FORALL_TO_EX_NOT,
     _INFIX,
 )
-
-
-# ---------------------------------------------------------------------------
-# Step 1 -- Peano signature and axioms
-# ---------------------------------------------------------------------------
-
-new_type("num", 0)
-num_ty = mk_type("num", [])
-
-new_constant("1", num_ty)
-ONE = mk_const("1", [])
-
-new_constant("SUC", mk_fun_ty(num_ty, num_ty))
-SUC = mk_const("SUC", [])
-
-def mk_suc(t):
-    return mk_comb(SUC, t)
-
-x = Var("x", num_ty)
-y = Var("y", num_ty)
-z = Var("z", num_ty)
-u = Var("u", num_ty)
-v = Var("v", num_ty)
-w = Var("w", num_ty)
-P = Var("P", mk_fun_ty(num_ty, bool_ty))
-
-# Axiom 3:   |- !x. ~(x' = 1)
-AXIOM_3 = new_axiom(mk_forall(x, mk_not(mk_eq(mk_suc(x), ONE))))
-
-# Axiom 4:   |- !x y. x' = y' ==> x = y
-AXIOM_4 = new_axiom(
-    mk_forall(x, mk_forall(y,
-        mk_imp(mk_eq(mk_suc(x), mk_suc(y)),
-               mk_eq(x, y)))))
-
-# Axiom 5 (Induction axiom):
-#   |- !P. P 1 /\ (!x. P x ==> P (x')) ==> !x. P x
-INDUCTION = new_axiom(
-    mk_forall(P,
-        mk_imp(
-            mk_and(mk_comb(P, ONE),
-                   mk_forall(x, mk_imp(mk_comb(P, x),
-                                       mk_comb(P, mk_suc(x))))),
-            mk_forall(x, mk_comb(P, x)))))
-
-
-
-# ---------------------------------------------------------------------------
-# Induction helper -- packages Axiom 5 for Landau-style proofs.
-#
-# Given a predicate  pred = \v. body[v]  and theorems
-#       base_th : |- body[1/v]
-#       step_th : |- !v. body[v] ==> body[v'/v]
-# returns           |- !v. body[v].
-# ---------------------------------------------------------------------------
-
-def INDUCT(pred, base_th, step_th):
-    if not isinstance(pred, Abs):
-        raise HolError("INDUCT: pred must be an Abs")
-    v_var = pred.bvar
-    pred_1  = mk_comb(pred, ONE)
-    pred_v  = mk_comb(pred, v_var)
-    pred_vs = mk_comb(pred, mk_suc(v_var))
-    # Lift base_th to pred-form: |- pred 1.
-    base_pred = EQ_MP(SYM(BETA_CONV(pred_1)), base_th)
-    # Lift step_th to pred-form: |- !v. pred v ==> pred v'.
-    inst_step    = SPEC(v_var, step_th)                              # |- body ==> body[v'/v]
-    body_assume  = EQ_MP(BETA_CONV(pred_v), ASSUME(pred_v))          # {pred v} |- body
-    body_succ    = MP(inst_step, body_assume)                        # {pred v} |- body[v'/v]
-    pred_vs_th   = EQ_MP(SYM(BETA_CONV(pred_vs)), body_succ)         # {pred v} |- pred v'
-    step_pred    = GEN(v_var, DISCH(pred_v, pred_vs_th))
-    # Apply Axiom 5.
-    ind_inst     = SPEC(pred, INDUCTION)
-    forall_pred  = MP(ind_inst, CONJ(base_pred, step_pred))          # |- !v. pred v
-    # Convert back to !v. body.
-    body_th = EQ_MP(BETA_CONV(pred_v), SPEC(v_var, forall_pred))
-    return GEN(v_var, body_th)
+from num import (
+    num_ty, ONE, SUC, mk_suc,
+    x, y, z, u, v, w, P,
+    AXIOM_3, AXIOM_4, INDUCTION, INDUCT,
+)
 
 
 # ---------------------------------------------------------------------------
