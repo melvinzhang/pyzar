@@ -63,7 +63,8 @@ from num import (
     x, y, z, u, v, w, P,
     AXIOM_3, AXIOM_4, INDUCTION, INDUCT, INDUCT_PROVE, NUM_RECURSION,
 )
-from tactics import REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV
+from tactics import (REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV,
+                       AC_PROVE, AC_NORM, REWRITE_AC_PROVE)
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +316,10 @@ def _prove_add_eqs():
 
 ADD_1, ADD_SUC = _prove_add_eqs()
 
+# Reversed orientation of ADD_1, used as a rewrite to canonicalize SUC into
+# `+1`-form before AC reasoning.
+ADD_1_REV = GEN(x, SYM(SPEC(x, ADD_1)))    # |- !x. SUC x = x + 1
+
 
 # ---------------------------------------------------------------------------
 # Theorem 4, Part A (uniqueness half).
@@ -421,14 +426,10 @@ SATZ_6 = _prove_satz_6()
 
 
 # AC-corollary used pervasively in the order proofs:  (a+b)+c = (a+c)+b.
-# Proof: (a+b)+c = a+(b+c) [SATZ_5] = a+(c+b) [SATZ_6 inner] = (a+c)+b [SYM SATZ_5].
 def _prove_add_right_swap():
     a, b, c = Var("a", num_ty), Var("b", num_ty), Var("c", num_ty)
-    return GENL([a, b, c], TRANS_CHAIN([
-        SPECL([a, b, c], SATZ_5),
-        AP_TERM(mk_comb(PLUS, a), SPECL([b, c], SATZ_6)),
-        SYM(SPECL([a, c, b], SATZ_5)),
-    ]))
+    target = mk_eq(mk_add(mk_add(a, b), c), mk_add(mk_add(a, c), b))
+    return GENL([a, b, c], AC_PROVE(PLUS, SATZ_5, SATZ_6, target))
 
 ADD_RIGHT_SWAP = _prove_add_right_swap()
 
@@ -944,9 +945,8 @@ def _prove_satz_19a():
     pred_u = mk_abs(u, mk_eq(x, mk_add(y, u)))
     def _from(eq_x):
         u0 = rand(rand(eq_x._concl))
-        # x+z = (y+u0)+z [eq_x]  =  (y+z)+u0 [ADD_RIGHT_SWAP].
-        path = TRANS(AP_THM(AP_TERM(PLUS, eq_x), z),
-                      SPECL([y, u0, z], ADD_RIGHT_SWAP))
+        path = REWRITE_AC_PROVE([eq_x], PLUS, SATZ_5, SATZ_6,
+                                 mk_eq(mk_add(x, z), mk_add(mk_add(y, z), u0)))
         return PROVE_GT(mk_add(x, z), mk_add(y, z), u0, path)
     th_gt = PROVE_HYP(ex_u, ELIM_EX(pred_u, ex_u._concl, _from))
     return GENL([x, y, z], DISCH(mk_gt(x, y), th_gt))
@@ -1521,31 +1521,14 @@ def _prove_one_mul():
 ONE_MUL = _prove_one_mul()
 
 def _prove_suc_mul():
-    body_y = mk_eq(mk_mul(mk_suc(x), y), mk_add(mk_mul(x, y), y))
-    # base y=1: (SUC x)*1 = SUC x = x+1 = x*1 + 1.
-    base = TRANS_CHAIN([
-        SPEC(mk_suc(x), MUL_1),                          # SUC x * 1 = SUC x
-        SYM(SPEC(x, ADD_1)),                             # SUC x = x + 1
-        AP_THM(AP_TERM(PLUS, SYM(SPEC(x, MUL_1))), ONE), # x + 1 = x*1 + 1
-    ])
-    # We need: (SUC x)*SUC y = x*SUC y + SUC y.
-    # LHS = (SUC x)*y + SUC x = (x*y+y) + SUC x = x*y + (y+SUC x).
-    # And (y+SUC x) = SUC(y+x) = SUC(x+y) = x + SUC y, so x*y + (y+SUC x)
-    #               = x*y + (x+SUC y) = (x*y+x) + SUC y = x*SUC y + SUC y.
-    def step_fn(IH):
-        inner_chain = TRANS_CHAIN([
-            SPECL([y, x], ADD_SUC),                      # y + SUC x = SUC(y+x)
-            AP_TERM(SUC, SPECL([y, x], SATZ_6)),         # SUC(y+x) = SUC(x+y)
-            SYM(SPECL([x, y], ADD_SUC)),                 # SUC(x+y) = x + SUC y
-        ])
-        return TRANS_CHAIN([
-            SPECL([mk_suc(x), y], MUL_SUC),              # (SUC x)*SUC y = (SUC x)*y + SUC x
-            AP_THM(AP_TERM(PLUS, IH), mk_suc(x)),        # = (x*y+y) + SUC x
-            SPECL([mk_mul(x, y), y, mk_suc(x)], SATZ_5), # = x*y + (y + SUC x)
-            AP_TERM(mk_comb(PLUS, mk_mul(x, y)), inner_chain),  # = x*y + (x + SUC y)
-            SYM(SPECL([mk_mul(x, y), x, mk_suc(y)], SATZ_5)),   # = (x*y+x) + SUC y
-            AP_THM(AP_TERM(PLUS, SYM(SPECL([x, y], MUL_SUC))), mk_suc(y)),  # = x*SUC y + SUC y
-        ])
+    body_y  = mk_eq(mk_mul(mk_suc(x), y), mk_add(mk_mul(x, y), y))
+    body_1  = mk_eq(mk_mul(mk_suc(x), ONE), mk_add(mk_mul(x, ONE), ONE))
+    body_ys = mk_eq(mk_mul(mk_suc(x), mk_suc(y)),
+                     mk_add(mk_mul(x, mk_suc(y)), mk_suc(y)))
+    base = REWRITE_PROVE([MUL_1, ADD_1_REV], body_1)
+    # Step: rewrite both sides with [MUL_SUC, IH]; canonicalize SUC→+1; then AC.
+    step_fn = lambda IH: REWRITE_AC_PROVE(
+        [MUL_SUC, IH], PLUS, SATZ_5, SATZ_6, body_ys, ac_rules=[ADD_1_REV])
     return GEN(x, INDUCT_PROVE(y, body_y, base, step_fn))
 
 SUC_MUL = _prove_suc_mul()
