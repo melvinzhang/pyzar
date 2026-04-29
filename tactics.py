@@ -28,7 +28,19 @@ from fusion import (
     type_of, dest_eq, rand, aconv, mk_comb, HolError,
     REFL, TRANS, MK_COMB, EQ_MP, INST,
 )
-from logic import SPEC, SYM, AP_TERM, AP_THM, TRANS_CHAIN
+from logic import SPEC, SYM, AP_TERM, AP_THM, BETA_NORM, TRANS_CHAIN
+
+
+# ---------------------------------------------------------------------------
+# Beta-reduce a theorem's conclusion in place.
+# ---------------------------------------------------------------------------
+
+def BETA_RULE(th):
+    """Beta-normalize the conclusion of th.  If the conclusion is already in
+    beta normal form, returns th unchanged."""
+    eq = BETA_NORM(th._concl)
+    lhs, rhs = dest_eq(eq._concl)
+    return th if aconv(lhs, rhs) else EQ_MP(eq, th)
 
 
 # ---------------------------------------------------------------------------

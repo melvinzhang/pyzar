@@ -31,6 +31,7 @@ from logic import (
     NOT_FORALL_TO_EX_NOT, NOT_EX_TO_FORALL_NOT, NE_SYM,
     TRANS_CHAIN,
 )
+from tactics import BETA_RULE
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +121,7 @@ def _prove_exists_witness():
     # AP_THM at IND_SUC:  |- ONTO IND_SUC = (\f. ...) IND_SUC.
     eq1 = AP_THM(onto_def_ind, IND_SUC)
     # BETA-reduce the RHS to the unfolded body.
-    eq2 = TRANS(eq1, BETA_CONV(rand(eq1._concl)))   # |- ONTO IND_SUC = !y. ?x. y = IND_SUC x
+    eq2 = BETA_RULE(eq1)                             # |- ONTO IND_SUC = !y. ?x. y = IND_SUC x
     # Negate both sides:
     NOT_C = mk_const("~", [])
     not_eq = AP_TERM(NOT_C, eq2)                     # |- ~(ONTO IND_SUC) = ~(!y. ?x. y = IND_SUC x)
@@ -252,9 +253,7 @@ NUM_REP = mk_const("NUM_REP", [])
 
 def _NUM_REP_unfold(a_term):
     r""" |- NUM_REP a = (!P. P IND_1 /\ (!i. P i ==> P (IND_SUC i)) ==> P a). """
-    # AP_THM NUM_REP_DEF a, then BETA.
-    eq = AP_THM(NUM_REP_DEF, a_term)
-    return TRANS(eq, BETA_CONV(rand(eq._concl)))
+    return BETA_RULE(AP_THM(NUM_REP_DEF, a_term))
 
 
 # ---------------------------------------------------------------------------
@@ -368,8 +367,7 @@ def mk_suc(t):
 
 def _SUC_unfold(n_term):
     """ |- SUC n = mk_num (IND_SUC (dest_num n)). """
-    eq = AP_THM(SUC_DEF, n_term)
-    return TRANS(eq, BETA_CONV(rand(eq._concl)))
+    return BETA_RULE(AP_THM(SUC_DEF, n_term))
 
 
 # Standard variable names re-used throughout the arithmetic development.
@@ -423,8 +421,7 @@ NUM_REP_dest_num = _prove_NUM_REP_dest_num()
 def _ONE_ONE_unfold_at_IND_SUC():
     """ |- ONE_ONE IND_SUC = !x1 x2. IND_SUC x1 = IND_SUC x2 ==> x1 = x2. """
     one_one_def_ind = INST_TYPE([(ind_ty, aty), (ind_ty, bty)], ONE_ONE_DEF)
-    eq1 = AP_THM(one_one_def_ind, IND_SUC)
-    return TRANS(eq1, BETA_CONV(rand(eq1._concl)))
+    return BETA_RULE(AP_THM(one_one_def_ind, IND_SUC))
 
 
 _ONE_ONE_IND_SUC_unfold = EQ_MP(_ONE_ONE_unfold_at_IND_SUC(), ONE_ONE_IND_SUC)
@@ -777,14 +774,8 @@ def _prove_R_unique_base():
     Qp = mk_abs(k_b, mk_abs(a_b, mk_imp(mk_eq(k_b, ONE), mk_eq(a_b, _c))))
 
     def apply_Qp(k_t, a_t):
-        """Return (|- Q' k a = (k = 1 ==> a = c), the equality from beta)."""
-        # Q' k a beta-reduces to (k = 1) ==> (a = c).
-        Qp_k = mk_comb(Qp, k_t)
-        bot1 = BETA_CONV(Qp_k)                   # |- Q' k = \a. ...
-        Qp_k_a = mk_comb(Qp_k, a_t)
-        bot2 = AP_THM(bot1, a_t)                 # |- Q' k a = (\a. ...) a
-        bot3 = TRANS(bot2, BETA_CONV(rand(bot2._concl)))
-        return bot3                              # |- Q' k a = (k = 1 ==> a = c)
+        """Return |- Q' k a = (k = 1 ==> a = c)."""
+        return BETA_NORM(mk_comb(mk_comb(Qp, k_t), a_t))
 
     # 1. Q' 1 c.   reduces to (1 = 1) ==> (c = c), proved by DISCH+REFL.
     eq_red_1c = apply_Qp(ONE, _c)
@@ -885,12 +876,7 @@ def _prove_R_unique_step():
 
     def apply_Qp(k_t, a_t):
         r"""Return |- Q' k a = (R c h k a /\ (k = SUC n ==> a = h n m_n))."""
-        Qp_k = mk_comb(Qp, k_t)
-        bot1 = BETA_CONV(Qp_k)                # |- Q' k = \a. ...
-        Qp_k_a = mk_comb(Qp_k, a_t)
-        bot2 = AP_THM(bot1, a_t)
-        bot3 = TRANS(bot2, BETA_CONV(rand(bot2._concl)))
-        return bot3                            # |- Q' k a = body[k_t, a_t]
+        return BETA_NORM(mk_comb(mk_comb(Qp, k_t), a_t))
 
     # 1. Q'(1, c).  We need:
     #    R c h 1 c    /\    (1 = SUC n ==> c = h n m_n).
