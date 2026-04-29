@@ -399,6 +399,39 @@ def EXISTS(pred, witness, th):
 
 
 # ---------------------------------------------------------------------------
+# List-form combinators -- shorthand for repeated SPEC/GEN/DISCH/TRANS chains.
+#
+#   SPECL([a, b, c], thm)   = SPEC(c, SPEC(b, SPEC(a, thm)))
+#   GENL([x, y, z], thm)    yields  |- !x y z. concl
+#   DISCHL([h1, h2], thm)   yields  |- h1 ==> h2 ==> concl
+#   TRANS_CHAIN([t1,...,tn]) chains TRANS over a list of equalities.
+# ---------------------------------------------------------------------------
+
+def SPECL(args, th):
+    for a in args:
+        th = SPEC(a, th)
+    return th
+
+def GENL(vars, th):
+    for v in reversed(vars):
+        th = GEN(v, th)
+    return th
+
+def DISCHL(hyps, th):
+    for h in reversed(hyps):
+        th = DISCH(h, th)
+    return th
+
+def TRANS_CHAIN(thms):
+    if not thms:
+        raise HolError("TRANS_CHAIN: empty list")
+    result = thms[0]
+    for t in thms[1:]:
+        result = TRANS(result, t)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # PROVE_HYP -- discharge an assumption via an existing proof.
 #
 #   asl1 |- h ;  asl2 |- t   =>   asl1 ∪ (asl2 - {h}) |- t.

@@ -649,6 +649,25 @@ def INDUCT(pred, base_th, step_th):
 
 
 # ---------------------------------------------------------------------------
+# INDUCT_PROVE -- high-level induction template.
+#
+#   var      : induction variable
+#   body     : term mentioning `var` (the predicate body at var)
+#   base     : |- body[var := 1]
+#   step_fn  : callback receiving IH = ASSUME(body) and returning a theorem
+#              of body[var := SUC var]  (using IH if needed).
+#   Result   : |- !var. body.
+# ---------------------------------------------------------------------------
+
+def INDUCT_PROVE(var, body, base, step_fn):
+    pred = mk_abs(var, body)
+    IH = ASSUME(body)
+    step_inner = step_fn(IH)
+    step = GEN(var, DISCH(body, step_inner))
+    return INDUCT(pred, base, step)
+
+
+# ---------------------------------------------------------------------------
 # Primitive recursion theorem.
 #
 #   |- !c:A h:num->A->A. ?fn:num->A. fn 1 = c /\ !n. fn (SUC n) = h n (fn n).
