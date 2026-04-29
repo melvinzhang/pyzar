@@ -52,12 +52,13 @@ from logic import (
     OR_DEF, mk_or, DISJ1, DISJ2, DISJ_CASES,
     MK_EQ, NE_SYM, REWRITE_NE, EXISTS,
     EXCLUDED_MIDDLE, NOT_NOT_ELIM, NOT_EX_TO_FORALL_NOT, NOT_FORALL_TO_EX_NOT,
+    PROVE_HYP, ELIM_EX,
     _INFIX,
 )
 from num import (
     num_ty, ONE, SUC, mk_suc,
     x, y, z, u, v, w, P,
-    AXIOM_3, AXIOM_4, INDUCTION, INDUCT,
+    AXIOM_3, AXIOM_4, INDUCTION, INDUCT, NUM_RECURSION,
 )
 
 
@@ -136,31 +137,187 @@ SATZ_3 = _prove_satz_3()
 # Landau proves: there is exactly one operation + : num x num -> num with
 #   x + 1 = x'    and    x + y' = (x + y)'.
 #
-# The uniqueness half (Proof A) is a routine induction; the existence half
-# (Proof B) needs the primitive-recursion principle for num, which is
-# *derivable* from Axiom 5 but only after several pages of relational-graph
-# bookkeeping.  Out of scope for this file.  Following Landau's Definition 1,
-# we introduce + as a constant and posit the two recursion equations as
-# axioms -- they are exactly Definition 1 once Theorem 4 has been admitted.
+# Uniqueness follows by routine induction.  For existence, we use the
+# primitive-recursion principle `NUM_RECURSION` proved in num.py:
+#   |- !c h. ?fn. fn 1 = c /\ !n. fn (SUC n) = h n (fn n).
+# Specialising at  c := SUC x,  h := \k a. SUC a,  yields a function fn
+# with fn 1 = SUC x and fn (SUC y) = SUC (fn y).  Define
+#   x + y := (@fn. fn 1 = SUC x /\ !n. fn (SUC n) = SUC (fn n)) y.
+# Then ADD_1 and ADD_SUC become *theorems*.
 # ---------------------------------------------------------------------------
 
-new_constant("+", mk_fun_ty(num_ty, mk_fun_ty(num_ty, num_ty)))
+# The predicate selecting the recursive `+ x` function.
+_add_fn = Var("fn", mk_fun_ty(num_ty, num_ty))
+_add_n  = Var("n", num_ty)
+
+def _add_pred_term(x_t):
+    """\\fn. fn 1 = SUC x_t /\\ !n. fn (SUC n) = SUC (fn n)."""
+    fn_1 = mk_comb(_add_fn, ONE)
+    fn_n = mk_comb(_add_fn, _add_n)
+    fn_sn = mk_comb(_add_fn, mk_suc(_add_n))
+    body = mk_and(mk_eq(fn_1, mk_suc(x_t)),
+                   mk_forall(_add_n,
+                       mk_eq(fn_sn, mk_suc(fn_n))))
+    return mk_abs(_add_fn, body)
+
+_select_add = mk_const("@", [(mk_fun_ty(num_ty, num_ty), aty)])
+
+# Define  +  =  \x y. (@fn. fn 1 = SUC x /\ !n. fn (SUC n) = SUC (fn n)) y.
+_x_d = Var("x", num_ty)
+_y_d = Var("y", num_ty)
+_add_def_rhs = mk_abs(_x_d, mk_abs(_y_d,
+    mk_comb(mk_comb(_select_add, _add_pred_term(_x_d)), _y_d)))
+
+ADD_DEF = new_basic_definition(
+    mk_eq(Var("+", mk_fun_ty(num_ty, mk_fun_ty(num_ty, num_ty))),
+          _add_def_rhs))
 PLUS = mk_const("+", [])
 
 def mk_add(a, b):
     return mk_comb(mk_comb(PLUS, a), b)
 
-# x + 1 = x'
-ADD_1 = new_axiom(mk_forall(x, mk_eq(mk_add(x, ONE), mk_suc(x))))
-# x + y' = (x + y)'
-ADD_SUC = new_axiom(
-    mk_forall(x, mk_forall(y,
-        mk_eq(mk_add(x, mk_suc(y)),
-              mk_suc(mk_add(x, y))))))
-
-
 # Make the pretty-printer aware of "+".
 _INFIX.add("+")
+
+
+def _prove_add_eqs():
+    """Derive ADD_1 = |- !x. x + 1 = SUC x  and  ADD_SUC = |- !x y. x + SUC y = SUC (x + y)."""
+    # Specialise NUM_RECURSION at A := num, c := SUC x, h := \k a. SUC a.
+    NR_num = INST_TYPE([(num_ty, aty)], NUM_RECURSION)        # |- !c h. ?fn. fn 1 = c /\ ...   (over num->num)
+    h_var_loc = Var("h", mk_fun_ty(num_ty, mk_fun_ty(num_ty, num_ty)))
+    # h := \k:num. \a:num. SUC a.
+    k_v = Var("k", num_ty)
+    a_v = Var("a", num_ty)
+    h_const = mk_abs(k_v, mk_abs(a_v, mk_suc(a_v)))
+    spec_c = SPEC(mk_suc(x), NR_num)                            # |- !h. ?fn. fn 1 = SUC x /\ !n. fn (SUC n) = h n (fn n)
+    spec_ch = SPEC(h_const, spec_c)
+    # spec_ch : |- ?fn. fn 1 = SUC x /\ !n. fn (SUC n) = (\k a. SUC a) n (fn n).
+    # The RHS still has the lambda; we'll need to BETA-reduce.
+
+    # Apply SELECT_AX: |- !P x. P x ==> P (@P).
+    # The predicate here is _add_pred_term(x) but with `(\k a. SUC a) n (fn n)` rather
+    # than `SUC (fn n)`.  Let's call the literal predicate from spec_ch `pred_raw`.
+    # spec_ch._concl = ?fn. body_raw[fn].   Predicate = \fn. body_raw[fn].
+    # Extract via exists-def of EXISTS: spec_ch is mk_exists(_, pred_raw_body) so
+    # the exists-predicate is the lambda inside the existential.  Equivalent:
+    pred_raw = spec_ch._concl.arg   # the lambda inside  ?fn. body_raw
+    # That is, pred_raw = Abs(fn, body_raw[fn]).
+    fn_var_raw = pred_raw.bvar      # `fn` variable (num -> num)
+
+    # Use ELIM_EX to extract  body_raw[witness]  where witness = @pred_raw.
+    # We then convert body_raw[witness] to "the" form (by beta-reducing the inner h).
+    sel_at_pred = mk_comb(_select_add, pred_raw)   # @fn. body_raw[fn]
+    # body_raw[witness] is body_raw with fn := sel_at_pred.
+
+    # Build the cleaned predicate (beta-reduced): _add_pred_term(x).
+    pred_clean = _add_pred_term(x)
+    sel_at_pred_clean = mk_comb(_select_add, pred_clean)   # @fn. clean body[fn]
+
+    # PROOF STRATEGY:
+    # Show pred_raw = pred_clean as terms (alpha-equivalent up to beta).  Actually
+    # they're not alpha-equal; pred_raw has `(\k a. SUC a) n (fn n)` and pred_clean
+    # has `SUC (fn n)`.  We need a theorem  |- pred_raw fn = pred_clean fn  for any
+    # fn, or pointwise equality lifted via FUN_EXT, or just operate at the level of
+    # the body once instantiated.
+
+    # Simpler approach: extract the witness body from spec_ch (which has the raw form)
+    # and then prove the cleaned form by transforming each piece.
+
+    def body_fn(th_raw):
+        # th_raw : {body_raw[witness]} |- body_raw[witness] where witness = @pred_raw.
+        return th_raw
+
+    body_raw_at_w = ELIM_EX(pred_raw, spec_ch._concl, body_fn)   # {?fn. body_raw} |- body_raw[witness]
+    body_raw_th   = PROVE_HYP(spec_ch, body_raw_at_w)             # |- body_raw[witness]
+    # body_raw[witness] = (witness 1 = SUC x) /\ (!n. witness (SUC n) = (\k a. SUC a) n (witness n)).
+
+    # Project conjuncts.
+    raw_conj1 = CONJUNCT1(body_raw_th)   # |- witness 1 = SUC x
+    raw_conj2 = CONJUNCT2(body_raw_th)   # |- !n. witness (SUC n) = (\k a. SUC a) n (witness n)
+
+    # `witness` here = sel_at_pred (the @ over pred_raw, which is the literal raw lambda).
+    # But our definition used pred_clean (the literal beta-reduced version).
+    # So sel_at_pred is NOT literally sel_at_pred_clean: they differ in the embedded h.
+    # We need to relate the two @-witnesses.
+    # Approach: prove pred_raw = pred_clean (as functions), then sel_at_pred = sel_at_pred_clean
+    # via AP_TERM on the @ constant.
+
+    # Step a: |- pred_raw = pred_clean  (as Abs(fn, ...) terms with same body modulo beta).
+    # Build via ABS over the body equality.
+    fn_x = mk_comb(_add_fn, mk_suc(_add_n))
+    h_n_fnn_raw = mk_comb(mk_comb(h_const, _add_n), mk_comb(_add_fn, _add_n))
+    # |- (\k a. SUC a) n (fn n) = SUC (fn n)
+    # Step: BETA on (\k a. SUC a) n: |- (\k a. SUC a) n = (\a. SUC a).
+    h_at_n = BETA_CONV(mk_comb(h_const, _add_n))               # |- (\k a. SUC a) n = (\a. SUC a)
+    # Then AP_THM at (fn n): |- ((\k a. SUC a) n) (fn n) = (\a. SUC a) (fn n).
+    h_at_n_fnn = AP_THM(h_at_n, mk_comb(_add_fn, _add_n))      # |- ... = (\a. SUC a) (fn n)
+    # BETA again: (\a. SUC a) (fn n) = SUC (fn n).
+    final_beta = BETA_CONV(mk_comb(mk_abs(a_v, mk_suc(a_v)), mk_comb(_add_fn, _add_n)))
+    # Combine:
+    h_red = TRANS(h_at_n_fnn, final_beta)                       # |- (\k a. SUC a) n (fn n) = SUC (fn n)
+
+    # Now show raw_body = clean_body where bodies live under the same fn binder.
+    # raw_inner_eq: |- witness (SUC n) = (\k a. SUC a) n (witness n).  We derived spec for arbitrary n.
+    # We want: !n. witness (SUC n) = SUC (witness n).
+    # Use raw_conj2 spec'ed at _add_n and chain with h_red[fn := witness].
+    raw_at_n = SPEC(_add_n, raw_conj2)   # |- witness (SUC n) = (\k a. SUC a) n (witness n)
+    # Now apply h_red, but h_red is over fn variable. We need to instantiate fn to witness.
+    h_red_at_w = INST([(sel_at_pred, _add_fn)], h_red)   # |- (\k a. SUC a) n (witness n) = SUC (witness n)
+    raw_clean_n = TRANS(raw_at_n, h_red_at_w)             # |- witness (SUC n) = SUC (witness n)
+    raw_clean_forall = GEN(_add_n, raw_clean_n)            # |- !n. witness (SUC n) = SUC (witness n)
+
+    # Now combine into clean predicate body:  P_clean witness =
+    #   (witness 1 = SUC x) /\ (!n. witness (SUC n) = SUC (witness n)).
+    P_clean_at_w = CONJ(raw_conj1, raw_clean_forall)       # |- witness 1 = SUC x /\ !n. witness (SUC n) = SUC (witness n)
+    # That is: |- pred_clean witness  (after BETA).  Build:
+    pred_clean_at_w = mk_comb(pred_clean, sel_at_pred)
+    pred_clean_at_w_eq = BETA_CONV(pred_clean_at_w)        # |- pred_clean witness = (clean body)
+    pred_clean_witness = EQ_MP(SYM(pred_clean_at_w_eq), P_clean_at_w)   # |- pred_clean witness
+
+    # Now apply SELECT_AX:  |- pred_clean witness ==> pred_clean (@pred_clean).
+    sel_inst = INST_TYPE([(mk_fun_ty(num_ty, num_ty), aty)], SELECT_AX)
+    sel_imp = SPEC(sel_at_pred, SPEC(pred_clean, sel_inst))   # |- pred_clean witness ==> pred_clean (@pred_clean)
+    pred_clean_at_select = MP(sel_imp, pred_clean_witness)     # |- pred_clean (@pred_clean)
+    # i.e. |- (@fn. ...) 1 = SUC x  /\  !n. (@fn. ...) (SUC n) = SUC ((@fn. ...) n)
+    sel_pred_clean = sel_at_pred_clean                         # @fn. pred_clean fn
+    select_at_clean_eq = BETA_CONV(mk_comb(pred_clean, sel_pred_clean))
+    select_at_clean_body = EQ_MP(select_at_clean_eq, pred_clean_at_select)
+    # Now project the two conjuncts.
+    sel_at_1_eq_sx = CONJUNCT1(select_at_clean_body)   # |- (@fn. ...) 1 = SUC x
+    sel_at_sn_eq   = CONJUNCT2(select_at_clean_body)   # |- !n. (@fn. ...) (SUC n) = SUC ((@fn. ...) n)
+
+    # ADD_1: |- !x. x + 1 = SUC x.   x + 1 = (\x y. (@fn. ...) y) x 1 = (@fn. ...) 1 = SUC x.
+    plus_x = mk_comb(PLUS, x)
+    # First, PLUS = _add_def_rhs.  Apply each side at x, 1.
+    add_def_th = ADD_DEF                                # |- + = \x y. (@fn. ...) y
+    plus_at_x = AP_THM(add_def_th, x)                    # |- + x = (\x y. (@fn. ...) y) x
+    plus_at_x_beta = TRANS(plus_at_x, BETA_CONV(rand(plus_at_x._concl)))
+    # |- + x = \y. (@fn[x]. ...) y
+    plus_at_x_at_1 = AP_THM(plus_at_x_beta, ONE)         # |- + x 1 = (\y. ...) 1
+    plus_at_x_at_1_beta = TRANS(plus_at_x_at_1, BETA_CONV(rand(plus_at_x_at_1._concl)))
+    # |- + x 1 = (@fn. ...) 1
+    add1_eq = TRANS(plus_at_x_at_1_beta, sel_at_1_eq_sx)   # |- x + 1 = SUC x
+    ADD_1_th = GEN(x, add1_eq)
+
+    # ADD_SUC: |- !x y. x + SUC y = SUC (x + y).
+    plus_at_x_at_sy = AP_THM(plus_at_x_beta, mk_suc(y))    # |- + x (SUC y) = (\y. ...) (SUC y)
+    plus_at_x_at_sy_beta = TRANS(plus_at_x_at_sy,
+                                  BETA_CONV(rand(plus_at_x_at_sy._concl)))
+    # |- + x (SUC y) = (@fn. ...) (SUC y)
+    sel_at_sy = SPEC(y, sel_at_sn_eq)                       # |- (@fn. ...) (SUC y) = SUC ((@fn. ...) y)
+    # SUC ((@fn. ...) y) = SUC (x + y).  Need to rewrite (@fn. ...) y back to + x y.
+    plus_at_x_at_y = AP_THM(plus_at_x_beta, y)              # |- + x y = (\y. ...) y
+    plus_at_x_at_y_beta = TRANS(plus_at_x_at_y,
+                                 BETA_CONV(rand(plus_at_x_at_y._concl)))
+    # |- + x y = (@fn. ...) y
+    suc_eq = AP_TERM(SUC, SYM(plus_at_x_at_y_beta))          # |- SUC ((@fn. ...) y) = SUC (x + y)
+    add_suc_eq = TRANS(plus_at_x_at_sy_beta, TRANS(sel_at_sy, suc_eq))   # |- x + SUC y = SUC (x + y)
+    ADD_SUC_th = GEN(x, GEN(y, add_suc_eq))
+
+    return ADD_1_th, ADD_SUC_th
+
+
+ADD_1, ADD_SUC = _prove_add_eqs()
 
 
 # ---------------------------------------------------------------------------
@@ -469,103 +626,6 @@ def _existq_witness_to_case2(x_t):
         pred_u = mk_abs(u, mk_eq(x_t, mk_add(ONE, u)))
         return EXISTS(pred_u, w_t, x_eq_1pw)
     return _go
-
-
-def ELIM_EX(pred_in, hyp_ex, body_fn):
-    """ Existential elimination via SELECT_AX.
-        pred_in : Abs(v, body_v)        # the existential's predicate \\v. body_v
-        hyp_ex  : term                  # `?v. body_v`  (the hypothesis term)
-        body_fn : function taking `|- body_v[w/v]` and returning `|- target`.
-        Result: `{hyp_ex} |- target`
-    """
-    v_var = pred_in.bvar
-    sel_const = mk_const("@", [(v_var.ty, aty)])
-    w_t = mk_comb(sel_const, pred_in)              # @v. body_v
-    # Specialise SELECT_AX:  |- !P x. P x ==> P (@P).
-    sel_inst = INST_TYPE([(v_var.ty, aty)], SELECT_AX)
-    sel_pq = SPEC(v_var, SPEC(pred_in, sel_inst))   # |- pred v ==> pred (@pred)  (after BETA)
-    # Convert pred_in v into body_v; pred_in (@pred_in) into body_v[w/v].
-    # The hypothesis we work under: hyp_ex = ?v. body_v.  Need to rewrite this
-    # into "pred_in (@pred_in)" via EXISTS_DEF unfolding.
-    # Easier route: from hyp_ex and SELECT_AX, derive body_v[w/v] directly using
-    # the standard existence-elimination recipe.
-    # We'll do this via the existential's own specification:
-    #   ?v. body_v  ≡  !r. (!v. body_v ==> r) ==> r
-    # Specialise r := body_v[w/v]; then assume `!v. body_v ==> body_v[w/v]`,
-    # discharge it.  Because @-witness satisfies body_v, we can prove this
-    # universal under `body_v ==> body_v[w/v]` by SELECT_AX route.
-    # But simpler: use Hilbert's @ directly.
-    # From SELECT_AX we have: |- (?v. body_v) ==> body_v[w/v].
-    # Proof:  Assume ?v. body_v.  Specialise to `body_v[w/v]`:
-    #    !r. (!v. body_v ==> r) ==> r    →    (!v. body_v ==> body_v[w/v]) ==> body_v[w/v].
-    # Need:  !v. body_v ==> body_v[w/v].   Which is sel_pq (after BETA on pred_in v
-    # and pred_in @pred_in).
-    # 1) Convert sel_pq from `pred_in v ==> pred_in (@pred_in)` to
-    #    `body_v ==> body_v[w/v]` via BETA on each side.
-    pred_v = mk_comb(pred_in, v_var)
-    pred_w = w_t   # = mk_comb(sel_const, pred_in)
-    pred_at_w = mk_comb(pred_in, pred_w)
-    body_v = rand(BETA_CONV(pred_v)._concl)         # = body_v
-    body_at_w = rand(BETA_CONV(pred_at_w)._concl)   # = body_v[w/v]
-    # build  body_v ==> body_at_w  from sel_pq:
-    th_assume_body = EQ_MP(SYM(BETA_CONV(pred_v)), ASSUME(body_v))   # {body_v} |- pred_in v
-    th_pred_at_w   = MP(sel_pq, th_assume_body)                       # {body_v} |- pred_in (@pred_in)
-    th_body_at_w   = EQ_MP(BETA_CONV(pred_at_w), th_pred_at_w)         # {body_v} |- body_v[w/v]
-    body_imp = DISCH(body_v, th_body_at_w)                            # |- body_v ==> body_v[w/v]
-    body_imp_gen = GEN(v_var, body_imp)                                # |- !v. body_v ==> body_v[w/v]
-    # 2) Unfold hyp_ex = ?v. body_v into !r. (!v. body_v ==> r) ==> r.
-    edef = INST_TYPE([(v_var.ty, aty)], EXISTS_DEF)
-    eq1 = AP_THM(edef, pred_in)
-    eq2 = TRANS(eq1, BETA_CONV(rand(eq1._concl)))   # |- (?) pred_in = (!r. ...)
-    th_hyp_unfold = EQ_MP(eq2, ASSUME(hyp_ex))      # {hyp_ex} |- !r. ...
-    th_spec_r = SPEC(body_at_w, th_hyp_unfold)       # {hyp_ex} |- (!v. body_v ==> body_at_w) ==> body_at_w
-    # Hmm -- but the unfolded form's inner `(!v. P v ==> r)` uses `P v`, not `body_v`.
-    # We need to bridge.  Restart cleanly: build the precise form.
-    return _ELIM_EX_with_witness(pred_in, hyp_ex, body_v, body_at_w,
-                                 body_imp_gen, body_fn,
-                                 th_assume_body=None, witness=w_t)
-
-
-def _ELIM_EX_with_witness(pred_in, hyp_ex, body_v, body_at_w,
-                           body_imp_gen, body_fn, **_):
-    """Inner helper continuing ELIM_EX after the witness extraction."""
-    v_var = pred_in.bvar
-    # Apply body_fn to a hypothetical proof of body_v[w/v] to obtain target.
-    # Then chain.
-    # We take the simpler route:  derive a proof of `target` under `{body_v[w/v]}`,
-    # then connect.
-    th_target_under_body_at_w = body_fn(ASSUME(body_at_w))   # {body_at_w} |- target
-    target = th_target_under_body_at_w._concl
-    # Use SELECT-based: from {hyp_ex} we can derive {hyp_ex} |- body_at_w via
-    #     hyp_ex_unfolded → SPEC body_at_w → MP with ((body_v ==> body_at_w) /\v)
-    # Do it now:
-    edef = INST_TYPE([(v_var.ty, aty)], EXISTS_DEF)
-    eq1 = AP_THM(edef, pred_in)
-    eq2 = TRANS(eq1, BETA_CONV(rand(eq1._concl)))
-    th_hyp_unfold = EQ_MP(eq2, ASSUME(hyp_ex))                # {hyp_ex} |- !r. (!v. P v ==> r) ==> r
-    th_spec_r = SPEC(body_at_w, th_hyp_unfold)                # {hyp_ex} |- (!v. P v ==> body_at_w) ==> body_at_w
-    # Need: |- !v. (P v) ==> body_at_w.  We have body_imp_gen : |- !v. body_v ==> body_at_w.
-    # Convert each P v to body_v by BETA.
-    pred_v = mk_comb(pred_in, v_var)
-    bridge = BETA_CONV(pred_v)                                 # |- P v = body_v
-    # Build  P v ==> body_at_w  from body_v ==> body_at_w  via EQ_MP / DISCH.
-    spec_body_imp = SPEC(v_var, body_imp_gen)                  # |- body_v ==> body_at_w
-    p_v_to_body_at_w = DISCH(pred_v,
-                             MP(spec_body_imp, EQ_MP(bridge, ASSUME(pred_v))))
-    th_forall_pv_imp = GEN(v_var, p_v_to_body_at_w)
-    th_body_at_w = MP(th_spec_r, th_forall_pv_imp)             # {hyp_ex} |- body_at_w
-    # Now combine with body_fn: substitute the body_at_w hypothesis with this.
-    # th_target_under_body_at_w has body_at_w in hyps. Eliminate via PROVE_HYP:
-    # PROVE_HYP(th, h_th):  th has h in hyps; h_th : asl |- h.  Result: asl ∪ (th_hyps - {h}) |- th_concl.
-    return PROVE_HYP(th_body_at_w, th_target_under_body_at_w)
-
-
-def PROVE_HYP(h_th, th):
-    """ asl1 |- h ;  asl2 |- t   =>   (asl1 ∪ (asl2 - {h})) |- t.
-        Used to discharge a hypothesis via an existing proof.
-        Implementation:  EQ_MP applied to a derived equality. """
-    # th_eq = DEDUCT_ANTISYM_RULE(MP-shape ...) -- simpler: use UNDISCH/DISCH.
-    return EQ_MP(DEDUCT_ANTISYM_RULE(h_th, th), h_th)
 
 
 # Step branches for Theorem 9 (Cases 2 and 3 at y).
@@ -1432,20 +1492,109 @@ SATZ_27 = _prove_satz_27()
 # half of which is admitted as we did for + in Definition 1).
 # ---------------------------------------------------------------------------
 
-new_constant("*", mk_fun_ty(num_ty, mk_fun_ty(num_ty, num_ty)))
+# Multiplication is defined analogously, via NUM_RECURSION at  c := x, h := \k a. a + x.
+# Then:  x * 1 = x  and  x * (SUC y) = x * y + x.
+
+_mul_fn = Var("fn", mk_fun_ty(num_ty, num_ty))
+_mul_n  = Var("n", num_ty)
+
+def _mul_pred_term(x_t):
+    """\\fn. fn 1 = x_t /\\ !n. fn (SUC n) = (fn n) + x_t."""
+    fn_1  = mk_comb(_mul_fn, ONE)
+    fn_n  = mk_comb(_mul_fn, _mul_n)
+    fn_sn = mk_comb(_mul_fn, mk_suc(_mul_n))
+    body  = mk_and(mk_eq(fn_1, x_t),
+                    mk_forall(_mul_n,
+                        mk_eq(fn_sn, mk_add(fn_n, x_t))))
+    return mk_abs(_mul_fn, body)
+
+_select_mul = mk_const("@", [(mk_fun_ty(num_ty, num_ty), aty)])
+
+_mul_def_rhs = mk_abs(_x_d, mk_abs(_y_d,
+    mk_comb(mk_comb(_select_mul, _mul_pred_term(_x_d)), _y_d)))
+
+MUL_DEF = new_basic_definition(
+    mk_eq(Var("*", mk_fun_ty(num_ty, mk_fun_ty(num_ty, num_ty))),
+          _mul_def_rhs))
 TIMES = mk_const("*", [])
 _INFIX.add("*")
 
 def mk_mul(a, b):
     return mk_comb(mk_comb(TIMES, a), b)
 
-# x * 1 = x
-MUL_1 = new_axiom(mk_forall(x, mk_eq(mk_mul(x, ONE), x)))
-# x * (SUC y) = x * y + x
-MUL_SUC = new_axiom(
-    mk_forall(x, mk_forall(y,
-        mk_eq(mk_mul(x, mk_suc(y)),
-              mk_add(mk_mul(x, y), x)))))
+
+def _prove_mul_eqs():
+    """Derive MUL_1 = |- !x. x * 1 = x  and  MUL_SUC = |- !x y. x * SUC y = x * y + x."""
+    NR_num = INST_TYPE([(num_ty, aty)], NUM_RECURSION)
+    k_v = Var("k", num_ty)
+    a_v = Var("a", num_ty)
+    h_const = mk_abs(k_v, mk_abs(a_v, mk_add(a_v, x)))   # \k a. a + x
+    spec_c = SPEC(x, NR_num)                              # |- !h. ?fn. fn 1 = x /\ !n. fn (SUC n) = h n (fn n)
+    spec_ch = SPEC(h_const, spec_c)                       # |- ?fn. fn 1 = x /\ !n. fn (SUC n) = (\k a. a+x) n (fn n)
+
+    pred_raw = spec_ch._concl.arg
+    sel_at_pred = mk_comb(_select_mul, pred_raw)
+
+    pred_clean = _mul_pred_term(x)
+    sel_at_pred_clean = mk_comb(_select_mul, pred_clean)
+
+    body_raw_at_w = ELIM_EX(pred_raw, spec_ch._concl, lambda th: th)
+    body_raw_th   = PROVE_HYP(spec_ch, body_raw_at_w)
+
+    raw_conj1 = CONJUNCT1(body_raw_th)   # |- witness 1 = x
+    raw_conj2 = CONJUNCT2(body_raw_th)   # |- !n. witness (SUC n) = (\k a. a+x) n (witness n)
+
+    # Reduce (\k a. a+x) n (fn n) = (fn n) + x.
+    h_at_n = BETA_CONV(mk_comb(h_const, _mul_n))                   # |- (\k a. a+x) n = \a. a + x
+    h_at_n_fnn = AP_THM(h_at_n, mk_comb(_mul_fn, _mul_n))           # |- ((\k a. a+x) n) (fn n) = (\a. a+x) (fn n)
+    final_beta = BETA_CONV(mk_comb(mk_abs(a_v, mk_add(a_v, x)),
+                                     mk_comb(_mul_fn, _mul_n)))     # |- (\a. a+x) (fn n) = (fn n) + x
+    h_red = TRANS(h_at_n_fnn, final_beta)                            # |- (\k a. a+x) n (fn n) = (fn n) + x
+
+    raw_at_n = SPEC(_mul_n, raw_conj2)                                # |- witness (SUC n) = (\k a. a+x) n (witness n)
+    h_red_at_w = INST([(sel_at_pred, _mul_fn)], h_red)                # |- (\k a. a+x) n (witness n) = (witness n) + x
+    raw_clean_n = TRANS(raw_at_n, h_red_at_w)                          # |- witness (SUC n) = (witness n) + x
+    raw_clean_forall = GEN(_mul_n, raw_clean_n)
+
+    P_clean_at_w = CONJ(raw_conj1, raw_clean_forall)
+    pred_clean_at_w = mk_comb(pred_clean, sel_at_pred)
+    pred_clean_at_w_eq = BETA_CONV(pred_clean_at_w)
+    pred_clean_witness = EQ_MP(SYM(pred_clean_at_w_eq), P_clean_at_w)
+
+    sel_inst = INST_TYPE([(mk_fun_ty(num_ty, num_ty), aty)], SELECT_AX)
+    sel_imp = SPEC(sel_at_pred, SPEC(pred_clean, sel_inst))
+    pred_clean_at_select = MP(sel_imp, pred_clean_witness)
+    sel_pred_clean = sel_at_pred_clean
+    select_at_clean_eq = BETA_CONV(mk_comb(pred_clean, sel_pred_clean))
+    select_at_clean_body = EQ_MP(select_at_clean_eq, pred_clean_at_select)
+    sel_at_1_eq_x = CONJUNCT1(select_at_clean_body)   # |- (@fn. ...) 1 = x
+    sel_at_sn_eq  = CONJUNCT2(select_at_clean_body)   # |- !n. (@fn. ...) (SUC n) = (@fn. ...) n + x
+
+    times_at_x = AP_THM(MUL_DEF, x)
+    times_at_x_beta = TRANS(times_at_x, BETA_CONV(rand(times_at_x._concl)))
+    times_at_x_at_1 = AP_THM(times_at_x_beta, ONE)
+    times_at_x_at_1_beta = TRANS(times_at_x_at_1,
+                                   BETA_CONV(rand(times_at_x_at_1._concl)))
+    mul1_eq = TRANS(times_at_x_at_1_beta, sel_at_1_eq_x)   # |- x * 1 = x
+    MUL_1_th = GEN(x, mul1_eq)
+
+    times_at_x_at_sy = AP_THM(times_at_x_beta, mk_suc(y))
+    times_at_x_at_sy_beta = TRANS(times_at_x_at_sy,
+                                    BETA_CONV(rand(times_at_x_at_sy._concl)))
+    sel_at_sy = SPEC(y, sel_at_sn_eq)                       # |- (@fn. ...) (SUC y) = (@fn. ...) y + x
+    times_at_x_at_y = AP_THM(times_at_x_beta, y)
+    times_at_x_at_y_beta = TRANS(times_at_x_at_y,
+                                   BETA_CONV(rand(times_at_x_at_y._concl)))
+    # Need to rewrite (@fn. ...) y back to x * y. Note: we have x * y = (@fn. ...) y.
+    # SUC's analogue: ((@fn. ...) y + x) = (x*y + x) via AP_THM(AP_TERM(PLUS, SYM(times_at_x_at_y_beta)), x).
+    rewrite_lhs = AP_THM(AP_TERM(PLUS, SYM(times_at_x_at_y_beta)), x)   # |- (@fn. ...) y + x = x*y + x
+    mul_suc_eq = TRANS(times_at_x_at_sy_beta, TRANS(sel_at_sy, rewrite_lhs))   # |- x * SUC y = x*y + x
+    MUL_SUC_th = GEN(x, GEN(y, mul_suc_eq))
+
+    return MUL_1_th, MUL_SUC_th
+
+
+MUL_1, MUL_SUC = _prove_mul_eqs()
 
 
 # Helpers (from Landau's "construction in the proof of Theorem 28"):

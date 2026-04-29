@@ -399,6 +399,62 @@ def EXISTS(pred, witness, th):
 
 
 # ---------------------------------------------------------------------------
+# PROVE_HYP -- discharge an assumption via an existing proof.
+#
+#   asl1 |- h ;  asl2 |- t   =>   asl1 ∪ (asl2 - {h}) |- t.
+# ---------------------------------------------------------------------------
+
+def PROVE_HYP(h_th, th):
+    return EQ_MP(DEDUCT_ANTISYM_RULE(h_th, th), h_th)
+
+
+# ---------------------------------------------------------------------------
+# ELIM_EX -- existential elimination via SELECT_AX.
+#
+#   pred_in : Abs(v, body_v)        # the existential's predicate \v. body_v
+#   hyp_ex  : term                  # `?v. body_v`  (a hypothesis term)
+#   body_fn : function taking `|- body_v[w/v]` (with w = @pred_in) and
+#             returning `|- target` (perhaps with extra hypotheses).
+#   Result: ({hyp_ex} ∪ extras) |- target.
+# ---------------------------------------------------------------------------
+
+def ELIM_EX(pred_in, hyp_ex, body_fn):
+    if not isinstance(pred_in, Abs):
+        raise HolError("ELIM_EX: pred_in must be an Abs")
+    v_var = pred_in.bvar
+    sel_const = mk_const("@", [(v_var.ty, aty)])
+    w_t = mk_comb(sel_const, pred_in)              # @v. body_v
+    sel_inst = INST_TYPE([(v_var.ty, aty)], SELECT_AX)
+    sel_pq = SPEC(v_var, SPEC(pred_in, sel_inst))   # |- pred v ==> pred (@pred)
+
+    pred_v = mk_comb(pred_in, v_var)
+    pred_at_w = mk_comb(pred_in, w_t)
+    body_v = rand(BETA_CONV(pred_v)._concl)         # = body_v
+    body_at_w = rand(BETA_CONV(pred_at_w)._concl)   # = body_v[w/v]
+
+    th_assume_body = EQ_MP(SYM(BETA_CONV(pred_v)), ASSUME(body_v))   # {body_v} |- pred v
+    th_pred_at_w   = MP(sel_pq, th_assume_body)                       # {body_v} |- pred (@pred)
+    th_body_at_w   = EQ_MP(BETA_CONV(pred_at_w), th_pred_at_w)         # {body_v} |- body_v[w/v]
+    body_imp = DISCH(body_v, th_body_at_w)                            # |- body_v ==> body_v[w/v]
+    body_imp_gen = GEN(v_var, body_imp)                                # |- !v. body_v ==> body_v[w/v]
+
+    edef = INST_TYPE([(v_var.ty, aty)], EXISTS_DEF)
+    eq1 = AP_THM(edef, pred_in)
+    eq2 = TRANS(eq1, BETA_CONV(rand(eq1._concl)))
+    th_hyp_unfold = EQ_MP(eq2, ASSUME(hyp_ex))                # {hyp_ex} |- !r. (!v. P v ==> r) ==> r
+    th_spec_r = SPEC(body_at_w, th_hyp_unfold)                # {hyp_ex} |- (!v. P v ==> body_at_w) ==> body_at_w
+    bridge = BETA_CONV(pred_v)                                 # |- P v = body_v
+    spec_body_imp = SPEC(v_var, body_imp_gen)                  # |- body_v ==> body_at_w
+    p_v_to_body_at_w = DISCH(pred_v,
+                             MP(spec_body_imp, EQ_MP(bridge, ASSUME(pred_v))))
+    th_forall_pv_imp = GEN(v_var, p_v_to_body_at_w)
+    th_body_at_w_under_hyp = MP(th_spec_r, th_forall_pv_imp)   # {hyp_ex} |- body_at_w
+
+    th_target_under_body_at_w = body_fn(ASSUME(body_at_w))      # {body_at_w, ...} |- target
+    return PROVE_HYP(th_body_at_w_under_hyp, th_target_under_body_at_w)
+
+
+# ---------------------------------------------------------------------------
 # Boolean extensionality.   |- !P Q. (!x. P x = Q x) ==> P = Q.
 # Combines ABS over the pointwise equality with two ETA_AX rewrites.
 # ---------------------------------------------------------------------------
