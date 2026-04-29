@@ -1373,7 +1373,7 @@ def EQ_TO_GE(th_eq):
 
 
 # Theorem 16:   x <= y, y < z  =>  x < z   ;   x < y, y <= z  =>  x < z.
-# We prove both forms (Landau's "oder" is a disjunctive hypothesis).
+# We prove both forms (Landau's "or" is a disjunctive hypothesis).
 
 def _prove_satz_16a():
     """ x <= y, y < z ==> x < z """
@@ -1511,7 +1511,7 @@ def _prove_satz_21():
 SATZ_21 = _prove_satz_21()
 
 
-# Theorem 22:   x >= y, z > u  ==>  x + z > y + u   (and the other "oder" form).
+# Theorem 22:   x >= y, z > u  ==>  x + z > y + u   (and the other "or" form).
 
 def _prove_satz_22a():
     h_ge = ASSUME(mk_ge(x, y))
@@ -2395,18 +2395,12 @@ SATZ_9_EXCL = _prove_satz_9_excl()
 # Theorem 20.   |- !x y z. (x+z > y+z ==> x > y)
 #                       /\ (x+z = y+z ==> x = y)
 #                       /\ (x+z < y+z ==> x < y).
-# Beweis (Landau): from Theorem 19 + trichotomy, since the three cases of
+# Proof (Landau): from Theorem 19 + trichotomy, since the three cases of
 # trichotomy mutually exclude each other.
 # ---------------------------------------------------------------------------
 
 def _prove_satz_20():
     s10 = SPEC(y, SPEC(x, SATZ_10))                          # (x=y) \/ (x>y \/ x<y)
-
-    def _branch_via_eq(rhs_t, lhs_t, lhs_th, h_eq):
-        """ Given lhs_th : asl |- lhs_form, and h_eq : a = b that contradicts it,
-            return CONTR-style absurdity. """
-        # placeholder
-        pass
 
     # Goal A: x+z > y+z ==> x > y.
     h_a = ASSUME(mk_gt(mk_add(x, z), mk_add(y, z)))
@@ -2483,10 +2477,6 @@ SATZ_20 = _prove_satz_20()
 
 def _prove_satz_33():
     s10 = SPEC(y, SPEC(x, SATZ_10))
-
-    def _build(forall_th_19a_like):
-        # placeholder
-        pass
 
     # Reusing the same skeleton with SATZ_32A/B/C in place of SATZ_19A/B/C.
     h_a = ASSUME(mk_gt(mk_mul(x, z), mk_mul(y, z)))
