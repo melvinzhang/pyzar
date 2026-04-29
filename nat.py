@@ -308,7 +308,7 @@ def _prove_add_eqs():
     # |- + x y = (@fn. ...) y
     suc_eq = AP_TERM(SUC, SYM(plus_at_x_at_y_beta))          # |- SUC ((@fn. ...) y) = SUC (x + y)
     add_suc_eq = TRANS(plus_at_x_at_sy_beta, TRANS(sel_at_sy, suc_eq))   # |- x + SUC y = SUC (x + y)
-    ADD_SUC_th = GEN(x, GEN(y, add_suc_eq))
+    ADD_SUC_th = GENL([x, y], add_suc_eq)
 
     return ADD_1_th, ADD_SUC_th
 
@@ -418,6 +418,19 @@ def _prove_satz_6():
     return GENL([x, y], SPEC(x, forall_x))
 
 SATZ_6 = _prove_satz_6()
+
+
+# AC-corollary used pervasively in the order proofs:  (a+b)+c = (a+c)+b.
+# Proof: (a+b)+c = a+(b+c) [SATZ_5] = a+(c+b) [SATZ_6 inner] = (a+c)+b [SYM SATZ_5].
+def _prove_add_right_swap():
+    a, b, c = Var("a", num_ty), Var("b", num_ty), Var("c", num_ty)
+    return GENL([a, b, c], TRANS_CHAIN([
+        SPECL([a, b, c], SATZ_5),
+        AP_TERM(mk_comb(PLUS, a), SPECL([b, c], SATZ_6)),
+        SYM(SPECL([a, c, b], SATZ_5)),
+    ]))
+
+ADD_RIGHT_SWAP = _prove_add_right_swap()
 
 
 # ---------------------------------------------------------------------------
@@ -639,14 +652,10 @@ def _satz9_step_case2(x_t, y_t, body_ys, case1_ys, case2_ys, case3_ys, rest_ys):
 
         def _from_w0_witness(w0_eq):
             w0_t = rand(rand(w0_eq._concl))
-            # x = y + w = y + (1+w0) = (y+1) + w0 = SUC y + w0.
-            th_w_eq_1pw0 = TRANS(w0_eq, SYM(SPEC(w0_t, ONE_PLUS)))    # w = 1 + w0
-            th_x_eq_syw0 = TRANS_CHAIN([
-                witness_eq,                                            # x = y + w
-                AP_TERM(mk_comb(PLUS, y_t), th_w_eq_1pw0),             # = y + (1+w0)
-                SYM(SPECL([y_t, ONE, w0_t], SATZ_5)),                  # = (y+1) + w0
-                AP_THM(AP_TERM(PLUS, SPEC(y_t, ADD_1)), w0_t),         # = SUC y + w0
-            ])
+            # x = y + w = y + SUC w0 = SUC(y+w0) = SUC y + w0.
+            th_x_eq_syw0 = REWRITE_PROVE(
+                [witness_eq, w0_eq, ADD_SUC, SUC_PLUS],
+                mk_eq(x_t, mk_add(mk_suc(y_t), w0_t)))
             pred_u_case2_ys = mk_abs(u, mk_eq(x_t, mk_add(mk_suc(y_t), u)))
             return EXISTS(pred_u_case2_ys, w0_t, th_x_eq_syw0)
         # Apply ELIM_EX to extract w0 and complete sub-B.
@@ -722,6 +731,16 @@ def UNFOLD_LT(a, b):
     """ |- (a < b) = (?v. b = a + v) """
     return _binop_unfold(LT_DEF, LT, a, b)
 
+def PROVE_GT(a_t, b_t, witness, eq_th):
+    """From eq_th : ... |- a = b + witness, return ... |- a > b."""
+    pred = mk_abs(u, mk_eq(a_t, mk_add(b_t, u)))
+    return EQ_MP(SYM(UNFOLD_GT(a_t, b_t)), EXISTS(pred, witness, eq_th))
+
+def PROVE_LT(a_t, b_t, witness, eq_th):
+    """From eq_th : ... |- b = a + witness, return ... |- a < b."""
+    pred = mk_abs(v, mk_eq(b_t, mk_add(a_t, v)))
+    return EQ_MP(SYM(UNFOLD_LT(a_t, b_t)), EXISTS(pred, witness, eq_th))
+
 
 # Theorem 10:  |- !x y. (x = y) \/ (x > y) \/ (x < y).    By Theorem 9 + Definitions 2, 3.
 
@@ -737,7 +756,7 @@ def _prove_satz_10():
     inner_eq = MK_COMB(AP_TERM(mk_const("\\/", []), eq_gt), eq_lt)
     # |- (case2 \/ case3) = (x > y \/ x < y)
     outer_eq = AP_TERM(mk_comb(mk_const("\\/", []), mk_eq(x, y)), inner_eq)
-    return GEN(x, GEN(y, EQ_MP(outer_eq, th9)))
+    return GENL([x, y], EQ_MP(outer_eq, th9))
 
 SATZ_10 = _prove_satz_10()
 
@@ -822,17 +841,12 @@ def _prove_satz_15():
         v0 = rand(rand(eq_y._concl))
         def _from_w(eq_z):
             w0 = rand(rand(eq_z._concl))
-            z_eq = TRANS_CHAIN([
-                eq_z,                                           # z = y + w0
-                AP_THM(AP_TERM(PLUS, eq_y), w0),                # y + w0 = (x+v0) + w0
-                SPECL([x, v0, w0], SATZ_5),                     # (x+v0)+w0 = x+(v0+w0)
-            ])
-            pred_final = mk_abs(v, mk_eq(z, mk_add(x, v)))
-            return EXISTS(pred_final, mk_add(v0, w0), z_eq)
+            z_eq = REWRITE_PROVE([eq_z, eq_y, SATZ_5],
+                                  mk_eq(z, mk_add(x, mk_add(v0, w0))))
+            return PROVE_LT(x, z, mk_add(v0, w0), z_eq)
         return ELIM_EX(pred_w_def, ex_w._concl, _from_w)
-    th_chain1 = ELIM_EX(pred_v_def, ex_v._concl, _from_v)
-    th_chain2 = PROVE_HYP(ex_v, PROVE_HYP(ex_w, th_chain1))
-    th_lt = EQ_MP(SYM(UNFOLD_LT(x, z)), th_chain2)
+    th_lt = PROVE_HYP(ex_v, PROVE_HYP(ex_w,
+                ELIM_EX(pred_v_def, ex_v._concl, _from_v)))
     return GENL([x, y, z], DISCHL([mk_lt(x, y), mk_lt(y, z)], th_lt))
 
 SATZ_15 = _prove_satz_15()
@@ -926,20 +940,15 @@ SATZ_18 = _prove_satz_18()
 
 def _prove_satz_19a():
     h = ASSUME(mk_gt(x, y))
-    ex_u = EQ_MP(UNFOLD_GT(x, y), h)                        # ?u. x = y + u
+    ex_u = EQ_MP(UNFOLD_GT(x, y), h)
     pred_u = mk_abs(u, mk_eq(x, mk_add(y, u)))
     def _from(eq_x):
         u0 = rand(rand(eq_x._concl))
-        path = TRANS_CHAIN([
-            AP_THM(AP_TERM(PLUS, eq_x), z),                  # x+z = (y+u0)+z
-            SPECL([y, u0, z], SATZ_5),                        # (y+u0)+z = y+(u0+z)
-            AP_TERM(mk_comb(PLUS, y), SPECL([u0, z], SATZ_6)),  # y+(u0+z) = y+(z+u0)
-            SYM(SPECL([y, z, u0], SATZ_5)),                   # y+(z+u0) = (y+z)+u0
-        ])
-        pred_final = mk_abs(u, mk_eq(mk_add(x, z), mk_add(mk_add(y, z), u)))
-        return EXISTS(pred_final, u0, path)
-    th_full = PROVE_HYP(ex_u, ELIM_EX(pred_u, ex_u._concl, _from))
-    th_gt = EQ_MP(SYM(UNFOLD_GT(mk_add(x, z), mk_add(y, z))), th_full)
+        # x+z = (y+u0)+z [eq_x]  =  (y+z)+u0 [ADD_RIGHT_SWAP].
+        path = TRANS(AP_THM(AP_TERM(PLUS, eq_x), z),
+                      SPECL([y, u0, z], ADD_RIGHT_SWAP))
+        return PROVE_GT(mk_add(x, z), mk_add(y, z), u0, path)
+    th_gt = PROVE_HYP(ex_u, ELIM_EX(pred_u, ex_u._concl, _from))
     return GENL([x, y, z], DISCH(mk_gt(x, y), th_gt))
 
 SATZ_19A = _prove_satz_19a()
@@ -1053,14 +1062,8 @@ def _prove_satz_24():
     hyp_ex = mk_exists(u, mk_eq(x, mk_suc(u)))
     def _from(eq_x):
         w = rand(rand(eq_x._concl))
-        x_eq_1w = TRANS_CHAIN([
-            eq_x,                              # x = w'
-            SYM(SPEC(w, ADD_1)),               # w' = w + 1
-            SYM(SPECL([ONE, w], SATZ_6)),      # w + 1 = 1 + w
-        ])
-        pred_gt = mk_abs(u, mk_eq(x, mk_add(ONE, u)))
-        th_gt = EQ_MP(SYM(UNFOLD_GT(x, ONE)), EXISTS(pred_gt, w, x_eq_1w))
-        return GT_TO_GE(th_gt)
+        x_eq_1w = REWRITE_PROVE([eq_x, ONE_PLUS], mk_eq(x, mk_add(ONE, w)))
+        return GT_TO_GE(PROVE_GT(x, ONE, w, x_eq_1w))
     branch2 = DISCH(hyp_ex, ELIM_EX(pred_u, hyp_ex, _from))
     return GEN(x, DISJ_CASES(lp, branch1, branch2))
 
@@ -1125,18 +1128,16 @@ def CONTRA_LT_GT(a_t, b_t, h_lt, h_gt):
         v0 = rand(rand(eq_v._concl))
         def _inner_u(eq_u):
             u0 = rand(rand(eq_u._concl))
-            chain = TRANS_CHAIN([
-                eq_v,                                         # b = a + v0
-                AP_THM(AP_TERM(PLUS, eq_u), v0),              # a+v0 = (b+u0)+v0
-                SPECL([b_t, u0, v0], SATZ_5),                 # (b+u0)+v0 = b+(u0+v0)
-            ])
-            comm = SPECL([mk_add(u0, v0), b_t], SATZ_6)
+            # Avoid rewriter loop (eq_v↔eq_u cycle): chain  eq_v then rewrite RHS only.
+            rhs_eq = REWRITE_PROVE([eq_u, SATZ_5],
+                          mk_eq(mk_add(a_t, v0), mk_add(b_t, mk_add(u0, v0))))
+            chain = TRANS(eq_v, rhs_eq)               # b = b + (u0+v0)
             ne   = SPECL([mk_add(u0, v0), b_t], SATZ_7)
-            ne_f = REWRITE_NE(ne, REFL(b_t), comm)
+            ne_f = REWRITE_NE(ne, REFL(b_t), SPECL([mk_add(u0, v0), b_t], SATZ_6))
             return MP(NOT_ELIM(ne_f), chain)
         return ELIM_EX(pred_u, ex_u._concl, _inner_u)
-    th = ELIM_EX(pred_v, ex_v._concl, _inner_v)
-    return PROVE_HYP(ex_v, PROVE_HYP(ex_u, th))
+    return PROVE_HYP(ex_v, PROVE_HYP(ex_u,
+                ELIM_EX(pred_v, ex_v._concl, _inner_v)))
 
 
 def CONTRA_LT_EQ(a_t, b_t, h_lt, h_eq):
@@ -1460,7 +1461,7 @@ def _prove_mul_eqs():
     # SUC's analogue: ((@fn. ...) y + x) = (x*y + x) via AP_THM(AP_TERM(PLUS, SYM(times_at_x_at_y_beta)), x).
     rewrite_lhs = AP_THM(AP_TERM(PLUS, SYM(times_at_x_at_y_beta)), x)   # |- (@fn. ...) y + x = x*y + x
     mul_suc_eq = TRANS(times_at_x_at_sy_beta, TRANS(sel_at_sy, rewrite_lhs))   # |- x * SUC y = x*y + x
-    MUL_SUC_th = GEN(x, GEN(y, mul_suc_eq))
+    MUL_SUC_th = GENL([x, y], mul_suc_eq)
 
     return MUL_1_th, MUL_SUC_th
 
@@ -1591,6 +1592,20 @@ def _prove_satz_31():
 SATZ_31 = _prove_satz_31()
 
 
+# Right-distributivity, the corollary Landau notes after Satz 30:
+#   (a+b)*c = a*c + b*c.   Used as a rewrite in the order/multiplication proofs.
+def _prove_right_distrib():
+    a, b, c = Var("a", num_ty), Var("b", num_ty), Var("c", num_ty)
+    return GENL([a, b, c], TRANS_CHAIN([
+        SPECL([mk_add(a, b), c], SATZ_29),
+        SPECL([c, a, b], SATZ_30),
+        AP_THM(AP_TERM(PLUS, SPECL([c, a], SATZ_29)), mk_mul(c, b)),
+        AP_TERM(mk_comb(PLUS, mk_mul(a, c)), SPECL([c, b], SATZ_29)),
+    ]))
+
+RIGHT_DISTRIB = _prove_right_distrib()
+
+
 # Theorem 32 (3-fold "respectively"):  From  x>y / x=y / x<y  it follows  xz > yz / xz = yz / xz < yz.
 # We prove the three pieces; same template as Theorem 19.
 
@@ -1600,19 +1615,12 @@ def _prove_satz_32a():
     pred_u = mk_abs(u, mk_eq(x, mk_add(y, u)))
     def _from(eq_x):
         u0 = rand(rand(eq_x._concl))
-        path = TRANS_CHAIN([
-            AP_THM(AP_TERM(TIMES, eq_x), z),                  # x*z = (y+u0)*z
-            SPECL([mk_add(y, u0), z], SATZ_29),                # = z*(y+u0)
-            SPECL([z, y, u0], SATZ_30),                        # = z*y + z*u0
-            AP_THM(AP_TERM(PLUS, SPECL([z, y], SATZ_29)),
-                    mk_mul(z, u0)),                            # = y*z + z*u0
-            AP_TERM(mk_comb(PLUS, mk_mul(y, z)),
-                     SPECL([z, u0], SATZ_29)),                 # = y*z + u0*z
-        ])
-        pred_final = mk_abs(u, mk_eq(mk_mul(x, z), mk_add(mk_mul(y, z), u)))
-        return EXISTS(pred_final, mk_mul(u0, z), path)
-    th_full = PROVE_HYP(ex_u, ELIM_EX(pred_u, ex_u._concl, _from))
-    th_gt = EQ_MP(SYM(UNFOLD_GT(mk_mul(x, z), mk_mul(y, z))), th_full)
+        # x*z = (y+u0)*z = y*z + u0*z   [eq_x then RIGHT_DISTRIB].
+        path = REWRITE_PROVE([eq_x, RIGHT_DISTRIB],
+                              mk_eq(mk_mul(x, z),
+                                    mk_add(mk_mul(y, z), mk_mul(u0, z))))
+        return PROVE_GT(mk_mul(x, z), mk_mul(y, z), mk_mul(u0, z), path)
+    th_gt = PROVE_HYP(ex_u, ELIM_EX(pred_u, ex_u._concl, _from))
     return GENL([x, y, z], DISCH(mk_gt(x, y), th_gt))
 
 SATZ_32A = _prove_satz_32a()
@@ -1765,11 +1773,10 @@ def _prove_satz_9_excl():
         u0 = rand(rand(eq_x._concl))
         def _from_c3_inner(eq_y):
             v0 = rand(rand(eq_y._concl))
-            chain = TRANS_CHAIN([
-                eq_x,                                          # x = y + u0
-                AP_THM(AP_TERM(PLUS, eq_y), u0),               # y+u0 = (x+v0)+u0
-                SPECL([x, v0, u0], SATZ_5),                    # = x+(v0+u0)
-            ])
+            # eq_x: x = y + u0; eq_y: y = x + v0.  Avoid cycle by chaining.
+            rhs_eq = REWRITE_PROVE([eq_y, SATZ_5],
+                          mk_eq(mk_add(y, u0), mk_add(x, mk_add(v0, u0))))
+            chain = TRANS(eq_x, rhs_eq)         # x = x + (v0+u0)
             comm = SPECL([mk_add(v0, u0), x], SATZ_6)
             ne   = SPECL([mk_add(v0, u0), x], SATZ_7)
             ne_f = REWRITE_NE(ne, REFL(x), comm)
