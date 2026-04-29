@@ -29,6 +29,7 @@ from logic import (
     CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP, EXISTS,
     PROVE_HYP, ELIM_EX, NOT_ELIM, NOT_INTRO, CONTR,
     NOT_FORALL_TO_EX_NOT, NOT_EX_TO_FORALL_NOT, NE_SYM,
+    TRANS_CHAIN,
 )
 
 
@@ -218,7 +219,7 @@ def _prove_ind_suc_neq_ind_1():
     func_eq_norm_rhs = BETA_CONV(mk_comb(big_pred, IND_1))
     # |- (\w. ...) (@_witness_pred) = !x. ~(IND_SUC x = @_witness_pred)
     # |- (\w. ...) IND_1 = !x. ~(IND_SUC x = IND_1)
-    bridge = TRANS(SYM(func_eq_norm_lhs), TRANS(func_eq, func_eq_norm_rhs))
+    bridge = TRANS_CHAIN([SYM(func_eq_norm_lhs), func_eq, func_eq_norm_rhs])
     # bridge : |- !x. ~(IND_SUC x = w) = !x. ~(IND_SUC x = IND_1)
     return EQ_MP(bridge, raw)
 
@@ -441,7 +442,7 @@ def _prove_AXIOM_3():
     h_eq = ASSUME(mk_eq(mk_suc(x), ONE))                       # {SUC x = 1} |- SUC x = 1
     # Replace SUC x and 1 by their definitions on each side.
     SUC_x_eq = _SUC_unfold(x)                                  # |- SUC x = mk_num (IND_SUC (dest_num x))
-    h_unfold = TRANS(SYM(SUC_x_eq), TRANS(h_eq, ONE_DEF))      # {SUC x = 1} |- mk_num (IND_SUC (dest_num x)) = mk_num IND_1
+    h_unfold = TRANS_CHAIN([SYM(SUC_x_eq), h_eq, ONE_DEF])      # {SUC x = 1} |- mk_num (IND_SUC (dest_num x)) = mk_num IND_1
     # Apply dest_num to both sides:
     h_dest = AP_TERM(dest_num, h_unfold)                       # {SUC x = 1} |- dest_num (mk_num (IND_SUC (dest_num x))) = dest_num (mk_num IND_1)
     # Peel via DEST_MK at IND_SUC (dest_num x) and at IND_1 (using NUM_REP closure).
@@ -458,7 +459,7 @@ def _prove_AXIOM_3():
     dm_at_ind1 = INST([(IND_1, r_var)], DEST_MK)               # |- NUM_REP IND_1 = (dest_num (mk_num IND_1) = IND_1)
     eq_rhs_peel = EQ_MP(dm_at_ind1, NUM_REP_IND_1)             # |- dest_num (mk_num IND_1) = IND_1
     # Combine:  IND_SUC (dest_num x) = dest_num (mk_num (IND_SUC (dest_num x))) = dest_num (mk_num IND_1) = IND_1.
-    h_peel = TRANS(SYM(eq_lhs_peel), TRANS(h_dest, eq_rhs_peel))
+    h_peel = TRANS_CHAIN([SYM(eq_lhs_peel), h_dest, eq_rhs_peel])
     # h_peel : {SUC x = 1} |- IND_SUC (dest_num x) = IND_1
     # Contradicts IND_SUC_NEQ_IND_1 specialized to dest_num x.
     neq_at_dx = SPEC(mk_comb(dest_num, x), IND_SUC_NEQ_IND_1)  # |- ~(IND_SUC (dest_num x) = IND_1)
@@ -479,7 +480,7 @@ def _prove_AXIOM_4():
     h_eq = ASSUME(mk_eq(mk_suc(x), mk_suc(y)))                 # {SUC x = SUC y} |- ...
     SUC_x_eq = _SUC_unfold(x)                                  # |- SUC x = mk_num (IND_SUC (dest_num x))
     SUC_y_eq = _SUC_unfold(y)                                  # |- SUC y = mk_num (IND_SUC (dest_num y))
-    h_unfold = TRANS(SYM(SUC_x_eq), TRANS(h_eq, SUC_y_eq))     # {...} |- mk_num (IND_SUC (dx)) = mk_num (IND_SUC (dy))
+    h_unfold = TRANS_CHAIN([SYM(SUC_x_eq), h_eq, SUC_y_eq])     # {...} |- mk_num (IND_SUC (dx)) = mk_num (IND_SUC (dy))
     # Apply dest_num.
     h_dest = AP_TERM(dest_num, h_unfold)                       # |- dest_num (mk_num (IND_SUC (dx))) = dest_num (mk_num (IND_SUC (dy)))
     # Peel via DEST_MK using NUM_REP closure for both sides.
@@ -494,7 +495,7 @@ def _prove_AXIOM_4():
     eq_dy_peel = EQ_MP(INST([(s_dy, r_var)], DEST_MK), NR_si_dy)
     # eq_dx_peel : |- dest_num (mk_num (IND_SUC (dx))) = IND_SUC (dx)
     # eq_dy_peel : |- dest_num (mk_num (IND_SUC (dy))) = IND_SUC (dy)
-    h_peeled = TRANS(SYM(eq_dx_peel), TRANS(h_dest, eq_dy_peel))
+    h_peeled = TRANS_CHAIN([SYM(eq_dx_peel), h_dest, eq_dy_peel])
     # h_peeled : {SUC x = SUC y} |- IND_SUC (dx) = IND_SUC (dy)
     # Use ONE_ONE IND_SUC.
     oo = SPEC(mk_comb(dest_num, y),
@@ -508,7 +509,7 @@ def _prove_AXIOM_4():
     a_var = Var("a", num_ty)
     md_x = INST([(x, a_var)], MK_DEST)                          # |- mk_num (dest_num x) = x
     md_y = INST([(y, a_var)], MK_DEST)                          # |- mk_num (dest_num y) = y
-    x_eq_y = TRANS(SYM(md_x), TRANS(mk_app, md_y))              # {SUC x = SUC y} |- x = y
+    x_eq_y = TRANS_CHAIN([SYM(md_x), mk_app, md_y])              # {SUC x = SUC y} |- x = y
     return GEN(x, GEN(y, DISCH(mk_eq(mk_suc(x), mk_suc(y)), x_eq_y)))
 
 
@@ -943,7 +944,7 @@ def _prove_R_unique_step():
     # AP_TERM applied to k_eq_n gives:  |- (\kk. R c h kk a) k = (\kk. R c h kk a) n.
     func_eq = AP_TERM(R_func_a, k_eq_n)                              # {SUC k = SUC n} |- (\kk. R c h kk a) k = (\kk. R c h kk a) n
     # Combine:  R c h k a = (\kk. R k a) k = (\kk. R k a) n = R c h n a.
-    R_k_eq_R_n = TRANS(SYM(beta_at_k), TRANS(func_eq, beta_at_n))    # {SUC k = SUC n} |- R c h k a = R c h n a
+    R_k_eq_R_n = TRANS_CHAIN([SYM(beta_at_k), func_eq, beta_at_n])    # {SUC k = SUC n} |- R c h k a = R c h n a
     R_n_a = EQ_MP(R_k_eq_R_n, R_k_a)                                  # {Qp_k_a, SUC k = SUC n} |- R c h n a
 
     # Now apply IH_unique at (a, m_n): R c h n a /\ R c h n m_n ==> a = m_n.
@@ -1141,7 +1142,7 @@ def _prove_num_recursion():
     beta_fn_n = BETA_CONV(fn_n)                                                   # |- fn n = @m. R n m
     h_n_fnn_eq = AP_TERM(mk_comb(_h, _n), beta_fn_n)                              # |- h n (fn n) = h n (@m. R n m)
     # Combine: fn (SUC n) = @m. R (SUC n) m = h n (@m. R n m) = h n (fn n).
-    fn_sn_eq_h_n_fnn = TRANS(beta_fn_sn, TRANS(sel_sn_eq_hn, SYM(h_n_fnn_eq)))    # |- fn (SUC n) = h n (fn n)
+    fn_sn_eq_h_n_fnn = TRANS_CHAIN([beta_fn_sn, sel_sn_eq_hn, SYM(h_n_fnn_eq)])    # |- fn (SUC n) = h n (fn n)
     forall_n_step = GEN(_n, fn_sn_eq_h_n_fnn)                                      # |- !n. fn (SUC n) = h n (fn n)
 
     # Combine and existential-introduce fn.
