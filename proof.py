@@ -33,9 +33,9 @@ from fusion import (
 )
 from axioms import F, mk_select
 from logic import (
-    SPEC, GEN, DISCH, MP_LIST, DISJ_CASES, BETA_CONV, BETA_NORM, SYM,
+    SPEC, GEN, DISCH, MP, MP_LIST, DISJ_CASES, BETA_CONV, BETA_NORM, SYM,
     PROVE_HYP, ELIM_EX, _subst_term,
-    NOT_INTRO, CONTR, REWRITE_NE, EXISTS, DISJ1, DISJ2,
+    NOT_INTRO, NOT_ELIM, CONTR, REWRITE_NE, EXISTS, DISJ1, DISJ2,
     CONJUNCT1, CONJUNCT2,
 )
 from tactics import (REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV, BETA_RULE,
@@ -607,15 +607,19 @@ class _Have:
         return self._finish(th)
 
     def by(self, justification, *args):
-        """SPEC/MP chain (if `justification` is a theorem) or a callable.
+        """SPEC/MP chain (if `justification` is a theorem or fact label) or
+        a callable.
 
-        - ``thm + args``: each arg is dispatched via MP_LIST -- a Term arg
-          becomes ``SPEC``, a Theorem arg becomes ``MP``. Strings are
-          interpreted as fact labels (theorem) when known, else parsed as
-          terms.
+        - ``thm | label + args``: each arg is dispatched via MP_LIST -- a
+          Term arg becomes ``SPEC``, a Theorem arg becomes ``MP``. Strings
+          in ``args`` are interpreted as fact labels (theorem) when known,
+          else parsed as terms. A ``str`` ``justification`` is resolved as
+          a fact label or negative index.
         - ``callable + args``: each arg is resolved as a fact (string label,
           negative index, or theorem); the callable is invoked on them.
         """
+        if isinstance(justification, (str, int)):
+            justification = self.p._resolve_fact(justification)
         if isinstance(justification, thm):
             resolved = [self.p._resolve_fact_or_term(a) for a in args]
             return self._finish(MP_LIST(justification, resolved))
@@ -683,6 +687,17 @@ class _Have:
         Like ``cases_on``, accepts extra ``*args`` to ``MP_LIST``-specialize
         a theorem source inline."""
         return self.p._open_cases(ref, self.term, self._finish, args=args)
+
+    def proof(self):
+        """Open a sub-frame whose goal is the have-term. The body proves it
+        via standard tactics (``thus``, ``cases_on``, ``induction``, …); on
+        exit the resulting theorem is registered as the have's fact (and,
+        if invoked from ``thus``, also closes the parent goal).
+
+        This is the declarative analogue of writing an intermediate lemma
+        inline — the dream sketch's ``.proof(lambda q: …)`` block."""
+        return _SubFrameCtx(self.p, self.term, kind="have_proof",
+                             on_close=self._finish)
 
     def by_eq_mp(self, eq_th, ref):
         """``EQ_MP(eq_th, fact)`` -- rewrite a fact through an equation."""
@@ -822,6 +837,24 @@ class _Absurd:
             return self._finish(justification(*resolved))
         raise HolError(
             f"absurd: not a theorem or callable: {justification!r}")
+
+    def by_conj(self, *refs):
+        """Discharge F from a fact ``P`` and a fact ``~P`` (in either order).
+
+        The two refs name a positive fact and its direct negation; we run
+        ``MP(NOT_ELIM(neg), pos)``."""
+        if len(refs) != 2:
+            raise HolError(
+                f"absurd: by_conj requires exactly two facts, got {len(refs)}")
+        ths = [self.p._resolve_fact(r) for r in refs]
+        for pos, neg in (ths, ths[::-1]):
+            c = neg._concl
+            if (isinstance(c, Comb) and isinstance(c.fun, Const)
+                    and c.fun.name == "~" and aconv(c.arg, pos._concl)):
+                return self._finish(MP(NOT_ELIM(neg), pos))
+        raise HolError(
+            "absurd: by_conj could not match P / ~P among "
+            f"{pp(ths[0]._concl)} / {pp(ths[1]._concl)}")
 
     def auto(self, *refs):
         """Discharge F by inspecting the conclusions of the supplied facts.

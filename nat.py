@@ -48,7 +48,7 @@ from axioms import (
 from logic import (
     AP_TERM, AP_THM, BETA_CONV, SYM,
     SPEC, GEN, CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP,
-    CONTR, NOT_ELIM, NOT_INTRO,
+    CONTR, NOT_ELIM, NOT_INTRO, NOT_CONST,
     mk_or, DISJ1, DISJ2, DISJ_CASES,
     NE_SYM, REWRITE_NE, EXISTS, EXISTS_AT,
     EXCLUDED_MIDDLE, NOT_NOT_ELIM, NOT_EX_TO_FORALL_NOT,
@@ -890,9 +890,126 @@ def SATZ_26(p):
 # Theorem 25, hence m+1 ∈ M).  Both clauses of the conclusion follow.
 # ---------------------------------------------------------------------------
 
+_N_ty = mk_fun_ty(num_ty, bool_ty)
+_N_var = Var("N", _N_ty)
+
+
+# Sub-lemma for SATZ_27 (Step 2). Stated in unfolded M-form: if y is in N then
+# the predicate ``M(y+1) := !n. N n ==> y+1 <= n`` cannot hold (would give
+# ``y+1 <= y`` contradicting ``y+1 > y``). Used inside _prove_satz_27 with a
+# BETA bridge to switch between the unfolded form and ``M_pred (y+1)``.
+
+@proof
+def _SATZ_27_NOT_M_SUCC(p):
+    p.goal("!N y. N y ==> ~(!n. N n ==> y + 1 <= n)",
+           types={"N": _N_ty})
+    p.fix("N y")
+    p.assume("hNy: N y")
+    with p.suppose("hM: !n. N n ==> y + 1 <= n"):
+        p.have("le: y + 1 <= y").by("hM", "y", "hNy")
+        p.have("gt: y + 1 > y").by(SATZ_18, "y", "1")
+        with p.cases_on("le"):
+            with p.case("h_lt: y + 1 < y"):
+                p.absurd().auto("h_lt", "gt")
+            with p.case("h_eq: y + 1 = y"):
+                p.absurd().auto("gt", "h_eq")
+
+
+# Sub-lemma for SATZ_27 (Step 3). Generic well-ordering kernel: if a
+# predicate ``P`` holds at 1, fails at the successor of every element of N,
+# and N is non-empty, then there is some boundary ``m`` with ``P m`` and
+# ``~ P (m+1)``.  This is the abstract content of Landau's Step 3.
+# Proof: by contradiction. If no such m exists then ``!x. ~(P x /\\ ~P(x+1))``,
+# which gives ``!x. P x ==> P (x+1)`` and (by induction on x in SUC form,
+# bridged by ADD_1) ``!x. P x``. Pick n in N, then P(n+1) holds, contradicting
+# ``hStepFail`` at y := n.
+
+@proof
+def _SATZ_27_EXISTS_M(p):
+    p.goal("!P N. P 1 ==> "
+           "(!y. N y ==> ~ P (y + 1)) ==> "
+           "(?n. N n) ==> "
+           "?m. P m /\\ ~ P (m + 1)",
+           types={"P": _N_ty, "N": _N_ty})
+    p.fix("P N")
+    p.assume("hP1: P 1")
+    p.assume("hStepFail: !y. N y ==> ~ P (y + 1)")
+    p.assume("hNonempty: ?n. N n")
+    with p.thus("?m. P m /\\ ~ P (m + 1)").by_cases(
+            EXCLUDED_MIDDLE, "?m. P m /\\ ~ P (m + 1)"):
+        with p.case("hex: ?m. P m /\\ ~ P (m + 1)"):
+            p.thus("?m. P m /\\ ~ P (m + 1)").by_thm(p.fact("hex"))
+        with p.case("hnex: ~ (?m. P m /\\ ~ P (m + 1))"):
+            pred_Q = p._parse("\\x. P x /\\ ~ P (x + 1)")
+            p.have("forall_nQ: !x. ~(P x /\\ ~ P (x + 1))")\
+                .by_thm(NOT_EX_TO_FORALL_NOT(p.fact("hnex"), pred_Q))
+            with p.have("forall_P: !x. P x").proof():
+                with p.induction("x"):
+                    with p.base():
+                        p.thus("P 1").by_thm(p.fact("hP1"))
+                    with p.step("IH"):
+                        with p.cases_on(EXCLUDED_MIDDLE, "P (SUC x)"):
+                            with p.case("hPS: P (SUC x)"):
+                                p.thus("P (SUC x)").by_thm(p.fact("hPS"))
+                            with p.case("hnPS: ~ P (SUC x)"):
+                                p.have("hnP1: ~ P (x + 1)")\
+                                    .by_rewrite_of("hnPS", [SYM(SPEC(x, ADD_1))])
+                                p.have("conj: P x /\\ ~ P (x + 1)")\
+                                    .by_thm(CONJ(p.fact("IH"), p.fact("hnP1")))
+                                p.have("not_conj: ~(P x /\\ ~ P (x + 1))")\
+                                    .by("forall_nQ", "x")
+                                p.absurd().by_conj("conj", "not_conj")
+            p.choose("n0: N n0", from_="hNonempty")
+            p.have("Pn1: P (n0 + 1)").by("forall_P", "n0 + 1")
+            p.have("nPn1: ~ P (n0 + 1)").by("hStepFail", "n0", "n0_eq")
+            p.absurd().by_conj("Pn1", "nPn1")
+
+
+# Sub-lemma for SATZ_27 (Step 4). Given M(m) (= !n. N n ==> m <= n) and
+# ~M(m+1) (= ~(!n. N n ==> m+1 <= n)), deduce that m itself satisfies
+# ``N m /\ (!k. N k ==> m <= k)`` — i.e., m is the witness we need.
+# Proof: the right conjunct is just M(m) renamed; for the left, suppose ~N m,
+# then for each n in N we have m <= n and m != n (else N m), hence m < n,
+# hence m+1 <= n (Sätze 12, 25, 13). That builds M(m+1), contradicting ~M(m+1).
+
+@proof
+def _SATZ_27_FROM_M(p):
+    p.goal("!N m. (!n. N n ==> m <= n) ==> "
+           "~(!n. N n ==> m + 1 <= n) ==> "
+           "N m /\\ (!k. N k ==> m <= k)",
+           types={"N": _N_ty})
+    p.fix("N m")
+    p.assume("hM: !n. N n ==> m <= n")
+    p.assume("hnM1: ~(!n. N n ==> m + 1 <= n)")
+    with p.have("Nm: N m").by_cases(EXCLUDED_MIDDLE, "N m"):
+        with p.case("hN: N m"):
+            p.thus("N m").by_thm(p.fact("hN"))
+        with p.case("hnN: ~ N m"):
+            with p.have("M_m1: !n. N n ==> m + 1 <= n").proof():
+                p.fix("n")
+                p.assume("hNn: N n")
+                p.have("le: m <= n").by("hM", "n", "hNn")
+                with p.have("ne: ~ (m = n)").proof():
+                    with p.suppose("eq: m = n"):
+                        p.have("Nm_via: N m").by_eq_mp(
+                            AP_TERM(_N_var, SYM(p.fact("eq"))), "hNn")
+                        p.absurd().by_conj("Nm_via", "hnN")
+                with p.have("lt: m < n").by_cases("le"):
+                    with p.case("h_lt: m < n"):
+                        p.thus("m < n").by_thm(p.fact("h_lt"))
+                    with p.case("h_eq: m = n"):
+                        p.absurd().by_conj("h_eq", "ne")
+                p.have("gt: n > m").by(SATZ_12, "m", "n", "lt")
+                p.have("ge: n >= m + 1").by(SATZ_25, "m", "n", "gt")
+                p.thus("m + 1 <= n").by(SATZ_13, "n", "m + 1", "ge")
+            p.absurd().by_conj("M_m1", "hnM1")
+    p.thus("N m /\\ (!k. N k ==> m <= k)")\
+        .by_thm(CONJ(p.fact("Nm"), p.fact("hM")))
+
+
 def _prove_satz_27():
-    N_ty = mk_fun_ty(num_ty, bool_ty)
-    N_var = Var("N", N_ty)
+    N_ty = _N_ty
+    N_var = _N_var
     n_var = Var("n", num_ty)
     k_var = Var("k", num_ty)
     m_var = Var("m", num_ty)
@@ -913,139 +1030,41 @@ def _prove_satz_27():
     M1 = EQ_MP(SYM(BETA_CONV(M_at(ONE))), M1_inner)
 
     # === Step 2: !y. N y ==> ~M(y+1). ===
-    h_Ny = ASSUME(P.parse("N y"))
-    h_M_yp1 = ASSUME(M_at(mk_add(y, ONE)))
-    M_unfolded = EQ_MP(BETA_CONV(M_at(mk_add(y, ONE))), h_M_yp1)
-    spec_y = SPEC(y, M_unfolded)
-    le_y1_y = MP(spec_y, h_Ny)
-    s18_y1 = SPEC(ONE, SPEC(y, SATZ_18))
-    le_unfold = EQ_MP(UNFOLD_LE(mk_add(y, ONE), y), le_y1_y)
-    branch_lt = DISCH(parse("y + 1 < y"),
-                      CONTRA_LT_GT(mk_add(y, ONE), y,
-                                   ASSUME(parse("y + 1 < y")), s18_y1))
-    branch_eq = DISCH(parse("y + 1 = y"),
-                      CONTRA_GT_EQ(mk_add(y, ONE), y, s18_y1,
-                                   ASSUME(parse("y + 1 = y"))))
-    th_F = DISJ_CASES(le_unfold, branch_lt, branch_eq)
-    th_imp_F = DISCH(M_at(mk_add(y, ONE)), th_F)
-    not_M_yp1 = NOT_INTRO(th_imp_F)
+    # Outsourced to _SATZ_27_NOT_M_SUCC which proves it in unfolded form;
+    # we BETA-bridge ``~(!n. N n ==> y+1 <= n)`` to ``~M(y+1)`` here.
+    Ny_imp_notM_unfolded = SPECL([N_var, y], _SATZ_27_NOT_M_SUCC)
+    M_yp1_beta = BETA_CONV(M_at(mk_add(y, ONE)))             # |- M(y+1) = unfolded
+    not_eq = AP_TERM(NOT_CONST, M_yp1_beta)                  # |- ~M(y+1) = ~unfolded
+    h_Ny_a = ASSUME(P.parse("N y"))
+    not_unfolded = MP(Ny_imp_notM_unfolded, h_Ny_a)          # {N y} |- ~unfolded
+    not_M_yp1 = EQ_MP(SYM(not_eq), not_unfolded)             # {N y} |- ~M(y+1)
     Ny_imp_notM = DISCH(P.parse("N y"), not_M_yp1)           # {} |- N y ==> ~M(y+1)
 
     # === Step 3: ?m. M(m) /\ ~M(m+1). ===
+    # Outsourced to _SATZ_27_EXISTS_M (a generic well-ordering kernel over an
+    # abstract predicate P). We GEN Step 2's result to get the ``!y`` form
+    # the lemma requires, then MP through.
     Q_pred = parse("\\x. ${M} x /\\ ~${M} (x + 1)", M=M_pred)
     target_3 = parse("?x. ${M} x /\\ ~${M} (x + 1)", M=M_pred)
-    not_target_3 = mk_not(target_3)
-
-    # Under not_target_3, derive contradiction using non-emptiness of N.
-    # First: !x. ~Q(x).
-    forall_not_Q = NOT_EX_TO_FORALL_NOT(ASSUME(not_target_3), Q_pred)
-    # Next: !x. M(x) ==> M(x+1).
-    # Pick x.  Goal: M(x) ==> M(x+1).
-    # From not_Q(x) = ~(M(x) /\ ~M(x+1)), and EM on M(x+1):
-    #   if M(x+1): trivially M(x) ==> M(x+1).
-    #   if ~M(x+1): then ~M(x) (else contradiction with not_Q(x)).  So M(x) ==> M(x+1) trivially.
-    spec_not_Q = SPEC(x, forall_not_Q)
-    not_Q_x_unfold_eq = BETA_CONV(mk_comb(Q_pred, x))     # |- Q_pred x = (M(x) /\ ~M(x+1))
-    not_Q_x_term = mk_not(rand(not_Q_x_unfold_eq._concl))  # ~(M(x) /\ ~M(x+1))
-    # Hmm spec_not_Q._concl is ~Q_pred(x) but after SPEC's beta it should be ~(M(x)/\~M(x+1)).
-    # Let me rely on that.
-    em_Mxp1 = SPEC(M_at(mk_add(x, ONE)), EXCLUDED_MIDDLE)   # |- M(x+1) \/ ~M(x+1)
-    branch_M = DISCH(M_at(mk_add(x, ONE)),
-                     DISCH(M_at(x), ASSUME(M_at(mk_add(x, ONE)))))
-    # Sub-branch ~M(x+1): show M(x) ==> M(x+1).  Approach: show ~M(x), then M(x) ==> anything.
-    h_notM_xp1 = ASSUME(mk_not(M_at(mk_add(x, ONE))))
-    h_M_x = ASSUME(M_at(x))
-    conj_x = CONJ(h_M_x, h_notM_xp1)            # {M(x), ~M(x+1)} |- M(x) /\ ~M(x+1)
-    th_F_inner = MP(NOT_ELIM(spec_not_Q), conj_x)        # {..., ~target_3} |- F
-    branch_NM_inner = CONTR(M_at(mk_add(x, ONE)), th_F_inner)   # {..., ~target_3} |- M(x+1)
-    branch_NM = DISCH(mk_not(M_at(mk_add(x, ONE))),
-                       DISCH(M_at(x), branch_NM_inner))
-    M_imp_M_succ = DISJ_CASES(em_Mxp1, branch_M, branch_NM)
-    forall_M_succ = GEN(x, M_imp_M_succ)                  # {~target_3} |- !x. M(x) ==> M(x+1)
-
-    # Apply Axiom 5 to M_pred.
-    ind_inst = SPEC(M_pred, INDUCTION)                    # |- (M_pred 1 /\ !x. M_pred x ==> M_pred x') ==> !x. M_pred x
-    # Convert forall_M_succ to use M_pred form (currently written as M_at).
-    # M_at(x) IS M_pred x = (\x. body) x — same as in INDUCT.
-    # We need:  !x. M_pred x ==> M_pred x'.   M_at(x) = M_pred x already (literally same term).
-    forall_step_pred = forall_M_succ                       # already in pred form: M(x) ==> M(x+1)
-    # Build conjunction.
-    conj_for_ind = CONJ(M1, forall_step_pred)              # {~target_3} |- M_pred 1 /\ !x. M_pred x ==> M_pred x'
-    # Wait, the step in Axiom 5 uses x' = SUC x, not x+1.
-    # M_at(x+1) versus M_pred (SUC x) — they differ by ADD_1.  Need to convert.
-    # SUC x and x+1 are equal by ADD_1: |- !x. x + 1 = SUC x.  So SUC x = x + 1, and
-    # M_at(SUC x) = M_at(x+1) as terms after substitution... but they are NOT syntactically equal.
-    # We need to bridge.
-    # Build !x. M_pred x ==> M_pred (SUC x)   from   !x. M_pred x ==> M_pred (x+1).
-    # via AP_TERM(M_pred, ADD_1 spec): |- M_pred (x+1) = M_pred (SUC x).
-    add_1_x = SPEC(x, ADD_1)                              # |- x + 1 = SUC x
-    M_eq = AP_TERM(M_pred, add_1_x)                       # |- M_pred (x+1) = M_pred (SUC x)
-    # Take spec of forall_step_pred at x: M_pred x ==> M_pred (x+1).
-    spec_step = SPEC(x, forall_step_pred)
-    # Convert RHS via M_eq.
-    # spec_step : |- M_pred x ==> M_pred (x+1).  We want |- M_pred x ==> M_pred (SUC x).
-    h_M_x2 = ASSUME(M_at(x))
-    th_M_xp1 = MP(spec_step, h_M_x2)                       # {M(x)} |- M_pred (x+1)
-    th_M_sx = EQ_MP(M_eq, th_M_xp1)                        # {M(x)} |- M_pred (SUC x)
-    spec_step_suc = DISCH(M_at(x), th_M_sx)                # |- M_pred x ==> M_pred (SUC x)
-    forall_step_suc = GEN(x, spec_step_suc)                # {~target_3} |- !x. M_pred x ==> M_pred (SUC x)
-    conj_for_ind2 = CONJ(M1, forall_step_suc)
-    forall_M_all = MP(ind_inst, conj_for_ind2)             # {~target_3} |- !x. M_pred x
-
-    # Now derive contradiction with hyp_nonempty.
-    # Pick n ∈ N (witness of hyp_nonempty), apply forall_M_all to n+1 to get M(n+1),
-    # then by Step 2 (Ny_imp_notM specialised), ~M(n+1).
-    n_pred = P.parse("\\n. N n")
-    def _from_n(eq_Nn):     # {N w} |- N w  for w = SELECT witness
-        w_t = rand(eq_Nn._concl)
-        spec_M = SPEC(mk_add(w_t, ONE), forall_M_all)          # M_at(w+1)
-        not_M_w1 = MP(INST([(w_t, y)], Ny_imp_notM), eq_Nn)    # ~M(w+1)
-        return MP(NOT_ELIM(not_M_w1), spec_M)                   # F
-    th_F_step3 = ELIM_EX(n_pred, hyp_nonempty, _from_n)
-    th_F_step3 = PROVE_HYP(ASSUME(hyp_nonempty), th_F_step3)
-    # th_F_step3 : {~target_3, hyp_nonempty} |- F
-    th_target3 = NOT_NOT_ELIM(NOT_INTRO(DISCH(not_target_3, th_F_step3)))
-    # th_target3 : {hyp_nonempty} |- target_3   (= ?m. M(m) /\ ~M(m+1))
+    forall_step_fail = GEN(y, Ny_imp_notM)                     # !y. N y ==> ~M_pred(y+1)
+    th_target3 = MP_LIST(SPECL([M_pred, N_var], _SATZ_27_EXISTS_M),
+                          [M1, forall_step_fail,
+                           ASSUME(hyp_nonempty)])               # {hyp_nonempty} |- ?m. ...
 
     # === Step 4: from m with M(m) /\ ~M(m+1), conclude m ∈ N and m ≤ k for all k ∈ N. ===
+    # Outsourced to _SATZ_27_FROM_M; we BETA-bridge M's wrapped form to the
+    # unfolded form the lemma takes.
     def _from_m(eq_Q):
-        # eq_Q : {body[w/x]} |- M(w) /\ ~M(w+1).  Extract w from M(w).
         Mm_w   = CONJUNCT1(eq_Q)                               # M(w)
         notM_w1 = CONJUNCT2(eq_Q)                              # ~M(w+1)
         w_t = rand(Mm_w._concl)
         Mm_unfold = EQ_MP(BETA_CONV(M_at(w_t)), Mm_w)          # !n. N n ==> w <= n
-        # Sub-claim a: !k. N k ==> w <= k (rename n_var to k_var).
-        sub_a = GEN(k_var,
-                     DISCH(mk_comb(N_var, k_var),
-                           MP(SPEC(k_var, Mm_unfold),
-                              ASSUME(mk_comb(N_var, k_var)))))
-        # Sub-claim b: N w, by contradiction.  If ~N w, then for n in N: w<n by
-        # M(w)+w!=n, so n>=w+1 (Satz 25), giving M(w+1) — contradicts ~M(w+1).
-        Pw = P.extend(w=w_t)
-        h_not_Nw = ASSUME(Pw.parse("~ N ${w}"))
-        h_Nn2 = ASSUME(Pw.parse("N n"))
-        w_le_n = MP(SPEC(n_var, Mm_unfold), h_Nn2)             # w <= n
-        h_w_eq_n = ASSUME(Pw.parse("${w} = n"))
-        Nw_th = EQ_MP(AP_TERM(N_var, SYM(h_w_eq_n)), h_Nn2)    # N w from N n via w=n
-        th_F_b = MP(NOT_ELIM(h_not_Nw), Nw_th)
-        not_w_eq_n = NOT_INTRO(DISCH(Pw.parse("${w} = n"), th_F_b))
-        w_le_unfold = EQ_MP(UNFOLD_LE(w_t, n_var), w_le_n)
-        branch_lt_b = DISCH(Pw.parse("${w} < n"),
-                             ASSUME(Pw.parse("${w} < n")))
-        branch_eq_b = DISCH(Pw.parse("${w} = n"),
-                             CONTR(Pw.parse("${w} < n"),
-                                   MP(NOT_ELIM(not_w_eq_n),
-                                      ASSUME(Pw.parse("${w} = n")))))
-        w_lt_n = DISJ_CASES(w_le_unfold, branch_lt_b, branch_eq_b)
-        n_gt_w = MP_LIST(SATZ_12, [w_t, n_var, w_lt_n])
-        n_ge_wp1 = MP_LIST(SATZ_25, [w_t, n_var, n_gt_w])
-        wp1_le_n = MP_LIST(SATZ_13, [n_var, mk_add(w_t, ONE), n_ge_wp1])
-        forall_wp1_le = GEN(n_var, DISCH(Pw.parse("N n"), wp1_le_n))
-        M_wp1 = EQ_MP(SYM(BETA_CONV(M_at(mk_add(w_t, ONE)))), forall_wp1_le)
-        th_F_b2 = MP(NOT_ELIM(notM_w1), M_wp1)
-        Nw_th_final = NOT_NOT_ELIM(NOT_INTRO(
-            DISCH(Pw.parse("~ N ${w}"), th_F_b2)))
-        return EXISTS_AT(w_t, CONJ(Nw_th_final, sub_a))
+        notM_w1_unfold = EQ_MP(
+            AP_TERM(NOT_CONST, BETA_CONV(M_at(mk_add(w_t, ONE)))),
+            notM_w1)                                           # ~(!n. N n ==> w+1 <= n)
+        th_conj = MP_LIST(SPECL([N_var, w_t], _SATZ_27_FROM_M),
+                          [Mm_unfold, notM_w1_unfold])         # N w /\ ...
+        return EXISTS_AT(w_t, th_conj)
     th_concl_inner = ELIM_EX(Q_pred, target_3, _from_m)
     # Discharge target_3 using th_target3:
     th_concl = PROVE_HYP(th_target3, th_concl_inner)
