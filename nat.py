@@ -44,7 +44,7 @@ from fusion import (
 from axioms import (
     F,
     SELECT_AX,
-    mk_and, mk_imp, mk_forall, mk_exists, mk_not,
+    mk_and, mk_imp, mk_forall, mk_exists, mk_not, mk_select,
 )
 from logic import (
     AP_TERM, AP_THM, BETA_CONV, SYM,
@@ -535,8 +535,7 @@ def _prove_satz_9_exist():
     # From {hyp_ex_u} build {hyp_ex_u} |- ?u. x = 1 + u. Use SELECT.
     # Strategy: from `?u. x = u'` and `1 + u = u'` (ONE_PLUS), derive `?u. x = 1 + u`.
     # We'll use SELECT-based CHOOSE: extract u via @ operator.
-    sel_const = mk_const("@", [(num_ty, aty)])
-    sel_u = mk_comb(sel_const, pred_u_for_lem)              # @u. x = u'
+    sel_u = mk_select(u, pred_u_for_lem.body)               # @u. x = u'
     # SELECT_AX specialised: !P x. P x ==> P (@P).  At type num.
     sel_ax_inst = INST_TYPE([(num_ty, aty)], SELECT_AX)
     sel_ax_pred = SPEC(u, SPEC(pred_u_for_lem, sel_ax_inst))
@@ -764,9 +763,10 @@ def _prove_satz_10():
     eq_gt = SYM(UNFOLD_GT(x, y))               # |- ?u. x = y + u   = (x > y)
     eq_lt = SYM(UNFOLD_LT(x, y))               # |- ?v. y = x + v   = (x < y)
     # body9 = (x=y) \/ (case2 \/ case3); rewrite to (x=y) \/ (x>y \/ x<y).
-    inner_eq = MK_COMB(AP_TERM(mk_const("\\/", []), eq_gt), eq_lt)
+    OR = DEFAULT_SIG["\\/"]
+    inner_eq = MK_COMB(AP_TERM(OR, eq_gt), eq_lt)
     # |- (case2 \/ case3) = (x > y \/ x < y)
-    outer_eq = AP_TERM(mk_comb(mk_const("\\/", []), mk_eq(x, y)), inner_eq)
+    outer_eq = AP_TERM(mk_comb(OR, mk_eq(x, y)), inner_eq)
     return GENL([x, y], EQ_MP(outer_eq, th9))
 
 SATZ_10 = _prove_satz_10()

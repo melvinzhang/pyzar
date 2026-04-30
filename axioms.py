@@ -97,6 +97,12 @@ new_constant("@", mk_fun_ty(abty, aty))
 _P = Var("P", abty)
 _xs = Var("x", aty)
 _select = mk_const("@", [])
+
+def mk_select(v, body):
+    """Build ``@v. body`` -- the SELECT-binder term picking some `v` of the
+    same type with `body[v]` true (or any `v` if no such exists)."""
+    return mk_comb(mk_const("@", [(v.ty, aty)]), mk_abs(v, body))
+
 SELECT_AX = new_axiom(
     mk_forall(_P, mk_forall(_xs,
         mk_imp(mk_comb(_P, _xs),
@@ -154,3 +160,4 @@ DEFAULT_SIG.add_prefix("~",      mk_not)
 DEFAULT_SIG.add_binder("!",      mk_forall)
 DEFAULT_SIG.add_binder("?",      mk_exists)
 DEFAULT_SIG.add_binder("\\",     mk_abs)
+DEFAULT_SIG.add_binder("@",      mk_select)

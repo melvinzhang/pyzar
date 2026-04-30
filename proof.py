@@ -28,10 +28,10 @@ import re
 
 from fusion import (
     Const, Comb, Abs, thm,
-    aconv, concl, HolError, ASSUME, EQ_MP, BETA, mk_comb, mk_const,
-    rand, aty, type_of,
+    aconv, concl, HolError, ASSUME, EQ_MP, BETA, mk_comb,
+    rand, type_of,
 )
-from axioms import F
+from axioms import F, mk_select
 from logic import (
     SPEC, GEN, DISCH, MP_LIST, DISJ_CASES, BETA_CONV, SYM,
     PROVE_HYP, ELIM_EX, _subst_term,
@@ -338,8 +338,7 @@ class Proof:
 
         pred = exc.arg
         v_var = pred.bvar
-        sel_const = mk_const("@", [(v_var.ty, aty)])
-        w_term = mk_comb(sel_const, pred)
+        w_term = mk_select(v_var, pred.body)
         # body[w/v]: beta-reduce (pred w).
         body_at_w = rand(BETA_CONV(mk_comb(pred, w_term))._concl)
 

@@ -92,9 +92,11 @@ class Signature:
         if assoc not in ("left", "right", "non"):
             raise ValueError(f"assoc must be left/right/non, got {assoc!r}")
         self.infix[op] = (prec, assoc, builder)
+        self._auto_register_const(op)
 
     def add_prefix(self, op, builder):
         self.prefix[op] = builder
+        self._auto_register_const(op)
 
     def add_const(self, name, term):
         self.const[name] = term
@@ -103,11 +105,29 @@ class Signature:
         self.type[name] = ty
 
     def add_binder(self, symbol, wrap):
-        if symbol not in ("!", "?", "\\"):
+        if symbol not in ("!", "?", "\\", "@"):
             raise ValueError(
-                f"binder must be one of !, ?, \\\\ (got {symbol!r}); "
-                "the grammar reserves only those three keywords")
+                f"binder must be one of !, ?, \\\\, @ (got {symbol!r}); "
+                "the grammar reserves only those four keywords")
         self.binder[symbol] = wrap
+
+    def _auto_register_const(self, name):
+        """Best-effort: store ``mk_const(name, [])`` under `name` in `const`
+        so callers can do ``sig[name]`` to recover the kernel constant.
+        Silently no-ops if `name` isn't a kernel constant (e.g. registered
+        before the kernel const exists, or just a user-chosen pseudo-op)."""
+        if name in self.const:
+            return
+        try:
+            self.const[name] = mk_const(name, [])
+        except Exception:
+            pass
+
+    def __getitem__(self, name):
+        """Look up the kernel constant registered under `name`.  Useful for
+        `MK_COMB`/`AP_TERM` chains that need the bare const rather than its
+        builder."""
+        return self.const[name]
 
 
 DEFAULT_SIG = Signature()
@@ -165,6 +185,7 @@ _GRAMMAR = r"""
 binder: "!" varlist "." term       -> forall_
       | "?" varlist "." term       -> exists_
       | "\\" varlist "." term      -> abs_
+      | "@" varlist "." term       -> select_
 
 infix_chain: prefix_term (OP rhs_term)*
 
@@ -282,6 +303,7 @@ class _Builder(Interpreter):
     def forall_(self, tree): return self._binder(tree, "!")
     def exists_(self, tree): return self._binder(tree, "?")
     def abs_(self,    tree): return self._binder(tree, "\\")
+    def select_(self, tree): return self._binder(tree, "@")
 
     # ----- prefix + flat infix chain -----
 
@@ -654,6 +676,21 @@ def _selftest():
     a2, b2 = mk_var("a", num_ty), mk_var("b", num_ty)
     op_ab = parse(f"a {op} b", sig=test_sig)
     assert aconv(op_ab, mk_comb(mk_comb(test_sig.const[op], a2), b2))
+
+    # --- sig["op"] lookup -------------------------------------------------
+    # Auto-registered by add_infix / add_prefix.
+    from fusion import mk_const as _mk_const
+    assert aconv(DEFAULT_SIG["\\/"], _mk_const("\\/", []))
+    assert aconv(DEFAULT_SIG["~"],   _mk_const("~", []))
+    assert aconv(DEFAULT_SIG["+"],   _mk_const("+", []))
+
+    # --- @ binder ---------------------------------------------------------
+    # Single-var SELECT (multi-var doesn't typecheck since `@v. body` has
+    # type `v.ty`, not bool, so it can't compose under another `@`).
+    from axioms import mk_select
+    assert aconv(parse("@u. x = SUC u"),
+                 mk_select(mk_var("u", num_ty),
+                           mk_eq(VX, mk_suc(mk_var("u", num_ty)))))
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ from axioms import (
     T, F,
     T_DEF, AND_DEF, IMP_DEF, FORALL_DEF, EXISTS_DEF, F_DEF, NOT_DEF,
     SELECT_AX, ETA_AX,
-    mk_and, mk_imp, mk_forall, mk_exists, mk_not,
+    mk_and, mk_imp, mk_forall, mk_exists, mk_not, mk_select,
 )
 
 
@@ -495,8 +495,7 @@ def ELIM_EX(pred_in, hyp_ex, body_fn):
     if not isinstance(pred_in, Abs):
         raise HolError("ELIM_EX: pred_in must be an Abs")
     v_var = pred_in.bvar
-    sel_const = mk_const("@", [(v_var.ty, aty)])
-    w_t = mk_comb(sel_const, pred_in)              # @v. body_v
+    w_t = mk_select(v_var, pred_in.body)           # @v. body_v
     sel_inst = INST_TYPE([(v_var.ty, aty)], SELECT_AX)
     sel_pq = SPEC(v_var, SPEC(pred_in, sel_inst))   # |- pred v ==> pred (@pred)
 
