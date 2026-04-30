@@ -121,9 +121,8 @@ def SATZ_3(p):
             p.absurd().by(MP, "imp", REFL(ONE))
         with p.step("IH"):
             p.assume("h: ~(SUC x = 1)")
-            pred_u = mk_abs(u, parse("SUC x = SUC u"))
             p.thus("?u. SUC x = SUC u")\
-                .by_thm(EXISTS(pred_u, x, REFL(mk_suc(x))))
+                .by_thm(EXISTS(parse("\\u. SUC x = SUC u"), x, REFL(mk_suc(x))))
 
 
 # ---------------------------------------------------------------------------
@@ -498,8 +497,8 @@ def LEMMA_PRED(p):
                 .by_thm(DISJ1(REFL(ONE), parse("?u. 1 = SUC u")))
         with p.step("IH"):
             p.thus("(SUC x = 1) \\/ (?u. SUC x = SUC u)").by_thm(
-                DISJ2(mk_eq(mk_suc(x), ONE),
-                      EXISTS(mk_abs(u, mk_eq(mk_suc(x), mk_suc(u))),
+                DISJ2(parse("SUC x = 1"),
+                      EXISTS(parse("\\u. SUC x = SUC u"),
                              x, REFL(mk_suc(x)))))
 
 
@@ -515,10 +514,8 @@ def LEMMA_PRED(p):
 
 def _build_satz9_body(x_t, y_t):
     """`(x = y) \\/ (?u. x = y + u) \\/ (?v. y = x + v)` as a term."""
-    case1 = mk_eq(x_t, y_t)
-    case2 = mk_exists(u, mk_eq(x_t, mk_add(y_t, u)))
-    case3 = mk_exists(v, mk_eq(y_t, mk_add(x_t, v)))
-    return mk_or(case1, mk_or(case2, case3))
+    return parse("${a} = ${b} \\/ (?u. ${a} = ${b} + u) "
+                 "\\/ (?v. ${b} = ${a} + v)", a=x_t, b=y_t)
 
 def _prove_satz_9_exist():
     body_y = _build_satz9_body(x, y)
@@ -539,8 +536,8 @@ def _prove_satz_9_exist():
     case_x1_to_body = DISJ1(ASSUME(case1_1), rest_1)        # {x=1} |- body_1
     branch_x1 = DISCH(case1_1, case_x1_to_body)             # |- (x=1) ==> body_1
     # Case ?u. x = u': from witness u with x = u' = 1 + u, derive case2_1.
-    pred_u_for_lem = mk_abs(u, mk_eq(x, mk_suc(u)))
-    hyp_ex_u = mk_exists(u, mk_eq(x, mk_suc(u)))
+    pred_u_for_lem = parse("\\u. x = SUC u")
+    hyp_ex_u = parse("?u. x = SUC u")
     # Inside the existential, we need to extract u. Use SELECT_AX to choose a witness.
     # From {hyp_ex_u} build {hyp_ex_u} |- ?u. x = 1 + u. Use SELECT.
     # Strategy: from `?u. x = u'` and `1 + u = u'` (ONE_PLUS), derive `?u. x = 1 + u`.
@@ -623,8 +620,8 @@ def _existq_witness_to_case2(x_t):
 
 def _satz9_step_case2(x_t, y_t, body_ys, case1_ys, case2_ys, case3_ys, rest_ys):
     # Hypothesis: ?u. x = y + u.
-    case2_y = mk_exists(u, mk_eq(x_t, mk_add(y_t, u)))
-    pred_u_2 = mk_abs(u, mk_eq(x_t, mk_add(y_t, u)))
+    case2_y = parse("?u. ${a} = ${b} + u", a=x_t, b=y_t)
+    pred_u_2 = parse("\\u. ${a} = ${b} + u", a=x_t, b=y_t)
 
     def _from_witness(witness_eq):
         # witness_eq : {x = y + w} |- x = y + w   for w = the SELECT witness.
@@ -636,25 +633,25 @@ def _satz9_step_case2(x_t, y_t, body_ys, case1_ys, case2_ys, case3_ys, rest_ys):
         from_lemma_pred = SPEC(w_t, LEMMA_PRED)    # |- (w = 1) \/ (?u. w = u')
 
         # Sub-A: w = 1
-        th_w_eq_1 = ASSUME(mk_eq(w_t, ONE))
+        th_w_eq_1 = ASSUME(parse("${w} = 1", w=w_t))
         # x = y + w.  AP_TERM (y +) on w=1: y + w = y + 1.  Combined with witness_eq.
         th_x_eq_y1 = TRANS(witness_eq,
                            AP_TERM(mk_comb(PLUS, y_t), th_w_eq_1))   # {witness, w=1} |- x = y + 1
         th_x_eq_sy = TRANS(th_x_eq_y1, SPEC(y_t, ADD_1))             # {...} |- x = SUC y
         # That's case1_ys.  Build body_ys via DISJ1.
         sub_A = DISJ1(th_x_eq_sy, mk_or(case2_ys, case3_ys))         # {...} |- body_ys
-        branch_A = DISCH(mk_eq(w_t, ONE), sub_A)
+        branch_A = DISCH(parse("${w} = 1", w=w_t), sub_A)
 
         # Sub-B: ?u. w = u'.
-        sub_B_hyp = mk_exists(u, mk_eq(w_t, mk_suc(u)))
-        pred_u_for_w = mk_abs(u, mk_eq(w_t, mk_suc(u)))
+        sub_B_hyp = parse("?u. ${w} = SUC u", w=w_t)
+        pred_u_for_w = parse("\\u. ${w} = SUC u", w=w_t)
 
         def _from_w0_witness(w0_eq):
             w0_t = rand(rand(w0_eq._concl))
             # x = y + w = y + SUC w0 = SUC(y+w0) = SUC y + w0.
             th_x_eq_syw0 = REWRITE_PROVE(
                 [witness_eq, w0_eq, ADD_SUC, SUC_PLUS],
-                mk_eq(x_t, mk_add(mk_suc(y_t), w0_t)))
+                parse("${x} = SUC ${y} + ${w0}", x=x_t, y=y_t, w0=w0_t))
             return EXISTS_AT(w0_t, th_x_eq_syw0)
         # Apply ELIM_EX to extract w0 and complete sub-B.
         th_case2_ys = ELIM_EX(pred_u_for_w, sub_B_hyp, _from_w0_witness)
@@ -670,8 +667,8 @@ def _satz9_step_case2(x_t, y_t, body_ys, case1_ys, case2_ys, case3_ys, rest_ys):
 
 def _satz9_step_case3(x_t, y_t, body_ys, case1_ys, case2_ys, case3_ys, rest_ys):
     # Hypothesis: ?v. y = x + v.   At y' we get y' = (x + v)' = x + v', so case3_ys.
-    case3_y = mk_exists(v, mk_eq(y_t, mk_add(x_t, v)))
-    pred_v_3 = mk_abs(v, mk_eq(y_t, mk_add(x_t, v)))
+    case3_y = parse("?v. ${b} = ${a} + v", a=x_t, b=y_t)
+    pred_v_3 = parse("\\v. ${b} = ${a} + v", a=x_t, b=y_t)
 
     def _from_witness(witness_eq):
         w_t = rand(rand(witness_eq._concl))
@@ -739,12 +736,12 @@ register_unfolder("<", UNFOLD_LT)
 
 def PROVE_GT(a_t, b_t, witness, eq_th):
     """From eq_th : ... |- a = b + witness, return ... |- a > b."""
-    pred = mk_abs(u, mk_eq(a_t, mk_add(b_t, u)))
+    pred = parse("\\u. ${a} = ${b} + u", a=a_t, b=b_t)
     return EQ_MP(SYM(UNFOLD_GT(a_t, b_t)), EXISTS(pred, witness, eq_th))
 
 def PROVE_LT(a_t, b_t, witness, eq_th):
     """From eq_th : ... |- b = a + witness, return ... |- a < b."""
-    pred = mk_abs(v, mk_eq(b_t, mk_add(a_t, v)))
+    pred = parse("\\v. ${b} = ${a} + v", a=a_t, b=b_t)
     return EQ_MP(SYM(UNFOLD_LT(a_t, b_t)), EXISTS(pred, witness, eq_th))
 
 
@@ -755,7 +752,7 @@ def CHOOSE_GT(h_gt, body_fn):
     a_t = rand(rator(h_gt._concl))
     b_t = rand(h_gt._concl)
     ex = EQ_MP(UNFOLD_GT(a_t, b_t), h_gt)
-    pred = mk_abs(u, mk_eq(a_t, mk_add(b_t, u)))
+    pred = parse("\\u. ${a} = ${b} + u", a=a_t, b=b_t)
     return PROVE_HYP(ex, ELIM_EX(pred, ex._concl,
                                   lambda eq: body_fn(eq, rand(rand(eq._concl)))))
 
@@ -766,7 +763,7 @@ def CHOOSE_LT(h_lt, body_fn):
     a_t = rand(rator(h_lt._concl))
     b_t = rand(h_lt._concl)
     ex = EQ_MP(UNFOLD_LT(a_t, b_t), h_lt)
-    pred = mk_abs(v, mk_eq(b_t, mk_add(a_t, v)))
+    pred = parse("\\v. ${b} = ${a} + v", a=a_t, b=b_t)
     return PROVE_HYP(ex, ELIM_EX(pred, ex._concl,
                                   lambda eq: body_fn(eq, rand(rand(eq._concl)))))
 
@@ -956,7 +953,7 @@ def SATZ_18(p):
     p.fix("x y")
     p.thus("x + y > x").by_thm(EQ_MP(
         SYM(UNFOLD_GT(mk_add(x, y), x)),
-        EXISTS(mk_abs(u, parse("x + y = x + u")), y, REFL(mk_add(x, y)))))
+        EXISTS(parse("\\u. x + y = x + u"), y, REFL(mk_add(x, y)))))
 
 
 # Theorem 19 (in three pieces -- Landau states it via "respectively"):
@@ -1113,9 +1110,9 @@ def CONTRA_LT_GT(a_t, b_t, h_lt, h_gt):
     def _inner_v(eq_v, v0):
         def _inner_u(eq_u, u0):
             # Avoid rewriter loop (eq_v↔eq_u cycle): chain eq_v then rewrite RHS only.
-            env = {"a": a_t, "b": b_t, "u0": u0, "v0": v0}
             rhs_eq = REWRITE_PROVE([eq_u, SATZ_5],
-                          parse("a + v0 = b + (u0 + v0)", env=env))
+                          parse("${a} + ${v0} = ${b} + (${u0} + ${v0})",
+                                a=a_t, b=b_t, u0=u0, v0=v0))
             chain = TRANS(eq_v, rhs_eq)               # b = b + (u0+v0)
             ne   = SPECL([mk_add(u0, v0), b_t], SATZ_7)
             ne_f = REWRITE_NE(ne, REFL(b_t), SPECL([mk_add(u0, v0), b_t], SATZ_6))
@@ -1184,23 +1181,20 @@ def SATZ_26(p):
 # ---------------------------------------------------------------------------
 
 def _prove_satz_27():
-    N_var = Var("N", mk_fun_ty(num_ty, bool_ty))
+    N_ty = mk_fun_ty(num_ty, bool_ty)
+    N_var = Var("N", N_ty)
     n_var = Var("n", num_ty)
     k_var = Var("k", num_ty)
     m_var = Var("m", num_ty)
+    env = {"N": N_ty}
 
-    hyp_nonempty = mk_exists(n_var, mk_comb(N_var, n_var))
-    M_body_x = mk_forall(n_var, mk_imp(mk_comb(N_var, n_var), mk_le(x, n_var)))
-    M_pred = mk_abs(x, M_body_x)
+    hyp_nonempty = parse("?n. N n", env=env)
+    M_pred = parse("\\x. !n. N n ==> x <= n", env=env)
 
     def M_at(t):
         return mk_comb(M_pred, t)
 
-    conclusion = mk_exists(m_var,
-                           mk_and(mk_comb(N_var, m_var),
-                                   mk_forall(k_var,
-                                             mk_imp(mk_comb(N_var, k_var),
-                                                    mk_le(m_var, k_var)))))
+    conclusion = parse("?m. N m /\\ (!k. N k ==> m <= k)", env=env)
 
     # === Step 1: M(1). ===
     s24_n = SPEC(n_var, SATZ_24)
@@ -1209,28 +1203,27 @@ def _prove_satz_27():
     M1 = EQ_MP(SYM(BETA_CONV(M_at(ONE))), M1_inner)
 
     # === Step 2: !y. N y ==> ~M(y+1). ===
-    h_Ny = ASSUME(mk_comb(N_var, y))
+    h_Ny = ASSUME(parse("N y", env=env))
     h_M_yp1 = ASSUME(M_at(mk_add(y, ONE)))
     M_unfolded = EQ_MP(BETA_CONV(M_at(mk_add(y, ONE))), h_M_yp1)
     spec_y = SPEC(y, M_unfolded)
     le_y1_y = MP(spec_y, h_Ny)
     s18_y1 = SPEC(ONE, SPEC(y, SATZ_18))
     le_unfold = EQ_MP(UNFOLD_LE(mk_add(y, ONE), y), le_y1_y)
-    branch_lt = DISCH(mk_lt(mk_add(y, ONE), y),
+    branch_lt = DISCH(parse("y + 1 < y"),
                       CONTRA_LT_GT(mk_add(y, ONE), y,
-                                   ASSUME(mk_lt(mk_add(y, ONE), y)), s18_y1))
-    branch_eq = DISCH(mk_eq(mk_add(y, ONE), y),
+                                   ASSUME(parse("y + 1 < y")), s18_y1))
+    branch_eq = DISCH(parse("y + 1 = y"),
                       CONTRA_GT_EQ(mk_add(y, ONE), y, s18_y1,
-                                   ASSUME(mk_eq(mk_add(y, ONE), y))))
+                                   ASSUME(parse("y + 1 = y"))))
     th_F = DISJ_CASES(le_unfold, branch_lt, branch_eq)
     th_imp_F = DISCH(M_at(mk_add(y, ONE)), th_F)
     not_M_yp1 = NOT_INTRO(th_imp_F)
-    Ny_imp_notM = DISCH(mk_comb(N_var, y), not_M_yp1)        # {} |- N y ==> ~M(y+1)
+    Ny_imp_notM = DISCH(parse("N y", env=env), not_M_yp1)    # {} |- N y ==> ~M(y+1)
 
     # === Step 3: ?m. M(m) /\ ~M(m+1). ===
-    Q_body = mk_and(M_at(x), mk_not(M_at(mk_add(x, ONE))))
-    Q_pred = mk_abs(x, Q_body)
-    target_3 = mk_exists(x, Q_body)
+    Q_pred = parse("\\x. ${M} x /\\ ~${M} (x + 1)", M=M_pred)
+    target_3 = parse("?x. ${M} x /\\ ~${M} (x + 1)", M=M_pred)
     not_target_3 = mk_not(target_3)
 
     # Under not_target_3, derive contradiction using non-emptiness of N.
@@ -1292,7 +1285,7 @@ def _prove_satz_27():
     # Now derive contradiction with hyp_nonempty.
     # Pick n ∈ N (witness of hyp_nonempty), apply forall_M_all to n+1 to get M(n+1),
     # then by Step 2 (Ny_imp_notM specialised), ~M(n+1).
-    n_pred = mk_abs(n_var, mk_comb(N_var, n_var))
+    n_pred = parse("\\n. N n", env=env)
     def _from_n(eq_Nn):     # {N w} |- N w  for w = SELECT witness
         w_t = rand(eq_Nn._concl)
         spec_M = SPEC(mk_add(w_t, ONE), forall_M_all)          # M_at(w+1)
@@ -1318,28 +1311,29 @@ def _prove_satz_27():
                               ASSUME(mk_comb(N_var, k_var)))))
         # Sub-claim b: N w, by contradiction.  If ~N w, then for n in N: w<n by
         # M(w)+w!=n, so n>=w+1 (Satz 25), giving M(w+1) — contradicts ~M(w+1).
-        h_not_Nw = ASSUME(mk_not(mk_comb(N_var, w_t)))
-        h_Nn2 = ASSUME(mk_comb(N_var, n_var))
+        h_not_Nw = ASSUME(parse("~ N ${w}", env=env, w=w_t))
+        h_Nn2 = ASSUME(parse("N n", env=env))
         w_le_n = MP(SPEC(n_var, Mm_unfold), h_Nn2)             # w <= n
-        h_w_eq_n = ASSUME(mk_eq(w_t, n_var))
+        h_w_eq_n = ASSUME(parse("${w} = n", w=w_t))
         Nw_th = EQ_MP(AP_TERM(N_var, SYM(h_w_eq_n)), h_Nn2)    # N w from N n via w=n
         th_F_b = MP(NOT_ELIM(h_not_Nw), Nw_th)
-        not_w_eq_n = NOT_INTRO(DISCH(mk_eq(w_t, n_var), th_F_b))
+        not_w_eq_n = NOT_INTRO(DISCH(parse("${w} = n", w=w_t), th_F_b))
         w_le_unfold = EQ_MP(UNFOLD_LE(w_t, n_var), w_le_n)
-        branch_lt_b = DISCH(mk_lt(w_t, n_var), ASSUME(mk_lt(w_t, n_var)))
-        branch_eq_b = DISCH(mk_eq(w_t, n_var),
-                             CONTR(mk_lt(w_t, n_var),
+        branch_lt_b = DISCH(parse("${w} < n", w=w_t),
+                             ASSUME(parse("${w} < n", w=w_t)))
+        branch_eq_b = DISCH(parse("${w} = n", w=w_t),
+                             CONTR(parse("${w} < n", w=w_t),
                                    MP(NOT_ELIM(not_w_eq_n),
-                                      ASSUME(mk_eq(w_t, n_var)))))
+                                      ASSUME(parse("${w} = n", w=w_t)))))
         w_lt_n = DISJ_CASES(w_le_unfold, branch_lt_b, branch_eq_b)
         n_gt_w = MP_LIST(SATZ_12, [w_t, n_var, w_lt_n])
         n_ge_wp1 = MP_LIST(SATZ_25, [w_t, n_var, n_gt_w])
         wp1_le_n = MP_LIST(SATZ_13, [n_var, mk_add(w_t, ONE), n_ge_wp1])
-        forall_wp1_le = GEN(n_var, DISCH(mk_comb(N_var, n_var), wp1_le_n))
+        forall_wp1_le = GEN(n_var, DISCH(parse("N n", env=env), wp1_le_n))
         M_wp1 = EQ_MP(SYM(BETA_CONV(M_at(mk_add(w_t, ONE)))), forall_wp1_le)
         th_F_b2 = MP(NOT_ELIM(notM_w1), M_wp1)
         Nw_th_final = NOT_NOT_ELIM(NOT_INTRO(
-            DISCH(mk_not(mk_comb(N_var, w_t)), th_F_b2)))
+            DISCH(parse("~ N ${w}", env=env, w=w_t), th_F_b2)))
         return EXISTS_AT(w_t, CONJ(Nw_th_final, sub_a))
     th_concl_inner = ELIM_EX(Q_pred, target_3, _from_m)
     # Discharge target_3 using th_target3:
@@ -1475,15 +1469,13 @@ MUL_1, MUL_SUC = _prove_mul_eqs()
 # ---------------------------------------------------------------------------
 
 def _prove_mul_unique():
-    f_var = Var("f", mk_fun_ty(num_ty, num_ty))
-    g_var = Var("g", mk_fun_ty(num_ty, num_ty))
-    f_1 = mk_eq(mk_comb(f_var, ONE), x)
-    f_step = mk_forall(y, mk_eq(mk_comb(f_var, mk_suc(y)),
-                                 mk_add(mk_comb(f_var, y), x)))
-    g_1 = mk_eq(mk_comb(g_var, ONE), x)
-    g_step = mk_forall(y, mk_eq(mk_comb(g_var, mk_suc(y)),
-                                 mk_add(mk_comb(g_var, y), x)))
-    hyps = mk_and(f_1, mk_and(f_step, mk_and(g_1, g_step)))
+    f_ty = mk_fun_ty(num_ty, num_ty)
+    f_var = Var("f", f_ty)
+    g_var = Var("g", f_ty)
+    env = {"f": f_ty, "g": f_ty}
+    hyps = parse(
+        "f 1 = x /\\ (!y. f (SUC y) = f y + x) /\\ "
+        "g 1 = x /\\ (!y. g (SUC y) = g y + x)", env=env)
     h_all = ASSUME(hyps)
     h_f1    = CONJUNCT1(h_all)
     h_rest  = CONJUNCT2(h_all)
@@ -1492,9 +1484,9 @@ def _prove_mul_unique():
     h_g1    = CONJUNCT1(h_rest2)
     h_gstep = CONJUNCT2(h_rest2)
 
-    body_y  = mk_eq(mk_comb(f_var, y), mk_comb(g_var, y))
-    body_1  = mk_eq(mk_comb(f_var, ONE), mk_comb(g_var, ONE))
-    body_ys = mk_eq(mk_comb(f_var, mk_suc(y)), mk_comb(g_var, mk_suc(y)))
+    body_y  = parse("f y = g y", env=env)
+    body_1  = parse("f 1 = g 1", env=env)
+    body_ys = parse("f (SUC y) = g (SUC y)", env=env)
     base = REWRITE_PROVE([h_f1, h_g1], body_1)
     step_fn = lambda IH: REWRITE_PROVE([h_fstep, h_gstep, IH], body_ys)
     forall_y = INDUCT_PROVE(y, body_y, base, step_fn)

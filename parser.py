@@ -28,6 +28,8 @@ Free variables default to type `num` if a ``num`` type is registered, else
 they have no default and `env={name: ty}` (or a kernel term) is required.
 """
 
+import re
+
 from lark import Lark
 from lark.visitors import Interpreter
 
@@ -36,6 +38,9 @@ from fusion import Var, Const, Comb, Abs, mk_var, mk_comb
 
 class ParseError(Exception):
     pass
+
+
+_SPLICE_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
 # ---------------------------------------------------------------------------
@@ -294,15 +299,53 @@ def _climb(terms, ops):
 # Public API.
 # ---------------------------------------------------------------------------
 
-def parse(s, env=None, sig=None):
+def parse(s, env=None, sig=None, **subst):
     """Parse `s` into a kernel term.
 
     `env` maps free-variable names either to their `hol_type` (when the
     default isn't right) or directly to a kernel term to substitute.
 
-    `sig` is a `Signature`; defaults to `DEFAULT_SIG`."""
+    `sig` is a `Signature`; defaults to `DEFAULT_SIG`.
+
+    Antiquotation: occurrences of ``${name}`` in `s` are replaced by the
+    kernel term passed as ``name=...`` in `**subst`.  Example:
+
+        parse("\\\\u. ${a} = ${b} + u", a=a_term, b=b_term)
+
+    Each ``${name}`` must be bound; unbound names raise `ParseError`.
+    Repeated occurrences of the same ``${name}`` reuse the same term.
+    """
+    if subst or "${" in s:
+        s, splice_env = _expand_splices(s, subst)
+        env = {**(env or {}), **splice_env}
     tree = _PARSER.parse(s)
     return _Builder(sig or DEFAULT_SIG, env).visit(tree)
+
+
+def _expand_splices(s, subst):
+    """Rewrite ``${name}`` markers to fresh sentinels and build an env
+    mapping each sentinel to the corresponding spliced term."""
+    name_to_sentinel = {}
+    splice_env = {}
+
+    def _repl(m):
+        name = m.group(1)
+        if name not in subst:
+            raise ParseError(
+                f"antiquote ${{{name}}} has no binding "
+                f"(pass {name}=... to parse)")
+        if name not in name_to_sentinel:
+            sentinel = f"__splice{len(name_to_sentinel)}_{name}__"
+            name_to_sentinel[name] = sentinel
+            splice_env[sentinel] = subst[name]
+        return name_to_sentinel[name]
+
+    s2 = _SPLICE_RE.sub(_repl, s)
+    unused = set(subst) - set(name_to_sentinel)
+    if unused:
+        raise ParseError(
+            f"unused antiquote binding(s): {sorted(unused)}")
+    return s2, splice_env
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +360,7 @@ def _selftest():
     from axioms import (
         bool_ty, mk_and, mk_imp, mk_not, mk_forall, mk_exists,
     )
+    from logic import mk_or
     from fusion import mk_abs
     from num import x as VX, y as VY, z as VZ, mk_suc, num_ty, ONE
 
@@ -376,6 +420,39 @@ def _selftest():
         pass
     else:
         raise AssertionError("expected ParseError for chained '='")
+
+    # --- antiquotation -----------------------------------------------------
+    # ${name} splices a Python kernel term into the parsed string.
+    assert aconv(parse("${a} + ${b}", a=VX, b=VY), _add(VX, VY))
+    # repeated antiquote reuses the same term
+    assert aconv(parse("${a} + ${a}", a=VX), _add(VX, VX))
+    # antiquote inside a binder, alongside a bound variable
+    assert aconv(parse("\\u. ${a} = SUC u", a=VX),
+                 mk_abs(mk_var("u", num_ty),
+                        mk_eq(VX, mk_suc(mk_var("u", num_ty)))))
+    # the SATZ_9 body, to confirm the boilerplate.md target shape
+    assert aconv(
+        parse("${a} = ${b} \\/ (?u. ${a} = ${b} + u) "
+              "\\/ (?v. ${b} = ${a} + v)", a=VX, b=VY),
+        mk_or(mk_eq(VX, VY),
+              mk_or(mk_exists(mk_var("u", num_ty),
+                              mk_eq(VX, _add(VY, mk_var("u", num_ty)))),
+                    mk_exists(mk_var("v", num_ty),
+                              mk_eq(VY, _add(VX, mk_var("v", num_ty)))))))
+    # missing binding -> ParseError
+    try:
+        parse("${a} + 1")
+    except ParseError:
+        pass
+    else:
+        raise AssertionError("expected ParseError for unbound antiquote")
+    # extra binding -> ParseError
+    try:
+        parse("${a} + 1", a=VX, b=VY)
+    except ParseError:
+        pass
+    else:
+        raise AssertionError("expected ParseError for unused antiquote")
 
     # --- extension at runtime ----------------------------------------------
     DEFAULT_SIG.add_infix("&&", 55, mk_and, assoc="left")
