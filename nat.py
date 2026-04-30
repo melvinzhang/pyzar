@@ -438,21 +438,22 @@ def ADD_RIGHT_SWAP(p):
 #   II) From y != x + y: y' != (x+y)' = x + y'  by Theorem 1 and ADD_SUC.
 # ---------------------------------------------------------------------------
 
-def _prove_satz_7():
-    body_y = parse("~(y = x + y)")
-
-    # Base: |- ~(1 = x + 1).
-    one_neq_sx = NE_SYM(SPEC(x, AXIOM_3))                    # |- ~(1 = SUC x)
-    base = REWRITE_NE(one_neq_sx, REFL(ONE), SYM(SPEC(x, ADD_1)))
-
-    def step_fn(IH):
-        th_ne_succ = MP(SPECL([y, mk_add(x, y)], SATZ_1), IH)   # ~(SUC y = SUC(x+y))
-        eq_rhs = SYM(SPECL([x, y], ADD_SUC))                    # SUC(x+y) = x + SUC y
-        return REWRITE_NE(th_ne_succ, REFL(mk_suc(y)), eq_rhs)
-
-    return GEN(x, INDUCT_PROVE(y, body_y, base, step_fn))
-
-SATZ_7 = _prove_satz_7()
+@proof
+def SATZ_7(p):
+    p.goal("!x y. ~(y = x + y)")
+    p.fix("x y")
+    with p.induction("y"):
+        with p.base():
+            p.have("ne_sx: ~(SUC x = 1)").by(AXIOM_3, "x")
+            p.have("ne1: ~(1 = SUC x)").by(NE_SYM, "ne_sx")
+            p.thus("~(1 = x + 1)")\
+                .by_rewrite_ne("ne1", [REFL(ONE), SYM(SPEC(x, ADD_1))])
+        with p.step("IH"):
+            p.have("ne_succ: ~(SUC y = SUC (x + y))")\
+                .by(SATZ_1, "y", "x + y", "IH")
+            p.thus("~(SUC y = x + SUC y)")\
+                .by_rewrite_ne("ne_succ",
+                               [REFL(mk_suc(y)), SYM(SPECL([x, y], ADD_SUC))])
 
 
 # ---------------------------------------------------------------------------
@@ -460,25 +461,24 @@ SATZ_7 = _prove_satz_7()
 # Proof (Landau): induction on x with y, z fixed and y != z.
 # ---------------------------------------------------------------------------
 
-def _prove_satz_8():
-    hyp_yz = parse("~(y = z)")
-    body_x = parse("~(x + y = x + z)")
-
-    th_ne_suc = MP(SPECL([y, z], SATZ_1), ASSUME(hyp_yz))       # ~(SUC y = SUC z)
-    base = REWRITE_NE(th_ne_suc,
-                      SYM(SPEC(y, ONE_PLUS)),
-                      SYM(SPEC(z, ONE_PLUS)))                   # ~(1+y = 1+z)
-
-    def step_fn(IH):
-        th_ne_sum = MP(SPECL([mk_add(x, y), mk_add(x, z)], SATZ_1), IH)
-        return REWRITE_NE(th_ne_sum,
-                          SYM(SPECL([x, y], SUC_PLUS)),
-                          SYM(SPECL([x, z], SUC_PLUS)))
-
-    forall_x = INDUCT_PROVE(x, body_x, base, step_fn)            # {hyp_yz} |- !x. body_x
-    return GENL([x, y, z], DISCH(hyp_yz, SPEC(x, forall_x)))
-
-SATZ_8 = _prove_satz_8()
+@proof
+def SATZ_8(p):
+    p.goal("!x y z. ~(y = z) ==> ~(x + y = x + z)")
+    p.fix("x y z")
+    p.assume("hyp_yz: ~(y = z)")
+    with p.induction("x"):
+        with p.base():
+            p.have("ne_suc: ~(SUC y = SUC z)").by(SATZ_1, "y", "z", "hyp_yz")
+            p.thus("~(1 + y = 1 + z)")\
+                .by_rewrite_ne("ne_suc",
+                               [SYM(SPEC(y, ONE_PLUS)), SYM(SPEC(z, ONE_PLUS))])
+        with p.step("IH"):
+            p.have("ne_sum: ~(SUC (x + y) = SUC (x + z))")\
+                .by(SATZ_1, "x + y", "x + z", "IH")
+            p.thus("~(SUC x + y = SUC x + z)")\
+                .by_rewrite_ne("ne_sum",
+                               [SYM(SPECL([x, y], SUC_PLUS)),
+                                SYM(SPECL([x, z], SUC_PLUS))])
 
 
 # ---------------------------------------------------------------------------

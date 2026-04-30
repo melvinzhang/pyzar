@@ -35,7 +35,7 @@ from axioms import F
 from logic import (
     pp, SPEC, GEN, DISCH, MP_LIST, DISJ_CASES, BETA_CONV,
     PROVE_HYP, ELIM_EX, _subst_term,
-    NOT_INTRO, CONTR,
+    NOT_INTRO, CONTR, REWRITE_NE,
 )
 from tactics import REWRITE_PROVE, REWRITE_RULE, AC_PROVE, REWRITE_AC_PROVE
 from parser import parse, ParseError
@@ -517,6 +517,18 @@ class _Have:
                      for r in rules]
         fact_th = self.p._resolve_fact(ref)
         return self._finish(REWRITE_RULE(rule_thms, fact_th))
+
+    def by_rewrite_ne(self, ref, eqs):
+        """REWRITE_NE on a non-equation fact: takes ``~(a = b)`` and rewrites
+        each side via ``[eq_l, eq_r]`` (theorems ``a = a'`` and ``b = b'``)
+        to produce the have-term ``~(a' = b')``."""
+        if len(eqs) != 2:
+            raise HolError(
+                f"by_rewrite_ne: expected 2 side equations, got {len(eqs)}")
+        ne_th = self.p._resolve_fact(ref)
+        eq_l_th = self.p._resolve_fact(eqs[0])
+        eq_r_th = self.p._resolve_fact(eqs[1])
+        return self._finish(REWRITE_NE(ne_th, eq_l_th, eq_r_th))
 
     def by_eq_mp(self, eq_th, ref):
         """``EQ_MP(eq_th, fact)`` -- rewrite a fact through an equation."""
