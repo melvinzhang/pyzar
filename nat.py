@@ -427,17 +427,6 @@ from proof import register_unfolder, register_disj_unfolder
 register_unfolder(">", UNFOLD_GT)
 register_unfolder("<", UNFOLD_LT)
 
-def PROVE_GT(a_t, b_t, witness, eq_th):
-    """From eq_th : ... |- a = b + witness, return ... |- a > b."""
-    pred = parse("\\u. ${a} = ${b} + u", a=a_t, b=b_t)
-    return EQ_MP(SYM(UNFOLD_GT(a_t, b_t)), EXISTS(pred, witness, eq_th))
-
-def PROVE_LT(a_t, b_t, witness, eq_th):
-    """From eq_th : ... |- b = a + witness, return ... |- a < b."""
-    pred = parse("\\v. ${b} = ${a} + v", a=a_t, b=b_t)
-    return EQ_MP(SYM(UNFOLD_LT(a_t, b_t)), EXISTS(pred, witness, eq_th))
-
-
 def CHOOSE_GT(h_gt, body_fn):
     """h_gt : ... |- a > b.  Calls body_fn(eq, witness) with
        eq : ... |- a = b + witness.  Returns body_fn's result with the
