@@ -697,8 +697,9 @@ LT = mk_const("<", [])
 def mk_gt(a, b): return mk_comb(mk_comb(GT, a), b)
 def mk_lt(a, b): return mk_comb(mk_comb(LT, a), b)
 
-def _binop_unfold(def_th, op_const, a, b):
-    """ |- (op a b) = (\\x y. body) a b   -- delivers the beta-reduced equality. """
+def _binop_unfold(def_th, a, b):
+    """Given ``def_th : |- op = \\x y. body``, return ``|- op a b = body[a,b]``
+    by two AP_THM/BETA_CONV steps."""
     eq1 = AP_THM(def_th, a)
     eq2 = TRANS(eq1, BETA_CONV(rand(eq1._concl)))
     eq3 = AP_THM(eq2, b)
@@ -706,11 +707,11 @@ def _binop_unfold(def_th, op_const, a, b):
 
 def UNFOLD_GT(a, b):
     """ |- (a > b) = (?u. a = b + u) """
-    return _binop_unfold(GT_DEF, GT, a, b)
+    return _binop_unfold(GT_DEF, a, b)
 
 def UNFOLD_LT(a, b):
     """ |- (a < b) = (?v. b = a + v) """
-    return _binop_unfold(LT_DEF, LT, a, b)
+    return _binop_unfold(LT_DEF, a, b)
 
 # Register with the proof DSL so `p.choose(name, from_=label)` accepts a fact
 # whose conclusion is `> ` or `<`.
@@ -804,8 +805,8 @@ LE = mk_const("<=", [])
 def mk_ge(a, b): return mk_comb(mk_comb(GE, a), b)
 def mk_le(a, b): return mk_comb(mk_comb(LE, a), b)
 
-def UNFOLD_GE(a, b): return _binop_unfold(GE_DEF, GE, a, b)
-def UNFOLD_LE(a, b): return _binop_unfold(LE_DEF, LE, a, b)
+def UNFOLD_GE(a, b): return _binop_unfold(GE_DEF, a, b)
+def UNFOLD_LE(a, b): return _binop_unfold(LE_DEF, a, b)
 
 register_disj_unfolder(">=", UNFOLD_GE)
 register_disj_unfolder("<=", UNFOLD_LE)
