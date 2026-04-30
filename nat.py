@@ -52,7 +52,7 @@ from logic import (
     SPEC, GEN, CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP,
     CONTR, NOT_ELIM, NOT_INTRO,
     mk_or, DISJ1, DISJ2, DISJ_CASES,
-    NE_SYM, REWRITE_NE, EXISTS,
+    NE_SYM, REWRITE_NE, EXISTS, EXISTS_AT,
     EXCLUDED_MIDDLE, NOT_NOT_ELIM, NOT_EX_TO_FORALL_NOT,
     PROVE_HYP, ELIM_EX,
     SPECL, GENL, DISCHL, TRANS_CHAIN, MP_LIST, CASE_OR,
@@ -578,8 +578,7 @@ def _prove_satz_9_exist():
     th_xy = ASSUME(case1_y)
     th_sy_eq_x1 = TRANS(SYM(SPEC(y, ADD_1)),                   # SUC y = y + 1
                          AP_THM(AP_TERM(PLUS, SYM(th_xy)), ONE)) # = x + 1
-    pred_v_case3 = mk_abs(v, mk_eq(mk_suc(y), mk_add(x, v)))
-    th_case3_ys = EXISTS(pred_v_case3, ONE, th_sy_eq_x1)
+    th_case3_ys = EXISTS_AT(ONE, th_sy_eq_x1)
     branch_case1 = DISCH(case1_y,
                          DISJ2(case1_ys, DISJ2(case2_ys, th_case3_ys)))
 
@@ -616,8 +615,7 @@ def _existq_witness_to_case2(x_t):
         w_t = rand(rhs)                            # = w
         eq_w = SYM(SPEC(w_t, ONE_PLUS))            # |- SUC w = 1 + w
         x_eq_1pw = TRANS(witness_eq, eq_w)         # {...} |- x = 1 + w
-        pred_u = mk_abs(u, mk_eq(x_t, mk_add(ONE, u)))
-        return EXISTS(pred_u, w_t, x_eq_1pw)
+        return EXISTS_AT(w_t, x_eq_1pw)
     return _go
 
 
@@ -657,8 +655,7 @@ def _satz9_step_case2(x_t, y_t, body_ys, case1_ys, case2_ys, case3_ys, rest_ys):
             th_x_eq_syw0 = REWRITE_PROVE(
                 [witness_eq, w0_eq, ADD_SUC, SUC_PLUS],
                 mk_eq(x_t, mk_add(mk_suc(y_t), w0_t)))
-            pred_u_case2_ys = mk_abs(u, mk_eq(x_t, mk_add(mk_suc(y_t), u)))
-            return EXISTS(pred_u_case2_ys, w0_t, th_x_eq_syw0)
+            return EXISTS_AT(w0_t, th_x_eq_syw0)
         # Apply ELIM_EX to extract w0 and complete sub-B.
         th_case2_ys = ELIM_EX(pred_u_for_w, sub_B_hyp, _from_w0_witness)
         # th_case2_ys : {sub_B_hyp, witness} |- ?u. x = SUC y + u  (= case2_ys)
@@ -681,8 +678,7 @@ def _satz9_step_case3(x_t, y_t, body_ys, case1_ys, case2_ys, case3_ys, rest_ys):
         # SUC y = SUC(x + w) = x + SUC w.
         th_sy = TRANS(AP_TERM(SUC, witness_eq),
                        SYM(SPECL([x_t, w_t], ADD_SUC)))
-        pred_v_case3_ys = mk_abs(v, mk_eq(mk_suc(y_t), mk_add(x_t, v)))
-        th_case3_ys = EXISTS(pred_v_case3_ys, mk_suc(w_t), th_sy)
+        th_case3_ys = EXISTS_AT(mk_suc(w_t), th_sy)
         return DISJ2(case1_ys, DISJ2(case2_ys, th_case3_ys))
 
     th_body_ys = ELIM_EX(pred_v_3, case3_y, _from_witness)
@@ -1310,12 +1306,7 @@ def _prove_satz_27():
         th_F_b2 = MP(NOT_ELIM(notM_w1), M_wp1)
         Nw_th_final = NOT_NOT_ELIM(NOT_INTRO(
             DISCH(mk_not(mk_comb(N_var, w_t)), th_F_b2)))
-        m_pred_concl = mk_abs(m_var,
-                               mk_and(mk_comb(N_var, m_var),
-                                       mk_forall(k_var,
-                                                 mk_imp(mk_comb(N_var, k_var),
-                                                        mk_le(m_var, k_var)))))
-        return EXISTS(m_pred_concl, w_t, CONJ(Nw_th_final, sub_a))
+        return EXISTS_AT(w_t, CONJ(Nw_th_final, sub_a))
     th_concl_inner = ELIM_EX(Q_pred, target_3, _from_m)
     # Discharge target_3 using th_target3:
     th_concl = PROVE_HYP(th_target3, th_concl_inner)

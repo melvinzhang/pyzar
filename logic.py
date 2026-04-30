@@ -377,6 +377,24 @@ def REWRITE_NE(th_ne, eq_l, eq_r):
 
 # Existential introduction.
 
+def _subst_term(old, new, tm):
+    """Replace every occurrence of `old` (a term) with `new` inside `tm`."""
+    if tm == old:
+        return new
+    if isinstance(tm, Comb):
+        f2 = _subst_term(old, new, tm.fun)
+        a2 = _subst_term(old, new, tm.arg)
+        if f2 is tm.fun and a2 is tm.arg:
+            return tm
+        return mk_comb(f2, a2)
+    if isinstance(tm, Abs):
+        b2 = _subst_term(old, new, tm.body)
+        if b2 is tm.body:
+            return tm
+        return mk_abs(tm.bvar, b2)
+    return tm
+
+
 def EXISTS(pred, witness, th):
     """ pred = Abs(v, body)   ; th : |- body[witness/v]  =>   |- ?v. body """
     if not isinstance(pred, Abs):
@@ -458,6 +476,24 @@ def MP_LIST(th, args):
 #
 #   Each prover receives `ASSUME(h)` and returns the conclusion theorem.
 # ---------------------------------------------------------------------------
+
+def EXISTS_AT(witness, th):
+    """ |- body  =>  |- ?v. body[v/witness]   for a fresh `v`.
+
+    Picks a fresh variable `v` of `witness`'s type, replaces every occurrence
+    of `witness` in th's conclusion with `v`, and applies EXISTS.  Use when
+    every occurrence of `witness` in the conclusion should be abstracted;
+    otherwise call EXISTS with an explicit predicate.
+    """
+    body = th._concl
+    avoid = freesl([body, witness])
+    if isinstance(witness, Var):
+        v = variant(avoid, witness)
+    else:
+        v = variant(avoid, Var("v", type_of(witness)))
+    pred = mk_abs(v, _subst_term(witness, v, body))
+    return EXISTS(pred, witness, th)
+
 
 def CASE_OR(or_thm, left, right):
     h_l, prove_l = left
