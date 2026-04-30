@@ -1,4 +1,4 @@
-PY := python
+PY := uv run python
 
 .PHONY: test
 
@@ -7,3 +7,4 @@ test:
 	$(PY) logic.py
 	$(PY) num.py
 	$(PY) nat.py
+	$(PY) parser.py

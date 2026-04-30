@@ -65,6 +65,7 @@ from num import (
 )
 from tactics import (REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV,
                        AC_PROVE, AC_NORM, REWRITE_AC_PROVE)
+from parser import parse
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +93,7 @@ SATZ_1 = _prove_satz_1()
 # ---------------------------------------------------------------------------
 
 def _prove_satz_2():
-    body = mk_not(mk_eq(mk_suc(x), x))
+    body = parse("~(SUC x = x)")
     base = SPEC(ONE, AXIOM_3)                                # |- ~(1' = 1)
     # Step: SATZ_1 with x:=x', y:=x  gives  ~(x'=x) ==> ~((x')'=x'); MP with IH.
     step_fn = lambda IH: MP(SPECL([mk_suc(x), x], SATZ_1), IH)
@@ -108,19 +109,17 @@ SATZ_2 = _prove_satz_2()
 # ---------------------------------------------------------------------------
 
 def _prove_satz_3():
-    body_x = mk_imp(mk_not(mk_eq(x, ONE)),
-                    mk_exists(u, mk_eq(x, mk_suc(u))))
+    body_x = parse("~(x = 1) ==> ?u. x = SUC u")
 
     # Base: |- ~(1 = 1) ==> ?u. 1 = u'.  Hypothesis is false (REFL contradicts it).
-    not_1_1 = mk_not(mk_eq(ONE, ONE))
+    not_1_1 = parse("~(1 = 1)")
     th_F = MP(NOT_ELIM(ASSUME(not_1_1)), REFL(ONE))
-    ex_1 = mk_exists(u, mk_eq(ONE, mk_suc(u)))
-    base = DISCH(not_1_1, CONTR(ex_1, th_F))
+    base = DISCH(not_1_1, CONTR(parse("?u. 1 = SUC u"), th_F))
 
     # Step: at x' we use u = x as witness (IH unused).
     def step_fn(IH):
-        not_xs_1 = mk_not(mk_eq(mk_suc(x), ONE))
-        pred_u = mk_abs(u, mk_eq(mk_suc(x), mk_suc(u)))
+        not_xs_1 = parse("~(SUC x = 1)")
+        pred_u = mk_abs(u, parse("SUC x = SUC u"))
         return DISCH(not_xs_1, EXISTS(pred_u, x, REFL(mk_suc(x))))
 
     return INDUCT_PROVE(x, body_x, base, step_fn)
@@ -332,15 +331,13 @@ ADD_1_REV = GEN(x, SYM(SPEC(x, ADD_1)))    # |- !x. SUC x = x + 1
 # ---------------------------------------------------------------------------
 
 def _prove_add_unique():
-    f_var = Var("f", mk_fun_ty(num_ty, num_ty))
-    g_var = Var("g", mk_fun_ty(num_ty, num_ty))
-    f_1 = mk_eq(mk_comb(f_var, ONE), mk_suc(x))
-    f_step = mk_forall(y, mk_eq(mk_comb(f_var, mk_suc(y)),
-                                 mk_suc(mk_comb(f_var, y))))
-    g_1 = mk_eq(mk_comb(g_var, ONE), mk_suc(x))
-    g_step = mk_forall(y, mk_eq(mk_comb(g_var, mk_suc(y)),
-                                 mk_suc(mk_comb(g_var, y))))
-    hyps = mk_and(f_1, mk_and(f_step, mk_and(g_1, g_step)))
+    f_ty = mk_fun_ty(num_ty, num_ty)
+    f_var = Var("f", f_ty)
+    g_var = Var("g", f_ty)
+    env = {"f": f_ty, "g": f_ty}
+    hyps = parse(
+        "f 1 = SUC x /\\ (!y. f (SUC y) = SUC (f y)) /\\ "
+        "g 1 = SUC x /\\ (!y. g (SUC y) = SUC (g y))", env=env)
     h_all = ASSUME(hyps)
     h_f1    = CONJUNCT1(h_all)
     h_rest  = CONJUNCT2(h_all)
@@ -349,9 +346,9 @@ def _prove_add_unique():
     h_g1    = CONJUNCT1(h_rest2)
     h_gstep = CONJUNCT2(h_rest2)
 
-    body_y  = mk_eq(mk_comb(f_var, y), mk_comb(g_var, y))
-    body_1  = mk_eq(mk_comb(f_var, ONE), mk_comb(g_var, ONE))
-    body_ys = mk_eq(mk_comb(f_var, mk_suc(y)), mk_comb(g_var, mk_suc(y)))
+    body_y  = parse("f y = g y", env=env)
+    body_1  = parse("f 1 = g 1", env=env)
+    body_ys = parse("f (SUC y) = g (SUC y)", env=env)
     base = REWRITE_PROVE([h_f1, h_g1], body_1)
     step_fn = lambda IH: REWRITE_PROVE([h_fstep, h_gstep, IH], body_ys)
     forall_y = INDUCT_PROVE(y, body_y, base, step_fn)
@@ -367,10 +364,9 @@ ADD_UNIQUE = _prove_add_unique()
 # ---------------------------------------------------------------------------
 
 def _prove_satz_5():
-    body_z  = mk_eq(mk_add(mk_add(x, y), z), mk_add(x, mk_add(y, z)))
-    body_1  = mk_eq(mk_add(mk_add(x, y), ONE), mk_add(x, mk_add(y, ONE)))
-    body_zs = mk_eq(mk_add(mk_add(x, y), mk_suc(z)),
-                     mk_add(x, mk_add(y, mk_suc(z))))
+    body_z  = parse("(x + y) + z = x + (y + z)")
+    body_1  = parse("(x + y) + 1 = x + (y + 1)")
+    body_zs = parse("(x + y) + SUC z = x + (y + SUC z)")
     base = REWRITE_PROVE([ADD_1, ADD_SUC], body_1)
     step_fn = lambda IH: REWRITE_PROVE([ADD_SUC, IH], body_zs)
     return GENL([x, y], INDUCT_PROVE(z, body_z, base, step_fn))
@@ -387,9 +383,9 @@ SATZ_5 = _prove_satz_5()
 # ---------------------------------------------------------------------------
 
 def _prove_one_plus():
-    body_y  = mk_eq(mk_add(ONE, y), mk_suc(y))
-    body_1  = mk_eq(mk_add(ONE, ONE), mk_suc(ONE))
-    body_ys = mk_eq(mk_add(ONE, mk_suc(y)), mk_suc(mk_suc(y)))
+    body_y  = parse("1 + y = SUC y")
+    body_1  = parse("1 + 1 = SUC 1")
+    body_ys = parse("1 + SUC y = SUC (SUC y)")
     base = REWRITE_PROVE([ADD_1], body_1)
     step_fn = lambda IH: REWRITE_PROVE([ADD_SUC, IH], body_ys)
     return INDUCT_PROVE(y, body_y, base, step_fn)
@@ -397,9 +393,9 @@ def _prove_one_plus():
 ONE_PLUS = _prove_one_plus()
 
 def _prove_suc_plus():
-    body_y  = mk_eq(mk_add(mk_suc(x), y), mk_suc(mk_add(x, y)))
-    body_1  = mk_eq(mk_add(mk_suc(x), ONE), mk_suc(mk_add(x, ONE)))
-    body_ys = mk_eq(mk_add(mk_suc(x), mk_suc(y)), mk_suc(mk_add(x, mk_suc(y))))
+    body_y  = parse("SUC x + y = SUC (x + y)")
+    body_1  = parse("SUC x + 1 = SUC (x + 1)")
+    body_ys = parse("SUC x + SUC y = SUC (x + SUC y)")
     base = REWRITE_PROVE([ADD_1], body_1)
     step_fn = lambda IH: REWRITE_PROVE([ADD_SUC, IH], body_ys)
     return GEN(x, INDUCT_PROVE(y, body_y, base, step_fn))
@@ -414,9 +410,9 @@ SUC_PLUS = _prove_suc_plus()
 # ---------------------------------------------------------------------------
 
 def _prove_satz_6():
-    body_x  = mk_eq(mk_add(x, y), mk_add(y, x))
-    body_1  = mk_eq(mk_add(ONE, y), mk_add(y, ONE))
-    body_xs = mk_eq(mk_add(mk_suc(x), y), mk_add(y, mk_suc(x)))
+    body_x  = parse("x + y = y + x")
+    body_1  = parse("1 + y = y + 1")
+    body_xs = parse("SUC x + y = y + SUC x")
     base = REWRITE_PROVE([ONE_PLUS, ADD_1], body_1)
     step_fn = lambda IH: REWRITE_PROVE([SUC_PLUS, ADD_SUC, IH], body_xs)
     forall_x = INDUCT_PROVE(x, body_x, base, step_fn)
@@ -428,7 +424,7 @@ SATZ_6 = _prove_satz_6()
 # AC-corollary used pervasively in the order proofs:  (a+b)+c = (a+c)+b.
 def _prove_add_right_swap():
     a, b, c = Var("a", num_ty), Var("b", num_ty), Var("c", num_ty)
-    target = mk_eq(mk_add(mk_add(a, b), c), mk_add(mk_add(a, c), b))
+    target = parse("(a + b) + c = (a + c) + b")
     return GENL([a, b, c], AC_PROVE(PLUS, SATZ_5, SATZ_6, target))
 
 ADD_RIGHT_SWAP = _prove_add_right_swap()
@@ -442,7 +438,7 @@ ADD_RIGHT_SWAP = _prove_add_right_swap()
 # ---------------------------------------------------------------------------
 
 def _prove_satz_7():
-    body_y = mk_not(mk_eq(y, mk_add(x, y)))
+    body_y = parse("~(y = x + y)")
 
     # Base: |- ~(1 = x + 1).
     one_neq_sx = NE_SYM(SPEC(x, AXIOM_3))                    # |- ~(1 = SUC x)
@@ -464,8 +460,8 @@ SATZ_7 = _prove_satz_7()
 # ---------------------------------------------------------------------------
 
 def _prove_satz_8():
-    hyp_yz = mk_not(mk_eq(y, z))
-    body_x = mk_not(mk_eq(mk_add(x, y), mk_add(x, z)))
+    hyp_yz = parse("~(y = z)")
+    body_x = parse("~(x + y = x + z)")
 
     th_ne_suc = MP(SPECL([y, z], SATZ_1), ASSUME(hyp_yz))       # ~(SUC y = SUC z)
     base = REWRITE_NE(th_ne_suc,
@@ -492,8 +488,8 @@ SATZ_8 = _prove_satz_8()
 # ---------------------------------------------------------------------------
 
 def _prove_lemma_pred():
-    body_x = mk_or(mk_eq(x, ONE), mk_exists(u, mk_eq(x, mk_suc(u))))
-    base = DISJ1(REFL(ONE), mk_exists(u, mk_eq(ONE, mk_suc(u))))
+    body_x = parse("(x = 1) \\/ (?u. x = SUC u)")
+    base = DISJ1(REFL(ONE), parse("?u. 1 = SUC u"))
     def step_fn(IH):
         pred_u = mk_abs(u, mk_eq(mk_suc(x), mk_suc(u)))
         th_ex = EXISTS(pred_u, x, REFL(mk_suc(x)))
@@ -855,7 +851,8 @@ def _prove_satz_15():
     def _from_v(eq_y, v0):
         def _from_w(eq_z, w0):
             z_eq = REWRITE_PROVE([eq_z, eq_y, SATZ_5],
-                                  mk_eq(z, mk_add(x, mk_add(v0, w0))))
+                                  parse("z = x + (v0 + w0)",
+                                        env={"v0": v0, "w0": w0}))
             return PROVE_LT(x, z, mk_add(v0, w0), z_eq)
         return CHOOSE_LT(ASSUME(mk_lt(y, z)), _from_w)
     th_lt = CHOOSE_LT(ASSUME(mk_lt(x, y)), _from_v)
@@ -924,7 +921,7 @@ SATZ_17 = _prove_satz_17()
 # Theorem 18:  |- !x y. x + y > x.    Witness y in ?u. x+y = x+u.
 
 def _prove_satz_18():
-    pred_u = mk_abs(u, mk_eq(mk_add(x, y), mk_add(x, u)))
+    pred_u = mk_abs(u, parse("x + y = x + u"))
     th_ex = EXISTS(pred_u, y, REFL(mk_add(x, y)))
     th_gt = EQ_MP(SYM(UNFOLD_GT(mk_add(x, y), x)), th_ex)
     return GENL([x, y], th_gt)
@@ -940,7 +937,7 @@ SATZ_18 = _prove_satz_18()
 def _prove_satz_19a():
     def _from(eq_x, u0):
         path = REWRITE_AC_PROVE([eq_x], PLUS, SATZ_5, SATZ_6,
-                                 mk_eq(mk_add(x, z), mk_add(mk_add(y, z), u0)))
+                                 parse("x + z = (y + z) + u0", env={"u0": u0}))
         return PROVE_GT(mk_add(x, z), mk_add(y, z), u0, path)
     th_gt = CHOOSE_GT(ASSUME(mk_gt(x, y)), _from)
     return GENL([x, y, z], DISCH(mk_gt(x, y), th_gt))
@@ -1043,12 +1040,13 @@ SATZ_23 = _prove_satz_23()
 
 def _prove_satz_24():
     lp = SPEC(x, LEMMA_PRED)
-    branch1 = DISCH(mk_eq(x, ONE), EQ_TO_GE(ASSUME(mk_eq(x, ONE))))
-    pred_u = mk_abs(u, mk_eq(x, mk_suc(u)))
-    hyp_ex = mk_exists(u, mk_eq(x, mk_suc(u)))
+    branch1 = DISCH(parse("x = 1"), EQ_TO_GE(ASSUME(parse("x = 1"))))
+    pred_u = mk_abs(u, parse("x = SUC u"))
+    hyp_ex = parse("?u. x = SUC u")
     def _from(eq_x):
         w = rand(rand(eq_x._concl))
-        x_eq_1w = REWRITE_PROVE([eq_x, ONE_PLUS], mk_eq(x, mk_add(ONE, w)))
+        x_eq_1w = REWRITE_PROVE([eq_x, ONE_PLUS],
+                                parse("x = 1 + w", env={"w": w}))
         return GT_TO_GE(PROVE_GT(x, ONE, w, x_eq_1w))
     branch2 = DISCH(hyp_ex, ELIM_EX(pred_u, hyp_ex, _from))
     return GEN(x, DISJ_CASES(lp, branch1, branch2))
@@ -1102,9 +1100,10 @@ def CONTRA_LT_GT(a_t, b_t, h_lt, h_gt):
     """ |- a < b,  |- a > b   =>   {a<b, a>b} |- F. """
     def _inner_v(eq_v, v0):
         def _inner_u(eq_u, u0):
-            # Avoid rewriter loop (eq_v↔eq_u cycle): chain  eq_v then rewrite RHS only.
+            # Avoid rewriter loop (eq_v↔eq_u cycle): chain eq_v then rewrite RHS only.
+            env = {"a": a_t, "b": b_t, "u0": u0, "v0": v0}
             rhs_eq = REWRITE_PROVE([eq_u, SATZ_5],
-                          mk_eq(mk_add(a_t, v0), mk_add(b_t, mk_add(u0, v0))))
+                          parse("a + v0 = b + (u0 + v0)", env=env))
             chain = TRANS(eq_v, rhs_eq)               # b = b + (u0+v0)
             ne   = SPECL([mk_add(u0, v0), b_t], SATZ_7)
             ne_f = REWRITE_NE(ne, REFL(b_t), SPECL([mk_add(u0, v0), b_t], SATZ_6))
@@ -1472,9 +1471,9 @@ MUL_UNIQUE = _prove_mul_unique()
 # SUC_MUL :  |- !x y. (SUC x) * y = x * y + y.
 
 def _prove_one_mul():
-    body_y  = mk_eq(mk_mul(ONE, y), y)
-    body_1  = mk_eq(mk_mul(ONE, ONE), ONE)
-    body_ys = mk_eq(mk_mul(ONE, mk_suc(y)), mk_suc(y))
+    body_y  = parse("1 * y = y")
+    body_1  = parse("1 * 1 = 1")
+    body_ys = parse("1 * SUC y = SUC y")
     base = REWRITE_PROVE([MUL_1], body_1)
     step_fn = lambda IH: REWRITE_PROVE([MUL_SUC, ADD_1, IH], body_ys)
     return INDUCT_PROVE(y, body_y, base, step_fn)
@@ -1482,10 +1481,9 @@ def _prove_one_mul():
 ONE_MUL = _prove_one_mul()
 
 def _prove_suc_mul():
-    body_y  = mk_eq(mk_mul(mk_suc(x), y), mk_add(mk_mul(x, y), y))
-    body_1  = mk_eq(mk_mul(mk_suc(x), ONE), mk_add(mk_mul(x, ONE), ONE))
-    body_ys = mk_eq(mk_mul(mk_suc(x), mk_suc(y)),
-                     mk_add(mk_mul(x, mk_suc(y)), mk_suc(y)))
+    body_y  = parse("SUC x * y = x * y + y")
+    body_1  = parse("SUC x * 1 = x * 1 + 1")
+    body_ys = parse("SUC x * SUC y = x * SUC y + SUC y")
     base = REWRITE_PROVE([MUL_1, ADD_1_REV], body_1)
     # Step: rewrite both sides with [MUL_SUC, IH]; canonicalize SUC→+1; then AC.
     step_fn = lambda IH: REWRITE_AC_PROVE(
@@ -1498,9 +1496,9 @@ SUC_MUL = _prove_suc_mul()
 # Theorem 29 (commutative law of multiplication):  |- !x y. x * y = y * x.
 
 def _prove_satz_29():
-    body_x  = mk_eq(mk_mul(x, y), mk_mul(y, x))
-    body_1  = mk_eq(mk_mul(ONE, y), mk_mul(y, ONE))
-    body_xs = mk_eq(mk_mul(mk_suc(x), y), mk_mul(y, mk_suc(x)))
+    body_x  = parse("x * y = y * x")
+    body_1  = parse("1 * y = y * 1")
+    body_xs = parse("SUC x * y = y * SUC x")
     base = REWRITE_PROVE([ONE_MUL, MUL_1], body_1)
     step_fn = lambda IH: REWRITE_PROVE([SUC_MUL, MUL_SUC, IH], body_xs)
     forall_x = INDUCT_PROVE(x, body_x, base, step_fn)
@@ -1512,10 +1510,9 @@ SATZ_29 = _prove_satz_29()
 # Theorem 30 (distributive):  |- !x y z. x * (y + z) = x*y + x*z.   Induction on z.
 
 def _prove_satz_30():
-    body_z  = mk_eq(mk_mul(x, mk_add(y, z)), mk_add(mk_mul(x, y), mk_mul(x, z)))
-    body_1  = mk_eq(mk_mul(x, mk_add(y, ONE)), mk_add(mk_mul(x, y), mk_mul(x, ONE)))
-    body_zs = mk_eq(mk_mul(x, mk_add(y, mk_suc(z))),
-                     mk_add(mk_mul(x, y), mk_mul(x, mk_suc(z))))
+    body_z  = parse("x * (y + z) = x * y + x * z")
+    body_1  = parse("x * (y + 1) = x * y + x * 1")
+    body_zs = parse("x * (y + SUC z) = x * y + x * SUC z")
     base = REWRITE_PROVE([ADD_1, MUL_1, MUL_SUC], body_1)
     step_fn = lambda IH: REWRITE_PROVE([ADD_SUC, MUL_SUC, SATZ_5, IH], body_zs)
     return GENL([x, y], INDUCT_PROVE(z, body_z, base, step_fn))
@@ -1526,9 +1523,9 @@ SATZ_30 = _prove_satz_30()
 # Theorem 31 (associative law of multiplication):  |- !x y z. (x*y) * z = x * (y*z).   Induction on z.
 
 def _prove_satz_31():
-    body_z  = mk_eq(mk_mul(mk_mul(x, y), z), mk_mul(x, mk_mul(y, z)))
-    body_1  = mk_eq(mk_mul(mk_mul(x, y), ONE), mk_mul(x, mk_mul(y, ONE)))
-    body_zs = mk_eq(mk_mul(mk_mul(x, y), mk_suc(z)), mk_mul(x, mk_mul(y, mk_suc(z))))
+    body_z  = parse("(x * y) * z = x * (y * z)")
+    body_1  = parse("(x * y) * 1 = x * (y * 1)")
+    body_zs = parse("(x * y) * SUC z = x * (y * SUC z)")
     base = REWRITE_PROVE([MUL_1], body_1)
     step_fn = lambda IH: REWRITE_PROVE([MUL_SUC, SATZ_30, IH], body_zs)
     return GENL([x, y], INDUCT_PROVE(z, body_z, base, step_fn))
@@ -1557,8 +1554,7 @@ def _prove_satz_32a():
     def _from(eq_x, u0):
         # x*z = (y+u0)*z = y*z + u0*z   [eq_x then RIGHT_DISTRIB].
         path = REWRITE_PROVE([eq_x, RIGHT_DISTRIB],
-                              mk_eq(mk_mul(x, z),
-                                    mk_add(mk_mul(y, z), mk_mul(u0, z))))
+                              parse("x * z = y * z + u0 * z", env={"u0": u0}))
         return PROVE_GT(mk_mul(x, z), mk_mul(y, z), mk_mul(u0, z), path)
     th_gt = CHOOSE_GT(ASSUME(mk_gt(x, y)), _from)
     return GENL([x, y, z], DISCH(mk_gt(x, y), th_gt))
@@ -1707,7 +1703,8 @@ def _prove_satz_9_excl():
             v0 = rand(rand(eq_y._concl))
             # eq_x: x = y + u0; eq_y: y = x + v0.  Avoid cycle by chaining.
             rhs_eq = REWRITE_PROVE([eq_y, SATZ_5],
-                          mk_eq(mk_add(y, u0), mk_add(x, mk_add(v0, u0))))
+                          parse("y + u0 = x + (v0 + u0)",
+                                env={"u0": u0, "v0": v0}))
             chain = TRANS(eq_x, rhs_eq)         # x = x + (v0+u0)
             comm = SPECL([mk_add(v0, u0), x], SATZ_6)
             ne   = SPECL([mk_add(v0, u0), x], SATZ_7)
