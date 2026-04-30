@@ -28,12 +28,29 @@ import re
 
 from fusion import (
     Const, Comb, Abs, thm,
-    aconv, concl, HolError, ASSUME, EQ_MP,
+    aconv, concl, HolError, ASSUME, EQ_MP, BETA, mk_comb, mk_const,
+    rand, aty, type_of,
 )
-from logic import pp, SPEC, GEN, DISCH, MP_LIST, DISJ_CASES, _subst_term
+from logic import (
+    pp, SPEC, GEN, DISCH, MP_LIST, DISJ_CASES, BETA_CONV,
+    PROVE_HYP, ELIM_EX, _subst_term,
+)
 from tactics import REWRITE_PROVE, REWRITE_RULE, AC_PROVE, REWRITE_AC_PROVE
 from parser import parse, ParseError
 from num import INDUCT_PROVE, mk_suc, ONE
+
+
+# ---------------------------------------------------------------------------
+# Unfolder registry: each entry maps a relation symbol (e.g. ">", "<") to
+# a function ``unfold(a, b) -> |- (op a b) = (?v. body)``. Modules that
+# introduce a relation can register here so ``p.choose(...)`` can be invoked
+# directly on facts of that relation.
+# ---------------------------------------------------------------------------
+
+_UNFOLDERS = {}
+
+def register_unfolder(op_name, unfold_fn):
+    _UNFOLDERS[op_name] = unfold_fn
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +59,8 @@ from num import INDUCT_PROVE, mk_suc, ONE
 
 class _Frame:
     __slots__ = ("goal", "kind", "vars_added", "hyps_added",
-                 "facts_added", "data", "result")
+                 "facts_added", "choose_env", "pending_choose",
+                 "data", "result")
 
     def __init__(self, goal=None, kind="root"):
         self.goal = goal
@@ -50,6 +68,8 @@ class _Frame:
         self.vars_added = []      # for fix(): GEN at close
         self.hyps_added = []      # for assume(): list of (label, term); DISCH at close
         self.facts_added = []     # labels added at this frame; popped on exit
+        self.choose_env = {}      # name -> witness term (parser env entries)
+        self.pending_choose = []  # list of (ex_th, pred, hyp_ex) to discharge on close
         self.data = {}            # block-specific scratch
         self.result = None        # the theorem proving `goal`
 
@@ -76,7 +96,18 @@ class Proof:
         for fr in self._frames:
             for v in fr.vars_added:
                 env[v.name] = v
+            for name, term in fr.choose_env.items():
+                env[name] = term
         return env
+
+    def _set_frame_result(self, frame, th):
+        """Assign `frame.result = th`, after discharging any pending choose-blocks
+        on the frame (in LIFO order). The discharge replays CHOOSE_GT-style
+        ELIM_EX + PROVE_HYP plumbing."""
+        for ex_th, pred, hyp_ex in reversed(frame.pending_choose):
+            th = PROVE_HYP(ex_th, ELIM_EX(pred, hyp_ex, lambda _: th))
+        frame.pending_choose.clear()
+        frame.result = th
 
     def _parse(self, s):
         return parse(s, env=self._scope_env())
@@ -250,6 +281,80 @@ class Proof:
                              on_close=on_close,
                              extra_facts=[(ih_label, ASSUME(body))])
 
+    def choose(self, name_spec, from_, eq_label=None):
+        """Eliminate an existential, bringing a witness into scope.
+
+        ``name_spec``: ``"name"`` or ``"name: equation"``. The latter form
+            verifies the equation matches the body the witness satisfies.
+        ``from_``: label of the source fact, which must be ``?v. body``,
+            or ``x > y``, or ``x < y`` (auto-unfolded).
+        ``eq_label``: label under which to register the equation fact;
+            defaults to ``f"{name}_eq"`` so it doesn't clash with the witness
+            name (which lives in the parser env).
+        """
+        m = self._LABEL_RE.match(name_spec)
+        if m:
+            name = m.group(1)
+            eq_check = m.group(2)
+        else:
+            name = name_spec.strip()
+            eq_check = None
+
+        src_th = self._resolve_fact(from_)
+        c = src_th._concl
+
+        # If src is a relation registered with an unfolder, unfold to
+        # existential first.
+        if (isinstance(c, Comb) and isinstance(c.fun, Comb)
+                and isinstance(c.fun.fun, Const)
+                and c.fun.fun.name in _UNFOLDERS):
+            unfold_fn = _UNFOLDERS[c.fun.fun.name]
+            a = c.fun.arg
+            b = c.arg
+            ex_th = EQ_MP(unfold_fn(a, b), src_th)
+        else:
+            ex_th = src_th
+
+        # ex_th's conclusion must now be `?v. body`.
+        exc = ex_th._concl
+        if not (isinstance(exc, Comb) and isinstance(exc.fun, Const)
+                and exc.fun.name == "?" and isinstance(exc.arg, Abs)):
+            raise HolError(
+                f"choose: source {from_!r} is not an existential or order relation: "
+                f"{pp(c)}")
+
+        pred = exc.arg
+        v_var = pred.bvar
+        sel_const = mk_const("@", [(v_var.ty, aty)])
+        w_term = mk_comb(sel_const, pred)
+        # body[w/v]: beta-reduce (pred w).
+        body_at_w = rand(BETA_CONV(mk_comb(pred, w_term))._concl)
+
+        if eq_check is not None:
+            env = self._scope_env()
+            env[name] = w_term
+            try:
+                expected = parse(eq_check, env=env)
+            except ParseError as ex:
+                raise HolError(f"choose: cannot parse equation spec: {ex}") from ex
+            if not aconv(expected, body_at_w):
+                raise HolError(
+                    "choose: equation spec doesn't match witness body\n"
+                    f"  expected: {pp(body_at_w)}\n"
+                    f"  given:    {pp(expected)}")
+
+        # Register witness in parser env on the current frame.
+        if name in self._cur.choose_env:
+            raise HolError(f"choose: witness name {name!r} already in use in this scope")
+        self._cur.choose_env[name] = w_term
+
+        # Register the equation as a fact (default label = "{name}_eq").
+        eq_label = eq_label or f"{name}_eq"
+        self._register_fact(eq_label, ASSUME(body_at_w))
+
+        # Defer discharge to frame close.
+        self._cur.pending_choose.append((ex_th, pred, exc))
+
     def cases_on(self, ref):
         or_th = self._resolve_fact(ref)
         c = or_th._concl
@@ -264,7 +369,7 @@ class Proof:
         fr = self._cur
         if fr.kind != "_cases":
             raise HolError("case() outside cases_on()")
-        branch_term = self._parse(branch_spec)
+        label, branch_term = self._split_label(branch_spec)
         outer_goal = fr.data["goal"]
         if aconv(branch_term, fr.data["left"]):
             slot = "left"
@@ -281,7 +386,7 @@ class Proof:
 
         return _SubFrameCtx(self, outer_goal, kind="case",
                              on_close=on_close,
-                             extra_facts=[(None, ASSUME(branch_term))])
+                             extra_facts=[(label, ASSUME(branch_term))])
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +419,7 @@ class _Have:
                     "thus: term does not match current goal\n"
                     f"  goal: {pp(cur.goal) if cur.goal is not None else 'None'}\n"
                     f"  thus: {pp(self.term)}")
-            cur.result = th
+            self.p._set_frame_result(cur, th)
         return th
 
     # ----- justification methods -----
@@ -337,7 +442,7 @@ class _Have:
             resolved = [self.p._resolve_fact_or_term(a) for a in args]
             return self._finish(MP_LIST(justification, resolved))
         if callable(justification):
-            resolved = [self.p._resolve_fact(a) for a in args]
+            resolved = [self.p._resolve_fact_or_term(a) for a in args]
             return self._finish(justification(*resolved))
         raise HolError(
             f"by: not a theorem or callable: {justification!r}")
@@ -455,7 +560,7 @@ class _InductionCtx:
                 "induction: produced wrong conclusion\n"
                 f"  goal: {pp(parent.goal) if parent.goal else 'None'}\n"
                 f"  got:  {pp(body_th._concl)}")
-        parent.result = body_th
+        self.p._set_frame_result(parent, body_th)
         return False
 
 
@@ -500,7 +605,7 @@ class _CasesCtx:
                 "cases_on: produced wrong conclusion\n"
                 f"  goal: {pp(parent.goal) if parent.goal else 'None'}\n"
                 f"  got:  {pp(result._concl)}")
-        parent.result = result
+        self.p._set_frame_result(parent, result)
         return False
 
 

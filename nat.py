@@ -734,6 +734,12 @@ def UNFOLD_LT(a, b):
     """ |- (a < b) = (?v. b = a + v) """
     return _binop_unfold(LT_DEF, LT, a, b)
 
+# Register with the proof DSL so `p.choose(name, from_=label)` accepts a fact
+# whose conclusion is `> ` or `<`.
+from proof import register_unfolder
+register_unfolder(">", UNFOLD_GT)
+register_unfolder("<", UNFOLD_LT)
+
 def PROVE_GT(a_t, b_t, witness, eq_th):
     """From eq_th : ... |- a = b + witness, return ... |- a > b."""
     pred = mk_abs(u, mk_eq(a_t, mk_add(b_t, u)))
@@ -862,18 +868,15 @@ SATZ_14 = _prove_satz_14()
 
 # Theorem 15 (transitivity of order):  |- !x y z. x < y ==> y < z ==> x < z.
 
-def _prove_satz_15():
-    def _from_v(eq_y, v0):
-        def _from_w(eq_z, w0):
-            z_eq = REWRITE_PROVE([eq_z, eq_y, SATZ_5],
-                                  parse("z = x + (v0 + w0)",
-                                        env={"v0": v0, "w0": w0}))
-            return PROVE_LT(x, z, mk_add(v0, w0), z_eq)
-        return CHOOSE_LT(ASSUME(mk_lt(y, z)), _from_w)
-    th_lt = CHOOSE_LT(ASSUME(mk_lt(x, y)), _from_v)
-    return GENL([x, y, z], DISCHL([mk_lt(x, y), mk_lt(y, z)], th_lt))
-
-SATZ_15 = _prove_satz_15()
+@proof
+def SATZ_15(p):
+    p.goal("!x y z. x < y ==> y < z ==> x < z")
+    p.fix("x y z")
+    p.assume("hxy: x < y", "hyz: y < z")
+    p.choose("v: y = x + v", from_="hxy")
+    p.choose("w: z = y + w", from_="hyz")
+    p.have("eq: z = x + (v + w)").by_rewrite(["w_eq", "v_eq", SATZ_5])
+    p.thus("x < z").by(PROVE_LT, "x", "z", "v + w", "eq")
 
 
 # Helpers turning < / = into <= and the analogues, used pervasively in #3.
@@ -957,15 +960,15 @@ def SATZ_18(p):
 #   19b:  x = y      ==>  x + z = y + z
 #   19c:  x < y      ==>  x + z < y + z
 
-def _prove_satz_19a():
-    def _from(eq_x, u0):
-        path = REWRITE_AC_PROVE([eq_x], PLUS, SATZ_5, SATZ_6,
-                                 parse("x + z = (y + z) + u0", env={"u0": u0}))
-        return PROVE_GT(mk_add(x, z), mk_add(y, z), u0, path)
-    th_gt = CHOOSE_GT(ASSUME(mk_gt(x, y)), _from)
-    return GENL([x, y, z], DISCH(mk_gt(x, y), th_gt))
-
-SATZ_19A = _prove_satz_19a()
+@proof
+def SATZ_19A(p):
+    p.goal("!x y z. x > y ==> x + z > y + z")
+    p.fix("x y z")
+    p.assume("h: x > y")
+    p.choose("u: x = y + u", from_="h")
+    p.have("eq: x + z = (y + z) + u")\
+        .by_rewrite_ac(["u_eq"], PLUS, SATZ_5, SATZ_6)
+    p.thus("x + z > y + z").by(PROVE_GT, "x + z", "y + z", "u", "eq")
 
 @proof
 def SATZ_19B(p):
@@ -987,111 +990,117 @@ def SATZ_19C(p):
 # Theorem 21:   x > y, z > u  ==>  x + z > y + u.
 # Proof: x+z > y+z (Theorem 19a) and y+z > y+u (Theorem 19a w/ commutativity).
 
-def _prove_satz_21():
-    h_xy = ASSUME(mk_gt(x, y))
-    h_zu = ASSUME(mk_gt(z, u))
-    s19a_xy = MP_LIST(SATZ_19A, [x, y, z, h_xy])                # x+z > y+z
-    s19a_zu = MP_LIST(SATZ_19A, [z, u, y, h_zu])                # z+y > u+y
-    comm_zy = SPECL([z, y], SATZ_6)
-    comm_uy = SPECL([u, y], SATZ_6)
-    rewrite = MK_COMB(AP_TERM(GT, comm_zy), comm_uy)
-    th_yz_gt_yu = EQ_MP(rewrite, s19a_zu)                       # y+z > y+u
-    th_yu_lt_yz = MP_LIST(SATZ_11, [mk_add(y, z), mk_add(y, u), th_yz_gt_yu])
-    th_yz_lt_xz = MP_LIST(SATZ_11, [mk_add(x, z), mk_add(y, z), s19a_xy])
-    th_lt = MP_LIST(SATZ_15, [mk_add(y, u), mk_add(y, z), mk_add(x, z),
-                              th_yu_lt_yz, th_yz_lt_xz])
-    th_gt = MP_LIST(SATZ_12, [mk_add(y, u), mk_add(x, z), th_lt])
-    return GENL([x, y, z, u], DISCHL([mk_gt(x, y), mk_gt(z, u)], th_gt))
-
-SATZ_21 = _prove_satz_21()
+@proof
+def SATZ_21(p):
+    p.goal("!x y z u. x > y ==> z > u ==> x + z > y + u")
+    p.fix("x y z u")
+    p.assume("hxy: x > y", "hzu: z > u")
+    p.have("xz_gt_yz: x + z > y + z").by(SATZ_19A, "x", "y", "z", "hxy")
+    p.have("zy_gt_uy: z + y > u + y").by(SATZ_19A, "z", "u", "y", "hzu")
+    p.have("yz_gt_yu: y + z > y + u")\
+        .by_thm(EQ_MP(MK_COMB(AP_TERM(GT, SPECL([z, y], SATZ_6)),
+                              SPECL([u, y], SATZ_6)),
+                      p.fact("zy_gt_uy")))
+    p.have("yu_lt_yz: y + u < y + z").by(SATZ_11, "y + z", "y + u", "yz_gt_yu")
+    p.have("yz_lt_xz: y + z < x + z").by(SATZ_11, "x + z", "y + z", "xz_gt_yz")
+    p.have("yu_lt_xz: y + u < x + z")\
+        .by(SATZ_15, "y + u", "y + z", "x + z", "yu_lt_yz", "yz_lt_xz")
+    p.thus("x + z > y + u").by(SATZ_12, "y + u", "x + z", "yu_lt_xz")
 
 
 # Theorem 22:   x >= y, z > u  ==>  x + z > y + u   (and the other "or" form).
 
-def _prove_satz_22a():
-    h_ge = ASSUME(mk_ge(x, y))
-    h_gt = ASSUME(mk_gt(z, u))
-    s19a_zu = MP_LIST(SATZ_19A, [z, u, y, h_gt])                # z+y > u+y
-    comm_zy = SPECL([z, y], SATZ_6)
-    comm_uy = SPECL([u, y], SATZ_6)
-    th_yzgt = EQ_MP(MK_COMB(AP_TERM(GT, comm_zy), comm_uy), s19a_zu)   # y+z > y+u
-    def _branch_eq(eq_xy):
-        yz_eq_xz = AP_THM(AP_TERM(PLUS, SYM(eq_xy)), z)         # y+z = x+z
-        rewrite = MK_COMB(AP_TERM(GT, yz_eq_xz), REFL(mk_add(y, u)))
-        return EQ_MP(rewrite, th_yzgt)
-    th_xzgt = CASE_OR(EQ_MP(UNFOLD_GE(x, y), h_ge),
-        (mk_gt(x, y), lambda h: MP_LIST(SATZ_21, [x, y, z, u, h, h_gt])),
-        (mk_eq(x, y), _branch_eq))
-    return GENL([x, y, z, u], DISCHL([mk_ge(x, y), mk_gt(z, u)], th_xzgt))
+@proof
+def SATZ_22A(p):
+    p.goal("!x y z u. x >= y ==> z > u ==> x + z > y + u")
+    p.fix("x y z u")
+    p.assume("hge: x >= y", "hgt: z > u")
+    p.have("xy_or: (x > y) \\/ (x = y)").by_eq_mp(UNFOLD_GE(x, y), "hge")
+    with p.cases_on("xy_or"):
+        with p.case("x > y"):
+            p.thus("x + z > y + u").by(SATZ_21, "x", "y", "z", "u", -1, "hgt")
+        with p.case("hxy: x = y"):
+            p.have("zy_gt_uy: z + y > u + y").by(SATZ_19A, "z", "u", "y", "hgt")
+            p.have("yz_gt_yu: y + z > y + u").by_thm(EQ_MP(
+                MK_COMB(AP_TERM(GT, SPECL([z, y], SATZ_6)),
+                        SPECL([u, y], SATZ_6)),
+                p.fact("zy_gt_uy")))
+            p.thus("x + z > y + u").by_rewrite_of(
+                "yz_gt_yu",
+                [AP_THM(AP_TERM(PLUS, SYM(p.fact("hxy"))), z)])
 
-SATZ_22A = _prove_satz_22a()
-
-def _prove_satz_22b():
-    h_gt = ASSUME(mk_gt(x, y))
-    h_ge = ASSUME(mk_ge(z, u))
-    s19a_xy = MP_LIST(SATZ_19A, [x, y, z, h_gt])                # x+z > y+z
-    def _branch_eq(eq_zu):
-        yz_eq_yu = AP_TERM(mk_comb(PLUS, y), eq_zu)             # y+z = y+u
-        rewrite = MK_COMB(AP_TERM(GT, REFL(mk_add(x, z))), yz_eq_yu)
-        return EQ_MP(rewrite, s19a_xy)
-    th = CASE_OR(EQ_MP(UNFOLD_GE(z, u), h_ge),
-        (mk_gt(z, u), lambda h: MP_LIST(SATZ_21, [x, y, z, u, h_gt, h])),
-        (mk_eq(z, u), _branch_eq))
-    return GENL([x, y, z, u], DISCHL([mk_gt(x, y), mk_ge(z, u)], th))
-
-SATZ_22B = _prove_satz_22b()
+@proof
+def SATZ_22B(p):
+    p.goal("!x y z u. x > y ==> z >= u ==> x + z > y + u")
+    p.fix("x y z u")
+    p.assume("hgt: x > y", "hge: z >= u")
+    p.have("zu_or: (z > u) \\/ (z = u)").by_eq_mp(UNFOLD_GE(z, u), "hge")
+    with p.cases_on("zu_or"):
+        with p.case("z > u"):
+            p.thus("x + z > y + u").by(SATZ_21, "x", "y", "z", "u", "hgt", -1)
+        with p.case("hzu: z = u"):
+            p.have("xz_gt_yz: x + z > y + z").by(SATZ_19A, "x", "y", "z", "hgt")
+            p.thus("x + z > y + u").by_rewrite_of(
+                "xz_gt_yz",
+                [AP_TERM(mk_comb(PLUS, y), p.fact("hzu"))])
 
 
 # Theorem 23:   x >= y, z >= u  ==>  x + z >= y + u.
 
-def _prove_satz_23():
-    h_xy = ASSUME(mk_ge(x, y))
-    h_zu = ASSUME(mk_ge(z, u))
-    uz  = EQ_MP(UNFOLD_GE(z, u), h_zu)
-    def _from_xy_eq(eq_xy):
-        return CASE_OR(uz,
-            (mk_gt(z, u), lambda h: GT_TO_GE(MP_LIST(SATZ_22A, [x, y, z, u, h_xy, h]))),
-            (mk_eq(z, u), lambda h: EQ_TO_GE(MK_COMB(AP_TERM(PLUS, eq_xy), h))))
-    th = CASE_OR(EQ_MP(UNFOLD_GE(x, y), h_xy),
-        (mk_gt(x, y), lambda h: GT_TO_GE(MP_LIST(SATZ_22B, [x, y, z, u, h, h_zu]))),
-        (mk_eq(x, y), _from_xy_eq))
-    return GENL([x, y, z, u], DISCHL([mk_ge(x, y), mk_ge(z, u)], th))
-
-SATZ_23 = _prove_satz_23()
+@proof
+def SATZ_23(p):
+    p.goal("!x y z u. x >= y ==> z >= u ==> x + z >= y + u")
+    p.fix("x y z u")
+    p.assume("hxy: x >= y", "hzu: z >= u")
+    p.have("xy_or: (x > y) \\/ (x = y)").by_eq_mp(UNFOLD_GE(x, y), "hxy")
+    p.have("zu_or: (z > u) \\/ (z = u)").by_eq_mp(UNFOLD_GE(z, u), "hzu")
+    with p.cases_on("xy_or"):
+        with p.case("hgt_xy: x > y"):
+            p.have("gt: x + z > y + u").by(SATZ_22B, "x", "y", "z", "u",
+                                            "hgt_xy", "hzu")
+            p.thus("x + z >= y + u").by(GT_TO_GE, "gt")
+        with p.case("heq_xy: x = y"):
+            with p.cases_on("zu_or"):
+                with p.case("hgt_zu: z > u"):
+                    p.have("gt: x + z > y + u").by(SATZ_22A, "x", "y", "z", "u",
+                                                    "hxy", "hgt_zu")
+                    p.thus("x + z >= y + u").by(GT_TO_GE, "gt")
+                with p.case("heq_zu: z = u"):
+                    p.thus("x + z >= y + u").by(EQ_TO_GE,
+                        MK_COMB(AP_TERM(PLUS, p.fact("heq_xy")),
+                                p.fact("heq_zu")))
 
 
 # Theorem 24:  |- !x. x >= 1.    Either x = 1 or x = u' = u + 1 > 1.
 
-def _prove_satz_24():
-    lp = SPEC(x, LEMMA_PRED)
-    branch1 = DISCH(parse("x = 1"), EQ_TO_GE(ASSUME(parse("x = 1"))))
-    pred_u = mk_abs(u, parse("x = SUC u"))
-    hyp_ex = parse("?u. x = SUC u")
-    def _from(eq_x):
-        w = rand(rand(eq_x._concl))
-        x_eq_1w = REWRITE_PROVE([eq_x, ONE_PLUS],
-                                parse("x = 1 + w", env={"w": w}))
-        return GT_TO_GE(PROVE_GT(x, ONE, w, x_eq_1w))
-    branch2 = DISCH(hyp_ex, ELIM_EX(pred_u, hyp_ex, _from))
-    return GEN(x, DISJ_CASES(lp, branch1, branch2))
-
-SATZ_24 = _prove_satz_24()
+@proof
+def SATZ_24(p):
+    p.goal("!x. x >= 1")
+    p.fix("x")
+    p.have("lp: (x = 1) \\/ (?u. x = SUC u)").by(LEMMA_PRED, "x")
+    with p.cases_on("lp"):
+        with p.case("hx1: x = 1"):
+            p.thus("x >= 1").by(EQ_TO_GE, "hx1")
+        with p.case("hex: ?u. x = SUC u"):
+            p.choose("u: x = SUC u", from_="hex")
+            p.have("eq: x = 1 + u").by_rewrite(["u_eq", ONE_PLUS])
+            p.have("gt1: x > 1").by(PROVE_GT, "x", "1", "u", "eq")
+            p.thus("x >= 1").by(GT_TO_GE, "gt1")
 
 
 # Theorem 25:   y > x  ==>  y >= x + 1.
 # Proof: y = x + u, u >= 1, so y = x + u >= x + 1 (Theorem 23).
 
-def _prove_satz_25():
-    def _from(eq_y, u0):
-        u_ge_1 = SPEC(u0, SATZ_24)
-        sum_ge = MP_LIST(SATZ_23,
-            [x, x, u0, ONE, EQ_TO_GE(REFL(x)), u_ge_1])         # x+u0 >= x+1
-        rewrite = MK_COMB(AP_TERM(GE, SYM(eq_y)), REFL(mk_add(x, ONE)))
-        return EQ_MP(rewrite, sum_ge)
-    th_full = CHOOSE_GT(ASSUME(mk_gt(y, x)), _from)
-    return GENL([x, y], DISCH(mk_gt(y, x), th_full))
-
-SATZ_25 = _prove_satz_25()
+@proof
+def SATZ_25(p):
+    p.goal("!x y. y > x ==> y >= x + 1")
+    p.fix("x y")
+    p.assume("h: y > x")
+    p.choose("u: y = x + u", from_="h")
+    p.have("u_ge_1: u >= 1").by(SATZ_24, "u")
+    p.have("sum_ge: x + u >= x + 1")\
+        .by(SATZ_23, "x", "x", "u", "1", EQ_TO_GE(REFL(x)), "u_ge_1")
+    p.thus("y >= x + 1").by_rewrite_of("sum_ge", [SYM(p.fact("u_eq"))])
 
 
 # Theorem 26:   y < x + 1  ==>  y <= x.    Contrapositive of Theorem 25.
@@ -1579,16 +1588,14 @@ RIGHT_DISTRIB = _prove_right_distrib()
 # Theorem 32 (3-fold "respectively"):  From  x>y / x=y / x<y  it follows  xz > yz / xz = yz / xz < yz.
 # We prove the three pieces; same template as Theorem 19.
 
-def _prove_satz_32a():
-    def _from(eq_x, u0):
-        # x*z = (y+u0)*z = y*z + u0*z   [eq_x then RIGHT_DISTRIB].
-        path = REWRITE_PROVE([eq_x, RIGHT_DISTRIB],
-                              parse("x * z = y * z + u0 * z", env={"u0": u0}))
-        return PROVE_GT(mk_mul(x, z), mk_mul(y, z), mk_mul(u0, z), path)
-    th_gt = CHOOSE_GT(ASSUME(mk_gt(x, y)), _from)
-    return GENL([x, y, z], DISCH(mk_gt(x, y), th_gt))
-
-SATZ_32A = _prove_satz_32a()
+@proof
+def SATZ_32A(p):
+    p.goal("!x y z. x > y ==> x * z > y * z")
+    p.fix("x y z")
+    p.assume("h: x > y")
+    p.choose("u: x = y + u", from_="h")
+    p.have("eq: x * z = y * z + u * z").by_rewrite(["u_eq", RIGHT_DISTRIB])
+    p.thus("x * z > y * z").by(PROVE_GT, "x * z", "y * z", "u * z", "eq")
 
 @proof
 def SATZ_32B(p):
@@ -1609,77 +1616,85 @@ def SATZ_32C(p):
 
 # Theorem 34:  x>y, z>u  ==>  x*z > y*u.   Mirror of Theorem 21.
 
-def _prove_satz_34():
-    h_xy = ASSUME(mk_gt(x, y))
-    h_zu = ASSUME(mk_gt(z, u))
-    s32a_xy = MP_LIST(SATZ_32A, [x, y, z, h_xy])                # x*z > y*z
-    s32a_zu = MP_LIST(SATZ_32A, [z, u, y, h_zu])                # z*y > u*y
-    comm_zy = SPECL([z, y], SATZ_29)
-    comm_uy = SPECL([u, y], SATZ_29)
-    rewrite = MK_COMB(AP_TERM(GT, comm_zy), comm_uy)
-    th_yz_gt_yu = EQ_MP(rewrite, s32a_zu)                       # y*z > y*u
-    th_yu_lt_yz = MP_LIST(SATZ_11, [mk_mul(y, z), mk_mul(y, u), th_yz_gt_yu])
-    th_yz_lt_xz = MP_LIST(SATZ_11, [mk_mul(x, z), mk_mul(y, z), s32a_xy])
-    th_lt = MP_LIST(SATZ_15, [mk_mul(y, u), mk_mul(y, z), mk_mul(x, z),
-                              th_yu_lt_yz, th_yz_lt_xz])
-    th_gt = MP_LIST(SATZ_12, [mk_mul(y, u), mk_mul(x, z), th_lt])
-    return GENL([x, y, z, u], DISCHL([mk_gt(x, y), mk_gt(z, u)], th_gt))
-
-SATZ_34 = _prove_satz_34()
+@proof
+def SATZ_34(p):
+    p.goal("!x y z u. x > y ==> z > u ==> x * z > y * u")
+    p.fix("x y z u")
+    p.assume("hxy: x > y", "hzu: z > u")
+    p.have("xz_gt_yz: x * z > y * z").by(SATZ_32A, "x", "y", "z", "hxy")
+    p.have("zy_gt_uy: z * y > u * y").by(SATZ_32A, "z", "u", "y", "hzu")
+    p.have("yz_gt_yu: y * z > y * u").by_thm(EQ_MP(
+        MK_COMB(AP_TERM(GT, SPECL([z, y], SATZ_29)),
+                SPECL([u, y], SATZ_29)),
+        p.fact("zy_gt_uy")))
+    p.have("yu_lt_yz: y * u < y * z").by(SATZ_11, "y * z", "y * u", "yz_gt_yu")
+    p.have("yz_lt_xz: y * z < x * z").by(SATZ_11, "x * z", "y * z", "xz_gt_yz")
+    p.have("yu_lt_xz: y * u < x * z")\
+        .by(SATZ_15, "y * u", "y * z", "x * z", "yu_lt_yz", "yz_lt_xz")
+    p.thus("x * z > y * u").by(SATZ_12, "y * u", "x * z", "yu_lt_xz")
 
 
 # Theorem 35:  x>=y, z>u (or x>y, z>=u)  ==>  x*z > y*u.
 
-def _prove_satz_35a():
-    h_ge = ASSUME(mk_ge(x, y))
-    h_gt = ASSUME(mk_gt(z, u))
-    s32a_zu = MP_LIST(SATZ_32A, [z, u, y, h_gt])                # z*y > u*y
-    comm_zy = SPECL([z, y], SATZ_29)
-    comm_uy = SPECL([u, y], SATZ_29)
-    th_yzgt = EQ_MP(MK_COMB(AP_TERM(GT, comm_zy), comm_uy), s32a_zu)
-    def _branch_eq(eq_xy):
-        yz_eq_xz = AP_THM(AP_TERM(TIMES, SYM(eq_xy)), z)
-        rewrite = MK_COMB(AP_TERM(GT, yz_eq_xz), REFL(mk_mul(y, u)))
-        return EQ_MP(rewrite, th_yzgt)
-    th = CASE_OR(EQ_MP(UNFOLD_GE(x, y), h_ge),
-        (mk_gt(x, y), lambda h: MP_LIST(SATZ_34, [x, y, z, u, h, h_gt])),
-        (mk_eq(x, y), _branch_eq))
-    return GENL([x, y, z, u], DISCHL([mk_ge(x, y), mk_gt(z, u)], th))
+@proof
+def SATZ_35A(p):
+    p.goal("!x y z u. x >= y ==> z > u ==> x * z > y * u")
+    p.fix("x y z u")
+    p.assume("hge: x >= y", "hgt: z > u")
+    p.have("xy_or: (x > y) \\/ (x = y)").by_eq_mp(UNFOLD_GE(x, y), "hge")
+    with p.cases_on("xy_or"):
+        with p.case("x > y"):
+            p.thus("x * z > y * u").by(SATZ_34, "x", "y", "z", "u", -1, "hgt")
+        with p.case("hxy: x = y"):
+            p.have("zy_gt_uy: z * y > u * y").by(SATZ_32A, "z", "u", "y", "hgt")
+            p.have("yz_gt_yu: y * z > y * u").by_thm(EQ_MP(
+                MK_COMB(AP_TERM(GT, SPECL([z, y], SATZ_29)),
+                        SPECL([u, y], SATZ_29)),
+                p.fact("zy_gt_uy")))
+            p.thus("x * z > y * u").by_rewrite_of(
+                "yz_gt_yu",
+                [AP_THM(AP_TERM(TIMES, SYM(p.fact("hxy"))), z)])
 
-SATZ_35A = _prove_satz_35a()
-
-def _prove_satz_35b():
-    h_gt = ASSUME(mk_gt(x, y))
-    h_ge = ASSUME(mk_ge(z, u))
-    s32a_xy = MP_LIST(SATZ_32A, [x, y, z, h_gt])                # x*z > y*z
-    def _branch_eq(eq_zu):
-        yz_eq_yu = AP_TERM(mk_comb(TIMES, y), eq_zu)
-        rewrite = MK_COMB(AP_TERM(GT, REFL(mk_mul(x, z))), yz_eq_yu)
-        return EQ_MP(rewrite, s32a_xy)
-    th = CASE_OR(EQ_MP(UNFOLD_GE(z, u), h_ge),
-        (mk_gt(z, u), lambda h: MP_LIST(SATZ_34, [x, y, z, u, h_gt, h])),
-        (mk_eq(z, u), _branch_eq))
-    return GENL([x, y, z, u], DISCHL([mk_gt(x, y), mk_ge(z, u)], th))
-
-SATZ_35B = _prove_satz_35b()
+@proof
+def SATZ_35B(p):
+    p.goal("!x y z u. x > y ==> z >= u ==> x * z > y * u")
+    p.fix("x y z u")
+    p.assume("hgt: x > y", "hge: z >= u")
+    p.have("zu_or: (z > u) \\/ (z = u)").by_eq_mp(UNFOLD_GE(z, u), "hge")
+    with p.cases_on("zu_or"):
+        with p.case("z > u"):
+            p.thus("x * z > y * u").by(SATZ_34, "x", "y", "z", "u", "hgt", -1)
+        with p.case("hzu: z = u"):
+            p.have("xz_gt_yz: x * z > y * z").by(SATZ_32A, "x", "y", "z", "hgt")
+            p.thus("x * z > y * u").by_rewrite_of(
+                "xz_gt_yz",
+                [AP_TERM(mk_comb(TIMES, y), p.fact("hzu"))])
 
 
 # Theorem 36:  x>=y, z>=u  ==>  x*z >= y*u.
 
-def _prove_satz_36():
-    h_xy = ASSUME(mk_ge(x, y))
-    h_zu = ASSUME(mk_ge(z, u))
-    uz  = EQ_MP(UNFOLD_GE(z, u), h_zu)
-    def _from_xy_eq(eq_xy):
-        return CASE_OR(uz,
-            (mk_gt(z, u), lambda h: GT_TO_GE(MP_LIST(SATZ_35A, [x, y, z, u, h_xy, h]))),
-            (mk_eq(z, u), lambda h: EQ_TO_GE(MK_COMB(AP_TERM(TIMES, eq_xy), h))))
-    th = CASE_OR(EQ_MP(UNFOLD_GE(x, y), h_xy),
-        (mk_gt(x, y), lambda h: GT_TO_GE(MP_LIST(SATZ_35B, [x, y, z, u, h, h_zu]))),
-        (mk_eq(x, y), _from_xy_eq))
-    return GENL([x, y, z, u], DISCHL([mk_ge(x, y), mk_ge(z, u)], th))
-
-SATZ_36 = _prove_satz_36()
+@proof
+def SATZ_36(p):
+    p.goal("!x y z u. x >= y ==> z >= u ==> x * z >= y * u")
+    p.fix("x y z u")
+    p.assume("hxy: x >= y", "hzu: z >= u")
+    p.have("xy_or: (x > y) \\/ (x = y)").by_eq_mp(UNFOLD_GE(x, y), "hxy")
+    p.have("zu_or: (z > u) \\/ (z = u)").by_eq_mp(UNFOLD_GE(z, u), "hzu")
+    with p.cases_on("xy_or"):
+        with p.case("hgt_xy: x > y"):
+            p.have("gt: x * z > y * u").by(SATZ_35B, "x", "y", "z", "u",
+                                            "hgt_xy", "hzu")
+            p.thus("x * z >= y * u").by(GT_TO_GE, "gt")
+        with p.case("heq_xy: x = y"):
+            with p.cases_on("zu_or"):
+                with p.case("hgt_zu: z > u"):
+                    p.have("gt: x * z > y * u").by(SATZ_35A, "x", "y", "z", "u",
+                                                    "hxy", "hgt_zu")
+                    p.thus("x * z >= y * u").by(GT_TO_GE, "gt")
+                with p.case("heq_zu: z = u"):
+                    p.thus("x * z >= y * u").by(EQ_TO_GE,
+                        MK_COMB(AP_TERM(TIMES, p.fact("heq_xy")),
+                                p.fact("heq_zu")))
 
 
 # ---------------------------------------------------------------------------
