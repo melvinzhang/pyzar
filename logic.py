@@ -4,13 +4,15 @@ Built on the primitive HOL Light kernel in ``fusion.py`` plus the boolean
 infrastructure / 3 logical axioms (ETA, SELECT, INFINITY) from ``axioms.py``.
 
 Provides:
-  * Pretty-printer (``pp``, ``pp_thm``).
   * Standard derived rules: AP_TERM, AP_THM, BETA_CONV, BETA_NORM, SYM,
     TRUTH, EQT_ELIM/INTRO, SPEC, GEN, CONJ, CONJUNCT1/2, DISCH, MP, UNDISCH,
     CONTR, NOT_ELIM/INTRO, EQF_ELIM/INTRO, DISJ1/2, DISJ_CASES, EXISTS.
   * EXCLUDED_MIDDLE   |- !t. t \\/ ~t   (proved from SELECT_AX + ETA_AX
     via Diaconescu's argument; mirrors HOL Light's class.ml).
   * Classical helpers: NOT_NOT_ELIM, NOT_EX_TO_FORALL_NOT, NOT_FORALL_TO_EX_NOT.
+
+Pretty-printing lives in ``parser.py`` (``pp``, ``pp_thm``) since it's
+surface syntax, not logic.
 """
 
 from fusion import (
@@ -28,40 +30,6 @@ from axioms import (
     SELECT_AX, ETA_AX,
     mk_and, mk_imp, mk_forall, mk_exists, mk_not,
 )
-
-
-# ---------------------------------------------------------------------------
-# Pretty-printer (display only -- never used by proofs).
-# ---------------------------------------------------------------------------
-
-_INFIX = {"=", "/\\", "==>", "\\/"}
-
-def pp(tm):
-    if isinstance(tm, Var):
-        return tm.name
-    if isinstance(tm, Const):
-        return tm.name
-    if isinstance(tm, Abs):
-        return f"(\\{tm.bvar.name}. {pp(tm.body)})"
-    if isinstance(tm, Comb):
-        if (isinstance(tm.fun, Const) and tm.fun.name in {"!", "?"}
-                and isinstance(tm.arg, Abs)):
-            return f"({tm.fun.name}{tm.arg.bvar.name}. {pp(tm.arg.body)})"
-        if isinstance(tm.fun, Const) and tm.fun.name == "~":
-            return f"~{pp(tm.arg)}"
-        if isinstance(tm.fun, Comb) and isinstance(tm.fun.fun, Const) \
-                and tm.fun.fun.name in _INFIX:
-            op = tm.fun.fun.name
-            a = pp(tm.fun.arg)
-            b = pp(tm.arg)
-            return f"({a} {op} {b})"
-        return f"({pp(tm.fun)} {pp(tm.arg)})"
-    return repr(tm)
-
-def pp_thm(th):
-    asl = hyp(th)
-    h = "" if not asl else ", ".join(pp(a) for a in asl) + " "
-    return f"{h}|- {pp(concl(th))}"
 
 
 # ---------------------------------------------------------------------------
@@ -831,6 +799,7 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+    from parser import pp_thm
     print(f"EXCLUDED_MIDDLE: {pp_thm(EXCLUDED_MIDDLE)}")
     print(f"F_NEQ_T:         {pp_thm(F_NEQ_T)}")
     print("logic.py self-tests passed.")

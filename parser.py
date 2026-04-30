@@ -36,7 +36,7 @@ from lark.visitors import Interpreter
 from fusion import (
     Var, Const, Comb, Abs,
     mk_var, mk_comb, mk_const, mk_eq,
-    new_basic_definition,
+    concl, hyp, new_basic_definition,
 )
 
 
@@ -111,6 +111,46 @@ class Signature:
 
 
 DEFAULT_SIG = Signature()
+
+
+# ---------------------------------------------------------------------------
+# Pretty-printer (display only -- never used by proofs).
+#
+# Reads infix/prefix/binder operators from the supplied `Signature` so that
+# every surface-syntax fact lives in one place.  `\` (raw lambda) is printed
+# from its `Abs` shape; `!` and `?` are recognised by their `Comb(Const, Abs)`
+# encoding and printed in binder form.
+# ---------------------------------------------------------------------------
+
+def pp(tm, sig=None):
+    sig = sig or DEFAULT_SIG
+    if isinstance(tm, Var):
+        return tm.name
+    if isinstance(tm, Const):
+        return tm.name
+    if isinstance(tm, Abs):
+        return f"(\\{tm.bvar.name}. {pp(tm.body, sig)})"
+    if isinstance(tm, Comb):
+        if (isinstance(tm.fun, Const) and tm.fun.name in sig.binder
+                and isinstance(tm.arg, Abs)):
+            return f"({tm.fun.name}{tm.arg.bvar.name}. {pp(tm.arg.body, sig)})"
+        if isinstance(tm.fun, Const) and tm.fun.name in sig.prefix:
+            return f"{tm.fun.name}{pp(tm.arg, sig)}"
+        if (isinstance(tm.fun, Comb) and isinstance(tm.fun.fun, Const)
+                and tm.fun.fun.name in sig.infix):
+            op = tm.fun.fun.name
+            a = pp(tm.fun.arg, sig)
+            b = pp(tm.arg, sig)
+            return f"({a} {op} {b})"
+        return f"({pp(tm.fun, sig)} {pp(tm.arg, sig)})"
+    return repr(tm)
+
+
+def pp_thm(th, sig=None):
+    sig = sig or DEFAULT_SIG
+    asl = hyp(th)
+    h = "" if not asl else ", ".join(pp(a, sig) for a in asl) + " "
+    return f"{h}|- {pp(concl(th), sig)}"
 
 
 # ---------------------------------------------------------------------------
@@ -403,8 +443,8 @@ def define(name, ty, body, *, sig=None, prec=None, assoc=None):
     Side effects (on success):
       * calls `new_basic_definition` to introduce the constant;
       * registers ``name -> mk_const(name, [])`` in `sig.const`;
-      * if `prec`/`assoc`: registers as infix in `sig`;
-      * adds ``name`` to the printer's infix set if `prec` is given.
+      * if `prec`/`assoc`: registers as infix in `sig` (which is also what
+        the printer reads from).
 
     Returns the definition theorem ``|- name = body``.
     """
@@ -419,13 +459,6 @@ def define(name, ty, body, *, sig=None, prec=None, assoc=None):
                 f"define({name!r}): prec given but assoc missing")
         builder = lambda a, b: mk_comb(mk_comb(const, a), b)
         sig.add_infix(name, prec, builder, assoc=assoc)
-        # Printer-side infix set.  Deferred import: logic.py loads after
-        # parser.py at startup, so this only resolves at call time.
-        try:
-            from logic import _INFIX
-            _INFIX.add(name)
-        except ImportError:
-            pass
     return def_th
 
 

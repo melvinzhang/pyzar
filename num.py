@@ -1166,7 +1166,7 @@ DEFAULT_SIG.default_var_ty = num_ty
 
 
 def _selftest_R():
-    from logic import pp_thm
+    from parser import pp_thm
     print("R_AT_1:        ", pp_thm(R_AT_1))
     print("R_STEP:        ", pp_thm(R_STEP))
     print("R_UNIQUE_BASE: ", pp_thm(R_UNIQUE_BASE))

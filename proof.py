@@ -33,12 +33,12 @@ from fusion import (
 )
 from axioms import F
 from logic import (
-    pp, SPEC, GEN, DISCH, MP_LIST, DISJ_CASES, BETA_CONV, SYM,
+    SPEC, GEN, DISCH, MP_LIST, DISJ_CASES, BETA_CONV, SYM,
     PROVE_HYP, ELIM_EX, _subst_term,
     NOT_INTRO, CONTR, REWRITE_NE,
 )
 from tactics import REWRITE_PROVE, REWRITE_RULE, AC_PROVE, REWRITE_AC_PROVE
-from parser import parse, ParseError
+from parser import parse, pp, ParseError
 from num import INDUCT_PROVE, mk_suc, ONE
 
 

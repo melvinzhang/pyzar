@@ -47,7 +47,6 @@ from axioms import (
     mk_and, mk_imp, mk_forall, mk_exists, mk_not,
 )
 from logic import (
-    pp_thm,
     AP_TERM, AP_THM, BETA_CONV, SYM,
     SPEC, GEN, CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP,
     CONTR, NOT_ELIM, NOT_INTRO,
@@ -64,7 +63,7 @@ from num import (
 )
 from tactics import (REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV,
                        AC_PROVE, AC_NORM, REWRITE_AC_PROVE)
-from parser import parse, ParseEnv, define, DEFAULT_SIG
+from parser import parse, ParseEnv, define, pp_thm, DEFAULT_SIG
 from proof import proof
 
 
