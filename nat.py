@@ -1177,16 +1177,18 @@ def SATZ_31(p):
 
 # Right-distributivity, the corollary Landau notes after Satz 30:
 #   (a+b)*c = a*c + b*c.   Used as a rewrite in the order/multiplication proofs.
-def _prove_right_distrib():
-    a, b, c = Var("a", num_ty), Var("b", num_ty), Var("c", num_ty)
-    return GENL([a, b, c], TRANS_CHAIN([
-        SPECL([mk_add(a, b), c], SATZ_29),
-        SPECL([c, a, b], SATZ_30),
-        AP_THM(AP_TERM(PLUS, SPECL([c, a], SATZ_29)), mk_mul(c, b)),
-        AP_TERM(mk_comb(PLUS, mk_mul(a, c)), SPECL([c, b], SATZ_29)),
-    ]))
-
-RIGHT_DISTRIB = _prove_right_distrib()
+# Plain commutativity (SATZ_29) loops as a free rewrite rule, so we name the
+# four intermediate equations explicitly and let `by_rewrite` chain them.
+@proof
+def RIGHT_DISTRIB(p):
+    p.goal("!a b c. (a + b) * c = a * c + b * c")
+    p.fix("a b c")
+    p.have("flip: (a + b) * c = c * (a + b)").by(SATZ_29, "a + b", "c")
+    p.have("dist: c * (a + b) = c * a + c * b").by(SATZ_30, "c", "a", "b")
+    p.have("ca: c * a = a * c").by(SATZ_29, "c", "a")
+    p.have("cb: c * b = b * c").by(SATZ_29, "c", "b")
+    p.thus("(a + b) * c = a * c + b * c")\
+        .by_rewrite(["flip", "dist", "ca", "cb"])
 
 
 # Theorem 32 (3-fold "respectively"):  From  x>y / x=y / x<y  it follows  xz > yz / xz = yz / xz < yz.
