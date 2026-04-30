@@ -368,8 +368,15 @@ class Proof:
         # Defer discharge to frame close.
         self._cur.pending_choose.append((ex_th, pred, exc))
 
-    def _open_cases(self, ref, target, on_close):
-        or_th = self._resolve_fact(ref)
+    def _open_cases(self, ref, target, on_close, args=()):
+        if args:
+            if not isinstance(ref, thm):
+                raise HolError(
+                    "cases_on: spec args require a theorem source")
+            resolved = [self._resolve_fact_or_term(a) for a in args]
+            or_th = MP_LIST(ref, resolved)
+        else:
+            or_th = self._resolve_fact(ref)
         c = or_th._concl
         # If the source is a relation registered with a disjunction unfolder
         # (e.g. ``>=``, ``<=``), unfold to the disjunction first.
@@ -388,13 +395,24 @@ class Proof:
             raise HolError(f"cases_on: not a disjunction: {pp(c)}")
         return _CasesCtx(self, or_th, target, on_close)
 
-    def cases_on(self, ref):
+    def cases_on(self, ref, *args):
+        """Case-split on a disjunction.
+
+        ``ref`` is a fact label, theorem, or relation fact (``a R b`` for a
+        relation registered with ``register_disj_unfolder``). When extra
+        ``*args`` are supplied, ``ref`` must be a theorem; the args are
+        ``MP_LIST``-applied (each string is parsed as a term, each fact
+        label looked up) before the cases are taken — so
+        ``cases_on(SATZ_10, "x", "y")`` is equivalent to
+        ``cases_on(SPECL([x, y], SATZ_10))``.
+        """
         parent = self._cur
         if parent.goal is None:
             raise HolError("cases_on: no current goal")
         return self._open_cases(
             ref, parent.goal,
-            lambda res: self._set_frame_result(parent, res))
+            lambda res: self._set_frame_result(parent, res),
+            args=args)
 
     def suppose(self, label_spec):
         """Open a hypothetical sub-block to prove a negation goal.
@@ -550,12 +568,15 @@ class _Have:
         eq_r_th = self.p._resolve_fact(eqs[1])
         return self._finish(REWRITE_NE(ne_th, eq_l_th, eq_r_th))
 
-    def by_cases(self, ref):
+    def by_cases(self, ref, *args):
         """Open a cases-on block whose target is the have-term (rather than
         the parent's goal). On close, the combined ``DISJ_CASES`` result is
         registered as the have's fact (and, if invoked from ``thus``, also
-        becomes the current frame's result)."""
-        return self.p._open_cases(ref, self.term, self._finish)
+        becomes the current frame's result).
+
+        Like ``cases_on``, accepts extra ``*args`` to ``MP_LIST``-specialize
+        a theorem source inline."""
+        return self.p._open_cases(ref, self.term, self._finish, args=args)
 
     def by_eq_mp(self, eq_th, ref):
         """``EQ_MP(eq_th, fact)`` -- rewrite a fact through an equation."""

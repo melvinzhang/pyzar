@@ -1156,7 +1156,7 @@ def SATZ_26(p):
     p.goal("!x y. y < x + 1 ==> y <= x")
     p.fix("x y")
     p.assume("h: y < x + 1")
-    with p.cases_on(SPECL([y, x], SATZ_10)):
+    with p.cases_on(SATZ_10, "y", "x"):
         with p.case("h_eq: y = x"):
             p.thus("y <= x").by(EQ_TO_LE, "h_eq")
         with p.case("h_gt: y > x"):
@@ -1755,7 +1755,7 @@ def SATZ_20A(p):
     p.goal("!x y z. x + z > y + z ==> x > y")
     p.fix("x y z")
     p.assume("h_a: x + z > y + z")
-    with p.cases_on(SPECL([x, y], SATZ_10)):
+    with p.cases_on(SATZ_10, "x", "y"):
         with p.case("h_eq: x = y"):
             p.have("eq_sum: x + z = y + z").by(SATZ_19B, "x", "y", "z", "h_eq")
             p.absurd().by(CONTRA_GT_EQ, "x + z", "y + z", "h_a", "eq_sum")
@@ -1771,7 +1771,7 @@ def SATZ_20B(p):
     p.goal("!x y z. x + z = y + z ==> x = y")
     p.fix("x y z")
     p.assume("h_b: x + z = y + z")
-    with p.cases_on(SPECL([x, y], SATZ_10)):
+    with p.cases_on(SATZ_10, "x", "y"):
         with p.case("h_eq: x = y"):
             p.thus("x = y").by_thm(p.fact("h_eq"))
         with p.case("h_gt: x > y"):
@@ -1787,7 +1787,7 @@ def SATZ_20C(p):
     p.goal("!x y z. x + z < y + z ==> x < y")
     p.fix("x y z")
     p.assume("h_c: x + z < y + z")
-    with p.cases_on(SPECL([x, y], SATZ_10)):
+    with p.cases_on(SATZ_10, "x", "y"):
         with p.case("h_eq: x = y"):
             p.have("eq_sum: x + z = y + z").by(SATZ_19B, "x", "y", "z", "h_eq")
             p.absurd().by(CONTRA_LT_EQ, "x + z", "y + z", "h_c", "eq_sum")
@@ -1814,7 +1814,7 @@ def SATZ_33A(p):
     p.goal("!x y z. x * z > y * z ==> x > y")
     p.fix("x y z")
     p.assume("h_a: x * z > y * z")
-    with p.cases_on(SPECL([x, y], SATZ_10)):
+    with p.cases_on(SATZ_10, "x", "y"):
         with p.case("h_eq: x = y"):
             p.have("eq_prod: x * z = y * z").by(SATZ_32B, "x", "y", "z", "h_eq")
             p.absurd().by(CONTRA_GT_EQ, "x * z", "y * z", "h_a", "eq_prod")
@@ -1830,7 +1830,7 @@ def SATZ_33B(p):
     p.goal("!x y z. x * z = y * z ==> x = y")
     p.fix("x y z")
     p.assume("h_b: x * z = y * z")
-    with p.cases_on(SPECL([x, y], SATZ_10)):
+    with p.cases_on(SATZ_10, "x", "y"):
         with p.case("h_eq: x = y"):
             p.thus("x = y").by_thm(p.fact("h_eq"))
         with p.case("h_gt: x > y"):
@@ -1846,7 +1846,7 @@ def SATZ_33C(p):
     p.goal("!x y z. x * z < y * z ==> x < y")
     p.fix("x y z")
     p.assume("h_c: x * z < y * z")
-    with p.cases_on(SPECL([x, y], SATZ_10)):
+    with p.cases_on(SATZ_10, "x", "y"):
         with p.case("h_eq: x = y"):
             p.have("eq_prod: x * z = y * z").by(SATZ_32B, "x", "y", "z", "h_eq")
             p.absurd().by(CONTRA_LT_EQ, "x * z", "y * z", "h_c", "eq_prod")
