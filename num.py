@@ -1152,6 +1152,19 @@ def _prove_num_recursion():
 NUM_RECURSION = _prove_num_recursion()
 
 
+# ---------------------------------------------------------------------------
+# Register surface syntax for the constants defined in this module, and make
+# `num` the default type for free variables in parsed terms.
+# ---------------------------------------------------------------------------
+
+from parser import DEFAULT_SIG
+
+DEFAULT_SIG.add_type("num", num_ty)
+DEFAULT_SIG.add_const("1",   ONE)
+DEFAULT_SIG.add_const("SUC", SUC)
+DEFAULT_SIG.default_var_ty = num_ty
+
+
 def _selftest_R():
     from logic import pp_thm
     print("R_AT_1:        ", pp_thm(R_AT_1))

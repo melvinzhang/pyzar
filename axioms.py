@@ -138,3 +138,19 @@ INFINITY_AX = new_axiom(
     mk_exists(_fi,
         mk_and(mk_comb(_one_one, _fi),
                mk_not(mk_comb(_onto, _fi)))))
+
+
+# ---------------------------------------------------------------------------
+# Register surface syntax for the operators defined in this module.
+# ---------------------------------------------------------------------------
+
+from parser import DEFAULT_SIG
+
+DEFAULT_SIG.add_type("bool", bool_ty)
+DEFAULT_SIG.add_infix("=",   40, mk_eq,  assoc="non")
+DEFAULT_SIG.add_infix("/\\", 30, mk_and, assoc="right")
+DEFAULT_SIG.add_infix("==>", 10, mk_imp, assoc="right")
+DEFAULT_SIG.add_prefix("~",      mk_not)
+DEFAULT_SIG.add_binder("!",      mk_forall)
+DEFAULT_SIG.add_binder("?",      mk_exists)
+DEFAULT_SIG.add_binder("\\",     mk_abs)

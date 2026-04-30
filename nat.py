@@ -65,7 +65,7 @@ from num import (
 )
 from tactics import (REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV,
                        AC_PROVE, AC_NORM, REWRITE_AC_PROVE)
-from parser import parse
+from parser import parse, DEFAULT_SIG
 
 
 # ---------------------------------------------------------------------------
@@ -172,8 +172,9 @@ PLUS = mk_const("+", [])
 def mk_add(a, b):
     return mk_comb(mk_comb(PLUS, a), b)
 
-# Make the pretty-printer aware of "+".
+# Make the pretty-printer aware of "+", and register surface syntax.
 _INFIX.add("+")
+DEFAULT_SIG.add_infix("+", 50, mk_add, assoc="left")
 
 
 def _prove_add_eqs():
@@ -709,6 +710,9 @@ _INFIX.add(">"); _INFIX.add("<")
 def mk_gt(a, b): return mk_comb(mk_comb(GT, a), b)
 def mk_lt(a, b): return mk_comb(mk_comb(LT, a), b)
 
+DEFAULT_SIG.add_infix(">", 40, mk_gt, assoc="non")
+DEFAULT_SIG.add_infix("<", 40, mk_lt, assoc="non")
+
 def _binop_unfold(def_th, op_const, a, b):
     """ |- (op a b) = (\\x y. body) a b   -- delivers the beta-reduced equality. """
     eq1 = AP_THM(def_th, a)
@@ -810,6 +814,9 @@ _INFIX.add(">="); _INFIX.add("<=")
 
 def mk_ge(a, b): return mk_comb(mk_comb(GE, a), b)
 def mk_le(a, b): return mk_comb(mk_comb(LE, a), b)
+
+DEFAULT_SIG.add_infix(">=", 40, mk_ge, assoc="non")
+DEFAULT_SIG.add_infix("<=", 40, mk_le, assoc="non")
 
 def UNFOLD_GE(a, b): return _binop_unfold(GE_DEF, GE, a, b)
 def UNFOLD_LE(a, b): return _binop_unfold(LE_DEF, LE, a, b)
@@ -1353,6 +1360,8 @@ _INFIX.add("*")
 
 def mk_mul(a, b):
     return mk_comb(mk_comb(TIMES, a), b)
+
+DEFAULT_SIG.add_infix("*", 60, mk_mul, assoc="left")
 
 
 def _prove_mul_eqs():
