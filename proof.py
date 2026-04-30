@@ -31,7 +31,7 @@ from fusion import (
     aconv, concl, HolError, ASSUME, EQ_MP,
 )
 from logic import pp, SPEC, GEN, DISCH, MP_LIST, DISJ_CASES, _subst_term
-from tactics import REWRITE_PROVE, REWRITE_RULE
+from tactics import REWRITE_PROVE, REWRITE_RULE, AC_PROVE, REWRITE_AC_PROVE
 from parser import parse, ParseError
 from num import INDUCT_PROVE, mk_suc, ONE
 
@@ -140,6 +140,10 @@ class Proof:
             except IndexError:
                 raise HolError(f"fact index out of range: {ref}")
         raise HolError(f"cannot resolve fact reference: {ref!r}")
+
+    def fact(self, ref):
+        """Public accessor: returns the theorem associated with a label or index."""
+        return self._resolve_fact(ref)
 
     def _resolve_fact_or_term(self, ref):
         """Like _resolve_fact but a non-fact string is parsed as a term."""
@@ -357,6 +361,20 @@ class _Have:
     def by_eq_mp(self, eq_th, ref):
         """``EQ_MP(eq_th, fact)`` -- rewrite a fact through an equation."""
         return self._finish(EQ_MP(eq_th, self.p._resolve_fact(ref)))
+
+    def by_ac(self, op, assoc, comm):
+        """AC_PROVE under ``(op, assoc, comm)`` for the (equation) have-term."""
+        return self._finish(AC_PROVE(op, assoc, comm, self.term))
+
+    def by_rewrite_ac(self, rules, op, assoc, comm, ac_rules=()):
+        """REWRITE_AC_PROVE -- rewrite both sides under ``rules`` (and optional
+        ``ac_rules`` for canonicalisation), then close by AC over ``op``."""
+        rule_thms = [self.p._resolve_fact(r) if not isinstance(r, thm) else r
+                     for r in rules]
+        ac_thms = tuple(self.p._resolve_fact(r) if not isinstance(r, thm) else r
+                        for r in ac_rules)
+        return self._finish(REWRITE_AC_PROVE(rule_thms, op, assoc, comm,
+                                              self.term, ac_rules=ac_thms))
 
 
 # ---------------------------------------------------------------------------

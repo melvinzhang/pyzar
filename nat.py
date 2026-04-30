@@ -66,6 +66,7 @@ from num import (
 from tactics import (REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV,
                        AC_PROVE, AC_NORM, REWRITE_AC_PROVE)
 from parser import parse, DEFAULT_SIG
+from proof import proof
 
 
 # ---------------------------------------------------------------------------
@@ -92,14 +93,15 @@ SATZ_1 = _prove_satz_1()
 #   II) From x' != x, Theorem 1 gives (x')' != x'.
 # ---------------------------------------------------------------------------
 
-def _prove_satz_2():
-    body = parse("~(SUC x = x)")
-    base = SPEC(ONE, AXIOM_3)                                # |- ~(1' = 1)
-    # Step: SATZ_1 with x:=x', y:=x  gives  ~(x'=x) ==> ~((x')'=x'); MP with IH.
-    step_fn = lambda IH: MP(SPECL([mk_suc(x), x], SATZ_1), IH)
-    return INDUCT_PROVE(x, body, base, step_fn)
-
-SATZ_2 = _prove_satz_2()
+@proof
+def SATZ_2(p):
+    p.goal("!x. ~(SUC x = x)")
+    p.fix("x")
+    with p.induction("x"):
+        with p.base():
+            p.thus("~(SUC 1 = 1)").by(AXIOM_3, "1")
+        with p.step("IH"):
+            p.thus("~(SUC (SUC x) = SUC x)").by(SATZ_1, "SUC x", "x", "IH")
 
 
 # ---------------------------------------------------------------------------
@@ -364,15 +366,16 @@ ADD_UNIQUE = _prove_add_unique()
 # Proof (Landau): induction on z.
 # ---------------------------------------------------------------------------
 
-def _prove_satz_5():
-    body_z  = parse("(x + y) + z = x + (y + z)")
-    body_1  = parse("(x + y) + 1 = x + (y + 1)")
-    body_zs = parse("(x + y) + SUC z = x + (y + SUC z)")
-    base = REWRITE_PROVE([ADD_1, ADD_SUC], body_1)
-    step_fn = lambda IH: REWRITE_PROVE([ADD_SUC, IH], body_zs)
-    return GENL([x, y], INDUCT_PROVE(z, body_z, base, step_fn))
-
-SATZ_5 = _prove_satz_5()
+@proof
+def SATZ_5(p):
+    p.goal("!x y z. (x + y) + z = x + (y + z)")
+    p.fix("x y z")
+    with p.induction("z"):
+        with p.base():
+            p.thus("(x + y) + 1 = x + (y + 1)").by_rewrite([ADD_1, ADD_SUC])
+        with p.step("IH"):
+            p.thus("(x + y) + SUC z = x + (y + SUC z)")\
+                .by_rewrite([ADD_SUC, "IH"])
 
 
 # ---------------------------------------------------------------------------
@@ -383,25 +386,26 @@ SATZ_5 = _prove_satz_5()
 # SUC_PLUS :  |- !x y.  SUC x + y = SUC (x + y)
 # ---------------------------------------------------------------------------
 
-def _prove_one_plus():
-    body_y  = parse("1 + y = SUC y")
-    body_1  = parse("1 + 1 = SUC 1")
-    body_ys = parse("1 + SUC y = SUC (SUC y)")
-    base = REWRITE_PROVE([ADD_1], body_1)
-    step_fn = lambda IH: REWRITE_PROVE([ADD_SUC, IH], body_ys)
-    return INDUCT_PROVE(y, body_y, base, step_fn)
+@proof
+def ONE_PLUS(p):
+    p.goal("!y. 1 + y = SUC y")
+    p.fix("y")
+    with p.induction("y"):
+        with p.base():
+            p.thus("1 + 1 = SUC 1").by_rewrite([ADD_1])
+        with p.step("IH"):
+            p.thus("1 + SUC y = SUC (SUC y)").by_rewrite([ADD_SUC, "IH"])
 
-ONE_PLUS = _prove_one_plus()
-
-def _prove_suc_plus():
-    body_y  = parse("SUC x + y = SUC (x + y)")
-    body_1  = parse("SUC x + 1 = SUC (x + 1)")
-    body_ys = parse("SUC x + SUC y = SUC (x + SUC y)")
-    base = REWRITE_PROVE([ADD_1], body_1)
-    step_fn = lambda IH: REWRITE_PROVE([ADD_SUC, IH], body_ys)
-    return GEN(x, INDUCT_PROVE(y, body_y, base, step_fn))
-
-SUC_PLUS = _prove_suc_plus()
+@proof
+def SUC_PLUS(p):
+    p.goal("!x y. SUC x + y = SUC (x + y)")
+    p.fix("x y")
+    with p.induction("y"):
+        with p.base():
+            p.thus("SUC x + 1 = SUC (x + 1)").by_rewrite([ADD_1])
+        with p.step("IH"):
+            p.thus("SUC x + SUC y = SUC (x + SUC y)")\
+                .by_rewrite([ADD_SUC, "IH"])
 
 
 # ---------------------------------------------------------------------------
@@ -410,25 +414,24 @@ SUC_PLUS = _prove_suc_plus()
 # Proof (Landau): induction on x with y fixed.
 # ---------------------------------------------------------------------------
 
-def _prove_satz_6():
-    body_x  = parse("x + y = y + x")
-    body_1  = parse("1 + y = y + 1")
-    body_xs = parse("SUC x + y = y + SUC x")
-    base = REWRITE_PROVE([ONE_PLUS, ADD_1], body_1)
-    step_fn = lambda IH: REWRITE_PROVE([SUC_PLUS, ADD_SUC, IH], body_xs)
-    forall_x = INDUCT_PROVE(x, body_x, base, step_fn)
-    return GENL([x, y], SPEC(x, forall_x))
-
-SATZ_6 = _prove_satz_6()
+@proof
+def SATZ_6(p):
+    p.goal("!x y. x + y = y + x")
+    p.fix("x y")
+    with p.induction("x"):
+        with p.base():
+            p.thus("1 + y = y + 1").by_rewrite([ONE_PLUS, ADD_1])
+        with p.step("IH"):
+            p.thus("SUC x + y = y + SUC x")\
+                .by_rewrite([SUC_PLUS, ADD_SUC, "IH"])
 
 
 # AC-corollary used pervasively in the order proofs:  (a+b)+c = (a+c)+b.
-def _prove_add_right_swap():
-    a, b, c = Var("a", num_ty), Var("b", num_ty), Var("c", num_ty)
-    target = parse("(a + b) + c = (a + c) + b")
-    return GENL([a, b, c], AC_PROVE(PLUS, SATZ_5, SATZ_6, target))
-
-ADD_RIGHT_SWAP = _prove_add_right_swap()
+@proof
+def ADD_RIGHT_SWAP(p):
+    p.goal("!a b c. (a + b) + c = (a + c) + b")
+    p.fix("a b c")
+    p.thus("(a + b) + c = (a + c) + b").by_ac(PLUS, SATZ_5, SATZ_6)
 
 
 # ---------------------------------------------------------------------------
@@ -488,16 +491,19 @@ SATZ_8 = _prove_satz_8()
 # proof of Theorem 3 -- restated as a clean disjunction for use in Theorem 9.
 # ---------------------------------------------------------------------------
 
-def _prove_lemma_pred():
-    body_x = parse("(x = 1) \\/ (?u. x = SUC u)")
-    base = DISJ1(REFL(ONE), parse("?u. 1 = SUC u"))
-    def step_fn(IH):
-        pred_u = mk_abs(u, mk_eq(mk_suc(x), mk_suc(u)))
-        th_ex = EXISTS(pred_u, x, REFL(mk_suc(x)))
-        return DISJ2(mk_eq(mk_suc(x), ONE), th_ex)
-    return INDUCT_PROVE(x, body_x, base, step_fn)
-
-LEMMA_PRED = _prove_lemma_pred()
+@proof
+def LEMMA_PRED(p):
+    p.goal("!x. (x = 1) \\/ (?u. x = SUC u)")
+    p.fix("x")
+    with p.induction("x"):
+        with p.base():
+            p.thus("(1 = 1) \\/ (?u. 1 = SUC u)")\
+                .by_thm(DISJ1(REFL(ONE), parse("?u. 1 = SUC u")))
+        with p.step("IH"):
+            p.thus("(SUC x = 1) \\/ (?u. SUC x = SUC u)").by_thm(
+                DISJ2(mk_eq(mk_suc(x), ONE),
+                      EXISTS(mk_abs(u, mk_eq(mk_suc(x), mk_suc(u))),
+                             x, REFL(mk_suc(x)))))
 
 
 # ---------------------------------------------------------------------------
@@ -784,19 +790,21 @@ SATZ_10 = _prove_satz_10()
 # Theorem 11:  |- !x y. (x > y) ==> (y < x).   Both sides unfold to ?u. x = y + u.
 # Theorem 12:  |- !x y. (x < y) ==> (y > x).   Symmetric.
 
-def _prove_satz_11():
-    th_unfold = EQ_MP(UNFOLD_GT(x, y), ASSUME(mk_gt(x, y)))   # ?u. x = y + u
-    th_lt = EQ_MP(SYM(UNFOLD_LT(y, x)), th_unfold)            # y < x
-    return GENL([x, y], DISCH(mk_gt(x, y), th_lt))
+@proof
+def SATZ_11(p):
+    p.goal("!x y. x > y ==> y < x")
+    p.fix("x y")
+    p.assume("h: x > y")
+    p.have("ex: ?u. x = y + u").by_eq_mp(UNFOLD_GT(x, y), "h")
+    p.thus("y < x").by_eq_mp(SYM(UNFOLD_LT(y, x)), "ex")
 
-SATZ_11 = _prove_satz_11()
-
-def _prove_satz_12():
-    th_unfold = EQ_MP(UNFOLD_LT(x, y), ASSUME(mk_lt(x, y)))   # ?v. y = x + v
-    th_gt = EQ_MP(SYM(UNFOLD_GT(y, x)), th_unfold)            # y > x
-    return GENL([x, y], DISCH(mk_lt(x, y), th_gt))
-
-SATZ_12 = _prove_satz_12()
+@proof
+def SATZ_12(p):
+    p.goal("!x y. x < y ==> y > x")
+    p.fix("x y")
+    p.assume("h: x < y")
+    p.have("ex: ?v. y = x + v").by_eq_mp(UNFOLD_LT(x, y), "h")
+    p.thus("y > x").by_eq_mp(SYM(UNFOLD_GT(y, x)), "ex")
 
 
 # Definition 4:  x >= y  ≡  x > y \/ x = y.
@@ -890,50 +898,58 @@ def EQ_TO_GE(th_eq):
 # Theorem 16:   x <= y, y < z  =>  x < z   ;   x < y, y <= z  =>  x < z.
 # We prove both forms (Landau's "or" is a disjunctive hypothesis).
 
-def _prove_satz_16a():
+@proof
+def SATZ_16A(p):
     """ x <= y, y < z ==> x < z """
-    h_le = ASSUME(mk_le(x, y))
-    h_lt = ASSUME(mk_lt(y, z))
-    th_xz = CASE_OR(EQ_MP(UNFOLD_LE(x, y), h_le),
-        (mk_lt(x, y), lambda h: MP_LIST(SATZ_15, [x, y, z, h, h_lt])),
-        (mk_eq(x, y), lambda h: EQ_MP(AP_THM(AP_TERM(LT, SYM(h)), z), h_lt)))
-    return GENL([x, y, z], DISCHL([mk_le(x, y), mk_lt(y, z)], th_xz))
+    p.goal("!x y z. x <= y ==> y < z ==> x < z")
+    p.fix("x y z")
+    p.assume("hxy: x <= y", "hyz: y < z")
+    p.have("xy_or: (x < y) \\/ (x = y)").by_eq_mp(UNFOLD_LE(x, y), "hxy")
+    with p.cases_on("xy_or"):
+        with p.case("x < y"):
+            p.thus("x < z").by(SATZ_15, "x", "y", "z", -1, "hyz")
+        with p.case("x = y"):
+            p.thus("x < z").by_rewrite_of("hyz", [SYM(p.fact(-1))])
 
-def _prove_satz_16b():
+@proof
+def SATZ_16B(p):
     """ x < y, y <= z ==> x < z """
-    h_lt = ASSUME(mk_lt(x, y))
-    h_le = ASSUME(mk_le(y, z))
-    th_xz = CASE_OR(EQ_MP(UNFOLD_LE(y, z), h_le),
-        (mk_lt(y, z), lambda h: MP_LIST(SATZ_15, [x, y, z, h_lt, h])),
-        (mk_eq(y, z), lambda h: EQ_MP(MK_COMB(REFL(mk_comb(LT, x)), h), h_lt)))
-    return GENL([x, y, z], DISCHL([mk_lt(x, y), mk_le(y, z)], th_xz))
-
-SATZ_16A = _prove_satz_16a()
-SATZ_16B = _prove_satz_16b()
+    p.goal("!x y z. x < y ==> y <= z ==> x < z")
+    p.fix("x y z")
+    p.assume("hxy: x < y", "hyz: y <= z")
+    p.have("yz_or: (y < z) \\/ (y = z)").by_eq_mp(UNFOLD_LE(y, z), "hyz")
+    with p.cases_on("yz_or"):
+        with p.case("y < z"):
+            p.thus("x < z").by(SATZ_15, "x", "y", "z", "hxy", -1)
+        with p.case("y = z"):
+            p.thus("x < z").by_rewrite_of("hxy", [-1])
 
 
 # Theorem 17:   x <= y, y <= z  =>  x <= z.
 
-def _prove_satz_17():
-    h_xy = ASSUME(mk_le(x, y))
-    h_yz = ASSUME(mk_le(y, z))
-    th_xz = CASE_OR(EQ_MP(UNFOLD_LE(y, z), h_yz),
-        (mk_lt(y, z), lambda h: LT_TO_LE(MP_LIST(SATZ_16A, [x, y, z, h_xy, h]))),
-        (mk_eq(y, z), lambda h: EQ_MP(MK_COMB(REFL(mk_comb(LE, x)), h), h_xy)))
-    return GENL([x, y, z], DISCHL([mk_le(x, y), mk_le(y, z)], th_xz))
-
-SATZ_17 = _prove_satz_17()
+@proof
+def SATZ_17(p):
+    p.goal("!x y z. x <= y ==> y <= z ==> x <= z")
+    p.fix("x y z")
+    p.assume("hxy: x <= y", "hyz: y <= z")
+    p.have("yz_or: (y < z) \\/ (y = z)").by_eq_mp(UNFOLD_LE(y, z), "hyz")
+    with p.cases_on("yz_or"):
+        with p.case("y < z"):
+            p.have("xz_lt: x < z").by(SATZ_16A, "x", "y", "z", "hxy", -1)
+            p.thus("x <= z").by(LT_TO_LE, "xz_lt")
+        with p.case("y = z"):
+            p.thus("x <= z").by_rewrite_of("hxy", [-1])
 
 
 # Theorem 18:  |- !x y. x + y > x.    Witness y in ?u. x+y = x+u.
 
-def _prove_satz_18():
-    pred_u = mk_abs(u, parse("x + y = x + u"))
-    th_ex = EXISTS(pred_u, y, REFL(mk_add(x, y)))
-    th_gt = EQ_MP(SYM(UNFOLD_GT(mk_add(x, y), x)), th_ex)
-    return GENL([x, y], th_gt)
-
-SATZ_18 = _prove_satz_18()
+@proof
+def SATZ_18(p):
+    p.goal("!x y. x + y > x")
+    p.fix("x y")
+    p.thus("x + y > x").by_thm(EQ_MP(
+        SYM(UNFOLD_GT(mk_add(x, y), x)),
+        EXISTS(mk_abs(u, parse("x + y = x + u")), y, REFL(mk_add(x, y)))))
 
 
 # Theorem 19 (in three pieces -- Landau states it via "respectively"):
@@ -951,20 +967,21 @@ def _prove_satz_19a():
 
 SATZ_19A = _prove_satz_19a()
 
-def _prove_satz_19b():
-    h = ASSUME(mk_eq(x, y))
-    return GENL([x, y, z], DISCH(mk_eq(x, y), AP_THM(AP_TERM(PLUS, h), z)))
+@proof
+def SATZ_19B(p):
+    p.goal("!x y z. x = y ==> x + z = y + z")
+    p.fix("x y z")
+    p.assume("h: x = y")
+    p.thus("x + z = y + z").by_rewrite(["h"])
 
-SATZ_19B = _prove_satz_19b()
-
-def _prove_satz_19c():
-    h = ASSUME(mk_lt(x, y))
-    th_yx_gt = MP_LIST(SATZ_12, [x, y, h])
-    th_yz_gt_xz = MP_LIST(SATZ_19A, [y, x, z, th_yx_gt])
-    th_lt = MP_LIST(SATZ_11, [mk_add(y, z), mk_add(x, z), th_yz_gt_xz])
-    return GENL([x, y, z], DISCH(mk_lt(x, y), th_lt))
-
-SATZ_19C = _prove_satz_19c()
+@proof
+def SATZ_19C(p):
+    p.goal("!x y z. x < y ==> x + z < y + z")
+    p.fix("x y z")
+    p.assume("h: x < y")
+    p.have("yx_gt: y > x").by(SATZ_12, "x", "y", "h")
+    p.have("yz_gt_xz: y + z > x + z").by(SATZ_19A, "y", "x", "z", "yx_gt")
+    p.thus("x + z < y + z").by(SATZ_11, "y + z", "x + z", "yz_gt_xz")
 
 
 # Theorem 21:   x > y, z > u  ==>  x + z > y + u.
@@ -1479,67 +1496,70 @@ MUL_UNIQUE = _prove_mul_unique()
 # ONE_MUL :  |- !y. 1 * y = y.
 # SUC_MUL :  |- !x y. (SUC x) * y = x * y + y.
 
-def _prove_one_mul():
-    body_y  = parse("1 * y = y")
-    body_1  = parse("1 * 1 = 1")
-    body_ys = parse("1 * SUC y = SUC y")
-    base = REWRITE_PROVE([MUL_1], body_1)
-    step_fn = lambda IH: REWRITE_PROVE([MUL_SUC, ADD_1, IH], body_ys)
-    return INDUCT_PROVE(y, body_y, base, step_fn)
+@proof
+def ONE_MUL(p):
+    p.goal("!y. 1 * y = y")
+    p.fix("y")
+    with p.induction("y"):
+        with p.base():
+            p.thus("1 * 1 = 1").by_rewrite([MUL_1])
+        with p.step("IH"):
+            p.thus("1 * SUC y = SUC y").by_rewrite([MUL_SUC, ADD_1, "IH"])
 
-ONE_MUL = _prove_one_mul()
-
-def _prove_suc_mul():
-    body_y  = parse("SUC x * y = x * y + y")
-    body_1  = parse("SUC x * 1 = x * 1 + 1")
-    body_ys = parse("SUC x * SUC y = x * SUC y + SUC y")
-    base = REWRITE_PROVE([MUL_1, ADD_1_REV], body_1)
-    # Step: rewrite both sides with [MUL_SUC, IH]; canonicalize SUC→+1; then AC.
-    step_fn = lambda IH: REWRITE_AC_PROVE(
-        [MUL_SUC, IH], PLUS, SATZ_5, SATZ_6, body_ys, ac_rules=[ADD_1_REV])
-    return GEN(x, INDUCT_PROVE(y, body_y, base, step_fn))
-
-SUC_MUL = _prove_suc_mul()
+@proof
+def SUC_MUL(p):
+    p.goal("!x y. SUC x * y = x * y + y")
+    p.fix("x y")
+    with p.induction("y"):
+        with p.base():
+            p.thus("SUC x * 1 = x * 1 + 1").by_rewrite([MUL_1, ADD_1_REV])
+        with p.step("IH"):
+            p.thus("SUC x * SUC y = x * SUC y + SUC y")\
+                .by_rewrite_ac([MUL_SUC, "IH"], PLUS, SATZ_5, SATZ_6,
+                                ac_rules=[ADD_1_REV])
 
 
 # Theorem 29 (commutative law of multiplication):  |- !x y. x * y = y * x.
 
-def _prove_satz_29():
-    body_x  = parse("x * y = y * x")
-    body_1  = parse("1 * y = y * 1")
-    body_xs = parse("SUC x * y = y * SUC x")
-    base = REWRITE_PROVE([ONE_MUL, MUL_1], body_1)
-    step_fn = lambda IH: REWRITE_PROVE([SUC_MUL, MUL_SUC, IH], body_xs)
-    forall_x = INDUCT_PROVE(x, body_x, base, step_fn)
-    return GENL([x, y], SPEC(x, forall_x))
-
-SATZ_29 = _prove_satz_29()
+@proof
+def SATZ_29(p):
+    p.goal("!x y. x * y = y * x")
+    p.fix("x y")
+    with p.induction("x"):
+        with p.base():
+            p.thus("1 * y = y * 1").by_rewrite([ONE_MUL, MUL_1])
+        with p.step("IH"):
+            p.thus("SUC x * y = y * SUC x")\
+                .by_rewrite([SUC_MUL, MUL_SUC, "IH"])
 
 
 # Theorem 30 (distributive):  |- !x y z. x * (y + z) = x*y + x*z.   Induction on z.
 
-def _prove_satz_30():
-    body_z  = parse("x * (y + z) = x * y + x * z")
-    body_1  = parse("x * (y + 1) = x * y + x * 1")
-    body_zs = parse("x * (y + SUC z) = x * y + x * SUC z")
-    base = REWRITE_PROVE([ADD_1, MUL_1, MUL_SUC], body_1)
-    step_fn = lambda IH: REWRITE_PROVE([ADD_SUC, MUL_SUC, SATZ_5, IH], body_zs)
-    return GENL([x, y], INDUCT_PROVE(z, body_z, base, step_fn))
+@proof
+def SATZ_30(p):
+    p.goal("!x y z. x * (y + z) = x * y + x * z")
+    p.fix("x y z")
+    with p.induction("z"):
+        with p.base():
+            p.thus("x * (y + 1) = x * y + x * 1")\
+                .by_rewrite([ADD_1, MUL_1, MUL_SUC])
+        with p.step("IH"):
+            p.thus("x * (y + SUC z) = x * y + x * SUC z")\
+                .by_rewrite([ADD_SUC, MUL_SUC, SATZ_5, "IH"])
 
-SATZ_30 = _prove_satz_30()
 
+# Theorem 31 (associative law of multiplication):  |- !x y z. (x*y)*z = x*(y*z).
 
-# Theorem 31 (associative law of multiplication):  |- !x y z. (x*y) * z = x * (y*z).   Induction on z.
-
-def _prove_satz_31():
-    body_z  = parse("(x * y) * z = x * (y * z)")
-    body_1  = parse("(x * y) * 1 = x * (y * 1)")
-    body_zs = parse("(x * y) * SUC z = x * (y * SUC z)")
-    base = REWRITE_PROVE([MUL_1], body_1)
-    step_fn = lambda IH: REWRITE_PROVE([MUL_SUC, SATZ_30, IH], body_zs)
-    return GENL([x, y], INDUCT_PROVE(z, body_z, base, step_fn))
-
-SATZ_31 = _prove_satz_31()
+@proof
+def SATZ_31(p):
+    p.goal("!x y z. (x * y) * z = x * (y * z)")
+    p.fix("x y z")
+    with p.induction("z"):
+        with p.base():
+            p.thus("(x * y) * 1 = x * (y * 1)").by_rewrite([MUL_1])
+        with p.step("IH"):
+            p.thus("(x * y) * SUC z = x * (y * SUC z)")\
+                .by_rewrite([MUL_SUC, SATZ_30, "IH"])
 
 
 # Right-distributivity, the corollary Landau notes after Satz 30:
@@ -1570,20 +1590,21 @@ def _prove_satz_32a():
 
 SATZ_32A = _prove_satz_32a()
 
-def _prove_satz_32b():
-    h = ASSUME(mk_eq(x, y))
-    return GENL([x, y, z], DISCH(mk_eq(x, y), AP_THM(AP_TERM(TIMES, h), z)))
+@proof
+def SATZ_32B(p):
+    p.goal("!x y z. x = y ==> x * z = y * z")
+    p.fix("x y z")
+    p.assume("h: x = y")
+    p.thus("x * z = y * z").by_rewrite(["h"])
 
-SATZ_32B = _prove_satz_32b()
-
-def _prove_satz_32c():
-    h = ASSUME(mk_lt(x, y))
-    th_yx = MP_LIST(SATZ_12, [x, y, h])
-    th_yz_gt = MP_LIST(SATZ_32A, [y, x, z, th_yx])
-    th_lt = MP_LIST(SATZ_11, [mk_mul(y, z), mk_mul(x, z), th_yz_gt])
-    return GENL([x, y, z], DISCH(mk_lt(x, y), th_lt))
-
-SATZ_32C = _prove_satz_32c()
+@proof
+def SATZ_32C(p):
+    p.goal("!x y z. x < y ==> x * z < y * z")
+    p.fix("x y z")
+    p.assume("h: x < y")
+    p.have("yx: y > x").by(SATZ_12, "x", "y", "h")
+    p.have("yz_gt: y * z > x * z").by(SATZ_32A, "y", "x", "z", "yx")
+    p.thus("x * z < y * z").by(SATZ_11, "y * z", "x * z", "yz_gt")
 
 
 # Theorem 34:  x>y, z>u  ==>  x*z > y*u.   Mirror of Theorem 21.
