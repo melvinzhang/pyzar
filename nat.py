@@ -58,7 +58,7 @@ from logic import (
 from num import (
     num_ty, ONE, SUC, mk_suc,
     x, y, z, u, v, w, P,
-    AXIOM_3, AXIOM_4, INDUCTION, INDUCT, INDUCT_PROVE,
+    AXIOM_3, AXIOM_4, INDUCTION, INDUCT,
     define_recursive,
 )
 from tactics import (REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV,
@@ -167,31 +167,24 @@ ADD_1_REV = GEN(x, SYM(SPEC(x, ADD_1)))    # |- !x. SUC x = x + 1
 #       ==> !y. f y = g y.
 # ---------------------------------------------------------------------------
 
-def _prove_add_unique():
-    f_ty = mk_fun_ty(num_ty, num_ty)
-    f_var = Var("f", f_ty)
-    g_var = Var("g", f_ty)
-    P = ParseEnv(f=f_ty, g=f_ty)
-    hyps = P.parse(
-        "f 1 = SUC x /\\ (!y. f (SUC y) = SUC (f y)) /\\ "
-        "g 1 = SUC x /\\ (!y. g (SUC y) = SUC (g y))")
-    h_all = ASSUME(hyps)
-    h_f1    = CONJUNCT1(h_all)
-    h_rest  = CONJUNCT2(h_all)
-    h_fstep = CONJUNCT1(h_rest)
-    h_rest2 = CONJUNCT2(h_rest)
-    h_g1    = CONJUNCT1(h_rest2)
-    h_gstep = CONJUNCT2(h_rest2)
+_fn_ty = mk_fun_ty(num_ty, num_ty)
 
-    body_y  = P.parse("f y = g y")
-    body_1  = P.parse("f 1 = g 1")
-    body_ys = P.parse("f (SUC y) = g (SUC y)")
-    base = REWRITE_PROVE([h_f1, h_g1], body_1)
-    step_fn = lambda IH: REWRITE_PROVE([h_fstep, h_gstep, IH], body_ys)
-    forall_y = INDUCT_PROVE(y, body_y, base, step_fn)
-    return GENL([x, f_var, g_var], DISCH(hyps, forall_y))
-
-ADD_UNIQUE = _prove_add_unique()
+@proof
+def ADD_UNIQUE(p):
+    p.goal("!x f g. f 1 = SUC x /\\ (!y. f (SUC y) = SUC (f y)) /\\ "
+                  "g 1 = SUC x /\\ (!y. g (SUC y) = SUC (g y)) "
+                  "==> !y. f y = g y",
+           types={"f": _fn_ty, "g": _fn_ty})
+    p.fix("x f g")
+    p.assume("h: f 1 = SUC x /\\ (!y. f (SUC y) = SUC (f y)) /\\ "
+                "g 1 = SUC x /\\ (!y. g (SUC y) = SUC (g y))")
+    p.split_conj("h", "h_f1", "h_fstep", "h_g1", "h_gstep")
+    with p.induction("y"):
+        with p.base():
+            p.thus("f 1 = g 1").by_rewrite(["h_f1", "h_g1"])
+        with p.step("IH"):
+            p.thus("f (SUC y) = g (SUC y)")\
+                .by_rewrite(["h_fstep", "h_gstep", "IH"])
 
 
 # ---------------------------------------------------------------------------
@@ -1067,31 +1060,22 @@ def mk_mul(a, b):
 #       ==> !y. f y = g y.
 # ---------------------------------------------------------------------------
 
-def _prove_mul_unique():
-    f_ty = mk_fun_ty(num_ty, num_ty)
-    f_var = Var("f", f_ty)
-    g_var = Var("g", f_ty)
-    P = ParseEnv(f=f_ty, g=f_ty)
-    hyps = P.parse(
-        "f 1 = x /\\ (!y. f (SUC y) = f y + x) /\\ "
-        "g 1 = x /\\ (!y. g (SUC y) = g y + x)")
-    h_all = ASSUME(hyps)
-    h_f1    = CONJUNCT1(h_all)
-    h_rest  = CONJUNCT2(h_all)
-    h_fstep = CONJUNCT1(h_rest)
-    h_rest2 = CONJUNCT2(h_rest)
-    h_g1    = CONJUNCT1(h_rest2)
-    h_gstep = CONJUNCT2(h_rest2)
-
-    body_y  = P.parse("f y = g y")
-    body_1  = P.parse("f 1 = g 1")
-    body_ys = P.parse("f (SUC y) = g (SUC y)")
-    base = REWRITE_PROVE([h_f1, h_g1], body_1)
-    step_fn = lambda IH: REWRITE_PROVE([h_fstep, h_gstep, IH], body_ys)
-    forall_y = INDUCT_PROVE(y, body_y, base, step_fn)
-    return GENL([x, f_var, g_var], DISCH(hyps, forall_y))
-
-MUL_UNIQUE = _prove_mul_unique()
+@proof
+def MUL_UNIQUE(p):
+    p.goal("!x f g. f 1 = x /\\ (!y. f (SUC y) = f y + x) /\\ "
+                  "g 1 = x /\\ (!y. g (SUC y) = g y + x) "
+                  "==> !y. f y = g y",
+           types={"f": _fn_ty, "g": _fn_ty})
+    p.fix("x f g")
+    p.assume("h: f 1 = x /\\ (!y. f (SUC y) = f y + x) /\\ "
+                "g 1 = x /\\ (!y. g (SUC y) = g y + x)")
+    p.split_conj("h", "h_f1", "h_fstep", "h_g1", "h_gstep")
+    with p.induction("y"):
+        with p.base():
+            p.thus("f 1 = g 1").by_rewrite(["h_f1", "h_g1"])
+        with p.step("IH"):
+            p.thus("f (SUC y) = g (SUC y)")\
+                .by_rewrite(["h_fstep", "h_gstep", "IH"])
 
 
 # Helpers (from Landau's "construction in the proof of Theorem 28"):

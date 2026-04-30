@@ -36,6 +36,7 @@ from logic import (
     SPEC, GEN, DISCH, MP_LIST, DISJ_CASES, BETA_CONV, SYM,
     PROVE_HYP, ELIM_EX, _subst_term,
     NOT_INTRO, CONTR, REWRITE_NE, EXISTS, DISJ1, DISJ2,
+    CONJUNCT1, CONJUNCT2,
 )
 from tactics import REWRITE_PROVE, REWRITE_RULE, AC_PROVE, REWRITE_AC_PROVE
 from parser import parse, pp, ParseError
@@ -72,7 +73,7 @@ def register_disj_unfolder(op_name, unfold_fn):
 
 class _Frame:
     __slots__ = ("goal", "kind", "vars_added", "hyps_added",
-                 "facts_added", "choose_env", "pending_choose",
+                 "facts_added", "choose_env", "type_env", "pending_choose",
                  "data", "result")
 
     def __init__(self, goal=None, kind="root"):
@@ -82,6 +83,7 @@ class _Frame:
         self.hyps_added = []      # for assume(): list of (label, term); DISCH at close
         self.facts_added = []     # labels added at this frame; popped on exit
         self.choose_env = {}      # name -> witness term (parser env entries)
+        self.type_env = {}        # name -> hol_type for higher-order params
         self.pending_choose = []  # list of (ex_th, pred, hyp_ex) to discharge on close
         self.data = {}            # block-specific scratch
         self.result = None        # the theorem proving `goal`
@@ -107,6 +109,8 @@ class Proof:
     def _scope_env(self):
         env = {"F": F}
         for fr in self._frames:
+            for name, ty in fr.type_env.items():
+                env[name] = ty
             for v in fr.vars_added:
                 env[v.name] = v
             for name, term in fr.choose_env.items():
@@ -203,9 +207,20 @@ class Proof:
 
     # ---- public API: opening declarations --------------------------------
 
-    def goal(self, spec):
+    def goal(self, spec, types=None):
+        """Set the goal for the current frame.
+
+        ``types``: optional ``{name: hol_type}`` mapping registering
+        higher-order or non-default-type parameters in scope. The parser
+        consults these when it encounters bare identifiers *or* binders
+        (``!f. ...``) so HO parameters can appear naturally in the goal
+        and subsequent ``fix``/``assume``/``have`` terms.
+        """
         if self._cur.goal is not None:
             raise HolError("goal: already set on current frame")
+        if types:
+            for name, ty in types.items():
+                self._cur.type_env[name] = ty
         self._cur.goal = self._parse(spec)
 
     def fix(self, names):
@@ -222,6 +237,19 @@ class Proof:
                     f"fix: name mismatch -- binder is {v.name!r}, given {nm!r}")
             self._cur.goal = g.arg.body
             self._cur.vars_added.append(v)
+
+    def split_conj(self, ref, *labels):
+        """Split a right-associated conjunction fact ``h : a /\\ b /\\ ... /\\ z``
+        into the supplied labels, registering each conjunct as its own fact."""
+        th = ref if isinstance(ref, thm) else self._resolve_fact(ref)
+        cur = th
+        n = len(labels)
+        for i, lbl in enumerate(labels):
+            if i == n - 1:
+                self._register_fact(lbl, cur)
+            else:
+                self._register_fact(lbl, CONJUNCT1(cur))
+                cur = CONJUNCT2(cur)
 
     def assume(self, *labelled):
         for spec in labelled:
@@ -256,14 +284,20 @@ class Proof:
     # ---- block constructs ------------------------------------------------
 
     def induction(self, var_name):
-        env = self._scope_env()
-        if var_name not in env:
-            raise HolError(f"induction: unknown variable {var_name!r}")
-        var = env[var_name]
         body = self._cur.goal
         if body is None:
             raise HolError("induction: no current goal")
-        return _InductionCtx(self, var, body)
+        # If the goal is ``!var_name. inner``, peel the binder automatically
+        # so the user doesn't need an intermediate fix() call.
+        if (isinstance(body, Comb) and isinstance(body.fun, Const)
+                and body.fun.name == "!" and isinstance(body.arg, Abs)
+                and body.arg.bvar.name == var_name):
+            return _InductionCtx(self, body.arg.bvar, body.arg.body,
+                                  peel_forall=True)
+        env = self._scope_env()
+        if var_name not in env:
+            raise HolError(f"induction: unknown variable {var_name!r}")
+        return _InductionCtx(self, env[var_name], body, peel_forall=False)
 
     def base(self):
         fr = self._cur
@@ -815,10 +849,11 @@ class _SubFrameCtx:
 # ---------------------------------------------------------------------------
 
 class _InductionCtx:
-    def __init__(self, p, var, body):
+    def __init__(self, p, var, body, peel_forall=False):
         self.p = p
         self.var = var
         self.body = body
+        self.peel_forall = peel_forall
 
     def __enter__(self):
         fr = _Frame(goal=None, kind="_induction")
@@ -838,11 +873,12 @@ class _InductionCtx:
             raise HolError("induction: missing step()")
         # User's step_th already contains ASSUME(body) as a hypothesis (under
         # the IH label). INDUCT_PROVE wraps that with DISCH(body, ...) and
-        # GEN(var, ...) to produce |- !var. body. We SPEC var back out so the
-        # parent's body-shaped goal matches.
+        # GEN(var, ...) to produce |- !var. body. If the parent's goal already
+        # has a !var binder, leave it as is; otherwise SPEC var back out so
+        # the parent's body-shaped goal matches.
         forall_th = INDUCT_PROVE(self.var, self.body, d["base_th"],
                                   lambda IH: d["step_th"])
-        body_th = SPEC(self.var, forall_th)
+        body_th = forall_th if self.peel_forall else SPEC(self.var, forall_th)
         self.p._drop_facts(fr.facts_added)
         parent = self.p._cur
         if parent.goal is None or not aconv(parent.goal, body_th._concl):

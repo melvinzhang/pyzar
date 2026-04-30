@@ -35,6 +35,7 @@ from lark.visitors import Interpreter
 
 from fusion import (
     Var, Const, Comb, Abs,
+    Tyvar, Tyapp,
     mk_var, mk_comb, mk_const, mk_eq,
     concl, hyp, new_basic_definition,
 )
@@ -268,12 +269,24 @@ class _Builder(Interpreter):
         out = []
         for vd in varlist_tree.children:
             n = str(vd.children[0])
-            ty = self.sig.default_var_ty
+            ty = None
             if len(vd.children) > 1:
+                # Explicit type annotation `name:ty_name`.
                 ty_name = str(vd.children[1])
                 if ty_name not in self.sig.type:
                     raise ParseError(f"unknown type name {ty_name!r}")
                 ty = self.sig.type[ty_name]
+            elif n in self.env:
+                # Inherit type from an env-provided binding so callers can
+                # introduce higher-order binders (e.g. !f. ... where
+                # f : num -> num) without registering a fresh type alias.
+                binding = self.env[n]
+                if isinstance(binding, (Tyvar, Tyapp)):
+                    ty = binding
+                elif isinstance(binding, Var):
+                    ty = binding.ty
+            if ty is None:
+                ty = self.sig.default_var_ty
             if ty is None:
                 raise ParseError(
                     f"binder for {n!r} has no type and no default type "
