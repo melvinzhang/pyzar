@@ -27,7 +27,7 @@ The decorator runs the script and returns the resulting kernel theorem.
 import re
 
 from fusion import (
-    Const, Comb, Abs, thm,
+    Var, Const, Comb, Abs, thm,
     aconv, concl, HolError, ASSUME, EQ_MP, BETA, mk_comb,
     rand, type_of, TRANS,
 )
@@ -40,7 +40,7 @@ from logic import (
 )
 from tactics import (REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV, BETA_RULE,
                      AC_PROVE, REWRITE_AC_PROVE)
-from parser import parse, pp, ParseError
+from parser import parse, pp, ParseError, LetDef, DEFAULT_SIG
 from num import INDUCT_PROVE, mk_suc, ONE
 
 
@@ -86,8 +86,8 @@ def register_contra_finder(rel_a, rel_b, finder):
 
 class _Frame:
     __slots__ = ("goal", "kind", "vars_added", "hyps_added",
-                 "facts_added", "choose_env", "type_env", "pending_choose",
-                 "data", "result")
+                 "facts_added", "choose_env", "type_env", "let_env",
+                 "pending_choose", "data", "result")
 
     def __init__(self, goal=None, kind="root"):
         self.goal = goal
@@ -97,6 +97,7 @@ class _Frame:
         self.facts_added = []     # labels added at this frame; popped on exit
         self.choose_env = {}      # name -> witness term (parser env entries)
         self.type_env = {}        # name -> hol_type for higher-order params
+        self.let_env = {}         # name -> LetDef (parser-level abbreviations)
         self.pending_choose = []  # list of (ex_th, pred, hyp_ex) to discharge on close
         self.data = {}            # block-specific scratch
         self.result = None        # the theorem proving `goal`
@@ -128,6 +129,8 @@ class Proof:
                 env[v.name] = v
             for name, term in fr.choose_env.items():
                 env[name] = term
+            for name, ld in fr.let_env.items():
+                env[name] = ld
         return env
 
     def _set_frame_result(self, frame, th):
@@ -143,6 +146,12 @@ class Proof:
         return parse(s, _env_bindings=self._scope_env())
 
     _LABEL_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z_0-9]*)\s*:\s*(.+)$", re.DOTALL)
+
+    _LET_SPEC_RE = re.compile(
+        r"^\s*([A-Za-z_]\w*)\s*"
+        r"\(\s*([A-Za-z_]\w*)\s*(?::\s*([A-Za-z_]\w*)\s*)?\)\s*"
+        r":=\s*(.+)$",
+        re.DOTALL)
 
     def _split_label(self, spec):
         """Parse 'label: term' or 'term'.
@@ -250,6 +259,58 @@ class Proof:
                     f"fix: name mismatch -- binder is {v.name!r}, given {nm!r}")
             self._cur.goal = g.arg.body
             self._cur.vars_added.append(v)
+
+    def let(self, spec):
+        """Register a schematic abbreviation in the current frame.
+
+        Spec form: ``"NAME(arg) := body"`` or ``"NAME(arg:ty) := body"``.
+        The body parses in the current scope (extended with ``arg`` as a
+        placeholder). Subsequent occurrences of ``NAME t`` in any term
+        passed to ``goal`` / ``have`` / ``thus`` / ``assume`` / ``choose``
+        / ``fix`` desugar to ``body[arg := t]`` at parse time -- no kernel
+        ``Abs`` is materialized, so downstream tactics see ground terms.
+
+        Lifetime: the binding dies with the current frame (same as
+        ``vars_added`` and ``facts_added``). v1 supports single-arg lets
+        only.
+        """
+        m = self._LET_SPEC_RE.match(spec)
+        if not m:
+            raise HolError(
+                f"let: expected 'NAME(arg) := body' (or 'NAME(arg:ty) := body'), "
+                f"got {spec!r}")
+        name, arg_name, ty_name, body_str = m.groups()
+
+        if ty_name is not None:
+            if ty_name not in DEFAULT_SIG.type:
+                raise HolError(f"let: unknown type {ty_name!r}")
+            bvar_ty = DEFAULT_SIG.type[ty_name]
+        else:
+            bvar_ty = DEFAULT_SIG.default_var_ty
+            if bvar_ty is None:
+                raise HolError(
+                    "let: no default type registered; annotate the bvar "
+                    f"as '{name}({arg_name}:T) := ...'")
+        bvar = Var(arg_name, bvar_ty)
+
+        env = self._scope_env()
+        if name in env:
+            raise HolError(
+                f"let: {name!r} clashes with an existing binding in scope")
+        if name in DEFAULT_SIG.const:
+            raise HolError(
+                f"let: {name!r} clashes with a registered constant")
+
+        # Parse body with the placeholder injected; the placeholder shadows
+        # any same-named outer scope binding for the duration of the body.
+        body_env = dict(env)
+        body_env[arg_name] = bvar
+        try:
+            body = parse(body_str, _env_bindings=body_env)
+        except ParseError as ex:
+            raise HolError(f"let: cannot parse body: {ex}") from ex
+
+        self._cur.let_env[name] = LetDef(name, bvar, body, arity=1)
 
     def split_conj(self, ref, *labels):
         """Split a right-associated conjunction fact ``h : a /\\ b /\\ ... /\\ z``
@@ -1171,6 +1232,58 @@ def _selftest():
     assert aconv(concl(SATZ_17_NEW), concl(nat.SATZ_17)), \
         f"SATZ_17 mismatch:\n  new: {pp(concl(SATZ_17_NEW))}\n  old: {pp(concl(nat.SATZ_17))}"
     assert SATZ_17_NEW._asl == nat.SATZ_17._asl
+
+    # ---- p.let smoke test ----------------------------------------------
+    from fusion import REFL, mk_var
+    from num import ONE, num_ty
+
+    # (1) Basic round-trip: `M x` parses to body with x substituted.
+    @proof
+    def LET_REFL(p):
+        p.goal("1 = 1")
+        p.let("M(x) := x = x")
+        p.thus("M 1").by_thm(REFL(ONE))
+    assert aconv(concl(LET_REFL), parse("1 = 1"))
+
+    # (2) Let-name in have-term, body in scope of fix-vars, multi-use.
+    @proof
+    def LET_FIX(p):
+        p.goal("!a. a = a")
+        p.fix("a")
+        p.let("M(x) := x = a")        # body closes over fix-var 'a'
+        p.thus("M a").by_thm(REFL(mk_var("a", num_ty)))
+    assert aconv(concl(LET_FIX), parse("!a. a = a"))
+
+    # (3) Capture-avoiding substitution: body `!n. n + x = n + x` substituted
+    # at `M (n + 1)` must not capture the outer `n`. Verify by reading the
+    # parsed term directly via _scope_env.
+    p = Proof()
+    p._cur.let_env["M"] = LetDef(
+        "M", mk_var("x", num_ty),
+        parse("!n. n + x = n + x", x=num_ty), arity=1)
+    parsed = parse("M (n + 1)", _env_bindings=p._scope_env())
+    expected = parse("!m. m + (n + 1) = m + (n + 1)")
+    assert aconv(parsed, expected), \
+        f"capture-avoiding subst broke: got {pp(parsed)}, expected {pp(expected)}"
+
+    # (4) Bare let usage is rejected.
+    try:
+        parse("M = M", _env_bindings=p._scope_env())
+    except ParseError:
+        pass
+    else:
+        raise AssertionError("expected ParseError for bare let usage")
+
+    # (5) Collision with fix-var refused.
+    pp_proof = Proof()
+    pp_proof.goal("!x. x = x")
+    pp_proof.fix("x")
+    try:
+        pp_proof.let("x(y) := y = y")
+    except HolError:
+        pass
+    else:
+        raise AssertionError("expected HolError for let/fix-var collision")
 
 
 if __name__ == "__main__":

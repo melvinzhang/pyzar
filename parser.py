@@ -36,9 +36,29 @@ from lark.visitors import Interpreter
 from fusion import (
     Var, Const, Comb, Abs,
     Tyvar, Tyapp,
-    mk_var, mk_comb, mk_const, mk_eq,
+    mk_var, mk_comb, mk_const, mk_eq, vsubst,
     concl, hyp, new_basic_definition,
 )
+
+
+class LetDef:
+    """Schematic abbreviation registered in a parse env.
+
+    When the parser sees ``name`` applied to ``arity`` argument terms, it
+    substitutes the args for the placeholder ``bvar`` in ``body`` (capture-
+    avoiding) and returns the resulting kernel term. No ``Abs`` is ever
+    materialized, so downstream rules see a ground term and never have to
+    BETA-bridge.
+
+    v1 ships single-arg lets only (``arity == 1``).
+    """
+    __slots__ = ("name", "bvar", "body", "arity")
+
+    def __init__(self, name, bvar, body, arity=1):
+        self.name = name
+        self.bvar = bvar
+        self.body = body
+        self.arity = arity
 
 
 class ParseError(Exception):
@@ -239,6 +259,10 @@ class _Builder(Interpreter):
         # Then env-provided binding (kernel term or hol_type).
         if name in self.env:
             binding = self.env[name]
+            if isinstance(binding, LetDef):
+                raise ParseError(
+                    f"let-defined {name!r} must be applied to "
+                    f"{binding.arity} argument(s); use it as `{name} t`")
             if isinstance(binding, (Var, Const, Comb, Abs)):
                 return binding
             return mk_var(name, binding)
@@ -262,7 +286,21 @@ class _Builder(Interpreter):
     # ----- application + binders -----
 
     def app_(self, tree):
-        f, a = self.visit(tree.children[0]), self.visit(tree.children[1])
+        f_tree = tree.children[0]
+        # Let-shorthand: a Name resolving to a LetDef in env desugars
+        # ``M arg`` to ``body[bvar := arg]`` at parse time. Bound vars and
+        # registered constants take precedence (so a `\M. M x` lambda still
+        # works and a const named `M` shadows the let).
+        if getattr(f_tree, "data", None) == "name":
+            nm = str(f_tree.children[0])
+            shadowed = (any(nm in s for s in self.scope)
+                        or nm in self.sig.const)
+            if not shadowed:
+                binding = self.env.get(nm)
+                if isinstance(binding, LetDef) and binding.arity == 1:
+                    arg = self.visit(tree.children[1])
+                    return vsubst([(arg, binding.bvar)])(binding.body)
+        f, a = self.visit(f_tree), self.visit(tree.children[1])
         return mk_comb(f, a)
 
     def _decls(self, varlist_tree):

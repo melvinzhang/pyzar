@@ -50,7 +50,7 @@ from logic import (
     SPEC, GEN, CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP,
     CONTR, NOT_ELIM, NOT_INTRO, NOT_CONST,
     mk_or, DISJ1, DISJ2, DISJ_CASES,
-    NE_SYM, REWRITE_NE, EXISTS, EXISTS_AT,
+    NE_SYM, REWRITE_NE, EXISTS,
     EXCLUDED_MIDDLE, NOT_NOT_ELIM, NOT_EX_TO_FORALL_NOT,
     PROVE_HYP, ELIM_EX,
     SPECL, GENL, DISCHL, TRANS_CHAIN, MP_LIST, CASE_OR,
@@ -61,9 +61,9 @@ from num import (
     AXIOM_3, AXIOM_4, INDUCTION, INDUCT,
     define_recursive,
 )
-from tactics import (REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV,
+from tactics import (REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV, BETA_RULE,
                        AC_PROVE, AC_NORM, REWRITE_AC_PROVE)
-from parser import parse, pp, ParseEnv, define, pp_thm, DEFAULT_SIG
+from parser import parse, pp, define, pp_thm, DEFAULT_SIG
 from proof import proof
 
 
@@ -996,72 +996,50 @@ def _SATZ_27_FROM_M(p):
         .by_thm(CONJ(p.fact("Nm"), p.fact("hM")))
 
 
-def _prove_satz_27():
-    N_ty = _N_ty
-    N_var = _N_var
-    n_var = Var("n", num_ty)
-    k_var = Var("k", num_ty)
-    m_var = Var("m", num_ty)
-    P = ParseEnv(N=N_ty)
+# Theorem 27 (well-ordering). Direct port of Landau's argument: introduce the
+# schematic predicate ``M(x) := !n. N n ==> x <= n`` via ``p.let``, build M(1),
+# show M fails at successors of N-elements, invoke the abstract well-ordering
+# kernel _SATZ_27_EXISTS_M to get a boundary m, then conclude via _SATZ_27_FROM_M.
+# Eager substitution at parse time means ``M m`` and the unfolded body share the
+# same kernel term, so no BETA-bridge plumbing is needed at the boundaries.
 
-    hyp_nonempty = P.parse("?n. N n")
-    M_pred = P.parse("\\x. !n. N n ==> x <= n")
+@proof
+def SATZ_27(p):
+    p.goal("!N. (?n. N n) ==> (?m. N m /\\ (!k. N k ==> m <= k))",
+           types={"N": _N_ty})
+    p.fix("N")
+    p.assume("hNonempty: ?n. N n")
+    p.let("M(x) := !n. N n ==> x <= n")
 
-    def M_at(t):
-        return mk_comb(M_pred, t)
+    # Step 1: M 1, i.e. !n. N n ==> 1 <= n.
+    with p.have("M_1: M 1").proof():
+        p.fix("n")
+        p.assume("hNn: N n")
+        p.have("ge1: n >= 1").by(SATZ_24, "n")
+        p.thus("1 <= n").by(SATZ_13, "n", "1", "ge1")
 
-    conclusion = P.parse("?m. N m /\\ (!k. N k ==> m <= k)")
+    # Step 2: !y. N y ==> ~ M (y + 1).  _SATZ_27_NOT_M_SUCC is stated in the
+    # unfolded form, which is exactly what ``M (y + 1)`` parses to via the let.
+    p.have("step_fail: !y. N y ==> ~ M (y + 1)")\
+        .by(_SATZ_27_NOT_M_SUCC, "N")
 
-    # === Step 1: M(1). ===
-    s24_n = SPEC(n_var, SATZ_24)
-    one_le_n = MP(SPEC(ONE, SPEC(n_var, SATZ_13)), s24_n)
-    M1_inner = GEN(n_var, DISCH(mk_comb(N_var, n_var), one_le_n))
-    M1 = EQ_MP(SYM(BETA_CONV(M_at(ONE))), M1_inner)
+    # Step 3: ?m. M m /\ ~ M (m + 1).  _SATZ_27_EXISTS_M takes a higher-order
+    # predicate P, so we materialize the lambda once at this boundary; BETA_RULE
+    # normalizes the resulting redexes back to the unfolded form (which the
+    # let-expansion in our `have` term agrees with).
+    M_pred = parse("\\x. !n. N n ==> x <= n", N=_N_ty)
+    ex_th = MP_LIST(
+        BETA_RULE(SPECL([M_pred, _N_var], _SATZ_27_EXISTS_M)),
+        [p.fact("M_1"), p.fact("step_fail"), p.fact("hNonempty")])
+    p.have("ex: ?m. M m /\\ ~ M (m + 1)").by_thm(ex_th)
 
-    # === Step 2: !y. N y ==> ~M(y+1). ===
-    # Outsourced to _SATZ_27_NOT_M_SUCC which proves it in unfolded form;
-    # we BETA-bridge ``~(!n. N n ==> y+1 <= n)`` to ``~M(y+1)`` here.
-    Ny_imp_notM_unfolded = SPECL([N_var, y], _SATZ_27_NOT_M_SUCC)
-    M_yp1_beta = BETA_CONV(M_at(mk_add(y, ONE)))             # |- M(y+1) = unfolded
-    not_eq = AP_TERM(NOT_CONST, M_yp1_beta)                  # |- ~M(y+1) = ~unfolded
-    h_Ny_a = ASSUME(P.parse("N y"))
-    not_unfolded = MP(Ny_imp_notM_unfolded, h_Ny_a)          # {N y} |- ~unfolded
-    not_M_yp1 = EQ_MP(SYM(not_eq), not_unfolded)             # {N y} |- ~M(y+1)
-    Ny_imp_notM = DISCH(P.parse("N y"), not_M_yp1)           # {} |- N y ==> ~M(y+1)
-
-    # === Step 3: ?m. M(m) /\ ~M(m+1). ===
-    # Outsourced to _SATZ_27_EXISTS_M (a generic well-ordering kernel over an
-    # abstract predicate P). We GEN Step 2's result to get the ``!y`` form
-    # the lemma requires, then MP through.
-    Q_pred = parse("\\x. ${M} x /\\ ~${M} (x + 1)", M=M_pred)
-    target_3 = parse("?x. ${M} x /\\ ~${M} (x + 1)", M=M_pred)
-    forall_step_fail = GEN(y, Ny_imp_notM)                     # !y. N y ==> ~M_pred(y+1)
-    th_target3 = MP_LIST(SPECL([M_pred, N_var], _SATZ_27_EXISTS_M),
-                          [M1, forall_step_fail,
-                           ASSUME(hyp_nonempty)])               # {hyp_nonempty} |- ?m. ...
-
-    # === Step 4: from m with M(m) /\ ~M(m+1), conclude m ∈ N and m ≤ k for all k ∈ N. ===
-    # Outsourced to _SATZ_27_FROM_M; we BETA-bridge M's wrapped form to the
-    # unfolded form the lemma takes.
-    def _from_m(eq_Q):
-        Mm_w   = CONJUNCT1(eq_Q)                               # M(w)
-        notM_w1 = CONJUNCT2(eq_Q)                              # ~M(w+1)
-        w_t = rand(Mm_w._concl)
-        Mm_unfold = EQ_MP(BETA_CONV(M_at(w_t)), Mm_w)          # !n. N n ==> w <= n
-        notM_w1_unfold = EQ_MP(
-            AP_TERM(NOT_CONST, BETA_CONV(M_at(mk_add(w_t, ONE)))),
-            notM_w1)                                           # ~(!n. N n ==> w+1 <= n)
-        th_conj = MP_LIST(SPECL([N_var, w_t], _SATZ_27_FROM_M),
-                          [Mm_unfold, notM_w1_unfold])         # N w /\ ...
-        return EXISTS_AT(w_t, th_conj)
-    th_concl_inner = ELIM_EX(Q_pred, target_3, _from_m)
-    # Discharge target_3 using th_target3:
-    th_concl = PROVE_HYP(th_target3, th_concl_inner)
-    # th_concl : {hyp_nonempty} |- conclusion
-    return GEN(N_var, DISCH(hyp_nonempty, th_concl))
-
-
-SATZ_27 = _prove_satz_27()
+    # Step 4: choose the boundary witness, decompose, conclude via _SATZ_27_FROM_M.
+    p.choose("m: M m /\\ ~ M (m + 1)", from_="ex")
+    p.split_conj("m_eq", "Mm", "nMm1")
+    p.have("conj: N m /\\ (!k. N k ==> m <= k)")\
+        .by(_SATZ_27_FROM_M, "N", "m", "Mm", "nMm1")
+    p.thus("?m. N m /\\ (!k. N k ==> m <= k)")\
+        .by_witness("m", "conj")
 
 
 # ---------------------------------------------------------------------------
