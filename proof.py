@@ -67,6 +67,18 @@ def register_disj_unfolder(op_name, unfold_fn):
     _DISJ_UNFOLDERS[op_name] = unfold_fn
 
 
+# Contradiction-finder registry: each entry maps an unordered pair of
+# relation-symbol names ``(rel_a, rel_b)`` to a finder
+# ``finder(th_a, th_b) -> |- F`` whose inputs are facts of shape ``rel_a a b``
+# and ``rel_b a b`` respectively. ``p.absurd().auto(...)`` consults this so
+# call sites no longer need to name a specific contradiction lemma.
+
+_CONTRA_FINDERS = {}
+
+def register_contra_finder(rel_a, rel_b, finder):
+    _CONTRA_FINDERS[(rel_a, rel_b)] = finder
+
+
 # ---------------------------------------------------------------------------
 # Frame: a single open scope (root, induction body, base/step, case).
 # ---------------------------------------------------------------------------
@@ -788,6 +800,41 @@ class _Absurd:
             return self._finish(justification(*resolved))
         raise HolError(
             f"absurd: not a theorem or callable: {justification!r}")
+
+    def auto(self, *refs):
+        """Discharge F by inspecting the conclusions of the supplied facts.
+
+        Each fact's conclusion is classified as ``rel a b`` for some binary
+        relation symbol ``rel``; a finder registered via
+        ``register_contra_finder`` for the resulting pair of relations
+        (in either order) produces ``|- F``.
+        """
+        if len(refs) != 2:
+            raise HolError(
+                f"absurd: auto() requires exactly two facts, got {len(refs)}")
+        ths = [self.p._resolve_fact_or_term(r) for r in refs]
+        cs = [_classify_contra(th._concl) for th in ths]
+        if cs[0] is None or cs[1] is None:
+            raise HolError(
+                "absurd: auto() cannot classify fact shapes: "
+                f"{pp(ths[0]._concl)} / {pp(ths[1]._concl)}")
+        rel0, rel1 = cs[0][0], cs[1][0]
+        finder = _CONTRA_FINDERS.get((rel0, rel1))
+        if finder is not None:
+            return self._finish(finder(ths[0], ths[1]))
+        finder = _CONTRA_FINDERS.get((rel1, rel0))
+        if finder is not None:
+            return self._finish(finder(ths[1], ths[0]))
+        raise HolError(
+            f"absurd: auto() has no finder for ({rel0!r}, {rel1!r})")
+
+
+def _classify_contra(t):
+    """Return ``(rel_name, a, b)`` for ``rel a b``, else ``None``."""
+    match t:
+        case Comb(Comb(Const(name, _), a), b):
+            return (name, a, b)
+    return None
 
 
 # ---------------------------------------------------------------------------

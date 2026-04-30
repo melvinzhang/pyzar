@@ -35,7 +35,7 @@ Coverage:
 from fusion import (
     Var, Comb, Abs,
     bool_ty, aty, mk_abs, mk_comb, mk_const, mk_eq, mk_fun_ty,
-    dest_eq,
+    dest_eq, aconv, HolError,
     rator, rand,
     REFL, TRANS, MK_COMB, ABS, BETA, ASSUME, EQ_MP,
     DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
@@ -63,7 +63,7 @@ from num import (
 )
 from tactics import (REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV,
                        AC_PROVE, AC_NORM, REWRITE_AC_PROVE)
-from parser import parse, ParseEnv, define, pp_thm, DEFAULT_SIG
+from parser import parse, pp, ParseEnv, define, pp_thm, DEFAULT_SIG
 from proof import proof
 
 
@@ -826,6 +826,42 @@ def CONTRA_GT_EQ(a_t, b_t, h_gt, h_eq):
     return CHOOSE_GT(h_gt, _inner)
 
 
+# Wire the three contradictions into the proof DSL so call sites can use
+# ``p.absurd().auto(h1, h2)`` instead of naming the lemma. Each finder
+# extracts the term pair from its order fact; equality facts are accepted in
+# either orientation (the finder applies SYM if needed).
+from proof import register_contra_finder
+
+def _dest_op(t):
+    return rator(rator(t)), rand(rator(t)), rand(t)
+
+def _contra_lt_gt(h_lt, h_gt):
+    _, a, b = _dest_op(h_lt._concl)
+    return CONTRA_LT_GT(a, b, h_lt, h_gt)
+
+def _orient_eq(h_eq, a, b):
+    l, r = dest_eq(h_eq._concl)
+    if aconv(l, a) and aconv(r, b):
+        return h_eq
+    if aconv(l, b) and aconv(r, a):
+        return SYM(h_eq)
+    raise HolError(
+        f"absurd.auto: equality {pp(h_eq._concl)} does not relate "
+        f"{pp(a)} and {pp(b)}")
+
+def _contra_lt_eq(h_lt, h_eq):
+    _, a, b = _dest_op(h_lt._concl)
+    return CONTRA_LT_EQ(a, b, h_lt, _orient_eq(h_eq, a, b))
+
+def _contra_gt_eq(h_gt, h_eq):
+    _, a, b = _dest_op(h_gt._concl)
+    return CONTRA_GT_EQ(a, b, h_gt, _orient_eq(h_eq, a, b))
+
+register_contra_finder("<", ">", _contra_lt_gt)
+register_contra_finder("<", "=", _contra_lt_eq)
+register_contra_finder(">", "=", _contra_gt_eq)
+
+
 # Theorem 26:   y < x + 1  ==>  y <= x.    Contrapositive of Theorem 25.
 # Landau: "Otherwise we'd have y > x, hence by Theorem 25 y >= x + 1."
 # We prove it via Theorem 9 (trichotomy): if y > x, then y >= x + 1, contradicting y < x + 1.
@@ -843,9 +879,9 @@ def SATZ_26(p):
             p.have("y_ge_x1: y >= x + 1").by(SATZ_25, "x", "y", "h_gt")
             with p.cases_on("y_ge_x1"):
                 with p.case("h_g: y > x + 1"):
-                    p.absurd().by(CONTRA_LT_GT, "y", "x + 1", "h", "h_g")
+                    p.absurd().auto("h", "h_g")
                 with p.case("h_e: y = x + 1"):
-                    p.absurd().by(CONTRA_LT_EQ, "y", "x + 1", "h", "h_e")
+                    p.absurd().auto("h", "h_e")
         with p.case("h_lt: y < x"):
             p.thus("y <= x").by(LT_TO_LE, "h_lt")
 
@@ -1285,7 +1321,7 @@ def _SATZ_9_EXCL_12(p):
         p.have("h_eq: x = y").by(CONJUNCT1, "h")
         p.have("h_ex: ?u. x = y + u").by(CONJUNCT2, "h")
         p.have("h_gt: x > y").by_fold("h_ex")
-        p.thus("F").by(CONTRA_GT_EQ, "x", "y", "h_gt", "h_eq")
+        p.absurd().auto("h_gt", "h_eq")
 
 
 @proof
@@ -1296,7 +1332,7 @@ def _SATZ_9_EXCL_13(p):
         p.have("h_eq: x = y").by(CONJUNCT1, "h")
         p.have("h_ex: ?v. y = x + v").by(CONJUNCT2, "h")
         p.have("h_lt: x < y").by_fold("h_ex")
-        p.thus("F").by(CONTRA_LT_EQ, "x", "y", "h_lt", "h_eq")
+        p.absurd().auto("h_lt", "h_eq")
 
 
 @proof
@@ -1308,7 +1344,7 @@ def _SATZ_9_EXCL_23(p):
         p.have("h_e3: ?v. y = x + v").by(CONJUNCT2, "h")
         p.have("h_gt: x > y").by_fold("h_e2")
         p.have("h_lt: x < y").by_fold("h_e3")
-        p.thus("F").by(CONTRA_LT_GT, "x", "y", "h_lt", "h_gt")
+        p.absurd().auto("h_lt", "h_gt")
 
 
 SATZ_9_EXCL = GENL([x, y],
@@ -1333,12 +1369,12 @@ def SATZ_20A(p):
     with p.cases_on(SATZ_10, "x", "y"):
         with p.case("h_eq: x = y"):
             p.have("eq_sum: x + z = y + z").by(SATZ_19B, "x", "y", "z", "h_eq")
-            p.absurd().by(CONTRA_GT_EQ, "x + z", "y + z", "h_a", "eq_sum")
+            p.absurd().auto("h_a", "eq_sum")
         with p.case("h_gt: x > y"):
             p.thus("x > y").by_thm(p.fact("h_gt"))
         with p.case("h_lt: x < y"):
             p.have("lt_sum: x + z < y + z").by(SATZ_19C, "x", "y", "z", "h_lt")
-            p.absurd().by(CONTRA_LT_GT, "x + z", "y + z", "lt_sum", "h_a")
+            p.absurd().auto("lt_sum", "h_a")
 
 
 @proof
@@ -1351,10 +1387,10 @@ def SATZ_20B(p):
             p.thus("x = y").by_thm(p.fact("h_eq"))
         with p.case("h_gt: x > y"):
             p.have("gt_sum: x + z > y + z").by(SATZ_19A, "x", "y", "z", "h_gt")
-            p.absurd().by(CONTRA_GT_EQ, "x + z", "y + z", "gt_sum", "h_b")
+            p.absurd().auto("gt_sum", "h_b")
         with p.case("h_lt: x < y"):
             p.have("lt_sum: x + z < y + z").by(SATZ_19C, "x", "y", "z", "h_lt")
-            p.absurd().by(CONTRA_LT_EQ, "x + z", "y + z", "lt_sum", "h_b")
+            p.absurd().auto("lt_sum", "h_b")
 
 
 @proof
@@ -1365,10 +1401,10 @@ def SATZ_20C(p):
     with p.cases_on(SATZ_10, "x", "y"):
         with p.case("h_eq: x = y"):
             p.have("eq_sum: x + z = y + z").by(SATZ_19B, "x", "y", "z", "h_eq")
-            p.absurd().by(CONTRA_LT_EQ, "x + z", "y + z", "h_c", "eq_sum")
+            p.absurd().auto("h_c", "eq_sum")
         with p.case("h_gt: x > y"):
             p.have("gt_sum: x + z > y + z").by(SATZ_19A, "x", "y", "z", "h_gt")
-            p.absurd().by(CONTRA_LT_GT, "x + z", "y + z", "h_c", "gt_sum")
+            p.absurd().auto("h_c", "gt_sum")
         with p.case("h_lt: x < y"):
             p.thus("x < y").by_thm(p.fact("h_lt"))
 
@@ -1392,12 +1428,12 @@ def SATZ_33A(p):
     with p.cases_on(SATZ_10, "x", "y"):
         with p.case("h_eq: x = y"):
             p.have("eq_prod: x * z = y * z").by(SATZ_32B, "x", "y", "z", "h_eq")
-            p.absurd().by(CONTRA_GT_EQ, "x * z", "y * z", "h_a", "eq_prod")
+            p.absurd().auto("h_a", "eq_prod")
         with p.case("h_gt: x > y"):
             p.thus("x > y").by_thm(p.fact("h_gt"))
         with p.case("h_lt: x < y"):
             p.have("lt_prod: x * z < y * z").by(SATZ_32C, "x", "y", "z", "h_lt")
-            p.absurd().by(CONTRA_LT_GT, "x * z", "y * z", "lt_prod", "h_a")
+            p.absurd().auto("lt_prod", "h_a")
 
 
 @proof
@@ -1410,10 +1446,10 @@ def SATZ_33B(p):
             p.thus("x = y").by_thm(p.fact("h_eq"))
         with p.case("h_gt: x > y"):
             p.have("gt_prod: x * z > y * z").by(SATZ_32A, "x", "y", "z", "h_gt")
-            p.absurd().by(CONTRA_GT_EQ, "x * z", "y * z", "gt_prod", "h_b")
+            p.absurd().auto("gt_prod", "h_b")
         with p.case("h_lt: x < y"):
             p.have("lt_prod: x * z < y * z").by(SATZ_32C, "x", "y", "z", "h_lt")
-            p.absurd().by(CONTRA_LT_EQ, "x * z", "y * z", "lt_prod", "h_b")
+            p.absurd().auto("lt_prod", "h_b")
 
 
 @proof
@@ -1424,10 +1460,10 @@ def SATZ_33C(p):
     with p.cases_on(SATZ_10, "x", "y"):
         with p.case("h_eq: x = y"):
             p.have("eq_prod: x * z = y * z").by(SATZ_32B, "x", "y", "z", "h_eq")
-            p.absurd().by(CONTRA_LT_EQ, "x * z", "y * z", "h_c", "eq_prod")
+            p.absurd().auto("h_c", "eq_prod")
         with p.case("h_gt: x > y"):
             p.have("gt_prod: x * z > y * z").by(SATZ_32A, "x", "y", "z", "h_gt")
-            p.absurd().by(CONTRA_LT_GT, "x * z", "y * z", "h_c", "gt_prod")
+            p.absurd().auto("h_c", "gt_prod")
         with p.case("h_lt: x < y"):
             p.thus("x < y").by_thm(p.fact("h_lt"))
 
