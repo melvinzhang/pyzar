@@ -29,16 +29,17 @@ import re
 from fusion import (
     Const, Comb, Abs, thm,
     aconv, concl, HolError, ASSUME, EQ_MP, BETA, mk_comb,
-    rand, type_of,
+    rand, type_of, TRANS,
 )
 from axioms import F, mk_select
 from logic import (
-    SPEC, GEN, DISCH, MP_LIST, DISJ_CASES, BETA_CONV, SYM,
+    SPEC, GEN, DISCH, MP_LIST, DISJ_CASES, BETA_CONV, BETA_NORM, SYM,
     PROVE_HYP, ELIM_EX, _subst_term,
     NOT_INTRO, CONTR, REWRITE_NE, EXISTS, DISJ1, DISJ2,
     CONJUNCT1, CONJUNCT2,
 )
-from tactics import REWRITE_PROVE, REWRITE_RULE, AC_PROVE, REWRITE_AC_PROVE
+from tactics import (REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV, BETA_RULE,
+                     AC_PROVE, REWRITE_AC_PROVE)
 from parser import parse, pp, ParseError
 from num import INDUCT_PROVE, mk_suc, ONE
 
@@ -639,6 +640,27 @@ class _Have:
                      for r in rules]
         fact_th = self.p._resolve_fact(ref)
         return self._finish(REWRITE_RULE(rule_thms, fact_th))
+
+    def by_unfold(self, src, *defs):
+        """Prove the goal from ``src`` by unfolding the given definition
+        equations (with beta-reduction). The goal and ``src``'s conclusion
+        must reduce to the same beta-normal form once ``defs`` fire as
+        rewrite rules. Used to bridge a theorem stated in unfolded form
+        (e.g. SATZ_9) to a goal stated using the defined symbol (SATZ_10's
+        ``>`` / ``<``)."""
+        src_th = src if isinstance(src, thm) else self.p._resolve_fact(src)
+        rules = [d if isinstance(d, thm) else self.p._resolve_fact(d)
+                 for d in defs]
+        eq_unfold = REWRITE_CONV(rules, self.term)
+        eq_beta = BETA_NORM(rand(eq_unfold._concl))
+        eq_goal = TRANS(eq_unfold, eq_beta)
+        src_norm = BETA_RULE(REWRITE_RULE(rules, src_th))
+        if not aconv(rand(eq_goal._concl), src_norm._concl):
+            raise HolError(
+                "by_unfold: normal forms differ\n"
+                f"  goal -> {pp(rand(eq_goal._concl))}\n"
+                f"  src  -> {pp(src_norm._concl)}")
+        return self._finish(EQ_MP(SYM(eq_goal), src_norm))
 
     def by_rewrite_ne(self, ref, eqs):
         """REWRITE_NE on a non-equation fact: takes ``~(a = b)`` and rewrites

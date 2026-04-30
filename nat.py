@@ -463,21 +463,12 @@ def CHOOSE_LT(h_lt, body_fn):
 
 # Theorem 10:  |- !x y. (x = y) \/ (x > y) \/ (x < y).    By Theorem 9 + Definitions 2, 3.
 
-def _prove_satz_10():
-    th9 = SPEC(y, SPEC(x, SATZ_9))             # |- (x=y) \/ (?u. ...) \/ (?v. ...)
-    case2 = mk_exists(u, mk_eq(x, mk_add(y, u)))
-    case3 = mk_exists(v, mk_eq(y, mk_add(x, v)))
-    # Rewrite case2 -> (x > y), case3 -> (x < y).
-    eq_gt = SYM(UNFOLD_GT(x, y))               # |- ?u. x = y + u   = (x > y)
-    eq_lt = SYM(UNFOLD_LT(x, y))               # |- ?v. y = x + v   = (x < y)
-    # body9 = (x=y) \/ (case2 \/ case3); rewrite to (x=y) \/ (x>y \/ x<y).
-    OR = DEFAULT_SIG["\\/"]
-    inner_eq = MK_COMB(AP_TERM(OR, eq_gt), eq_lt)
-    # |- (case2 \/ case3) = (x > y \/ x < y)
-    outer_eq = AP_TERM(mk_comb(OR, mk_eq(x, y)), inner_eq)
-    return GENL([x, y], EQ_MP(outer_eq, th9))
-
-SATZ_10 = _prove_satz_10()
+@proof
+def SATZ_10(p):
+    p.goal("!x y. (x = y) \\/ (x > y) \\/ (x < y)")
+    p.fix("x y")
+    p.thus("(x = y) \\/ (x > y) \\/ (x < y)")\
+        .by_unfold(SPECL([x, y], SATZ_9), GT_DEF, LT_DEF)
 
 
 # Theorem 11:  |- !x y. (x > y) ==> (y < x).   Both sides unfold to ?u. x = y + u.
