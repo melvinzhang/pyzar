@@ -33,7 +33,7 @@ from fusion import (
 )
 from axioms import F
 from logic import (
-    pp, SPEC, GEN, DISCH, MP_LIST, DISJ_CASES, BETA_CONV,
+    pp, SPEC, GEN, DISCH, MP_LIST, DISJ_CASES, BETA_CONV, SYM,
     PROVE_HYP, ELIM_EX, _subst_term,
     NOT_INTRO, CONTR, REWRITE_NE,
 )
@@ -455,18 +455,9 @@ class Proof:
             raise HolError("case() outside cases_on()")
         label, branch_term = self._split_label(branch_spec)
         outer_goal = fr.data["goal"]
-        if aconv(branch_term, fr.data["left"]):
-            slot = "left"
-        elif aconv(branch_term, fr.data["right"]):
-            slot = "right"
-        else:
-            raise HolError(
-                f"case: branch {pp(branch_term)} does not match either disjunct\n"
-                f"  left:  {pp(fr.data['left'])}\n"
-                f"  right: {pp(fr.data['right'])}")
 
         def on_close(th):
-            fr.data[slot + "_th"] = (branch_term, th)
+            fr.data["branches"].append((branch_term, th))
 
         return _SubFrameCtx(self, outer_goal, kind="case",
                              on_close=on_close,
@@ -569,6 +560,29 @@ class _Have:
     def by_eq_mp(self, eq_th, ref):
         """``EQ_MP(eq_th, fact)`` -- rewrite a fact through an equation."""
         return self._finish(EQ_MP(eq_th, self.p._resolve_fact(ref)))
+
+    def by_fold(self, ref):
+        """Inverse of an unfolder: if the have-term is ``a R b`` for a
+        relation ``R`` registered with ``register_unfolder`` or
+        ``register_disj_unfolder``, fold ``ref`` (whose conclusion equals the
+        unfolded form) back into ``a R b``."""
+        target = self.term
+        if not (isinstance(target, Comb) and isinstance(target.fun, Comb)
+                and isinstance(target.fun.fun, Const)):
+            raise HolError(
+                f"by_fold: target is not a binary relation: {pp(target)}")
+        op_name = target.fun.fun.name
+        if op_name in _UNFOLDERS:
+            unfold_fn = _UNFOLDERS[op_name]
+        elif op_name in _DISJ_UNFOLDERS:
+            unfold_fn = _DISJ_UNFOLDERS[op_name]
+        else:
+            raise HolError(
+                f"by_fold: no unfolder registered for {op_name!r}")
+        a = target.fun.arg
+        b = target.arg
+        fact = self.p._resolve_fact(ref)
+        return self._finish(EQ_MP(SYM(unfold_fn(a, b)), fact))
 
     def by_ac(self, op, assoc, comm):
         """AC_PROVE under ``(op, assoc, comm)`` for the (equation) have-term."""
@@ -710,22 +724,51 @@ class _InductionCtx:
 # branch's proof under an extra hypothesis. On exit, DISJ_CASES composes them.
 # ---------------------------------------------------------------------------
 
+def _split_disj_n(term, n):
+    """Right-associated split of ``p1 \\/ (p2 \\/ (... \\/ pn))`` into a
+    list of exactly ``n`` disjuncts, or ``None`` if the shape doesn't fit."""
+    leaves = [term]
+    while len(leaves) < n:
+        last = leaves[-1]
+        if not (isinstance(last, Comb) and isinstance(last.fun, Comb)
+                and isinstance(last.fun.fun, Const)
+                and last.fun.fun.name == "\\/"):
+            return None
+        leaves[-1] = last.fun.arg
+        leaves.append(last.arg)
+    return leaves
+
+
+def _build_disj_cases(or_th, branches):
+    """Compose nested ``DISJ_CASES`` over a right-associated disjunction.
+
+    ``or_th``'s conclusion is ``p1 \\/ (p2 \\/ (... \\/ pn))``; ``branches``
+    is the matching ordered list of ``(disjunct_term, branch_th)`` pairs
+    where each ``branch_th`` proves the target under hypothesis
+    ``disjunct_term``. Returns the combined theorem with all branch
+    hypotheses discharged."""
+    if len(branches) == 2:
+        l_term, l_th = branches[0]
+        r_term, r_th = branches[1]
+        return DISJ_CASES(or_th, DISCH(l_term, l_th), DISCH(r_term, r_th))
+    head_term, head_th = branches[0]
+    rest_or = or_th._concl.arg
+    inner_th = _build_disj_cases(ASSUME(rest_or), branches[1:])
+    return DISJ_CASES(or_th,
+                      DISCH(head_term, head_th),
+                      DISCH(rest_or, inner_th))
+
+
 class _CasesCtx:
     def __init__(self, p, or_th, target, on_close):
         self.p = p
         self.or_th = or_th
-        c = or_th._concl
-        self.left = c.fun.arg
-        self.right = c.arg
         self.target = target
         self.on_close = on_close
 
     def __enter__(self):
         fr = _Frame(goal=self.target, kind="_cases")
-        # The "_cases" frame's goal is what each case() branch must prove.
-        fr.data = {"goal": self.target,
-                   "left": self.left, "right": self.right,
-                   "left_th": None, "right_th": None}
+        fr.data = {"goal": self.target, "branches": []}
         self.p._frames.append(fr)
         return self.p
 
@@ -733,14 +776,33 @@ class _CasesCtx:
         if exc_type is not None:
             return False
         fr = self.p._frames.pop()
-        d = fr.data
-        if d["left_th"] is None or d["right_th"] is None:
-            raise HolError("cases_on: missing one or both case() blocks")
-        l_term, l_th = d["left_th"]
-        r_term, r_th = d["right_th"]
-        branch_l = DISCH(l_term, l_th)
-        branch_r = DISCH(r_term, r_th)
-        result = DISJ_CASES(self.or_th, branch_l, branch_r)
+        branches = fr.data["branches"]
+        n = len(branches)
+        if n < 2:
+            raise HolError(
+                f"cases_on: need at least 2 case() blocks, got {n}")
+        leaves = _split_disj_n(self.or_th._concl, n)
+        if leaves is None:
+            raise HolError(
+                f"cases_on: cannot split into {n} disjuncts: "
+                f"{pp(self.or_th._concl)}")
+        # Match each user-supplied case to a leaf (preserves leaf order).
+        slots = [None] * n
+        for branch_term, th in branches:
+            placed = False
+            for i, leaf in enumerate(leaves):
+                if slots[i] is None and aconv(leaf, branch_term):
+                    slots[i] = (branch_term, th)
+                    placed = True
+                    break
+            if not placed:
+                raise HolError(
+                    f"cases_on: branch does not match any disjunct: "
+                    f"{pp(branch_term)}")
+        if any(s is None for s in slots):
+            missing = [pp(leaves[i]) for i, s in enumerate(slots) if s is None]
+            raise HolError(f"cases_on: missing case for {missing}")
+        result = _build_disj_cases(self.or_th, slots)
         self.p._drop_facts(fr.facts_added)
         if not aconv(self.target, result._concl):
             raise HolError(

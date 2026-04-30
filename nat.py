@@ -799,7 +799,7 @@ def SATZ_11(p):
     p.fix("x y")
     p.assume("h: x > y")
     p.have("ex: ?u. x = y + u").by_eq_mp(UNFOLD_GT(x, y), "h")
-    p.thus("y < x").by_eq_mp(SYM(UNFOLD_LT(y, x)), "ex")
+    p.thus("y < x").by_fold("ex")
 
 @proof
 def SATZ_12(p):
@@ -807,7 +807,7 @@ def SATZ_12(p):
     p.fix("x y")
     p.assume("h: x < y")
     p.have("ex: ?v. y = x + v").by_eq_mp(UNFOLD_LT(x, y), "h")
-    p.thus("y > x").by_eq_mp(SYM(UNFOLD_GT(y, x)), "ex")
+    p.thus("y > x").by_fold("ex")
 
 
 # Definition 4:  x >= y  ≡  x > y \/ x = y.
@@ -853,7 +853,7 @@ def SATZ_13(p):
             p.have("yx_eq: y = x").by(SYM, "h_eq")
             p.thus("(y < x) \\/ (y = x)")\
                 .by_thm(DISJ2(mk_lt(y, x), p.fact("yx_eq")))
-    p.thus("y <= x").by_eq_mp(SYM(UNFOLD_LE(y, x)), "yx_or")
+    p.thus("y <= x").by_fold("yx_or")
 
 
 @proof
@@ -870,7 +870,7 @@ def SATZ_14(p):
             p.have("yx_eq: y = x").by(SYM, "h_eq")
             p.thus("(y > x) \\/ (y = x)")\
                 .by_thm(DISJ2(mk_gt(y, x), p.fact("yx_eq")))
-    p.thus("y >= x").by_eq_mp(SYM(UNFOLD_GE(y, x)), "yx_or")
+    p.thus("y >= x").by_fold("yx_or")
 
 
 # Theorem 15 (transitivity of order):  |- !x y z. x < y ==> y < z ==> x < z.
@@ -1156,21 +1156,18 @@ def SATZ_26(p):
     p.goal("!x y. y < x + 1 ==> y <= x")
     p.fix("x y")
     p.assume("h: y < x + 1")
-    p.have("trichot: (y = x) \\/ ((y > x) \\/ (y < x))").by(SATZ_10, "y", "x")
-    with p.cases_on("trichot"):
+    with p.cases_on(SPECL([y, x], SATZ_10)):
         with p.case("h_eq: y = x"):
             p.thus("y <= x").by(EQ_TO_LE, "h_eq")
-        with p.case("inner: (y > x) \\/ (y < x)"):
-            with p.cases_on("inner"):
-                with p.case("h_gt: y > x"):
-                    p.have("y_ge_x1: y >= x + 1").by(SATZ_25, "x", "y", "h_gt")
-                    with p.cases_on("y_ge_x1"):
-                        with p.case("h_g: y > x + 1"):
-                            p.absurd().by(CONTRA_LT_GT, "y", "x + 1", "h", "h_g")
-                        with p.case("h_e: y = x + 1"):
-                            p.absurd().by(CONTRA_LT_EQ, "y", "x + 1", "h", "h_e")
-                with p.case("h_lt: y < x"):
-                    p.thus("y <= x").by(LT_TO_LE, "h_lt")
+        with p.case("h_gt: y > x"):
+            p.have("y_ge_x1: y >= x + 1").by(SATZ_25, "x", "y", "h_gt")
+            with p.cases_on("y_ge_x1"):
+                with p.case("h_g: y > x + 1"):
+                    p.absurd().by(CONTRA_LT_GT, "y", "x + 1", "h", "h_g")
+                with p.case("h_e: y = x + 1"):
+                    p.absurd().by(CONTRA_LT_EQ, "y", "x + 1", "h", "h_e")
+        with p.case("h_lt: y < x"):
+            p.thus("y <= x").by(LT_TO_LE, "h_lt")
 
 
 
@@ -1712,7 +1709,7 @@ def _SATZ_9_EXCL_12(p):
     with p.suppose("h: x = y /\\ ?u. x = y + u"):
         p.have("h_eq: x = y").by(CONJUNCT1, "h")
         p.have("h_ex: ?u. x = y + u").by(CONJUNCT2, "h")
-        p.have("h_gt: x > y").by_eq_mp(SYM(UNFOLD_GT(x, y)), "h_ex")
+        p.have("h_gt: x > y").by_fold("h_ex")
         p.thus("F").by(CONTRA_GT_EQ, "x", "y", "h_gt", "h_eq")
 
 
@@ -1723,7 +1720,7 @@ def _SATZ_9_EXCL_13(p):
     with p.suppose("h: x = y /\\ ?v. y = x + v"):
         p.have("h_eq: x = y").by(CONJUNCT1, "h")
         p.have("h_ex: ?v. y = x + v").by(CONJUNCT2, "h")
-        p.have("h_lt: x < y").by_eq_mp(SYM(UNFOLD_LT(x, y)), "h_ex")
+        p.have("h_lt: x < y").by_fold("h_ex")
         p.thus("F").by(CONTRA_LT_EQ, "x", "y", "h_lt", "h_eq")
 
 
@@ -1734,8 +1731,8 @@ def _SATZ_9_EXCL_23(p):
     with p.suppose("h: (?u. x = y + u) /\\ (?v. y = x + v)"):
         p.have("h_e2: ?u. x = y + u").by(CONJUNCT1, "h")
         p.have("h_e3: ?v. y = x + v").by(CONJUNCT2, "h")
-        p.have("h_gt: x > y").by_eq_mp(SYM(UNFOLD_GT(x, y)), "h_e2")
-        p.have("h_lt: x < y").by_eq_mp(SYM(UNFOLD_LT(x, y)), "h_e3")
+        p.have("h_gt: x > y").by_fold("h_e2")
+        p.have("h_lt: x < y").by_fold("h_e3")
         p.thus("F").by(CONTRA_LT_GT, "x", "y", "h_lt", "h_gt")
 
 
@@ -1758,18 +1755,15 @@ def SATZ_20A(p):
     p.goal("!x y z. x + z > y + z ==> x > y")
     p.fix("x y z")
     p.assume("h_a: x + z > y + z")
-    p.have("trichot: (x = y) \\/ ((x > y) \\/ (x < y))").by(SATZ_10, "x", "y")
-    with p.cases_on("trichot"):
+    with p.cases_on(SPECL([x, y], SATZ_10)):
         with p.case("h_eq: x = y"):
             p.have("eq_sum: x + z = y + z").by(SATZ_19B, "x", "y", "z", "h_eq")
             p.absurd().by(CONTRA_GT_EQ, "x + z", "y + z", "h_a", "eq_sum")
-        with p.case("inner: (x > y) \\/ (x < y)"):
-            with p.cases_on("inner"):
-                with p.case("h_gt: x > y"):
-                    p.thus("x > y").by_thm(p.fact("h_gt"))
-                with p.case("h_lt: x < y"):
-                    p.have("lt_sum: x + z < y + z").by(SATZ_19C, "x", "y", "z", "h_lt")
-                    p.absurd().by(CONTRA_LT_GT, "x + z", "y + z", "lt_sum", "h_a")
+        with p.case("h_gt: x > y"):
+            p.thus("x > y").by_thm(p.fact("h_gt"))
+        with p.case("h_lt: x < y"):
+            p.have("lt_sum: x + z < y + z").by(SATZ_19C, "x", "y", "z", "h_lt")
+            p.absurd().by(CONTRA_LT_GT, "x + z", "y + z", "lt_sum", "h_a")
 
 
 @proof
@@ -1777,18 +1771,15 @@ def SATZ_20B(p):
     p.goal("!x y z. x + z = y + z ==> x = y")
     p.fix("x y z")
     p.assume("h_b: x + z = y + z")
-    p.have("trichot: (x = y) \\/ ((x > y) \\/ (x < y))").by(SATZ_10, "x", "y")
-    with p.cases_on("trichot"):
+    with p.cases_on(SPECL([x, y], SATZ_10)):
         with p.case("h_eq: x = y"):
             p.thus("x = y").by_thm(p.fact("h_eq"))
-        with p.case("inner: (x > y) \\/ (x < y)"):
-            with p.cases_on("inner"):
-                with p.case("h_gt: x > y"):
-                    p.have("gt_sum: x + z > y + z").by(SATZ_19A, "x", "y", "z", "h_gt")
-                    p.absurd().by(CONTRA_GT_EQ, "x + z", "y + z", "gt_sum", "h_b")
-                with p.case("h_lt: x < y"):
-                    p.have("lt_sum: x + z < y + z").by(SATZ_19C, "x", "y", "z", "h_lt")
-                    p.absurd().by(CONTRA_LT_EQ, "x + z", "y + z", "lt_sum", "h_b")
+        with p.case("h_gt: x > y"):
+            p.have("gt_sum: x + z > y + z").by(SATZ_19A, "x", "y", "z", "h_gt")
+            p.absurd().by(CONTRA_GT_EQ, "x + z", "y + z", "gt_sum", "h_b")
+        with p.case("h_lt: x < y"):
+            p.have("lt_sum: x + z < y + z").by(SATZ_19C, "x", "y", "z", "h_lt")
+            p.absurd().by(CONTRA_LT_EQ, "x + z", "y + z", "lt_sum", "h_b")
 
 
 @proof
@@ -1796,18 +1787,15 @@ def SATZ_20C(p):
     p.goal("!x y z. x + z < y + z ==> x < y")
     p.fix("x y z")
     p.assume("h_c: x + z < y + z")
-    p.have("trichot: (x = y) \\/ ((x > y) \\/ (x < y))").by(SATZ_10, "x", "y")
-    with p.cases_on("trichot"):
+    with p.cases_on(SPECL([x, y], SATZ_10)):
         with p.case("h_eq: x = y"):
             p.have("eq_sum: x + z = y + z").by(SATZ_19B, "x", "y", "z", "h_eq")
             p.absurd().by(CONTRA_LT_EQ, "x + z", "y + z", "h_c", "eq_sum")
-        with p.case("inner: (x > y) \\/ (x < y)"):
-            with p.cases_on("inner"):
-                with p.case("h_gt: x > y"):
-                    p.have("gt_sum: x + z > y + z").by(SATZ_19A, "x", "y", "z", "h_gt")
-                    p.absurd().by(CONTRA_LT_GT, "x + z", "y + z", "h_c", "gt_sum")
-                with p.case("h_lt: x < y"):
-                    p.thus("x < y").by_thm(p.fact("h_lt"))
+        with p.case("h_gt: x > y"):
+            p.have("gt_sum: x + z > y + z").by(SATZ_19A, "x", "y", "z", "h_gt")
+            p.absurd().by(CONTRA_LT_GT, "x + z", "y + z", "h_c", "gt_sum")
+        with p.case("h_lt: x < y"):
+            p.thus("x < y").by_thm(p.fact("h_lt"))
 
 
 SATZ_20 = GENL([x, y, z],
@@ -1826,18 +1814,15 @@ def SATZ_33A(p):
     p.goal("!x y z. x * z > y * z ==> x > y")
     p.fix("x y z")
     p.assume("h_a: x * z > y * z")
-    p.have("trichot: (x = y) \\/ ((x > y) \\/ (x < y))").by(SATZ_10, "x", "y")
-    with p.cases_on("trichot"):
+    with p.cases_on(SPECL([x, y], SATZ_10)):
         with p.case("h_eq: x = y"):
             p.have("eq_prod: x * z = y * z").by(SATZ_32B, "x", "y", "z", "h_eq")
             p.absurd().by(CONTRA_GT_EQ, "x * z", "y * z", "h_a", "eq_prod")
-        with p.case("inner: (x > y) \\/ (x < y)"):
-            with p.cases_on("inner"):
-                with p.case("h_gt: x > y"):
-                    p.thus("x > y").by_thm(p.fact("h_gt"))
-                with p.case("h_lt: x < y"):
-                    p.have("lt_prod: x * z < y * z").by(SATZ_32C, "x", "y", "z", "h_lt")
-                    p.absurd().by(CONTRA_LT_GT, "x * z", "y * z", "lt_prod", "h_a")
+        with p.case("h_gt: x > y"):
+            p.thus("x > y").by_thm(p.fact("h_gt"))
+        with p.case("h_lt: x < y"):
+            p.have("lt_prod: x * z < y * z").by(SATZ_32C, "x", "y", "z", "h_lt")
+            p.absurd().by(CONTRA_LT_GT, "x * z", "y * z", "lt_prod", "h_a")
 
 
 @proof
@@ -1845,18 +1830,15 @@ def SATZ_33B(p):
     p.goal("!x y z. x * z = y * z ==> x = y")
     p.fix("x y z")
     p.assume("h_b: x * z = y * z")
-    p.have("trichot: (x = y) \\/ ((x > y) \\/ (x < y))").by(SATZ_10, "x", "y")
-    with p.cases_on("trichot"):
+    with p.cases_on(SPECL([x, y], SATZ_10)):
         with p.case("h_eq: x = y"):
             p.thus("x = y").by_thm(p.fact("h_eq"))
-        with p.case("inner: (x > y) \\/ (x < y)"):
-            with p.cases_on("inner"):
-                with p.case("h_gt: x > y"):
-                    p.have("gt_prod: x * z > y * z").by(SATZ_32A, "x", "y", "z", "h_gt")
-                    p.absurd().by(CONTRA_GT_EQ, "x * z", "y * z", "gt_prod", "h_b")
-                with p.case("h_lt: x < y"):
-                    p.have("lt_prod: x * z < y * z").by(SATZ_32C, "x", "y", "z", "h_lt")
-                    p.absurd().by(CONTRA_LT_EQ, "x * z", "y * z", "lt_prod", "h_b")
+        with p.case("h_gt: x > y"):
+            p.have("gt_prod: x * z > y * z").by(SATZ_32A, "x", "y", "z", "h_gt")
+            p.absurd().by(CONTRA_GT_EQ, "x * z", "y * z", "gt_prod", "h_b")
+        with p.case("h_lt: x < y"):
+            p.have("lt_prod: x * z < y * z").by(SATZ_32C, "x", "y", "z", "h_lt")
+            p.absurd().by(CONTRA_LT_EQ, "x * z", "y * z", "lt_prod", "h_b")
 
 
 @proof
@@ -1864,18 +1846,15 @@ def SATZ_33C(p):
     p.goal("!x y z. x * z < y * z ==> x < y")
     p.fix("x y z")
     p.assume("h_c: x * z < y * z")
-    p.have("trichot: (x = y) \\/ ((x > y) \\/ (x < y))").by(SATZ_10, "x", "y")
-    with p.cases_on("trichot"):
+    with p.cases_on(SPECL([x, y], SATZ_10)):
         with p.case("h_eq: x = y"):
             p.have("eq_prod: x * z = y * z").by(SATZ_32B, "x", "y", "z", "h_eq")
             p.absurd().by(CONTRA_LT_EQ, "x * z", "y * z", "h_c", "eq_prod")
-        with p.case("inner: (x > y) \\/ (x < y)"):
-            with p.cases_on("inner"):
-                with p.case("h_gt: x > y"):
-                    p.have("gt_prod: x * z > y * z").by(SATZ_32A, "x", "y", "z", "h_gt")
-                    p.absurd().by(CONTRA_LT_GT, "x * z", "y * z", "h_c", "gt_prod")
-                with p.case("h_lt: x < y"):
-                    p.thus("x < y").by_thm(p.fact("h_lt"))
+        with p.case("h_gt: x > y"):
+            p.have("gt_prod: x * z > y * z").by(SATZ_32A, "x", "y", "z", "h_gt")
+            p.absurd().by(CONTRA_LT_GT, "x * z", "y * z", "h_c", "gt_prod")
+        with p.case("h_lt: x < y"):
+            p.thus("x < y").by_thm(p.fact("h_lt"))
 
 
 SATZ_33 = GENL([x, y, z],
