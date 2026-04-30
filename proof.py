@@ -31,9 +31,11 @@ from fusion import (
     aconv, concl, HolError, ASSUME, EQ_MP, BETA, mk_comb, mk_const,
     rand, aty, type_of,
 )
+from axioms import F
 from logic import (
     pp, SPEC, GEN, DISCH, MP_LIST, DISJ_CASES, BETA_CONV,
     PROVE_HYP, ELIM_EX, _subst_term,
+    NOT_INTRO, CONTR,
 )
 from tactics import REWRITE_PROVE, REWRITE_RULE, AC_PROVE, REWRITE_AC_PROVE
 from parser import parse, ParseError
@@ -92,7 +94,7 @@ class Proof:
     # ---- env / parsing ---------------------------------------------------
 
     def _scope_env(self):
-        env = {}
+        env = {"F": F}
         for fr in self._frames:
             for v in fr.vars_added:
                 env[v.name] = v
@@ -365,6 +367,59 @@ class Proof:
             raise HolError(f"cases_on: not a disjunction: {pp(c)}")
         return _CasesCtx(self, or_th)
 
+    def suppose(self, label_spec):
+        """Open a hypothetical sub-block to prove a negation goal.
+
+        The current goal must be ``~p``. The block has goal ``F`` and gets
+        ``label: p`` registered as a fact. On close, wraps the F-theorem as
+        ``NOT_INTRO(DISCH(p, F_th))`` and discharges the parent's ``~p`` goal.
+        """
+        fr = self._cur
+        g = fr.goal
+        if g is None or not (isinstance(g, Comb) and isinstance(g.fun, Const)
+                and g.fun.name == "~"):
+            raise HolError(
+                f"suppose: current goal is not a negation: "
+                f"{pp(g) if g is not None else 'None'}")
+        body = g.arg
+
+        spec = label_spec.strip()
+        m = self._LABEL_RE.match(spec)
+        if m:
+            label = m.group(1)
+            try:
+                hyp_term = self._parse(m.group(2))
+            except ParseError as ex:
+                raise HolError(f"suppose: cannot parse hypothesis: {ex}") from ex
+            if not aconv(hyp_term, body):
+                raise HolError(
+                    "suppose: hypothesis does not match negated body\n"
+                    f"  body:  {pp(body)}\n  given: {pp(hyp_term)}")
+        else:
+            if not re.match(r"^[A-Za-z_][A-Za-z_0-9]*$", spec):
+                raise HolError(f"suppose: bad label spec: {label_spec!r}")
+            label = spec
+
+        def on_close(F_th):
+            not_th = NOT_INTRO(DISCH(body, F_th))
+            self._set_frame_result(self._cur, not_th)
+
+        return _SubFrameCtx(self, F, kind="suppose",
+                             on_close=on_close,
+                             extra_facts=[(label, ASSUME(body))])
+
+    def absurd(self):
+        """Discharge the current goal as an impossible case by deriving F.
+
+        Returns a helper whose ``.by(...)``/``.by_thm(...)`` produce a
+        theorem of conclusion ``F``; this is wrapped via ``CONTR(goal, F_th)``
+        and set as the current frame's result.
+        """
+        fr = self._cur
+        if fr.goal is None:
+            raise HolError("absurd: no current goal")
+        return _Absurd(self, fr.goal)
+
     def case(self, branch_spec):
         fr = self._cur
         if fr.kind != "_cases":
@@ -483,6 +538,39 @@ class _Have:
 
 
 # ---------------------------------------------------------------------------
+# Absurd: derive F from the current scope and CONTR-wrap to the frame's goal.
+# ---------------------------------------------------------------------------
+
+class _Absurd:
+    __slots__ = ("p", "target")
+
+    def __init__(self, p, target):
+        self.p = p
+        self.target = target
+
+    def _finish(self, F_th):
+        if not aconv(F_th._concl, F):
+            raise HolError(
+                f"absurd: justification did not produce F: {pp(F_th._concl)}")
+        result = CONTR(self.target, F_th)
+        self.p._set_frame_result(self.p._cur, result)
+        return result
+
+    def by_thm(self, th):
+        return self._finish(th)
+
+    def by(self, justification, *args):
+        if isinstance(justification, thm):
+            resolved = [self.p._resolve_fact_or_term(a) for a in args]
+            return self._finish(MP_LIST(justification, resolved))
+        if callable(justification):
+            resolved = [self.p._resolve_fact_or_term(a) for a in args]
+            return self._finish(justification(*resolved))
+        raise HolError(
+            f"absurd: not a theorem or callable: {justification!r}")
+
+
+# ---------------------------------------------------------------------------
 # Sub-frame context manager: pushes a frame with a sub-goal, on exit verifies
 # discharge and reports the result back to the parent via ``on_close``.
 # ---------------------------------------------------------------------------
@@ -511,8 +599,13 @@ class _SubFrameCtx:
         if fr.result is None:
             raise HolError(
                 f"{self.kind}: block did not discharge sub-goal via thus")
+        th = fr.result
+        for label, term in reversed(fr.hyps_added):
+            th = DISCH(term, th)
+        for v in reversed(fr.vars_added):
+            th = GEN(v, th)
         self.p._drop_facts(fr.facts_added)
-        self.on_close(fr.result)
+        self.on_close(th)
         return False
 
 

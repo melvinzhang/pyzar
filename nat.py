@@ -75,15 +75,15 @@ from proof import proof
 # Formally: contrapositive of Axiom 4.
 # ---------------------------------------------------------------------------
 
-def _prove_satz_1():
-    hyp_neq  = mk_not(mk_eq(x, y))           # ~(x = y)
-    hyp_eq_s = mk_eq(mk_suc(x), mk_suc(y))   # x' = y'
-    th_xy  = MP(SPECL([x, y], AXIOM_4), ASSUME(hyp_eq_s))         # {x'=y'} |- x = y
-    th_F   = MP(NOT_ELIM(ASSUME(hyp_neq)), th_xy)                 # {~(x=y), x'=y'} |- F
-    th_not = NOT_INTRO(DISCH(hyp_eq_s, th_F))                     # {~(x=y)} |- ~(x'=y')
-    return GENL([x, y], DISCH(hyp_neq, th_not))
-
-SATZ_1 = _prove_satz_1()
+@proof
+def SATZ_1(p):
+    p.goal("!x y. ~(x = y) ==> ~(SUC x = SUC y)")
+    p.fix("x y")
+    p.assume("hxy: ~(x = y)")
+    with p.suppose("h: SUC x = SUC y"):
+        p.have("xy: x = y").by(AXIOM_4, "x", "y", "h")
+        p.have("imp: (x = y) ==> F").by(NOT_ELIM, "hxy")
+        p.thus("F").by(MP, "imp", "xy")
 
 
 # ---------------------------------------------------------------------------
@@ -110,23 +110,20 @@ def SATZ_2(p):
 #                 contradictory); in the step: at x' take u = x.
 # ---------------------------------------------------------------------------
 
-def _prove_satz_3():
-    body_x = parse("~(x = 1) ==> ?u. x = SUC u")
-
-    # Base: |- ~(1 = 1) ==> ?u. 1 = u'.  Hypothesis is false (REFL contradicts it).
-    not_1_1 = parse("~(1 = 1)")
-    th_F = MP(NOT_ELIM(ASSUME(not_1_1)), REFL(ONE))
-    base = DISCH(not_1_1, CONTR(parse("?u. 1 = SUC u"), th_F))
-
-    # Step: at x' we use u = x as witness (IH unused).
-    def step_fn(IH):
-        not_xs_1 = parse("~(SUC x = 1)")
-        pred_u = mk_abs(u, parse("SUC x = SUC u"))
-        return DISCH(not_xs_1, EXISTS(pred_u, x, REFL(mk_suc(x))))
-
-    return INDUCT_PROVE(x, body_x, base, step_fn)
-
-SATZ_3 = _prove_satz_3()
+@proof
+def SATZ_3(p):
+    p.goal("!x. ~(x = 1) ==> ?u. x = SUC u")
+    p.fix("x")
+    with p.induction("x"):
+        with p.base():
+            p.assume("h: ~(1 = 1)")
+            p.have("imp: (1 = 1) ==> F").by(NOT_ELIM, "h")
+            p.absurd().by(MP, "imp", REFL(ONE))
+        with p.step("IH"):
+            p.assume("h: ~(SUC x = 1)")
+            pred_u = mk_abs(u, parse("SUC x = SUC u"))
+            p.thus("?u. SUC x = SUC u")\
+                .by_thm(EXISTS(pred_u, x, REFL(mk_suc(x))))
 
 
 # ---------------------------------------------------------------------------
@@ -1103,31 +1100,10 @@ def SATZ_25(p):
     p.thus("y >= x + 1").by_rewrite_of("sum_ge", [SYM(p.fact("u_eq"))])
 
 
-# Theorem 26:   y < x + 1  ==>  y <= x.    Contrapositive of Theorem 25.
-# Landau: "Otherwise we'd have y > x, hence by Theorem 25 y >= x + 1."
-# We prove it via Theorem 9 (trichotomy): if y > x, then y >= x + 1, contradicting y < x + 1.
-# Otherwise y = x or y < x, both giving y <= x.
-
-def _prove_satz_26():
-    h = ASSUME(mk_lt(y, mk_add(x, ONE)))
-    def _from_gt(h_gt):
-        s25_yx = MP_LIST(SATZ_25, [x, y, h_gt])
-        u_ge = EQ_MP(UNFOLD_GE(y, mk_add(x, ONE)), s25_yx)
-        return CASE_OR(u_ge,
-            (mk_gt(y, mk_add(x, ONE)),
-                lambda h_g: CONTR(mk_le(y, x),
-                                   CONTRA_LT_GT(y, mk_add(x, ONE), h, h_g))),
-            (mk_eq(y, mk_add(x, ONE)),
-                lambda h_e: CONTR(mk_le(y, x),
-                                   CONTRA_LT_EQ(y, mk_add(x, ONE), h, h_e))))
-    inner = lambda h_or: CASE_OR(h_or,
-        (mk_gt(y, x), _from_gt),
-        (mk_lt(y, x), LT_TO_LE))
-    th = CASE_OR(SPECL([y, x], SATZ_10),
-        (mk_eq(y, x), EQ_TO_LE),
-        (mk_or(mk_gt(y, x), mk_lt(y, x)), inner))
-    return GENL([x, y], DISCH(mk_lt(y, mk_add(x, ONE)), th))
-
+# ---------------------------------------------------------------------------
+# Contradiction helpers used by Theorems 26, 20, 33 (and Theorem 9 part A).
+# Each builds F from a pair of inconsistent order facts, via Theorem 7 + 6.
+# ---------------------------------------------------------------------------
 
 def CONTRA_LT_GT(a_t, b_t, h_lt, h_gt):
     """ |- a < b,  |- a > b   =>   {a<b, a>b} |- F. """
@@ -1167,7 +1143,35 @@ def CONTRA_GT_EQ(a_t, b_t, h_gt, h_eq):
     return CHOOSE_GT(h_gt, _inner)
 
 
-SATZ_26 = _prove_satz_26()
+# Theorem 26:   y < x + 1  ==>  y <= x.    Contrapositive of Theorem 25.
+# Landau: "Otherwise we'd have y > x, hence by Theorem 25 y >= x + 1."
+# We prove it via Theorem 9 (trichotomy): if y > x, then y >= x + 1, contradicting y < x + 1.
+# Otherwise y = x or y < x, both giving y <= x.
+
+@proof
+def SATZ_26(p):
+    p.goal("!x y. y < x + 1 ==> y <= x")
+    p.fix("x y")
+    p.assume("h: y < x + 1")
+    p.have("trichot: (y = x) \\/ ((y > x) \\/ (y < x))").by(SATZ_10, "y", "x")
+    with p.cases_on("trichot"):
+        with p.case("h_eq: y = x"):
+            p.thus("y <= x").by(EQ_TO_LE, "h_eq")
+        with p.case("inner: (y > x) \\/ (y < x)"):
+            with p.cases_on("inner"):
+                with p.case("h_gt: y > x"):
+                    p.have("y_ge_x1: y >= x + 1").by(SATZ_25, "x", "y", "h_gt")
+                    p.have("u_or: (y > x + 1) \\/ (y = x + 1)")\
+                        .by_eq_mp(UNFOLD_GE(y, mk_add(x, ONE)), "y_ge_x1")
+                    with p.cases_on("u_or"):
+                        with p.case("h_g: y > x + 1"):
+                            p.absurd().by(CONTRA_LT_GT, "y", "x + 1", "h", "h_g")
+                        with p.case("h_e: y = x + 1"):
+                            p.absurd().by(CONTRA_LT_EQ, "y", "x + 1", "h", "h_e")
+                with p.case("h_lt: y < x"):
+                    p.thus("y <= x").by(LT_TO_LE, "h_lt")
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -1704,67 +1708,44 @@ def SATZ_36(p):
 #         /\ ~((?u. x = y + u) /\ (?v. y = x + v))
 # ---------------------------------------------------------------------------
 
-def _prove_satz_9_excl():
-    case2 = mk_exists(u, mk_eq(x, mk_add(y, u)))
-    case3 = mk_exists(v, mk_eq(y, mk_add(x, v)))
+@proof
+def _SATZ_9_EXCL_12(p):
+    p.goal("!x y. ~(x = y /\\ ?u. x = y + u)")
+    p.fix("x y")
+    with p.suppose("h: x = y /\\ ?u. x = y + u"):
+        p.have("h_eq: x = y").by(CONJUNCT1, "h")
+        p.have("h_ex: ?u. x = y + u").by(CONJUNCT2, "h")
+        p.have("h_gt: x > y").by_eq_mp(SYM(UNFOLD_GT(x, y)), "h_ex")
+        p.thus("F").by(CONTRA_GT_EQ, "x", "y", "h_gt", "h_eq")
 
-    # Pair 1: x = y AND case2 are inconsistent.
-    h_xy = ASSUME(mk_eq(x, y))
-    h_c2 = ASSUME(case2)
-    pred_u = mk_abs(u, mk_eq(x, mk_add(y, u)))
-    def _from_c2(eq_x):
-        u0 = rand(rand(eq_x._concl))
-        chain = TRANS(SYM(h_xy), eq_x)                       # y = y + u0
-        comm = SPECL([u0, y], SATZ_6)
-        ne   = SPECL([u0, y], SATZ_7)
-        ne_f = REWRITE_NE(ne, REFL(y), comm)
-        return MP(NOT_ELIM(ne_f), chain)
-    th_F1 = PROVE_HYP(h_c2, ELIM_EX(pred_u, case2, _from_c2))
-    h_conj_12 = ASSUME(mk_and(mk_eq(x, y), case2))
-    th_F1b = PROVE_HYP(CONJUNCT2(h_conj_12),
-                       PROVE_HYP(CONJUNCT1(h_conj_12), th_F1))
-    excl_12 = NOT_INTRO(DISCH(mk_and(mk_eq(x, y), case2), th_F1b))
 
-    # Pair 2: x = y AND case3 are inconsistent.
-    h_c3 = ASSUME(case3)
-    pred_v = mk_abs(v, mk_eq(y, mk_add(x, v)))
-    def _from_c3(eq_y):
-        v0 = rand(rand(eq_y._concl))
-        chain = TRANS(h_xy, eq_y)                            # x = x + v0
-        comm = SPECL([v0, x], SATZ_6)
-        ne   = SPECL([v0, x], SATZ_7)
-        ne_f = REWRITE_NE(ne, REFL(x), comm)
-        return MP(NOT_ELIM(ne_f), chain)
-    th_F2 = PROVE_HYP(h_c3, ELIM_EX(pred_v, case3, _from_c3))
-    h_conj_13 = ASSUME(mk_and(mk_eq(x, y), case3))
-    th_F2b = PROVE_HYP(CONJUNCT2(h_conj_13),
-                       PROVE_HYP(CONJUNCT1(h_conj_13), th_F2))
-    excl_13 = NOT_INTRO(DISCH(mk_and(mk_eq(x, y), case3), th_F2b))
+@proof
+def _SATZ_9_EXCL_13(p):
+    p.goal("!x y. ~(x = y /\\ ?v. y = x + v)")
+    p.fix("x y")
+    with p.suppose("h: x = y /\\ ?v. y = x + v"):
+        p.have("h_eq: x = y").by(CONJUNCT1, "h")
+        p.have("h_ex: ?v. y = x + v").by(CONJUNCT2, "h")
+        p.have("h_lt: x < y").by_eq_mp(SYM(UNFOLD_LT(x, y)), "h_ex")
+        p.thus("F").by(CONTRA_LT_EQ, "x", "y", "h_lt", "h_eq")
 
-    # Pair 3: case2 AND case3 are inconsistent.
-    def _from_c2_outer(eq_x):
-        u0 = rand(rand(eq_x._concl))
-        def _from_c3_inner(eq_y):
-            v0 = rand(rand(eq_y._concl))
-            # eq_x: x = y + u0; eq_y: y = x + v0.  Avoid cycle by chaining.
-            rhs_eq = REWRITE_PROVE([eq_y, SATZ_5],
-                          parse("y + u0 = x + (v0 + u0)",
-                                env={"u0": u0, "v0": v0}))
-            chain = TRANS(eq_x, rhs_eq)         # x = x + (v0+u0)
-            comm = SPECL([mk_add(v0, u0), x], SATZ_6)
-            ne   = SPECL([mk_add(v0, u0), x], SATZ_7)
-            ne_f = REWRITE_NE(ne, REFL(x), comm)
-            return MP(NOT_ELIM(ne_f), chain)
-        return ELIM_EX(pred_v, case3, _from_c3_inner)
-    th_F3 = PROVE_HYP(h_c3, PROVE_HYP(h_c2, ELIM_EX(pred_u, case2, _from_c2_outer)))
-    h_conj_23 = ASSUME(mk_and(case2, case3))
-    th_F3b = PROVE_HYP(CONJUNCT2(h_conj_23),
-                       PROVE_HYP(CONJUNCT1(h_conj_23), th_F3))
-    excl_23 = NOT_INTRO(DISCH(mk_and(case2, case3), th_F3b))
 
-    return GENL([x, y], CONJ(excl_12, CONJ(excl_13, excl_23)))
+@proof
+def _SATZ_9_EXCL_23(p):
+    p.goal("!x y. ~((?u. x = y + u) /\\ (?v. y = x + v))")
+    p.fix("x y")
+    with p.suppose("h: (?u. x = y + u) /\\ (?v. y = x + v)"):
+        p.have("h_e2: ?u. x = y + u").by(CONJUNCT1, "h")
+        p.have("h_e3: ?v. y = x + v").by(CONJUNCT2, "h")
+        p.have("h_gt: x > y").by_eq_mp(SYM(UNFOLD_GT(x, y)), "h_e2")
+        p.have("h_lt: x < y").by_eq_mp(SYM(UNFOLD_LT(x, y)), "h_e3")
+        p.thus("F").by(CONTRA_LT_GT, "x", "y", "h_lt", "h_gt")
 
-SATZ_9_EXCL = _prove_satz_9_excl()
+
+SATZ_9_EXCL = GENL([x, y],
+                   CONJ(SPECL([x, y], _SATZ_9_EXCL_12),
+                        CONJ(SPECL([x, y], _SATZ_9_EXCL_13),
+                             SPECL([x, y], _SATZ_9_EXCL_23))))
 
 
 # ---------------------------------------------------------------------------
@@ -1775,59 +1756,67 @@ SATZ_9_EXCL = _prove_satz_9_excl()
 # trichotomy mutually exclude each other.
 # ---------------------------------------------------------------------------
 
-def _prove_satz_20():
-    s10 = SPECL([x, y], SATZ_10)
-    s19a = SPECL([x, y, z], SATZ_19A)
-    s19b = SPECL([x, y, z], SATZ_19B)
-    s19c = SPECL([x, y, z], SATZ_19C)
-    a, b = mk_add(x, z), mk_add(y, z)
-    or_gt_lt = mk_or(mk_gt(x, y), mk_lt(x, y))
+@proof
+def SATZ_20A(p):
+    p.goal("!x y z. x + z > y + z ==> x > y")
+    p.fix("x y z")
+    p.assume("h_a: x + z > y + z")
+    p.have("trichot: (x = y) \\/ ((x > y) \\/ (x < y))").by(SATZ_10, "x", "y")
+    with p.cases_on("trichot"):
+        with p.case("h_eq: x = y"):
+            p.have("eq_sum: x + z = y + z").by(SATZ_19B, "x", "y", "z", "h_eq")
+            p.absurd().by(CONTRA_GT_EQ, "x + z", "y + z", "h_a", "eq_sum")
+        with p.case("inner: (x > y) \\/ (x < y)"):
+            with p.cases_on("inner"):
+                with p.case("h_gt: x > y"):
+                    p.thus("x > y").by_thm(p.fact("h_gt"))
+                with p.case("h_lt: x < y"):
+                    p.have("lt_sum: x + z < y + z").by(SATZ_19C, "x", "y", "z", "h_lt")
+                    p.absurd().by(CONTRA_LT_GT, "x + z", "y + z", "lt_sum", "h_a")
 
-    # Goal A: x+z > y+z ==> x > y.
-    h_a = ASSUME(mk_gt(a, b))
-    branch_eq_A = DISCH(mk_eq(x, y),
-                        CONTR(mk_gt(x, y),
-                              CONTRA_GT_EQ(a, b, h_a,
-                                           MP(s19b, ASSUME(mk_eq(x, y))))))
-    branch_gt_A = DISCH(mk_gt(x, y), ASSUME(mk_gt(x, y)))
-    branch_lt_A = DISCH(mk_lt(x, y),
-                        CONTR(mk_gt(x, y),
-                              CONTRA_LT_GT(a, b,
-                                           MP(s19c, ASSUME(mk_lt(x, y))), h_a)))
-    inner_A = DISCH(or_gt_lt, DISJ_CASES(ASSUME(or_gt_lt), branch_gt_A, branch_lt_A))
-    goal_A = DISCH(mk_gt(a, b), DISJ_CASES(s10, branch_eq_A, inner_A))
 
-    # Goal B: x+z = y+z ==> x = y.
-    h_b = ASSUME(mk_eq(a, b))
-    branch_eq_B = DISCH(mk_eq(x, y), ASSUME(mk_eq(x, y)))
-    branch_gt_B = DISCH(mk_gt(x, y),
-                        CONTR(mk_eq(x, y),
-                              CONTRA_GT_EQ(a, b,
-                                           MP(s19a, ASSUME(mk_gt(x, y))), h_b)))
-    branch_lt_B = DISCH(mk_lt(x, y),
-                        CONTR(mk_eq(x, y),
-                              CONTRA_LT_EQ(a, b,
-                                           MP(s19c, ASSUME(mk_lt(x, y))), h_b)))
-    inner_B = DISCH(or_gt_lt, DISJ_CASES(ASSUME(or_gt_lt), branch_gt_B, branch_lt_B))
-    goal_B = DISCH(mk_eq(a, b), DISJ_CASES(s10, branch_eq_B, inner_B))
+@proof
+def SATZ_20B(p):
+    p.goal("!x y z. x + z = y + z ==> x = y")
+    p.fix("x y z")
+    p.assume("h_b: x + z = y + z")
+    p.have("trichot: (x = y) \\/ ((x > y) \\/ (x < y))").by(SATZ_10, "x", "y")
+    with p.cases_on("trichot"):
+        with p.case("h_eq: x = y"):
+            p.thus("x = y").by_thm(p.fact("h_eq"))
+        with p.case("inner: (x > y) \\/ (x < y)"):
+            with p.cases_on("inner"):
+                with p.case("h_gt: x > y"):
+                    p.have("gt_sum: x + z > y + z").by(SATZ_19A, "x", "y", "z", "h_gt")
+                    p.absurd().by(CONTRA_GT_EQ, "x + z", "y + z", "gt_sum", "h_b")
+                with p.case("h_lt: x < y"):
+                    p.have("lt_sum: x + z < y + z").by(SATZ_19C, "x", "y", "z", "h_lt")
+                    p.absurd().by(CONTRA_LT_EQ, "x + z", "y + z", "lt_sum", "h_b")
 
-    # Goal C: x+z < y+z ==> x < y.
-    h_c = ASSUME(mk_lt(a, b))
-    branch_eq_C = DISCH(mk_eq(x, y),
-                        CONTR(mk_lt(x, y),
-                              CONTRA_LT_EQ(a, b, h_c,
-                                           MP(s19b, ASSUME(mk_eq(x, y))))))
-    branch_gt_C = DISCH(mk_gt(x, y),
-                        CONTR(mk_lt(x, y),
-                              CONTRA_LT_GT(a, b, h_c,
-                                           MP(s19a, ASSUME(mk_gt(x, y))))))
-    branch_lt_C = DISCH(mk_lt(x, y), ASSUME(mk_lt(x, y)))
-    inner_C = DISCH(or_gt_lt, DISJ_CASES(ASSUME(or_gt_lt), branch_gt_C, branch_lt_C))
-    goal_C = DISCH(mk_lt(a, b), DISJ_CASES(s10, branch_eq_C, inner_C))
 
-    return GENL([x, y, z], CONJ(goal_A, CONJ(goal_B, goal_C)))
+@proof
+def SATZ_20C(p):
+    p.goal("!x y z. x + z < y + z ==> x < y")
+    p.fix("x y z")
+    p.assume("h_c: x + z < y + z")
+    p.have("trichot: (x = y) \\/ ((x > y) \\/ (x < y))").by(SATZ_10, "x", "y")
+    with p.cases_on("trichot"):
+        with p.case("h_eq: x = y"):
+            p.have("eq_sum: x + z = y + z").by(SATZ_19B, "x", "y", "z", "h_eq")
+            p.absurd().by(CONTRA_LT_EQ, "x + z", "y + z", "h_c", "eq_sum")
+        with p.case("inner: (x > y) \\/ (x < y)"):
+            with p.cases_on("inner"):
+                with p.case("h_gt: x > y"):
+                    p.have("gt_sum: x + z > y + z").by(SATZ_19A, "x", "y", "z", "h_gt")
+                    p.absurd().by(CONTRA_LT_GT, "x + z", "y + z", "h_c", "gt_sum")
+                with p.case("h_lt: x < y"):
+                    p.thus("x < y").by_thm(p.fact("h_lt"))
 
-SATZ_20 = _prove_satz_20()
+
+SATZ_20 = GENL([x, y, z],
+               CONJ(SPECL([x, y, z], SATZ_20A),
+                    CONJ(SPECL([x, y, z], SATZ_20B),
+                         SPECL([x, y, z], SATZ_20C))))
 
 
 # ---------------------------------------------------------------------------
@@ -1835,56 +1824,67 @@ SATZ_20 = _prove_satz_20()
 #   |- !x y z. (xz > yz ==> x > y) /\ (xz = yz ==> x = y) /\ (xz < yz ==> x < y).
 # ---------------------------------------------------------------------------
 
-def _prove_satz_33():
-    s10 = SPECL([x, y], SATZ_10)
-    s32a = SPECL([x, y, z], SATZ_32A)
-    s32b = SPECL([x, y, z], SATZ_32B)
-    s32c = SPECL([x, y, z], SATZ_32C)
-    a, b = mk_mul(x, z), mk_mul(y, z)
-    or_gt_lt = mk_or(mk_gt(x, y), mk_lt(x, y))
+@proof
+def SATZ_33A(p):
+    p.goal("!x y z. x * z > y * z ==> x > y")
+    p.fix("x y z")
+    p.assume("h_a: x * z > y * z")
+    p.have("trichot: (x = y) \\/ ((x > y) \\/ (x < y))").by(SATZ_10, "x", "y")
+    with p.cases_on("trichot"):
+        with p.case("h_eq: x = y"):
+            p.have("eq_prod: x * z = y * z").by(SATZ_32B, "x", "y", "z", "h_eq")
+            p.absurd().by(CONTRA_GT_EQ, "x * z", "y * z", "h_a", "eq_prod")
+        with p.case("inner: (x > y) \\/ (x < y)"):
+            with p.cases_on("inner"):
+                with p.case("h_gt: x > y"):
+                    p.thus("x > y").by_thm(p.fact("h_gt"))
+                with p.case("h_lt: x < y"):
+                    p.have("lt_prod: x * z < y * z").by(SATZ_32C, "x", "y", "z", "h_lt")
+                    p.absurd().by(CONTRA_LT_GT, "x * z", "y * z", "lt_prod", "h_a")
 
-    h_a = ASSUME(mk_gt(a, b))
-    branch_eq_A = DISCH(mk_eq(x, y),
-                        CONTR(mk_gt(x, y),
-                              CONTRA_GT_EQ(a, b, h_a,
-                                           MP(s32b, ASSUME(mk_eq(x, y))))))
-    branch_gt_A = DISCH(mk_gt(x, y), ASSUME(mk_gt(x, y)))
-    branch_lt_A = DISCH(mk_lt(x, y),
-                        CONTR(mk_gt(x, y),
-                              CONTRA_LT_GT(a, b,
-                                           MP(s32c, ASSUME(mk_lt(x, y))), h_a)))
-    inner_A = DISCH(or_gt_lt, DISJ_CASES(ASSUME(or_gt_lt), branch_gt_A, branch_lt_A))
-    goal_A = DISCH(mk_gt(a, b), DISJ_CASES(s10, branch_eq_A, inner_A))
 
-    h_b = ASSUME(mk_eq(a, b))
-    branch_eq_B = DISCH(mk_eq(x, y), ASSUME(mk_eq(x, y)))
-    branch_gt_B = DISCH(mk_gt(x, y),
-                        CONTR(mk_eq(x, y),
-                              CONTRA_GT_EQ(a, b,
-                                           MP(s32a, ASSUME(mk_gt(x, y))), h_b)))
-    branch_lt_B = DISCH(mk_lt(x, y),
-                        CONTR(mk_eq(x, y),
-                              CONTRA_LT_EQ(a, b,
-                                           MP(s32c, ASSUME(mk_lt(x, y))), h_b)))
-    inner_B = DISCH(or_gt_lt, DISJ_CASES(ASSUME(or_gt_lt), branch_gt_B, branch_lt_B))
-    goal_B = DISCH(mk_eq(a, b), DISJ_CASES(s10, branch_eq_B, inner_B))
+@proof
+def SATZ_33B(p):
+    p.goal("!x y z. x * z = y * z ==> x = y")
+    p.fix("x y z")
+    p.assume("h_b: x * z = y * z")
+    p.have("trichot: (x = y) \\/ ((x > y) \\/ (x < y))").by(SATZ_10, "x", "y")
+    with p.cases_on("trichot"):
+        with p.case("h_eq: x = y"):
+            p.thus("x = y").by_thm(p.fact("h_eq"))
+        with p.case("inner: (x > y) \\/ (x < y)"):
+            with p.cases_on("inner"):
+                with p.case("h_gt: x > y"):
+                    p.have("gt_prod: x * z > y * z").by(SATZ_32A, "x", "y", "z", "h_gt")
+                    p.absurd().by(CONTRA_GT_EQ, "x * z", "y * z", "gt_prod", "h_b")
+                with p.case("h_lt: x < y"):
+                    p.have("lt_prod: x * z < y * z").by(SATZ_32C, "x", "y", "z", "h_lt")
+                    p.absurd().by(CONTRA_LT_EQ, "x * z", "y * z", "lt_prod", "h_b")
 
-    h_c = ASSUME(mk_lt(a, b))
-    branch_eq_C = DISCH(mk_eq(x, y),
-                        CONTR(mk_lt(x, y),
-                              CONTRA_LT_EQ(a, b, h_c,
-                                           MP(s32b, ASSUME(mk_eq(x, y))))))
-    branch_gt_C = DISCH(mk_gt(x, y),
-                        CONTR(mk_lt(x, y),
-                              CONTRA_LT_GT(a, b, h_c,
-                                           MP(s32a, ASSUME(mk_gt(x, y))))))
-    branch_lt_C = DISCH(mk_lt(x, y), ASSUME(mk_lt(x, y)))
-    inner_C = DISCH(or_gt_lt, DISJ_CASES(ASSUME(or_gt_lt), branch_gt_C, branch_lt_C))
-    goal_C = DISCH(mk_lt(a, b), DISJ_CASES(s10, branch_eq_C, inner_C))
 
-    return GENL([x, y, z], CONJ(goal_A, CONJ(goal_B, goal_C)))
+@proof
+def SATZ_33C(p):
+    p.goal("!x y z. x * z < y * z ==> x < y")
+    p.fix("x y z")
+    p.assume("h_c: x * z < y * z")
+    p.have("trichot: (x = y) \\/ ((x > y) \\/ (x < y))").by(SATZ_10, "x", "y")
+    with p.cases_on("trichot"):
+        with p.case("h_eq: x = y"):
+            p.have("eq_prod: x * z = y * z").by(SATZ_32B, "x", "y", "z", "h_eq")
+            p.absurd().by(CONTRA_LT_EQ, "x * z", "y * z", "h_c", "eq_prod")
+        with p.case("inner: (x > y) \\/ (x < y)"):
+            with p.cases_on("inner"):
+                with p.case("h_gt: x > y"):
+                    p.have("gt_prod: x * z > y * z").by(SATZ_32A, "x", "y", "z", "h_gt")
+                    p.absurd().by(CONTRA_LT_GT, "x * z", "y * z", "h_c", "gt_prod")
+                with p.case("h_lt: x < y"):
+                    p.thus("x < y").by_thm(p.fact("h_lt"))
 
-SATZ_33 = _prove_satz_33()
+
+SATZ_33 = GENL([x, y, z],
+               CONJ(SPECL([x, y, z], SATZ_33A),
+                    CONJ(SPECL([x, y, z], SATZ_33B),
+                         SPECL([x, y, z], SATZ_33C))))
 
 
 if __name__ == "__main__":
