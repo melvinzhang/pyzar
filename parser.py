@@ -434,8 +434,8 @@ def parse(s, sig=None, _env_bindings=None, **bindings):
 
     `sig` is a `Signature`; defaults to `DEFAULT_SIG`.
 
-    `_env_bindings` is private: `ParseEnv.parse` uses it to pass long-lived
-    bindings that bypass the unused check.
+    `_env_bindings` is private: callers (e.g. `Proof._parse`) use it to
+    pass long-lived bindings that bypass the unused check.
     """
     env_b = _env_bindings or {}
     name_to_sentinel = {}
@@ -471,34 +471,6 @@ def parse(s, sig=None, _env_bindings=None, **bindings):
     merged = {**env_b, **bindings, **splice_env}
     tree = _PARSER.parse(s2)
     return _Builder(sig or DEFAULT_SIG, merged).visit(tree)
-
-
-class ParseEnv:
-    """A bag of bindings reused across many `parse` calls.
-
-    Bindings on a `ParseEnv` are *not* checked for unused (they're meant
-    to outlive any single parse).  Per-call kwargs in `.parse(**extra)`
-    are checked.
-
-    Example:
-        P  = ParseEnv(N=N_ty)
-        Pw = P.extend(w=w_t)
-        Pw.parse("~ N ${w}")      # both N (env) and ${w} (env) resolve
-        Pw.parse("${w} = n")      # bare 'n' falls through to default var
-    """
-
-    __slots__ = ("sig", "bindings")
-
-    def __init__(self, sig=None, **bindings):
-        self.sig = sig
-        self.bindings = dict(bindings)
-
-    def parse(self, s, **extra):
-        return parse(s, sig=self.sig,
-                     _env_bindings=self.bindings, **extra)
-
-    def extend(self, **more):
-        return ParseEnv(sig=self.sig, **{**self.bindings, **more})
 
 
 def define(name, ty, body, *, sig=None, prec=None, assoc=None):
@@ -651,29 +623,6 @@ def _selftest():
     assert aconv(parse("f 1", f=P_ty),
                  mk_comb(mk_var("f", P_ty), ONE))
 
-    # --- ParseEnv ---------------------------------------------------------
-    P_env = ParseEnv(P=P_ty, Q=P_ty)
-    assert aconv(P_env.parse("!x. P x /\\ Q x"),
-                 mk_forall(VX, mk_and(mk_comb(P, VX), mk_comb(Q, VX))))
-    # env binding unused in this particular call -- no error
-    assert aconv(P_env.parse("!x. P x"),
-                 mk_forall(VX, mk_comb(P, VX)))
-    # per-call kwarg layered on env
-    assert aconv(P_env.parse("P ${w}", w=VY),
-                 mk_comb(P, VY))
-    # extend
-    Pw = P_env.extend(w=VY)
-    assert aconv(Pw.parse("P ${w}"),
-                 mk_comb(P, VY))
-    # per-call kwarg still subject to unused check
-    try:
-        P_env.parse("P x", w=VY)      # w never referenced
-    except ParseError:
-        pass
-    else:
-        raise AssertionError("expected ParseError for unused per-call kwarg "
-                             "on ParseEnv")
-
     # --- extension at runtime ----------------------------------------------
     DEFAULT_SIG.add_infix("&&", 55, mk_and, assoc="left")
     try:
@@ -705,10 +654,6 @@ def _selftest():
         pass
     else:
         raise AssertionError("expected ParseError when no default var type")
-
-    # ParseEnv carries the sig too.
-    bare_env = ParseEnv(sig=fresh)
-    assert aconv(bare_env.parse("a + b = c"), mk_eq(_add(a, b), c))
 
     # --- define() ---------------------------------------------------------
     # Use a fresh signature to avoid polluting DEFAULT_SIG with a throwaway
