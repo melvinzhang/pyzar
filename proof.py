@@ -55,6 +55,17 @@ def register_unfolder(op_name, unfold_fn):
     _UNFOLDERS[op_name] = unfold_fn
 
 
+# Parallel registry for disjunction-shaped unfolders (e.g. ``>=``, ``<=``):
+# each entry maps a relation symbol to a function ``unfold(a, b) -> |- (op a
+# b) = (left \/ right)``. ``cases_on`` consults this so it can take a fact of
+# the form ``a R b`` directly and case-split on the unfolded disjunction.
+
+_DISJ_UNFOLDERS = {}
+
+def register_disj_unfolder(op_name, unfold_fn):
+    _DISJ_UNFOLDERS[op_name] = unfold_fn
+
+
 # ---------------------------------------------------------------------------
 # Frame: a single open scope (root, induction body, base/step, case).
 # ---------------------------------------------------------------------------
@@ -360,6 +371,16 @@ class Proof:
     def _open_cases(self, ref, target, on_close):
         or_th = self._resolve_fact(ref)
         c = or_th._concl
+        # If the source is a relation registered with a disjunction unfolder
+        # (e.g. ``>=``, ``<=``), unfold to the disjunction first.
+        if (isinstance(c, Comb) and isinstance(c.fun, Comb)
+                and isinstance(c.fun.fun, Const)
+                and c.fun.fun.name in _DISJ_UNFOLDERS):
+            unfold_fn = _DISJ_UNFOLDERS[c.fun.fun.name]
+            a = c.fun.arg
+            b = c.arg
+            or_th = EQ_MP(unfold_fn(a, b), or_th)
+            c = or_th._concl
         # Expect (p \/ q) at the top.
         if not (isinstance(c, Comb) and isinstance(c.fun, Comb)
                 and isinstance(c.fun.fun, Const)

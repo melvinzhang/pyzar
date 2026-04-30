@@ -733,7 +733,7 @@ def UNFOLD_LT(a, b):
 
 # Register with the proof DSL so `p.choose(name, from_=label)` accepts a fact
 # whose conclusion is `> ` or `<`.
-from proof import register_unfolder
+from proof import register_unfolder, register_disj_unfolder
 register_unfolder(">", UNFOLD_GT)
 register_unfolder("<", UNFOLD_LT)
 
@@ -832,6 +832,9 @@ DEFAULT_SIG.add_infix("<=", 40, mk_le, assoc="non")
 def UNFOLD_GE(a, b): return _binop_unfold(GE_DEF, GE, a, b)
 def UNFOLD_LE(a, b): return _binop_unfold(LE_DEF, LE, a, b)
 
+register_disj_unfolder(">=", UNFOLD_GE)
+register_disj_unfolder("<=", UNFOLD_LE)
+
 
 # Theorem 13:  |- !x y. (x >= y) ==> (y <= x).
 # Theorem 14:  |- !x y. (x <= y) ==> (y >= x).
@@ -841,8 +844,7 @@ def SATZ_13(p):
     p.goal("!x y. x >= y ==> y <= x")
     p.fix("x y")
     p.assume("h: x >= y")
-    p.have("xy_or: (x > y) \\/ (x = y)").by_eq_mp(UNFOLD_GE(x, y), "h")
-    with p.have("yx_or: (y < x) \\/ (y = x)").by_cases("xy_or"):
+    with p.have("yx_or: (y < x) \\/ (y = x)").by_cases("h"):
         with p.case("h_gt: x > y"):
             p.have("yx_lt: y < x").by(SATZ_11, "x", "y", "h_gt")
             p.thus("(y < x) \\/ (y = x)")\
@@ -859,8 +861,7 @@ def SATZ_14(p):
     p.goal("!x y. x <= y ==> y >= x")
     p.fix("x y")
     p.assume("h: x <= y")
-    p.have("xy_or: (x < y) \\/ (x = y)").by_eq_mp(UNFOLD_LE(x, y), "h")
-    with p.have("yx_or: (y > x) \\/ (y = x)").by_cases("xy_or"):
+    with p.have("yx_or: (y > x) \\/ (y = x)").by_cases("h"):
         with p.case("h_lt: x < y"):
             p.have("yx_gt: y > x").by(SATZ_12, "x", "y", "h_lt")
             p.thus("(y > x) \\/ (y = x)")\
@@ -913,8 +914,7 @@ def SATZ_16A(p):
     p.goal("!x y z. x <= y ==> y < z ==> x < z")
     p.fix("x y z")
     p.assume("hxy: x <= y", "hyz: y < z")
-    p.have("xy_or: (x < y) \\/ (x = y)").by_eq_mp(UNFOLD_LE(x, y), "hxy")
-    with p.cases_on("xy_or"):
+    with p.cases_on("hxy"):
         with p.case("x < y"):
             p.thus("x < z").by(SATZ_15, "x", "y", "z", -1, "hyz")
         with p.case("x = y"):
@@ -926,8 +926,7 @@ def SATZ_16B(p):
     p.goal("!x y z. x < y ==> y <= z ==> x < z")
     p.fix("x y z")
     p.assume("hxy: x < y", "hyz: y <= z")
-    p.have("yz_or: (y < z) \\/ (y = z)").by_eq_mp(UNFOLD_LE(y, z), "hyz")
-    with p.cases_on("yz_or"):
+    with p.cases_on("hyz"):
         with p.case("y < z"):
             p.thus("x < z").by(SATZ_15, "x", "y", "z", "hxy", -1)
         with p.case("y = z"):
@@ -941,8 +940,7 @@ def SATZ_17(p):
     p.goal("!x y z. x <= y ==> y <= z ==> x <= z")
     p.fix("x y z")
     p.assume("hxy: x <= y", "hyz: y <= z")
-    p.have("yz_or: (y < z) \\/ (y = z)").by_eq_mp(UNFOLD_LE(y, z), "hyz")
-    with p.cases_on("yz_or"):
+    with p.cases_on("hyz"):
         with p.case("y < z"):
             p.have("xz_lt: x < z").by(SATZ_16A, "x", "y", "z", "hxy", -1)
             p.thus("x <= z").by(LT_TO_LE, "xz_lt")
@@ -1021,8 +1019,7 @@ def SATZ_22A(p):
     p.goal("!x y z u. x >= y ==> z > u ==> x + z > y + u")
     p.fix("x y z u")
     p.assume("hge: x >= y", "hgt: z > u")
-    p.have("xy_or: (x > y) \\/ (x = y)").by_eq_mp(UNFOLD_GE(x, y), "hge")
-    with p.cases_on("xy_or"):
+    with p.cases_on("hge"):
         with p.case("x > y"):
             p.thus("x + z > y + u").by(SATZ_21, "x", "y", "z", "u", -1, "hgt")
         with p.case("hxy: x = y"):
@@ -1040,8 +1037,7 @@ def SATZ_22B(p):
     p.goal("!x y z u. x > y ==> z >= u ==> x + z > y + u")
     p.fix("x y z u")
     p.assume("hgt: x > y", "hge: z >= u")
-    p.have("zu_or: (z > u) \\/ (z = u)").by_eq_mp(UNFOLD_GE(z, u), "hge")
-    with p.cases_on("zu_or"):
+    with p.cases_on("hge"):
         with p.case("z > u"):
             p.thus("x + z > y + u").by(SATZ_21, "x", "y", "z", "u", "hgt", -1)
         with p.case("hzu: z = u"):
@@ -1058,15 +1054,13 @@ def SATZ_23(p):
     p.goal("!x y z u. x >= y ==> z >= u ==> x + z >= y + u")
     p.fix("x y z u")
     p.assume("hxy: x >= y", "hzu: z >= u")
-    p.have("xy_or: (x > y) \\/ (x = y)").by_eq_mp(UNFOLD_GE(x, y), "hxy")
-    p.have("zu_or: (z > u) \\/ (z = u)").by_eq_mp(UNFOLD_GE(z, u), "hzu")
-    with p.cases_on("xy_or"):
+    with p.cases_on("hxy"):
         with p.case("hgt_xy: x > y"):
             p.have("gt: x + z > y + u").by(SATZ_22B, "x", "y", "z", "u",
                                             "hgt_xy", "hzu")
             p.thus("x + z >= y + u").by(GT_TO_GE, "gt")
         with p.case("heq_xy: x = y"):
-            with p.cases_on("zu_or"):
+            with p.cases_on("hzu"):
                 with p.case("hgt_zu: z > u"):
                     p.have("gt: x + z > y + u").by(SATZ_22A, "x", "y", "z", "u",
                                                     "hxy", "hgt_zu")
@@ -1170,9 +1164,7 @@ def SATZ_26(p):
             with p.cases_on("inner"):
                 with p.case("h_gt: y > x"):
                     p.have("y_ge_x1: y >= x + 1").by(SATZ_25, "x", "y", "h_gt")
-                    p.have("u_or: (y > x + 1) \\/ (y = x + 1)")\
-                        .by_eq_mp(UNFOLD_GE(y, mk_add(x, ONE)), "y_ge_x1")
-                    with p.cases_on("u_or"):
+                    with p.cases_on("y_ge_x1"):
                         with p.case("h_g: y > x + 1"):
                             p.absurd().by(CONTRA_LT_GT, "y", "x + 1", "h", "h_g")
                         with p.case("h_e: y = x + 1"):
@@ -1654,8 +1646,7 @@ def SATZ_35A(p):
     p.goal("!x y z u. x >= y ==> z > u ==> x * z > y * u")
     p.fix("x y z u")
     p.assume("hge: x >= y", "hgt: z > u")
-    p.have("xy_or: (x > y) \\/ (x = y)").by_eq_mp(UNFOLD_GE(x, y), "hge")
-    with p.cases_on("xy_or"):
+    with p.cases_on("hge"):
         with p.case("x > y"):
             p.thus("x * z > y * u").by(SATZ_34, "x", "y", "z", "u", -1, "hgt")
         with p.case("hxy: x = y"):
@@ -1673,8 +1664,7 @@ def SATZ_35B(p):
     p.goal("!x y z u. x > y ==> z >= u ==> x * z > y * u")
     p.fix("x y z u")
     p.assume("hgt: x > y", "hge: z >= u")
-    p.have("zu_or: (z > u) \\/ (z = u)").by_eq_mp(UNFOLD_GE(z, u), "hge")
-    with p.cases_on("zu_or"):
+    with p.cases_on("hge"):
         with p.case("z > u"):
             p.thus("x * z > y * u").by(SATZ_34, "x", "y", "z", "u", "hgt", -1)
         with p.case("hzu: z = u"):
@@ -1691,15 +1681,13 @@ def SATZ_36(p):
     p.goal("!x y z u. x >= y ==> z >= u ==> x * z >= y * u")
     p.fix("x y z u")
     p.assume("hxy: x >= y", "hzu: z >= u")
-    p.have("xy_or: (x > y) \\/ (x = y)").by_eq_mp(UNFOLD_GE(x, y), "hxy")
-    p.have("zu_or: (z > u) \\/ (z = u)").by_eq_mp(UNFOLD_GE(z, u), "hzu")
-    with p.cases_on("xy_or"):
+    with p.cases_on("hxy"):
         with p.case("hgt_xy: x > y"):
             p.have("gt: x * z > y * u").by(SATZ_35B, "x", "y", "z", "u",
                                             "hgt_xy", "hzu")
             p.thus("x * z >= y * u").by(GT_TO_GE, "gt")
         with p.case("heq_xy: x = y"):
-            with p.cases_on("zu_or"):
+            with p.cases_on("hzu"):
                 with p.case("hgt_zu: z > u"):
                     p.have("gt: x * z > y * u").by(SATZ_35A, "x", "y", "z", "u",
                                                     "hxy", "hgt_zu")
