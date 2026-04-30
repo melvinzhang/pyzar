@@ -35,7 +35,7 @@ from axioms import F, mk_select
 from logic import (
     SPEC, GEN, DISCH, MP_LIST, DISJ_CASES, BETA_CONV, SYM,
     PROVE_HYP, ELIM_EX, _subst_term,
-    NOT_INTRO, CONTR, REWRITE_NE,
+    NOT_INTRO, CONTR, REWRITE_NE, EXISTS, DISJ1, DISJ2,
 )
 from tactics import REWRITE_PROVE, REWRITE_RULE, AC_PROVE, REWRITE_AC_PROVE
 from parser import parse, pp, ParseError
@@ -470,15 +470,54 @@ class Proof:
         fr = self._cur
         if fr.kind != "_cases":
             raise HolError("case() outside cases_on()")
-        label, branch_term = self._split_label(branch_spec)
+        label, user_term = self._split_label(branch_spec)
         outer_goal = fr.data["goal"]
+        or_concl = fr.data["or_concl"]
+
+        # Walk the right-associated disjunction to find the leaf this user
+        # spec corresponds to (alpha-equivalence). Using the *leaf* term for
+        # ASSUME/DISCH is essential: DISJ_CASES later requires literal
+        # identity with the disjunction's actual disjunct, not just aconv.
+        leaf = _find_disj_leaf(or_concl, user_term)
+        if leaf is None:
+            raise HolError(
+                "case: branch does not alpha-match any disjunct\n"
+                f"  branch: {pp(user_term)}\n"
+                f"  disj:   {pp(or_concl)}")
 
         def on_close(th):
-            fr.data["branches"].append((branch_term, th))
+            fr.data["branches"].append((leaf, th))
+
+        # If the branch hypothesis is itself an existential ``?v. body``,
+        # auto-choose the witness inside the case body so the user gets
+        # ``v`` in scope and ``v_eq: body[v]`` as a fact, exactly as if they
+        # had written ``p.choose("v: body", from_=label)`` themselves. The
+        # display name follows the *user*'s spec bvar (so they can rename to
+        # avoid clashes with outer scopes); the underlying witness/pred terms
+        # come from the leaf so ELIM_EX matches kernel-literally.
+        auto_choose = None
+        if (isinstance(leaf, Comb) and isinstance(leaf.fun, Const)
+                and leaf.fun.name == "?"
+                and isinstance(leaf.arg, Abs)):
+            leaf_pred = leaf.arg
+            leaf_v = leaf_pred.bvar
+            w_term = mk_select(leaf_v, leaf_pred.body)
+            body_at_w = rand(BETA_CONV(mk_comb(leaf_pred, w_term))._concl)
+            user_pred = (user_term.arg
+                          if (isinstance(user_term, Comb)
+                              and isinstance(user_term.fun, Const)
+                              and user_term.fun.name == "?"
+                              and isinstance(user_term.arg, Abs))
+                          else None)
+            wit_name = user_pred.bvar.name if user_pred else leaf_v.name
+            eq_label = f"{wit_name}_eq"
+            auto_choose = (wit_name, w_term, eq_label, body_at_w,
+                            leaf_pred, leaf)
 
         return _SubFrameCtx(self, outer_goal, kind="case",
                              on_close=on_close,
-                             extra_facts=[(label, ASSUME(branch_term))])
+                             extra_facts=[(label, ASSUME(leaf))],
+                             auto_choose=auto_choose)
 
 
 # ---------------------------------------------------------------------------
@@ -604,6 +643,71 @@ class _Have:
         fact = self.p._resolve_fact(ref)
         return self._finish(EQ_MP(SYM(unfold_fn(a, b)), fact))
 
+    def by_witness(self, witness, ref):
+        """For an existential have-term ``?v. P v`` (or a registered relation
+        ``a R b`` whose unfolded form is ``?v. body``), given a fact whose
+        conclusion is ``P[witness/v]``, produce ``?v. P v`` via ``EXISTS``
+        (and fold back through the relation's unfolder if applicable).
+
+        ``witness`` is parsed in the current scope (so ``choose``-bound names
+        are available) or accepted as a kernel term directly. ``ref`` is a
+        fact label, fact index, or a theorem.
+        """
+        target = self.term
+        p = self.p
+
+        fact_th = ref if isinstance(ref, thm) else p._resolve_fact(ref)
+        witness_t = p._parse(witness) if isinstance(witness, str) else witness
+
+        # Direct existential: ?v. body.
+        if (isinstance(target, Comb) and isinstance(target.fun, Const)
+                and target.fun.name == "?" and isinstance(target.arg, Abs)):
+            return self._finish(EXISTS(target.arg, witness_t, fact_th))
+
+        # Registered relation a R b: unfold, EXISTS, fold back.
+        if (isinstance(target, Comb) and isinstance(target.fun, Comb)
+                and isinstance(target.fun.fun, Const)
+                and target.fun.fun.name in _UNFOLDERS):
+            op_name = target.fun.fun.name
+            unfold_eq = _UNFOLDERS[op_name](target.fun.arg, target.arg)
+            ex_term = rand(unfold_eq._concl)
+            if not (isinstance(ex_term, Comb) and isinstance(ex_term.fun, Const)
+                    and ex_term.fun.name == "?" and isinstance(ex_term.arg, Abs)):
+                raise HolError(
+                    f"by_witness: unfolded form of {op_name!r} is not "
+                    f"existential: {pp(ex_term)}")
+            ex_th = EXISTS(ex_term.arg, witness_t, fact_th)
+            return self._finish(EQ_MP(SYM(unfold_eq), ex_th))
+
+        raise HolError(
+            "by_witness: target is not existential or a registered relation: "
+            f"{pp(target)}")
+
+    def by_disj(self, ref):
+        """Given a fact whose conclusion alpha-matches one of the goal's
+        right-associated disjuncts, build the ``DISJ1``/``DISJ2`` chain to
+        inject it as the proof of the whole disjunction."""
+        target = self.term
+        fact_th = ref if isinstance(ref, thm) else self.p._resolve_fact(ref)
+
+        def build(disj, th):
+            if aconv(disj, fact_th._concl):
+                return th
+            if not (isinstance(disj, Comb) and isinstance(disj.fun, Comb)
+                    and isinstance(disj.fun.fun, Const)
+                    and disj.fun.fun.name == "\\/"):
+                raise HolError(
+                    "by_disj: fact conclusion does not match any disjunct\n"
+                    f"  fact: {pp(fact_th._concl)}\n"
+                    f"  goal: {pp(target)}")
+            p_part = disj.fun.arg
+            q_part = disj.arg
+            if aconv(p_part, fact_th._concl):
+                return DISJ1(th, q_part)
+            return DISJ2(p_part, build(q_part, th))
+
+        return self._finish(build(target, fact_th))
+
     def by_ac(self, op, assoc, comm):
         """AC_PROVE under ``(op, assoc, comm)`` for the (equation) have-term."""
         return self._finish(AC_PROVE(op, assoc, comm, self.term))
@@ -658,12 +762,14 @@ class _Absurd:
 # ---------------------------------------------------------------------------
 
 class _SubFrameCtx:
-    def __init__(self, p, goal, kind, on_close, extra_facts=()):
+    def __init__(self, p, goal, kind, on_close, extra_facts=(),
+                  auto_choose=None):
         self.p = p
         self.goal = goal
         self.kind = kind
         self.on_close = on_close
         self.extra_facts = list(extra_facts)
+        self.auto_choose = auto_choose
 
     def __enter__(self):
         fr = _Frame(goal=self.goal, kind=self.kind)
@@ -672,6 +778,15 @@ class _SubFrameCtx:
             if label is None:
                 label = self.p._fresh_label("h")
             self.p._register_fact(label, th)
+        if self.auto_choose is not None:
+            wit_name, w_term, eq_label, body_at_w, pred, hyp_ex = self.auto_choose
+            if wit_name in fr.choose_env:
+                raise HolError(
+                    f"case: witness name {wit_name!r} clashes with an "
+                    f"existing chooser-bound name in this scope")
+            fr.choose_env[wit_name] = w_term
+            self.p._register_fact(eq_label, ASSUME(body_at_w))
+            fr.pending_choose.append((ASSUME(hyp_ex), pred, hyp_ex))
         return self.p
 
     def __exit__(self, exc_type, *_):
@@ -744,6 +859,21 @@ class _InductionCtx:
 # branch's proof under an extra hypothesis. On exit, DISJ_CASES composes them.
 # ---------------------------------------------------------------------------
 
+def _find_disj_leaf(or_concl, target):
+    """Walk a right-associated disjunction; return the leaf alpha-equivalent
+    to ``target``, or ``None``. The whole disjunction itself is also a valid
+    leaf (matched at depth 0)."""
+    if aconv(or_concl, target):
+        return or_concl
+    if not (isinstance(or_concl, Comb) and isinstance(or_concl.fun, Comb)
+            and isinstance(or_concl.fun.fun, Const)
+            and or_concl.fun.fun.name == "\\/"):
+        return None
+    if aconv(or_concl.fun.arg, target):
+        return or_concl.fun.arg
+    return _find_disj_leaf(or_concl.arg, target)
+
+
 def _split_disj_n(term, n):
     """Right-associated split of ``p1 \\/ (p2 \\/ (... \\/ pn))`` into a
     list of exactly ``n`` disjuncts, or ``None`` if the shape doesn't fit."""
@@ -788,7 +918,8 @@ class _CasesCtx:
 
     def __enter__(self):
         fr = _Frame(goal=self.target, kind="_cases")
-        fr.data = {"goal": self.target, "branches": []}
+        fr.data = {"goal": self.target, "branches": [],
+                    "or_concl": self.or_th._concl}
         self.p._frames.append(fr)
         return self.p
 

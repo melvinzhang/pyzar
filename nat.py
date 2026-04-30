@@ -119,8 +119,7 @@ def SATZ_3(p):
             p.absurd().by(MP, "imp", REFL(ONE))
         with p.step("IH"):
             p.assume("h: ~(SUC x = 1)")
-            p.thus("?u. SUC x = SUC u")\
-                .by_thm(EXISTS(parse("\\u. SUC x = SUC u"), x, REFL(mk_suc(x))))
+            p.thus("?u. SUC x = SUC u").by_witness("x", REFL(mk_suc(x)))
 
 
 # ---------------------------------------------------------------------------
@@ -486,13 +485,12 @@ def LEMMA_PRED(p):
     p.fix("x")
     with p.induction("x"):
         with p.base():
-            p.thus("(1 = 1) \\/ (?u. 1 = SUC u)")\
-                .by_thm(DISJ1(REFL(ONE), parse("?u. 1 = SUC u")))
+            p.have("e: 1 = 1").by_thm(REFL(ONE))
+            p.thus("(1 = 1) \\/ (?u. 1 = SUC u)").by_disj("e")
         with p.step("IH"):
-            p.thus("(SUC x = 1) \\/ (?u. SUC x = SUC u)").by_thm(
-                DISJ2(parse("SUC x = 1"),
-                      EXISTS(parse("\\u. SUC x = SUC u"),
-                             x, REFL(mk_suc(x)))))
+            p.have("ex: ?u. SUC x = SUC u")\
+                .by_witness("x", REFL(mk_suc(x)))
+            p.thus("(SUC x = 1) \\/ (?u. SUC x = SUC u)").by_disj("ex")
 
 
 # ---------------------------------------------------------------------------
@@ -505,177 +503,48 @@ def LEMMA_PRED(p):
 # Proof B (Landau): induction on y with x fixed.
 # ---------------------------------------------------------------------------
 
-def _build_satz9_body(x_t, y_t):
-    """`(x = y) \\/ (?u. x = y + u) \\/ (?v. y = x + v)` as a term."""
-    return parse("${a} = ${b} \\/ (?u. ${a} = ${b} + u) "
-                 "\\/ (?v. ${b} = ${a} + v)", a=x_t, b=y_t)
-
-def _prove_satz_9_exist():
-    body_y = _build_satz9_body(x, y)
-    pred = mk_abs(y, body_y)
-    case2_y = mk_exists(u, mk_eq(x, mk_add(y, u)))
-    case3_y = mk_exists(v, mk_eq(y, mk_add(x, v)))
-
-    # === Base y = 1 ===
-    body_1 = _build_satz9_body(x, ONE)
-    case1_1 = mk_eq(x, ONE)
-    case2_1 = mk_exists(u, mk_eq(x, mk_add(ONE, u)))
-    case3_1 = mk_exists(v, mk_eq(ONE, mk_add(x, v)))
-    rest_1  = mk_or(case2_1, case3_1)
-
-    # From LEMMA_PRED: x = 1 \/ ?u. x = u'. Case-split.
-    lem_x = SPEC(x, LEMMA_PRED)        # |- (x = 1) \/ (?u. x = u')
-    # Case x = 1: apply DISJ1 of body_1.
-    case_x1_to_body = DISJ1(ASSUME(case1_1), rest_1)        # {x=1} |- body_1
-    branch_x1 = DISCH(case1_1, case_x1_to_body)             # |- (x=1) ==> body_1
-    # Case ?u. x = u': from witness u with x = u' = 1 + u, derive case2_1.
-    pred_u_for_lem = parse("\\u. x = SUC u")
-    hyp_ex_u = parse("?u. x = SUC u")
-    # Inside the existential, we need to extract u. Use SELECT_AX to choose a witness.
-    # From {hyp_ex_u} build {hyp_ex_u} |- ?u. x = 1 + u. Use SELECT.
-    # Strategy: from `?u. x = u'` and `1 + u = u'` (ONE_PLUS), derive `?u. x = 1 + u`.
-    # We'll use SELECT-based CHOOSE: extract u via @ operator.
-    sel_u = mk_select(u, pred_u_for_lem.body)               # @u. x = u'
-    # SELECT_AX specialised: !P x. P x ==> P (@P).  At type num.
-    sel_ax_inst = INST_TYPE([(num_ty, aty)], SELECT_AX)
-    sel_ax_pred = SPEC(u, SPEC(pred_u_for_lem, sel_ax_inst))
-    # sel_ax_pred : |- pred_u_for_lem u ==> pred_u_for_lem (@pred_u_for_lem)
-    # i.e., |- (x = u') ==> (x = (@u. x = u')')   modulo BETA.
-    # Easier: we just need to use existing existential infrastructure.
-    # Alternative: from `?u. x = u'`, work under the existential by introducing
-    # ASSUME of `x = u'`, deriving `?u. x = 1 + u`, then DISCH. The CHOOSE-style
-    # rule that uses SELECT.
-    # Rather than rolling our own CHOOSE here, take a constructive shortcut:
-    # use the helper ELIM_EX defined below.
-    # (defined immediately before this function ↓)
-    th_x_eq_1pu = ELIM_EX(pred_u_for_lem, hyp_ex_u, _existq_witness_to_case2(x))
-    # th_x_eq_1pu : {hyp_ex_u} |- ?u. x = 1 + u
-    case_xs_to_body = DISJ2(case1_1, DISJ1(th_x_eq_1pu, case3_1))   # {hyp_ex_u} |- body_1
-    branch_xs = DISCH(hyp_ex_u, case_xs_to_body)
-    base = DISJ_CASES(lem_x, branch_x1, branch_xs)          # |- body_1
-
-    # === Step  body[y] ==> body[y'] ===
-    IH = ASSUME(body_y)                       # {body_y} |- body_y
-    body_ys = _build_satz9_body(x, mk_suc(y))
-    case1_ys = mk_eq(x, mk_suc(y))
-    case2_ys = mk_exists(u, mk_eq(x, mk_add(mk_suc(y), u)))
-    case3_ys = mk_exists(v, mk_eq(mk_suc(y), mk_add(x, v)))
-    rest_ys  = mk_or(case2_ys, case3_ys)
-
-    # Case 1) at y: x = y.  Then SUC y = y + 1 = x + 1, giving case 3 at y'.
-    case1_y = mk_eq(x, y)
-    th_xy = ASSUME(case1_y)
-    th_sy_eq_x1 = TRANS(SYM(SPEC(y, ADD_1)),                   # SUC y = y + 1
-                         AP_THM(AP_TERM(PLUS, SYM(th_xy)), ONE)) # = x + 1
-    th_case3_ys = EXISTS_AT(ONE, th_sy_eq_x1)
-    branch_case1 = DISCH(case1_y,
-                         DISJ2(case1_ys, DISJ2(case2_ys, th_case3_ys)))
-
-    # Case 2) at y: ?u. x = y + u. Sub-cases u = 1 vs u ≠ 1.
-    case2_y = mk_exists(u, mk_eq(x, mk_add(y, u)))
-    branch_case2 = _satz9_step_case2(x, y, body_ys, case1_ys, case2_ys, case3_ys, rest_ys)
-
-    # Case 3) at y: ?v. y = x + v. Then y' = (x+v)' = x + v', so case 3) at y'.
-    case3_y = mk_exists(v, mk_eq(y, mk_add(x, v)))
-    branch_case3 = _satz9_step_case3(x, y, body_ys, case1_ys, case2_ys, case3_ys, rest_ys)
-
-    # Combine: body_y = case1_y \/ (case2_y \/ case3_y).
-    inner_or_y = mk_or(case2_y, case3_y)
-    inner_branches = DISJ_CASES(ASSUME(inner_or_y), branch_case2, branch_case3)
-    inner_disch = DISCH(inner_or_y, inner_branches)            # |- (case2 \/ case3) ==> body_ys
-    step_inner = DISJ_CASES(IH, branch_case1, inner_disch)     # {body_y} |- body_ys
-    step = GEN(y, DISCH(body_y, step_inner))
-
-    forall_y = INDUCT(pred, base, step)
-    return GENL([x, y], SPEC(y, forall_y))
-
-
-# Helpers used inside _prove_satz_9_exist.  They depend only on what's
-# already defined above this function in the file.
-
-def _existq_witness_to_case2(x_t):
-    """Given a SELECT-extracted witness u with x = u', returns a function
-    that, when applied to a hypothesis `{x = u'} |- x = u'`, yields
-    `|- ?u. x = 1 + u` (using ONE_PLUS to rewrite u' as 1+u)."""
-    def _go(witness_eq):
-        # witness_eq : {x = w'} |- x = w'   for some chosen w
-        # Rewrite RHS: w' = 1 + w (SYM ONE_PLUS spec w).
-        _, rhs = dest_eq(witness_eq._concl)        # rhs = SUC w
-        w_t = rand(rhs)                            # = w
-        eq_w = SYM(SPEC(w_t, ONE_PLUS))            # |- SUC w = 1 + w
-        x_eq_1pw = TRANS(witness_eq, eq_w)         # {...} |- x = 1 + w
-        return EXISTS_AT(w_t, x_eq_1pw)
-    return _go
-
-
-# Step branches for Theorem 9 (Cases 2 and 3 at y).
-
-def _satz9_step_case2(x_t, y_t, body_ys, case1_ys, case2_ys, case3_ys, rest_ys):
-    # Hypothesis: ?u. x = y + u.
-    case2_y = parse("?u. ${a} = ${b} + u", a=x_t, b=y_t)
-    pred_u_2 = parse("\\u. ${a} = ${b} + u", a=x_t, b=y_t)
-
-    def _from_witness(witness_eq):
-        # witness_eq : {x = y + w} |- x = y + w   for w = the SELECT witness.
-        _, rhs = dest_eq(witness_eq._concl)        # rhs = y + w
-        w_t = rand(rhs)                            # = w
-        # Sub-case A: w = 1.  Then x = y + 1 = SUC y, so case1_ys.
-        # Sub-case B: w != 1.  By Theorem 3, w = w0' = 1 + w0.  Then
-        #   x = y + (1 + w0) = (y + 1) + w0 = SUC y + w0   →  case2_ys with witness w0.
-        from_lemma_pred = SPEC(w_t, LEMMA_PRED)    # |- (w = 1) \/ (?u. w = u')
-        Pw = ParseEnv(w=w_t)
-
-        # Sub-A: w = 1
-        th_w_eq_1 = ASSUME(Pw.parse("${w} = 1"))
-        # x = y + w.  AP_TERM (y +) on w=1: y + w = y + 1.  Combined with witness_eq.
-        th_x_eq_y1 = TRANS(witness_eq,
-                           AP_TERM(mk_comb(PLUS, y_t), th_w_eq_1))   # {witness, w=1} |- x = y + 1
-        th_x_eq_sy = TRANS(th_x_eq_y1, SPEC(y_t, ADD_1))             # {...} |- x = SUC y
-        # That's case1_ys.  Build body_ys via DISJ1.
-        sub_A = DISJ1(th_x_eq_sy, mk_or(case2_ys, case3_ys))         # {...} |- body_ys
-        branch_A = DISCH(Pw.parse("${w} = 1"), sub_A)
-
-        # Sub-B: ?u. w = u'.
-        sub_B_hyp = Pw.parse("?u. ${w} = SUC u")
-        pred_u_for_w = Pw.parse("\\u. ${w} = SUC u")
-
-        def _from_w0_witness(w0_eq):
-            w0_t = rand(rand(w0_eq._concl))
-            # x = y + w = y + SUC w0 = SUC(y+w0) = SUC y + w0.
-            th_x_eq_syw0 = REWRITE_PROVE(
-                [witness_eq, w0_eq, ADD_SUC, SUC_PLUS],
-                parse("${x} = SUC ${y} + ${w0}", x=x_t, y=y_t, w0=w0_t))
-            return EXISTS_AT(w0_t, th_x_eq_syw0)
-        # Apply ELIM_EX to extract w0 and complete sub-B.
-        th_case2_ys = ELIM_EX(pred_u_for_w, sub_B_hyp, _from_w0_witness)
-        # th_case2_ys : {sub_B_hyp, witness} |- ?u. x = SUC y + u  (= case2_ys)
-        sub_B = DISJ2(case1_ys, DISJ1(th_case2_ys, case3_ys))      # body_ys
-        branch_B = DISCH(sub_B_hyp, sub_B)
-
-        # Combine sub-cases via DISJ_CASES on LEMMA_PRED for w.
-        return DISJ_CASES(from_lemma_pred, branch_A, branch_B)
-    th_body_ys = ELIM_EX(pred_u_2, case2_y, _from_witness)
-    return DISCH(case2_y, th_body_ys)
-
-
-def _satz9_step_case3(x_t, y_t, body_ys, case1_ys, case2_ys, case3_ys, rest_ys):
-    # Hypothesis: ?v. y = x + v.   At y' we get y' = (x + v)' = x + v', so case3_ys.
-    case3_y = parse("?v. ${b} = ${a} + v", a=x_t, b=y_t)
-    pred_v_3 = parse("\\v. ${b} = ${a} + v", a=x_t, b=y_t)
-
-    def _from_witness(witness_eq):
-        w_t = rand(rand(witness_eq._concl))
-        # SUC y = SUC(x + w) = x + SUC w.
-        th_sy = TRANS(AP_TERM(SUC, witness_eq),
-                       SYM(SPECL([x_t, w_t], ADD_SUC)))
-        th_case3_ys = EXISTS_AT(mk_suc(w_t), th_sy)
-        return DISJ2(case1_ys, DISJ2(case2_ys, th_case3_ys))
-
-    th_body_ys = ELIM_EX(pred_v_3, case3_y, _from_witness)
-    return DISCH(case3_y, th_body_ys)
-
-
-SATZ_9 = _prove_satz_9_exist()
+@proof
+def SATZ_9(p):
+    p.goal("!x y. (x = y) \\/ (?u. x = y + u) \\/ (?v. y = x + v)")
+    p.fix("x y")
+    with p.induction("y"):
+        with p.base():
+            with p.cases_on(LEMMA_PRED, "x"):
+                with p.case("hx1: x = 1"):
+                    p.thus("(x = 1) \\/ (?u. x = 1 + u) \\/ (?v. 1 = x + v)")\
+                        .by_disj("hx1")
+                with p.case("hxs: ?u. x = SUC u"):
+                    p.have("eq: x = 1 + u").by_rewrite(["u_eq", ONE_PLUS])
+                    p.have("ex: ?u. x = 1 + u").by_witness("u", "eq")
+                    p.thus("(x = 1) \\/ (?u. x = 1 + u) \\/ (?v. 1 = x + v)")\
+                        .by_disj("ex")
+        with p.step("IH"):
+            with p.cases_on("IH"):
+                with p.case("h_eq: x = y"):
+                    p.have("eq: SUC y = x + 1").by_rewrite(["h_eq", ADD_1])
+                    p.have("ex: ?v. SUC y = x + v").by_witness("1", "eq")
+                    p.thus("(x = SUC y) \\/ (?u. x = SUC y + u) "
+                           "\\/ (?v. SUC y = x + v)").by_disj("ex")
+                with p.case("h_gt: ?u. x = y + u"):
+                    with p.cases_on(LEMMA_PRED, "u"):
+                        with p.case("u_is_1: u = 1"):
+                            p.have("eq: x = SUC y")\
+                                .by_rewrite(["u_eq", "u_is_1", ADD_1])
+                            p.thus("(x = SUC y) \\/ (?u. x = SUC y + u) "
+                                   "\\/ (?v. SUC y = x + v)").by_disj("eq")
+                        with p.case("u_succ: ?w. u = SUC w"):
+                            p.have("eq: x = SUC y + w")\
+                                .by_rewrite(["u_eq", "w_eq",
+                                             ADD_SUC, SUC_PLUS])
+                            p.have("ex: ?u. x = SUC y + u")\
+                                .by_witness("w", "eq")
+                            p.thus("(x = SUC y) \\/ (?u. x = SUC y + u) "
+                                   "\\/ (?v. SUC y = x + v)").by_disj("ex")
+                with p.case("h_lt: ?v. y = x + v"):
+                    p.have("eq: SUC y = x + SUC v").by_rewrite(["v_eq", ADD_SUC])
+                    p.have("ex: ?v. SUC y = x + v").by_witness("SUC v", "eq")
+                    p.thus("(x = SUC y) \\/ (?u. x = SUC y + u) "
+                           "\\/ (?v. SUC y = x + v)").by_disj("ex")
 
 
 # ---------------------------------------------------------------------------
@@ -756,8 +625,7 @@ def CHOOSE_LT(h_lt, body_fn):
 # Theorem 10:  |- !x y. (x = y) \/ (x > y) \/ (x < y).    By Theorem 9 + Definitions 2, 3.
 
 def _prove_satz_10():
-    body9 = _build_satz9_body(x, y)
-    th9 = SPEC(y, SPEC(x, SATZ_9))             # |- body9
+    th9 = SPEC(y, SPEC(x, SATZ_9))             # |- (x=y) \/ (?u. ...) \/ (?v. ...)
     case2 = mk_exists(u, mk_eq(x, mk_add(y, u)))
     case3 = mk_exists(v, mk_eq(y, mk_add(x, v)))
     # Rewrite case2 -> (x > y), case3 -> (x < y).
@@ -859,7 +727,7 @@ def SATZ_15(p):
     p.choose("v: y = x + v", from_="hxy")
     p.choose("w: z = y + w", from_="hyz")
     p.have("eq: z = x + (v + w)").by_rewrite(["w_eq", "v_eq", SATZ_5])
-    p.thus("x < z").by(PROVE_LT, "x", "z", "v + w", "eq")
+    p.thus("x < z").by_witness("v + w", "eq")
 
 
 # Helpers turning < / = into <= and the analogues, used pervasively in #3.
@@ -930,9 +798,7 @@ def SATZ_17(p):
 def SATZ_18(p):
     p.goal("!x y. x + y > x")
     p.fix("x y")
-    p.thus("x + y > x").by_thm(EQ_MP(
-        SYM(UNFOLD_GT(mk_add(x, y), x)),
-        EXISTS(parse("\\u. x + y = x + u"), y, REFL(mk_add(x, y)))))
+    p.thus("x + y > x").by_witness("y", REFL(mk_add(x, y)))
 
 
 # Theorem 19 (in three pieces -- Landau states it via "respectively"):
@@ -948,7 +814,7 @@ def SATZ_19A(p):
     p.choose("u: x = y + u", from_="h")
     p.have("eq: x + z = (y + z) + u")\
         .by_rewrite_ac(["u_eq"], PLUS, SATZ_5, SATZ_6)
-    p.thus("x + z > y + z").by(PROVE_GT, "x + z", "y + z", "u", "eq")
+    p.thus("x + z > y + z").by_witness("u", "eq")
 
 @proof
 def SATZ_19B(p):
@@ -1058,9 +924,8 @@ def SATZ_24(p):
         with p.case("hx1: x = 1"):
             p.thus("x >= 1").by(EQ_TO_GE, "hx1")
         with p.case("hex: ?u. x = SUC u"):
-            p.choose("u: x = SUC u", from_="hex")
             p.have("eq: x = 1 + u").by_rewrite(["u_eq", ONE_PLUS])
-            p.have("gt1: x > 1").by(PROVE_GT, "x", "1", "u", "eq")
+            p.have("gt1: x > 1").by_witness("u", "eq")
             p.thus("x >= 1").by(GT_TO_GE, "gt1")
 
 
@@ -1564,7 +1429,7 @@ def SATZ_32A(p):
     p.assume("h: x > y")
     p.choose("u: x = y + u", from_="h")
     p.have("eq: x * z = y * z + u * z").by_rewrite(["u_eq", RIGHT_DISTRIB])
-    p.thus("x * z > y * z").by(PROVE_GT, "x * z", "y * z", "u * z", "eq")
+    p.thus("x * z > y * z").by_witness("u * z", "eq")
 
 @proof
 def SATZ_32B(p):
