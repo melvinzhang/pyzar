@@ -25,13 +25,13 @@ from axioms import (
     mk_and, mk_imp, mk_forall, mk_exists, mk_not,
 )
 from logic import (
-    AP_TERM, AP_THM, BETA_CONV, BETA_NORM, SYM, SPEC, GEN,
+    AP_TERM, AP_THM, BETA_CONV, BETA_NORM, SYM, SPEC, GEN, GENL,
     CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP, EXISTS,
     PROVE_HYP, ELIM_EX, NOT_ELIM, NOT_INTRO, CONTR,
     NOT_FORALL_TO_EX_NOT, NOT_EX_TO_FORALL_NOT, NE_SYM,
     TRANS_CHAIN,
 )
-from tactics import BETA_RULE
+from tactics import BETA_RULE, REWRITE_RULE
 
 
 # ---------------------------------------------------------------------------
@@ -1150,6 +1150,115 @@ def _prove_num_recursion():
 
 
 NUM_RECURSION = _prove_num_recursion()
+
+
+# ---------------------------------------------------------------------------
+# define_recursive -- declare a binary operator on num by primitive recursion.
+#
+# Given:
+#     c : term in x_var,                                     # value at y = 1
+#     h : Abs(k_var, Abs(a_var, body[k, a, x_var])),         # step kernel
+# define
+#     name x y := (@fn:num->num. fn 1 = c /\ !n. fn (SUC n) = body[n, fn n]) y
+# and return the two recursion equations as theorems:
+#     BASE : |- !x. name x 1 = c
+#     STEP : |- !x y. name x (SUC y) = body[y, name x y]
+#
+# Folds together NUM_RECURSION (existence) + SELECT_AX (witness extraction)
+# + the BETA-reduction dance that turns the raw `h n (fn n)` form into the
+# clean step body. Each new recursive operator becomes a one-liner.
+# ---------------------------------------------------------------------------
+
+from parser import define as _define
+
+
+def define_recursive(name, fn_ty, x_var, c, h, *, prec=None, assoc="non"):
+    if not isinstance(h, Abs) or not isinstance(h.body, Abs):
+        raise HolError(
+            "define_recursive: h must be Abs(k, Abs(a, body))")
+
+    fn_to_num = mk_fun_ty(num_ty, num_ty)
+    fn_var = Var("fn", fn_to_num)
+    n_var = Var("n", num_ty)
+    y_var = Var("y", num_ty)
+
+    fn_1   = mk_comb(fn_var, ONE)
+    fn_n   = mk_comb(fn_var, n_var)
+    fn_sn  = mk_comb(fn_var, mk_suc(n_var))
+
+    # Beta-reduce h n (fn n) once to get the clean step body
+    # (= body[k:=n_var, a:=fn_n]).
+    h_at_n   = BETA_CONV(mk_comb(h, n_var))                 # |- h n = (\a. body[k:=n])
+    inner    = AP_THM(h_at_n, fn_n)                          # |- (h n) (fn n) = (\a. ...) (fn n)
+    full     = BETA_CONV(rand(inner._concl))                 # |- (\a. ...) (fn n) = body[k:=n, a:=fn n]
+    h_red    = TRANS(inner, full)                             # |- h n (fn n) = clean_step
+    step_clean = rand(h_red._concl)
+
+    # Clean predicate \fn. fn 1 = c /\ !n. fn (SUC n) = clean_step.
+    pred_clean = mk_abs(fn_var,
+        mk_and(mk_eq(fn_1, c),
+                mk_forall(n_var, mk_eq(fn_sn, step_clean))))
+
+    sel_const = mk_const("@", [(fn_to_num, aty)])
+    sel_at_pc = mk_comb(sel_const, pred_clean)              # @fn. pred_clean fn
+
+    # Operator definition: \x y. (@fn. pred_clean fn) y.
+    op_rhs = mk_abs(x_var, mk_abs(y_var, mk_comb(sel_at_pc, y_var)))
+    OP_DEF = _define(name, fn_ty, op_rhs, prec=prec, assoc=assoc)
+
+    # NUM_RECURSION at this c, h: |- ?fn. fn 1 = c /\ !n. fn (SUC n) = h n (fn n).
+    NR_num = INST_TYPE([(num_ty, aty)], NUM_RECURSION)
+    spec_ch = SPEC(h, SPEC(c, NR_num))
+    pred_raw = spec_ch._concl.arg
+    sel_at_raw = mk_comb(sel_const, pred_raw)               # @fn. raw_body[fn]
+
+    # Extract the conjunction body under the existential witness.
+    body_raw = PROVE_HYP(spec_ch,
+                          ELIM_EX(pred_raw, spec_ch._concl, lambda th: th))
+    raw_base = CONJUNCT1(body_raw)                          # |- sel_at_raw 1 = c
+    raw_step = CONJUNCT2(body_raw)                          # |- !n. sel_at_raw (SUC n) = h n (sel_at_raw n)
+
+    # Convert raw step (with embedded h) to clean step (beta-reduced).
+    raw_at_n   = SPEC(n_var, raw_step)
+    h_red_w    = INST([(sel_at_raw, fn_var)], h_red)        # |- h n (sel_at_raw n) = clean_step[fn:=sel_at_raw]
+    clean_at_n = TRANS(raw_at_n, h_red_w)                    # |- sel_at_raw (SUC n) = clean_step[fn:=sel_at_raw]
+    clean_step_forall = GEN(n_var, clean_at_n)
+
+    # pred_clean (sel_at_raw) holds: combine the two conjuncts.
+    pc_at_raw_body = CONJ(raw_base, clean_step_forall)
+    pc_at_raw_eq   = BETA_CONV(mk_comb(pred_clean, sel_at_raw))
+    pc_at_raw      = EQ_MP(SYM(pc_at_raw_eq), pc_at_raw_body)
+
+    # SELECT_AX: pred_clean (sel_at_raw) ==> pred_clean (@pred_clean).
+    sel_inst = INST_TYPE([(fn_to_num, aty)], SELECT_AX)
+    sel_imp  = SPEC(sel_at_raw, SPEC(pred_clean, sel_inst))
+    pc_at_sel = MP(sel_imp, pc_at_raw)
+    pc_at_sel_eq = BETA_CONV(mk_comb(pred_clean, sel_at_pc))
+    pc_at_sel_body = EQ_MP(pc_at_sel_eq, pc_at_sel)
+    sel_base = CONJUNCT1(pc_at_sel_body)                    # |- (@pred_clean) 1 = c
+    sel_step = CONJUNCT2(pc_at_sel_body)                    # |- !n. (@pred_clean) (SUC n) = clean_step[fn:=@pred_clean]
+
+    # Connect (@pred_clean) y back to `name x y` via OP_DEF.
+    OP = mk_const(name, [])
+    op_at_x = AP_THM(OP_DEF, x_var)
+    op_at_x = TRANS(op_at_x, BETA_CONV(rand(op_at_x._concl)))   # |- name x = \y. (@pred_clean) y
+
+    op_at_x_at_1 = AP_THM(op_at_x, ONE)
+    op_at_x_at_1 = TRANS(op_at_x_at_1, BETA_CONV(rand(op_at_x_at_1._concl)))
+    BASE_THM = GEN(x_var, TRANS(op_at_x_at_1, sel_base))         # |- !x. name x 1 = c
+
+    op_at_x_at_y = AP_THM(op_at_x, y_var)
+    op_at_x_at_y = TRANS(op_at_x_at_y, BETA_CONV(rand(op_at_x_at_y._concl)))
+    op_at_x_at_sy = AP_THM(op_at_x, mk_suc(y_var))
+    op_at_x_at_sy = TRANS(op_at_x_at_sy, BETA_CONV(rand(op_at_x_at_sy._concl)))
+    sel_at_sy   = SPEC(y_var, sel_step)
+    raw_step_eq = TRANS(op_at_x_at_sy, sel_at_sy)
+    # raw_step_eq : |- name x (SUC y) = clean_step[fn:=@pred_clean, n:=y].
+    # Rewrite (@pred_clean) y -> name x y on the RHS.
+    step_eq = REWRITE_RULE([SYM(op_at_x_at_y)], raw_step_eq)
+    STEP_THM = GENL([x_var, y_var], step_eq)
+
+    return BASE_THM, STEP_THM
 
 
 # ---------------------------------------------------------------------------

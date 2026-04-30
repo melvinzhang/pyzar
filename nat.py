@@ -43,7 +43,6 @@ from fusion import (
 )
 from axioms import (
     F,
-    SELECT_AX,
     mk_and, mk_imp, mk_forall, mk_exists, mk_not, mk_select,
 )
 from logic import (
@@ -59,7 +58,8 @@ from logic import (
 from num import (
     num_ty, ONE, SUC, mk_suc,
     x, y, z, u, v, w, P,
-    AXIOM_3, AXIOM_4, INDUCTION, INDUCT, INDUCT_PROVE, NUM_RECURSION,
+    AXIOM_3, AXIOM_4, INDUCTION, INDUCT, INDUCT_PROVE,
+    define_recursive,
 )
 from tactics import (REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV,
                        AC_PROVE, AC_NORM, REWRITE_AC_PROVE)
@@ -137,174 +137,20 @@ def SATZ_3(p):
 # Then ADD_1 and ADD_SUC become *theorems*.
 # ---------------------------------------------------------------------------
 
-# The predicate selecting the recursive `+ x` function.
-_add_fn = Var("fn", mk_fun_ty(num_ty, num_ty))
-_add_n  = Var("n", num_ty)
-
-def _add_pred_term(x_t):
-    """\\fn. fn 1 = SUC x_t /\\ !n. fn (SUC n) = SUC (fn n)."""
-    fn_1 = mk_comb(_add_fn, ONE)
-    fn_n = mk_comb(_add_fn, _add_n)
-    fn_sn = mk_comb(_add_fn, mk_suc(_add_n))
-    body = mk_and(mk_eq(fn_1, mk_suc(x_t)),
-                   mk_forall(_add_n,
-                       mk_eq(fn_sn, mk_suc(fn_n))))
-    return mk_abs(_add_fn, body)
-
-_select_add = mk_const("@", [(mk_fun_ty(num_ty, num_ty), aty)])
-
-# Define  +  =  \x y. (@fn. fn 1 = SUC x /\ !n. fn (SUC n) = SUC (fn n)) y.
-_x_d = Var("x", num_ty)
-_y_d = Var("y", num_ty)
-_add_def_rhs = mk_abs(_x_d, mk_abs(_y_d,
-    mk_comb(mk_comb(_select_add, _add_pred_term(_x_d)), _y_d)))
-
 _nnn = mk_fun_ty(num_ty, mk_fun_ty(num_ty, num_ty))
-ADD_DEF = define("+", _nnn, _add_def_rhs, prec=50, assoc="left")
+_k = Var("k", num_ty)
+_a = Var("a", num_ty)
+
+ADD_1, ADD_SUC = define_recursive(
+    "+", _nnn, x,
+    c = mk_suc(x),
+    h = mk_abs(_k, mk_abs(_a, mk_suc(_a))),    # \k a. SUC a
+    prec=50, assoc="left",
+)
 PLUS = mk_const("+", [])
 
 def mk_add(a, b):
     return mk_comb(mk_comb(PLUS, a), b)
-
-
-def _prove_add_eqs():
-    """Derive ADD_1 = |- !x. x + 1 = SUC x  and  ADD_SUC = |- !x y. x + SUC y = SUC (x + y)."""
-    # Specialise NUM_RECURSION at A := num, c := SUC x, h := \k a. SUC a.
-    NR_num = INST_TYPE([(num_ty, aty)], NUM_RECURSION)        # |- !c h. ?fn. fn 1 = c /\ ...   (over num->num)
-    h_var_loc = Var("h", mk_fun_ty(num_ty, mk_fun_ty(num_ty, num_ty)))
-    # h := \k:num. \a:num. SUC a.
-    k_v = Var("k", num_ty)
-    a_v = Var("a", num_ty)
-    h_const = mk_abs(k_v, mk_abs(a_v, mk_suc(a_v)))
-    spec_c = SPEC(mk_suc(x), NR_num)                            # |- !h. ?fn. fn 1 = SUC x /\ !n. fn (SUC n) = h n (fn n)
-    spec_ch = SPEC(h_const, spec_c)
-    # spec_ch : |- ?fn. fn 1 = SUC x /\ !n. fn (SUC n) = (\k a. SUC a) n (fn n).
-    # The RHS still has the lambda; we'll need to BETA-reduce.
-
-    # Apply SELECT_AX: |- !P x. P x ==> P (@P).
-    # The predicate here is _add_pred_term(x) but with `(\k a. SUC a) n (fn n)` rather
-    # than `SUC (fn n)`.  Let's call the literal predicate from spec_ch `pred_raw`.
-    # spec_ch._concl = ?fn. body_raw[fn].   Predicate = \fn. body_raw[fn].
-    # Extract via exists-def of EXISTS: spec_ch is mk_exists(_, pred_raw_body) so
-    # the exists-predicate is the lambda inside the existential.  Equivalent:
-    pred_raw = spec_ch._concl.arg   # the lambda inside  ?fn. body_raw
-    # That is, pred_raw = Abs(fn, body_raw[fn]).
-    fn_var_raw = pred_raw.bvar      # `fn` variable (num -> num)
-
-    # Use ELIM_EX to extract  body_raw[witness]  where witness = @pred_raw.
-    # We then convert body_raw[witness] to "the" form (by beta-reducing the inner h).
-    sel_at_pred = mk_comb(_select_add, pred_raw)   # @fn. body_raw[fn]
-    # body_raw[witness] is body_raw with fn := sel_at_pred.
-
-    # Build the cleaned predicate (beta-reduced): _add_pred_term(x).
-    pred_clean = _add_pred_term(x)
-    sel_at_pred_clean = mk_comb(_select_add, pred_clean)   # @fn. clean body[fn]
-
-    # PROOF STRATEGY:
-    # Show pred_raw = pred_clean as terms (alpha-equivalent up to beta).  Actually
-    # they're not alpha-equal; pred_raw has `(\k a. SUC a) n (fn n)` and pred_clean
-    # has `SUC (fn n)`.  We need a theorem  |- pred_raw fn = pred_clean fn  for any
-    # fn, or pointwise equality lifted via FUN_EXT, or just operate at the level of
-    # the body once instantiated.
-
-    # Simpler approach: extract the witness body from spec_ch (which has the raw form)
-    # and then prove the cleaned form by transforming each piece.
-
-    def body_fn(th_raw):
-        # th_raw : {body_raw[witness]} |- body_raw[witness] where witness = @pred_raw.
-        return th_raw
-
-    body_raw_at_w = ELIM_EX(pred_raw, spec_ch._concl, body_fn)   # {?fn. body_raw} |- body_raw[witness]
-    body_raw_th   = PROVE_HYP(spec_ch, body_raw_at_w)             # |- body_raw[witness]
-    # body_raw[witness] = (witness 1 = SUC x) /\ (!n. witness (SUC n) = (\k a. SUC a) n (witness n)).
-
-    # Project conjuncts.
-    raw_conj1 = CONJUNCT1(body_raw_th)   # |- witness 1 = SUC x
-    raw_conj2 = CONJUNCT2(body_raw_th)   # |- !n. witness (SUC n) = (\k a. SUC a) n (witness n)
-
-    # `witness` here = sel_at_pred (the @ over pred_raw, which is the literal raw lambda).
-    # But our definition used pred_clean (the literal beta-reduced version).
-    # So sel_at_pred is NOT literally sel_at_pred_clean: they differ in the embedded h.
-    # We need to relate the two @-witnesses.
-    # Approach: prove pred_raw = pred_clean (as functions), then sel_at_pred = sel_at_pred_clean
-    # via AP_TERM on the @ constant.
-
-    # Step a: |- pred_raw = pred_clean  (as Abs(fn, ...) terms with same body modulo beta).
-    # Build via ABS over the body equality.
-    fn_x = mk_comb(_add_fn, mk_suc(_add_n))
-    h_n_fnn_raw = mk_comb(mk_comb(h_const, _add_n), mk_comb(_add_fn, _add_n))
-    # |- (\k a. SUC a) n (fn n) = SUC (fn n)
-    # Step: BETA on (\k a. SUC a) n: |- (\k a. SUC a) n = (\a. SUC a).
-    h_at_n = BETA_CONV(mk_comb(h_const, _add_n))               # |- (\k a. SUC a) n = (\a. SUC a)
-    # Then AP_THM at (fn n): |- ((\k a. SUC a) n) (fn n) = (\a. SUC a) (fn n).
-    h_at_n_fnn = AP_THM(h_at_n, mk_comb(_add_fn, _add_n))      # |- ... = (\a. SUC a) (fn n)
-    # BETA again: (\a. SUC a) (fn n) = SUC (fn n).
-    final_beta = BETA_CONV(mk_comb(mk_abs(a_v, mk_suc(a_v)), mk_comb(_add_fn, _add_n)))
-    # Combine:
-    h_red = TRANS(h_at_n_fnn, final_beta)                       # |- (\k a. SUC a) n (fn n) = SUC (fn n)
-
-    # Now show raw_body = clean_body where bodies live under the same fn binder.
-    # raw_inner_eq: |- witness (SUC n) = (\k a. SUC a) n (witness n).  We derived spec for arbitrary n.
-    # We want: !n. witness (SUC n) = SUC (witness n).
-    # Use raw_conj2 spec'ed at _add_n and chain with h_red[fn := witness].
-    raw_at_n = SPEC(_add_n, raw_conj2)   # |- witness (SUC n) = (\k a. SUC a) n (witness n)
-    # Now apply h_red, but h_red is over fn variable. We need to instantiate fn to witness.
-    h_red_at_w = INST([(sel_at_pred, _add_fn)], h_red)   # |- (\k a. SUC a) n (witness n) = SUC (witness n)
-    raw_clean_n = TRANS(raw_at_n, h_red_at_w)             # |- witness (SUC n) = SUC (witness n)
-    raw_clean_forall = GEN(_add_n, raw_clean_n)            # |- !n. witness (SUC n) = SUC (witness n)
-
-    # Now combine into clean predicate body:  P_clean witness =
-    #   (witness 1 = SUC x) /\ (!n. witness (SUC n) = SUC (witness n)).
-    P_clean_at_w = CONJ(raw_conj1, raw_clean_forall)       # |- witness 1 = SUC x /\ !n. witness (SUC n) = SUC (witness n)
-    # That is: |- pred_clean witness  (after BETA).  Build:
-    pred_clean_at_w = mk_comb(pred_clean, sel_at_pred)
-    pred_clean_at_w_eq = BETA_CONV(pred_clean_at_w)        # |- pred_clean witness = (clean body)
-    pred_clean_witness = EQ_MP(SYM(pred_clean_at_w_eq), P_clean_at_w)   # |- pred_clean witness
-
-    # Now apply SELECT_AX:  |- pred_clean witness ==> pred_clean (@pred_clean).
-    sel_inst = INST_TYPE([(mk_fun_ty(num_ty, num_ty), aty)], SELECT_AX)
-    sel_imp = SPEC(sel_at_pred, SPEC(pred_clean, sel_inst))   # |- pred_clean witness ==> pred_clean (@pred_clean)
-    pred_clean_at_select = MP(sel_imp, pred_clean_witness)     # |- pred_clean (@pred_clean)
-    # i.e. |- (@fn. ...) 1 = SUC x  /\  !n. (@fn. ...) (SUC n) = SUC ((@fn. ...) n)
-    sel_pred_clean = sel_at_pred_clean                         # @fn. pred_clean fn
-    select_at_clean_eq = BETA_CONV(mk_comb(pred_clean, sel_pred_clean))
-    select_at_clean_body = EQ_MP(select_at_clean_eq, pred_clean_at_select)
-    # Now project the two conjuncts.
-    sel_at_1_eq_sx = CONJUNCT1(select_at_clean_body)   # |- (@fn. ...) 1 = SUC x
-    sel_at_sn_eq   = CONJUNCT2(select_at_clean_body)   # |- !n. (@fn. ...) (SUC n) = SUC ((@fn. ...) n)
-
-    # ADD_1: |- !x. x + 1 = SUC x.   x + 1 = (\x y. (@fn. ...) y) x 1 = (@fn. ...) 1 = SUC x.
-    plus_x = mk_comb(PLUS, x)
-    # First, PLUS = _add_def_rhs.  Apply each side at x, 1.
-    add_def_th = ADD_DEF                                # |- + = \x y. (@fn. ...) y
-    plus_at_x = AP_THM(add_def_th, x)                    # |- + x = (\x y. (@fn. ...) y) x
-    plus_at_x_beta = TRANS(plus_at_x, BETA_CONV(rand(plus_at_x._concl)))
-    # |- + x = \y. (@fn[x]. ...) y
-    plus_at_x_at_1 = AP_THM(plus_at_x_beta, ONE)         # |- + x 1 = (\y. ...) 1
-    plus_at_x_at_1_beta = TRANS(plus_at_x_at_1, BETA_CONV(rand(plus_at_x_at_1._concl)))
-    # |- + x 1 = (@fn. ...) 1
-    add1_eq = TRANS(plus_at_x_at_1_beta, sel_at_1_eq_sx)   # |- x + 1 = SUC x
-    ADD_1_th = GEN(x, add1_eq)
-
-    # ADD_SUC: |- !x y. x + SUC y = SUC (x + y).
-    plus_at_x_at_sy = AP_THM(plus_at_x_beta, mk_suc(y))    # |- + x (SUC y) = (\y. ...) (SUC y)
-    plus_at_x_at_sy_beta = TRANS(plus_at_x_at_sy,
-                                  BETA_CONV(rand(plus_at_x_at_sy._concl)))
-    # |- + x (SUC y) = (@fn. ...) (SUC y)
-    sel_at_sy = SPEC(y, sel_at_sn_eq)                       # |- (@fn. ...) (SUC y) = SUC ((@fn. ...) y)
-    # SUC ((@fn. ...) y) = SUC (x + y).  Need to rewrite (@fn. ...) y back to + x y.
-    plus_at_x_at_y = AP_THM(plus_at_x_beta, y)              # |- + x y = (\y. ...) y
-    plus_at_x_at_y_beta = TRANS(plus_at_x_at_y,
-                                 BETA_CONV(rand(plus_at_x_at_y._concl)))
-    # |- + x y = (@fn. ...) y
-    suc_eq = AP_TERM(SUC, SYM(plus_at_x_at_y_beta))          # |- SUC ((@fn. ...) y) = SUC (x + y)
-    add_suc_eq = TRANS(plus_at_x_at_sy_beta, TRANS(sel_at_sy, suc_eq))   # |- x + SUC y = SUC (x + y)
-    ADD_SUC_th = GENL([x, y], add_suc_eq)
-
-    return ADD_1_th, ADD_SUC_th
-
-
-ADD_1, ADD_SUC = _prove_add_eqs()
 
 # Reversed orientation of ADD_1, used as a rewrite to canonicalize SUC into
 # `+1`-form before AC reasoning.
@@ -1201,103 +1047,16 @@ SATZ_27 = _prove_satz_27()
 # Multiplication is defined analogously, via NUM_RECURSION at  c := x, h := \k a. a + x.
 # Then:  x * 1 = x  and  x * (SUC y) = x * y + x.
 
-_mul_fn = Var("fn", mk_fun_ty(num_ty, num_ty))
-_mul_n  = Var("n", num_ty)
-
-def _mul_pred_term(x_t):
-    """\\fn. fn 1 = x_t /\\ !n. fn (SUC n) = (fn n) + x_t."""
-    fn_1  = mk_comb(_mul_fn, ONE)
-    fn_n  = mk_comb(_mul_fn, _mul_n)
-    fn_sn = mk_comb(_mul_fn, mk_suc(_mul_n))
-    body  = mk_and(mk_eq(fn_1, x_t),
-                    mk_forall(_mul_n,
-                        mk_eq(fn_sn, mk_add(fn_n, x_t))))
-    return mk_abs(_mul_fn, body)
-
-_select_mul = mk_const("@", [(mk_fun_ty(num_ty, num_ty), aty)])
-
-_mul_def_rhs = mk_abs(_x_d, mk_abs(_y_d,
-    mk_comb(mk_comb(_select_mul, _mul_pred_term(_x_d)), _y_d)))
-
-MUL_DEF = define("*", _nnn, _mul_def_rhs, prec=60, assoc="left")
+MUL_1, MUL_SUC = define_recursive(
+    "*", _nnn, x,
+    c = x,
+    h = mk_abs(_k, mk_abs(_a, mk_add(_a, x))),   # \k a. a + x
+    prec=60, assoc="left",
+)
 TIMES = mk_const("*", [])
 
 def mk_mul(a, b):
     return mk_comb(mk_comb(TIMES, a), b)
-
-
-def _prove_mul_eqs():
-    """Derive MUL_1 = |- !x. x * 1 = x  and  MUL_SUC = |- !x y. x * SUC y = x * y + x."""
-    NR_num = INST_TYPE([(num_ty, aty)], NUM_RECURSION)
-    k_v = Var("k", num_ty)
-    a_v = Var("a", num_ty)
-    h_const = mk_abs(k_v, mk_abs(a_v, mk_add(a_v, x)))   # \k a. a + x
-    spec_c = SPEC(x, NR_num)                              # |- !h. ?fn. fn 1 = x /\ !n. fn (SUC n) = h n (fn n)
-    spec_ch = SPEC(h_const, spec_c)                       # |- ?fn. fn 1 = x /\ !n. fn (SUC n) = (\k a. a+x) n (fn n)
-
-    pred_raw = spec_ch._concl.arg
-    sel_at_pred = mk_comb(_select_mul, pred_raw)
-
-    pred_clean = _mul_pred_term(x)
-    sel_at_pred_clean = mk_comb(_select_mul, pred_clean)
-
-    body_raw_at_w = ELIM_EX(pred_raw, spec_ch._concl, lambda th: th)
-    body_raw_th   = PROVE_HYP(spec_ch, body_raw_at_w)
-
-    raw_conj1 = CONJUNCT1(body_raw_th)   # |- witness 1 = x
-    raw_conj2 = CONJUNCT2(body_raw_th)   # |- !n. witness (SUC n) = (\k a. a+x) n (witness n)
-
-    # Reduce (\k a. a+x) n (fn n) = (fn n) + x.
-    h_at_n = BETA_CONV(mk_comb(h_const, _mul_n))                   # |- (\k a. a+x) n = \a. a + x
-    h_at_n_fnn = AP_THM(h_at_n, mk_comb(_mul_fn, _mul_n))           # |- ((\k a. a+x) n) (fn n) = (\a. a+x) (fn n)
-    final_beta = BETA_CONV(mk_comb(mk_abs(a_v, mk_add(a_v, x)),
-                                     mk_comb(_mul_fn, _mul_n)))     # |- (\a. a+x) (fn n) = (fn n) + x
-    h_red = TRANS(h_at_n_fnn, final_beta)                            # |- (\k a. a+x) n (fn n) = (fn n) + x
-
-    raw_at_n = SPEC(_mul_n, raw_conj2)                                # |- witness (SUC n) = (\k a. a+x) n (witness n)
-    h_red_at_w = INST([(sel_at_pred, _mul_fn)], h_red)                # |- (\k a. a+x) n (witness n) = (witness n) + x
-    raw_clean_n = TRANS(raw_at_n, h_red_at_w)                          # |- witness (SUC n) = (witness n) + x
-    raw_clean_forall = GEN(_mul_n, raw_clean_n)
-
-    P_clean_at_w = CONJ(raw_conj1, raw_clean_forall)
-    pred_clean_at_w = mk_comb(pred_clean, sel_at_pred)
-    pred_clean_at_w_eq = BETA_CONV(pred_clean_at_w)
-    pred_clean_witness = EQ_MP(SYM(pred_clean_at_w_eq), P_clean_at_w)
-
-    sel_inst = INST_TYPE([(mk_fun_ty(num_ty, num_ty), aty)], SELECT_AX)
-    sel_imp = SPEC(sel_at_pred, SPEC(pred_clean, sel_inst))
-    pred_clean_at_select = MP(sel_imp, pred_clean_witness)
-    sel_pred_clean = sel_at_pred_clean
-    select_at_clean_eq = BETA_CONV(mk_comb(pred_clean, sel_pred_clean))
-    select_at_clean_body = EQ_MP(select_at_clean_eq, pred_clean_at_select)
-    sel_at_1_eq_x = CONJUNCT1(select_at_clean_body)   # |- (@fn. ...) 1 = x
-    sel_at_sn_eq  = CONJUNCT2(select_at_clean_body)   # |- !n. (@fn. ...) (SUC n) = (@fn. ...) n + x
-
-    times_at_x = AP_THM(MUL_DEF, x)
-    times_at_x_beta = TRANS(times_at_x, BETA_CONV(rand(times_at_x._concl)))
-    times_at_x_at_1 = AP_THM(times_at_x_beta, ONE)
-    times_at_x_at_1_beta = TRANS(times_at_x_at_1,
-                                   BETA_CONV(rand(times_at_x_at_1._concl)))
-    mul1_eq = TRANS(times_at_x_at_1_beta, sel_at_1_eq_x)   # |- x * 1 = x
-    MUL_1_th = GEN(x, mul1_eq)
-
-    times_at_x_at_sy = AP_THM(times_at_x_beta, mk_suc(y))
-    times_at_x_at_sy_beta = TRANS(times_at_x_at_sy,
-                                    BETA_CONV(rand(times_at_x_at_sy._concl)))
-    sel_at_sy = SPEC(y, sel_at_sn_eq)                       # |- (@fn. ...) (SUC y) = (@fn. ...) y + x
-    times_at_x_at_y = AP_THM(times_at_x_beta, y)
-    times_at_x_at_y_beta = TRANS(times_at_x_at_y,
-                                   BETA_CONV(rand(times_at_x_at_y._concl)))
-    # Need to rewrite (@fn. ...) y back to x * y. Note: we have x * y = (@fn. ...) y.
-    # SUC's analogue: ((@fn. ...) y + x) = (x*y + x) via AP_THM(AP_TERM(PLUS, SYM(times_at_x_at_y_beta)), x).
-    rewrite_lhs = AP_THM(AP_TERM(PLUS, SYM(times_at_x_at_y_beta)), x)   # |- (@fn. ...) y + x = x*y + x
-    mul_suc_eq = TRANS(times_at_x_at_sy_beta, TRANS(sel_at_sy, rewrite_lhs))   # |- x * SUC y = x*y + x
-    MUL_SUC_th = GENL([x, y], mul_suc_eq)
-
-    return MUL_1_th, MUL_SUC_th
-
-
-MUL_1, MUL_SUC = _prove_mul_eqs()
 
 
 # ---------------------------------------------------------------------------
