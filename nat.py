@@ -836,31 +836,40 @@ def UNFOLD_LE(a, b): return _binop_unfold(LE_DEF, LE, a, b)
 # Theorem 13:  |- !x y. (x >= y) ==> (y <= x).
 # Theorem 14:  |- !x y. (x <= y) ==> (y >= x).
 
-def _prove_satz_13():
-    th_unfold = EQ_MP(UNFOLD_GE(x, y), ASSUME(mk_ge(x, y)))   # (x>y) \/ (x=y)
-    s11_xy = SPECL([x, y], SATZ_11)
-    branch_gt = DISCH(mk_gt(x, y),
-                      DISJ1(MP(s11_xy, ASSUME(mk_gt(x, y))), mk_eq(y, x)))
-    branch_eq = DISCH(mk_eq(x, y),
-                      DISJ2(mk_lt(y, x), SYM(ASSUME(mk_eq(x, y)))))
-    th_disj = DISJ_CASES(th_unfold, branch_gt, branch_eq)
-    th_le = EQ_MP(SYM(UNFOLD_LE(y, x)), th_disj)
-    return GENL([x, y], DISCH(mk_ge(x, y), th_le))
+@proof
+def SATZ_13(p):
+    p.goal("!x y. x >= y ==> y <= x")
+    p.fix("x y")
+    p.assume("h: x >= y")
+    p.have("xy_or: (x > y) \\/ (x = y)").by_eq_mp(UNFOLD_GE(x, y), "h")
+    with p.have("yx_or: (y < x) \\/ (y = x)").by_cases("xy_or"):
+        with p.case("h_gt: x > y"):
+            p.have("yx_lt: y < x").by(SATZ_11, "x", "y", "h_gt")
+            p.thus("(y < x) \\/ (y = x)")\
+                .by_thm(DISJ1(p.fact("yx_lt"), mk_eq(y, x)))
+        with p.case("h_eq: x = y"):
+            p.have("yx_eq: y = x").by(SYM, "h_eq")
+            p.thus("(y < x) \\/ (y = x)")\
+                .by_thm(DISJ2(mk_lt(y, x), p.fact("yx_eq")))
+    p.thus("y <= x").by_eq_mp(SYM(UNFOLD_LE(y, x)), "yx_or")
 
-SATZ_13 = _prove_satz_13()
 
-def _prove_satz_14():
-    th_unfold = EQ_MP(UNFOLD_LE(x, y), ASSUME(mk_le(x, y)))
-    s12_xy = SPECL([x, y], SATZ_12)
-    branch_lt = DISCH(mk_lt(x, y),
-                      DISJ1(MP(s12_xy, ASSUME(mk_lt(x, y))), mk_eq(y, x)))
-    branch_eq = DISCH(mk_eq(x, y),
-                      DISJ2(mk_gt(y, x), SYM(ASSUME(mk_eq(x, y)))))
-    th_disj = DISJ_CASES(th_unfold, branch_lt, branch_eq)
-    th_ge = EQ_MP(SYM(UNFOLD_GE(y, x)), th_disj)
-    return GENL([x, y], DISCH(mk_le(x, y), th_ge))
-
-SATZ_14 = _prove_satz_14()
+@proof
+def SATZ_14(p):
+    p.goal("!x y. x <= y ==> y >= x")
+    p.fix("x y")
+    p.assume("h: x <= y")
+    p.have("xy_or: (x < y) \\/ (x = y)").by_eq_mp(UNFOLD_LE(x, y), "h")
+    with p.have("yx_or: (y > x) \\/ (y = x)").by_cases("xy_or"):
+        with p.case("h_lt: x < y"):
+            p.have("yx_gt: y > x").by(SATZ_12, "x", "y", "h_lt")
+            p.thus("(y > x) \\/ (y = x)")\
+                .by_thm(DISJ1(p.fact("yx_gt"), mk_eq(y, x)))
+        with p.case("h_eq: x = y"):
+            p.have("yx_eq: y = x").by(SYM, "h_eq")
+            p.thus("(y > x) \\/ (y = x)")\
+                .by_thm(DISJ2(mk_gt(y, x), p.fact("yx_eq")))
+    p.thus("y >= x").by_eq_mp(SYM(UNFOLD_GE(y, x)), "yx_or")
 
 
 # Theorem 15 (transitivity of order):  |- !x y z. x < y ==> y < z ==> x < z.

@@ -357,7 +357,7 @@ class Proof:
         # Defer discharge to frame close.
         self._cur.pending_choose.append((ex_th, pred, exc))
 
-    def cases_on(self, ref):
+    def _open_cases(self, ref, target, on_close):
         or_th = self._resolve_fact(ref)
         c = or_th._concl
         # Expect (p \/ q) at the top.
@@ -365,7 +365,15 @@ class Proof:
                 and isinstance(c.fun.fun, Const)
                 and c.fun.fun.name == "\\/"):
             raise HolError(f"cases_on: not a disjunction: {pp(c)}")
-        return _CasesCtx(self, or_th)
+        return _CasesCtx(self, or_th, target, on_close)
+
+    def cases_on(self, ref):
+        parent = self._cur
+        if parent.goal is None:
+            raise HolError("cases_on: no current goal")
+        return self._open_cases(
+            ref, parent.goal,
+            lambda res: self._set_frame_result(parent, res))
 
     def suppose(self, label_spec):
         """Open a hypothetical sub-block to prove a negation goal.
@@ -530,6 +538,13 @@ class _Have:
         eq_r_th = self.p._resolve_fact(eqs[1])
         return self._finish(REWRITE_NE(ne_th, eq_l_th, eq_r_th))
 
+    def by_cases(self, ref):
+        """Open a cases-on block whose target is the have-term (rather than
+        the parent's goal). On close, the combined ``DISJ_CASES`` result is
+        registered as the have's fact (and, if invoked from ``thus``, also
+        becomes the current frame's result)."""
+        return self.p._open_cases(ref, self.term, self._finish)
+
     def by_eq_mp(self, eq_th, ref):
         """``EQ_MP(eq_th, fact)`` -- rewrite a fact through an equation."""
         return self._finish(EQ_MP(eq_th, self.p._resolve_fact(ref)))
@@ -675,17 +690,19 @@ class _InductionCtx:
 # ---------------------------------------------------------------------------
 
 class _CasesCtx:
-    def __init__(self, p, or_th):
+    def __init__(self, p, or_th, target, on_close):
         self.p = p
         self.or_th = or_th
         c = or_th._concl
         self.left = c.fun.arg
         self.right = c.arg
+        self.target = target
+        self.on_close = on_close
 
     def __enter__(self):
-        fr = _Frame(goal=self.p._cur.goal, kind="_cases")
-        # The "_cases" frame inherits the parent's goal so case() can see it.
-        fr.data = {"goal": self.p._cur.goal,
+        fr = _Frame(goal=self.target, kind="_cases")
+        # The "_cases" frame's goal is what each case() branch must prove.
+        fr.data = {"goal": self.target,
                    "left": self.left, "right": self.right,
                    "left_th": None, "right_th": None}
         self.p._frames.append(fr)
@@ -704,13 +721,12 @@ class _CasesCtx:
         branch_r = DISCH(r_term, r_th)
         result = DISJ_CASES(self.or_th, branch_l, branch_r)
         self.p._drop_facts(fr.facts_added)
-        parent = self.p._cur
-        if parent.goal is None or not aconv(parent.goal, result._concl):
+        if not aconv(self.target, result._concl):
             raise HolError(
                 "cases_on: produced wrong conclusion\n"
-                f"  goal: {pp(parent.goal) if parent.goal else 'None'}\n"
-                f"  got:  {pp(result._concl)}")
-        self.p._set_frame_result(parent, result)
+                f"  target: {pp(self.target)}\n"
+                f"  got:    {pp(result._concl)}")
+        self.on_close(result)
         return False
 
 
