@@ -45,24 +45,24 @@ from axioms import (
     F,
     mk_and, mk_imp, mk_forall, mk_exists, mk_not, mk_select,
 )
-from logic import (
+from tactics import (
     AP_TERM, AP_THM, BETA_CONV, SYM,
     SPEC, GEN, CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP,
     CONTR, NOT_ELIM, NOT_INTRO, NOT_CONST,
     mk_or, DISJ1, DISJ2, DISJ_CASES,
     NE_SYM, REWRITE_NE, EXISTS,
-    EXCLUDED_MIDDLE, NOT_NOT_ELIM, NOT_EX_TO_FORALL_NOT,
     PROVE_HYP, ELIM_EX,
-    SPECL, GENL, DISCHL, TRANS_CHAIN, MP_LIST, CASE_OR,
+    SPECL, GENL, DISCHL, TRANS_CHAIN, CASE_OR,
+    REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV,
+    AC_PROVE, AC_NORM, REWRITE_AC_PROVE,
 )
+from classical import EXCLUDED_MIDDLE, NOT_NOT_ELIM, NOT_EX_TO_FORALL_NOT
 from num import (
     num_ty, ONE, SUC, mk_suc,
     x, y, z, u, v, w, P,
     AXIOM_3, AXIOM_4, INDUCTION, INDUCT,
     define_recursive,
 )
-from tactics import (REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV, BETA_RULE,
-                       AC_PROVE, AC_NORM, REWRITE_AC_PROVE)
 from parser import parse, pp, define, pp_thm, DEFAULT_SIG
 from proof import proof
 
@@ -1024,14 +1024,12 @@ def SATZ_27(p):
         .by(_SATZ_27_NOT_M_SUCC, "N")
 
     # Step 3: ?m. M m /\ ~ M (m + 1).  _SATZ_27_EXISTS_M takes a higher-order
-    # predicate P, so we materialize the lambda once at this boundary; BETA_RULE
-    # normalizes the resulting redexes back to the unfolded form (which the
-    # let-expansion in our `have` term agrees with).
-    M_pred = parse("\\x. !n. N n ==> x <= n", N=_N_ty)
-    ex_th = MP_LIST(
-        BETA_RULE(SPECL([M_pred, _N_var], _SATZ_27_EXISTS_M)),
-        [p.fact("M_1"), p.fact("step_fail"), p.fact("hNonempty")])
-    p.have("ex: ?m. M m /\\ ~ M (m + 1)").by_thm(ex_th)
+    # predicate P; by_select materializes the let `M` as a kernel lambda for
+    # the SPEC, BETA_RULE-normalizes the resulting redexes back to the unfolded
+    # form, then MPs the premise facts.
+    p.have("ex: ?m. M m /\\ ~ M (m + 1)")\
+        .by_select(_SATZ_27_EXISTS_M, "M", "N",
+                    "M_1", "step_fail", "hNonempty")
 
     # Step 4: choose the boundary witness, decompose, conclude via _SATZ_27_FROM_M.
     p.choose("m: M m /\\ ~ M (m + 1)", from_="ex")

@@ -519,7 +519,7 @@ def _selftest():
     from axioms import (
         bool_ty, mk_and, mk_imp, mk_not, mk_forall, mk_exists,
     )
-    from logic import mk_or
+    from tactics import mk_or
     from fusion import mk_abs
     from num import x as VX, y as VY, z as VZ, mk_suc, num_ty, ONE
 

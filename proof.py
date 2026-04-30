@@ -28,20 +28,19 @@ import re
 
 from fusion import (
     Var, Const, Comb, Abs, thm,
-    aconv, concl, HolError, ASSUME, EQ_MP, BETA, mk_comb,
+    aconv, concl, HolError, ASSUME, EQ_MP, BETA, mk_abs, mk_comb,
     rand, type_of, TRANS,
 )
-from axioms import F, mk_select
-from logic import (
+from axioms import T, F, mk_select
+from tactics import (
     SPEC, GEN, DISCH, MP, MP_LIST, DISJ_CASES, BETA_CONV, BETA_NORM, SYM,
-    PROVE_HYP, ELIM_EX, _subst_term,
+    AP_THM, PROVE_HYP, ELIM_EX, _subst_term,
     NOT_INTRO, NOT_ELIM, CONTR, REWRITE_NE, EXISTS, DISJ1, DISJ2,
     CONJUNCT1, CONJUNCT2,
+    REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV, BETA_RULE,
+    AC_PROVE, REWRITE_AC_PROVE,
 )
-from tactics import (REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV, BETA_RULE,
-                     AC_PROVE, REWRITE_AC_PROVE)
 from parser import parse, pp, ParseError, LetDef, DEFAULT_SIG
-from num import INDUCT_PROVE, mk_suc, ONE
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +120,7 @@ class Proof:
     # ---- env / parsing ---------------------------------------------------
 
     def _scope_env(self):
-        env = {"F": F}
+        env = {"F": F, "T": T}
         for fr in self._frames:
             for name, ty in fr.type_env.items():
                 env[name] = ty
@@ -144,6 +143,28 @@ class Proof:
 
     def _parse(self, s):
         return parse(s, _env_bindings=self._scope_env())
+
+    def _lookup_let(self, name):
+        """Find a `LetDef` by name in scope (inner frames shadow outer)."""
+        for fr in reversed(self._frames):
+            ld = fr.let_env.get(name)
+            if ld is not None:
+                return ld
+        return None
+
+    def unfold(self, def_th, *args):
+        """Apply a definition equation to argument terms.
+
+        For ``def_th : |- C = \\x1 ... xn. body``, returns
+        ``|- C t1 ... tn = body[xi := ti]``.  Each arg is parsed in the
+        current scope if a string, else taken as a kernel term.  Each
+        application step is followed by ``BETA_RULE`` to normalize the
+        redex introduced by ``AP_THM``."""
+        th = def_th
+        for a in args:
+            t = self._parse(a) if isinstance(a, str) else a
+            th = BETA_RULE(AP_THM(th, t))
+        return th
 
     _LABEL_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z_0-9]*)\s*:\s*(.+)$", re.DOTALL)
 
@@ -374,6 +395,7 @@ class Proof:
         return _InductionCtx(self, env[var_name], body, peel_forall=False)
 
     def base(self):
+        from num import ONE
         fr = self._cur
         if fr.kind != "_induction":
             raise HolError("base() outside induction()")
@@ -388,6 +410,7 @@ class Proof:
                              on_close=on_close)
 
     def step(self, ih_label="IH"):
+        from num import mk_suc
         fr = self._cur
         if fr.kind != "_induction":
             raise HolError("step() outside induction()")
@@ -705,6 +728,48 @@ class _Have:
                      for r in rules]
         fact_th = self.p._resolve_fact(ref)
         return self._finish(REWRITE_RULE(rule_thms, fact_th))
+
+    def by_select(self, axiom, *args):
+        """Higher-order-to-first-order boundary helper.
+
+        ``axiom`` is the HO theorem (e.g. ``SELECT_AX`` after ``INST_TYPE``,
+        or any custom lemma like ``_SATZ_27_EXISTS_M``).  Each subsequent
+        arg is dispatched in order:
+
+        - ``str`` matching a let-name in scope: materialize as kernel ``Abs``,
+          ``SPEC`` at it, and ``BETA_RULE`` the result (so the redexes that
+          ``SPEC`` introduces normalize back to the let-expansion shape that
+          surrounding ``have``/``thus`` terms agree with).
+        - ``str`` matching a fact label: ``MP``.
+        - ``str`` otherwise: parse as a term and ``SPEC``.
+        - kernel ``thm``: ``MP``.
+        - kernel term (Var/Const/Comb/Abs): ``SPEC``.
+
+        Replaces the manual ``MP_LIST(BETA_RULE(SPECL([...], LEMMA)), [...])``
+        chain at every HO-lemma boundary.
+        """
+        p = self.p
+        th = axiom if isinstance(axiom, thm) else p._resolve_fact(axiom)
+        for a in args:
+            if isinstance(a, str):
+                ld = p._lookup_let(a)
+                if ld is not None:
+                    if ld.arity != 1:
+                        raise HolError(
+                            f"by_select: only single-arg lets supported "
+                            f"(got {a!r} with arity {ld.arity})")
+                    th = BETA_RULE(SPEC(mk_abs(ld.bvar, ld.body), th))
+                    continue
+                if a in p._facts:
+                    th = MP(th, p._facts[a])
+                    continue
+                th = SPEC(p._parse(a), th)
+                continue
+            if isinstance(a, thm):
+                th = MP(th, a)
+                continue
+            th = SPEC(a, th)
+        return self._finish(th)
 
     def by_unfold(self, src, *defs):
         """Prove the goal from ``src`` by unfolding the given definition
@@ -1039,6 +1104,7 @@ class _InductionCtx:
         # GEN(var, ...) to produce |- !var. body. If the parent's goal already
         # has a !var binder, leave it as is; otherwise SPEC var back out so
         # the parent's body-shaped goal matches.
+        from num import INDUCT_PROVE
         forall_th = INDUCT_PROVE(self.var, self.body, d["base_th"],
                                   lambda IH: d["step_th"])
         body_th = forall_th if self.peel_forall else SPEC(self.var, forall_th)
@@ -1284,6 +1350,48 @@ def _selftest():
         pass
     else:
         raise AssertionError("expected HolError for let/fix-var collision")
+
+    # ---- p.unfold smoke test --------------------------------------------
+    from num import SUC_DEF
+    from fusion import mk_fun_ty, bool_ty
+    # Unary def: SUC_DEF : |- SUC = \n. mk_num (IND_SUC (dest_num n)).
+    x_v = mk_var("x", num_ty)
+    expected_unary = BETA_RULE(AP_THM(SUC_DEF, x_v))
+    got_unary = Proof().unfold(SUC_DEF, x_v)
+    assert aconv(got_unary._concl, expected_unary._concl), \
+        "p.unfold (unary): mismatch"
+    assert got_unary._asl == expected_unary._asl
+
+    # Binary def: GT_DEF : |- > = \x y. ?u. x = y + u (defined in nat).
+    from nat import GT_DEF, UNFOLD_GT, x as VX, y as VY
+    expected_binary = UNFOLD_GT(VX, VY)
+    got_binary = Proof().unfold(GT_DEF, VX, VY)
+    assert aconv(got_binary._concl, expected_binary._concl), \
+        "p.unfold (binary): mismatch"
+
+    # String form: parses argument in current scope.
+    p_str = Proof()
+    p_str.goal("!x. x = x")
+    p_str.fix("x")
+    got_str = p_str.unfold(SUC_DEF, "x")
+    assert aconv(got_str._concl, expected_unary._concl)
+
+    # ---- _Have.by_select smoke test -------------------------------------
+    # Build a tiny HO lemma `|- !P. P 1 ==> P 1` and apply by_select with a
+    # let-defined predicate plus a witness fact, verifying the SPEC + BETA_RULE
+    # + MP chain produces the right theorem.
+    from tactics import GEN as L_GEN, DISCH as L_DISCH
+    P_var = mk_var("P", mk_fun_ty(num_ty, bool_ty))
+    P_1   = mk_comb(P_var, ONE)
+    trivial_HO = L_GEN(P_var, L_DISCH(P_1, ASSUME(P_1)))   # |- !P. P 1 ==> P 1
+
+    @proof
+    def BY_SELECT_TEST(p):
+        p.goal("1 = 1")
+        p.let("M(x) := x = x")
+        p.have("M_1: M 1").by_thm(REFL(ONE))
+        p.thus("M 1").by_select(trivial_HO, "M", "M_1")
+    assert aconv(concl(BY_SELECT_TEST), parse("1 = 1"))
 
 
 if __name__ == "__main__":

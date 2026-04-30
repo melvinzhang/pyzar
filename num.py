@@ -24,14 +24,14 @@ from axioms import (
     ind_ty,
     mk_and, mk_imp, mk_forall, mk_exists, mk_not,
 )
-from logic import (
+from tactics import (
     AP_TERM, AP_THM, BETA_CONV, BETA_NORM, SYM, SPEC, GEN, GENL,
     CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP, EXISTS,
     PROVE_HYP, ELIM_EX, NOT_ELIM, NOT_INTRO, CONTR,
-    NOT_FORALL_TO_EX_NOT, NOT_EX_TO_FORALL_NOT, NE_SYM,
-    TRANS_CHAIN,
+    NE_SYM, TRANS_CHAIN,
+    BETA_RULE, REWRITE_RULE,
 )
-from tactics import BETA_RULE, REWRITE_RULE
+from classical import NOT_FORALL_TO_EX_NOT, NOT_EX_TO_FORALL_NOT
 
 
 # ---------------------------------------------------------------------------
@@ -790,7 +790,7 @@ def _prove_R_unique_base():
     # Inner: SUC k = 1 ==> h k a = c.   Use AXIOM_3 specialized to k.
     ax3_k = SPEC(_k, AXIOM_3)                              # |- ~(SUC k = 1)
     # NOT_ELIM gives  |- (SUC k = 1) ==> F.
-    from logic import NOT_ELIM, CONTR
+    from tactics import NOT_ELIM, CONTR
     sk_eq_1_imp_F = NOT_ELIM(ax3_k)                        # |- (SUC k = 1) ==> F
     # |- (SUC k = 1) ==> (h k a = c):  apply CONTR.
     h_sk_eq_1 = ASSUME(mk_eq(mk_suc(_k), ONE))             # {SUC k = 1} |- SUC k = 1
