@@ -8,3 +8,4 @@ test:
 	$(PY) num.py
 	$(PY) nat.py
 	$(PY) parser.py
+	$(PY) proof.py
