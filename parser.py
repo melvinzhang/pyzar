@@ -33,7 +33,11 @@ import re
 from lark import Lark
 from lark.visitors import Interpreter
 
-from fusion import Var, Const, Comb, Abs, mk_var, mk_comb
+from fusion import (
+    Var, Const, Comb, Abs,
+    mk_var, mk_comb, mk_const, mk_eq,
+    new_basic_definition,
+)
 
 
 class ParseError(Exception):
@@ -41,6 +45,7 @@ class ParseError(Exception):
 
 
 _SPLICE_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_NAME_RE   = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 # ---------------------------------------------------------------------------
@@ -299,53 +304,129 @@ def _climb(terms, ops):
 # Public API.
 # ---------------------------------------------------------------------------
 
-def parse(s, env=None, sig=None, **subst):
+def parse(s, sig=None, _env_bindings=None, **bindings):
     """Parse `s` into a kernel term.
 
-    `env` maps free-variable names either to their `hol_type` (when the
-    default isn't right) or directly to a kernel term to substitute.
+    `bindings` (kwargs) maps free-variable names to either their
+    ``hol_type`` (when the default isn't right) or directly to a kernel
+    term to substitute.  Two reference styles in `s`:
+
+      - bare ``name``  -- resolves through scope > const > bindings > default.
+        Falls through to a default-typed free var if unbound.
+      - ``${name}``    -- requires `name` to be in bindings; raises
+        `ParseError` if missing.
+
+    Every kwarg in `bindings` must be referenced (either as a bare ``name``
+    appearing in `s` or as ``${name}``); unused bindings raise `ParseError`.
 
     `sig` is a `Signature`; defaults to `DEFAULT_SIG`.
 
-    Antiquotation: occurrences of ``${name}`` in `s` are replaced by the
-    kernel term passed as ``name=...`` in `**subst`.  Example:
-
-        parse("\\\\u. ${a} = ${b} + u", a=a_term, b=b_term)
-
-    Each ``${name}`` must be bound; unbound names raise `ParseError`.
-    Repeated occurrences of the same ``${name}`` reuse the same term.
+    `_env_bindings` is private: `ParseEnv.parse` uses it to pass long-lived
+    bindings that bypass the unused check.
     """
-    if subst or "${" in s:
-        s, splice_env = _expand_splices(s, subst)
-        env = {**(env or {}), **splice_env}
-    tree = _PARSER.parse(s)
-    return _Builder(sig or DEFAULT_SIG, env).visit(tree)
-
-
-def _expand_splices(s, subst):
-    """Rewrite ``${name}`` markers to fresh sentinels and build an env
-    mapping each sentinel to the corresponding spliced term."""
+    env_b = _env_bindings or {}
     name_to_sentinel = {}
     splice_env = {}
 
     def _repl(m):
         name = m.group(1)
-        if name not in subst:
+        if name in bindings:
+            value = bindings[name]
+        elif name in env_b:
+            value = env_b[name]
+        else:
             raise ParseError(
                 f"antiquote ${{{name}}} has no binding "
                 f"(pass {name}=... to parse)")
         if name not in name_to_sentinel:
             sentinel = f"__splice{len(name_to_sentinel)}_{name}__"
             name_to_sentinel[name] = sentinel
-            splice_env[sentinel] = subst[name]
+            splice_env[sentinel] = value
         return name_to_sentinel[name]
 
     s2 = _SPLICE_RE.sub(_repl, s)
-    unused = set(subst) - set(name_to_sentinel)
-    if unused:
-        raise ParseError(
-            f"unused antiquote binding(s): {sorted(unused)}")
-    return s2, splice_env
+
+    if bindings:
+        bare_names = set(_NAME_RE.findall(s2)) - set(name_to_sentinel.values())
+        referenced = set(name_to_sentinel) | (set(bindings) & bare_names)
+        unused = set(bindings) - referenced
+        if unused:
+            raise ParseError(
+                f"unused binding(s): {sorted(unused)} "
+                "(neither bare name nor ${{...}} reference appears in source)")
+
+    merged = {**env_b, **bindings, **splice_env}
+    tree = _PARSER.parse(s2)
+    return _Builder(sig or DEFAULT_SIG, merged).visit(tree)
+
+
+class ParseEnv:
+    """A bag of bindings reused across many `parse` calls.
+
+    Bindings on a `ParseEnv` are *not* checked for unused (they're meant
+    to outlive any single parse).  Per-call kwargs in `.parse(**extra)`
+    are checked.
+
+    Example:
+        P  = ParseEnv(N=N_ty)
+        Pw = P.extend(w=w_t)
+        Pw.parse("~ N ${w}")      # both N (env) and ${w} (env) resolve
+        Pw.parse("${w} = n")      # bare 'n' falls through to default var
+    """
+
+    __slots__ = ("sig", "bindings")
+
+    def __init__(self, sig=None, **bindings):
+        self.sig = sig
+        self.bindings = dict(bindings)
+
+    def parse(self, s, **extra):
+        return parse(s, sig=self.sig,
+                     _env_bindings=self.bindings, **extra)
+
+    def extend(self, **more):
+        return ParseEnv(sig=self.sig, **{**self.bindings, **more})
+
+
+def define(name, ty, body, *, sig=None, prec=None, assoc=None):
+    """Introduce a new defined constant.
+
+    Parameters:
+      name -- the constant's surface name (e.g. ``">"`` or ``"+"``).
+      ty   -- the constant's `hol_type`.
+      body -- the definition's right-hand side, either a string (parsed
+              via `parse(body, sig=sig)`) or a pre-built kernel term.
+      sig  -- target `Signature`; defaults to `DEFAULT_SIG`.
+      prec, assoc -- if given, also register as an infix operator
+              (`assoc` in {"left","right","non"}).
+
+    Side effects (on success):
+      * calls `new_basic_definition` to introduce the constant;
+      * registers ``name -> mk_const(name, [])`` in `sig.const`;
+      * if `prec`/`assoc`: registers as infix in `sig`;
+      * adds ``name`` to the printer's infix set if `prec` is given.
+
+    Returns the definition theorem ``|- name = body``.
+    """
+    sig = sig or DEFAULT_SIG
+    rhs = parse(body, sig=sig) if isinstance(body, str) else body
+    def_th = new_basic_definition(mk_eq(Var(name, ty), rhs))
+    const = mk_const(name, [])
+    sig.add_const(name, const)
+    if prec is not None:
+        if assoc is None:
+            raise ValueError(
+                f"define({name!r}): prec given but assoc missing")
+        builder = lambda a, b: mk_comb(mk_comb(const, a), b)
+        sig.add_infix(name, prec, builder, assoc=assoc)
+        # Printer-side infix set.  Deferred import: logic.py loads after
+        # parser.py at startup, so this only resolves at call time.
+        try:
+            from logic import _INFIX
+            _INFIX.add(name)
+        except ImportError:
+            pass
+    return def_th
 
 
 # ---------------------------------------------------------------------------
@@ -356,7 +437,7 @@ def _selftest():
     # Importing nat triggers the full chain of registrations
     # (axioms -> logic -> num -> nat) on DEFAULT_SIG.
     import nat  # noqa: F401
-    from fusion import aconv, mk_const, mk_eq, mk_fun_ty
+    from fusion import aconv, dest_eq, mk_const, mk_eq, mk_fun_ty
     from axioms import (
         bool_ty, mk_and, mk_imp, mk_not, mk_forall, mk_exists,
     )
@@ -385,7 +466,7 @@ def _selftest():
     P_ty = mk_fun_ty(num_ty, bool_ty)
     P, Q, R = mk_var("P", P_ty), mk_var("Q", P_ty), mk_var("R", P_ty)
     env_pqr = {"P": P_ty, "Q": P_ty, "R": P_ty}
-    assert aconv(parse("P x /\\ Q x /\\ R x", env=env_pqr),
+    assert aconv(parse("P x /\\ Q x /\\ R x", **env_pqr),
                  mk_and(mk_comb(P, VX),
                         mk_and(mk_comb(Q, VX), mk_comb(R, VX))))
 
@@ -399,7 +480,7 @@ def _selftest():
                      mk_imp(_gt(VX, VY),
                             _gt(_add(VX, ONE), _add(VY, ONE))))))
     assert aconv(parse("\\x. x + 1"), mk_abs(VX, _add(VX, ONE)))
-    assert aconv(parse("!x. P x", env={"P": P_ty}),
+    assert aconv(parse("!x. P x", P=P_ty),
                  mk_forall(VX, mk_comb(P, VX)))
     assert aconv(parse("!x. ~(x = 1) ==> ?u. x = SUC u"),
                  mk_forall(VX,
@@ -453,11 +534,44 @@ def _selftest():
         pass
     else:
         raise AssertionError("expected ParseError for unused antiquote")
+    # bare-name binding gets unused check too
+    try:
+        parse("x + y", f=P_ty)        # 'f' never referenced
+    except ParseError:
+        pass
+    else:
+        raise AssertionError("expected ParseError for unused bare binding")
+    # bare-name binding that IS referenced is fine
+    assert aconv(parse("f 1", f=P_ty),
+                 mk_comb(mk_var("f", P_ty), ONE))
+
+    # --- ParseEnv ---------------------------------------------------------
+    P_env = ParseEnv(P=P_ty, Q=P_ty)
+    assert aconv(P_env.parse("!x. P x /\\ Q x"),
+                 mk_forall(VX, mk_and(mk_comb(P, VX), mk_comb(Q, VX))))
+    # env binding unused in this particular call -- no error
+    assert aconv(P_env.parse("!x. P x"),
+                 mk_forall(VX, mk_comb(P, VX)))
+    # per-call kwarg layered on env
+    assert aconv(P_env.parse("P ${w}", w=VY),
+                 mk_comb(P, VY))
+    # extend
+    Pw = P_env.extend(w=VY)
+    assert aconv(Pw.parse("P ${w}"),
+                 mk_comb(P, VY))
+    # per-call kwarg still subject to unused check
+    try:
+        P_env.parse("P x", w=VY)      # w never referenced
+    except ParseError:
+        pass
+    else:
+        raise AssertionError("expected ParseError for unused per-call kwarg "
+                             "on ParseEnv")
 
     # --- extension at runtime ----------------------------------------------
     DEFAULT_SIG.add_infix("&&", 55, mk_and, assoc="left")
     try:
-        got = parse("P x && Q x", env=env_pqr)
+        got = parse("P x && Q x", P=P_ty, Q=P_ty)
         assert aconv(got, mk_and(mk_comb(P, VX), mk_comb(Q, VX)))
     finally:
         del DEFAULT_SIG.infix["&&"]
@@ -485,6 +599,28 @@ def _selftest():
         pass
     else:
         raise AssertionError("expected ParseError when no default var type")
+
+    # ParseEnv carries the sig too.
+    bare_env = ParseEnv(sig=fresh)
+    assert aconv(bare_env.parse("a + b = c"), mk_eq(_add(a, b), c))
+
+    # --- define() ---------------------------------------------------------
+    # Use a fresh signature to avoid polluting DEFAULT_SIG with a throwaway
+    # infix.  Test that infix registration round-trips through parse.
+    test_sig = Signature(default_var_ty=num_ty)
+    test_sig.add_infix("=", 40, mk_eq, assoc="non")
+    test_sig.add_infix("+", 50, _add, assoc="left")
+    test_sig.add_binder("\\", mk_abs)
+    nnn = mk_fun_ty(num_ty, mk_fun_ty(num_ty, num_ty))
+    op = "++"   # symbolic name (parser's OP token only accepts symbols)
+    op_def = define(op, nnn, "\\a b. a + b", sig=test_sig,
+                    prec=50, assoc="left")
+    op_lhs, _ = dest_eq(op_def._concl)
+    assert isinstance(op_lhs, Const) and op_lhs.name == op
+    assert op in test_sig.const and op in test_sig.infix
+    a2, b2 = mk_var("a", num_ty), mk_var("b", num_ty)
+    op_ab = parse(f"a {op} b", sig=test_sig)
+    assert aconv(op_ab, mk_comb(mk_comb(test_sig.const[op], a2), b2))
 
 
 if __name__ == "__main__":

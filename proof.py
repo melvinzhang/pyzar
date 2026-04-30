@@ -123,7 +123,7 @@ class Proof:
         frame.result = th
 
     def _parse(self, s):
-        return parse(s, env=self._scope_env())
+        return parse(s, _env_bindings=self._scope_env())
 
     _LABEL_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z_0-9]*)\s*:\s*(.+)$", re.DOTALL)
 
@@ -347,7 +347,7 @@ class Proof:
             env = self._scope_env()
             env[name] = w_term
             try:
-                expected = parse(eq_check, env=env)
+                expected = parse(eq_check, _env_bindings=env)
             except ParseError as ex:
                 raise HolError(f"choose: cannot parse equation spec: {ex}") from ex
             if not aconv(expected, body_at_w):
