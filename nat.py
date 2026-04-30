@@ -55,7 +55,7 @@ from logic import (
     NE_SYM, REWRITE_NE, EXISTS,
     EXCLUDED_MIDDLE, NOT_NOT_ELIM, NOT_EX_TO_FORALL_NOT,
     PROVE_HYP, ELIM_EX,
-    SPECL, GENL, DISCHL, TRANS_CHAIN,
+    SPECL, GENL, DISCHL, TRANS_CHAIN, MP_LIST, CASE_OR,
     _INFIX,
 )
 from num import (
@@ -894,26 +894,18 @@ def _prove_satz_16a():
     """ x <= y, y < z ==> x < z """
     h_le = ASSUME(mk_le(x, y))
     h_lt = ASSUME(mk_lt(y, z))
-    u = EQ_MP(UNFOLD_LE(x, y), h_le)
-    s15 = SPECL([x, y, z], SATZ_15)
-    branch_lt = DISCH(mk_lt(x, y), MP(MP(s15, ASSUME(mk_lt(x, y))), h_lt))
-    eq_xy = ASSUME(mk_eq(x, y))
-    rewrite = AP_THM(AP_TERM(LT, SYM(eq_xy)), z)
-    branch_eq = DISCH(mk_eq(x, y), EQ_MP(rewrite, h_lt))
-    th_xz = DISJ_CASES(u, branch_lt, branch_eq)
+    th_xz = CASE_OR(EQ_MP(UNFOLD_LE(x, y), h_le),
+        (mk_lt(x, y), lambda h: MP_LIST(SATZ_15, [x, y, z, h, h_lt])),
+        (mk_eq(x, y), lambda h: EQ_MP(AP_THM(AP_TERM(LT, SYM(h)), z), h_lt)))
     return GENL([x, y, z], DISCHL([mk_le(x, y), mk_lt(y, z)], th_xz))
 
 def _prove_satz_16b():
     """ x < y, y <= z ==> x < z """
     h_lt = ASSUME(mk_lt(x, y))
     h_le = ASSUME(mk_le(y, z))
-    u = EQ_MP(UNFOLD_LE(y, z), h_le)
-    s15 = SPECL([x, y, z], SATZ_15)
-    branch_lt = DISCH(mk_lt(y, z), MP(MP(s15, h_lt), ASSUME(mk_lt(y, z))))
-    eq_yz = ASSUME(mk_eq(y, z))
-    rewrite = MK_COMB(REFL(mk_comb(LT, x)), eq_yz)
-    branch_eq = DISCH(mk_eq(y, z), EQ_MP(rewrite, h_lt))
-    th_xz = DISJ_CASES(u, branch_lt, branch_eq)
+    th_xz = CASE_OR(EQ_MP(UNFOLD_LE(y, z), h_le),
+        (mk_lt(y, z), lambda h: MP_LIST(SATZ_15, [x, y, z, h_lt, h])),
+        (mk_eq(y, z), lambda h: EQ_MP(MK_COMB(REFL(mk_comb(LT, x)), h), h_lt)))
     return GENL([x, y, z], DISCHL([mk_lt(x, y), mk_le(y, z)], th_xz))
 
 SATZ_16A = _prove_satz_16a()
@@ -925,14 +917,9 @@ SATZ_16B = _prove_satz_16b()
 def _prove_satz_17():
     h_xy = ASSUME(mk_le(x, y))
     h_yz = ASSUME(mk_le(y, z))
-    s16a = SPECL([x, y, z], SATZ_16A)
-    u = EQ_MP(UNFOLD_LE(y, z), h_yz)
-    branch_lt = DISCH(mk_lt(y, z),
-                      LT_TO_LE(MP(MP(s16a, h_xy), ASSUME(mk_lt(y, z)))))
-    eq_yz = ASSUME(mk_eq(y, z))
-    rewrite = MK_COMB(REFL(mk_comb(LE, x)), eq_yz)
-    branch_eq = DISCH(mk_eq(y, z), EQ_MP(rewrite, h_xy))
-    th_xz = DISJ_CASES(u, branch_lt, branch_eq)
+    th_xz = CASE_OR(EQ_MP(UNFOLD_LE(y, z), h_yz),
+        (mk_lt(y, z), lambda h: LT_TO_LE(MP_LIST(SATZ_16A, [x, y, z, h_xy, h]))),
+        (mk_eq(y, z), lambda h: EQ_MP(MK_COMB(REFL(mk_comb(LE, x)), h), h_xy)))
     return GENL([x, y, z], DISCHL([mk_le(x, y), mk_le(y, z)], th_xz))
 
 SATZ_17 = _prove_satz_17()
@@ -972,9 +959,9 @@ SATZ_19B = _prove_satz_19b()
 
 def _prove_satz_19c():
     h = ASSUME(mk_lt(x, y))
-    th_yx_gt = MP(SPECL([x, y], SATZ_12), h)
-    th_yz_gt_xz = MP(SPECL([y, x, z], SATZ_19A), th_yx_gt)
-    th_lt = MP(SPECL([mk_add(y, z), mk_add(x, z)], SATZ_11), th_yz_gt_xz)
+    th_yx_gt = MP_LIST(SATZ_12, [x, y, h])
+    th_yz_gt_xz = MP_LIST(SATZ_19A, [y, x, z, th_yx_gt])
+    th_lt = MP_LIST(SATZ_11, [mk_add(y, z), mk_add(x, z), th_yz_gt_xz])
     return GENL([x, y, z], DISCH(mk_lt(x, y), th_lt))
 
 SATZ_19C = _prove_satz_19c()
@@ -986,17 +973,17 @@ SATZ_19C = _prove_satz_19c()
 def _prove_satz_21():
     h_xy = ASSUME(mk_gt(x, y))
     h_zu = ASSUME(mk_gt(z, u))
-    s19a_xy = MP(SPECL([x, y, z], SATZ_19A), h_xy)              # x+z > y+z
-    s19a_zu = MP(SPECL([z, u, y], SATZ_19A), h_zu)              # z+y > u+y
+    s19a_xy = MP_LIST(SATZ_19A, [x, y, z, h_xy])                # x+z > y+z
+    s19a_zu = MP_LIST(SATZ_19A, [z, u, y, h_zu])                # z+y > u+y
     comm_zy = SPECL([z, y], SATZ_6)
     comm_uy = SPECL([u, y], SATZ_6)
     rewrite = MK_COMB(AP_TERM(GT, comm_zy), comm_uy)
     th_yz_gt_yu = EQ_MP(rewrite, s19a_zu)                       # y+z > y+u
-    th_yu_lt_yz = MP(SPECL([mk_add(y, z), mk_add(y, u)], SATZ_11), th_yz_gt_yu)
-    th_yz_lt_xz = MP(SPECL([mk_add(x, z), mk_add(y, z)], SATZ_11), s19a_xy)
-    s15 = SPECL([mk_add(y, u), mk_add(y, z), mk_add(x, z)], SATZ_15)
-    th_lt = MP(MP(s15, th_yu_lt_yz), th_yz_lt_xz)
-    th_gt = MP(SPECL([mk_add(y, u), mk_add(x, z)], SATZ_12), th_lt)
+    th_yu_lt_yz = MP_LIST(SATZ_11, [mk_add(y, z), mk_add(y, u), th_yz_gt_yu])
+    th_yz_lt_xz = MP_LIST(SATZ_11, [mk_add(x, z), mk_add(y, z), s19a_xy])
+    th_lt = MP_LIST(SATZ_15, [mk_add(y, u), mk_add(y, z), mk_add(x, z),
+                              th_yu_lt_yz, th_yz_lt_xz])
+    th_gt = MP_LIST(SATZ_12, [mk_add(y, u), mk_add(x, z), th_lt])
     return GENL([x, y, z, u], DISCHL([mk_gt(x, y), mk_gt(z, u)], th_gt))
 
 SATZ_21 = _prove_satz_21()
@@ -1007,18 +994,17 @@ SATZ_21 = _prove_satz_21()
 def _prove_satz_22a():
     h_ge = ASSUME(mk_ge(x, y))
     h_gt = ASSUME(mk_gt(z, u))
-    u_ge = EQ_MP(UNFOLD_GE(x, y), h_ge)                         # (x>y) \/ (x=y)
-    s21 = SPECL([x, y, z, u], SATZ_21)
-    branch_gt = DISCH(mk_gt(x, y), MP(MP(s21, ASSUME(mk_gt(x, y))), h_gt))
-    eq_xy = ASSUME(mk_eq(x, y))
-    s19a_zu = MP(SPECL([z, u, y], SATZ_19A), h_gt)              # z+y > u+y
+    s19a_zu = MP_LIST(SATZ_19A, [z, u, y, h_gt])                # z+y > u+y
     comm_zy = SPECL([z, y], SATZ_6)
     comm_uy = SPECL([u, y], SATZ_6)
     th_yzgt = EQ_MP(MK_COMB(AP_TERM(GT, comm_zy), comm_uy), s19a_zu)   # y+z > y+u
-    yz_eq_xz = AP_THM(AP_TERM(PLUS, SYM(eq_xy)), z)             # y+z = x+z
-    rewrite = MK_COMB(AP_TERM(GT, yz_eq_xz), REFL(mk_add(y, u)))
-    branch_eq = DISCH(mk_eq(x, y), EQ_MP(rewrite, th_yzgt))
-    th_xzgt = DISJ_CASES(u_ge, branch_gt, branch_eq)
+    def _branch_eq(eq_xy):
+        yz_eq_xz = AP_THM(AP_TERM(PLUS, SYM(eq_xy)), z)         # y+z = x+z
+        rewrite = MK_COMB(AP_TERM(GT, yz_eq_xz), REFL(mk_add(y, u)))
+        return EQ_MP(rewrite, th_yzgt)
+    th_xzgt = CASE_OR(EQ_MP(UNFOLD_GE(x, y), h_ge),
+        (mk_gt(x, y), lambda h: MP_LIST(SATZ_21, [x, y, z, u, h, h_gt])),
+        (mk_eq(x, y), _branch_eq))
     return GENL([x, y, z, u], DISCHL([mk_ge(x, y), mk_gt(z, u)], th_xzgt))
 
 SATZ_22A = _prove_satz_22a()
@@ -1026,15 +1012,14 @@ SATZ_22A = _prove_satz_22a()
 def _prove_satz_22b():
     h_gt = ASSUME(mk_gt(x, y))
     h_ge = ASSUME(mk_ge(z, u))
-    u_ge = EQ_MP(UNFOLD_GE(z, u), h_ge)
-    s21 = SPECL([x, y, z, u], SATZ_21)
-    branch_gt = DISCH(mk_gt(z, u), MP(MP(s21, h_gt), ASSUME(mk_gt(z, u))))
-    eq_zu = ASSUME(mk_eq(z, u))
-    s19a_xy = MP(SPECL([x, y, z], SATZ_19A), h_gt)              # x+z > y+z
-    yz_eq_yu = AP_TERM(mk_comb(PLUS, y), eq_zu)                 # y+z = y+u
-    rewrite = MK_COMB(AP_TERM(GT, REFL(mk_add(x, z))), yz_eq_yu)
-    branch_eq = DISCH(mk_eq(z, u), EQ_MP(rewrite, s19a_xy))
-    th = DISJ_CASES(u_ge, branch_gt, branch_eq)
+    s19a_xy = MP_LIST(SATZ_19A, [x, y, z, h_gt])                # x+z > y+z
+    def _branch_eq(eq_zu):
+        yz_eq_yu = AP_TERM(mk_comb(PLUS, y), eq_zu)             # y+z = y+u
+        rewrite = MK_COMB(AP_TERM(GT, REFL(mk_add(x, z))), yz_eq_yu)
+        return EQ_MP(rewrite, s19a_xy)
+    th = CASE_OR(EQ_MP(UNFOLD_GE(z, u), h_ge),
+        (mk_gt(z, u), lambda h: MP_LIST(SATZ_21, [x, y, z, u, h_gt, h])),
+        (mk_eq(z, u), _branch_eq))
     return GENL([x, y, z, u], DISCHL([mk_gt(x, y), mk_ge(z, u)], th))
 
 SATZ_22B = _prove_satz_22b()
@@ -1045,20 +1030,14 @@ SATZ_22B = _prove_satz_22b()
 def _prove_satz_23():
     h_xy = ASSUME(mk_ge(x, y))
     h_zu = ASSUME(mk_ge(z, u))
-    ux  = EQ_MP(UNFOLD_GE(x, y), h_xy)
     uz  = EQ_MP(UNFOLD_GE(z, u), h_zu)
-    s22a = SPECL([x, y, z, u], SATZ_22A)
-    s22b = SPECL([x, y, z, u], SATZ_22B)
-    branch_x_gt = DISCH(mk_gt(x, y),
-                        GT_TO_GE(MP(MP(s22b, ASSUME(mk_gt(x, y))), h_zu)))
-    eq_xy = ASSUME(mk_eq(x, y))
-    branch_z_gt = DISCH(mk_gt(z, u),
-                        GT_TO_GE(MP(MP(s22a, h_xy), ASSUME(mk_gt(z, u)))))
-    eq_zu = ASSUME(mk_eq(z, u))
-    eq_sum = MK_COMB(AP_TERM(PLUS, eq_xy), eq_zu)
-    branch_z_eq = DISCH(mk_eq(z, u), EQ_TO_GE(eq_sum))
-    branch_x_eq = DISCH(mk_eq(x, y), DISJ_CASES(uz, branch_z_gt, branch_z_eq))
-    th = DISJ_CASES(ux, branch_x_gt, branch_x_eq)
+    def _from_xy_eq(eq_xy):
+        return CASE_OR(uz,
+            (mk_gt(z, u), lambda h: GT_TO_GE(MP_LIST(SATZ_22A, [x, y, z, u, h_xy, h]))),
+            (mk_eq(z, u), lambda h: EQ_TO_GE(MK_COMB(AP_TERM(PLUS, eq_xy), h))))
+    th = CASE_OR(EQ_MP(UNFOLD_GE(x, y), h_xy),
+        (mk_gt(x, y), lambda h: GT_TO_GE(MP_LIST(SATZ_22B, [x, y, z, u, h, h_zu]))),
+        (mk_eq(x, y), _from_xy_eq))
     return GENL([x, y, z, u], DISCHL([mk_ge(x, y), mk_ge(z, u)], th))
 
 SATZ_23 = _prove_satz_23()
@@ -1087,8 +1066,8 @@ SATZ_24 = _prove_satz_24()
 def _prove_satz_25():
     def _from(eq_y, u0):
         u_ge_1 = SPEC(u0, SATZ_24)
-        s23 = SPECL([x, x, u0, ONE], SATZ_23)
-        sum_ge = MP(MP(s23, EQ_TO_GE(REFL(x))), u_ge_1)         # x+u0 >= x+1
+        sum_ge = MP_LIST(SATZ_23,
+            [x, x, u0, ONE, EQ_TO_GE(REFL(x)), u_ge_1])         # x+u0 >= x+1
         rewrite = MK_COMB(AP_TERM(GE, SYM(eq_y)), REFL(mk_add(x, ONE)))
         return EQ_MP(rewrite, sum_ge)
     th_full = CHOOSE_GT(ASSUME(mk_gt(y, x)), _from)
@@ -1104,24 +1083,22 @@ SATZ_25 = _prove_satz_25()
 
 def _prove_satz_26():
     h = ASSUME(mk_lt(y, mk_add(x, ONE)))
-    s10 = SPECL([y, x], SATZ_10)
-    branch_eq = DISCH(mk_eq(y, x), EQ_TO_LE(ASSUME(mk_eq(y, x))))
-    s25_yx = MP(SPECL([x, y], SATZ_25), ASSUME(mk_gt(y, x)))
-    u_ge = EQ_MP(UNFOLD_GE(y, mk_add(x, ONE)), s25_yx)
-    branch_gt = DISCH(mk_gt(y, mk_add(x, ONE)),
-                      CONTR(mk_le(y, x),
-                            CONTRA_LT_GT(y, mk_add(x, ONE), h,
-                                         ASSUME(mk_gt(y, mk_add(x, ONE))))))
-    branch_eq2 = DISCH(mk_eq(y, mk_add(x, ONE)),
-                       CONTR(mk_le(y, x),
-                             CONTRA_LT_EQ(y, mk_add(x, ONE), h,
-                                          ASSUME(mk_eq(y, mk_add(x, ONE))))))
-    branch_gtcase = DISCH(mk_gt(y, x), DISJ_CASES(u_ge, branch_gt, branch_eq2))
-    branch_lt = DISCH(mk_lt(y, x), LT_TO_LE(ASSUME(mk_lt(y, x))))
-    inner = DISCH(mk_or(mk_gt(y, x), mk_lt(y, x)),
-                  DISJ_CASES(ASSUME(mk_or(mk_gt(y, x), mk_lt(y, x))),
-                             branch_gtcase, branch_lt))
-    th = DISJ_CASES(s10, branch_eq, inner)
+    def _from_gt(h_gt):
+        s25_yx = MP_LIST(SATZ_25, [x, y, h_gt])
+        u_ge = EQ_MP(UNFOLD_GE(y, mk_add(x, ONE)), s25_yx)
+        return CASE_OR(u_ge,
+            (mk_gt(y, mk_add(x, ONE)),
+                lambda h_g: CONTR(mk_le(y, x),
+                                   CONTRA_LT_GT(y, mk_add(x, ONE), h, h_g))),
+            (mk_eq(y, mk_add(x, ONE)),
+                lambda h_e: CONTR(mk_le(y, x),
+                                   CONTRA_LT_EQ(y, mk_add(x, ONE), h, h_e))))
+    inner = lambda h_or: CASE_OR(h_or,
+        (mk_gt(y, x), _from_gt),
+        (mk_lt(y, x), LT_TO_LE))
+    th = CASE_OR(SPECL([y, x], SATZ_10),
+        (mk_eq(y, x), EQ_TO_LE),
+        (mk_or(mk_gt(y, x), mk_lt(y, x)), inner))
     return GENL([x, y], DISCH(mk_lt(y, mk_add(x, ONE)), th))
 
 
@@ -1325,9 +1302,9 @@ def _prove_satz_27():
                                    MP(NOT_ELIM(not_w_eq_n),
                                       ASSUME(mk_eq(w_t, n_var)))))
         w_lt_n = DISJ_CASES(w_le_unfold, branch_lt_b, branch_eq_b)
-        n_gt_w = MP(SPECL([w_t, n_var], SATZ_12), w_lt_n)
-        n_ge_wp1 = MP(SPECL([w_t, n_var], SATZ_25), n_gt_w)
-        wp1_le_n = MP(SPECL([n_var, mk_add(w_t, ONE)], SATZ_13), n_ge_wp1)
+        n_gt_w = MP_LIST(SATZ_12, [w_t, n_var, w_lt_n])
+        n_ge_wp1 = MP_LIST(SATZ_25, [w_t, n_var, n_gt_w])
+        wp1_le_n = MP_LIST(SATZ_13, [n_var, mk_add(w_t, ONE), n_ge_wp1])
         forall_wp1_le = GEN(n_var, DISCH(mk_comb(N_var, n_var), wp1_le_n))
         M_wp1 = EQ_MP(SYM(BETA_CONV(M_at(mk_add(w_t, ONE)))), forall_wp1_le)
         th_F_b2 = MP(NOT_ELIM(notM_w1), M_wp1)
@@ -1605,9 +1582,9 @@ SATZ_32B = _prove_satz_32b()
 
 def _prove_satz_32c():
     h = ASSUME(mk_lt(x, y))
-    th_yx = MP(SPECL([x, y], SATZ_12), h)
-    th_yz_gt = MP(SPECL([y, x, z], SATZ_32A), th_yx)
-    th_lt = MP(SPECL([mk_mul(y, z), mk_mul(x, z)], SATZ_11), th_yz_gt)
+    th_yx = MP_LIST(SATZ_12, [x, y, h])
+    th_yz_gt = MP_LIST(SATZ_32A, [y, x, z, th_yx])
+    th_lt = MP_LIST(SATZ_11, [mk_mul(y, z), mk_mul(x, z), th_yz_gt])
     return GENL([x, y, z], DISCH(mk_lt(x, y), th_lt))
 
 SATZ_32C = _prove_satz_32c()
@@ -1618,17 +1595,17 @@ SATZ_32C = _prove_satz_32c()
 def _prove_satz_34():
     h_xy = ASSUME(mk_gt(x, y))
     h_zu = ASSUME(mk_gt(z, u))
-    s32a_xy = MP(SPECL([x, y, z], SATZ_32A), h_xy)              # x*z > y*z
-    s32a_zu = MP(SPECL([z, u, y], SATZ_32A), h_zu)              # z*y > u*y
+    s32a_xy = MP_LIST(SATZ_32A, [x, y, z, h_xy])                # x*z > y*z
+    s32a_zu = MP_LIST(SATZ_32A, [z, u, y, h_zu])                # z*y > u*y
     comm_zy = SPECL([z, y], SATZ_29)
     comm_uy = SPECL([u, y], SATZ_29)
     rewrite = MK_COMB(AP_TERM(GT, comm_zy), comm_uy)
     th_yz_gt_yu = EQ_MP(rewrite, s32a_zu)                       # y*z > y*u
-    th_yu_lt_yz = MP(SPECL([mk_mul(y, z), mk_mul(y, u)], SATZ_11), th_yz_gt_yu)
-    th_yz_lt_xz = MP(SPECL([mk_mul(x, z), mk_mul(y, z)], SATZ_11), s32a_xy)
-    s15 = SPECL([mk_mul(y, u), mk_mul(y, z), mk_mul(x, z)], SATZ_15)
-    th_lt = MP(MP(s15, th_yu_lt_yz), th_yz_lt_xz)
-    th_gt = MP(SPECL([mk_mul(y, u), mk_mul(x, z)], SATZ_12), th_lt)
+    th_yu_lt_yz = MP_LIST(SATZ_11, [mk_mul(y, z), mk_mul(y, u), th_yz_gt_yu])
+    th_yz_lt_xz = MP_LIST(SATZ_11, [mk_mul(x, z), mk_mul(y, z), s32a_xy])
+    th_lt = MP_LIST(SATZ_15, [mk_mul(y, u), mk_mul(y, z), mk_mul(x, z),
+                              th_yu_lt_yz, th_yz_lt_xz])
+    th_gt = MP_LIST(SATZ_12, [mk_mul(y, u), mk_mul(x, z), th_lt])
     return GENL([x, y, z, u], DISCHL([mk_gt(x, y), mk_gt(z, u)], th_gt))
 
 SATZ_34 = _prove_satz_34()
@@ -1639,18 +1616,17 @@ SATZ_34 = _prove_satz_34()
 def _prove_satz_35a():
     h_ge = ASSUME(mk_ge(x, y))
     h_gt = ASSUME(mk_gt(z, u))
-    u_ge = EQ_MP(UNFOLD_GE(x, y), h_ge)
-    s34 = SPECL([x, y, z, u], SATZ_34)
-    branch_gt = DISCH(mk_gt(x, y), MP(MP(s34, ASSUME(mk_gt(x, y))), h_gt))
-    eq_xy = ASSUME(mk_eq(x, y))
-    s32a_zu = MP(SPECL([z, u, y], SATZ_32A), h_gt)              # z*y > u*y
+    s32a_zu = MP_LIST(SATZ_32A, [z, u, y, h_gt])                # z*y > u*y
     comm_zy = SPECL([z, y], SATZ_29)
     comm_uy = SPECL([u, y], SATZ_29)
     th_yzgt = EQ_MP(MK_COMB(AP_TERM(GT, comm_zy), comm_uy), s32a_zu)
-    yz_eq_xz = AP_THM(AP_TERM(TIMES, SYM(eq_xy)), z)
-    rewrite = MK_COMB(AP_TERM(GT, yz_eq_xz), REFL(mk_mul(y, u)))
-    branch_eq = DISCH(mk_eq(x, y), EQ_MP(rewrite, th_yzgt))
-    th = DISJ_CASES(u_ge, branch_gt, branch_eq)
+    def _branch_eq(eq_xy):
+        yz_eq_xz = AP_THM(AP_TERM(TIMES, SYM(eq_xy)), z)
+        rewrite = MK_COMB(AP_TERM(GT, yz_eq_xz), REFL(mk_mul(y, u)))
+        return EQ_MP(rewrite, th_yzgt)
+    th = CASE_OR(EQ_MP(UNFOLD_GE(x, y), h_ge),
+        (mk_gt(x, y), lambda h: MP_LIST(SATZ_34, [x, y, z, u, h, h_gt])),
+        (mk_eq(x, y), _branch_eq))
     return GENL([x, y, z, u], DISCHL([mk_ge(x, y), mk_gt(z, u)], th))
 
 SATZ_35A = _prove_satz_35a()
@@ -1658,15 +1634,14 @@ SATZ_35A = _prove_satz_35a()
 def _prove_satz_35b():
     h_gt = ASSUME(mk_gt(x, y))
     h_ge = ASSUME(mk_ge(z, u))
-    u_ge = EQ_MP(UNFOLD_GE(z, u), h_ge)
-    s34 = SPECL([x, y, z, u], SATZ_34)
-    branch_gt = DISCH(mk_gt(z, u), MP(MP(s34, h_gt), ASSUME(mk_gt(z, u))))
-    eq_zu = ASSUME(mk_eq(z, u))
-    s32a_xy = MP(SPECL([x, y, z], SATZ_32A), h_gt)              # x*z > y*z
-    yz_eq_yu = AP_TERM(mk_comb(TIMES, y), eq_zu)
-    rewrite = MK_COMB(AP_TERM(GT, REFL(mk_mul(x, z))), yz_eq_yu)
-    branch_eq = DISCH(mk_eq(z, u), EQ_MP(rewrite, s32a_xy))
-    th = DISJ_CASES(u_ge, branch_gt, branch_eq)
+    s32a_xy = MP_LIST(SATZ_32A, [x, y, z, h_gt])                # x*z > y*z
+    def _branch_eq(eq_zu):
+        yz_eq_yu = AP_TERM(mk_comb(TIMES, y), eq_zu)
+        rewrite = MK_COMB(AP_TERM(GT, REFL(mk_mul(x, z))), yz_eq_yu)
+        return EQ_MP(rewrite, s32a_xy)
+    th = CASE_OR(EQ_MP(UNFOLD_GE(z, u), h_ge),
+        (mk_gt(z, u), lambda h: MP_LIST(SATZ_34, [x, y, z, u, h_gt, h])),
+        (mk_eq(z, u), _branch_eq))
     return GENL([x, y, z, u], DISCHL([mk_gt(x, y), mk_ge(z, u)], th))
 
 SATZ_35B = _prove_satz_35b()
@@ -1677,20 +1652,14 @@ SATZ_35B = _prove_satz_35b()
 def _prove_satz_36():
     h_xy = ASSUME(mk_ge(x, y))
     h_zu = ASSUME(mk_ge(z, u))
-    ux  = EQ_MP(UNFOLD_GE(x, y), h_xy)
     uz  = EQ_MP(UNFOLD_GE(z, u), h_zu)
-    s35a = SPECL([x, y, z, u], SATZ_35A)
-    s35b = SPECL([x, y, z, u], SATZ_35B)
-    branch_x_gt = DISCH(mk_gt(x, y),
-                        GT_TO_GE(MP(MP(s35b, ASSUME(mk_gt(x, y))), h_zu)))
-    eq_xy = ASSUME(mk_eq(x, y))
-    branch_z_gt = DISCH(mk_gt(z, u),
-                        GT_TO_GE(MP(MP(s35a, h_xy), ASSUME(mk_gt(z, u)))))
-    eq_zu = ASSUME(mk_eq(z, u))
-    eq_prod = MK_COMB(AP_TERM(TIMES, eq_xy), eq_zu)
-    branch_z_eq = DISCH(mk_eq(z, u), EQ_TO_GE(eq_prod))
-    branch_x_eq = DISCH(mk_eq(x, y), DISJ_CASES(uz, branch_z_gt, branch_z_eq))
-    th = DISJ_CASES(ux, branch_x_gt, branch_x_eq)
+    def _from_xy_eq(eq_xy):
+        return CASE_OR(uz,
+            (mk_gt(z, u), lambda h: GT_TO_GE(MP_LIST(SATZ_35A, [x, y, z, u, h_xy, h]))),
+            (mk_eq(z, u), lambda h: EQ_TO_GE(MK_COMB(AP_TERM(TIMES, eq_xy), h))))
+    th = CASE_OR(EQ_MP(UNFOLD_GE(x, y), h_xy),
+        (mk_gt(x, y), lambda h: GT_TO_GE(MP_LIST(SATZ_35B, [x, y, z, u, h, h_zu]))),
+        (mk_eq(x, y), _from_xy_eq))
     return GENL([x, y, z, u], DISCHL([mk_ge(x, y), mk_ge(z, u)], th))
 
 SATZ_36 = _prove_satz_36()

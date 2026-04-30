@@ -14,7 +14,7 @@ Provides:
 """
 
 from fusion import (
-    Var, Const, Comb, Abs,
+    Var, Const, Comb, Abs, thm,
     bool_ty, aty, bty, mk_abs, mk_comb, mk_const, mk_eq, mk_fun_ty,
     type_of, dest_eq,
     rator, rand, freesl, variant, aconv,
@@ -429,6 +429,42 @@ def TRANS_CHAIN(thms):
     for t in thms[1:]:
         result = TRANS(result, t)
     return result
+
+
+# ---------------------------------------------------------------------------
+# MP_LIST -- forward composition over a mixed list of terms / theorems.
+#
+#   MP_LIST(thm, [a1, a2, ...])  applies SPEC for each Term-typed entry and
+#   MP for each thm-typed entry, in order.  Replaces nested
+#   `MP(MP(SPECL([a, b, c], thm), th1), th2)` with
+#   `MP_LIST(thm, [a, b, c, th1, th2])`.
+# ---------------------------------------------------------------------------
+
+def MP_LIST(th, args):
+    for a in args:
+        if isinstance(a, thm):
+            th = MP(th, a)
+        else:
+            th = SPEC(a, th)
+    return th
+
+
+# ---------------------------------------------------------------------------
+# CASE_OR -- structured case analysis on a disjunction.
+#
+#   CASE_OR(or_thm, (h1, prover1), (h2, prover2))   is shorthand for
+#       DISJ_CASES(or_thm, DISCH(h1, prover1(ASSUME(h1))),
+#                          DISCH(h2, prover2(ASSUME(h2)))).
+#
+#   Each prover receives `ASSUME(h)` and returns the conclusion theorem.
+# ---------------------------------------------------------------------------
+
+def CASE_OR(or_thm, left, right):
+    h_l, prove_l = left
+    h_r, prove_r = right
+    branch_l = DISCH(h_l, prove_l(ASSUME(h_l)))
+    branch_r = DISCH(h_r, prove_r(ASSUME(h_r)))
+    return DISJ_CASES(or_thm, branch_l, branch_r)
 
 
 # ---------------------------------------------------------------------------
