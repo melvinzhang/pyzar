@@ -18,7 +18,7 @@ Catalogue of dubious patterns. Each entry: where it lives, why it's a smell, and
 | H10 | ✅ | `simp_normalize` no longer wraps `HolError` as `SimpFailure` (`56170d0`). |
 | H11 | ✅ | `hyps_added` stores ASSUME theorems INSTed in lockstep with `th`; DISCH/lazy-let-discharge order is no longer load-bearing. |
 | H12 | ✅ | `_substitute_carrier` / `_beta_norm_concl` extracted in `fc6b43f`. |
-| H13 | 📝 | `assume` shape swap. Proper fix outlined below — needs implication-rewrite at frame close. |
+| H13 | ✅ | `assume` registers user surface ASSUME; `term_eq_ant` synthesised at assume-time, lifted into the implication antecedent at frame close. |
 | H14 | ✅ | `CHOOSE_WITNESS` factored, `pending_choose` deleted (`3a8d734`). |
 | H15 | ⏳ | Asymmetric strictness on fact registry. |
 | H16 | ⏳ | `auto_choose` still a positional 6-tuple. |
@@ -265,7 +265,7 @@ the frame's lets in reverse registration order.
 
 ---
 
-## H13. `assume` silently swaps the registered fact's shape  📝
+## H13. `assume` silently swaps the registered fact's shape  ✅
 
 **Where:** `proof.py:Proof.assume`.
 

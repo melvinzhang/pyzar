@@ -29,7 +29,7 @@ import re
 from fusion import (
     Var, Comb, Abs, thm,
     aconv, concl, HolError, ASSUME, EQ_MP, BETA, INST, mk_abs, mk_app, mk_comb,
-    rand, type_of, TRANS, mk_eq, mk_fun_ty, MK_COMB, ABS, REFL, dest_eq,
+    rand, rator, type_of, TRANS, mk_eq, mk_fun_ty, MK_COMB, ABS, REFL, dest_eq,
     dest_binop_any,
 )
 from axioms import (
@@ -39,7 +39,7 @@ from axioms import (
 )
 from tactics import (
     SPEC, GEN, DISCH, MP, MP_LIST, DISJ_CASES, BETA_CONV, BETA_NORM, SYM,
-    AP_THM, PROVE_HYP, ELIM_EX, CHOOSE_WITNESS, subst_term,
+    AP_TERM, AP_THM, PROVE_HYP, ELIM_EX, CHOOSE_WITNESS, subst_term,
     NOT_INTRO, NOT_ELIM, CONTR, REWRITE_NE, EXISTS, DISJ1, DISJ2,
     CONJUNCT1, CONJUNCT2,
     REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV, BETA_RULE,
@@ -393,20 +393,34 @@ class Proof:
     def _close_frame(self, fr, th):
         """Discharge a frame's accumulated bindings into ``th``.
 
-        ``hyps_added`` stores the registered ``ASSUME`` theorems (not raw
-        terms), and ``_discharge_lazy_lets`` INSTs each saved theorem in
-        lockstep with ``th``. So each ``asm._concl`` always matches its
-        entry in ``th._asl`` exactly — DISCH and lazy-let-discharge
-        commute, and the order between them is no longer load-bearing.
-        ``GEN`` still has to come last (its ``ABS`` step fails if a
-        fix-var is free in any remaining hyp).
+        For each saved hyp, ``DISCH(asm._concl, th)`` produces
+        ``... |- term ==> consequent`` (with ``term`` being the user's
+        surface form). The accompanying ``term_eq_ant`` (``|- term =
+        ant``) is lifted to an implication equation
+        ``|- (term ==> consequent) = (ant ==> consequent)`` via
+        ``MK_COMB(AP_TERM(==>, term_eq_ant), REFL(consequent))``, then
+        ``EQ_MP`` rewrites the antecedent to the goal's kernel form. So
+        the user always sees their surface form via ``p.fact(label)``,
+        and the closed theorem matches the original goal exactly.
 
-        Induction's frame has empty ``hyps_added`` / ``vars_added`` (the
-        ``GEN`` happens earlier via ``INDUCT_PROVE``), so for that
-        caller this collapses to ``_discharge_lazy_lets``.
+        ``hyps_added`` stores the registered ``ASSUME`` theorems and
+        their shape equations; ``_discharge_lazy_lets`` INSTs both in
+        lockstep with ``th``, so ``DISCH`` / lazy-let-discharge order
+        does not affect correctness. ``GEN`` still has to come last
+        (its ``ABS`` step fails if a fix-var is free in any remaining
+        hyp).
+
+        Induction's frame has empty ``hyps_added`` / ``vars_added``
+        (the ``GEN`` happens earlier via ``INDUCT_PROVE``), so for
+        that caller this collapses to ``_discharge_lazy_lets``.
         """
-        for _, asm in reversed(fr.hyps_added):
+        for _, asm, term_eq_ant in reversed(fr.hyps_added):
             th = DISCH(asm._concl, th)
+            consequent = rand(th._concl)
+            imp_eq_const = rator(rator(th._concl))   # the (==>) const
+            imp_eq = MK_COMB(AP_TERM(imp_eq_const, term_eq_ant),
+                             REFL(consequent))
+            th = EQ_MP(imp_eq, th)
         th = self._discharge_lazy_lets(fr, th)
         th = self._beta_norm_concl(th)
         for v in reversed(fr.vars_added):
@@ -437,15 +451,19 @@ class Proof:
             return th
         for lz in reversed(list(frame.lazy_lets.values())):
             th = self._substitute_carrier(lz, th)
-            # Sync saved ASSUMEs: same INST keeps their _concl matching
-            # th._asl. Plain INST (not _substitute_carrier) — the saved
-            # ASSUMEs don't carry the lazy-let equation hyp themselves,
-            # so the PROVE_HYP step would be a no-op (and would risk
-            # inadvertently discharging the user's hyp if they happened
-            # to assume the equation literal).
+            # Sync saved ASSUMEs and shape equations in lockstep.
+            #   * Plain INST on each ASSUME: keeps its _concl matching
+            #     th._asl. _substitute_carrier would risk discharging
+            #     the user's own hyp if they literally assumed the
+            #     lazy-let equation.
+            #   * _substitute_carrier on each shape equation: it carries
+            #     the lazy-let equation hyp internally, so we want it
+            #     discharged the same way as in th.
             sub = (self._carrier_abs_body(lz), lz.carrier)
-            frame.hyps_added = [(label, INST([sub], asm))
-                                for label, asm in frame.hyps_added]
+            frame.hyps_added = [
+                (label, INST([sub], asm),
+                 self._substitute_carrier(lz, term_eq_ant))
+                for label, asm, term_eq_ant in frame.hyps_added]
         return self._beta_norm_concl(th)
 
     def _parse(self, s):
@@ -769,13 +787,29 @@ class Proof:
             # downstream facts stay sound.
             self._simp_require(ant, ASSUME(term), op="assume")
             self._cur.goal = cons
-            # Store the registered ASSUME theorem itself, not just the
-            # term: ``_discharge_lazy_lets`` INSTs each saved ASSUME in
-            # lockstep with ``th``, so its ``_concl`` always matches
-            # what is in ``th._asl`` regardless of discharge order.
-            asm_th = ASSUME(ant)
-            self._cur.hyps_added.append((label, asm_th))
+            # Register the user's surface-form ASSUME so ``p.fact(label)``
+            # returns what they wrote. ``term_eq_ant : |- term = ant``
+            # bridges the surface form to the kernel-form antecedent at
+            # frame close, so the resulting implication has the goal's
+            # original shape.
+            asm_th = ASSUME(term)
+            term_eq_ant = self._derive_shape_eq(term, ant)
+            self._cur.hyps_added.append((label, asm_th, term_eq_ant))
             self._register_fact(label, asm_th)
+
+    def _derive_shape_eq(self, lhs, rhs):
+        """``|- lhs = rhs`` for two simp-equivalent terms. ``REFL`` when
+        they're already kernel-aconv; otherwise composed from the two
+        ``simp_normalize`` equations through the shared normal form."""
+        if aconv(lhs, rhs):
+            return REFL(lhs)
+        lhs_eq = self.simp_normalize(lhs)
+        rhs_eq = self.simp_normalize(rhs)
+        if not aconv(rand(lhs_eq._concl), rand(rhs_eq._concl)):
+            raise HolError(
+                "_derive_shape_eq: terms not simp-equivalent\n"
+                f"  lhs: {pp(lhs)}\n  rhs: {pp(rhs)}")
+        return TRANS(lhs_eq, SYM(rhs_eq))
 
     # ---- have / thus -----------------------------------------------------
 
