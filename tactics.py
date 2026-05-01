@@ -468,18 +468,25 @@ def PROVE_HYP(h_th, th):
 
 
 # ---------------------------------------------------------------------------
-# ELIM_EX -- existential elimination via SELECT_AX.
+# CHOOSE_WITNESS / ELIM_EX -- existential elimination via SELECT_AX.
 #
-#   pred_in : Abs(v, body_v)        # the existential's predicate \v. body_v
-#   hyp_ex  : term                  # `?v. body_v`  (a hypothesis term)
-#   body_fn : function taking `|- body_v[w/v]` (with w = @pred_in) and
-#             returning `|- target` (perhaps with extra hypotheses).
-#   Result: ({hyp_ex} ∪ extras) |- target.
+# CHOOSE_WITNESS(pred_in, ex_th) is the pure SELECT_AX derivation:
+#   pred_in : Abs(v, body_v)
+#   ex_th   : asl |- ?v. body_v
+#   Result  : asl |- body_v[w/v]   where w = @v. body_v.
+#
+# ELIM_EX layers a body_fn on top: hands body_fn an ASSUME(body_v[w/v]),
+# discharges that assumption from the returned target via PROVE_HYP.
+# Use CHOOSE_WITNESS directly when you want the witnessed-body fact as a
+# theorem (so its hyps mirror ex_th's), and avoid an indirect body_fn /
+# ASSUME pair whose term shape has to round-trip identically.
 # ---------------------------------------------------------------------------
 
-def ELIM_EX(pred_in, hyp_ex, body_fn):
+def CHOOSE_WITNESS(pred_in, ex_th):
+    """ pred = \\v. body_v ;  ex_th : asl |- ?v. body_v
+        =>   asl |- body_v[w/v]   where w = @v. body_v. """
     if not isinstance(pred_in, Abs):
-        raise HolError("ELIM_EX: pred_in must be an Abs")
+        raise HolError("CHOOSE_WITNESS: pred_in must be an Abs")
     v_var = pred_in.bvar
     w_t = mk_select(v_var, pred_in.body)           # @v. body_v
     sel_inst = INST_TYPE([(v_var.ty, aty)], SELECT_AX)
@@ -497,17 +504,22 @@ def ELIM_EX(pred_in, hyp_ex, body_fn):
     body_imp_gen = GEN(v_var, body_imp)                                # |- !v. body_v ==> body_v[w/v]
 
     edef = INST_TYPE([(v_var.ty, aty)], EXISTS_DEF)
-    th_hyp_unfold = EQ_MP(unfold_def_at(edef, pred_in), ASSUME(hyp_ex))                # {hyp_ex} |- !r. (!v. P v ==> r) ==> r
-    th_spec_r = SPEC(body_at_w, th_hyp_unfold)                # {hyp_ex} |- (!v. P v ==> body_at_w) ==> body_at_w
+    th_hyp_unfold = EQ_MP(unfold_def_at(edef, pred_in), ex_th)         # asl |- !r. (!v. P v ==> r) ==> r
+    th_spec_r = SPEC(body_at_w, th_hyp_unfold)                # asl |- (!v. P v ==> body_at_w) ==> body_at_w
     bridge = BETA_CONV(pred_v)                                 # |- P v = body_v
     spec_body_imp = SPEC(v_var, body_imp_gen)                  # |- body_v ==> body_at_w
     p_v_to_body_at_w = DISCH(pred_v,
                              MP(spec_body_imp, EQ_MP(bridge, ASSUME(pred_v))))
     th_forall_pv_imp = GEN(v_var, p_v_to_body_at_w)
-    th_body_at_w_under_hyp = MP(th_spec_r, th_forall_pv_imp)   # {hyp_ex} |- body_at_w
+    return MP(th_spec_r, th_forall_pv_imp)                     # asl |- body_at_w
 
-    th_target_under_body_at_w = body_fn(ASSUME(body_at_w))      # {body_at_w, ...} |- target
-    return PROVE_HYP(th_body_at_w_under_hyp, th_target_under_body_at_w)
+
+def ELIM_EX(pred_in, hyp_ex, body_fn):
+    """ Run ``body_fn`` under ``ASSUME(body_at_w)`` and discharge that
+        assumption against ``ASSUME(hyp_ex)``'s witness. """
+    th_witness = CHOOSE_WITNESS(pred_in, ASSUME(hyp_ex))    # {hyp_ex} |- body_at_w
+    th_target = body_fn(ASSUME(th_witness._concl))           # {body_at_w, ...} |- target
+    return PROVE_HYP(th_witness, th_target)
 
 
 # ---------------------------------------------------------------------------

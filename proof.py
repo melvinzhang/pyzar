@@ -39,7 +39,7 @@ from axioms import (
 )
 from tactics import (
     SPEC, GEN, DISCH, MP, MP_LIST, DISJ_CASES, BETA_CONV, BETA_NORM, SYM,
-    AP_THM, PROVE_HYP, ELIM_EX, _subst_term,
+    AP_THM, PROVE_HYP, ELIM_EX, CHOOSE_WITNESS, _subst_term,
     NOT_INTRO, NOT_ELIM, CONTR, REWRITE_NE, EXISTS, DISJ1, DISJ2,
     CONJUNCT1, CONJUNCT2,
     REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV, BETA_RULE,
@@ -133,7 +133,7 @@ class LazyLetDef:
 class _Frame:
     __slots__ = ("goal", "kind", "vars_added", "hyps_added",
                  "facts_added", "choose_env", "type_env",
-                 "lazy_lets", "pending_choose", "data", "result")
+                 "lazy_lets", "data", "result")
 
     def __init__(self, goal=None, kind="root"):
         self.goal = goal
@@ -144,7 +144,6 @@ class _Frame:
         self.choose_env = {}      # name -> witness term (parser env entries)
         self.type_env = {}        # name -> hol_type for higher-order params
         self.lazy_lets = {}       # name -> LazyLetDef (Isabelle-style local equation)
-        self.pending_choose = []  # list of (ex_th, pred, hyp_ex) to discharge on close
         self.data = {}            # block-specific scratch
         self.result = None        # the theorem proving `goal`
 
@@ -180,25 +179,14 @@ class Proof:
         return env
 
     def _set_frame_result(self, frame, th):
-        """Assign `frame.result = th`, after discharging any pending
-        choose-blocks on the frame (LIFO order).
+        """Record ``th`` as ``frame.result``.
 
-        Each pending entry was set up by ``choose()``: an existential proof
-        ``ex_th``, its predicate ``pred``, and the hypothesis term ``hyp_ex``.
-        The witnessed-body fact is already a hypothesis of ``th`` because
-        ``choose()`` registered ``ASSUME(body_at_w)`` as the equation fact
-        under ``{name}_eq``.
-
-        ``ELIM_EX`` hands ``body_fn`` a fresh ``ASSUME(body_at_w)``; we pipe
-        it through ``PROVE_HYP`` on ``th`` so the dependency on the
-        witnessed-body hypothesis is explicit at this call site rather than
-        relying on ``ELIM_EX``'s outer ``PROVE_HYP`` to find the matching
-        hyp inside ``th._asl`` by term-equality alone.
+        ``choose()`` registers the SELECT_AX-derived witness theorem
+        directly as the equation fact, so the user's proof carries the
+        existential's hyps (rather than ``body_at_w``) all along — there
+        is nothing to discharge at frame close. The frame-close DISCH /
+        GEN steps in ``_close_frame`` handle the rest.
         """
-        for ex_th, pred, hyp_ex in reversed(frame.pending_choose):
-            discharge = lambda body_th: PROVE_HYP(body_th, th)
-            th = PROVE_HYP(ex_th, ELIM_EX(pred, hyp_ex, discharge))
-        frame.pending_choose.clear()
         frame.result = th
 
     def _lazy_let_carriers(self):
@@ -856,8 +844,14 @@ class Proof:
                 f"{pp(c)}")
         v_var = pred.bvar
         w_term = mk_select(v_var, pred.body)
-        # body[w/v]: beta-reduce (pred w).
-        body_at_w = rand(BETA_CONV(mk_comb(pred, w_term))._concl)
+        # SELECT_AX-derive the witness fact directly from ex_th. The
+        # registered theorem's _asl mirrors ex_th's, so the user's proof
+        # accumulates ex_th's hyps rather than a free-floating ASSUME of
+        # body_at_w that would have to be reconciled at frame close. The
+        # term ``body_at_w`` is computed inside CHOOSE_WITNESS exactly
+        # once.
+        witness_th = CHOOSE_WITNESS(pred, ex_th)
+        body_at_w = witness_th._concl
 
         if eq_check is not None:
             env = self._scope_env()
@@ -868,7 +862,7 @@ class Proof:
                 raise HolError(f"choose: cannot parse equation spec: {ex}") from ex
             # Simp-aware match: user may have written a folded shape whose
             # unfolded form equals body_at_w (or vice versa).
-            if self.simp_match(expected, ASSUME(body_at_w)) is None:
+            if self.simp_match(expected, witness_th) is None:
                 raise HolError(
                     "choose: equation spec doesn't match witness body\n"
                     f"  expected: {pp(body_at_w)}\n"
@@ -881,10 +875,7 @@ class Proof:
 
         # Register the equation as a fact (default label = "{name}_eq").
         eq_label = eq_label or f"{name}_eq"
-        self._register_fact(eq_label, ASSUME(body_at_w))
-
-        # Defer discharge to frame close.
-        self._cur.pending_choose.append((ex_th, pred, ex_th._concl))
+        self._register_fact(eq_label, witness_th)
 
     def _open_cases(self, ref, target, on_close, args=()):
         if args:
@@ -1002,22 +993,22 @@ class Proof:
 
         # If the branch hypothesis is itself an existential ``?v. body``,
         # auto-choose the witness inside the case body so the user gets
-        # ``v`` in scope and ``v_eq: body[v]`` as a fact, exactly as if they
-        # had written ``p.choose("v: body", from_=label)`` themselves. The
-        # display name follows the *user*'s spec bvar (so they can rename to
-        # avoid clashes with outer scopes); the underlying witness/pred terms
-        # come from the leaf so ELIM_EX matches kernel-literally.
+        # ``v`` in scope and ``v_eq: body[v]`` as a fact, exactly as if
+        # they had written ``p.choose("v: body", from_=label)`` themselves.
+        # The display name follows the *user*'s spec bvar (so they can
+        # rename to avoid clashes with outer scopes); the witness theorem
+        # is SELECT_AX-derived from ``ASSUME(leaf)`` so its hyp set is
+        # ``{leaf}`` — which the case's outer DISCH(leaf) already retires.
         auto_choose = None
         leaf_pred = dest_exists(leaf)
         if leaf_pred is not None:
             leaf_v = leaf_pred.bvar
             w_term = mk_select(leaf_v, leaf_pred.body)
-            body_at_w = rand(BETA_CONV(mk_comb(leaf_pred, w_term))._concl)
             user_pred = dest_exists(user_term)
             wit_name = user_pred.bvar.name if user_pred is not None else leaf_v.name
             eq_label = f"{wit_name}_eq"
-            auto_choose = (wit_name, w_term, eq_label, body_at_w,
-                            leaf_pred, leaf)
+            witness_th = CHOOSE_WITNESS(leaf_pred, ASSUME(leaf))
+            auto_choose = (wit_name, w_term, eq_label, witness_th)
 
         return _SubFrameCtx(self, outer_goal, kind="case",
                              on_close=on_close,
@@ -1421,14 +1412,13 @@ class _SubFrameCtx:
                 label = self.p._fresh_label("h")
             self.p._register_fact(label, th)
         if self.auto_choose is not None:
-            wit_name, w_term, eq_label, body_at_w, pred, hyp_ex = self.auto_choose
+            wit_name, w_term, eq_label, witness_th = self.auto_choose
             if wit_name in fr.choose_env:
                 raise HolError(
                     f"case: witness name {wit_name!r} clashes with an "
                     f"existing chooser-bound name in this scope")
             fr.choose_env[wit_name] = w_term
-            self.p._register_fact(eq_label, ASSUME(body_at_w))
-            fr.pending_choose.append((ASSUME(hyp_ex), pred, hyp_ex))
+            self.p._register_fact(eq_label, witness_th)
         return self.p
 
     def __exit__(self, exc_type, *_):
