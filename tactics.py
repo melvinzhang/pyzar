@@ -34,6 +34,7 @@ from axioms import (
     T, F,
     T_DEF, AND_DEF, OR_DEF, IMP_DEF, FORALL_DEF, EXISTS_DEF, F_DEF, NOT_DEF,
     SELECT_AX, ETA_AX,
+    dest_forall, is_imp,
     mk_and, mk_or, mk_imp, mk_forall, mk_exists, mk_not, mk_select,
 )
 
@@ -219,7 +220,7 @@ def DISCH(p_t, th):
 def MP(th_imp, th_p):
     """ |- p ==> q,  |- p   =>   |- q """
     p_t = th_p._concl
-    if not isinstance(th_imp._concl, Comb) or not isinstance(th_imp._concl.fun, Comb):
+    if not is_imp(th_imp._concl):
         raise HolError("MP: first theorem is not an implication")
     q_t = rand(th_imp._concl)
     eq = _imp_eq(p_t, q_t)
@@ -590,15 +591,9 @@ def UNFOLD(def_th, *args):
 def _strip_forall(th):
     """Strip outer (!v. ...) layers from th, returning (vars, th_body)."""
     vs = []
-    while True:
-        c = th._concl
-        if (isinstance(c, Comb) and isinstance(c.fun, Const)
-                and c.fun.name == "!" and isinstance(c.arg, Abs)):
-            v = c.arg.bvar
-            th = SPEC(v, th)
-            vs.append(v)
-        else:
-            break
+    while (pred := dest_forall(th._concl)) is not None:
+        th = SPEC(pred.bvar, th)
+        vs.append(pred.bvar)
     return vs, th
 
 

@@ -27,11 +27,16 @@ The decorator runs the script and returns the resulting kernel theorem.
 import re
 
 from fusion import (
-    Var, Const, Comb, Abs, thm,
+    Var, Comb, Abs, thm,
     aconv, concl, HolError, ASSUME, EQ_MP, BETA, INST, mk_abs, mk_app, mk_comb,
     rand, type_of, TRANS, mk_eq, mk_fun_ty, MK_COMB, ABS, REFL, dest_eq,
+    dest_binop_any,
 )
-from axioms import T, F, mk_select, mk_forall
+from axioms import (
+    T, F, mk_select, mk_forall,
+    dest_disj, dest_exists, dest_forall, dest_imp, dest_neg,
+    is_conj, is_disj,
+)
 from tactics import (
     SPEC, GEN, DISCH, MP, MP_LIST, DISJ_CASES, BETA_CONV, BETA_NORM, SYM,
     AP_THM, PROVE_HYP, ELIM_EX, _subst_term,
@@ -278,11 +283,10 @@ class Proof:
         If the antecedent and ``th_arg``'s conclusion don't ``aconv``
         directly, lift via ``simp_match`` so the user can mix folded /
         unfolded forms across an MP boundary."""
-        c = th_imp._concl
-        if not (isinstance(c, Comb) and isinstance(c.fun, Comb)
-                and isinstance(c.fun.fun, Const) and c.fun.fun.name == "==>"):
+        parts = dest_imp(th_imp._concl)
+        if parts is None:
             return MP(th_imp, th_arg)
-        ant = c.fun.arg
+        ant, _ = parts
         return MP(th_imp, self._simp_require(ant, th_arg, op="MP"))
 
     def simp_match(self, target, th):
@@ -556,15 +560,14 @@ class Proof:
             names = names.split()
         for nm in names:
             g = self._cur.goal
-            if not (isinstance(g, Comb) and isinstance(g.fun, Const)
-                    and g.fun.name == "!" and isinstance(g.arg, Abs)):
+            pred = dest_forall(g)
+            if pred is None:
                 raise HolError(f"fix({nm!r}): goal is not a forall: {pp(g)}")
-            v = g.arg.bvar
-            if v.name != nm:
+            if pred.bvar.name != nm:
                 raise HolError(
-                    f"fix: name mismatch -- binder is {v.name!r}, given {nm!r}")
-            self._cur.goal = g.arg.body
-            self._cur.vars_added.append(v)
+                    f"fix: name mismatch -- binder is {pred.bvar.name!r}, given {nm!r}")
+            self._cur.goal = pred.body
+            self._cur.vars_added.append(pred.bvar)
 
     def let(self, spec, types=None):
         """Register a local abbreviation in the current frame
@@ -658,9 +661,7 @@ class Proof:
         # exposed (idempotent if already in normal form).
         th = self.simp_norm_fact(th)
         c = th._concl
-        if not (isinstance(c, Comb) and isinstance(c.fun, Comb)
-                and isinstance(c.fun.fun, Const)
-                and c.fun.fun.name == "/\\"):
+        if not is_conj(c):
             raise HolError(
                 f"split_conj: not a conjunction: {pp(c)}")
         cur = th
@@ -678,12 +679,10 @@ class Proof:
             if label is None:
                 label = self._fresh_label("h")
             g = self._cur.goal
-            if not (isinstance(g, Comb) and isinstance(g.fun, Comb)
-                    and isinstance(g.fun.fun, Const)
-                    and g.fun.fun.name == "==>"):
+            parts = dest_imp(g)
+            if parts is None:
                 raise HolError(f"assume: goal is not an implication: {pp(g)}")
-            ant = g.fun.arg
-            cons = g.arg
+            ant, cons = parts
             # Simp-aware match: `Q i` (folded) should accept the unfolded
             # antecedent `NUM_REP i /\ P (mk_num i)` and vice versa. The
             # registered ASSUME is on the kernel-literal antecedent so
@@ -711,11 +710,9 @@ class Proof:
             raise HolError("induction: no current goal")
         # If the goal is ``!var_name. inner``, peel the binder automatically
         # so the user doesn't need an intermediate fix() call.
-        if (isinstance(body, Comb) and isinstance(body.fun, Const)
-                and body.fun.name == "!" and isinstance(body.arg, Abs)
-                and body.arg.bvar.name == var_name):
-            return _InductionCtx(self, body.arg.bvar, body.arg.body,
-                                  peel_forall=True)
+        pred = dest_forall(body)
+        if pred is not None and pred.bvar.name == var_name:
+            return _InductionCtx(self, pred.bvar, pred.body, peel_forall=True)
         env = self._scope_env()
         if var_name not in env:
             raise HolError(f"induction: unknown variable {var_name!r}")
@@ -776,25 +773,19 @@ class Proof:
 
         # If src is a relation registered with an unfolder, unfold to
         # existential first.
-        if (isinstance(c, Comb) and isinstance(c.fun, Comb)
-                and isinstance(c.fun.fun, Const)
-                and c.fun.fun.name in _UNFOLDERS):
-            unfold_fn = _UNFOLDERS[c.fun.fun.name]
-            a = c.fun.arg
-            b = c.arg
-            ex_th = EQ_MP(unfold_fn(a, b), src_th)
+        op_parts = dest_binop_any(c)
+        if op_parts is not None and op_parts[0] in _UNFOLDERS:
+            op_name, a, b = op_parts
+            ex_th = EQ_MP(_UNFOLDERS[op_name](a, b), src_th)
         else:
             ex_th = src_th
 
         # ex_th's conclusion must now be `?v. body`.
-        exc = ex_th._concl
-        if not (isinstance(exc, Comb) and isinstance(exc.fun, Const)
-                and exc.fun.name == "?" and isinstance(exc.arg, Abs)):
+        pred = dest_exists(ex_th._concl)
+        if pred is None:
             raise HolError(
                 f"choose: source {from_!r} is not an existential or order relation: "
                 f"{pp(c)}")
-
-        pred = exc.arg
         v_var = pred.bvar
         w_term = mk_select(v_var, pred.body)
         # body[w/v]: beta-reduce (pred w).
@@ -825,7 +816,7 @@ class Proof:
         self._register_fact(eq_label, ASSUME(body_at_w))
 
         # Defer discharge to frame close.
-        self._cur.pending_choose.append((ex_th, pred, exc))
+        self._cur.pending_choose.append((ex_th, pred, ex_th._concl))
 
     def _open_cases(self, ref, target, on_close, args=()):
         if args:
@@ -839,18 +830,13 @@ class Proof:
         c = or_th._concl
         # If the source is a relation registered with a disjunction unfolder
         # (e.g. ``>=``, ``<=``), unfold to the disjunction first.
-        if (isinstance(c, Comb) and isinstance(c.fun, Comb)
-                and isinstance(c.fun.fun, Const)
-                and c.fun.fun.name in _DISJ_UNFOLDERS):
-            unfold_fn = _DISJ_UNFOLDERS[c.fun.fun.name]
-            a = c.fun.arg
-            b = c.arg
-            or_th = EQ_MP(unfold_fn(a, b), or_th)
+        op_parts = dest_binop_any(c)
+        if op_parts is not None and op_parts[0] in _DISJ_UNFOLDERS:
+            op_name, a, b = op_parts
+            or_th = EQ_MP(_DISJ_UNFOLDERS[op_name](a, b), or_th)
             c = or_th._concl
         # Expect (p \/ q) at the top.
-        if not (isinstance(c, Comb) and isinstance(c.fun, Comb)
-                and isinstance(c.fun.fun, Const)
-                and c.fun.fun.name == "\\/"):
+        if not is_disj(c):
             raise HolError(f"cases_on: not a disjunction: {pp(c)}")
         return _CasesCtx(self, or_th, target, on_close)
 
@@ -882,12 +868,11 @@ class Proof:
         """
         fr = self._cur
         g = fr.goal
-        if g is None or not (isinstance(g, Comb) and isinstance(g.fun, Const)
-                and g.fun.name == "~"):
+        body = dest_neg(g) if g is not None else None
+        if body is None:
             raise HolError(
                 f"suppose: current goal is not a negation: "
                 f"{pp(g) if g is not None else 'None'}")
-        body = g.arg
 
         spec = label_spec.strip()
         m = self._LABEL_RE.match(spec)
@@ -956,20 +941,13 @@ class Proof:
         # avoid clashes with outer scopes); the underlying witness/pred terms
         # come from the leaf so ELIM_EX matches kernel-literally.
         auto_choose = None
-        if (isinstance(leaf, Comb) and isinstance(leaf.fun, Const)
-                and leaf.fun.name == "?"
-                and isinstance(leaf.arg, Abs)):
-            leaf_pred = leaf.arg
+        leaf_pred = dest_exists(leaf)
+        if leaf_pred is not None:
             leaf_v = leaf_pred.bvar
             w_term = mk_select(leaf_v, leaf_pred.body)
             body_at_w = rand(BETA_CONV(mk_comb(leaf_pred, w_term))._concl)
-            user_pred = (user_term.arg
-                          if (isinstance(user_term, Comb)
-                              and isinstance(user_term.fun, Const)
-                              and user_term.fun.name == "?"
-                              and isinstance(user_term.arg, Abs))
-                          else None)
-            wit_name = user_pred.bvar.name if user_pred else leaf_v.name
+            user_pred = dest_exists(user_term)
+            wit_name = user_pred.bvar.name if user_pred is not None else leaf_v.name
             eq_label = f"{wit_name}_eq"
             auto_choose = (wit_name, w_term, eq_label, body_at_w,
                             leaf_pred, leaf)
@@ -1175,11 +1153,11 @@ class _Have:
         ``register_disj_unfolder``, fold ``ref`` (whose conclusion equals the
         unfolded form) back into ``a R b``."""
         target = self.term
-        if not (isinstance(target, Comb) and isinstance(target.fun, Comb)
-                and isinstance(target.fun.fun, Const)):
+        op_parts = dest_binop_any(target)
+        if op_parts is None:
             raise HolError(
                 f"by_fold: target is not a binary relation: {pp(target)}")
-        op_name = target.fun.fun.name
+        op_name, a, b = op_parts
         if op_name in _UNFOLDERS:
             unfold_fn = _UNFOLDERS[op_name]
         elif op_name in _DISJ_UNFOLDERS:
@@ -1187,8 +1165,6 @@ class _Have:
         else:
             raise HolError(
                 f"by_fold: no unfolder registered for {op_name!r}")
-        a = target.fun.arg
-        b = target.arg
         fact = self.p._resolve_fact(ref)
         return self._finish(EQ_MP(SYM(unfold_fn(a, b)), fact))
 
@@ -1209,26 +1185,25 @@ class _Have:
         witness_t = p._parse(witness) if isinstance(witness, str) else witness
 
         # Direct existential: ?v. body.
-        if (isinstance(target, Comb) and isinstance(target.fun, Const)
-                and target.fun.name == "?" and isinstance(target.arg, Abs)):
+        target_pred = dest_exists(target)
+        if target_pred is not None:
             from tactics import _subst_term
-            expected = _subst_term(target.arg.bvar, witness_t, target.arg.body)
+            expected = _subst_term(target_pred.bvar, witness_t, target_pred.body)
             fact_th = p._simp_require(expected, fact_th, op="by_witness")
-            return self._finish(EXISTS(target.arg, witness_t, fact_th))
+            return self._finish(EXISTS(target_pred, witness_t, fact_th))
 
         # Registered relation a R b: unfold, EXISTS, fold back.
-        if (isinstance(target, Comb) and isinstance(target.fun, Comb)
-                and isinstance(target.fun.fun, Const)
-                and target.fun.fun.name in _UNFOLDERS):
-            op_name = target.fun.fun.name
-            unfold_eq = _UNFOLDERS[op_name](target.fun.arg, target.arg)
+        op_parts = dest_binop_any(target)
+        if op_parts is not None and op_parts[0] in _UNFOLDERS:
+            op_name, a, b = op_parts
+            unfold_eq = _UNFOLDERS[op_name](a, b)
             ex_term = rand(unfold_eq._concl)
-            if not (isinstance(ex_term, Comb) and isinstance(ex_term.fun, Const)
-                    and ex_term.fun.name == "?" and isinstance(ex_term.arg, Abs)):
+            ex_pred = dest_exists(ex_term)
+            if ex_pred is None:
                 raise HolError(
                     f"by_witness: unfolded form of {op_name!r} is not "
                     f"existential: {pp(ex_term)}")
-            ex_th = EXISTS(ex_term.arg, witness_t, fact_th)
+            ex_th = EXISTS(ex_pred, witness_t, fact_th)
             return self._finish(EQ_MP(SYM(unfold_eq), ex_th))
 
         raise HolError(
@@ -1252,15 +1227,13 @@ class _Have:
         def build(disj, th):
             if aconv(disj, th._concl):
                 return th
-            if not (isinstance(disj, Comb) and isinstance(disj.fun, Comb)
-                    and isinstance(disj.fun.fun, Const)
-                    and disj.fun.fun.name == "\\/"):
+            parts = dest_disj(disj)
+            if parts is None:
                 raise HolError(
                     "by_disj: fact conclusion does not match any disjunct\n"
                     f"  fact: {pp(th._concl)}\n"
                     f"  goal: {pp(target)}")
-            p_part = disj.fun.arg
-            q_part = disj.arg
+            p_part, q_part = parts
             if aconv(p_part, th._concl):
                 return DISJ1(th, q_part)
             return DISJ2(p_part, build(q_part, th))
@@ -1324,9 +1297,8 @@ class _Absurd:
                 f"absurd: by_conj requires exactly two facts, got {len(refs)}")
         ths = [self.p._resolve_fact(r) for r in refs]
         for pos, neg in (ths, ths[::-1]):
-            c = neg._concl
-            if (isinstance(c, Comb) and isinstance(c.fun, Const)
-                    and c.fun.name == "~" and aconv(c.arg, pos._concl)):
+            inner = dest_neg(neg._concl)
+            if inner is not None and aconv(inner, pos._concl):
                 return self._finish(MP(NOT_ELIM(neg), pos))
         raise HolError(
             "absurd: by_conj could not match P / ~P among "
@@ -1360,12 +1332,7 @@ class _Absurd:
             f"absurd: auto() has no finder for ({rel0!r}, {rel1!r})")
 
 
-def _classify_contra(t):
-    """Return ``(rel_name, a, b)`` for ``rel a b``, else ``None``."""
-    match t:
-        case Comb(Comb(Const(name, _), a), b):
-            return (name, a, b)
-    return None
+_classify_contra = dest_binop_any
 
 
 # ---------------------------------------------------------------------------
@@ -1498,13 +1465,13 @@ def _find_disj_leaf(or_concl, target):
     leaf (matched at depth 0)."""
     if aconv(or_concl, target):
         return or_concl
-    if not (isinstance(or_concl, Comb) and isinstance(or_concl.fun, Comb)
-            and isinstance(or_concl.fun.fun, Const)
-            and or_concl.fun.fun.name == "\\/"):
+    parts = dest_disj(or_concl)
+    if parts is None:
         return None
-    if aconv(or_concl.fun.arg, target):
-        return or_concl.fun.arg
-    return _find_disj_leaf(or_concl.arg, target)
+    left, right = parts
+    if aconv(left, target):
+        return left
+    return _find_disj_leaf(right, target)
 
 
 def _split_disj_n(term, n):
@@ -1512,13 +1479,12 @@ def _split_disj_n(term, n):
     list of exactly ``n`` disjuncts, or ``None`` if the shape doesn't fit."""
     leaves = [term]
     while len(leaves) < n:
-        last = leaves[-1]
-        if not (isinstance(last, Comb) and isinstance(last.fun, Comb)
-                and isinstance(last.fun.fun, Const)
-                and last.fun.fun.name == "\\/"):
+        parts = dest_disj(leaves[-1])
+        if parts is None:
             return None
-        leaves[-1] = last.fun.arg
-        leaves.append(last.arg)
+        left, right = parts
+        leaves[-1] = left
+        leaves.append(right)
     return leaves
 
 

@@ -7,6 +7,7 @@ the original HOL Light distribution.
 from fusion import (
     Var,
     aty, bty, bool_ty,
+    dest_binder, dest_binop, dest_unop, is_binder, is_binop, is_unop,
     mk_abs, mk_app, mk_comb, mk_const, mk_eq, mk_fun_ty, mk_type,
     new_axiom, new_basic_definition, new_constant, new_type,
 )
@@ -90,6 +91,23 @@ NOT_DEF = new_basic_definition(
 
 def mk_not(t):
     return mk_comb(mk_const("~", []), t)
+
+# Bool-specific shape helpers: thin aliases over the kernel ``is_*``/
+# ``dest_*`` connective helpers so tactic call sites can ask
+# "is this a conjunction?" without re-rolling the AST pattern.
+
+def is_conj(tm):    return is_binop("/\\", tm)
+def dest_conj(tm):  return dest_binop("/\\", tm)
+def is_disj(tm):    return is_binop("\\/", tm)
+def dest_disj(tm):  return dest_binop("\\/", tm)
+def is_imp(tm):     return is_binop("==>", tm)
+def dest_imp(tm):   return dest_binop("==>", tm)
+def is_neg(tm):     return is_unop("~", tm)
+def dest_neg(tm):   return dest_unop("~", tm)
+def is_forall(tm):  return is_binder("!", tm)
+def dest_forall(tm): return dest_binder("!", tm)
+def is_exists(tm):  return is_binder("?", tm)
+def dest_exists(tm): return dest_binder("?", tm)
 
 # ---------------------------------------------------------------------------
 # Axiom 1: ETA_AX (bool.ml)        |- !t:A->B. (\x. t x) = t

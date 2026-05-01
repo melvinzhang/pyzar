@@ -281,6 +281,46 @@ def dest_abs(tm: term):
         return tm.bvar, tm.body
     raise HolError("dest_abs: not an abstraction")
 
+# Connective shape helpers: name-parametric structural checks for terms of
+# the form ``op a b`` (binop), ``op x`` (unop), or ``op (\\v. body)``
+# (binder). ``is_*`` returns bool; ``dest_*`` returns the unpacked pieces
+# on match and ``None`` otherwise, so callers can write
+# ``if (parts := dest_binop(name, tm)) is not None: a, b = parts``.
+
+def is_binop(name: str, tm: term) -> bool:
+    return (isinstance(tm, Comb) and isinstance(tm.fun, Comb)
+            and isinstance(tm.fun.fun, Const) and tm.fun.fun.name == name)
+
+def dest_binop(name: str, tm: term):
+    if is_binop(name, tm):
+        return (tm.fun.arg, tm.arg)
+    return None
+
+def dest_binop_any(tm: term):
+    """If tm = op a b for some Const op, return (op_name, a, b); else None."""
+    if (isinstance(tm, Comb) and isinstance(tm.fun, Comb)
+            and isinstance(tm.fun.fun, Const)):
+        return (tm.fun.fun.name, tm.fun.arg, tm.arg)
+    return None
+
+def is_unop(name: str, tm: term) -> bool:
+    return (isinstance(tm, Comb) and isinstance(tm.fun, Const)
+            and tm.fun.name == name)
+
+def dest_unop(name: str, tm: term):
+    if is_unop(name, tm):
+        return tm.arg
+    return None
+
+def is_binder(name: str, tm: term) -> bool:
+    return is_unop(name, tm) and isinstance(tm.arg, Abs)
+
+def dest_binder(name: str, tm: term):
+    """If tm = `name` (\\v. body), return the Abs (\\v. body); else None."""
+    if is_binder(name, tm):
+        return tm.arg
+    return None
+
 # ---------------------------------------------------------------------------
 # Free variables
 # ---------------------------------------------------------------------------
