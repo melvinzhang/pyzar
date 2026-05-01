@@ -28,7 +28,7 @@ import re
 
 from fusion import (
     Var, Comb, Abs, thm,
-    aconv, concl, HolError, ASSUME, EQ_MP, BETA, INST, mk_abs, mk_app, mk_comb,
+    aconv, concl, HolError, SimpFailure, ASSUME, EQ_MP, BETA, INST, mk_abs, mk_app, mk_comb,
     rand, type_of, TRANS, mk_eq, mk_fun_ty, MK_COMB, ABS, REFL, dest_eq,
     dest_binop_any,
 )
@@ -82,6 +82,20 @@ _CONTRA_FINDERS = {}
 
 def register_contra_finder(rel_a, rel_b, finder):
     _CONTRA_FINDERS[(rel_a, rel_b)] = finder
+
+
+def _hook(registry, term):
+    """If ``term`` is ``op a b`` for some ``op`` registered in ``registry``,
+    return ``registry[op](a, b)``; else ``None``. Unifies the
+    classify-then-apply pattern over the relation-hook registries."""
+    parts = dest_binop_any(term)
+    if parts is None:
+        return None
+    op_name, a, b = parts
+    fn = registry.get(op_name)
+    if fn is None:
+        return None
+    return fn(a, b)
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +208,12 @@ class Proof:
             carriers = self._lazy_let_carriers()
         if not carriers:
             return REFL(tm)
-        return self._unfold_walk(tm, carriers, frozenset())
+        try:
+            return self._unfold_walk(tm, carriers, frozenset())
+        except HolError as e:
+            if isinstance(e, SimpFailure):
+                raise
+            raise SimpFailure(f"simp_normalize: {e}") from e
 
     def _unfold_walk(self, tm, carriers, blocked):
         if isinstance(tm, Abs):
@@ -305,7 +324,7 @@ class Proof:
         try:
             target_eq = self.simp_normalize(target, carriers)
             th_eq = self.simp_normalize(th._concl, carriers)
-        except HolError:
+        except SimpFailure:
             return None
         if not aconv(rand(target_eq._concl), rand(th_eq._concl)):
             return None
@@ -804,12 +823,8 @@ class Proof:
 
         # If src is a relation registered with an unfolder, unfold to
         # existential first.
-        op_parts = dest_binop_any(c)
-        if op_parts is not None and op_parts[0] in _UNFOLDERS:
-            op_name, a, b = op_parts
-            ex_th = EQ_MP(_UNFOLDERS[op_name](a, b), src_th)
-        else:
-            ex_th = src_th
+        unfold_eq = _hook(_UNFOLDERS, c)
+        ex_th = EQ_MP(unfold_eq, src_th) if unfold_eq is not None else src_th
 
         # ex_th's conclusion must now be `?v. body`.
         pred = dest_exists(ex_th._concl)
@@ -861,10 +876,9 @@ class Proof:
         c = or_th._concl
         # If the source is a relation registered with a disjunction unfolder
         # (e.g. ``>=``, ``<=``), unfold to the disjunction first.
-        op_parts = dest_binop_any(c)
-        if op_parts is not None and op_parts[0] in _DISJ_UNFOLDERS:
-            op_name, a, b = op_parts
-            or_th = EQ_MP(_DISJ_UNFOLDERS[op_name](a, b), or_th)
+        unfold_eq = _hook(_DISJ_UNFOLDERS, c)
+        if unfold_eq is not None:
+            or_th = EQ_MP(unfold_eq, or_th)
             c = or_th._concl
         # Expect (p \/ q) at the top.
         if not is_disj(c):
@@ -1187,20 +1201,12 @@ class _Have:
         ``register_disj_unfolder``, fold ``ref`` (whose conclusion equals the
         unfolded form) back into ``a R b``."""
         target = self.term
-        op_parts = dest_binop_any(target)
-        if op_parts is None:
+        unfold_eq = _hook(_UNFOLDERS, target) or _hook(_DISJ_UNFOLDERS, target)
+        if unfold_eq is None:
             raise HolError(
-                f"by_fold: target is not a binary relation: {pp(target)}")
-        op_name, a, b = op_parts
-        if op_name in _UNFOLDERS:
-            unfold_fn = _UNFOLDERS[op_name]
-        elif op_name in _DISJ_UNFOLDERS:
-            unfold_fn = _DISJ_UNFOLDERS[op_name]
-        else:
-            raise HolError(
-                f"by_fold: no unfolder registered for {op_name!r}")
+                f"by_fold: no unfolder registered for target: {pp(target)}")
         fact = self.p._resolve_fact(ref)
-        return self._finish(EQ_MP(SYM(unfold_fn(a, b)), fact))
+        return self._finish(EQ_MP(SYM(unfold_eq), fact))
 
     def by_witness(self, witness, ref):
         """For an existential have-term ``?v. P v`` (or a registered relation
@@ -1227,15 +1233,13 @@ class _Have:
             return self._finish(EXISTS(target_pred, witness_t, fact_th))
 
         # Registered relation a R b: unfold, EXISTS, fold back.
-        op_parts = dest_binop_any(target)
-        if op_parts is not None and op_parts[0] in _UNFOLDERS:
-            op_name, a, b = op_parts
-            unfold_eq = _UNFOLDERS[op_name](a, b)
+        unfold_eq = _hook(_UNFOLDERS, target)
+        if unfold_eq is not None:
             ex_term = rand(unfold_eq._concl)
             ex_pred = dest_exists(ex_term)
             if ex_pred is None:
                 raise HolError(
-                    f"by_witness: unfolded form of {op_name!r} is not "
+                    f"by_witness: unfolded form is not "
                     f"existential: {pp(ex_term)}")
             ex_th = EXISTS(ex_pred, witness_t, fact_th)
             return self._finish(EQ_MP(SYM(unfold_eq), ex_th))

@@ -15,6 +15,15 @@ sys.setrecursionlimit(10000)
 class HolError(Exception):
     pass
 
+class SimpFailure(HolError):
+    """Raised by simp/rewrite infrastructure when an input can't be
+    normalized or matched. Subclasses ``HolError`` so legacy
+    ``except HolError`` blocks still catch it; a precise
+    ``except SimpFailure`` documents that the call site is intentionally
+    falling through on a simp-level shape mismatch (rather than masking a
+    genuine kernel error)."""
+    pass
+
 class Clash(Exception):
     def __init__(self, tm):
         super().__init__()

@@ -556,6 +556,16 @@ def FUN_EXT(th_pointwise):
 # First-order matching only.  Lambdas in patterns must alpha-match exactly.
 # ---------------------------------------------------------------------------
 
+# Termination guards for the bottom-up rewriter. Both are deliberately
+# loose: any well-formed terminating rule set should finish well below
+# them. Hitting either is a strong "the rule set is non-terminating"
+# signal, not a "bump the limit" one. Kept generous so legitimately deep
+# proofs (the SATZ_27 well-ordering chain peeled through several lazy
+# lets, for instance) don't trip them.
+SIMP_ROOT_FIRE_LIMIT = 256       # max root-rule fires per ``_bottom_up`` call
+SIMP_OUTER_PASS_LIMIT = 64       # max outer fixpoint passes per ``REWRITE_CONV``
+
+
 def BETA_RULE(th):
     """Beta-normalize the conclusion of th.  If the conclusion is already in
     beta normal form, returns th unchanged."""
@@ -593,7 +603,7 @@ def _prepare_rule(th):
     vs, body = _strip_forall(th)
     try:
         lhs, rhs = dest_eq(body._concl)
-    except Exception:
+    except HolError:
         return None
     return vs, lhs, rhs, body
 
@@ -677,7 +687,7 @@ def _bottom_up(rules, tm, under_binder=False):
         inner = REFL(tm)
         inner_changed = False
 
-    for _ in range(256):
+    for _ in range(SIMP_ROOT_FIRE_LIMIT):
         cur = rand(inner._concl)
         root_step = _try_rules_at(active, cur)
         if root_step is None:
@@ -685,12 +695,14 @@ def _bottom_up(rules, tm, under_binder=False):
         inner = TRANS(inner, root_step)
         inner_changed = True
     else:
-        raise HolError("REWRITE: root rule fired 256 times — likely non-terminating")
+        raise HolError(
+            f"REWRITE: root rule fired {SIMP_ROOT_FIRE_LIMIT} times — "
+            "likely non-terminating")
 
     return inner if inner_changed else None
 
 
-def REWRITE_CONV(rules_thms, tm, max_passes=64):
+def REWRITE_CONV(rules_thms, tm, max_passes=SIMP_OUTER_PASS_LIMIT):
     """Rewrite tm with the given equation theorems to fixpoint, bottom-up.
        Raises HolError if no fixpoint reached after max_passes outer passes
        (likely a non-terminating rule set)."""
