@@ -180,11 +180,24 @@ class Proof:
         return env
 
     def _set_frame_result(self, frame, th):
-        """Assign `frame.result = th`, after discharging any pending choose-blocks
-        on the frame (in LIFO order). The discharge replays CHOOSE_GT-style
-        ELIM_EX + PROVE_HYP plumbing."""
+        """Assign `frame.result = th`, after discharging any pending
+        choose-blocks on the frame (LIFO order).
+
+        Each pending entry was set up by ``choose()``: an existential proof
+        ``ex_th``, its predicate ``pred``, and the hypothesis term ``hyp_ex``.
+        The witnessed-body fact is already a hypothesis of ``th`` because
+        ``choose()`` registered ``ASSUME(body_at_w)`` as the equation fact
+        under ``{name}_eq``.
+
+        ``ELIM_EX`` hands ``body_fn`` a fresh ``ASSUME(body_at_w)``; we pipe
+        it through ``PROVE_HYP`` on ``th`` so the dependency on the
+        witnessed-body hypothesis is explicit at this call site rather than
+        relying on ``ELIM_EX``'s outer ``PROVE_HYP`` to find the matching
+        hyp inside ``th._asl`` by term-equality alone.
+        """
         for ex_th, pred, hyp_ex in reversed(frame.pending_choose):
-            th = PROVE_HYP(ex_th, ELIM_EX(pred, hyp_ex, lambda _: th))
+            discharge = lambda body_th: PROVE_HYP(body_th, th)
+            th = PROVE_HYP(ex_th, ELIM_EX(pred, hyp_ex, discharge))
         frame.pending_choose.clear()
         frame.result = th
 
