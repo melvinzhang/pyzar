@@ -282,14 +282,21 @@ class Proof:
         return EQ_MP(eq, th)
 
     @staticmethod
+    def _carrier_abs_body(lz):
+        """``\\b1..bn. body`` -- the abstraction that replaces ``lz``'s
+        carrier under INST."""
+        abs_body = lz.body
+        for bv in reversed(lz.bvars):
+            abs_body = mk_abs(bv, abs_body)
+        return abs_body
+
+    @staticmethod
     def _substitute_carrier(lz, th):
         """Substitute lazy-let ``lz``'s carrier with ``\\args. body`` in
         ``th`` and discharge the local-equation hypothesis. The returned
         theorem still has beta-redexes at every former carrier-application
         site; callers responsible for any conclusion BETA cleanup."""
-        abs_body = lz.body
-        for bv in reversed(lz.bvars):
-            abs_body = mk_abs(bv, abs_body)
+        abs_body = Proof._carrier_abs_body(lz)
         th_inst = INST([(abs_body, lz.carrier)], th)
         # Build the now-trivially-true equation hyp:
         # |- !b1..bn. (\b1..bn. body) b1..bn = body
@@ -386,28 +393,22 @@ class Proof:
     def _close_frame(self, fr, th):
         """Discharge a frame's accumulated bindings into ``th``.
 
-        Order matters: ``DISCH`` first, so user-``assume``d hyps move
-        from ``_asl`` into the conclusion before ``_discharge_lazy_lets``
-        INSTs carriers (which would otherwise mutate the hyp shape and
-        leave ``DISCH`` silently producing the wrong implication); then
-        ``_discharge_lazy_lets`` so equation hyps and any free fix-vars
-        they mention are gone before ``GEN``; finally ``GEN`` over the
-        fix-vars.
-
-        ``GEN``'s ``ABS`` step fails loudly if the var is free in any
-        remaining hyp, so a swap that puts ``GEN`` before
-        ``_discharge_lazy_lets`` is caught by the kernel. The
-        ``DISCH``-vs-``_discharge_lazy_lets`` swap is the silent one
-        (``DISCH`` always succeeds at the kernel level), so the doc
-        above is the only thing keeping that pair in order.
+        ``hyps_added`` stores the registered ``ASSUME`` theorems (not raw
+        terms), and ``_discharge_lazy_lets`` INSTs each saved theorem in
+        lockstep with ``th``. So each ``asm._concl`` always matches its
+        entry in ``th._asl`` exactly — DISCH and lazy-let-discharge
+        commute, and the order between them is no longer load-bearing.
+        ``GEN`` still has to come last (its ``ABS`` step fails if a
+        fix-var is free in any remaining hyp).
 
         Induction's frame has empty ``hyps_added`` / ``vars_added`` (the
         ``GEN`` happens earlier via ``INDUCT_PROVE``), so for that
         caller this collapses to ``_discharge_lazy_lets``.
         """
-        for _, term in reversed(fr.hyps_added):
-            th = DISCH(term, th)
+        for _, asm in reversed(fr.hyps_added):
+            th = DISCH(asm._concl, th)
         th = self._discharge_lazy_lets(fr, th)
+        th = self._beta_norm_concl(th)
         for v in reversed(fr.vars_added):
             th = GEN(v, th)
         return th
@@ -415,11 +416,14 @@ class Proof:
     def _discharge_lazy_lets(self, frame, th):
         """Discharge each lazy-let hypothesis on ``th`` from ``frame``.
 
-        For every lazy let ``R(b1...bn) := body`` registered on ``frame``,
-        substitute ``R := \\b1...bn. body`` and ``PROVE_HYP`` the resulting
-        (now trivially provable) equation hypothesis. The conclusion is
-        BETA-normalized once at the end to clean up redexes left by the
-        substitutions.
+        For every lazy let ``R(b1...bn) := body`` registered on
+        ``frame``, substitute ``R := \\b1...bn. body`` and ``PROVE_HYP``
+        the resulting (now trivially provable) equation hypothesis. The
+        same substitution is applied to every ``ASSUME`` saved in
+        ``frame.hyps_added``, so each saved hyp's ``_concl`` tracks
+        ``th._asl`` through the discharge — this is what lets
+        ``_close_frame`` swap discharge / DISCH order without changing
+        the result.
 
         Lazy lets registered on parent frames are *not* discharged here —
         they go out with the corresponding parent frame.
@@ -433,6 +437,15 @@ class Proof:
             return th
         for lz in reversed(list(frame.lazy_lets.values())):
             th = self._substitute_carrier(lz, th)
+            # Sync saved ASSUMEs: same INST keeps their _concl matching
+            # th._asl. Plain INST (not _substitute_carrier) — the saved
+            # ASSUMEs don't carry the lazy-let equation hyp themselves,
+            # so the PROVE_HYP step would be a no-op (and would risk
+            # inadvertently discharging the user's hyp if they happened
+            # to assume the equation literal).
+            sub = (self._carrier_abs_body(lz), lz.carrier)
+            frame.hyps_added = [(label, INST([sub], asm))
+                                for label, asm in frame.hyps_added]
         return self._beta_norm_concl(th)
 
     def _parse(self, s):
@@ -756,8 +769,13 @@ class Proof:
             # downstream facts stay sound.
             self._simp_require(ant, ASSUME(term), op="assume")
             self._cur.goal = cons
-            self._cur.hyps_added.append((label, ant))
-            self._register_fact(label, ASSUME(ant))
+            # Store the registered ASSUME theorem itself, not just the
+            # term: ``_discharge_lazy_lets`` INSTs each saved ASSUME in
+            # lockstep with ``th``, so its ``_concl`` always matches
+            # what is in ``th._asl`` regardless of discharge order.
+            asm_th = ASSUME(ant)
+            self._cur.hyps_added.append((label, asm_th))
+            self._register_fact(label, asm_th)
 
     # ---- have / thus -----------------------------------------------------
 

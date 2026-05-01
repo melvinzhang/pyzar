@@ -16,7 +16,7 @@ Catalogue of dubious patterns. Each entry: where it lives, why it's a smell, and
 | H8 | ⏳ | `_split_label` still swallows label-form parse errors. |
 | H9 | ⏳ | String overloading in `coerce` / `by_select`. |
 | H10 | ✅ | `simp_normalize` no longer wraps `HolError` as `SimpFailure` (`56170d0`). |
-| H11 | 📝 | Doc strengthened (`_close_frame` ordering). Proper structural fix outlined below — bigger refactor. |
+| H11 | ✅ | `hyps_added` stores ASSUME theorems INSTed in lockstep with `th`; DISCH/lazy-let-discharge order is no longer load-bearing. |
 | H12 | ✅ | `_substitute_carrier` / `_beta_norm_concl` extracted in `fc6b43f`. |
 | H13 | 📝 | `assume` shape swap. Proper fix outlined below — needs implication-rewrite at frame close. |
 | H14 | ✅ | `CHOOSE_WITNESS` factored, `pending_choose` deleted (`3a8d734`). |
@@ -199,7 +199,7 @@ or a dedicated `SimpNoProgress` rather than catching the broad `HolError`.
 
 ---
 
-## H11. `_close_frame`'s discharge order is an implicit invariant  📝
+## H11. `_close_frame`'s discharge order is an implicit invariant  ✅
 
 **Where:** `proof.py:_close_frame`.
 
