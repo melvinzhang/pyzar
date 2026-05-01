@@ -279,29 +279,24 @@ def _or_unfold(p_t, q_t):
     """ |- (p \\/ q) = (!r. (p==>r) ==> (q==>r) ==> r) """
     return unfold_def_at(OR_DEF, p_t, q_t)
 
-def DISJ1(th_p, q_t):
-    """ |- p   =>   |- p \\/ q """
-    p_t = th_p._concl
-    avoid = freesl(list(th_p._asl) + [p_t, q_t])
+def _DISJ_inj(p_t, q_t, th, take_left):
+    """Inject ``th`` into ``|- p \\/ q``: ``take_left`` selects DISJ1
+    (``th : |- p``), else DISJ2 (``th : |- q``)."""
+    avoid = freesl(list(th._asl) + [p_t, q_t])
     r_v = variant(avoid, Var("r", bool_ty))
     p_imp_r = mk_imp(p_t, r_v)
     q_imp_r = mk_imp(q_t, r_v)
-    th_r = MP(ASSUME(p_imp_r), th_p)
-    th_inner = DISCH(p_imp_r, DISCH(q_imp_r, th_r))
-    th_gen = GEN(r_v, th_inner)
-    return EQ_MP(SYM(_or_unfold(p_t, q_t)), th_gen)
+    use_imp = ASSUME(p_imp_r if take_left else q_imp_r)
+    th_inner = DISCH(p_imp_r, DISCH(q_imp_r, MP(use_imp, th)))
+    return EQ_MP(SYM(_or_unfold(p_t, q_t)), GEN(r_v, th_inner))
+
+def DISJ1(th_p, q_t):
+    """ |- p   =>   |- p \\/ q """
+    return _DISJ_inj(th_p._concl, q_t, th_p, take_left=True)
 
 def DISJ2(p_t, th_q):
     """ |- q   =>   |- p \\/ q """
-    q_t = th_q._concl
-    avoid = freesl(list(th_q._asl) + [p_t, q_t])
-    r_v = variant(avoid, Var("r", bool_ty))
-    p_imp_r = mk_imp(p_t, r_v)
-    q_imp_r = mk_imp(q_t, r_v)
-    th_r = MP(ASSUME(q_imp_r), th_q)
-    th_inner = DISCH(p_imp_r, DISCH(q_imp_r, th_r))
-    th_gen = GEN(r_v, th_inner)
-    return EQ_MP(SYM(_or_unfold(p_t, q_t)), th_gen)
+    return _DISJ_inj(p_t, th_q._concl, th_q, take_left=False)
 
 def DISJ_CASES(th_or, th_p_imp, th_q_imp):
     """ |- p \\/ q,  asl_p, p |- r,  asl_q, q |- r   =>   asl |- r """
