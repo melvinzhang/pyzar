@@ -503,39 +503,49 @@ class Proof:
             drop = set(labels)
             self._fact_order = [l for l in self._fact_order if l not in drop]
 
-    def _resolve_fact(self, ref):
-        """Resolve `ref` to a theorem.
+    def coerce(self, x, *, accept=("fact",)):
+        """Resolve ``x`` to a theorem or term per the kinds in ``accept``.
 
-        Accepts a ``thm`` directly, a string label, or a negative integer
-        (index into insertion order)."""
-        if isinstance(ref, thm):
-            return ref
-        if isinstance(ref, str):
-            if ref in self._facts:
-                return self._facts[ref]
-            raise HolError(f"unknown fact label: {ref!r}")
-        if isinstance(ref, int):
+        Kinds:
+          - ``"fact"``: ``thm`` | fact-label ``str`` | fact-index ``int`` → ``thm``
+          - ``"term"``: kernel term object | non-fact ``str`` (parsed) → ``term``
+
+        Theorems short-circuit when ``"fact"`` is accepted; bare kernel
+        term objects short-circuit when ``"term"`` is accepted. Strings
+        dispatch in the order ``accept`` lists — each kind in turn tries
+        to match (``"fact"`` looks up the label table; ``"term"`` parses).
+        """
+        if isinstance(x, thm):
+            if "fact" not in accept:
+                raise HolError(f"coerce: theorem not accepted (accept={accept!r})")
+            return x
+        if isinstance(x, int):
+            if "fact" not in accept:
+                raise HolError(f"coerce: integer index not accepted (accept={accept!r})")
             try:
-                return self._facts[self._fact_order[ref]]
+                return self._facts[self._fact_order[x]]
             except IndexError:
-                raise HolError(f"fact index out of range: {ref}")
-        raise HolError(f"cannot resolve fact reference: {ref!r}")
+                raise HolError(f"fact index out of range: {x}")
+        if isinstance(x, str):
+            for kind in accept:
+                if kind == "fact" and x in self._facts:
+                    return self._facts[x]
+                if kind == "term":
+                    return self._parse(x)
+            raise HolError(f"unknown fact label: {x!r}")
+        if "term" not in accept:
+            raise HolError(f"coerce: cannot resolve reference: {x!r}")
+        return x
+
+    def _resolve_fact(self, ref):
+        return self.coerce(ref)
 
     def fact(self, ref):
         """Public accessor: returns the theorem associated with a label or index."""
-        return self._resolve_fact(ref)
+        return self.coerce(ref)
 
     def _resolve_fact_or_term(self, ref):
-        """Like _resolve_fact but a non-fact string is parsed as a term."""
-        if isinstance(ref, thm):
-            return ref
-        if isinstance(ref, int):
-            return self._resolve_fact(ref)
-        if isinstance(ref, str):
-            if ref in self._facts:
-                return self._facts[ref]
-            return self._parse(ref)
-        return ref
+        return self.coerce(ref, accept=("fact", "term"))
 
     # ---- public API: opening declarations --------------------------------
 
@@ -656,7 +666,7 @@ class Proof:
     def split_conj(self, ref, *labels):
         """Split a right-associated conjunction fact ``h : a /\\ b /\\ ... /\\ z``
         into the supplied labels, registering each conjunct as its own fact."""
-        th = ref if isinstance(ref, thm) else self._resolve_fact(ref)
+        th = self._resolve_fact(ref)
         # Pattern B: simp-normalize the fact so the top-level conjunction is
         # exposed (idempotent if already in normal form).
         th = self.simp_norm_fact(th)
@@ -1030,14 +1040,12 @@ class _Have:
 
         Each rule may be a Theorem or a string label naming a fact in scope.
         """
-        rule_thms = [self.p._resolve_fact(r) if not isinstance(r, thm) else r
-                     for r in rules]
+        rule_thms = [self.p._resolve_fact(r) for r in rules]
         return self._finish(REWRITE_PROVE(rule_thms, self.term))
 
     def by_rewrite_of(self, ref, rules):
         """Rewrite an existing fact `ref` with `rules` to obtain the have-term."""
-        rule_thms = [self.p._resolve_fact(r) if not isinstance(r, thm) else r
-                     for r in rules]
+        rule_thms = [self.p._resolve_fact(r) for r in rules]
         fact_th = self.p._resolve_fact(ref)
         return self._finish(REWRITE_RULE(rule_thms, fact_th))
 
@@ -1061,7 +1069,7 @@ class _Have:
         chain at every HO-lemma boundary.
         """
         p = self.p
-        th = axiom if isinstance(axiom, thm) else p._resolve_fact(axiom)
+        th = p._resolve_fact(axiom)
         # Pattern B: simp-normalize the axiom so the SPEC chain finds a
         # forall to peel; Pattern A on each MP step via simp_mp.
         th = p.simp_norm_fact(th)
@@ -1091,9 +1099,8 @@ class _Have:
         rewrite rules. Used to bridge a theorem stated in unfolded form
         (e.g. SATZ_9) to a goal stated using the defined symbol (SATZ_10's
         ``>`` / ``<``)."""
-        src_th = src if isinstance(src, thm) else self.p._resolve_fact(src)
-        rules = [d if isinstance(d, thm) else self.p._resolve_fact(d)
-                 for d in defs]
+        src_th = self.p._resolve_fact(src)
+        rules = [self.p._resolve_fact(d) for d in defs]
         eq_unfold = REWRITE_CONV(rules, self.term)
         eq_beta = BETA_NORM(rand(eq_unfold._concl))
         eq_goal = TRANS(eq_unfold, eq_beta)
@@ -1143,7 +1150,7 @@ class _Have:
 
         Aligns the equation's LHS with the fact's conclusion via simp, so
         the user can mix folded/unfolded forms across an EQ_MP boundary."""
-        eq_th_resolved = eq_th if isinstance(eq_th, thm) else self.p._resolve_fact(eq_th)
+        eq_th_resolved = self.p._resolve_fact(eq_th)
         ref_th = self.p._resolve_fact(ref)
         return self._finish(self.p.simp_eq_mp(eq_th_resolved, ref_th))
 
@@ -1181,7 +1188,7 @@ class _Have:
         target = self.term
         p = self.p
 
-        fact_th = ref if isinstance(ref, thm) else p._resolve_fact(ref)
+        fact_th = p._resolve_fact(ref)
         witness_t = p._parse(witness) if isinstance(witness, str) else witness
 
         # Direct existential: ?v. body.
@@ -1216,7 +1223,7 @@ class _Have:
         inject it as the proof of the whole disjunction."""
         target = self.term
         p = self.p
-        fact_th = ref if isinstance(ref, thm) else p._resolve_fact(ref)
+        fact_th = p._resolve_fact(ref)
         # Pattern B: normalize fact and goal so the disjunction structure is
         # exposed, build at the normalized shape; ``_finish`` re-folds via
         # ``_simp_require``.
@@ -1247,10 +1254,8 @@ class _Have:
     def by_rewrite_ac(self, rules, op, assoc, comm, ac_rules=()):
         """REWRITE_AC_PROVE -- rewrite both sides under ``rules`` (and optional
         ``ac_rules`` for canonicalisation), then close by AC over ``op``."""
-        rule_thms = [self.p._resolve_fact(r) if not isinstance(r, thm) else r
-                     for r in rules]
-        ac_thms = tuple(self.p._resolve_fact(r) if not isinstance(r, thm) else r
-                        for r in ac_rules)
+        rule_thms = [self.p._resolve_fact(r) for r in rules]
+        ac_thms = tuple(self.p._resolve_fact(r) for r in ac_rules)
         return self._finish(REWRITE_AC_PROVE(rule_thms, op, assoc, comm,
                                               self.term, ac_rules=ac_thms))
 
