@@ -34,7 +34,7 @@ Coverage:
 
 from fusion import (
     Var, Comb, Abs,
-    bool_ty, aty, mk_abs, mk_comb, mk_const, mk_eq, mk_fun_ty,
+    bool_ty, aty, mk_abs, mk_app, mk_comb, mk_const, mk_eq, mk_fun_ty,
     dest_eq, aconv, HolError,
     rator, rand,
     REFL, TRANS, MK_COMB, ABS, BETA, ASSUME, EQ_MP,
@@ -150,7 +150,7 @@ ADD_1, ADD_SUC = define_recursive(
 PLUS = mk_const("+", [])
 
 def mk_add(a, b):
-    return mk_comb(mk_comb(PLUS, a), b)
+    return mk_app(PLUS, a, b)
 
 # Reversed orientation of ADD_1, used as a rewrite to canonicalize SUC into
 # `+1`-form before AC reasoning.
@@ -402,8 +402,8 @@ LT_DEF = define("<", _nnb, "\\x y. ?v. y = x + v", prec=40, assoc="non")
 GT = mk_const(">", [])
 LT = mk_const("<", [])
 
-def mk_gt(a, b): return mk_comb(mk_comb(GT, a), b)
-def mk_lt(a, b): return mk_comb(mk_comb(LT, a), b)
+def mk_gt(a, b): return mk_app(GT, a, b)
+def mk_lt(a, b): return mk_app(LT, a, b)
 
 def UNFOLD_GT(a, b):
     """ |- (a > b) = (?u. a = b + u) """
@@ -481,8 +481,8 @@ LE_DEF = define("<=", _nnb, "\\x y. x < y \\/ x = y", prec=40, assoc="non")
 GE = mk_const(">=", [])
 LE = mk_const("<=", [])
 
-def mk_ge(a, b): return mk_comb(mk_comb(GE, a), b)
-def mk_le(a, b): return mk_comb(mk_comb(LE, a), b)
+def mk_ge(a, b): return mk_app(GE, a, b)
+def mk_le(a, b): return mk_app(LE, a, b)
 
 def UNFOLD_GE(a, b): return UNFOLD(GE_DEF, a, b)
 def UNFOLD_LE(a, b): return UNFOLD(LE_DEF, a, b)
@@ -1044,7 +1044,7 @@ MUL_1, MUL_SUC = define_recursive(
 TIMES = mk_const("*", [])
 
 def mk_mul(a, b):
-    return mk_comb(mk_comb(TIMES, a), b)
+    return mk_app(TIMES, a, b)
 
 
 # ---------------------------------------------------------------------------

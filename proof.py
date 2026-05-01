@@ -28,7 +28,7 @@ import re
 
 from fusion import (
     Var, Const, Comb, Abs, thm,
-    aconv, concl, HolError, ASSUME, EQ_MP, BETA, INST, mk_abs, mk_comb,
+    aconv, concl, HolError, ASSUME, EQ_MP, BETA, INST, mk_abs, mk_app, mk_comb,
     rand, type_of, TRANS, mk_eq, mk_fun_ty, MK_COMB, ABS, REFL, dest_eq,
 )
 from axioms import T, F, mk_select, mk_forall
@@ -263,10 +263,7 @@ class Proof:
             abs_body = mk_abs(bv, abs_body)
         th_inst = INST([(abs_body, lz.carrier)], th)
         # Discharge the (now-trivially-true) substituted equation hypothesis.
-        applied = abs_body
-        for bv in lz.bvars:
-            applied = mk_comb(applied, bv)
-        eq_th = BETA_NORM(applied)
+        eq_th = BETA_NORM(mk_app(abs_body, *lz.bvars))
         for bv in reversed(lz.bvars):
             eq_th = GEN(bv, eq_th)
         th_inst = PROVE_HYP(eq_th, th_inst)
@@ -367,10 +364,7 @@ class Proof:
             th = INST([(abs_body, lz.carrier)], th)
             # Build the hypothesis-proof: |- !b1..bn. (\b1..bn. body) b1..bn = body
             # via BETA_NORM on the LHS chain, then GEN over each bvar.
-            applied = abs_body
-            for bv in lz.bvars:
-                applied = mk_comb(applied, bv)
-            eq_th = BETA_NORM(applied)            # |- (abs_body) b1..bn = body
+            eq_th = BETA_NORM(mk_app(abs_body, *lz.bvars))   # |- (abs_body) b1..bn = body
             for bv in reversed(lz.bvars):
                 eq_th = GEN(bv, eq_th)
             th = PROVE_HYP(eq_th, th)
@@ -409,10 +403,7 @@ class Proof:
         for bv in reversed(bvars):
             ty = mk_fun_ty(bv.ty, ty)
         carrier = Var(name, ty)
-        applied = carrier
-        for bv in bvars:
-            applied = mk_comb(applied, bv)
-        eq_term = mk_eq(applied, body)
+        eq_term = mk_eq(mk_app(carrier, *bvars), body)
         for bv in reversed(bvars):
             eq_term = mk_forall(bv, eq_term)
         eq_th = ASSUME(eq_term)
@@ -1732,7 +1723,7 @@ def _selftest():
     from fusion import bool_ty
     Q2_ty = mk_fun_ty(num_ty, mk_fun_ty(num_ty, bool_ty))
     Q2_var = mk_var("Q", Q2_ty)
-    Q2_at_11 = mk_comb(mk_comb(Q2_var, ONE), ONE)
+    Q2_at_11 = mk_app(Q2_var, ONE, ONE)
     trivial_HO_2 = GEN(Q2_var, DISCH(Q2_at_11, ASSUME(Q2_at_11)))
     @proof
     def BY_SELECT_MULTI(p):
@@ -1833,7 +1824,7 @@ def _selftest():
     expected_ty2 = mk_fun_ty(num_ty, mk_fun_ty(num_ty, bool_ty))
     assert ld2.carrier.ty == expected_ty2
     expected_eq2 = mk_forall(a_v, mk_forall(b_v,
-        mk_eq(mk_comb(mk_comb(ld2.carrier, a_v), b_v), body_ab)))
+        mk_eq(mk_app(ld2.carrier, a_v, b_v), body_ab)))
     assert aconv(ld2.eq_th._concl, expected_eq2), \
         f"lazy-let multi-arg eq mismatch: {pp(ld2.eq_th._concl)}"
 

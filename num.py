@@ -13,7 +13,7 @@ Mirrors `nums.ml` from HOL Light.
 
 from fusion import (
     Var, Abs, Comb,
-    aty, bty, bool_ty, mk_abs, mk_comb, mk_const, mk_eq, mk_fun_ty,
+    aty, bty, bool_ty, mk_abs, mk_app, mk_comb, mk_const, mk_eq, mk_fun_ty,
     mk_type, new_constant, new_type,
     new_basic_definition, new_basic_type_definition,
     rator, rand, dest_eq, type_of,
@@ -537,10 +537,10 @@ _fn  = Var("fn", _num_to_A)
 
 def _mk_closure_hyp(Q_term, c_term, h_term):
     """Build the term  Q 1 c /\\ (!k a. Q k a ==> Q (SUC k) (h k a))."""
-    Q_1_c   = mk_comb(mk_comb(Q_term, ONE), c_term)
-    h_k_a   = mk_comb(mk_comb(h_term, _k), _a)
-    Q_k_a   = mk_comb(mk_comb(Q_term, _k), _a)
-    Q_sk_h  = mk_comb(mk_comb(Q_term, mk_suc(_k)), h_k_a)
+    Q_1_c   = mk_app(Q_term, ONE, c_term)
+    h_k_a   = mk_app(h_term, _k, _a)
+    Q_k_a   = mk_app(Q_term, _k, _a)
+    Q_sk_h  = mk_app(Q_term, mk_suc(_k), h_k_a)
     closure = mk_forall(_k, mk_forall(_a, mk_imp(Q_k_a, Q_sk_h)))
     return mk_and(Q_1_c, closure)
 
@@ -548,7 +548,7 @@ def _mk_closure_hyp(Q_term, c_term, h_term):
 def _mk_R(c_term, h_term, n_term, m_term):
     """Build R c h n m as  !Q. (Q 1 c /\\ closure) ==> Q n m."""
     hyp = _mk_closure_hyp(_Q, c_term, h_term)
-    Q_n_m = mk_comb(mk_comb(_Q, n_term), m_term)
+    Q_n_m = mk_app(_Q, n_term, m_term)
     return mk_forall(_Q, mk_imp(hyp, Q_n_m))
 
 
@@ -776,7 +776,7 @@ def NUM_RECURSION(p):
             exist_sn,
             ELIM_EX(pred_R_sn, exist_sn._concl, lambda th: th))
         sel_pred_R_sn = mk_comb(sel_const, pred_R_sn)
-        h_n_sel = mk_comb(mk_comb(_h, _n), sel_pred_R_n)
+        h_n_sel = mk_app(_h, _n, sel_pred_R_n)
         p.thus("(@m. R c h (SUC n) m) = h n (@m. R c h n m)") \
             .by_thm(MP(SPEC(h_n_sel, SPEC(sel_pred_R_sn, unique_sn)),
                        CONJ(R_sn_at_sel, R_sn_h_n_sel)))

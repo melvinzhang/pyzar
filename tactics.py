@@ -23,7 +23,7 @@ surface syntax.
 
 from fusion import (
     Var, Const, Comb, Abs, thm,
-    bool_ty, aty, bty, mk_abs, mk_comb, mk_const, mk_eq, mk_fun_ty,
+    bool_ty, aty, bty, mk_abs, mk_app, mk_comb, mk_const, mk_eq, mk_fun_ty,
     type_of, dest_eq,
     rator, rand, freesl, variant, aconv,
     REFL, TRANS, MK_COMB, ABS, BETA, ASSUME, EQ_MP,
@@ -797,7 +797,7 @@ def _build_right_assoc(op_const, leaves):
     """Build right-associated op-tree from a non-empty list of leaves."""
     result = leaves[-1]
     for leaf in reversed(leaves[:-1]):
-        result = mk_comb(mk_comb(op_const, leaf), result)
+        result = mk_app(op_const, leaf, result)
     return result
 
 

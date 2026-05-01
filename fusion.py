@@ -255,6 +255,12 @@ def mk_comb(f: term, a: term) -> term:
         return Comb(f, a)
     raise HolError("mk_comb: types do not agree")
 
+def mk_app(f: term, *args: term) -> term:
+    """Left-associated application: ``mk_app(f, a, b, c) == f a b c``."""
+    for a in args:
+        f = mk_comb(f, a)
+    return f
+
 def dest_var(tm: term):
     if isinstance(tm, Var):
         return tm.name, tm.ty
@@ -778,7 +784,7 @@ def mk_eq(l: term, r: term) -> term:
     try:
         ty = type_of(l)
         eq_tm = inst([(ty, aty)])(_eq_const)
-        return mk_comb(mk_comb(eq_tm, l), r)
+        return mk_app(eq_tm, l, r)
     except Exception:
         raise HolError("mk_eq")
 

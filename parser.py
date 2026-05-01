@@ -36,7 +36,7 @@ from lark.visitors import Interpreter
 from fusion import (
     Var, Const, Comb, Abs,
     Tyvar, Tyapp,
-    mk_var, mk_comb, mk_const, mk_eq,
+    mk_var, mk_app, mk_comb, mk_const, mk_eq,
     concl, hyp, new_basic_definition,
 )
 
@@ -473,7 +473,7 @@ def define(name, ty, body, *, sig=None, prec=None, assoc=None):
         if assoc is None:
             raise ValueError(
                 f"define({name!r}): prec given but assoc missing")
-        builder = lambda a, b: mk_comb(mk_comb(const, a), b)
+        builder = lambda a, b: mk_app(const, a, b)
         sig.add_infix(name, prec, builder, assoc=assoc)
     return def_th
 
@@ -495,7 +495,7 @@ def _selftest():
 
     def _mk(name):
         def _b(a, b):
-            return mk_comb(mk_comb(mk_const(name, []), a), b)
+            return mk_app(mk_const(name, []), a, b)
         return _b
     _add, _mul, _gt = _mk("+"), _mk("*"), _mk(">")
 
@@ -641,7 +641,7 @@ def _selftest():
     assert op in test_sig.const and op in test_sig.infix
     a2, b2 = mk_var("a", num_ty), mk_var("b", num_ty)
     op_ab = parse(f"a {op} b", sig=test_sig)
-    assert aconv(op_ab, mk_comb(mk_comb(test_sig.const[op], a2), b2))
+    assert aconv(op_ab, mk_app(test_sig.const[op], a2, b2))
 
     # --- sig["op"] lookup -------------------------------------------------
     # Auto-registered by add_infix / add_prefix.

@@ -7,7 +7,7 @@ the original HOL Light distribution.
 from fusion import (
     Var,
     aty, bty, bool_ty,
-    mk_abs, mk_comb, mk_const, mk_eq, mk_fun_ty, mk_type,
+    mk_abs, mk_app, mk_comb, mk_const, mk_eq, mk_fun_ty, mk_type,
     new_axiom, new_basic_definition, new_constant, new_type,
 )
 
@@ -30,11 +30,11 @@ f_bbb = Var("f", bbb_ty)
 AND_DEF = new_basic_definition(
     mk_eq(Var("/\\", bbb_ty),
           mk_abs(p, mk_abs(q,
-              mk_eq(mk_abs(f_bbb, mk_comb(mk_comb(f_bbb, p), q)),
-                    mk_abs(f_bbb, mk_comb(mk_comb(f_bbb, T), T)))))))
+              mk_eq(mk_abs(f_bbb, mk_app(f_bbb, p, q)),
+                    mk_abs(f_bbb, mk_app(f_bbb, T, T)))))))
 
 def mk_and(a, b):
-    return mk_comb(mk_comb(mk_const("/\\", []), a), b)
+    return mk_app(mk_const("/\\", []), a, b)
 
 # (==>) = \p q. p /\ q <=> p
 IMP_DEF = new_basic_definition(
@@ -42,7 +42,7 @@ IMP_DEF = new_basic_definition(
           mk_abs(p, mk_abs(q, mk_eq(mk_and(p, q), p)))))
 
 def mk_imp(a, b):
-    return mk_comb(mk_comb(mk_const("==>", []), a), b)
+    return mk_app(mk_const("==>", []), a, b)
 
 # (!) = \P:A->bool. P = \x. T
 abty = mk_fun_ty(aty, bool_ty)
@@ -76,7 +76,7 @@ OR_DEF = new_basic_definition(
                          mk_imp(mk_imp(q, r_b), r_b)))))))
 
 def mk_or(a, b):
-    return mk_comb(mk_comb(mk_const("\\/", []), a), b)
+    return mk_app(mk_const("\\/", []), a, b)
 
 # F = !p:bool. p
 F_DEF = new_basic_definition(
