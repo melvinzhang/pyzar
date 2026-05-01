@@ -24,6 +24,7 @@ Usage:
 The decorator runs the script and returns the resulting kernel theorem.
 """
 
+import enum
 import re
 
 from fusion import (
@@ -171,12 +172,29 @@ class LazyLetDef:
         self.eq_th = eq_th       # [eq_term] |- !b1...bn. R b1..bn = body
 
 
+class FrameKind(enum.Enum):
+    """Discriminator for ``_Frame``. Replaces ad-hoc string tags so
+    misspellings fail loudly at the use site instead of silently never
+    matching."""
+    ROOT = "root"
+    INDUCTION = "induction"
+    IND_BASE = "ind_base"
+    IND_STEP = "ind_step"
+    CASES = "cases"
+    CASE = "case"
+    HAVE_PROOF = "have_proof"
+    SUPPOSE = "suppose"
+
+    def __str__(self):
+        return self.value
+
+
 class _Frame:
     __slots__ = ("goal", "kind", "vars_added", "hyps_added",
                  "facts_added", "choose_env", "type_env",
                  "lazy_lets", "data", "result")
 
-    def __init__(self, goal=None, kind="root"):
+    def __init__(self, goal=None, kind=FrameKind.ROOT):
         self.goal = goal
         self.kind = kind
         self.vars_added = []      # for fix(): GEN at close
@@ -195,7 +213,7 @@ class _Frame:
 
 class Proof:
     def __init__(self):
-        self._frames = [_Frame(kind="root")]
+        self._frames = [_Frame(kind=FrameKind.ROOT)]
         self._facts = {}          # label -> thm
         self._fact_order = []     # insertion order for negative-index lookup
         self._anon = 0
@@ -886,7 +904,7 @@ class Proof:
 
     def base(self):
         fr = self._cur
-        if fr.kind != "_induction":
+        if fr.kind != FrameKind.INDUCTION:
             raise HolError("base() outside induction()")
         s = fr.data["strategy"]
         sub_goal = subst_term(fr.data["var"], s.base_term, fr.data["body"])
@@ -894,12 +912,12 @@ class Proof:
         def on_close(th):
             fr.data["base_th"] = th
 
-        return _SubFrameCtx(self, sub_goal, kind="ind_base",
+        return _SubFrameCtx(self, sub_goal, kind=FrameKind.IND_BASE,
                              on_close=on_close)
 
     def step(self, ih_label="IH"):
         fr = self._cur
-        if fr.kind != "_induction":
+        if fr.kind != FrameKind.INDUCTION:
             raise HolError("step() outside induction()")
         s = fr.data["strategy"]
         var, body = fr.data["var"], fr.data["body"]
@@ -908,7 +926,7 @@ class Proof:
         def on_close(th):
             fr.data["step_th"] = th
 
-        return _SubFrameCtx(self, sub_goal, kind="ind_step",
+        return _SubFrameCtx(self, sub_goal, kind=FrameKind.IND_STEP,
                              on_close=on_close,
                              extra_facts=[(ih_label, ASSUME(body))])
 
@@ -1056,7 +1074,7 @@ class Proof:
             not_th = NOT_INTRO(DISCH(body, F_th))
             self._set_frame_result(self._cur, not_th)
 
-        return _SubFrameCtx(self, F, kind="suppose",
+        return _SubFrameCtx(self, F, kind=FrameKind.SUPPOSE,
                              on_close=on_close,
                              extra_facts=[(label, ASSUME(body))])
 
@@ -1074,7 +1092,7 @@ class Proof:
 
     def case(self, branch_spec):
         fr = self._cur
-        if fr.kind != "_cases":
+        if fr.kind != FrameKind.CASES:
             raise HolError("case() outside cases_on()")
         label, user_term = self._split_label(branch_spec)
         outer_goal = fr.data["goal"]
@@ -1113,7 +1131,7 @@ class Proof:
             witness_th = CHOOSE_WITNESS(leaf_pred, ASSUME(leaf))
             auto_choose = (wit_name, w_term, eq_label, witness_th)
 
-        return _SubFrameCtx(self, outer_goal, kind="case",
+        return _SubFrameCtx(self, outer_goal, kind=FrameKind.CASE,
                              on_close=on_close,
                              extra_facts=[(label, ASSUME(leaf))],
                              auto_choose=auto_choose)
@@ -1301,7 +1319,7 @@ class _Have:
 
         This is the declarative analogue of writing an intermediate lemma
         inline — the dream sketch's ``.proof(lambda q: …)`` block."""
-        return _SubFrameCtx(self.p, self.term, kind="have_proof",
+        return _SubFrameCtx(self.p, self.term, kind=FrameKind.HAVE_PROOF,
                              on_close=self._finish)
 
     def by_eq_mp(self, eq_th, ref):
@@ -1537,7 +1555,7 @@ class _SubFrameCtx:
 
 
 # ---------------------------------------------------------------------------
-# Induction block: pushes an "_induction" frame whose .base() / .step()
+# Induction block: pushes an INDUCTION frame whose .base() / .step()
 # children fill in base_th / step_th. On exit, INDUCT_PROVE composes them and
 # the result is set as the parent frame's .result, after SPEC'ing the
 # induction variable so the resulting term matches the parent's body-shaped
@@ -1553,7 +1571,7 @@ class _InductionCtx:
         self.peel_forall = peel_forall
 
     def __enter__(self):
-        fr = _Frame(goal=None, kind="_induction")
+        fr = _Frame(goal=None, kind=FrameKind.INDUCTION)
         fr.data = {"var": self.var, "body": self.body,
                    "strategy": self.strategy,
                    "base_th": None, "step_th": None}
@@ -1590,7 +1608,7 @@ class _InductionCtx:
 
 
 # ---------------------------------------------------------------------------
-# cases_on block: pushes a "_cases" frame; .case() children supply each
+# cases_on block: pushes a CASES frame; .case() children supply each
 # branch's proof under an extra hypothesis. On exit, DISJ_CASES composes them.
 # ---------------------------------------------------------------------------
 
@@ -1651,7 +1669,7 @@ class _CasesCtx:
         self.on_close = on_close
 
     def __enter__(self):
-        fr = _Frame(goal=self.target, kind="_cases")
+        fr = _Frame(goal=self.target, kind=FrameKind.CASES)
         fr.data = {"goal": self.target, "branches": [],
                     "or_concl": self.or_th._concl}
         self.p._frames.append(fr)

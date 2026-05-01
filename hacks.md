@@ -11,7 +11,7 @@ Catalogue of dubious patterns. Each entry: where it lives, why it's a smell, and
 | H3 | ⏳ | Not addressed. |
 | H4 | ✅ | Alpha-aware Abs match in `fc6b43f`. |
 | H5 | ✅ | `_term_match` mutates `subst` in place in `fc6b43f`. |
-| H6 | ⏳ | Frame-kind naming still mixed. |
+| H6 | ✅ | Frame kinds replaced with `FrameKind` enum; misspellings now fail at parse time. |
 | H7 | ⏳ | Mini-DSL still regex-parsed. |
 | H8 | ⏳ | `_split_label` still swallows label-form parse errors. |
 | H9 | ⏳ | String overloading in `coerce` / `by_select`. |
@@ -116,7 +116,7 @@ deterministic per node), just mutate without copying.
 
 ---
 
-## H6. Inconsistent frame-`kind` naming
+## H6. Inconsistent frame-`kind` naming  ✅
 
 **Where:** `proof.py` uses `"root"`, `"_induction"`, `"_cases"` (underscore-
 prefixed), but also `"ind_base"`, `"ind_step"`, `"case"`, `"have_proof"`,
@@ -126,9 +126,11 @@ prefixed), but also `"ind_base"`, `"ind_step"`, `"case"`, `"have_proof"`,
 kinds. Readers cannot tell at a glance which kinds are visible from the
 public DSL.
 
-**Fix:** Pick one convention (recommend underscore-prefix for all internal
-frames since none of them are user-typed). Or, better: replace the magic
-strings with an `enum.Enum` so misspellings fail loudly.
+**Fix:** Replaced the magic strings with a `FrameKind` enum
+(`ROOT`, `INDUCTION`, `IND_BASE`, `IND_STEP`, `CASES`, `CASE`, `HAVE_PROOF`,
+`SUPPOSE`). Misspellings now raise `AttributeError` at the use site instead
+of silently never matching. The `__str__` override preserves the original
+value strings for the `_SubFrameCtx.__exit__` error message.
 
 ---
 
