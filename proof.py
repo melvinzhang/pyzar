@@ -1004,14 +1004,10 @@ class Proof:
         self._register_fact(eq_label, witness_th)
 
     def _open_cases(self, ref, target, on_close, args=()):
+        or_th = self._resolve_fact(ref)
         if args:
-            if not isinstance(ref, thm):
-                raise HolError(
-                    "cases_on: spec args require a theorem source")
             resolved = [self._resolve_fact_or_term(a) for a in args]
-            or_th = MP_LIST(ref, resolved)
-        else:
-            or_th = self._resolve_fact(ref)
+            or_th = MP_LIST(or_th, resolved)
         c = or_th._concl
         # If the source is a relation registered with a disjunction unfolder
         # (e.g. ``>=``, ``<=``), unfold to the disjunction first.
@@ -1028,12 +1024,13 @@ class Proof:
         """Case-split on a disjunction.
 
         ``ref`` is a fact label, theorem, or relation fact (``a R b`` for a
-        relation registered with ``register_disj_unfolder``). When extra
-        ``*args`` are supplied, ``ref`` must be a theorem; the args are
-        ``MP_LIST``-applied (each string is parsed as a term, each fact
-        label looked up) before the cases are taken — so
+        relation registered with ``register_disj_unfolder``). Extra
+        ``*args`` are ``MP_LIST``-applied to the resolved theorem (each
+        string is parsed as a term, each fact label looked up) before
+        the cases are taken — so
         ``cases_on(SATZ_10, "x", "y")`` is equivalent to
-        ``cases_on(SPECL([x, y], SATZ_10))``.
+        ``cases_on(SPECL([x, y], SATZ_10))``, and ``cases_on("h", x_term)``
+        works when ``"h"`` is a registered fact label.
         """
         parent = self._cur
         if parent.goal is None:

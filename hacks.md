@@ -24,7 +24,7 @@ Catalogue of dubious patterns. Each entry: where it lives, why it's a smell, and
 | H16 | ✅ | Auto-choose plumbing lifted out of `_SubFrameCtx`; `case()` is a `@contextmanager` that pushes the witness/equation after the inner frame enters. |
 | H17 | ✅ | Self-tests moved to `tactics_test.py` and `proof_test.py`; `sys.modules` workaround retired. |
 | H18 | ✅ | `subst_term` capture-avoiding by construction (`fc6b43f`); kernel `INST` for the Var case. |
-| H19 | ⏳ | `_open_cases`'s theorem-only-with-args still undocumented. |
+| H19 | ✅ | `_open_cases` resolves `ref` through `_resolve_fact` first; fact labels and theorems both accept `*args`. |
 | H20 | ⏳ | `_fresh_label` still uses a collision-prone prefix. |
 
 Plus one issue surfaced during fixes:
@@ -425,7 +425,7 @@ machinery to do this safely (cf. `INST`).
 
 ---
 
-## H19. `_open_cases` accepts theorem-only when args are supplied — undocumented in the public API
+## H19. `_open_cases` accepts theorem-only when args are supplied — undocumented in the public API  ✅
 
 **Where:** `proof.py:873-892`. `cases_on(ref, *args)` and `by_cases(ref, *args)`
 both delegate.
@@ -434,10 +434,11 @@ both delegate.
 about it from a `HolError` at runtime: "spec args require a theorem
 source". A user who passes a fact label and args gets a confusing message.
 
-**Fix:** Either widen the implementation to accept fact labels (resolving
-to a theorem before `MP_LIST`), or document the constraint in the public
-docstrings of `cases_on` / `by_cases`. The first is essentially a one-
-line change (`ref = self._resolve_fact(ref)`).
+**Fix:** Generalised the implementation -- `_open_cases` now resolves
+`ref` through `_resolve_fact` first (the same path the no-args branch
+already used), then applies `MP_LIST` if any `*args` are present. Fact
+labels and theorems accept `*args` symmetrically; the
+"theorem-required" runtime error is gone.
 
 ---
 
