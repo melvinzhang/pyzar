@@ -21,7 +21,7 @@ Catalogue of dubious patterns. Each entry: where it lives, why it's a smell, and
 | H13 | ✅ | `assume` registers user surface ASSUME; `term_eq_ant` synthesised at assume-time, lifted into the implication antecedent at frame close. |
 | H14 | ✅ | `CHOOSE_WITNESS` factored, `pending_choose` deleted (`3a8d734`). |
 | H15 | ✅ | `_drop_facts` now `del`-and-raise; `facts_added` ⊆ `_facts` is enforced symmetrically. |
-| H16 | ⏳ | `auto_choose` still a positional 6-tuple. |
+| H16 | ✅ | Auto-choose plumbing lifted out of `_SubFrameCtx`; `case()` is a `@contextmanager` that pushes the witness/equation after the inner frame enters. |
 | H17 | ✅ | Self-tests moved to `tactics_test.py` and `proof_test.py`; `sys.modules` workaround retired. |
 | H18 | ✅ | `subst_term` capture-avoiding by construction (`fc6b43f`); kernel `INST` for the Var case. |
 | H19 | ⏳ | `_open_cases`'s theorem-only-with-args still undocumented. |
@@ -374,7 +374,7 @@ becoming a silent leak.
 
 ---
 
-## H16. `auto_choose` is a 6-tuple stuffed into the generic `_SubFrameCtx`
+## H16. `auto_choose` is a 6-tuple stuffed into the generic `_SubFrameCtx`  ✅
 
 **Where:** `proof.py:1003-1009` builds it; `proof.py:1407-1415` consumes it.
 
@@ -383,10 +383,13 @@ exactly one caller (`case()` for an existential leaf). The 6-tuple is
 positionally unpacked, with no dataclass or named-tuple to anchor the
 shape.
 
-**Fix:** Either (a) lift the auto-choose plumbing out of `_SubFrameCtx` —
-have `case()` push the witness/equation onto the new frame after entering
-it, the same way `extra_facts` does; or (b) at minimum, make the tuple a
-`_AutoChoose` `dataclass` so the field names are visible at the use site.
+**Fix (option a -- lift the plumbing out).** ``case()`` is now a
+``@contextlib.contextmanager`` that opens a plain ``_SubFrameCtx`` and,
+once the inner frame is entered, pushes the witness term and equation
+fact onto the current frame -- exactly like a user-written
+``p.choose(...)`` would. ``_SubFrameCtx`` no longer carries the
+``auto_choose`` slot; sub-frames stay generic and the existential
+auto-choose lives entirely inside the one caller that needs it.
 
 ---
 

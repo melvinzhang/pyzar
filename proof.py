@@ -24,6 +24,7 @@ Usage:
 The decorator runs the script and returns the resulting kernel theorem.
 """
 
+import contextlib
 import enum
 import re
 
@@ -1093,6 +1094,7 @@ class Proof:
             raise HolError("absurd: no current goal")
         return _Absurd(self, fr.goal)
 
+    @contextlib.contextmanager
     def case(self, branch_spec):
         fr = self._cur
         if fr.kind != FrameKind.CASES:
@@ -1115,29 +1117,32 @@ class Proof:
         def on_close(th):
             fr.data["branches"].append((leaf, th))
 
-        # If the branch hypothesis is itself an existential ``?v. body``,
-        # auto-choose the witness inside the case body so the user gets
-        # ``v`` in scope and ``v_eq: body[v]`` as a fact, exactly as if
-        # they had written ``p.choose("v: body", from_=label)`` themselves.
-        # The display name follows the *user*'s spec bvar (so they can
-        # rename to avoid clashes with outer scopes); the witness theorem
-        # is SELECT_AX-derived from ``ASSUME(leaf)`` so its hyp set is
-        # ``{leaf}`` — which the case's outer DISCH(leaf) already retires.
-        auto_choose = None
-        leaf_pred = dest_exists(leaf)
-        if leaf_pred is not None:
-            leaf_v = leaf_pred.bvar
-            w_term = mk_select(leaf_v, leaf_pred.body)
-            user_pred = dest_exists(user_term)
-            wit_name = user_pred.bvar.name if user_pred is not None else leaf_v.name
-            eq_label = f"{wit_name}_eq"
-            witness_th = CHOOSE_WITNESS(leaf_pred, ASSUME(leaf))
-            auto_choose = (wit_name, w_term, eq_label, witness_th)
-
-        return _SubFrameCtx(self, outer_goal, kind=FrameKind.CASE,
-                             on_close=on_close,
-                             extra_facts=[(label, ASSUME(leaf))],
-                             auto_choose=auto_choose)
+        sub_ctx = _SubFrameCtx(self, outer_goal, kind=FrameKind.CASE,
+                                on_close=on_close,
+                                extra_facts=[(label, ASSUME(leaf))])
+        with sub_ctx as inner_p:
+            # If the branch hypothesis is itself an existential
+            # ``?v. body``, auto-choose the witness inside the case body
+            # so the user gets ``v`` in scope and ``v_eq: body[v]`` as a
+            # fact, exactly as if they had written ``p.choose("v: body",
+            # from_=label)`` themselves. The display name follows the
+            # *user*'s spec bvar (so they can rename to avoid clashes
+            # with outer scopes); the witness theorem is SELECT_AX-
+            # derived from ``ASSUME(leaf)`` so its hyp set is ``{leaf}``
+            # -- which the case's outer DISCH(leaf) already retires.
+            leaf_pred = dest_exists(leaf)
+            if leaf_pred is not None:
+                leaf_v = leaf_pred.bvar
+                w_term = mk_select(leaf_v, leaf_pred.body)
+                user_pred = dest_exists(user_term)
+                wit_name = (user_pred.bvar.name if user_pred is not None
+                            else leaf_v.name)
+                eq_label = f"{wit_name}_eq"
+                witness_th = CHOOSE_WITNESS(leaf_pred, ASSUME(leaf))
+                self._require_fresh_name(wit_name, "case")
+                self._cur.choose_env[wit_name] = w_term
+                self._register_fact(eq_label, witness_th)
+            yield inner_p
 
 
 # ---------------------------------------------------------------------------
@@ -1506,14 +1511,12 @@ class _Absurd:
 # ---------------------------------------------------------------------------
 
 class _SubFrameCtx:
-    def __init__(self, p, goal, kind, on_close, extra_facts=(),
-                  auto_choose=None):
+    def __init__(self, p, goal, kind, on_close, extra_facts=()):
         self.p = p
         self.goal = goal
         self.kind = kind
         self.on_close = on_close
         self.extra_facts = list(extra_facts)
-        self.auto_choose = auto_choose
 
     def __enter__(self):
         # Simp-normalize the sub-goal against the active lazy-let set so the
@@ -1534,11 +1537,6 @@ class _SubFrameCtx:
             if label is None:
                 label = self.p._fresh_label("h")
             self.p._register_fact(label, th)
-        if self.auto_choose is not None:
-            wit_name, w_term, eq_label, witness_th = self.auto_choose
-            self.p._require_fresh_name(wit_name, "case")
-            fr.choose_env[wit_name] = w_term
-            self.p._register_fact(eq_label, witness_th)
         return self.p
 
     def __exit__(self, exc_type, *_):
