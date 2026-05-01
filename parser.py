@@ -36,41 +36,9 @@ from lark.visitors import Interpreter
 from fusion import (
     Var, Const, Comb, Abs,
     Tyvar, Tyapp,
-    mk_var, mk_comb, mk_const, mk_eq, vsubst,
+    mk_var, mk_comb, mk_const, mk_eq,
     concl, hyp, new_basic_definition,
 )
-
-
-class LetDef:
-    """Schematic abbreviation registered in a parse env.
-
-    When the parser sees ``name`` applied to ``arity`` argument terms, it
-    substitutes the args for the placeholders ``bvars`` in ``body``
-    (capture-avoiding) and returns the resulting kernel term. No ``Abs`` is
-    ever materialized, so downstream rules see a ground term and never have
-    to BETA-bridge.
-    """
-    __slots__ = ("name", "bvars", "body", "arity")
-
-    def __init__(self, name, bvars, body, arity=None):
-        self.name = name
-        if isinstance(bvars, (list, tuple)):
-            self.bvars = list(bvars)
-        else:
-            self.bvars = [bvars]
-        self.body = body
-        self.arity = arity if arity is not None else len(self.bvars)
-        if self.arity != len(self.bvars):
-            raise ValueError(
-                f"LetDef {name!r}: arity {self.arity} != len(bvars) {len(self.bvars)}")
-
-    @property
-    def bvar(self):
-        """Backward-compat: single-arg lets expose the lone placeholder."""
-        if len(self.bvars) != 1:
-            raise AttributeError(
-                f"LetDef {self.name!r} has arity {self.arity}; use .bvars")
-        return self.bvars[0]
 
 
 class ParseError(Exception):
@@ -271,11 +239,6 @@ class _Builder(Interpreter):
         # Then env-provided binding (kernel term or hol_type).
         if name in self.env:
             binding = self.env[name]
-            if isinstance(binding, LetDef):
-                args = ", ".join(b.name for b in binding.bvars)
-                raise ParseError(
-                    f"let-defined {name!r} must be applied to "
-                    f"{binding.arity} argument(s); use it as `{name}({args})`")
             if isinstance(binding, (Var, Const, Comb, Abs)):
                 return binding
             return mk_var(name, binding)
@@ -301,30 +264,6 @@ class _Builder(Interpreter):
     def app_(self, tree):
         f_tree = tree.children[0]
         a_tree = tree.children[1]
-        # Let-shorthand: walk the left application spine to find a head
-        # ``name`` with N args and desugar ``M a1 ... aN`` to
-        # ``body[bvars := args]`` at parse time. Bound vars and registered
-        # constants take precedence (so a `\M. M x` lambda still works and a
-        # const named `M` shadows the let).
-        spine = [a_tree]
-        head = f_tree
-        while getattr(head, "data", None) == "app_":
-            spine.append(head.children[1])
-            head = head.children[0]
-        spine.reverse()
-        if getattr(head, "data", None) == "name":
-            nm = str(head.children[0])
-            shadowed = (any(nm in s for s in self.scope)
-                        or nm in self.sig.const)
-            if not shadowed:
-                binding = self.env.get(nm)
-                if isinstance(binding, LetDef) and binding.arity <= len(spine):
-                    head_args = [self.visit(a) for a in spine[:binding.arity]]
-                    subs = list(zip(head_args, binding.bvars))
-                    t = vsubst(subs)(binding.body)
-                    for a in spine[binding.arity:]:
-                        t = mk_comb(t, self.visit(a))
-                    return t
         f, a = self.visit(f_tree), self.visit(a_tree)
         return mk_comb(f, a)
 

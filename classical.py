@@ -100,10 +100,21 @@ def EXCLUDED_MIDDLE(p):
     p.have("U_F: U F").by_disj(REFL(F))
     p.have("V_T: V T").by_disj(REFL(T))
 
+    # by_select with the lazy carriers produces ``|- U (@ U)`` /
+    # ``|- V (@ V)`` (folded). The downstream cases_on and the
+    # _diaconescu_F_eq_T helper expect the unfolded ``@x. body`` shape,
+    # so build the SPEC/MP chain by hand and materialize the carrier
+    # (substitute ``U := \x. body`` and BETA-normalize) before binding.
+    _U_lz = p._lookup_lazy_let("U")
+    _V_lz = p._lookup_lazy_let("V")
+    _U_at_F = MP(SPEC(F, SPEC(_U_lz.carrier, _SELECT_AX_BOOL)),
+                  p.fact("U_F"))                      # |- U (@ U)
+    _V_at_T = MP(SPEC(T, SPEC(_V_lz.carrier, _SELECT_AX_BOOL)),
+                  p.fact("V_T"))                      # |- V (@ V)
     p.have("U_or: ((@x:bool. (x = F) \\/ t) = F) \\/ t")\
-        .by_select(_SELECT_AX_BOOL, "U", "F", "U_F")
+        .by_thm(p.materialize_let(_U_at_F, "U"))
     p.have("V_or: ((@x:bool. (x = T) \\/ t) = T) \\/ t")\
-        .by_select(_SELECT_AX_BOOL, "V", "T", "V_T")
+        .by_thm(p.materialize_let(_V_at_T, "V"))
 
     with p.cases_on("U_or"):
         with p.case("eq_uF: (@x:bool. (x = F) \\/ t) = F"):

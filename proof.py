@@ -28,10 +28,10 @@ import re
 
 from fusion import (
     Var, Const, Comb, Abs, thm,
-    aconv, concl, HolError, ASSUME, EQ_MP, BETA, mk_abs, mk_comb,
-    rand, type_of, TRANS,
+    aconv, concl, HolError, ASSUME, EQ_MP, BETA, INST, mk_abs, mk_comb,
+    rand, type_of, TRANS, mk_eq, mk_fun_ty, MK_COMB, ABS, REFL,
 )
-from axioms import T, F, mk_select
+from axioms import T, F, mk_select, mk_forall
 from tactics import (
     SPEC, GEN, DISCH, MP, MP_LIST, DISJ_CASES, BETA_CONV, BETA_NORM, SYM,
     AP_THM, PROVE_HYP, ELIM_EX, _subst_term,
@@ -40,7 +40,7 @@ from tactics import (
     REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV, BETA_RULE,
     AC_PROVE, REWRITE_AC_PROVE,
 )
-from parser import parse, pp, ParseError, LetDef, DEFAULT_SIG
+from parser import parse, pp, ParseError, DEFAULT_SIG
 
 
 # ---------------------------------------------------------------------------
@@ -83,10 +83,32 @@ def register_contra_finder(rel_a, rel_b, finder):
 # Frame: a single open scope (root, induction body, base/step, case).
 # ---------------------------------------------------------------------------
 
+class LazyLetDef:
+    """Local-equation form of a let (Isabelle-style ``define``).
+
+    The let abbreviation stays folded throughout the proof: a fresh kernel
+    ``Var`` of the right function type is the carrier, and a local
+    equation theorem
+    ``[!args. R args = body] |- !args. R args = body`` is available for
+    downstream tactics to rewrite through. The hypothesis is discharged
+    on frame close (see ``_discharge_lazy_lets``): the carrier is
+    INST'd to ``\\args. body`` and the now-trivial substituted equation
+    is PROVE_HYP'd, leaving a theorem with no lazy-let baggage.
+    """
+    __slots__ = ("name", "bvars", "body", "carrier", "eq_th")
+
+    def __init__(self, name, bvars, body, carrier, eq_th):
+        self.name = name
+        self.bvars = list(bvars)
+        self.body = body
+        self.carrier = carrier   # fresh Var of fun-type t1->...->tn->bty
+        self.eq_th = eq_th       # [eq_term] |- !b1...bn. R b1..bn = body
+
+
 class _Frame:
     __slots__ = ("goal", "kind", "vars_added", "hyps_added",
-                 "facts_added", "choose_env", "type_env", "let_env",
-                 "pending_choose", "data", "result")
+                 "facts_added", "choose_env", "type_env",
+                 "lazy_lets", "pending_choose", "data", "result")
 
     def __init__(self, goal=None, kind="root"):
         self.goal = goal
@@ -96,7 +118,7 @@ class _Frame:
         self.facts_added = []     # labels added at this frame; popped on exit
         self.choose_env = {}      # name -> witness term (parser env entries)
         self.type_env = {}        # name -> hol_type for higher-order params
-        self.let_env = {}         # name -> LetDef (parser-level abbreviations)
+        self.lazy_lets = {}       # name -> LazyLetDef (Isabelle-style local equation)
         self.pending_choose = []  # list of (ex_th, pred, hyp_ex) to discharge on close
         self.data = {}            # block-specific scratch
         self.result = None        # the theorem proving `goal`
@@ -128,8 +150,8 @@ class Proof:
                 env[v.name] = v
             for name, term in fr.choose_env.items():
                 env[name] = term
-            for name, ld in fr.let_env.items():
-                env[name] = ld
+            for name, lz in fr.lazy_lets.items():
+                env[name] = lz.carrier
         return env
 
     def _set_frame_result(self, frame, th):
@@ -141,16 +163,256 @@ class Proof:
         frame.pending_choose.clear()
         frame.result = th
 
+    def _lazy_let_carriers(self):
+        """Map every in-scope lazy-let carrier ``Var`` to its ``LazyLetDef``."""
+        out = {}
+        for fr in self._frames:
+            for lz in fr.lazy_lets.values():
+                out[lz.carrier] = lz
+        return out
+
+    def _unfold_lazy_lets_in_term(self, tm, carriers=None):
+        """Bottom-up unfold of every lazy-let application in ``tm``, returning
+        ``|- tm = tm_unfolded``.
+
+        Bypasses ``REWRITE_CONV``'s blanket "no hyp-bearing rules under
+        binders" rule. The relaxation is sound here because lazy-let
+        equation hyps are exactly ``!args. carrier args = body`` and
+        ``ABS`` succeeds under binders (the bvar is not free in the hyp).
+
+        Self-reference is bounded: each carrier may fire at most once on
+        any descent path. A self-referential body (carrier appearing in
+        its own RHS) therefore unfolds once and stops, rather than
+        looping.
+        """
+        if carriers is None:
+            carriers = self._lazy_let_carriers()
+        if not carriers:
+            return REFL(tm)
+        return self._unfold_walk(tm, carriers, frozenset())
+
+    def _unfold_walk(self, tm, carriers, blocked):
+        if isinstance(tm, Abs):
+            body_eq = self._unfold_walk(tm.body, carriers, blocked)
+            if aconv(rand(body_eq._concl), tm.body):
+                return REFL(tm)
+            return ABS(tm.bvar, body_eq)
+        if isinstance(tm, Comb):
+            # Walk the spine; if the head is a lazy-let carrier and we have
+            # enough args, fire the rule at the spine root then recurse on
+            # the surplus arguments and child positions.
+            spine = []
+            head = tm
+            while isinstance(head, Comb):
+                spine.append(head.arg)
+                head = head.fun
+            spine.reverse()
+            if (isinstance(head, Var) and head in carriers
+                    and head not in blocked):
+                lz = carriers[head]
+                n = len(lz.bvars)
+                if len(spine) >= n:
+                    arg_eqs = [self._unfold_walk(a, carriers, blocked)
+                               for a in spine]
+                    eq = lz.eq_th
+                    for i in range(n):
+                        eq = SPEC(rand(arg_eqs[i]._concl), eq)
+                    # In the unfolded body, the same carrier should not fire
+                    # again on this descent (else self-referential lets loop).
+                    rhs_unfolded = self._unfold_walk(
+                        rand(eq._concl), carriers, blocked | {head})
+                    eq = TRANS(eq, rhs_unfolded)
+                    head_chain = REFL(head)
+                    for i in range(n):
+                        head_chain = MK_COMB(head_chain, arg_eqs[i])
+                    head_eq = TRANS(head_chain, eq)
+                    cur = head_eq
+                    for i in range(n, len(spine)):
+                        cur = MK_COMB(cur, arg_eqs[i])
+                    return cur
+            # No rule fires at the head; recurse into fun and arg.
+            f_eq = self._unfold_walk(tm.fun, carriers, blocked)
+            a_eq = self._unfold_walk(tm.arg, carriers, blocked)
+            if (aconv(rand(f_eq._concl), tm.fun)
+                    and aconv(rand(a_eq._concl), tm.arg)):
+                return REFL(tm)
+            return MK_COMB(f_eq, a_eq)
+        return REFL(tm)
+
+    def _unfold_fact(self, th):
+        """Unfold every lazy-let application in ``th``'s conclusion,
+        returning a theorem whose conclusion is the unfolded body. Used
+        by ``by`` / ``by_select`` to auto-lift folded facts into their
+        HO shape before SPEC/MP chains.
+        """
+        eq = self._unfold_lazy_lets_in_term(th._concl)
+        if aconv(rand(eq._concl), th._concl):
+            return th
+        return EQ_MP(eq, th)
+
+    def materialize_let(self, th, name):
+        """Substitute the named lazy-let carrier with its ``\\args. body``
+        abstraction in ``th`` and BETA-normalize the result, returning a
+        new theorem whose conclusion no longer mentions the carrier.
+
+        Use this when downstream code needs the original lambda shape
+        (e.g. SELECT_AX-derived facts in EXCLUDED_MIDDLE that the rest of
+        the proof navigates as ``@x. body``) rather than the folded
+        carrier form. The local-equation hypothesis is discharged
+        immediately, so the returned theorem has no lazy-let baggage.
+        """
+        lz = self._lookup_lazy_let(name)
+        if lz is None:
+            raise HolError(f"materialize_let: no lazy let named {name!r}")
+        abs_body = lz.body
+        for bv in reversed(lz.bvars):
+            abs_body = mk_abs(bv, abs_body)
+        th_inst = INST([(abs_body, lz.carrier)], th)
+        # Discharge the (now-trivially-true) substituted equation hypothesis.
+        applied = abs_body
+        for bv in lz.bvars:
+            applied = mk_comb(applied, bv)
+        eq_th = BETA_NORM(applied)
+        for bv in reversed(lz.bvars):
+            eq_th = GEN(bv, eq_th)
+        th_inst = PROVE_HYP(eq_th, th_inst)
+        nf_eq = BETA_NORM(th_inst._concl)
+        if not aconv(rand(nf_eq._concl), th_inst._concl):
+            th_inst = EQ_MP(nf_eq, th_inst)
+        return th_inst
+
+    def _mp_modulo_lazy_lets(self, th_imp, th_arg):
+        """``MP(th_imp, th_arg)`` with conversion-on-match fallback.
+
+        If the antecedent shape and ``th_arg``'s conclusion don't ``aconv``
+        directly, try to align them by unfolding lazy lets in either
+        direction. Used by ``by`` and ``by_select``'s MP steps so the user
+        can mix folded/unfolded facts in the same MP chain.
+        """
+        try:
+            return MP(th_imp, th_arg)
+        except HolError:
+            pass
+        # th_imp must be of shape a ==> b. Pull out a.
+        c = th_imp._concl
+        if not (isinstance(c, Comb) and isinstance(c.fun, Comb)
+                and isinstance(c.fun.fun, Const) and c.fun.fun.name == "==>"):
+            raise HolError(
+                "MP: antecedent not a ==> shape\n"
+                f"  th_imp: {pp(c)}\n"
+                f"  th_arg: {pp(th_arg._concl)}")
+        ant = c.fun.arg
+        lifted = self._match_modulo_lazy_lets(ant, th_arg)
+        if lifted is None:
+            raise HolError(
+                "MP: antecedent shape does not match argument\n"
+                f"  expected: {pp(ant)}\n"
+                f"  got:      {pp(th_arg._concl)}")
+        return MP(th_imp, lifted)
+
+    def _match_modulo_lazy_lets(self, target, th):
+        """If ``aconv(target, th._concl)`` fails, try to align them by
+        unfolding every lazy-let application in both terms.
+
+        Uses the under-binder-tolerant ``_unfold_lazy_lets_in_term`` rather
+        than the engine's ``REWRITE_CONV``, which would refuse to descend
+        under binders for hyp-bearing rules.
+
+        Returns ``th'`` with ``aconv(concl(th'), target)`` on success,
+        else ``None``.
+        """
+        carriers = self._lazy_let_carriers()
+        if not carriers:
+            return None
+        try:
+            target_eq = self._unfold_lazy_lets_in_term(target, carriers)
+            th_eq = self._unfold_lazy_lets_in_term(th._concl, carriers)
+        except HolError:
+            return None
+        if not aconv(rand(target_eq._concl), rand(th_eq._concl)):
+            return None
+        th_at_nf = EQ_MP(th_eq, th)
+        return EQ_MP(SYM(target_eq), th_at_nf)
+
+    def _discharge_lazy_lets(self, frame, th):
+        """Discharge each lazy-let hypothesis on ``th`` from ``frame``.
+
+        For every lazy let ``R(b1...bn) := body`` registered on ``frame``,
+        substitute ``R := \\b1...bn. body`` in ``th`` and ``PROVE_HYP`` the
+        resulting (now trivially provable) equation hypothesis. The
+        conclusion is BETA-normalized to clean up redexes left behind by
+        the substitution.
+
+        Lazy lets registered on parent frames are *not* discharged here —
+        they go out with the corresponding parent frame.
+        """
+        if not frame.lazy_lets:
+            return th
+        # Process lets in reverse registration order: a later let's body
+        # may reference an earlier carrier, so discharging the earlier
+        # one first would mutate the later let's hyp into a shape that no
+        # longer matches the eq_th we synthesize from ``lz.body``.
+        for lz in reversed(list(frame.lazy_lets.values())):
+            abs_body = lz.body
+            for bv in reversed(lz.bvars):
+                abs_body = mk_abs(bv, abs_body)
+            # Substitute carrier := abs_body in th. Beta-redexes appear at
+            # every former carrier-application site, plus inside the local
+            # equation hypothesis (now ``!b1..bn. (\b1..bn. body) b1..bn = body``).
+            th = INST([(abs_body, lz.carrier)], th)
+            # Build the hypothesis-proof: |- !b1..bn. (\b1..bn. body) b1..bn = body
+            # via BETA_NORM on the LHS chain, then GEN over each bvar.
+            applied = abs_body
+            for bv in lz.bvars:
+                applied = mk_comb(applied, bv)
+            eq_th = BETA_NORM(applied)            # |- (abs_body) b1..bn = body
+            for bv in reversed(lz.bvars):
+                eq_th = GEN(bv, eq_th)
+            th = PROVE_HYP(eq_th, th)
+        # Clean up residual redexes in the conclusion left by INST.
+        nf_eq = BETA_NORM(th._concl)              # |- concl = beta-normal-concl
+        if not aconv(rand(nf_eq._concl), th._concl):
+            th = EQ_MP(nf_eq, th)
+        return th
+
     def _parse(self, s):
         return parse(s, _env_bindings=self._scope_env())
 
-    def _lookup_let(self, name):
-        """Find a `LetDef` by name in scope (inner frames shadow outer)."""
+    def _lookup_lazy_let(self, name):
+        """Find a `LazyLetDef` by name in scope (inner frames shadow outer)."""
         for fr in reversed(self._frames):
-            ld = fr.let_env.get(name)
+            ld = fr.lazy_lets.get(name)
             if ld is not None:
                 return ld
         return None
+
+    def _register_lazy_let(self, name, bvars, body):
+        """Register a lazy-let binding on the current frame.
+
+        Builds a fresh carrier ``Var name : t1 -> ... -> tn -> body_ty`` and
+        the local equation theorem
+        ``[!b1...bn. name b1..bn = body] |- !b1...bn. name b1..bn = body``.
+        Stores both in a ``LazyLetDef`` keyed under ``name`` in the current
+        frame's ``lazy_lets`` map.
+
+        Re-registering the same name on the same frame raises.
+        """
+        if name in self._cur.lazy_lets:
+            raise HolError(
+                f"_register_lazy_let: {name!r} already registered on frame")
+        ty = type_of(body)
+        for bv in reversed(bvars):
+            ty = mk_fun_ty(bv.ty, ty)
+        carrier = Var(name, ty)
+        applied = carrier
+        for bv in bvars:
+            applied = mk_comb(applied, bv)
+        eq_term = mk_eq(applied, body)
+        for bv in reversed(bvars):
+            eq_term = mk_forall(bv, eq_term)
+        eq_th = ASSUME(eq_term)
+        self._cur.lazy_lets[name] = LazyLetDef(name, bvars, body, carrier, eq_th)
+        return self._cur.lazy_lets[name]
 
     def unfold(self, def_th, *args):
         """Apply a definition equation to argument terms.
@@ -161,6 +423,35 @@ class Proof:
         from tactics import UNFOLD
         resolved = [self._parse(a) if isinstance(a, str) else a for a in args]
         return UNFOLD(def_th, *resolved)
+
+    def unfold_let(self, name, *args):
+        """Produce the local equation for a lazy let, specialized at args.
+
+        Returns ``|- name a1...an = body[bvars := ai]`` (with the local-
+        equation hypothesis still attached; discharged on frame close).
+        Mirrors ``p.unfold`` for global definitions: the result is an
+        equation that downstream code threads through ``EQ_MP`` /
+        ``TRANS`` / ``by_eq_mp`` / ``REWRITE_RULE``.
+
+        Each ``arg`` may be a kernel term or a string parsed in the
+        current scope.
+        """
+        lz = self._lookup_lazy_let(name)
+        if lz is None:
+            raise HolError(f"unfold_let: no lazy let named {name!r} in scope")
+        if len(args) != len(lz.bvars):
+            raise HolError(
+                f"unfold_let: {name!r} expects {len(lz.bvars)} args, "
+                f"got {len(args)}")
+        th = lz.eq_th
+        for a in args:
+            a_t = self._parse(a) if isinstance(a, str) else a
+            th = SPEC(a_t, th)
+        return th
+
+    def fold_let(self, name, *args):
+        """Inverse of ``unfold_let``: returns ``|- body = name a1...an``."""
+        return SYM(self.unfold_let(name, *args))
 
     _LABEL_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z_0-9]*)\s*:\s*(.+)$", re.DOTALL)
 
@@ -280,19 +571,25 @@ class Proof:
             self._cur.vars_added.append(v)
 
     def let(self, spec, types=None):
-        """Register a schematic abbreviation in the current frame.
+        """Register a local abbreviation in the current frame
+        (Isabelle-style ``define``).
 
-        Spec form: ``"NAME(arg1, arg2, ...) := body"``; each arg may carry an
-        optional type annotation (``arg:ty``). The body parses in the
-        current scope extended with the placeholders. Subsequent occurrences
-        of ``NAME t1 ... tn`` in any term passed to ``goal`` / ``have`` /
-        ``thus`` / ``assume`` / ``choose`` / ``fix`` desugar to
-        ``body[bvars := ts]`` at parse time -- no kernel ``Abs`` is
-        materialized, so downstream tactics see ground terms.
+        Spec form: ``"NAME(arg1, arg2, ...) := body"``; each arg may carry
+        an optional type annotation (``arg:ty``). The body parses in the
+        current scope extended with the placeholders.
 
-        ``types``: optional ``{name: hol_type}`` mapping that supplies
-        types for bvars whose desired type is not registered as a parser
-        alias (e.g. fresh tyvars or function types). Also extends the
+        Mechanics: a fresh kernel ``Var`` of the appropriate function type
+        is introduced as the *carrier*, plus a local equation
+        ``[!args. NAME args = body] |- !args. NAME args = body``. Goals
+        and facts mention ``NAME`` in folded form; use ``p.unfold_let`` /
+        ``p.fold_let`` to convert to/from the body. The local-equation
+        hypothesis is discharged on frame close (carrier substituted with
+        ``\\args. body``, BETA-normalized) so the resulting theorem has
+        no lazy-let baggage and never names ``NAME`` outside the frame.
+
+        ``types``: optional ``{name: hol_type}`` mapping supplying types
+        for bvars whose desired type is not registered as a parser alias
+        (e.g. fresh tyvars or function types). Also extends the
         body-parsing env so other free names in ``body`` can be typed.
 
         Lifetime: the binding dies with the current frame (same as
@@ -355,12 +652,21 @@ class Proof:
         except ParseError as ex:
             raise HolError(f"let: cannot parse body: {ex}") from ex
 
-        self._cur.let_env[name] = LetDef(name, bvars, body)
+        self._register_lazy_let(name, bvars, body)
 
     def split_conj(self, ref, *labels):
         """Split a right-associated conjunction fact ``h : a /\\ b /\\ ... /\\ z``
         into the supplied labels, registering each conjunct as its own fact."""
         th = ref if isinstance(ref, thm) else self._resolve_fact(ref)
+        # If the fact's top-level isn't already a conjunction (e.g., a
+        # folded lazy-let application whose body is a conj), unfold lazy
+        # lets to expose it. Avoids unfolding when not needed so other
+        # downstream facts that prefer folded shape are unaffected.
+        c = th._concl
+        if not (isinstance(c, Comb) and isinstance(c.fun, Comb)
+                and isinstance(c.fun.fun, Const)
+                and c.fun.fun.name == "/\\"):
+            th = self._unfold_fact(th)
         cur = th
         n = len(labels)
         for i, lbl in enumerate(labels):
@@ -504,7 +810,16 @@ class Proof:
                 expected = parse(eq_check, _env_bindings=env)
             except ParseError as ex:
                 raise HolError(f"choose: cannot parse equation spec: {ex}") from ex
-            if not aconv(expected, body_at_w):
+            ok = aconv(expected, body_at_w)
+            if not ok:
+                # Try matching modulo lazy lets (the user wrote a folded
+                # body whose unfolded form equals body_at_w, or vice versa).
+                expected_unfold = self._unfold_lazy_lets_in_term(expected)
+                body_unfold = self._unfold_lazy_lets_in_term(body_at_w)
+                if aconv(rand(expected_unfold._concl),
+                         rand(body_unfold._concl)):
+                    ok = True
+            if not ok:
                 raise HolError(
                     "choose: equation spec doesn't match witness body\n"
                     f"  expected: {pp(body_at_w)}\n"
@@ -692,15 +1007,34 @@ class _Have:
 
     def _finish(self, th):
         if not aconv(concl(th), self.term):
-            raise HolError(
-                "have: justification produced wrong conclusion\n"
-                f"  expected: {pp(self.term)}\n"
-                f"  got:      {pp(concl(th))}")
+            # Conversion-on-match: if the mismatch is between a folded
+            # let-application and its body, reconcile via the lazy-let
+            # equation set.
+            th_lifted = self.p._match_modulo_lazy_lets(self.term, th)
+            if th_lifted is None:
+                raise HolError(
+                    "have: justification produced wrong conclusion\n"
+                    f"  expected: {pp(self.term)}\n"
+                    f"  got:      {pp(concl(th))}")
+            th = th_lifted
         label = self.label or self.p._fresh_label("h")
         self.p._register_fact(label, th)
         if self.is_thus:
             cur = self.p._cur
-            if cur.goal is None or not aconv(cur.goal, self.term):
+            ok = cur.goal is not None and aconv(cur.goal, self.term)
+            if not ok and cur.goal is not None:
+                # Lazy-let-aware match: both goal and thus-term may carry
+                # folded carrier applications; unfold both and re-check.
+                g_eq = self.p._unfold_lazy_lets_in_term(cur.goal)
+                t_eq = self.p._unfold_lazy_lets_in_term(self.term)
+                if aconv(rand(g_eq._concl), rand(t_eq._concl)):
+                    ok = True
+                    # Pivot th's concl from self.term shape to cur.goal shape
+                    # so the frame's recorded result has the same shape as
+                    # the original goal.
+                    pivot = TRANS(g_eq, SYM(t_eq))   # |- goal = thus_term
+                    th = EQ_MP(SYM(pivot), th)
+            if not ok:
                 raise HolError(
                     "thus: term does not match current goal\n"
                     f"  goal: {pp(cur.goal) if cur.goal is not None else 'None'}\n"
@@ -729,8 +1063,16 @@ class _Have:
         if isinstance(justification, (str, int)):
             justification = self.p._resolve_fact(justification)
         if isinstance(justification, thm):
-            resolved = [self.p._resolve_fact_or_term(a) for a in args]
-            return self._finish(MP_LIST(justification, resolved))
+            # Auto-unfold a folded justification (e.g. ``R c h 1 m`` from a
+            # lazy let) so subsequent SPECs have a forall to peel.
+            th = self.p._unfold_fact(justification)
+            for a in args:
+                resolved = self.p._resolve_fact_or_term(a)
+                if isinstance(resolved, thm):
+                    th = self.p._mp_modulo_lazy_lets(th, resolved)
+                else:
+                    th = SPEC(resolved, th)
+            return self._finish(th)
         if callable(justification):
             resolved = [self.p._resolve_fact_or_term(a) for a in args]
             return self._finish(justification(*resolved))
@@ -774,22 +1116,24 @@ class _Have:
         """
         p = self.p
         th = axiom if isinstance(axiom, thm) else p._resolve_fact(axiom)
+        # Auto-unfold the axiom: a folded lazy-let fact like ``R c h 1 m``
+        # is lifted to its HO body so the SPEC chain finds a forall.
+        th = p._unfold_fact(th)
         for a in args:
             if isinstance(a, str):
-                ld = p._lookup_let(a)
-                if ld is not None:
-                    abs_term = ld.body
-                    for bv in reversed(ld.bvars):
-                        abs_term = mk_abs(bv, abs_term)
-                    th = BETA_RULE(SPEC(abs_term, th))
+                lz = p._lookup_lazy_let(a)
+                if lz is not None:
+                    # Lazy let: SPEC the HO axiom at the carrier ``Var``
+                    # directly. No Abs materialization, no BETA needed.
+                    th = SPEC(lz.carrier, th)
                     continue
                 if a in p._facts:
-                    th = MP(th, p._facts[a])
+                    th = p._mp_modulo_lazy_lets(th, p._facts[a])
                     continue
                 th = SPEC(p._parse(a), th)
                 continue
             if isinstance(a, thm):
-                th = MP(th, a)
+                th = p._mp_modulo_lazy_lets(th, a)
                 continue
             th = SPEC(a, th)
         return self._finish(th)
@@ -894,6 +1238,15 @@ class _Have:
         # Direct existential: ?v. body.
         if (isinstance(target, Comb) and isinstance(target.fun, Const)
                 and target.fun.name == "?" and isinstance(target.arg, Abs)):
+            # The expected fact shape is ``P[witness/v]``. If the supplied
+            # fact is in folded lazy-let form (or vice versa), align it
+            # via conversion-on-match before EXISTS.
+            from tactics import _subst_term
+            expected = _subst_term(target.arg.bvar, witness_t, target.arg.body)
+            if not aconv(fact_th._concl, expected):
+                lifted = p._match_modulo_lazy_lets(expected, fact_th)
+                if lifted is not None:
+                    fact_th = lifted
             return self._finish(EXISTS(target.arg, witness_t, fact_th))
 
         # Registered relation a R b: unfold, EXISTS, fold back.
@@ -938,7 +1291,18 @@ class _Have:
                 return DISJ1(th, q_part)
             return DISJ2(p_part, build(q_part, th))
 
-        return self._finish(build(target, fact_th))
+        try:
+            return self._finish(build(target, fact_th))
+        except HolError:
+            # Fallback: target may be a folded lazy-let application whose
+            # body is the disjunction. Unfold, build there, fold back.
+            unfold_eq = self.p._unfold_lazy_lets_in_term(target)
+            target_un = rand(unfold_eq._concl)
+            if aconv(target_un, target):
+                raise
+            th_un = build(target_un, fact_th)
+            th = EQ_MP(SYM(unfold_eq), th_un)
+            return self._finish(th)
 
     def by_ac(self, op, assoc, comm):
         """AC_PROVE under ``(op, assoc, comm)`` for the (equation) have-term."""
@@ -1082,8 +1446,13 @@ class _SubFrameCtx:
             raise HolError(
                 f"{self.kind}: block did not discharge sub-goal via thus")
         th = fr.result
+        # See note in `proof()` decorator: DISCH first to clear out
+        # carrier-mentioning assume-hyps, then discharge lazy lets so the
+        # equation hyp is gone before GEN tries to ABS over fix-vars,
+        # then GEN.
         for label, term in reversed(fr.hyps_added):
             th = DISCH(term, th)
+        th = self.p._discharge_lazy_lets(fr, th)
         for v in reversed(fr.vars_added):
             th = GEN(v, th)
         self.p._drop_facts(fr.facts_added)
@@ -1131,6 +1500,7 @@ class _InductionCtx:
         forall_th = INDUCT_PROVE(self.var, self.body, d["base_th"],
                                   lambda IH: d["step_th"])
         body_th = forall_th if self.peel_forall else SPEC(self.var, forall_th)
+        body_th = self.p._discharge_lazy_lets(fr, body_th)
         self.p._drop_facts(fr.facts_added)
         parent = self.p._cur
         if parent.goal is None or not aconv(parent.goal, body_th._concl):
@@ -1242,6 +1612,7 @@ class _CasesCtx:
             missing = [pp(leaves[i]) for i, s in enumerate(slots) if s is None]
             raise HolError(f"cases_on: missing case for {missing}")
         result = _build_disj_cases(self.or_th, slots)
+        result = self.p._discharge_lazy_lets(fr, result)
         self.p._drop_facts(fr.facts_added)
         if not aconv(self.target, result._concl):
             raise HolError(
@@ -1267,8 +1638,16 @@ def proof(fn):
         raise HolError(
             f"proof({fn.__name__}): no result -- did you forget thus or close a block?")
     th = fr.result
+    # Order matters:
+    # 1. DISCH first so any user-``assume``d hyps that mention the lazy-let
+    #    carrier move out of ``_asl`` and into the conclusion; the ensuing
+    #    INST in discharge can BETA-clean them.
+    # 2. Discharge lazy lets next so the equation hyp (and any free fix-var
+    #    appearing in it) is gone before GEN tries to ABS over those vars.
+    # 3. GEN last over fix-vars.
     for label, term in reversed(fr.hyps_added):
         th = DISCH(term, th)
+    th = p._discharge_lazy_lets(fr, th)
     for v in reversed(fr.vars_added):
         th = GEN(v, th)
     return th
@@ -1322,11 +1701,12 @@ def _selftest():
         f"SATZ_17 mismatch:\n  new: {pp(concl(SATZ_17_NEW))}\n  old: {pp(concl(nat.SATZ_17))}"
     assert SATZ_17_NEW._asl == nat.SATZ_17._asl
 
-    # ---- p.let smoke test ----------------------------------------------
-    from fusion import REFL, mk_var
+    # ---- p.let smoke tests (Isabelle-style) ----------------------------
+    from fusion import mk_var
     from num import ONE, num_ty
 
-    # (1) Basic round-trip: `M x` parses to body with x substituted.
+    # (1) Basic round-trip via the lazy let: ``M 1`` (folded) is bridged
+    # to ``1 = 1`` (REFL) through conversion-on-match in _finish.
     @proof
     def LET_REFL(p):
         p.goal("1 = 1")
@@ -1334,36 +1714,16 @@ def _selftest():
         p.thus("M 1").by_thm(REFL(ONE))
     assert aconv(concl(LET_REFL), parse("1 = 1"))
 
-    # (2) Let-name in have-term, body in scope of fix-vars, multi-use.
+    # (2) Let-name in have-term, body closes over fix-var 'a'.
     @proof
     def LET_FIX(p):
         p.goal("!a. a = a")
         p.fix("a")
-        p.let("M(x) := x = a")        # body closes over fix-var 'a'
+        p.let("M(x) := x = a")
         p.thus("M a").by_thm(REFL(mk_var("a", num_ty)))
     assert aconv(concl(LET_FIX), parse("!a. a = a"))
 
-    # (3) Capture-avoiding substitution: body `!n. n + x = n + x` substituted
-    # at `M (n + 1)` must not capture the outer `n`. Verify by reading the
-    # parsed term directly via _scope_env.
-    p = Proof()
-    p._cur.let_env["M"] = LetDef(
-        "M", [mk_var("x", num_ty)],
-        parse("!n. n + x = n + x", x=num_ty))
-    parsed = parse("M (n + 1)", _env_bindings=p._scope_env())
-    expected = parse("!m. m + (n + 1) = m + (n + 1)")
-    assert aconv(parsed, expected), \
-        f"capture-avoiding subst broke: got {pp(parsed)}, expected {pp(expected)}"
-
-    # (4) Bare let usage is rejected.
-    try:
-        parse("M = M", _env_bindings=p._scope_env())
-    except ParseError:
-        pass
-    else:
-        raise AssertionError("expected ParseError for bare let usage")
-
-    # (5) Collision with fix-var refused.
+    # (3) Collision with fix-var refused.
     pp_proof = Proof()
     pp_proof.goal("!x. x = x")
     pp_proof.fix("x")
@@ -1374,9 +1734,8 @@ def _selftest():
     else:
         raise AssertionError("expected HolError for let/fix-var collision")
 
-    # ---- multi-arg p.let smoke tests ------------------------------------
-    # (M1) Two-arg let: ``R(a, b) := a + b = b + a`` parses ``R 1 1`` to the
-    # body with both args substituted.
+    # (4) Multi-arg let: ``R(a, b) := a + b = b + a`` proves
+    # ``R 1 1`` from REFL of ``1 + 1`` via conversion-on-match.
     @proof
     def LET_MULTI(p):
         p.goal("1 + 1 = 1 + 1")
@@ -1384,36 +1743,13 @@ def _selftest():
         p.thus("R 1 1").by_thm(REFL(parse("1 + 1")))
     assert aconv(concl(LET_MULTI), parse("1 + 1 = 1 + 1"))
 
-    # (M2) Three-arg let, mixed application shapes -- ``S 1 1 1`` and
-    # ``S (1 + 1) 1 1`` both substitute correctly.
-    p_m2 = Proof()
-    p_m2._cur.let_env["S"] = LetDef(
-        "S", [mk_var("a", num_ty), mk_var("b", num_ty), mk_var("c", num_ty)],
-        parse("a + b = c"))
-    parsed3 = parse("S 1 1 (1 + 1)", _env_bindings=p_m2._scope_env())
-    expected3 = parse("1 + 1 = 1 + 1")
-    assert aconv(parsed3, expected3), \
-        f"3-arg let: got {pp(parsed3)}, expected {pp(expected3)}"
-
-    # (M3) Capture-avoiding multi-arg substitution: body ``!u. u + a = u + b``
-    # at ``R (u + 1) u`` must rename the bound ``u`` so the args don't capture.
-    p_m3 = Proof()
-    p_m3._cur.let_env["R"] = LetDef(
-        "R", [mk_var("a", num_ty), mk_var("b", num_ty)],
-        parse("!u. u + a = u + b"))
-    parsed_cap = parse("R (u + 1) u", _env_bindings=p_m3._scope_env())
-    expected_cap = parse("!w. w + (u + 1) = w + u")
-    assert aconv(parsed_cap, expected_cap), \
-        f"multi-arg capture-avoidance: got {pp(parsed_cap)}, expected {pp(expected_cap)}"
-
-    # (M4) by_select with a multi-arg let: trivial 2-ary HO axiom
-    # ``|- !Q. Q 1 1 ==> Q 1 1``, applied at ``R(a, b) := a = b``.
-    from fusion import mk_fun_ty as _mk_fun_ty, bool_ty as _bool_ty
-    from tactics import GEN as _L_GEN, DISCH as _L_DISCH
-    Q2_ty = _mk_fun_ty(num_ty, _mk_fun_ty(num_ty, _bool_ty))
+    # (5) by_select with a multi-arg let: trivial 2-ary HO axiom
+    # ``|- !Q. Q 1 1 ==> Q 1 1`` at ``R(a, b) := a = b``.
+    from fusion import bool_ty
+    Q2_ty = mk_fun_ty(num_ty, mk_fun_ty(num_ty, bool_ty))
     Q2_var = mk_var("Q", Q2_ty)
     Q2_at_11 = mk_comb(mk_comb(Q2_var, ONE), ONE)
-    trivial_HO_2 = _L_GEN(Q2_var, _L_DISCH(Q2_at_11, ASSUME(Q2_at_11)))
+    trivial_HO_2 = GEN(Q2_var, DISCH(Q2_at_11, ASSUME(Q2_at_11)))
     @proof
     def BY_SELECT_MULTI(p):
         p.goal("1 = 1")
@@ -1422,19 +1758,17 @@ def _selftest():
         p.thus("R 1 1").by_select(trivial_HO_2, "R", "R_11")
     assert aconv(concl(BY_SELECT_MULTI), parse("1 = 1"))
 
-    # (M5) Bad spec: missing comma argument list rejected.
-    p_m5 = Proof()
+    # (6) Bad spec rejected.
     try:
-        p_m5.let("R(a b) := a = b")
+        Proof().let("R(a b) := a = b")
     except HolError:
         pass
     else:
         raise AssertionError("expected HolError for malformed multi-arg spec")
 
-    # (M6) Duplicate argument names rejected.
-    p_m6 = Proof()
+    # (7) Duplicate argument names rejected.
     try:
-        p_m6.let("R(a, a) := a = a")
+        Proof().let("R(a, a) := a = a")
     except HolError:
         pass
     else:
@@ -1442,7 +1776,6 @@ def _selftest():
 
     # ---- p.unfold smoke test --------------------------------------------
     from num import SUC_DEF
-    from fusion import mk_fun_ty, bool_ty
     # Unary def: SUC_DEF : |- SUC = \n. mk_num (IND_SUC (dest_num n)).
     x_v = mk_var("x", num_ty)
     expected_unary = BETA_RULE(AP_THM(SUC_DEF, x_v))
@@ -1469,10 +1802,9 @@ def _selftest():
     # Build a tiny HO lemma `|- !P. P 1 ==> P 1` and apply by_select with a
     # let-defined predicate plus a witness fact, verifying the SPEC + BETA_RULE
     # + MP chain produces the right theorem.
-    from tactics import GEN as L_GEN, DISCH as L_DISCH
     P_var = mk_var("P", mk_fun_ty(num_ty, bool_ty))
     P_1   = mk_comb(P_var, ONE)
-    trivial_HO = L_GEN(P_var, L_DISCH(P_1, ASSUME(P_1)))   # |- !P. P 1 ==> P 1
+    trivial_HO = GEN(P_var, DISCH(P_1, ASSUME(P_1)))   # |- !P. P 1 ==> P 1
 
     @proof
     def BY_SELECT_TEST(p):
@@ -1481,6 +1813,156 @@ def _selftest():
         p.have("M_1: M 1").by_thm(REFL(ONE))
         p.thus("M 1").by_select(trivial_HO, "M", "M_1")
     assert aconv(concl(BY_SELECT_TEST), parse("1 = 1"))
+
+    # ---- lazy-let registry smoke test -----------------------------------
+    # Direct call to _register_lazy_let: confirm carrier is a fresh Var of
+    # the right function type, equation has the expected shape, and lookup
+    # finds the registered binding.
+    p_lazy = Proof()
+    a_v = Var("a", num_ty)
+    body_aa = mk_eq(a_v, a_v)                    # body: a = a (bool)
+    ld = p_lazy._register_lazy_let("MX", [a_v], body_aa)
+    # Carrier: Var named "MX" with type num -> bool.
+    assert isinstance(ld.carrier, Var) and ld.carrier.name == "MX"
+    assert ld.carrier.ty == mk_fun_ty(num_ty, bool_ty)
+    # Equation conclusion: !a. MX a = (a = a).
+    expected_eq = mk_forall(a_v, mk_eq(mk_comb(ld.carrier, a_v), body_aa))
+    assert aconv(ld.eq_th._concl, expected_eq), \
+        f"lazy-let eq mismatch: {pp(ld.eq_th._concl)} vs {pp(expected_eq)}"
+    # Equation hypothesis: same as conclusion (introduced via ASSUME).
+    assert len(ld.eq_th._asl) == 1 and aconv(ld.eq_th._asl[0], expected_eq), \
+        f"lazy-let hyp mismatch: {ld.eq_th._asl}"
+    # Lookup: scope chain finds it.
+    assert p_lazy._lookup_lazy_let("MX") is ld
+    assert p_lazy._lookup_lazy_let("missing") is None
+    # Re-registration on the same frame raises.
+    try:
+        p_lazy._register_lazy_let("MX", [a_v], body_aa)
+    except HolError:
+        pass
+    else:
+        raise AssertionError("expected HolError on duplicate lazy-let register")
+    # Multi-arg: MX2(a, b) := a = b.
+    b_v = Var("b", num_ty)
+    body_ab = mk_eq(a_v, b_v)
+    ld2 = p_lazy._register_lazy_let("MX2", [a_v, b_v], body_ab)
+    expected_ty2 = mk_fun_ty(num_ty, mk_fun_ty(num_ty, bool_ty))
+    assert ld2.carrier.ty == expected_ty2
+    expected_eq2 = mk_forall(a_v, mk_forall(b_v,
+        mk_eq(mk_comb(mk_comb(ld2.carrier, a_v), b_v), body_ab)))
+    assert aconv(ld2.eq_th._concl, expected_eq2), \
+        f"lazy-let multi-arg eq mismatch: {pp(ld2.eq_th._concl)}"
+
+    # ---- lazy by_select smoke test --------------------------------------
+    # Register a lazy let MZ(x) := x = x directly, then verify by_select
+    # with "MZ" produces a folded ``MZ 1`` theorem (rather than an unfolded
+    # ``1 = 1``).
+    p_bsl = Proof()
+    a_v_l = Var("x", num_ty)
+    body_xx = mk_eq(a_v_l, a_v_l)
+    lz = p_bsl._register_lazy_let("MZ", [a_v_l], body_xx)
+    p_bsl.goal("MZ 1")
+    # MZ 1 = (1 = 1) via SPEC; EQ_MP(SYM(...), REFL 1) gives |- MZ 1 (with
+    # the local-equation hypothesis still attached).
+    eq_at_1 = SPEC(ONE, lz.eq_th)
+    mz_1_th = EQ_MP(SYM(eq_at_1), REFL(ONE))
+    p_bsl.have("MZ_1: MZ 1").by_thm(mz_1_th)
+    p_bsl.thus("MZ 1").by_select(trivial_HO, "MZ", "MZ_1")
+    # The frame's result is the folded ``MZ 1`` theorem; verify shape.
+    assert p_bsl._cur.result is not None
+    assert aconv(p_bsl._cur.result._concl, parse("MZ 1",
+                                                  _env_bindings={"MZ": lz.carrier})), \
+        f"lazy by_select: unexpected concl {pp(p_bsl._cur.result._concl)}"
+
+    # ---- p.unfold_let / p.fold_let smoke test ---------------------------
+    # Register MN(x) := x + x; verify unfold_let yields |- MN 1 = 1 + 1.
+    p_ul = Proof()
+    x_v_u = Var("x", num_ty)
+    plus_x_x = parse("x + x", _env_bindings={"x": x_v_u})
+    lz_n = p_ul._register_lazy_let("MN", [x_v_u], plus_x_x)
+    eq_at_one = p_ul.unfold_let("MN", ONE)
+    expected = mk_eq(mk_comb(lz_n.carrier, ONE), parse("1 + 1"))
+    assert aconv(eq_at_one._concl, expected), \
+        f"unfold_let: {pp(eq_at_one._concl)} vs {pp(expected)}"
+    # String arg form (parsed in current scope).
+    p_ul.goal("MN 1 = 1 + 1")
+    eq_str = p_ul.unfold_let("MN", "1")
+    assert aconv(eq_str._concl, expected)
+    # Wrong arity raises.
+    try:
+        p_ul.unfold_let("MN", ONE, ONE)
+    except HolError:
+        pass
+    else:
+        raise AssertionError("expected HolError for unfold_let arity mismatch")
+    # Missing name raises.
+    try:
+        p_ul.unfold_let("nope", ONE)
+    except HolError:
+        pass
+    else:
+        raise AssertionError("expected HolError for unfold_let missing name")
+    # fold_let is the inverse equation.
+    eq_folded = p_ul.fold_let("MN", ONE)
+    expected_fold = mk_eq(parse("1 + 1"), mk_comb(lz_n.carrier, ONE))
+    assert aconv(eq_folded._concl, expected_fold), \
+        f"fold_let: {pp(eq_folded._concl)} vs {pp(expected_fold)}"
+
+    # ---- lazy let end-to-end smoke test --------------------------------
+    # A complete @proof using a lazy let. Frame-close discharge substitutes
+    # the carrier away, leaving the unfolded equivalent and no dangling hyp.
+    @proof
+    def LAZY_LET_END2END(p):
+        p.let("MK(x) := x = x")
+        p.goal("MK 1")
+        p.thus("MK 1").by_eq_mp(p.fold_let("MK", ONE), REFL(ONE))
+    assert LAZY_LET_END2END._asl == [], \
+        f"lazy let: dangling hyp on result: {LAZY_LET_END2END._asl}"
+    assert aconv(LAZY_LET_END2END._concl, parse("1 = 1")), \
+        f"lazy let: unexpected concl {pp(LAZY_LET_END2END._concl)}"
+
+    # ---- conversion-on-match smoke tests -------------------------------
+    # Folded target, unfolded justification: the fallback in _finish should
+    # reconcile ``MK 1`` (folded have-term) with ``|- 1 = 1`` (REFL).
+    @proof
+    def MATCH_FOLDED_TGT(p):
+        p.let("MK(x) := x = x")
+        p.goal("MK 1")
+        p.thus("MK 1").by_thm(REFL(ONE))
+    assert MATCH_FOLDED_TGT._asl == []
+    assert aconv(MATCH_FOLDED_TGT._concl, parse("1 = 1"))
+
+    # Unfolded target, folded justification: by_select on the carrier
+    # gives folded ``MK 1``; the have-term ``1 = 1`` is unfolded. The
+    # conversion-on-match in _finish lifts the theorem.
+    @proof
+    def MATCH_UNFOLDED_TGT(p):
+        p.let("MK(x) := x = x")
+        p.goal("1 = 1")
+        p.have("MK_1: MK 1").by_eq_mp(p.fold_let("MK", ONE), REFL(ONE))
+        p.thus("1 = 1").by_thm(p.fact("MK_1"))
+    assert MATCH_UNFOLDED_TGT._asl == []
+    assert aconv(MATCH_UNFOLDED_TGT._concl, parse("1 = 1"))
+
+    # Non-terminating-rewrite guard: a (synthetic) self-referential lazy
+    # let must not loop; conversion-on-match returns failure cleanly. The
+    # body here is ``M y`` itself (rule ``M y -> M y`` — same size, fires
+    # repeatedly until the rewriter's 256-fire guard trips). A growing
+    # body (e.g. ``M y = M y``) would blow the term size up exponentially
+    # before that guard fires; for an infrastructure-level loop check the
+    # same-size form is sufficient.
+    p_loop = Proof()
+    yv = Var("y", num_ty)
+    M_carrier = Var("M", mk_fun_ty(num_ty, bool_ty))
+    self_ref_body = mk_comb(M_carrier, yv)               # body = M y
+    eq_term_loop = mk_forall(yv,
+        mk_eq(mk_comb(M_carrier, yv), self_ref_body))    # !y. M y = M y
+    p_loop._cur.lazy_lets["M"] = LazyLetDef(
+        "M", [yv], self_ref_body, M_carrier, ASSUME(eq_term_loop))
+    th_dummy = REFL(ONE)                                 # |- 1 = 1
+    target_loop = parse("M 1", _env_bindings={"M": M_carrier})
+    assert p_loop._match_modulo_lazy_lets(target_loop, th_dummy) is None, \
+        "self-ref lazy let: match must fail cleanly"
 
 
 if __name__ == "__main__":

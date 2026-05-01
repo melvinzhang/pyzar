@@ -995,12 +995,15 @@ def SATZ_27(p):
     p.assume("hNonempty: ?n. N n")
     p.let("M(x) := !n. N n ==> x <= n")
 
-    # Step 1: M 1, i.e. !n. N n ==> 1 <= n.
-    with p.have("M_1: M 1").proof():
+    # Step 1: M 1, i.e. !n. N n ==> 1 <= n. Under the lazy let the
+    # sub-frame goal mentions ``M 1`` in folded form (not a forall), so
+    # we prove the unfolded body explicitly and refold via fold_let.
+    with p.have("M_1_body: !n. N n ==> 1 <= n").proof():
         p.fix("n")
         p.assume("hNn: N n")
         p.have("ge1: n >= 1").by(SATZ_24, "n")
         p.thus("1 <= n").by(SATZ_13, "n", "1", "ge1")
+    p.have("M_1: M 1").by_eq_mp(p.fold_let("M", ONE), "M_1_body")
 
     # Step 2: !y. N y ==> ~ M (y + 1).  _SATZ_27_NOT_M_SUCC is stated in the
     # unfolded form, which is exactly what ``M (y + 1)`` parses to via the let.
