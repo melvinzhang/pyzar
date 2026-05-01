@@ -84,6 +84,27 @@ def BETA_NORM(tm):
     return REFL(tm)
 
 
+def beta_after(eq):
+    """ |- a = (\\v. body) x   =>   |- a = body[x/v].
+
+    One BETA step at the rand of the equation. Composes with ``AP_THM`` to
+    walk a curried definition equation across its argument list. """
+    return TRANS(eq, BETA_CONV(rand(eq._concl)))
+
+
+def unfold_def_at(def_th, *args):
+    """ |- C = \\x1...xn. body   =>   |- C a1 ... an = body[ai/xi].
+
+    Per-argument ``AP_THM`` + ``BETA_CONV`` chain; the canonical way to
+    instantiate a connective definition (``AND_DEF``, ``OR_DEF``,
+    ``IMP_DEF``, ``NOT_DEF``, ``FORALL_DEF``, ``EXISTS_DEF``) at concrete
+    operands. """
+    eq = def_th
+    for a in args:
+        eq = beta_after(AP_THM(eq, a))
+    return eq
+
+
 # Symmetry of equality.
 
 def SYM(th):
@@ -119,9 +140,7 @@ def SPEC(t, th):
         raise HolError("SPEC: not a forall theorem")
     bvar = pred.bvar
     fdef = INST_TYPE([(bvar.ty, aty)], FORALL_DEF)
-    eq1 = AP_THM(fdef, pred)
-    eq2 = TRANS(eq1, BETA_CONV(rand(eq1._concl)))
-    pred_eq_lamT = EQ_MP(eq2, th)
+    pred_eq_lamT = EQ_MP(unfold_def_at(fdef, pred), th)
     appT = AP_THM(pred_eq_lamT, t)
     lhs_red = BETA_CONV(mk_comb(pred, t))
     rhs_red = BETA_CONV(rand(appT._concl))
@@ -137,9 +156,7 @@ def GEN(v, th):
     th_abs = ABS(v, th_eqT)
     pred = mk_abs(v, th._concl)
     fdef = INST_TYPE([(v.ty, aty)], FORALL_DEF)
-    eq1 = AP_THM(fdef, pred)
-    eq2 = TRANS(eq1, BETA_CONV(rand(eq1._concl)))
-    return EQ_MP(SYM(eq2), th_abs)
+    return EQ_MP(SYM(unfold_def_at(fdef, pred)), th_abs)
 
 
 # Conjunction.
@@ -151,28 +168,21 @@ def _bbb_var(name, avoid):
 def CONJ(th_p, th_q):
     r""" |- p, |- q   =>   |- p /\ q """
     p_t, q_t = th_p._concl, th_q._concl
-    eq1 = AP_THM(AND_DEF, p_t)
-    eq2 = TRANS(eq1, BETA_CONV(rand(eq1._concl)))
-    eq3 = AP_THM(eq2, q_t)
-    eq4 = TRANS(eq3, BETA_CONV(rand(eq3._concl)))
+    and_eq = unfold_def_at(AND_DEF, p_t, q_t)
     avoid = freesl(list(th_p._asl) + list(th_q._asl) + [p_t, q_t])
     fv = _bbb_var("f", avoid)
     eqT_p = EQT_INTRO(th_p)
     eqT_q = EQT_INTRO(th_q)
     th_fpq = MK_COMB(AP_TERM(fv, eqT_p), eqT_q)
     th_lam = ABS(fv, th_fpq)
-    return EQ_MP(SYM(eq4), th_lam)
+    return EQ_MP(SYM(and_eq), th_lam)
 
 
 def _CONJUNCT_proj(th, take_first):
     conj = th._concl
     p_t = rand(rator(conj))
     q_t = rand(conj)
-    eq1 = AP_THM(AND_DEF, p_t)
-    eq2 = TRANS(eq1, BETA_CONV(rand(eq1._concl)))
-    eq3 = AP_THM(eq2, q_t)
-    eq4 = TRANS(eq3, BETA_CONV(rand(eq3._concl)))
-    th_eq = EQ_MP(eq4, th)
+    th_eq = EQ_MP(unfold_def_at(AND_DEF, p_t, q_t), th)
     avoid = freesl(list(th._asl) + [p_t, q_t])
     a_v = variant(avoid, Var("a", bool_ty))
     b_v = variant(avoid + [a_v], Var("b", bool_ty))
@@ -204,10 +214,7 @@ def CONJUNCT2(th):
 
 def _imp_eq(p_t, q_t):
     r"""Build |- (p ==> q) = (p /\ q = p) from IMP_DEF."""
-    eq1 = AP_THM(IMP_DEF, p_t)
-    eq2 = TRANS(eq1, BETA_CONV(rand(eq1._concl)))
-    eq3 = AP_THM(eq2, q_t)
-    return TRANS(eq3, BETA_CONV(rand(eq3._concl)))
+    return unfold_def_at(IMP_DEF, p_t, q_t)
 
 def DISCH(p_t, th):
     """ asl |- q   =>   asl - {p}  |-  p ==> q """
@@ -244,16 +251,12 @@ def CONTR(tm, th_F):
 def NOT_ELIM(th):
     """ |- ~p   =>   |- p ==> F """
     p_t = rand(th._concl)
-    eq1 = AP_THM(NOT_DEF, p_t)
-    eq2 = TRANS(eq1, BETA_CONV(rand(eq1._concl)))
-    return EQ_MP(eq2, th)
+    return EQ_MP(unfold_def_at(NOT_DEF, p_t), th)
 
 def NOT_INTRO(th_imp_F):
     """ |- p ==> F   =>   |- ~p """
     p_t = rand(rator(th_imp_F._concl))
-    eq1 = AP_THM(NOT_DEF, p_t)
-    eq2 = TRANS(eq1, BETA_CONV(rand(eq1._concl)))
-    return EQ_MP(SYM(eq2), th_imp_F)
+    return EQ_MP(SYM(unfold_def_at(NOT_DEF, p_t)), th_imp_F)
 
 def EQF_INTRO(th_not):
     """ |- ~p   =>   |- p = F """
@@ -274,10 +277,7 @@ def EQF_ELIM(th):
 
 def _or_unfold(p_t, q_t):
     """ |- (p \\/ q) = (!r. (p==>r) ==> (q==>r) ==> r) """
-    eq1 = AP_THM(OR_DEF, p_t)
-    eq2 = TRANS(eq1, BETA_CONV(rand(eq1._concl)))
-    eq3 = AP_THM(eq2, q_t)
-    return TRANS(eq3, BETA_CONV(rand(eq3._concl)))
+    return unfold_def_at(OR_DEF, p_t, q_t)
 
 def DISJ1(th_p, q_t):
     """ |- p   =>   |- p \\/ q """
@@ -372,9 +372,7 @@ def EXISTS(pred, witness, th):
     th_disch = DISCH(forall_inner, th_q)
     th_gen   = GEN(q_var, th_disch)
     edef = INST_TYPE([(v_var.ty, aty)], EXISTS_DEF)
-    eq1 = AP_THM(edef, pred)
-    eq2 = TRANS(eq1, BETA_CONV(rand(eq1._concl)))
-    return EQ_MP(SYM(eq2), th_gen)
+    return EQ_MP(SYM(unfold_def_at(edef, pred)), th_gen)
 
 
 # ---------------------------------------------------------------------------
@@ -504,9 +502,7 @@ def ELIM_EX(pred_in, hyp_ex, body_fn):
     body_imp_gen = GEN(v_var, body_imp)                                # |- !v. body_v ==> body_v[w/v]
 
     edef = INST_TYPE([(v_var.ty, aty)], EXISTS_DEF)
-    eq1 = AP_THM(edef, pred_in)
-    eq2 = TRANS(eq1, BETA_CONV(rand(eq1._concl)))
-    th_hyp_unfold = EQ_MP(eq2, ASSUME(hyp_ex))                # {hyp_ex} |- !r. (!v. P v ==> r) ==> r
+    th_hyp_unfold = EQ_MP(unfold_def_at(edef, pred_in), ASSUME(hyp_ex))                # {hyp_ex} |- !r. (!v. P v ==> r) ==> r
     th_spec_r = SPEC(body_at_w, th_hyp_unfold)                # {hyp_ex} |- (!v. P v ==> body_at_w) ==> body_at_w
     bridge = BETA_CONV(pred_v)                                 # |- P v = body_v
     spec_body_imp = SPEC(v_var, body_imp_gen)                  # |- body_v ==> body_at_w

@@ -28,7 +28,7 @@ from tactics import (
     AP_TERM, AP_THM, BETA_CONV, BETA_NORM, SYM, SPEC, GEN, GENL,
     CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP, EXISTS,
     PROVE_HYP, ELIM_EX, NOT_ELIM, NOT_INTRO, CONTR,
-    NE_SYM, TRANS_CHAIN, UNFOLD,
+    NE_SYM, TRANS_CHAIN, UNFOLD, unfold_def_at,
     BETA_RULE, REWRITE_RULE,
 )
 from classical import NOT_FORALL_TO_EX_NOT, NOT_EX_TO_FORALL_NOT
@@ -890,17 +890,13 @@ def define_recursive(name, fn_ty, x_var, c, h, *, prec=None, assoc="non"):
 
     # Connect (@pred_clean) y back to `name x y` via OP_DEF.
     OP = mk_const(name, [])
-    op_at_x = AP_THM(OP_DEF, x_var)
-    op_at_x = TRANS(op_at_x, BETA_CONV(rand(op_at_x._concl)))   # |- name x = \y. (@pred_clean) y
+    op_at_x = unfold_def_at(OP_DEF, x_var)        # |- name x = \y. (@pred_clean) y
 
-    op_at_x_at_1 = AP_THM(op_at_x, ONE)
-    op_at_x_at_1 = TRANS(op_at_x_at_1, BETA_CONV(rand(op_at_x_at_1._concl)))
+    op_at_x_at_1 = unfold_def_at(op_at_x, ONE)
     BASE_THM = GEN(x_var, TRANS(op_at_x_at_1, sel_base))         # |- !x. name x 1 = c
 
-    op_at_x_at_y = AP_THM(op_at_x, y_var)
-    op_at_x_at_y = TRANS(op_at_x_at_y, BETA_CONV(rand(op_at_x_at_y._concl)))
-    op_at_x_at_sy = AP_THM(op_at_x, mk_suc(y_var))
-    op_at_x_at_sy = TRANS(op_at_x_at_sy, BETA_CONV(rand(op_at_x_at_sy._concl)))
+    op_at_x_at_y = unfold_def_at(op_at_x, y_var)
+    op_at_x_at_sy = unfold_def_at(op_at_x, mk_suc(y_var))
     sel_at_sy   = SPEC(y_var, sel_step)
     raw_step_eq = TRANS(op_at_x_at_sy, sel_at_sy)
     # raw_step_eq : |- name x (SUC y) = clean_step[fn:=@pred_clean, n:=y].
