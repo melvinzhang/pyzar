@@ -939,27 +939,4 @@ def REWRITE_AC_PROVE(rules, op_const, assoc_thm, comm_thm, target_eq, *, ac_rule
     return TRANS(eq_l, TRANS(eq_ac, SYM(eq_r)))
 
 
-# ---------------------------------------------------------------------------
-# Self-tests.
-# ---------------------------------------------------------------------------
-
-def _selftest():
-    pv = Var("p", bool_ty)
-    qv = Var("q", bool_ty)
-
-    # SYM
-    th = ASSUME(mk_eq(pv, qv))
-    assert aconv(concl(SYM(th)), mk_eq(qv, pv))
-
-    # TRUTH
-    assert aconv(concl(TRUTH), T)
-
-    # EQT_INTRO / EQT_ELIM round-trip
-    th_p = ASSUME(pv)
-    th_back = EQT_ELIM(EQT_INTRO(th_p))
-    assert aconv(concl(th_back), pv)
-
-
-if __name__ == "__main__":
-    _selftest()
-    print("tactics.py self-tests passed.")
+# Self-tests live in tactics_test.py (H17).

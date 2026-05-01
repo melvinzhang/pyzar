@@ -22,7 +22,7 @@ Catalogue of dubious patterns. Each entry: where it lives, why it's a smell, and
 | H14 | ✅ | `CHOOSE_WITNESS` factored, `pending_choose` deleted (`3a8d734`). |
 | H15 | ⏳ | Asymmetric strictness on fact registry. |
 | H16 | ⏳ | `auto_choose` still a positional 6-tuple. |
-| H17 | ⏳ | Self-tests still embedded in module bodies. |
+| H17 | ✅ | Self-tests moved to `tactics_test.py` and `proof_test.py`; `sys.modules` workaround retired. |
 | H18 | ✅ | `subst_term` capture-avoiding by construction (`fc6b43f`); kernel `INST` for the Var case. |
 | H19 | ⏳ | `_open_cases`'s theorem-only-with-args still undocumented. |
 | H20 | ⏳ | `_fresh_label` still uses a collision-prone prefix. |
@@ -367,7 +367,7 @@ it, the same way `extra_facts` does; or (b) at minimum, make the tuple a
 
 ---
 
-## H17. Self-tests live inside the module bodies
+## H17. Self-tests live inside the module bodies  ✅
 
 **Where:** `tactics.py:886-905`, `proof.py:1615-1924`.
 
