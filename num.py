@@ -143,14 +143,11 @@ DEFAULT_SIG.add_const("IND_1", IND_1)
 @proof
 def IND_SUC_NEQ_IND_1(prf):
     # _EXISTS_WITNESS : |- ?z. !x. ~(IND_SUC x = z); IND_1_DEF picks the very
-    # @-witness as IND_1, so chooser-bind z and rewrite z -> IND_1.  The
-    # rewrite engine doesn't descend into binders, so we bridge by hand: at
-    # the abstraction \w. !x. ~(IND_SUC x = w), apply IND_1_DEF and BETA_RULE.
+    # @-witness as IND_1, so chooser-bind z and rewrite z -> IND_1.
     prf.goal("!x:ind. ~(IND_SUC x = IND_1)")
     prf.choose("z: !x:ind. ~(IND_SUC x = z)", from_=_EXISTS_WITNESS)
-    bridge_pred = parse("\\w:ind. !x:ind. ~(IND_SUC x = w)")
-    bridge = BETA_RULE(AP_TERM(bridge_pred, SYM(IND_1_DEF)))
-    prf.thus("!x:ind. ~(IND_SUC x = IND_1)").by_eq_mp(bridge, "z_eq")
+    prf.thus("!x:ind. ~(IND_SUC x = IND_1)") \
+        .by_rewrite_of("z_eq", [SYM(IND_1_DEF)])
 
 
 # ---------------------------------------------------------------------------

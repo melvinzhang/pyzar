@@ -634,13 +634,20 @@ def _try_rules_at(rules, tm):
     return None
 
 
-def _bottom_up(rules, tm):
+def _bottom_up(rules, tm, under_binder=False):
     """One bottom-up pass: rewrite children once, then iterate rules at the root
        (without descending into the new RHS — that's what the outer fixpoint loop
-       in REWRITE_CONV is for).  Returns |- tm = tm' or None if unchanged."""
+       in REWRITE_CONV is for).  Returns |- tm = tm' or None if unchanged.
+
+       Inside an Abs body, only rules with empty assumptions are considered:
+       hypothetical local facts (e.g. ``ASSUME``-derived equations) routinely
+       have RHS terms that re-introduce their own LHS under a binder, which
+       would loop.  Closed rewrite rules are safe."""
+    active = [r for r in rules if not r[3]._asl] if under_binder else rules
+
     if isinstance(tm, Comb):
-        l_step = _bottom_up(rules, tm.fun)
-        r_step = _bottom_up(rules, tm.arg)
+        l_step = _bottom_up(rules, tm.fun, under_binder)
+        r_step = _bottom_up(rules, tm.arg, under_binder)
         if l_step is None and r_step is None:
             inner = REFL(tm)
             inner_changed = False
@@ -649,13 +656,29 @@ def _bottom_up(rules, tm):
             r_eq = r_step if r_step is not None else REFL(tm.arg)
             inner = MK_COMB(l_eq, r_eq)
             inner_changed = True
+    elif isinstance(tm, Abs):
+        body_step = _bottom_up(rules, tm.body, under_binder=True)
+        if body_step is None:
+            inner = REFL(tm)
+            inner_changed = False
+        else:
+            # ABS lifts |- s = t to |- (\v. s) = (\v. t) provided v isn't free
+            # in the equation's hypotheses.  Active rules under a binder are
+            # filtered to empty-asl ones, so this normally succeeds; bail
+            # safely otherwise.
+            try:
+                inner = ABS(tm.bvar, body_step)
+                inner_changed = True
+            except HolError:
+                inner = REFL(tm)
+                inner_changed = False
     else:
         inner = REFL(tm)
         inner_changed = False
 
     for _ in range(256):
         cur = rand(inner._concl)
-        root_step = _try_rules_at(rules, cur)
+        root_step = _try_rules_at(active, cur)
         if root_step is None:
             break
         inner = TRANS(inner, root_step)
