@@ -283,7 +283,7 @@ class Proof:
             self._cur.goal = g.arg.body
             self._cur.vars_added.append(v)
 
-    def let(self, spec):
+    def let(self, spec, types=None):
         """Register a schematic abbreviation in the current frame.
 
         Spec form: ``"NAME(arg1, arg2, ...) := body"``; each arg may carry an
@@ -294,6 +294,11 @@ class Proof:
         ``body[bvars := ts]`` at parse time -- no kernel ``Abs`` is
         materialized, so downstream tactics see ground terms.
 
+        ``types``: optional ``{name: hol_type}`` mapping that supplies
+        types for bvars whose desired type is not registered as a parser
+        alias (e.g. fresh tyvars or function types). Also extends the
+        body-parsing env so other free names in ``body`` can be typed.
+
         Lifetime: the binding dies with the current frame (same as
         ``vars_added`` and ``facts_added``).
         """
@@ -303,6 +308,7 @@ class Proof:
                 f"let: expected 'NAME(arg1, arg2, ...) := body' "
                 f"(args may be annotated 'arg:ty'), got {spec!r}")
         name, args_str, body_str = m.groups()
+        types = types or {}
 
         bvars = []
         seen = set()
@@ -320,6 +326,8 @@ class Proof:
                 if ty_name not in DEFAULT_SIG.type:
                     raise HolError(f"let: unknown type {ty_name!r}")
                 bvar_ty = DEFAULT_SIG.type[ty_name]
+            elif arg_name in types:
+                bvar_ty = types[arg_name]
             else:
                 bvar_ty = DEFAULT_SIG.default_var_ty
                 if bvar_ty is None:
@@ -338,7 +346,12 @@ class Proof:
 
         # Parse body with the placeholders injected; placeholders shadow
         # any same-named outer scope binding for the duration of the body.
+        # ``types`` further extends the env so other free names in body
+        # (not bvars) get their declared types.
         body_env = dict(env)
+        for nm, ty in types.items():
+            if nm not in seen:
+                body_env[nm] = ty
         for bv in bvars:
             body_env[bv.name] = bv
         try:
