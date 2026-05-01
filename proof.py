@@ -81,7 +81,13 @@ def register_disj_unfolder(op_name, unfold_fn):
 _CONTRA_FINDERS = {}
 
 def register_contra_finder(rel_a, rel_b, finder):
+    """Register ``finder(th_a, th_b) -> |- F`` for facts ``rel_a a b`` /
+    ``rel_b a b``. Both orientations are stored so ``auto`` can look up
+    once without swapping at the call site; the swapped entry wraps
+    ``finder`` to keep its registered argument order."""
     _CONTRA_FINDERS[(rel_a, rel_b)] = finder
+    if rel_a != rel_b:
+        _CONTRA_FINDERS[(rel_b, rel_a)] = lambda x, y: finder(y, x)
 
 
 def _hook(registry, term):
@@ -1350,24 +1356,18 @@ class _Absurd:
         if len(refs) != 2:
             raise HolError(
                 f"absurd: auto() requires exactly two facts, got {len(refs)}")
-        ths = [self.p._resolve_fact_or_term(r) for r in refs]
-        cs = [_classify_contra(th._concl) for th in ths]
+        ths = [self.p._resolve_fact(r) for r in refs]
+        cs = [dest_binop_any(th._concl) for th in ths]
         if cs[0] is None or cs[1] is None:
             raise HolError(
                 "absurd: auto() cannot classify fact shapes: "
                 f"{pp(ths[0]._concl)} / {pp(ths[1]._concl)}")
         rel0, rel1 = cs[0][0], cs[1][0]
         finder = _CONTRA_FINDERS.get((rel0, rel1))
-        if finder is not None:
-            return self._finish(finder(ths[0], ths[1]))
-        finder = _CONTRA_FINDERS.get((rel1, rel0))
-        if finder is not None:
-            return self._finish(finder(ths[1], ths[0]))
-        raise HolError(
-            f"absurd: auto() has no finder for ({rel0!r}, {rel1!r})")
-
-
-_classify_contra = dest_binop_any
+        if finder is None:
+            raise HolError(
+                f"absurd: auto() has no finder for ({rel0!r}, {rel1!r})")
+        return self._finish(finder(ths[0], ths[1]))
 
 
 # ---------------------------------------------------------------------------
