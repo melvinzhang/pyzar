@@ -170,9 +170,11 @@ class Proof:
 
     _LET_SPEC_RE = re.compile(
         r"^\s*([A-Za-z_]\w*)\s*"
-        r"\(\s*([A-Za-z_]\w*)\s*(?::\s*([A-Za-z_]\w*)\s*)?\)\s*"
+        r"\(\s*(.+?)\s*\)\s*"
         r":=\s*(.+)$",
         re.DOTALL)
+    _LET_ARG_RE = re.compile(
+        r"^\s*([A-Za-z_]\w*)\s*(?::\s*([A-Za-z_]\w*)\s*)?$")
 
     def _split_label(self, spec):
         """Parse 'label: term' or 'term'.
@@ -284,35 +286,47 @@ class Proof:
     def let(self, spec):
         """Register a schematic abbreviation in the current frame.
 
-        Spec form: ``"NAME(arg) := body"`` or ``"NAME(arg:ty) := body"``.
-        The body parses in the current scope (extended with ``arg`` as a
-        placeholder). Subsequent occurrences of ``NAME t`` in any term
-        passed to ``goal`` / ``have`` / ``thus`` / ``assume`` / ``choose``
-        / ``fix`` desugar to ``body[arg := t]`` at parse time -- no kernel
-        ``Abs`` is materialized, so downstream tactics see ground terms.
+        Spec form: ``"NAME(arg1, arg2, ...) := body"``; each arg may carry an
+        optional type annotation (``arg:ty``). The body parses in the
+        current scope extended with the placeholders. Subsequent occurrences
+        of ``NAME t1 ... tn`` in any term passed to ``goal`` / ``have`` /
+        ``thus`` / ``assume`` / ``choose`` / ``fix`` desugar to
+        ``body[bvars := ts]`` at parse time -- no kernel ``Abs`` is
+        materialized, so downstream tactics see ground terms.
 
         Lifetime: the binding dies with the current frame (same as
-        ``vars_added`` and ``facts_added``). v1 supports single-arg lets
-        only.
+        ``vars_added`` and ``facts_added``).
         """
         m = self._LET_SPEC_RE.match(spec)
         if not m:
             raise HolError(
-                f"let: expected 'NAME(arg) := body' (or 'NAME(arg:ty) := body'), "
-                f"got {spec!r}")
-        name, arg_name, ty_name, body_str = m.groups()
+                f"let: expected 'NAME(arg1, arg2, ...) := body' "
+                f"(args may be annotated 'arg:ty'), got {spec!r}")
+        name, args_str, body_str = m.groups()
 
-        if ty_name is not None:
-            if ty_name not in DEFAULT_SIG.type:
-                raise HolError(f"let: unknown type {ty_name!r}")
-            bvar_ty = DEFAULT_SIG.type[ty_name]
-        else:
-            bvar_ty = DEFAULT_SIG.default_var_ty
-            if bvar_ty is None:
+        bvars = []
+        seen = set()
+        for piece in args_str.split(","):
+            am = self._LET_ARG_RE.match(piece)
+            if not am:
                 raise HolError(
-                    "let: no default type registered; annotate the bvar "
-                    f"as '{name}({arg_name}:T) := ...'")
-        bvar = Var(arg_name, bvar_ty)
+                    f"let: cannot parse arg declaration {piece!r} in {spec!r}")
+            arg_name, ty_name = am.groups()
+            if arg_name in seen:
+                raise HolError(
+                    f"let: duplicate arg name {arg_name!r} in {spec!r}")
+            seen.add(arg_name)
+            if ty_name is not None:
+                if ty_name not in DEFAULT_SIG.type:
+                    raise HolError(f"let: unknown type {ty_name!r}")
+                bvar_ty = DEFAULT_SIG.type[ty_name]
+            else:
+                bvar_ty = DEFAULT_SIG.default_var_ty
+                if bvar_ty is None:
+                    raise HolError(
+                        "let: no default type registered; annotate the bvar "
+                        f"as '{name}({arg_name}:T, ...) := ...'")
+            bvars.append(Var(arg_name, bvar_ty))
 
         env = self._scope_env()
         if name in env:
@@ -322,16 +336,17 @@ class Proof:
             raise HolError(
                 f"let: {name!r} clashes with a registered constant")
 
-        # Parse body with the placeholder injected; the placeholder shadows
+        # Parse body with the placeholders injected; placeholders shadow
         # any same-named outer scope binding for the duration of the body.
         body_env = dict(env)
-        body_env[arg_name] = bvar
+        for bv in bvars:
+            body_env[bv.name] = bv
         try:
             body = parse(body_str, _env_bindings=body_env)
         except ParseError as ex:
             raise HolError(f"let: cannot parse body: {ex}") from ex
 
-        self._cur.let_env[name] = LetDef(name, bvar, body, arity=1)
+        self._cur.let_env[name] = LetDef(name, bvars, body)
 
     def split_conj(self, ref, *labels):
         """Split a right-associated conjunction fact ``h : a /\\ b /\\ ... /\\ z``
@@ -754,11 +769,10 @@ class _Have:
             if isinstance(a, str):
                 ld = p._lookup_let(a)
                 if ld is not None:
-                    if ld.arity != 1:
-                        raise HolError(
-                            f"by_select: only single-arg lets supported "
-                            f"(got {a!r} with arity {ld.arity})")
-                    th = BETA_RULE(SPEC(mk_abs(ld.bvar, ld.body), th))
+                    abs_term = ld.body
+                    for bv in reversed(ld.bvars):
+                        abs_term = mk_abs(bv, abs_term)
+                    th = BETA_RULE(SPEC(abs_term, th))
                     continue
                 if a in p._facts:
                     th = MP(th, p._facts[a])
@@ -1325,8 +1339,8 @@ def _selftest():
     # parsed term directly via _scope_env.
     p = Proof()
     p._cur.let_env["M"] = LetDef(
-        "M", mk_var("x", num_ty),
-        parse("!n. n + x = n + x", x=num_ty), arity=1)
+        "M", [mk_var("x", num_ty)],
+        parse("!n. n + x = n + x", x=num_ty))
     parsed = parse("M (n + 1)", _env_bindings=p._scope_env())
     expected = parse("!m. m + (n + 1) = m + (n + 1)")
     assert aconv(parsed, expected), \
@@ -1350,6 +1364,72 @@ def _selftest():
         pass
     else:
         raise AssertionError("expected HolError for let/fix-var collision")
+
+    # ---- multi-arg p.let smoke tests ------------------------------------
+    # (M1) Two-arg let: ``R(a, b) := a + b = b + a`` parses ``R 1 1`` to the
+    # body with both args substituted.
+    @proof
+    def LET_MULTI(p):
+        p.goal("1 + 1 = 1 + 1")
+        p.let("R(a, b) := a + b = b + a")
+        p.thus("R 1 1").by_thm(REFL(parse("1 + 1")))
+    assert aconv(concl(LET_MULTI), parse("1 + 1 = 1 + 1"))
+
+    # (M2) Three-arg let, mixed application shapes -- ``S 1 1 1`` and
+    # ``S (1 + 1) 1 1`` both substitute correctly.
+    p_m2 = Proof()
+    p_m2._cur.let_env["S"] = LetDef(
+        "S", [mk_var("a", num_ty), mk_var("b", num_ty), mk_var("c", num_ty)],
+        parse("a + b = c"))
+    parsed3 = parse("S 1 1 (1 + 1)", _env_bindings=p_m2._scope_env())
+    expected3 = parse("1 + 1 = 1 + 1")
+    assert aconv(parsed3, expected3), \
+        f"3-arg let: got {pp(parsed3)}, expected {pp(expected3)}"
+
+    # (M3) Capture-avoiding multi-arg substitution: body ``!u. u + a = u + b``
+    # at ``R (u + 1) u`` must rename the bound ``u`` so the args don't capture.
+    p_m3 = Proof()
+    p_m3._cur.let_env["R"] = LetDef(
+        "R", [mk_var("a", num_ty), mk_var("b", num_ty)],
+        parse("!u. u + a = u + b"))
+    parsed_cap = parse("R (u + 1) u", _env_bindings=p_m3._scope_env())
+    expected_cap = parse("!w. w + (u + 1) = w + u")
+    assert aconv(parsed_cap, expected_cap), \
+        f"multi-arg capture-avoidance: got {pp(parsed_cap)}, expected {pp(expected_cap)}"
+
+    # (M4) by_select with a multi-arg let: trivial 2-ary HO axiom
+    # ``|- !Q. Q 1 1 ==> Q 1 1``, applied at ``R(a, b) := a = b``.
+    from fusion import mk_fun_ty as _mk_fun_ty, bool_ty as _bool_ty
+    from tactics import GEN as _L_GEN, DISCH as _L_DISCH
+    Q2_ty = _mk_fun_ty(num_ty, _mk_fun_ty(num_ty, _bool_ty))
+    Q2_var = mk_var("Q", Q2_ty)
+    Q2_at_11 = mk_comb(mk_comb(Q2_var, ONE), ONE)
+    trivial_HO_2 = _L_GEN(Q2_var, _L_DISCH(Q2_at_11, ASSUME(Q2_at_11)))
+    @proof
+    def BY_SELECT_MULTI(p):
+        p.goal("1 = 1")
+        p.let("R(a, b) := a = b")
+        p.have("R_11: R 1 1").by_thm(REFL(ONE))
+        p.thus("R 1 1").by_select(trivial_HO_2, "R", "R_11")
+    assert aconv(concl(BY_SELECT_MULTI), parse("1 = 1"))
+
+    # (M5) Bad spec: missing comma argument list rejected.
+    p_m5 = Proof()
+    try:
+        p_m5.let("R(a b) := a = b")
+    except HolError:
+        pass
+    else:
+        raise AssertionError("expected HolError for malformed multi-arg spec")
+
+    # (M6) Duplicate argument names rejected.
+    p_m6 = Proof()
+    try:
+        p_m6.let("R(a, a) := a = a")
+    except HolError:
+        pass
+    else:
+        raise AssertionError("expected HolError for duplicate let arg names")
 
     # ---- p.unfold smoke test --------------------------------------------
     from num import SUC_DEF
