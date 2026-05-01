@@ -46,7 +46,7 @@ from axioms import (
     mk_and, mk_or, mk_imp, mk_forall, mk_exists, mk_not, mk_select,
 )
 from tactics import (
-    AP_TERM, AP_THM, BETA_CONV, SYM,
+    AP_TERM, AP_THM, BETA_CONV, SYM, UNFOLD,
     SPEC, GEN, CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP,
     CONTR, NOT_ELIM, NOT_INTRO, NOT_CONST,
     DISJ1, DISJ2, DISJ_CASES,
@@ -405,21 +405,13 @@ LT = mk_const("<", [])
 def mk_gt(a, b): return mk_comb(mk_comb(GT, a), b)
 def mk_lt(a, b): return mk_comb(mk_comb(LT, a), b)
 
-def _binop_unfold(def_th, a, b):
-    """Given ``def_th : |- op = \\x y. body``, return ``|- op a b = body[a,b]``
-    by two AP_THM/BETA_CONV steps."""
-    eq1 = AP_THM(def_th, a)
-    eq2 = TRANS(eq1, BETA_CONV(rand(eq1._concl)))
-    eq3 = AP_THM(eq2, b)
-    return TRANS(eq3, BETA_CONV(rand(eq3._concl)))
-
 def UNFOLD_GT(a, b):
     """ |- (a > b) = (?u. a = b + u) """
-    return _binop_unfold(GT_DEF, a, b)
+    return UNFOLD(GT_DEF, a, b)
 
 def UNFOLD_LT(a, b):
     """ |- (a < b) = (?v. b = a + v) """
-    return _binop_unfold(LT_DEF, a, b)
+    return UNFOLD(LT_DEF, a, b)
 
 # Register with the proof DSL so `p.choose(name, from_=label)` accepts a fact
 # whose conclusion is `> ` or `<`.
@@ -492,8 +484,8 @@ LE = mk_const("<=", [])
 def mk_ge(a, b): return mk_comb(mk_comb(GE, a), b)
 def mk_le(a, b): return mk_comb(mk_comb(LE, a), b)
 
-def UNFOLD_GE(a, b): return _binop_unfold(GE_DEF, a, b)
-def UNFOLD_LE(a, b): return _binop_unfold(LE_DEF, a, b)
+def UNFOLD_GE(a, b): return UNFOLD(GE_DEF, a, b)
+def UNFOLD_LE(a, b): return UNFOLD(LE_DEF, a, b)
 
 register_disj_unfolder(">=", UNFOLD_GE)
 register_disj_unfolder("<=", UNFOLD_LE)

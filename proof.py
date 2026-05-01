@@ -155,16 +155,12 @@ class Proof:
     def unfold(self, def_th, *args):
         """Apply a definition equation to argument terms.
 
-        For ``def_th : |- C = \\x1 ... xn. body``, returns
-        ``|- C t1 ... tn = body[xi := ti]``.  Each arg is parsed in the
-        current scope if a string, else taken as a kernel term.  Each
-        application step is followed by ``BETA_RULE`` to normalize the
-        redex introduced by ``AP_THM``."""
-        th = def_th
-        for a in args:
-            t = self._parse(a) if isinstance(a, str) else a
-            th = BETA_RULE(AP_THM(th, t))
-        return th
+        Thin wrapper over ``tactics.UNFOLD`` that resolves each string arg
+        in the current scope before delegating; kernel-term args pass
+        through.  See ``tactics.UNFOLD`` for the underlying behavior."""
+        from tactics import UNFOLD
+        resolved = [self._parse(a) if isinstance(a, str) else a for a in args]
+        return UNFOLD(def_th, *resolved)
 
     _LABEL_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z_0-9]*)\s*:\s*(.+)$", re.DOTALL)
 

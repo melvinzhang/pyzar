@@ -572,6 +572,21 @@ def BETA_RULE(th):
     return th if aconv(lhs, rhs) else EQ_MP(eq, th)
 
 
+def UNFOLD(def_th, *args):
+    """Apply a definition equation to argument terms.
+
+    For ``def_th : |- C = \\x1 ... xn. body``, returns
+    ``|- C t1 ... tn = body[xi := ti]`` -- one ``BETA_RULE(AP_THM(...))``
+    step per arg.  ``Proof.unfold`` is the same logic with string
+    parsing in current scope; this module-level form takes kernel terms
+    directly so callers without a ``Proof`` instance (registry hooks,
+    relation unfolders, infrastructure helpers) can use it too."""
+    th = def_th
+    for a in args:
+        th = BETA_RULE(AP_THM(th, a))
+    return th
+
+
 def _strip_forall(th):
     """Strip outer (!v. ...) layers from th, returning (vars, th_body)."""
     vs = []

@@ -28,7 +28,7 @@ from tactics import (
     AP_TERM, AP_THM, BETA_CONV, BETA_NORM, SYM, SPEC, GEN, GENL,
     CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP, EXISTS,
     PROVE_HYP, ELIM_EX, NOT_ELIM, NOT_INTRO, CONTR,
-    NE_SYM, TRANS_CHAIN,
+    NE_SYM, TRANS_CHAIN, UNFOLD,
     BETA_RULE, REWRITE_RULE,
 )
 from classical import NOT_FORALL_TO_EX_NOT, NOT_EX_TO_FORALL_NOT
@@ -104,7 +104,7 @@ _z_ind = Var("z", ind_ty)
 _NOT_C = mk_const("~", [])
 _ONTO_DEF_IND = INST_TYPE([(ind_ty, aty), (ind_ty, bty)], ONTO_DEF)
 # |- ~(ONTO IND_SUC) = ~(!y. ?x. y = IND_SUC x)
-_NOT_ONTO_UNFOLD = AP_TERM(_NOT_C, BETA_RULE(AP_THM(_ONTO_DEF_IND, IND_SUC)))
+_NOT_ONTO_UNFOLD = AP_TERM(_NOT_C, UNFOLD(_ONTO_DEF_IND, IND_SUC))
 
 
 @proof
@@ -177,7 +177,7 @@ _P_ind_ty = mk_fun_ty(ind_ty, bool_ty)
 
 def _NUM_REP_unfold(a_term):
     r""" |- NUM_REP a = (!P. P IND_1 /\ (!i. P i ==> P (IND_SUC i)) ==> P a). """
-    return BETA_RULE(AP_THM(NUM_REP_DEF, a_term))
+    return UNFOLD(NUM_REP_DEF, a_term)
 
 
 # ---------------------------------------------------------------------------
@@ -291,11 +291,6 @@ def mk_suc(t):
     return mk_comb(SUC, t)
 
 
-def _SUC_unfold(n_term):
-    """ |- SUC n = mk_num (IND_SUC (dest_num n)). """
-    return BETA_RULE(AP_THM(SUC_DEF, n_term))
-
-
 # Standard variable names re-used throughout the arithmetic development.
 x = Var("x", num_ty)
 y = Var("y", num_ty)
@@ -334,13 +329,9 @@ def NUM_REP_dest_num(p):
 # Step 8.  Working facts about ONE_ONE and ONTO unfolded at IND_SUC.
 # ---------------------------------------------------------------------------
 
-def _ONE_ONE_unfold_at_IND_SUC():
-    """ |- ONE_ONE IND_SUC = !x1 x2. IND_SUC x1 = IND_SUC x2 ==> x1 = x2. """
-    one_one_def_ind = INST_TYPE([(ind_ty, aty), (ind_ty, bty)], ONE_ONE_DEF)
-    return BETA_RULE(AP_THM(one_one_def_ind, IND_SUC))
-
-
-_ONE_ONE_IND_SUC_unfold = EQ_MP(_ONE_ONE_unfold_at_IND_SUC(), ONE_ONE_IND_SUC)
+_ONE_ONE_IND_SUC_unfold = EQ_MP(
+    UNFOLD(INST_TYPE([(ind_ty, aty), (ind_ty, bty)], ONE_ONE_DEF), IND_SUC),
+    ONE_ONE_IND_SUC)
 # _ONE_ONE_IND_SUC_unfold : |- !x1 x2. IND_SUC x1 = IND_SUC x2 ==> x1 = x2
 
 
