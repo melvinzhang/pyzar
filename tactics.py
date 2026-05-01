@@ -333,21 +333,60 @@ def REWRITE_NE(th_ne, eq_l, eq_r):
 
 # Existential introduction.
 
-def _subst_term(old, new, tm):
-    """Replace every occurrence of `old` (a term) with `new` inside `tm`."""
+def subst_term(old, new, tm):
+    """Capture-avoiding substitution: replace occurrences of ``old`` with
+    ``new`` inside ``tm``.
+
+    Var case: delegated to kernel ``INST`` on ``REFL(tm)`` — the kernel
+    primitive guarantees capture-avoidance, so this branch is correct by
+    construction.
+
+    Non-Var ``old`` case: structural walk that alpha-renames any binder
+    whose bvar is free in ``new`` (or could shadow free vars of ``old``)
+    before descending. The avoidance set covers all vars in the body,
+    not just frees, so renamed bvars cannot collide with inner binders."""
+    if isinstance(old, Var):
+        if old == new:
+            return tm
+        return rand(INST([(new, old)], REFL(tm))._concl)
+    return _subst_compound(old, new, tm)
+
+
+def _all_vars(tm):
+    """Every ``Var`` occurring in ``tm``, free or bound."""
+    seen = []
+    def rec(t):
+        if isinstance(t, Var):
+            if t not in seen:
+                seen.append(t)
+        elif isinstance(t, Comb):
+            rec(t.fun); rec(t.arg)
+        elif isinstance(t, Abs):
+            if t.bvar not in seen:
+                seen.append(t.bvar)
+            rec(t.body)
+    rec(tm)
+    return seen
+
+
+def _subst_compound(old, new, tm):
+    """Capture-avoiding substitution where ``old`` is a non-``Var`` term."""
     if tm == old:
         return new
     if isinstance(tm, Comb):
-        f2 = _subst_term(old, new, tm.fun)
-        a2 = _subst_term(old, new, tm.arg)
-        if f2 is tm.fun and a2 is tm.arg:
-            return tm
-        return mk_comb(f2, a2)
+        f2 = _subst_compound(old, new, tm.fun)
+        a2 = _subst_compound(old, new, tm.arg)
+        return tm if (f2 is tm.fun and a2 is tm.arg) else mk_comb(f2, a2)
     if isinstance(tm, Abs):
-        b2 = _subst_term(old, new, tm.body)
-        if b2 is tm.body:
-            return tm
-        return mk_abs(tm.bvar, b2)
+        if tm.bvar in freesl([new]):
+            # Alpha-rename against every var (free or bound) in body, plus
+            # frees of new and old. Inner binders cannot then shadow fresh.
+            avoid = list({*_all_vars(tm.body), *freesl([new]), *freesl([old])})
+            fresh = variant(avoid, tm.bvar)
+            renamed = subst_term(tm.bvar, fresh, tm.body)   # Var case
+            return mk_abs(fresh, _subst_compound(old, new, renamed))
+        b2 = _subst_compound(old, new, tm.body)
+        return tm if b2 is tm.body else mk_abs(tm.bvar, b2)
     return tm
 
 
@@ -445,7 +484,7 @@ def EXISTS_AT(witness, th):
         v = variant(avoid, witness)
     else:
         v = variant(avoid, Var("v", type_of(witness)))
-    pred = mk_abs(v, _subst_term(witness, v, body))
+    pred = mk_abs(v, subst_term(witness, v, body))
     return EXISTS(pred, witness, th)
 
 
@@ -623,26 +662,35 @@ def _prepare_rule(th):
 def _term_match(pat, tgt, vars_set, subst):
     """First-order match of pat against tgt.
        pat-vars in vars_set are match variables; others must match literally.
-       Returns extended subst dict, or None on failure."""
+       Returns the (possibly extended) subst dict, or None on failure.
+       Mutates ``subst`` in place — safe because matching is deterministic
+       single-pass with no backtracking."""
     if isinstance(pat, Var) and pat in vars_set:
         if pat in subst:
             return subst if aconv(subst[pat], tgt) else None
         if type_of(pat) != type_of(tgt):
             return None
-        s = dict(subst); s[pat] = tgt
-        return s
+        subst[pat] = tgt
+        return subst
     if isinstance(pat, Var) and isinstance(tgt, Var):
         return subst if (pat.name == tgt.name and pat.ty == tgt.ty) else None
     if isinstance(pat, Const) and isinstance(tgt, Const):
         return subst if (pat.name == tgt.name and pat.ty == tgt.ty) else None
     if isinstance(pat, Comb) and isinstance(tgt, Comb):
-        s = _term_match(pat.fun, tgt.fun, vars_set, subst)
-        if s is None: return None
-        return _term_match(pat.arg, tgt.arg, vars_set, s)
+        if _term_match(pat.fun, tgt.fun, vars_set, subst) is None:
+            return None
+        return _term_match(pat.arg, tgt.arg, vars_set, subst)
     if isinstance(pat, Abs) and isinstance(tgt, Abs):
-        if pat.bvar.name == tgt.bvar.name and pat.bvar.ty == tgt.bvar.ty:
+        if pat.bvar.ty != tgt.bvar.ty:
+            return None
+        if pat.bvar.name == tgt.bvar.name:
             return _term_match(pat.body, tgt.body, vars_set, subst)
-        return None
+        # Alpha-equivalence: if tgt.bvar is free in pat.body, renaming
+        # would capture — pat and tgt belong to different alpha-classes.
+        if tgt.bvar in freesl([pat.body]):
+            return None
+        renamed_body = subst_term(pat.bvar, tgt.bvar, pat.body)
+        return _term_match(renamed_body, tgt.body, vars_set, subst)
     return None
 
 

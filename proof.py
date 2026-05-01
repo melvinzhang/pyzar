@@ -39,7 +39,7 @@ from axioms import (
 )
 from tactics import (
     SPEC, GEN, DISCH, MP, MP_LIST, DISJ_CASES, BETA_CONV, BETA_NORM, SYM,
-    AP_THM, PROVE_HYP, ELIM_EX, CHOOSE_WITNESS, _subst_term,
+    AP_THM, PROVE_HYP, ELIM_EX, CHOOSE_WITNESS, subst_term,
     NOT_INTRO, NOT_ELIM, CONTR, REWRITE_NE, EXISTS, DISJ1, DISJ2,
     CONJUNCT1, CONJUNCT2,
     REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV, BETA_RULE,
@@ -281,6 +281,32 @@ class Proof:
             return th
         return EQ_MP(eq, th)
 
+    @staticmethod
+    def _substitute_carrier(lz, th):
+        """Substitute lazy-let ``lz``'s carrier with ``\\args. body`` in
+        ``th`` and discharge the local-equation hypothesis. The returned
+        theorem still has beta-redexes at every former carrier-application
+        site; callers responsible for any conclusion BETA cleanup."""
+        abs_body = lz.body
+        for bv in reversed(lz.bvars):
+            abs_body = mk_abs(bv, abs_body)
+        th_inst = INST([(abs_body, lz.carrier)], th)
+        # Build the now-trivially-true equation hyp:
+        # |- !b1..bn. (\b1..bn. body) b1..bn = body
+        eq_th = BETA_NORM(mk_app(abs_body, *lz.bvars))
+        for bv in reversed(lz.bvars):
+            eq_th = GEN(bv, eq_th)
+        return PROVE_HYP(eq_th, th_inst)
+
+    @staticmethod
+    def _beta_norm_concl(th):
+        """If ``th``'s conclusion has beta-redexes, lift through the
+        normalizing equation; else return unchanged."""
+        nf_eq = BETA_NORM(th._concl)
+        if aconv(rand(nf_eq._concl), th._concl):
+            return th
+        return EQ_MP(nf_eq, th)
+
     def materialize_let(self, th, name):
         """Substitute the named lazy-let carrier with its ``\\args. body``
         abstraction in ``th`` and BETA-normalize the result, returning a
@@ -295,19 +321,7 @@ class Proof:
         lz = self._lookup_lazy_let(name)
         if lz is None:
             raise HolError(f"materialize_let: no lazy let named {name!r}")
-        abs_body = lz.body
-        for bv in reversed(lz.bvars):
-            abs_body = mk_abs(bv, abs_body)
-        th_inst = INST([(abs_body, lz.carrier)], th)
-        # Discharge the (now-trivially-true) substituted equation hypothesis.
-        eq_th = BETA_NORM(mk_app(abs_body, *lz.bvars))
-        for bv in reversed(lz.bvars):
-            eq_th = GEN(bv, eq_th)
-        th_inst = PROVE_HYP(eq_th, th_inst)
-        nf_eq = BETA_NORM(th_inst._concl)
-        if not aconv(rand(nf_eq._concl), th_inst._concl):
-            th_inst = EQ_MP(nf_eq, th_inst)
-        return th_inst
+        return self._beta_norm_concl(self._substitute_carrier(lz, th))
 
     def simp_mp(self, th_imp, th_arg):
         """``MP(th_imp, th_arg)`` modulo simp on the antecedent.
@@ -372,12 +386,20 @@ class Proof:
     def _close_frame(self, fr, th):
         """Discharge a frame's accumulated bindings into ``th``.
 
-        Order matters: ``DISCH`` first, so any user-``assume``d hyps that
-        mention a lazy-let carrier move out of ``_asl`` and into the
-        conclusion (where carrier-INST during discharge can BETA-clean
-        them); then discharge lazy lets so the equation hyps and any free
-        fix-vars they mention are gone before ``GEN`` tries to ``ABS``
-        over those vars; finally ``GEN`` over the fix-vars themselves.
+        Order matters: ``DISCH`` first, so user-``assume``d hyps move
+        from ``_asl`` into the conclusion before ``_discharge_lazy_lets``
+        INSTs carriers (which would otherwise mutate the hyp shape and
+        leave ``DISCH`` silently producing the wrong implication); then
+        ``_discharge_lazy_lets`` so equation hyps and any free fix-vars
+        they mention are gone before ``GEN``; finally ``GEN`` over the
+        fix-vars.
+
+        ``GEN``'s ``ABS`` step fails loudly if the var is free in any
+        remaining hyp, so a swap that puts ``GEN`` before
+        ``_discharge_lazy_lets`` is caught by the kernel. The
+        ``DISCH``-vs-``_discharge_lazy_lets`` swap is the silent one
+        (``DISCH`` always succeeds at the kernel level), so the doc
+        above is the only thing keeping that pair in order.
 
         Induction's frame has empty ``hyps_added`` / ``vars_added`` (the
         ``GEN`` happens earlier via ``INDUCT_PROVE``), so for that
@@ -394,39 +416,24 @@ class Proof:
         """Discharge each lazy-let hypothesis on ``th`` from ``frame``.
 
         For every lazy let ``R(b1...bn) := body`` registered on ``frame``,
-        substitute ``R := \\b1...bn. body`` in ``th`` and ``PROVE_HYP`` the
-        resulting (now trivially provable) equation hypothesis. The
-        conclusion is BETA-normalized to clean up redexes left behind by
-        the substitution.
+        substitute ``R := \\b1...bn. body`` and ``PROVE_HYP`` the resulting
+        (now trivially provable) equation hypothesis. The conclusion is
+        BETA-normalized once at the end to clean up redexes left by the
+        substitutions.
 
         Lazy lets registered on parent frames are *not* discharged here —
         they go out with the corresponding parent frame.
+
+        Reverse registration order matters: a later let's body may
+        reference an earlier carrier, so discharging the earlier one
+        first would mutate the later let's hyp shape away from what
+        ``_substitute_carrier`` synthesises from ``lz.body``.
         """
         if not frame.lazy_lets:
             return th
-        # Process lets in reverse registration order: a later let's body
-        # may reference an earlier carrier, so discharging the earlier
-        # one first would mutate the later let's hyp into a shape that no
-        # longer matches the eq_th we synthesize from ``lz.body``.
         for lz in reversed(list(frame.lazy_lets.values())):
-            abs_body = lz.body
-            for bv in reversed(lz.bvars):
-                abs_body = mk_abs(bv, abs_body)
-            # Substitute carrier := abs_body in th. Beta-redexes appear at
-            # every former carrier-application site, plus inside the local
-            # equation hypothesis (now ``!b1..bn. (\b1..bn. body) b1..bn = body``).
-            th = INST([(abs_body, lz.carrier)], th)
-            # Build the hypothesis-proof: |- !b1..bn. (\b1..bn. body) b1..bn = body
-            # via BETA_NORM on the LHS chain, then GEN over each bvar.
-            eq_th = BETA_NORM(mk_app(abs_body, *lz.bvars))   # |- (abs_body) b1..bn = body
-            for bv in reversed(lz.bvars):
-                eq_th = GEN(bv, eq_th)
-            th = PROVE_HYP(eq_th, th)
-        # Clean up residual redexes in the conclusion left by INST.
-        nf_eq = BETA_NORM(th._concl)              # |- concl = beta-normal-concl
-        if not aconv(rand(nf_eq._concl), th._concl):
-            th = EQ_MP(nf_eq, th)
-        return th
+            th = self._substitute_carrier(lz, th)
+        return self._beta_norm_concl(th)
 
     def _parse(self, s):
         return parse(s, _env_bindings=self._scope_env())
@@ -785,7 +792,7 @@ class Proof:
             raise HolError("base() outside induction()")
         var = fr.data["var"]
         body = fr.data["body"]
-        sub_goal = _subst_term(var, ONE, body)
+        sub_goal = subst_term(var, ONE, body)
 
         def on_close(th):
             fr.data["base_th"] = th
@@ -800,7 +807,7 @@ class Proof:
             raise HolError("step() outside induction()")
         var = fr.data["var"]
         body = fr.data["body"]
-        sub_goal = _subst_term(var, mk_suc(var), body)
+        sub_goal = subst_term(var, mk_suc(var), body)
 
         def on_close(th):
             fr.data["step_th"] = th
@@ -1240,8 +1247,7 @@ class _Have:
         # Direct existential: ?v. body.
         target_pred = dest_exists(target)
         if target_pred is not None:
-            from tactics import _subst_term
-            expected = _subst_term(target_pred.bvar, witness_t, target_pred.body)
+            expected = subst_term(target_pred.bvar, witness_t, target_pred.body)
             fact_th = p._simp_require(expected, fact_th, op="by_witness")
             return self._finish(EXISTS(target_pred, witness_t, fact_th))
 

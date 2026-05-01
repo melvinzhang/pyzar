@@ -27,7 +27,7 @@ from axioms import (
 from tactics import (
     AP_TERM, AP_THM, BETA_CONV, BETA_NORM, SYM, SPEC, GEN, GENL,
     CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP, EXISTS,
-    PROVE_HYP, ELIM_EX, NOT_ELIM, NOT_INTRO, CONTR,
+    PROVE_HYP, ELIM_EX, CHOOSE_WITNESS, NOT_ELIM, NOT_INTRO, CONTR,
     NE_SYM, TRANS_CHAIN, UNFOLD, unfold_def_at,
     BETA_RULE, REWRITE_RULE,
 )
@@ -750,9 +750,7 @@ def NUM_RECURSION(p):
     # Step 1: (@m. R c h 1 m) = c, by uniqueness at 1 + R_AT_1 + SELECT.
     R_unique_1 = SPEC(ONE, R_UNIQUE)
     exist_1, unique_1 = CONJUNCT1(R_unique_1), CONJUNCT2(R_unique_1)
-    R_1_at_sel = PROVE_HYP(
-        exist_1,
-        ELIM_EX(pred_R_1, exist_1._concl, lambda th: th))
+    R_1_at_sel = CHOOSE_WITNESS(pred_R_1, exist_1)
     sel1_eq_c = MP(SPEC(_c, SPEC(sel_pred_R_1, unique_1)),
                    CONJ(R_1_at_sel, R_AT_1))   # |- (@m. R c h 1 m) = c
 
@@ -763,18 +761,14 @@ def NUM_RECURSION(p):
         R_unique_n = SPEC(_n, R_UNIQUE)
         exist_n = CONJUNCT1(R_unique_n)
         pred_R_n = mk_abs(_m, _mk_R(_c, _h, _n, _m))
-        R_n_at_sel = PROVE_HYP(
-            exist_n,
-            ELIM_EX(pred_R_n, exist_n._concl, lambda th: th))
+        R_n_at_sel = CHOOSE_WITNESS(pred_R_n, exist_n)
         sel_pred_R_n = mk_comb(sel_const, pred_R_n)
         R_sn_h_n_sel = MP(SPEC(sel_pred_R_n, SPEC(_n, R_STEP)),
                           R_n_at_sel)
         R_unique_sn = SPEC(mk_suc(_n), R_UNIQUE)
         exist_sn, unique_sn = CONJUNCT1(R_unique_sn), CONJUNCT2(R_unique_sn)
         pred_R_sn = mk_abs(_m, _mk_R(_c, _h, mk_suc(_n), _m))
-        R_sn_at_sel = PROVE_HYP(
-            exist_sn,
-            ELIM_EX(pred_R_sn, exist_sn._concl, lambda th: th))
+        R_sn_at_sel = CHOOSE_WITNESS(pred_R_sn, exist_sn)
         sel_pred_R_sn = mk_comb(sel_const, pred_R_sn)
         h_n_sel = mk_app(_h, _n, sel_pred_R_n)
         p.thus("(@m. R c h (SUC n) m) = h n (@m. R c h n m)") \
@@ -863,8 +857,7 @@ def define_recursive(name, fn_ty, x_var, c, h, *, prec=None, assoc="non"):
     sel_at_raw = mk_comb(sel_const, pred_raw)               # @fn. raw_body[fn]
 
     # Extract the conjunction body under the existential witness.
-    body_raw = PROVE_HYP(spec_ch,
-                          ELIM_EX(pred_raw, spec_ch._concl, lambda th: th))
+    body_raw = CHOOSE_WITNESS(pred_raw, spec_ch)
     raw_base = CONJUNCT1(body_raw)                          # |- sel_at_raw 1 = c
     raw_step = CONJUNCT2(body_raw)                          # |- !n. sel_at_raw (SUC n) = h n (sel_at_raw n)
 
