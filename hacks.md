@@ -20,7 +20,7 @@ Catalogue of dubious patterns. Each entry: where it lives, why it's a smell, and
 | H12 | ✅ | `_substitute_carrier` / `_beta_norm_concl` extracted in `fc6b43f`. |
 | H13 | ✅ | `assume` registers user surface ASSUME; `term_eq_ant` synthesised at assume-time, lifted into the implication antecedent at frame close. |
 | H14 | ✅ | `CHOOSE_WITNESS` factored, `pending_choose` deleted (`3a8d734`). |
-| H15 | ⏳ | Asymmetric strictness on fact registry. |
+| H15 | ✅ | `_drop_facts` now `del`-and-raise; `facts_added` ⊆ `_facts` is enforced symmetrically. |
 | H16 | ⏳ | `auto_choose` still a positional 6-tuple. |
 | H17 | ✅ | Self-tests moved to `tactics_test.py` and `proof_test.py`; `sys.modules` workaround retired. |
 | H18 | ✅ | `subst_term` capture-avoiding by construction (`fc6b43f`); kernel `INST` for the Var case. |
@@ -359,7 +359,7 @@ becomes explicit.
 
 ---
 
-## H15. `_register_fact` raises on duplicates; `_drop_facts` silently ignores missing labels
+## H15. `_register_fact` raises on duplicates; `_drop_facts` silently ignores missing labels  ✅
 
 **Where:** `proof.py:538-550`.
 
@@ -367,10 +367,10 @@ becomes explicit.
 uses `pop(label, None)`. The asymmetry hides bugs — if a frame's
 `facts_added` ever mentions a label that's already gone, we'll never know.
 
-**Fix:** Make both fail-fast (`del self._facts[label]`), or both lenient,
-and pick whichever the invariants actually need. The natural answer is
-fail-fast: `facts_added` should always be a subset of `_facts` at frame
-exit.
+**Fix:** `_drop_facts` now uses ``del self._facts[label]`` and raises a
+`HolError` if the label is missing. ``facts_added`` ⊆ ``_facts`` is the
+invariant; any drift surfaces immediately at frame close instead of
+becoming a silent leak.
 
 ---
 

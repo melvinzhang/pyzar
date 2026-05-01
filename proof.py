@@ -675,7 +675,11 @@ class Proof:
 
     def _drop_facts(self, labels):
         for label in labels:
-            self._facts.pop(label, None)
+            if label not in self._facts:
+                raise HolError(
+                    f"_drop_facts: {label!r} not in fact registry "
+                    "(facts_added must stay a subset of _facts)")
+            del self._facts[label]
         if labels:
             drop = set(labels)
             self._fact_order = [l for l in self._fact_order if l not in drop]
