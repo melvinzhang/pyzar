@@ -430,7 +430,7 @@ def INDUCTION(p):
         p.have("P_mk_ind1: P (mk_num IND_1)") \
             .by_eq_mp(AP_TERM(P, ONE_DEF), "h_base")
         p.thus("NUM_REP IND_1 /\\ P (mk_num IND_1)") \
-            .by_thm(CONJ(NUM_REP_IND_1, p.fact("P_mk_ind1")))
+            .by(CONJ, NUM_REP_IND_1, "P_mk_ind1")
 
     # ----- !i. Q i ==> Q (IND_SUC i). -----
     with p.have("Q_step: !i:ind. Q i ==> Q (IND_SUC i)").proof():
@@ -453,7 +453,7 @@ def INDUCTION(p):
         p.have("P_mk_si: P (mk_num (IND_SUC i))") \
             .by_eq_mp(AP_TERM(P, SUC_mki_eq_mk_si), P_SUC_mki)
         p.thus("NUM_REP (IND_SUC i) /\\ P (mk_num (IND_SUC i))") \
-            .by_thm(CONJ(p.fact("NR_si"), p.fact("P_mk_si")))
+            .by(CONJ, "NR_si", "P_mk_si")
 
     # ----- For any x, NUM_REP at Q gives Q (dest_num x); peel via MK_DEST. -----
     with p.thus("!x. P x").proof():
@@ -618,9 +618,7 @@ def R_UNIQUE_BASE(p):
            "(!m1 m2. R c h 1 m1 /\\ R c h 1 m2 ==> m1 = m2)",
            types=_R_TYPES)
     # Existence: witness m = c, via R_AT_1.
-    R_1_m = parse("R c h 1 m", _env_bindings=p._scope_env())
-    p.have("exist: ?m. R c h 1 m") \
-        .by_thm(EXISTS(mk_abs(_m, R_1_m), _c, R_AT_1))
+    p.have("exist: ?m. R c h 1 m").by_witness("c", R_AT_1)
     # Closure of Qp.
     with p.have("Qp_1_c: Qp 1 c").proof():
         p.assume("h11: 1 = 1")
@@ -634,7 +632,7 @@ def R_UNIQUE_BASE(p):
         p.absurd().by_conj("h_eq1", SPEC(_k, AXIOM_3))
     p.have("Qp_closure: Qp 1 c /\\ "
            "(!k a. Qp k a ==> Qp (SUC k) (h k a))") \
-        .by_thm(CONJ(p.fact("Qp_1_c"), p.fact("Qp_close")))
+        .by(CONJ, "Qp_1_c", "Qp_close")
     # Uniqueness.
     with p.have("unique: !m1 m2. R c h 1 m1 /\\ R c h 1 m2 ==> m1 = m2").proof():
         p.fix("m1 m2")
@@ -646,11 +644,10 @@ def R_UNIQUE_BASE(p):
             .by_select("h_R_m2", "Qp", "Qp_closure")
         p.have("m1_eq_c: m1 = c").by("Qp_1_m1", REFL(ONE))
         p.have("m2_eq_c: m2 = c").by("Qp_1_m2", REFL(ONE))
-        p.thus("m1 = m2") \
-            .by_thm(TRANS(p.fact("m1_eq_c"), SYM(p.fact("m2_eq_c"))))
+        p.thus("m1 = m2").by_rewrite(["m1_eq_c", "m2_eq_c"])
     p.thus("(?m. R c h 1 m) /\\ "
            "(!m1 m2. R c h 1 m1 /\\ R c h 1 m2 ==> m1 = m2)") \
-        .by_thm(CONJ(p.fact("exist"), p.fact("unique")))
+        .by(CONJ, "exist", "unique")
 
 
 @proof
@@ -681,7 +678,7 @@ def R_UNIQUE_STEP(p):
             p.assume("h_1_sn: 1 = SUC n")
             p.absurd().by_conj(SYM(p.fact("h_1_sn")), SPEC(_n, AXIOM_3))
         p.thus("R c h 1 c /\\ (1 = SUC n ==> c = h n m_n)") \
-            .by_thm(CONJ(R_AT_1, p.fact("vac1")))
+            .by(CONJ, R_AT_1, "vac1")
     # !k a. Qp k a ==> Qp (SUC k) (h k a).
     with p.have("Qp_close: !k a. Qp k a ==> Qp (SUC k) (h k a)").proof():
         p.fix("k a")
@@ -692,7 +689,10 @@ def R_UNIQUE_STEP(p):
         with p.have("vac2: SUC k = SUC n ==> h k a = h n m_n").proof():
             p.assume("h_sk_sn: SUC k = SUC n")
             p.have("k_eq_n: k = n").by(AXIOM_4, "k", "n", "h_sk_sn")
-            # Rewrite R c h k a -> R c h n a using k = n.
+            # Rewrite R c h k a -> R c h n a using k = n. R_k_a's body is
+            # under a !Q. binder and k_eq_n carries the SUC k = SUC n hyp,
+            # so the rewriter's under-binder filter blocks it -- bridge by
+            # hand at the abstraction \kk. R c h kk a.
             kk = Var("kk", num_ty)
             R_func_a = mk_abs(kk, parse("R c h kk a",
                                          _env_bindings={**p._scope_env(),
@@ -716,10 +716,10 @@ def R_UNIQUE_STEP(p):
             p.thus("h k a = h n m_n").by_thm(h_k_a_eq_h_n_mn)
         p.thus("R c h (SUC k) (h k a) /\\ "
                "(SUC k = SUC n ==> h k a = h n m_n)") \
-            .by_thm(CONJ(p.fact("R_sk_hka"), p.fact("vac2")))
+            .by(CONJ, "R_sk_hka", "vac2")
     p.have("Qp_closure: Qp 1 c /\\ "
            "(!k a. Qp k a ==> Qp (SUC k) (h k a))") \
-        .by_thm(CONJ(p.fact("Qp_1_c"), p.fact("Qp_close")))
+        .by(CONJ, "Qp_1_c", "Qp_close")
     with p.have("unique_sn: !m1 m2. R c h (SUC n) m1 /\\ "
                 "R c h (SUC n) m2 ==> m1 = m2").proof():
         p.fix("m1 m2")
@@ -733,11 +733,10 @@ def R_UNIQUE_STEP(p):
         p.split_conj("Qp_sn_m2", "_R_sn_m2", "step2")
         p.have("m1_eq: m1 = h n m_n").by("step1", REFL(mk_suc(_n)))
         p.have("m2_eq: m2 = h n m_n").by("step2", REFL(mk_suc(_n)))
-        p.thus("m1 = m2") \
-            .by_thm(TRANS(p.fact("m1_eq"), SYM(p.fact("m2_eq"))))
+        p.thus("m1 = m2").by_rewrite(["m1_eq", "m2_eq"])
     p.thus("(?m. R c h (SUC n) m) /\\ "
            "(!m1 m2. R c h (SUC n) m1 /\\ R c h (SUC n) m2 ==> m1 = m2)") \
-        .by_thm(CONJ(p.fact("exist_sn"), p.fact("unique_sn")))
+        .by(CONJ, "exist_sn", "unique_sn")
 
 
 # Now combine via INDUCT to get R_UNIQUE: |- !n. _mk_unique_at(n).
@@ -803,27 +802,17 @@ def NUM_RECURSION(p):
     # (fn_body 1) beta-converts to (@m. R c h 1 m); same for (fn_body n) and
     # (fn_body (SUC n)). We bridge via TRANS_CHAIN over BETA_CONVs.
     fn_body = mk_abs(_n, mk_comb(sel_const, mk_abs(_m, _mk_R(_c, _h, _n, _m))))
-    fn_1   = mk_comb(fn_body, ONE)
-    fn_n   = mk_comb(fn_body, _n)
-    fn_sn  = mk_comb(fn_body, mk_suc(_n))
-    beta_1  = BETA_CONV(fn_1)
-    beta_n  = BETA_CONV(fn_n)
-    beta_sn = BETA_CONV(fn_sn)
+    beta_1  = BETA_CONV(mk_comb(fn_body, ONE))
+    beta_n  = BETA_CONV(mk_comb(fn_body, _n))
+    beta_sn = BETA_CONV(mk_comb(fn_body, mk_suc(_n)))
     fn_1_eq_c = TRANS(beta_1, sel1_eq_c)
     h_n_fnn_eq = AP_TERM(mk_comb(_h, _n), beta_n)
-    fn_sn_eq = TRANS_CHAIN([
-        beta_sn,
-        SPEC(_n, p.fact("fn_step")),
-        SYM(h_n_fnn_eq)])
-    forall_step = GEN(_n, fn_sn_eq)
-    combined = CONJ(fn_1_eq_c, forall_step)
-    body_pred = mk_and(
-        mk_eq(mk_comb(_fn, ONE), _c),
-        mk_forall(_n, mk_eq(mk_comb(_fn, mk_suc(_n)),
-                            mk_comb(mk_comb(_h, _n), mk_comb(_fn, _n)))))
-    pred_fn = mk_abs(_fn, body_pred)
+    fn_sn_eq = TRANS_CHAIN([beta_sn,
+                             SPEC(_n, p.fact("fn_step")),
+                             SYM(h_n_fnn_eq)])
+    combined = CONJ(fn_1_eq_c, GEN(_n, fn_sn_eq))
     p.thus("?fn. fn 1 = c /\\ (!n. fn (SUC n) = h n (fn n))") \
-        .by_thm(EXISTS(pred_fn, fn_body, combined))
+        .by_witness(fn_body, combined)
 
 
 # ---------------------------------------------------------------------------
