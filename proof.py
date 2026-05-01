@@ -171,9 +171,9 @@ class Proof:
                 out[lz.carrier] = lz
         return out
 
-    def _unfold_lazy_lets_in_term(self, tm, carriers=None):
-        """Fixpoint simp pass over ``tm`` against the active lazy-let rules,
-        returning ``|- tm = tm_norm``.
+    def simp_normalize(self, tm, carriers=None):
+        """Fixpoint simp pass over ``tm`` against the active simp set
+        (currently: lazy-let local equations), returning ``|- tm = tm_norm``.
 
         Walks bottom-up; each carrier application fires its rule, and the
         substituted body is re-walked so nested carriers also normalize.
@@ -233,13 +233,13 @@ class Proof:
             return MK_COMB(f_eq, a_eq)
         return REFL(tm)
 
-    def _unfold_fact(self, th):
-        """Unfold every lazy-let application in ``th``'s conclusion,
-        returning a theorem whose conclusion is the unfolded body. Used
-        by ``by`` / ``by_select`` to auto-lift folded facts into their
-        HO shape before SPEC/MP chains.
-        """
-        eq = self._unfold_lazy_lets_in_term(th._concl)
+    def simp_norm_fact(self, th):
+        """Simp-normalize ``th``'s conclusion, returning a theorem whose
+        conclusion is the normal form. Pattern B: structural exposure —
+        used by tactics that need the unfolded shape (``by`` / ``by_select``
+        before SPEC chains, ``split_conj`` to expose the top conjunction,
+        ``by_disj`` to expose the disjunction)."""
+        eq = self.simp_normalize(th._concl)
         if aconv(rand(eq._concl), th._concl):
             return th
         return EQ_MP(eq, th)
@@ -275,58 +275,69 @@ class Proof:
             th_inst = EQ_MP(nf_eq, th_inst)
         return th_inst
 
-    def _mp_modulo_lazy_lets(self, th_imp, th_arg):
-        """``MP(th_imp, th_arg)`` with conversion-on-match fallback.
+    def simp_mp(self, th_imp, th_arg):
+        """``MP(th_imp, th_arg)`` modulo simp on the antecedent.
 
-        If the antecedent shape and ``th_arg``'s conclusion don't ``aconv``
-        directly, try to align them by unfolding lazy lets in either
-        direction. Used by ``by`` and ``by_select``'s MP steps so the user
-        can mix folded/unfolded facts in the same MP chain.
-        """
-        try:
-            return MP(th_imp, th_arg)
-        except HolError:
-            pass
-        # th_imp must be of shape a ==> b. Pull out a.
+        If the antecedent and ``th_arg``'s conclusion don't ``aconv``
+        directly, lift via ``simp_match`` so the user can mix folded /
+        unfolded forms across an MP boundary."""
         c = th_imp._concl
         if not (isinstance(c, Comb) and isinstance(c.fun, Comb)
                 and isinstance(c.fun.fun, Const) and c.fun.fun.name == "==>"):
-            raise HolError(
-                "MP: antecedent not a ==> shape\n"
-                f"  th_imp: {pp(c)}\n"
-                f"  th_arg: {pp(th_arg._concl)}")
+            return MP(th_imp, th_arg)
         ant = c.fun.arg
-        lifted = self._match_modulo_lazy_lets(ant, th_arg)
-        if lifted is None:
-            raise HolError(
-                "MP: antecedent shape does not match argument\n"
-                f"  expected: {pp(ant)}\n"
-                f"  got:      {pp(th_arg._concl)}")
-        return MP(th_imp, lifted)
+        return MP(th_imp, self._simp_require(ant, th_arg, op="MP"))
 
-    def _match_modulo_lazy_lets(self, target, th):
+    def simp_match(self, target, th):
         """If ``aconv(target, th._concl)`` fails, try to align them by
-        unfolding every lazy-let application in both terms.
+        simp-normalizing both terms.
 
-        Uses the under-binder-tolerant ``_unfold_lazy_lets_in_term`` rather
-        than the engine's ``REWRITE_CONV``, which would refuse to descend
-        under binders for hyp-bearing rules.
+        Uses the under-binder-tolerant ``simp_normalize`` rather than the
+        engine's ``REWRITE_CONV``, which would refuse to descend under
+        binders for hyp-bearing rules.
 
         Returns ``th'`` with ``aconv(concl(th'), target)`` on success,
-        else ``None``.
-        """
+        else ``None``."""
         carriers = self._lazy_let_carriers()
         if not carriers:
-            return None
+            return th if aconv(target, th._concl) else None
         try:
-            target_eq = self._unfold_lazy_lets_in_term(target, carriers)
-            th_eq = self._unfold_lazy_lets_in_term(th._concl, carriers)
+            target_eq = self.simp_normalize(target, carriers)
+            th_eq = self.simp_normalize(th._concl, carriers)
         except HolError:
             return None
         if not aconv(rand(target_eq._concl), rand(th_eq._concl)):
             return None
         th_at_nf = EQ_MP(th_eq, th)
         return EQ_MP(SYM(target_eq), th_at_nf)
+
+    def simp_eq_mp(self, eq_th, fact_th):
+        """``EQ_MP(eq_th, fact_th)`` modulo simp on the LHS of ``eq_th``.
+
+        Aligns the equation's LHS with the fact's conclusion via simp on
+        the active simp set, so callers can mix folded/unfolded forms
+        across an EQ_MP boundary."""
+        try:
+            lhs, _ = dest_eq(eq_th._concl)
+        except HolError:
+            return EQ_MP(eq_th, fact_th)
+        lifted = self.simp_match(lhs, fact_th)
+        if lifted is not None:
+            fact_th = lifted
+        return EQ_MP(eq_th, fact_th)
+
+    def _simp_require(self, target, th, op):
+        """Return ``th`` lifted to shape ``target`` via ``simp_match``, or
+        raise ``HolError`` with a uniform shape-mismatch message."""
+        if aconv(target, th._concl):
+            return th
+        lifted = self.simp_match(target, th)
+        if lifted is not None:
+            return lifted
+        raise HolError(
+            f"{op}: shape does not match\n"
+            f"  expected: {pp(target)}\n"
+            f"  got:      {pp(th._concl)}")
 
     def _discharge_lazy_lets(self, frame, th):
         """Discharge each lazy-let hypothesis on ``th`` from ``frame``.
@@ -652,15 +663,15 @@ class Proof:
         """Split a right-associated conjunction fact ``h : a /\\ b /\\ ... /\\ z``
         into the supplied labels, registering each conjunct as its own fact."""
         th = ref if isinstance(ref, thm) else self._resolve_fact(ref)
-        # If the fact's top-level isn't already a conjunction (e.g., a
-        # folded lazy-let application whose body is a conj), unfold lazy
-        # lets to expose it. Avoids unfolding when not needed so other
-        # downstream facts that prefer folded shape are unaffected.
+        # Pattern B: simp-normalize the fact so the top-level conjunction is
+        # exposed (idempotent if already in normal form).
+        th = self.simp_norm_fact(th)
         c = th._concl
         if not (isinstance(c, Comb) and isinstance(c.fun, Comb)
                 and isinstance(c.fun.fun, Const)
                 and c.fun.fun.name == "/\\"):
-            th = self._unfold_fact(th)
+            raise HolError(
+                f"split_conj: not a conjunction: {pp(c)}")
         cur = th
         n = len(labels)
         for i, lbl in enumerate(labels):
@@ -682,23 +693,11 @@ class Proof:
                 raise HolError(f"assume: goal is not an implication: {pp(g)}")
             ant = g.fun.arg
             cons = g.arg
-            if not aconv(ant, term):
-                # Simp-aware match: `Q i` (folded) should accept the
-                # unfolded antecedent `NUM_REP i /\ P (mk_num i)` and vice
-                # versa. The hyp added to the frame uses the *given* term
-                # (user's shape), with ASSUME on the actual antecedent so
-                # downstream facts stay sound.
-                carriers = self._lazy_let_carriers()
-                ok = False
-                if carriers:
-                    ant_eq = self._unfold_lazy_lets_in_term(ant, carriers)
-                    term_eq = self._unfold_lazy_lets_in_term(term, carriers)
-                    if aconv(rand(ant_eq._concl), rand(term_eq._concl)):
-                        ok = True
-                if not ok:
-                    raise HolError(
-                        "assume: hypothesis does not match antecedent\n"
-                        f"  antecedent: {pp(ant)}\n  given:      {pp(term)}")
+            # Simp-aware match: `Q i` (folded) should accept the unfolded
+            # antecedent `NUM_REP i /\ P (mk_num i)` and vice versa. The
+            # registered ASSUME is on the kernel-literal antecedent so
+            # downstream facts stay sound.
+            self._simp_require(ant, ASSUME(term), op="assume")
             self._cur.goal = cons
             self._cur.hyps_added.append((label, ant))
             self._register_fact(label, ASSUME(ant))
@@ -817,16 +816,9 @@ class Proof:
                 expected = parse(eq_check, _env_bindings=env)
             except ParseError as ex:
                 raise HolError(f"choose: cannot parse equation spec: {ex}") from ex
-            ok = aconv(expected, body_at_w)
-            if not ok:
-                # Try matching modulo lazy lets (the user wrote a folded
-                # body whose unfolded form equals body_at_w, or vice versa).
-                expected_unfold = self._unfold_lazy_lets_in_term(expected)
-                body_unfold = self._unfold_lazy_lets_in_term(body_at_w)
-                if aconv(rand(expected_unfold._concl),
-                         rand(body_unfold._concl)):
-                    ok = True
-            if not ok:
+            # Simp-aware match: user may have written a folded shape whose
+            # unfolded form equals body_at_w (or vice versa).
+            if self.simp_match(expected, ASSUME(body_at_w)) is None:
                 raise HolError(
                     "choose: equation spec doesn't match witness body\n"
                     f"  expected: {pp(body_at_w)}\n"
@@ -1013,39 +1005,17 @@ class _Have:
     # ----- finishing: alpha-check, register, optionally close goal -----
 
     def _finish(self, th):
-        if not aconv(concl(th), self.term):
-            # Conversion-on-match: if the mismatch is between a folded
-            # let-application and its body, reconcile via the lazy-let
-            # equation set.
-            th_lifted = self.p._match_modulo_lazy_lets(self.term, th)
-            if th_lifted is None:
-                raise HolError(
-                    "have: justification produced wrong conclusion\n"
-                    f"  expected: {pp(self.term)}\n"
-                    f"  got:      {pp(concl(th))}")
-            th = th_lifted
+        # Pattern A: lift th to the user-supplied have-term shape.
+        th = self.p._simp_require(self.term, th, op="have")
         label = self.label or self.p._fresh_label("h")
         self.p._register_fact(label, th)
         if self.is_thus:
             cur = self.p._cur
-            ok = cur.goal is not None and aconv(cur.goal, self.term)
-            if not ok and cur.goal is not None:
-                # Lazy-let-aware match: both goal and thus-term may carry
-                # folded carrier applications; unfold both and re-check.
-                g_eq = self.p._unfold_lazy_lets_in_term(cur.goal)
-                t_eq = self.p._unfold_lazy_lets_in_term(self.term)
-                if aconv(rand(g_eq._concl), rand(t_eq._concl)):
-                    ok = True
-                    # Pivot th's concl from self.term shape to cur.goal shape
-                    # so the frame's recorded result has the same shape as
-                    # the original goal.
-                    pivot = TRANS(g_eq, SYM(t_eq))   # |- goal = thus_term
-                    th = EQ_MP(SYM(pivot), th)
-            if not ok:
-                raise HolError(
-                    "thus: term does not match current goal\n"
-                    f"  goal: {pp(cur.goal) if cur.goal is not None else 'None'}\n"
-                    f"  thus: {pp(self.term)}")
+            if cur.goal is None:
+                raise HolError("thus: no current goal")
+            # Lift th from have-term shape to current-goal shape so the
+            # frame's recorded result matches the original goal.
+            th = self.p._simp_require(cur.goal, th, op="thus")
             self.p._set_frame_result(cur, th)
         return th
 
@@ -1070,13 +1040,13 @@ class _Have:
         if isinstance(justification, (str, int)):
             justification = self.p._resolve_fact(justification)
         if isinstance(justification, thm):
-            # Auto-unfold a folded justification (e.g. ``R c h 1 m`` from a
-            # lazy let) so subsequent SPECs have a forall to peel.
-            th = self.p._unfold_fact(justification)
+            # Pattern B: simp-normalize the justification so SPECs find a
+            # forall to peel; Pattern A on each MP step via simp_mp.
+            th = self.p.simp_norm_fact(justification)
             for a in args:
                 resolved = self.p._resolve_fact_or_term(a)
                 if isinstance(resolved, thm):
-                    th = self.p._mp_modulo_lazy_lets(th, resolved)
+                    th = self.p.simp_mp(th, resolved)
                 else:
                     th = SPEC(resolved, th)
             return self._finish(th)
@@ -1123,9 +1093,9 @@ class _Have:
         """
         p = self.p
         th = axiom if isinstance(axiom, thm) else p._resolve_fact(axiom)
-        # Auto-unfold the axiom: a folded lazy-let fact like ``R c h 1 m``
-        # is lifted to its HO body so the SPEC chain finds a forall.
-        th = p._unfold_fact(th)
+        # Pattern B: simp-normalize the axiom so the SPEC chain finds a
+        # forall to peel; Pattern A on each MP step via simp_mp.
+        th = p.simp_norm_fact(th)
         for a in args:
             if isinstance(a, str):
                 lz = p._lookup_lazy_let(a)
@@ -1135,12 +1105,12 @@ class _Have:
                     th = SPEC(lz.carrier, th)
                     continue
                 if a in p._facts:
-                    th = p._mp_modulo_lazy_lets(th, p._facts[a])
+                    th = p.simp_mp(th, p._facts[a])
                     continue
                 th = SPEC(p._parse(a), th)
                 continue
             if isinstance(a, thm):
-                th = p._mp_modulo_lazy_lets(th, a)
+                th = p.simp_mp(th, a)
                 continue
             th = SPEC(a, th)
         return self._finish(th)
@@ -1202,23 +1172,11 @@ class _Have:
     def by_eq_mp(self, eq_th, ref):
         """``EQ_MP(eq_th, fact)`` -- rewrite a fact through an equation.
 
-        Aligns the equation's LHS with the fact's conclusion via simp on
-        the active lazy-let set, so the user can mix folded/unfolded forms
-        across an EQ_MP boundary (e.g. an equation stated in folded shape
-        applied to a fact whose conclusion was simp-normalized by an earlier
-        ``split_conj``).
-        """
+        Aligns the equation's LHS with the fact's conclusion via simp, so
+        the user can mix folded/unfolded forms across an EQ_MP boundary."""
         eq_th_resolved = eq_th if isinstance(eq_th, thm) else self.p._resolve_fact(eq_th)
         ref_th = self.p._resolve_fact(ref)
-        try:
-            lhs, _ = dest_eq(eq_th_resolved._concl)
-        except HolError:
-            return self._finish(EQ_MP(eq_th_resolved, ref_th))
-        if not aconv(lhs, ref_th._concl):
-            lifted = self.p._match_modulo_lazy_lets(lhs, ref_th)
-            if lifted is not None:
-                ref_th = lifted
-        return self._finish(EQ_MP(eq_th_resolved, ref_th))
+        return self._finish(self.p.simp_eq_mp(eq_th_resolved, ref_th))
 
     def by_fold(self, ref):
         """Inverse of an unfolder: if the have-term is ``a R b`` for a
@@ -1262,15 +1220,9 @@ class _Have:
         # Direct existential: ?v. body.
         if (isinstance(target, Comb) and isinstance(target.fun, Const)
                 and target.fun.name == "?" and isinstance(target.arg, Abs)):
-            # The expected fact shape is ``P[witness/v]``. If the supplied
-            # fact is in folded lazy-let form (or vice versa), align it
-            # via conversion-on-match before EXISTS.
             from tactics import _subst_term
             expected = _subst_term(target.arg.bvar, witness_t, target.arg.body)
-            if not aconv(fact_th._concl, expected):
-                lifted = p._match_modulo_lazy_lets(expected, fact_th)
-                if lifted is not None:
-                    fact_th = lifted
+            fact_th = p._simp_require(expected, fact_th, op="by_witness")
             return self._finish(EXISTS(target.arg, witness_t, fact_th))
 
         # Registered relation a R b: unfold, EXISTS, fold back.
@@ -1297,36 +1249,32 @@ class _Have:
         right-associated disjuncts, build the ``DISJ1``/``DISJ2`` chain to
         inject it as the proof of the whole disjunction."""
         target = self.term
-        fact_th = ref if isinstance(ref, thm) else self.p._resolve_fact(ref)
+        p = self.p
+        fact_th = ref if isinstance(ref, thm) else p._resolve_fact(ref)
+        # Pattern B: normalize fact and goal so the disjunction structure is
+        # exposed, build at the normalized shape; ``_finish`` re-folds via
+        # ``_simp_require``.
+        fact_th = p.simp_norm_fact(fact_th)
+        target_eq = p.simp_normalize(target)
+        target_norm = rand(target_eq._concl)
 
         def build(disj, th):
-            if aconv(disj, fact_th._concl):
+            if aconv(disj, th._concl):
                 return th
             if not (isinstance(disj, Comb) and isinstance(disj.fun, Comb)
                     and isinstance(disj.fun.fun, Const)
                     and disj.fun.fun.name == "\\/"):
                 raise HolError(
                     "by_disj: fact conclusion does not match any disjunct\n"
-                    f"  fact: {pp(fact_th._concl)}\n"
+                    f"  fact: {pp(th._concl)}\n"
                     f"  goal: {pp(target)}")
             p_part = disj.fun.arg
             q_part = disj.arg
-            if aconv(p_part, fact_th._concl):
+            if aconv(p_part, th._concl):
                 return DISJ1(th, q_part)
             return DISJ2(p_part, build(q_part, th))
 
-        try:
-            return self._finish(build(target, fact_th))
-        except HolError:
-            # Fallback: target may be a folded lazy-let application whose
-            # body is the disjunction. Unfold, build there, fold back.
-            unfold_eq = self.p._unfold_lazy_lets_in_term(target)
-            target_un = rand(unfold_eq._concl)
-            if aconv(target_un, target):
-                raise
-            th_un = build(target_un, fact_th)
-            th = EQ_MP(SYM(unfold_eq), th_un)
-            return self._finish(th)
+        return self._finish(build(target_norm, fact_th))
 
     def by_ac(self, op, assoc, comm):
         """AC_PROVE under ``(op, assoc, comm)`` for the (equation) have-term."""
@@ -1454,7 +1402,7 @@ class _SubFrameCtx:
         carriers = self.p._lazy_let_carriers()
         goal = self.goal
         if carriers:
-            eq = self.p._unfold_lazy_lets_in_term(goal, carriers)
+            eq = self.p.simp_normalize(goal, carriers)
             if not aconv(rand(eq._concl), goal):
                 goal = rand(eq._concl)
         fr = _Frame(goal=goal, kind=self.kind)
@@ -1997,7 +1945,7 @@ def _selftest():
         "M", [yv], self_ref_body, M_carrier, ASSUME(eq_term_loop))
     th_dummy = REFL(ONE)                                 # |- 1 = 1
     target_loop = parse("M 1", _env_bindings={"M": M_carrier})
-    assert p_loop._match_modulo_lazy_lets(target_loop, th_dummy) is None, \
+    assert p_loop.simp_match(target_loop, th_dummy) is None, \
         "self-ref lazy let: match must fail cleanly"
 
 
