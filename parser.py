@@ -30,7 +30,7 @@ they have no default and `env={name: ty}` (or a kernel term) is required.
 
 import re
 
-from lark import Lark
+from lark import Lark, LarkError
 from lark.visitors import Interpreter
 
 from fusion import (
@@ -181,6 +181,11 @@ def pp_thm(th, sig=None):
 _GRAMMAR = r"""
 ?start: term
 
+label_start: NAME ":" term         -> labelled
+           | term                  -> unlabelled
+
+let_start: NAME "(" arglist ")" ":=" term -> let_spec_
+
 ?term: binder | infix_chain
 
 binder: "!" varlist "." term       -> forall_
@@ -203,6 +208,7 @@ infix_chain: prefix_term (OP rhs_term)*
      | NAME                         -> name
 
 varlist: var_decl+
+arglist: var_decl ("," var_decl)*
 var_decl: NAME (":" NAME)?
 
 NAME: /[A-Za-z_][A-Za-z0-9_]*/
@@ -212,7 +218,8 @@ OP:   /[+\-*=<>^&|\/\\]+|~/
 %ignore /[ \t\r\n]+/
 """
 
-_PARSER = Lark(_GRAMMAR, parser="lalr", start="start")
+_PARSER = Lark(_GRAMMAR, parser="lalr",
+               start=["start", "label_start", "let_start"])
 
 
 # ---------------------------------------------------------------------------
@@ -327,6 +334,29 @@ class _Builder(Interpreter):
     def abs_(self,    tree): return self._binder(tree, "\\")
     def select_(self, tree): return self._binder(tree, "@")
 
+    # ----- spec-form starts (label / let) -----
+
+    def labelled(self, tree):
+        label = str(tree.children[0])
+        return label, self.visit(tree.children[1])
+
+    def unlabelled(self, tree):
+        return None, self.visit(tree.children[0])
+
+    def let_spec_(self, tree):
+        name = str(tree.children[0])
+        decls = self._decls(tree.children[1])
+        bvars = []
+        scope = {}
+        for nm, ty in decls:
+            v = mk_var(nm, ty)
+            scope[nm] = v
+            bvars.append(v)
+        self.scope.append(scope)
+        body = self.visit(tree.children[2])
+        self.scope.pop()
+        return name, bvars, body
+
     # ----- prefix + flat infix chain -----
 
     def prefix_app(self, tree):
@@ -388,26 +418,10 @@ def _climb(terms, ops):
 # Public API.
 # ---------------------------------------------------------------------------
 
-def parse(s, sig=None, _env_bindings=None, **bindings):
-    """Parse `s` into a kernel term.
-
-    `bindings` (kwargs) maps free-variable names to either their
-    ``hol_type`` (when the default isn't right) or directly to a kernel
-    term to substitute.  Two reference styles in `s`:
-
-      - bare ``name``  -- resolves through scope > const > bindings > default.
-        Falls through to a default-typed free var if unbound.
-      - ``${name}``    -- requires `name` to be in bindings; raises
-        `ParseError` if missing.
-
-    Every kwarg in `bindings` must be referenced (either as a bare ``name``
-    appearing in `s` or as ``${name}``); unused bindings raise `ParseError`.
-
-    `sig` is a `Signature`; defaults to `DEFAULT_SIG`.
-
-    `_env_bindings` is private: callers (e.g. `Proof._parse`) use it to
-    pass long-lived bindings that bypass the unused check.
-    """
+def _prepare(s, _env_bindings, bindings):
+    """Run antiquote substitution and unused-binding checks shared by
+    every public ``parse_*`` entry point. Returns ``(s_after_splice,
+    merged_env)``."""
     env_b = _env_bindings or {}
     name_to_sentinel = {}
     splice_env = {}
@@ -439,8 +453,69 @@ def parse(s, sig=None, _env_bindings=None, **bindings):
                 f"unused binding(s): {sorted(unused)} "
                 "(neither bare name nor ${{...}} reference appears in source)")
 
-    merged = {**env_b, **bindings, **splice_env}
-    tree = _PARSER.parse(s2)
+    return s2, {**env_b, **bindings, **splice_env}
+
+
+def parse(s, sig=None, _env_bindings=None, **bindings):
+    """Parse `s` into a kernel term.
+
+    `bindings` (kwargs) maps free-variable names to either their
+    ``hol_type`` (when the default isn't right) or directly to a kernel
+    term to substitute.  Two reference styles in `s`:
+
+      - bare ``name``  -- resolves through scope > const > bindings > default.
+        Falls through to a default-typed free var if unbound.
+      - ``${name}``    -- requires `name` to be in bindings; raises
+        `ParseError` if missing.
+
+    Every kwarg in `bindings` must be referenced (either as a bare ``name``
+    appearing in `s` or as ``${name}``); unused bindings raise `ParseError`.
+
+    `sig` is a `Signature`; defaults to `DEFAULT_SIG`.
+
+    `_env_bindings` is private: callers (e.g. `Proof._parse`) use it to
+    pass long-lived bindings that bypass the unused check.
+    """
+    s2, merged = _prepare(s, _env_bindings, bindings)
+    tree = _lark_parse(s2, "start")
+    return _Builder(sig or DEFAULT_SIG, merged).visit(tree)
+
+
+def _lark_parse(s, start):
+    """Run the Lark parser and rewrap lexer/parser errors as
+    ``ParseError`` so callers don't have to know about lark."""
+    try:
+        return _PARSER.parse(s, start=start)
+    except LarkError as ex:
+        raise ParseError(str(ex)) from ex
+
+
+def parse_label(s, sig=None, _env_bindings=None, **bindings):
+    """Parse ``"label: term"`` or bare ``"term"``.
+
+    Returns ``(label_or_None, kernel_term)``. The label form is
+    structurally unambiguous (a term cannot start with ``IDENT:`` --
+    binders open with ``!`` / ``?`` / ``\\`` / ``@``), so the grammar
+    commits once it sees ``NAME ":"``: a body-level ``ParseError``
+    propagates rather than triggering a misleading whole-spec retry.
+    """
+    s2, merged = _prepare(s, _env_bindings, bindings)
+    tree = _lark_parse(s2, "label_start")
+    return _Builder(sig or DEFAULT_SIG, merged).visit(tree)
+
+
+def parse_let_spec(s, sig=None, _env_bindings=None, **bindings):
+    """Parse ``"NAME(arg1, arg2, ...) := body"``.
+
+    Returns ``(name, [Var, ...], body_term)``. Each arg may carry an
+    optional type annotation ``arg:typename``; type names resolve
+    against ``sig.type`` first, then env-provided type aliases, then
+    inherited types from env-provided ``Var`` bindings, and finally
+    the registry's default-var type. The body is parsed with all args
+    in scope.
+    """
+    s2, merged = _prepare(s, _env_bindings, bindings)
+    tree = _lark_parse(s2, "let_start")
     return _Builder(sig or DEFAULT_SIG, merged).visit(tree)
 
 

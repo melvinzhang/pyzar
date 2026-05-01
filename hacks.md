@@ -12,8 +12,8 @@ Catalogue of dubious patterns. Each entry: where it lives, why it's a smell, and
 | H4 | ✅ | Alpha-aware Abs match in `fc6b43f`. |
 | H5 | ✅ | `_term_match` mutates `subst` in place in `fc6b43f`. |
 | H6 | ✅ | Frame kinds replaced with `FrameKind` enum; misspellings now fail at parse time. |
-| H7 | ⏳ | Mini-DSL still regex-parsed. |
-| H8 | ⏳ | `_split_label` still swallows label-form parse errors. |
+| H7 | ✅ | Spec syntax promoted into the Lark grammar via `label_start` / `let_start` rules; new `parse_label` / `parse_let_spec` entry points. |
+| H8 | ✅ | `_split_label` commits once `NAME ":"` is recognised by the grammar; body `ParseError` propagates instead of being masked by a whole-spec retry. |
 | H9 | ⏳ | String overloading in `coerce` / `by_select`. |
 | H10 | ✅ | `simp_normalize` no longer wraps `HolError` as `SimpFailure` (`56170d0`). |
 | H11 | ✅ | `hyps_added` stores ASSUME theorems INSTed in lockstep with `th`; DISCH/lazy-let-discharge order is no longer load-bearing. |
@@ -134,7 +134,7 @@ value strings for the `_SubFrameCtx.__exit__` error message.
 
 ---
 
-## H7. Mini-DSL parsing via three regexes (`_LABEL_RE`, `_LET_SPEC_RE`, `_LET_ARG_RE`)
+## H7. Mini-DSL parsing via three regexes (`_LABEL_RE`, `_LET_SPEC_RE`, `_LET_ARG_RE`)  ✅
 
 **Where:** `proof.py:502-510`.
 
@@ -145,13 +145,24 @@ annotations with arrows — quickly outgrow what regex can handle. Already
 visible in `_split_label` (H8) where the regex misclassifies and falls
 back.
 
-**Fix:** Promote the spec syntax into the existing `parser.py` grammar.
-`label:`, `name(args) :=` are simple prefix forms; treating them as first-
-class parse productions removes the regex layer and fixes H8 along the way.
+**Fix:** Spec syntax is now first-class in `parser.py`'s Lark grammar.
+Two new start rules — `label_start: NAME ":" term | term` and
+`let_start: NAME "(" arglist ")" ":=" term` — share the existing `term`
+production, so binders / nested colons / parens / type annotations are
+handled by the kernel grammar instead of duplicated regex logic. New
+public entry points `parse_label` / `parse_let_spec` wrap them; the
+`_Builder` visitor returns `(label, term)` and `(name, [Var], body)`
+respectively, with body parsed in scope of the args. Lark errors are
+re-wrapped as `ParseError` so callers don't need to know about lark.
+
+A single small regex remains (`Proof._peel_label`) for the deferred-
+parse case in `choose()`, where the body must be parsed only after the
+witness term is computed and bound under the label name; eager
+`parse_label` doesn't fit that flow.
 
 ---
 
-## H8. `_split_label` swallows the real parse error
+## H8. `_split_label` swallows the real parse error  ✅
 
 **Where:** `proof.py:519-527`.
 
@@ -161,9 +172,11 @@ label-form specs (e.g. `"hxy: x ?? y"`) get reported against the wrong
 syntactic interpretation, hiding the original `ParseError` and producing a
 confusing error.
 
-**Fix:** Once the label form matches structurally, commit to it: let the
-inner `ParseError` propagate. The fall-through path should only fire when
-the label form fails the regex outright.
+**Fix:** Folded into H7. With `label_start` as a Lark production, the
+parser commits to label form as soon as it sees ``NAME ":"`` — there's
+no fallback path, so a body-level `ParseError` reaches the caller
+verbatim. ``"hxy: x ?? y"`` now reports the unexpected ``?`` against
+the `x ?? y` body, exactly where the typo lives.
 
 ---
 

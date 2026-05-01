@@ -46,7 +46,9 @@ from tactics import (
     REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV, BETA_RULE,
     AC_PROVE, REWRITE_AC_PROVE,
 )
-from parser import parse, pp, ParseError, DEFAULT_SIG
+from parser import (
+    parse, parse_label, parse_let_spec, pp, ParseError, DEFAULT_SIG,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -599,32 +601,29 @@ class Proof:
         """Inverse of ``unfold_let``: returns ``|- body = name a1...an``."""
         return SYM(self.unfold_let(name, *args))
 
-    _LABEL_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z_0-9]*)\s*:\s*(.+)$", re.DOTALL)
-
-    _LET_SPEC_RE = re.compile(
-        r"^\s*([A-Za-z_]\w*)\s*"
-        r"\(\s*(.+?)\s*\)\s*"
-        r":=\s*(.+)$",
-        re.DOTALL)
-    _LET_ARG_RE = re.compile(
-        r"^\s*([A-Za-z_]\w*)\s*(?::\s*([A-Za-z_]\w*)\s*)?$")
-
     def _split_label(self, spec):
-        """Parse 'label: term' or 'term'.
+        """Parse ``"label: term"`` or ``"term"``.
 
-        Returns ``(label_or_None, kernel_term)``. Tries label-form first; if
-        the remainder fails to parse, falls back to treating the whole spec
-        as a term (so ``"!x:num. x = x"`` survives).
+        Thin wrapper over ``parser.parse_label`` that supplies the
+        current scope env. The grammar commits once it sees ``NAME ":"``
+        so a body-level ``ParseError`` reports the typo the user
+        actually wrote (no misleading whole-spec retry).
         """
-        m = self._LABEL_RE.match(spec)
-        if m:
-            label = m.group(1)
-            rest = m.group(2)
-            try:
-                return label, self._parse(rest)
-            except ParseError:
-                pass
-        return None, self._parse(spec)
+        return parse_label(spec, _env_bindings=self._scope_env())
+
+    _LABEL_PEEL_RE = re.compile(
+        r"^\s*([A-Za-z_]\w*)\s*:(?!=)\s*(.*)$", re.DOTALL)
+
+    @classmethod
+    def _peel_label(cls, spec):
+        """Structural-only split of ``"label: rest"`` -- returns
+        ``(label, rest_str)`` or ``None``. Used when the body must be
+        parsed lazily because its env depends on the label name (see
+        ``choose``); callers that can parse eagerly should prefer
+        ``parser.parse_label`` instead.
+        """
+        m = cls._LABEL_PEEL_RE.match(spec)
+        return (m.group(1), m.group(2)) if m else None
 
     def _fresh_label(self, prefix="h"):
         while True:
@@ -750,62 +749,35 @@ class Proof:
         Lifetime: the binding dies with the current frame (same as
         ``vars_added`` and ``facts_added``).
         """
-        m = self._LET_SPEC_RE.match(spec)
-        if not m:
-            raise HolError(
-                f"let: expected 'NAME(arg1, arg2, ...) := body' "
-                f"(args may be annotated 'arg:ty'), got {spec!r}")
-        name, args_str, body_str = m.groups()
         types = types or {}
 
-        bvars = []
-        seen = set()
-        for piece in args_str.split(","):
-            am = self._LET_ARG_RE.match(piece)
-            if not am:
-                raise HolError(
-                    f"let: cannot parse arg declaration {piece!r} in {spec!r}")
-            arg_name, ty_name = am.groups()
-            if arg_name in seen:
-                raise HolError(
-                    f"let: duplicate arg name {arg_name!r} in {spec!r}")
-            seen.add(arg_name)
-            if ty_name is not None:
-                if ty_name not in DEFAULT_SIG.type:
-                    raise HolError(f"let: unknown type {ty_name!r}")
-                bvar_ty = DEFAULT_SIG.type[ty_name]
-            elif arg_name in types:
-                bvar_ty = types[arg_name]
-            else:
-                bvar_ty = DEFAULT_SIG.default_var_ty
-                if bvar_ty is None:
-                    raise HolError(
-                        "let: no default type registered; annotate the bvar "
-                        f"as '{name}({arg_name}:T, ...) := ...'")
-            bvars.append(Var(arg_name, bvar_ty))
-
+        # Build the body-parsing env first so the parser sees user-supplied
+        # type aliases (consulted by ``var_decl`` for ``arg:T`` annotations
+        # *and* for body free-names that need a declared type).
         env = self._scope_env()
+        body_env = dict(env)
+        for nm, ty in types.items():
+            body_env[nm] = ty
+        try:
+            name, bvars, body = parse_let_spec(spec, _env_bindings=body_env)
+        except ParseError as ex:
+            raise HolError(
+                f"let: expected 'NAME(arg1, arg2, ...) := body' "
+                f"(args may be annotated 'arg:ty'); {ex}") from ex
+
+        seen = set()
+        for v in bvars:
+            if v.name in seen:
+                raise HolError(
+                    f"let: duplicate arg name {v.name!r} in {spec!r}")
+            seen.add(v.name)
+
         if name in env:
             raise HolError(
                 f"let: {name!r} clashes with an existing binding in scope")
         if name in DEFAULT_SIG.const:
             raise HolError(
                 f"let: {name!r} clashes with a registered constant")
-
-        # Parse body with the placeholders injected; placeholders shadow
-        # any same-named outer scope binding for the duration of the body.
-        # ``types`` further extends the env so other free names in body
-        # (not bvars) get their declared types.
-        body_env = dict(env)
-        for nm, ty in types.items():
-            if nm not in seen:
-                body_env[nm] = ty
-        for bv in bvars:
-            body_env[bv.name] = bv
-        try:
-            body = parse(body_str, _env_bindings=body_env)
-        except ParseError as ex:
-            raise HolError(f"let: cannot parse body: {ex}") from ex
 
         self._register_lazy_let(name, bvars, body)
 
@@ -941,10 +913,9 @@ class Proof:
             defaults to ``f"{name}_eq"`` so it doesn't clash with the witness
             name (which lives in the parser env).
         """
-        m = self._LABEL_RE.match(name_spec)
-        if m:
-            name = m.group(1)
-            eq_check = m.group(2)
+        peeled = self._peel_label(name_spec)
+        if peeled is not None:
+            name, eq_check = peeled
         else:
             name = name_spec.strip()
             eq_check = None
@@ -1054,21 +1025,20 @@ class Proof:
                 f"{pp(g) if g is not None else 'None'}")
 
         spec = label_spec.strip()
-        m = self._LABEL_RE.match(spec)
-        if m:
-            label = m.group(1)
+        if re.fullmatch(r"[A-Za-z_]\w*", spec):
+            label = spec
+        else:
             try:
-                hyp_term = self._parse(m.group(2))
+                label, hyp_term = parse_label(
+                    spec, _env_bindings=self._scope_env())
             except ParseError as ex:
                 raise HolError(f"suppose: cannot parse hypothesis: {ex}") from ex
+            if label is None:
+                raise HolError(f"suppose: bad label spec: {label_spec!r}")
             if not aconv(hyp_term, body):
                 raise HolError(
                     "suppose: hypothesis does not match negated body\n"
                     f"  body:  {pp(body)}\n  given: {pp(hyp_term)}")
-        else:
-            if not re.match(r"^[A-Za-z_][A-Za-z_0-9]*$", spec):
-                raise HolError(f"suppose: bad label spec: {label_spec!r}")
-            label = spec
 
         def on_close(F_th):
             not_th = NOT_INTRO(DISCH(body, F_th))
