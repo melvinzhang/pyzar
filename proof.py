@@ -28,7 +28,7 @@ import re
 
 from fusion import (
     Var, Comb, Abs, thm,
-    aconv, concl, HolError, SimpFailure, ASSUME, EQ_MP, BETA, INST, mk_abs, mk_app, mk_comb,
+    aconv, concl, HolError, ASSUME, EQ_MP, BETA, INST, mk_abs, mk_app, mk_comb,
     rand, type_of, TRANS, mk_eq, mk_fun_ty, MK_COMB, ABS, REFL, dest_eq,
     dest_binop_any,
 )
@@ -207,26 +207,32 @@ class Proof:
 
         Bypasses ``REWRITE_CONV``'s "no hyp-bearing rules under binders"
         filter — sound because lazy-let equation hyps are
-        ``!args. carrier args = body`` and ``ABS`` succeeds under binders
-        (bvar isn't free in the hyp).
+        ``!args. carrier args = body``; ``ABS`` normally succeeds under
+        binders (bvar isn't free in the hyp), and ``_unfold_walk`` falls
+        back to ``REFL`` for the rare case where it can't.
+
+        Real kernel errors raised inside ``_unfold_walk`` propagate
+        unchanged — only ``SimpFailure`` signals "simp gave up cleanly".
         """
         if carriers is None:
             carriers = self._lazy_let_carriers()
         if not carriers:
             return REFL(tm)
-        try:
-            return self._unfold_walk(tm, carriers, frozenset())
-        except HolError as e:
-            if isinstance(e, SimpFailure):
-                raise
-            raise SimpFailure(f"simp_normalize: {e}") from e
+        return self._unfold_walk(tm, carriers, frozenset())
 
     def _unfold_walk(self, tm, carriers, blocked):
         if isinstance(tm, Abs):
             body_eq = self._unfold_walk(tm.body, carriers, blocked)
             if aconv(rand(body_eq._concl), tm.body):
                 return REFL(tm)
-            return ABS(tm.bvar, body_eq)
+            # ``ABS`` fails if ``tm.bvar`` is free in some hyp of ``body_eq``.
+            # That's a legitimate "can't lift this rewrite under the binder"
+            # signal, not a bug — fall back to no-progress at this node and
+            # let the caller see the un-normalized lambda.
+            try:
+                return ABS(tm.bvar, body_eq)
+            except HolError:
+                return REFL(tm)
         if isinstance(tm, Comb):
             spine = []
             head = tm
@@ -327,11 +333,8 @@ class Proof:
         carriers = self._lazy_let_carriers()
         if not carriers:
             return th if aconv(target, th._concl) else None
-        try:
-            target_eq = self.simp_normalize(target, carriers)
-            th_eq = self.simp_normalize(th._concl, carriers)
-        except SimpFailure:
-            return None
+        target_eq = self.simp_normalize(target, carriers)
+        th_eq = self.simp_normalize(th._concl, carriers)
         if not aconv(rand(target_eq._concl), rand(th_eq._concl)):
             return None
         th_at_nf = EQ_MP(th_eq, th)
