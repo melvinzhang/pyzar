@@ -340,6 +340,27 @@ class Proof:
             f"  expected: {pp(target)}\n"
             f"  got:      {pp(th._concl)}")
 
+    def _close_frame(self, fr, th):
+        """Discharge a frame's accumulated bindings into ``th``.
+
+        Order matters: ``DISCH`` first, so any user-``assume``d hyps that
+        mention a lazy-let carrier move out of ``_asl`` and into the
+        conclusion (where carrier-INST during discharge can BETA-clean
+        them); then discharge lazy lets so the equation hyps and any free
+        fix-vars they mention are gone before ``GEN`` tries to ``ABS``
+        over those vars; finally ``GEN`` over the fix-vars themselves.
+
+        Induction's frame has empty ``hyps_added`` / ``vars_added`` (the
+        ``GEN`` happens earlier via ``INDUCT_PROVE``), so for that
+        caller this collapses to ``_discharge_lazy_lets``.
+        """
+        for _, term in reversed(fr.hyps_added):
+            th = DISCH(term, th)
+        th = self._discharge_lazy_lets(fr, th)
+        for v in reversed(fr.vars_added):
+            th = GEN(v, th)
+        return th
+
     def _discharge_lazy_lets(self, frame, th):
         """Discharge each lazy-let hypothesis on ``th`` from ``frame``.
 
@@ -1392,16 +1413,7 @@ class _SubFrameCtx:
         if fr.result is None:
             raise HolError(
                 f"{self.kind}: block did not discharge sub-goal via thus")
-        th = fr.result
-        # See note in `proof()` decorator: DISCH first to clear out
-        # carrier-mentioning assume-hyps, then discharge lazy lets so the
-        # equation hyp is gone before GEN tries to ABS over fix-vars,
-        # then GEN.
-        for label, term in reversed(fr.hyps_added):
-            th = DISCH(term, th)
-        th = self.p._discharge_lazy_lets(fr, th)
-        for v in reversed(fr.vars_added):
-            th = GEN(v, th)
+        th = self.p._close_frame(fr, fr.result)
         self.p._drop_facts(fr.facts_added)
         self.on_close(th)
         return False
@@ -1447,7 +1459,7 @@ class _InductionCtx:
         forall_th = INDUCT_PROVE(self.var, self.body, d["base_th"],
                                   lambda IH: d["step_th"])
         body_th = forall_th if self.peel_forall else SPEC(self.var, forall_th)
-        body_th = self.p._discharge_lazy_lets(fr, body_th)
+        body_th = self.p._close_frame(fr, body_th)
         self.p._drop_facts(fr.facts_added)
         parent = self.p._cur
         if parent.goal is None or not aconv(parent.goal, body_th._concl):
@@ -1583,20 +1595,7 @@ def proof(fn):
     if fr.result is None:
         raise HolError(
             f"proof({fn.__name__}): no result -- did you forget thus or close a block?")
-    th = fr.result
-    # Order matters:
-    # 1. DISCH first so any user-``assume``d hyps that mention the lazy-let
-    #    carrier move out of ``_asl`` and into the conclusion; the ensuing
-    #    INST in discharge can BETA-clean them.
-    # 2. Discharge lazy lets next so the equation hyp (and any free fix-var
-    #    appearing in it) is gone before GEN tries to ABS over those vars.
-    # 3. GEN last over fix-vars.
-    for label, term in reversed(fr.hyps_added):
-        th = DISCH(term, th)
-    th = p._discharge_lazy_lets(fr, th)
-    for v in reversed(fr.vars_added):
-        th = GEN(v, th)
-    return th
+    return p._close_frame(fr, fr.result)
 
 
 # ---------------------------------------------------------------------------
