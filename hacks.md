@@ -14,7 +14,7 @@ Catalogue of dubious patterns. Each entry: where it lives, why it's a smell, and
 | H6 | ✅ | Frame kinds replaced with `FrameKind` enum; misspellings now fail at parse time. |
 | H7 | ✅ | Spec syntax promoted into the Lark grammar via `label_start` / `let_start` rules; new `parse_label` / `parse_let_spec` entry points. |
 | H8 | ✅ | `_split_label` commits once `NAME ":"` is recognised by the grammar; body `ParseError` propagates instead of being masked by a whole-spec retry. |
-| H9 | ⏳ | String overloading in `coerce` / `by_select`. |
+| H9 | ✅ | Cheaper variant: `_namespace_kind` collision check at every registration site (fact / lazy-let / choose-witness / fixed-var). |
 | H10 | ✅ | `simp_normalize` no longer wraps `HolError` as `SimpFailure` (`56170d0`). |
 | H11 | ✅ | `hyps_added` stores ASSUME theorems INSTed in lockstep with `th`; DISCH/lazy-let-discharge order is no longer load-bearing. |
 | H12 | ✅ | `_substitute_carrier` / `_beta_norm_concl` extracted in `fc6b43f`. |
@@ -180,7 +180,7 @@ the `x ?? y` body, exactly where the typo lives.
 
 ---
 
-## H9. String overloading in `coerce` and `by_select`
+## H9. String overloading in `coerce` and `by_select`  ✅
 
 **Where:** `proof.py:552-584` (`coerce` walks `accept` in order; same string
 may be a fact label or a parseable term);
@@ -192,10 +192,18 @@ variable term x" depends on which scopes happen to be populated. Add a fact
 called `x` later and an existing `by_select(..., "x")` silently changes
 meaning.
 
-**Fix:** Require an explicit prefix or wrapper — e.g. `Fact("x")` /
-`Term("x")` / `Let("x")` — when ambiguity is possible. Cheaper variant:
-detect collisions at registration time and refuse to register a fact whose
-label shadows a let or a parser binding (or vice-versa).
+**Fix (cheaper variant).** Collisions now fail at the *write* side:
+``Proof._namespace_kind`` walks fact labels, lazy-let carriers, choose
+witnesses, and fixed vars; ``_require_fresh_name`` is called at every
+registration point (`_register_fact`, `_register_lazy_let`, `fix`,
+`choose`, `case` auto-witness). Two different kernel values can no
+longer share a name, so later ``coerce`` lookups have an unambiguous
+source regardless of resolution order.
+
+``type_env`` is intentionally outside the collision set: it carries
+*type hints* for variable names that ``fix`` later realises (e.g.
+``goal(types={"p": pred_ty})`` then ``fix("p")``). The hint and the
+realised Var are the same identifier, not two competing values.
 
 ---
 

@@ -226,6 +226,41 @@ class Proof:
 
     # ---- env / parsing ---------------------------------------------------
 
+    def _namespace_kind(self, name):
+        """Return a label describing where ``name`` is already registered
+        as a Proof-level identifier, or ``None`` if it is free.
+
+        Covers the four namespaces that resolve a string at lookup time
+        to *different kernel values*: fact labels, lazy-let carriers,
+        choose witnesses, and fixed vars. The H9 fix refuses any
+        registration that would put two different values under one name
+        so ``coerce`` calls have an unambiguous source.
+
+        ``type_env`` is intentionally excluded: it carries variable-type
+        declarations (a pre-fix hint about what *type* a later ``fix``
+        or parsed-binder occurrence of the name should have), not a
+        separate kernel value. Realising the name via ``fix`` -- which
+        consumes the same hint -- is consistent, not a collision.
+        """
+        if name in self._facts:
+            return "fact label"
+        for fr in self._frames:
+            if name in fr.lazy_lets:
+                return "lazy-let binding"
+            if name in fr.choose_env:
+                return "choose witness"
+            for v in fr.vars_added:
+                if v.name == name:
+                    return "fixed variable"
+        return None
+
+    def _require_fresh_name(self, name, registering_as):
+        existing = self._namespace_kind(name)
+        if existing is not None:
+            raise HolError(
+                f"{registering_as}: name {name!r} clashes with an "
+                f"existing {existing}")
+
     def _scope_env(self):
         env = {"F": F, "T": T}
         for fr in self._frames:
@@ -549,9 +584,7 @@ class Proof:
 
         Re-registering the same name on the same frame raises.
         """
-        if name in self._cur.lazy_lets:
-            raise HolError(
-                f"_register_lazy_let: {name!r} already registered on frame")
+        self._require_fresh_name(name, "register_lazy_let")
         ty = type_of(body)
         for bv in reversed(bvars):
             ty = mk_fun_ty(bv.ty, ty)
@@ -635,8 +668,7 @@ class Proof:
     # ---- facts -----------------------------------------------------------
 
     def _register_fact(self, label, th):
-        if label in self._facts:
-            raise HolError(f"duplicate fact label: {label!r}")
+        self._require_fresh_name(label, "register_fact")
         self._facts[label] = th
         self._fact_order.append(label)
         self._cur.facts_added.append(label)
@@ -721,6 +753,7 @@ class Proof:
             if pred.bvar.name != nm:
                 raise HolError(
                     f"fix: name mismatch -- binder is {pred.bvar.name!r}, given {nm!r}")
+            self._require_fresh_name(nm, "fix")
             self._cur.goal = pred.body
             self._cur.vars_added.append(pred.bvar)
 
@@ -772,9 +805,6 @@ class Proof:
                     f"let: duplicate arg name {v.name!r} in {spec!r}")
             seen.add(v.name)
 
-        if name in env:
-            raise HolError(
-                f"let: {name!r} clashes with an existing binding in scope")
         if name in DEFAULT_SIG.const:
             raise HolError(
                 f"let: {name!r} clashes with a registered constant")
@@ -961,8 +991,7 @@ class Proof:
                     f"  given:    {pp(expected)}")
 
         # Register witness in parser env on the current frame.
-        if name in self._cur.choose_env:
-            raise HolError(f"choose: witness name {name!r} already in use in this scope")
+        self._require_fresh_name(name, "choose")
         self._cur.choose_env[name] = w_term
 
         # Register the equation as a fact (default label = "{name}_eq").
@@ -1503,10 +1532,7 @@ class _SubFrameCtx:
             self.p._register_fact(label, th)
         if self.auto_choose is not None:
             wit_name, w_term, eq_label, witness_th = self.auto_choose
-            if wit_name in fr.choose_env:
-                raise HolError(
-                    f"case: witness name {wit_name!r} clashes with an "
-                    f"existing chooser-bound name in this scope")
+            self.p._require_fresh_name(wit_name, "case")
             fr.choose_env[wit_name] = w_term
             self.p._register_fact(eq_label, witness_th)
         return self.p
