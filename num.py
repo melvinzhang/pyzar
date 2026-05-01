@@ -59,45 +59,31 @@ IND_SUC_DEF = new_basic_definition(
           mk_comb(_select_ii, _INFTY_PRED)))     # |- IND_SUC = @(\f. ONE_ONE f /\ ~ONTO f)
 IND_SUC = mk_const("IND_SUC", [])
 
-
-def _prove_ind_suc_props():
-    """ Returns (ONE_ONE IND_SUC, ~(ONTO IND_SUC)). """
-    # SELECT_AX[ind->ind, with predicate _INFTY_PRED, witnessed by INFINITY_AX]
-    # First unfold the existential of INFINITY_AX into its predicate form.
-    # INFINITY_AX : ?f. ONE_ONE f /\ ~(ONTO f).
-    # Use ELIM_EX to obtain {INFINITY_AX_concl} |- ONE_ONE w /\ ~(ONTO w)
-    # where w = @(\f. ...).  But the witness emitted by ELIM_EX is exactly
-    # @(\f. ONE_ONE f /\ ~ONTO f) = IND_SUC (after unfolding IND_SUC_DEF).
-    pred = _INFTY_PRED
-    hyp_ex = INFINITY_AX._concl
-
-    def body_fn(th_at_w):
-        # th_at_w : {body_at_w} |- ONE_ONE w /\ ~(ONTO w)   where w = @pred
-        return th_at_w
-
-    th_at_w = ELIM_EX(pred, hyp_ex, body_fn)         # {hyp_ex} |- ONE_ONE w /\ ~(ONTO w)
-    th_at_w = PROVE_HYP(INFINITY_AX, th_at_w)        # |- ONE_ONE w /\ ~(ONTO w)
-
-    # Now rewrite w (= @pred) into IND_SUC using SYM(IND_SUC_DEF).
-    # th_at_w mentions w syntactically as `Comb(@, pred)`. SYM(IND_SUC_DEF)
-    # is `|- @pred = IND_SUC`. We rewrite by AP_TERM through both conjuncts.
-    sel_eq_indsuc = SYM(IND_SUC_DEF)              # |- @pred = IND_SUC
-    # ONE_ONE @pred = ONE_ONE IND_SUC
-    one_one_eq = AP_TERM(_one_one_ind, sel_eq_indsuc)
-    # ONTO @pred = ONTO IND_SUC
-    onto_eq    = AP_TERM(_onto_ind, sel_eq_indsuc)
-    # ~(ONTO @pred) = ~(ONTO IND_SUC)
-    NOT_C = mk_const("~", [])
-    not_onto_eq = AP_TERM(NOT_C, onto_eq)
-    # combined equality on conjunction:
-    AND_C = mk_const("/\\", [])
-    conj_eq = MK_COMB(AP_TERM(AND_C, one_one_eq), not_onto_eq)
-    # rewrite th_at_w using conj_eq.
-    th_at_indsuc = EQ_MP(conj_eq, th_at_w)        # |- ONE_ONE IND_SUC /\ ~(ONTO IND_SUC)
-    return CONJUNCT1(th_at_indsuc), CONJUNCT2(th_at_indsuc)
+# Register surface syntax as soon as each constant becomes available, so that
+# subsequent ``@proof`` blocks can mention them by name. ``ind`` is the type
+# of points we'll carve ``num`` out of, and ``ONE_ONE_ind`` / ``ONTO_ind`` are
+# the (ind->ind)-instantiated copies of ``ONE_ONE`` / ``ONTO`` -- registering
+# the polymorphic kernel constants directly would force the parser to do
+# type inference, so we expose them at the single instantiation we need.
+DEFAULT_SIG.add_type("ind", ind_ty)
+DEFAULT_SIG.add_const("IND_SUC", IND_SUC)
+DEFAULT_SIG.add_const("ONE_ONE_ind", _one_one_ind)
+DEFAULT_SIG.add_const("ONTO_ind",    _onto_ind)
 
 
-ONE_ONE_IND_SUC, NOT_ONTO_IND_SUC = _prove_ind_suc_props()
+@proof
+def _IND_SUC_PROPS_PAIR(prf):
+    # INFINITY_AX gives ?f. ONE_ONE f /\ ~(ONTO f). Choose the witness; it's
+    # @(\f. ...) by definition of ``?``-elimination, which equals IND_SUC by
+    # IND_SUC_DEF. Rewrite the chosen-witness fact to expose IND_SUC.
+    prf.goal("ONE_ONE_ind IND_SUC /\\ ~(ONTO_ind IND_SUC)")
+    prf.choose("f: ONE_ONE_ind f /\\ ~(ONTO_ind f)", from_=INFINITY_AX)
+    prf.thus("ONE_ONE_ind IND_SUC /\\ ~(ONTO_ind IND_SUC)") \
+        .by_rewrite_of("f_eq", [SYM(IND_SUC_DEF)])
+
+
+ONE_ONE_IND_SUC = CONJUNCT1(_IND_SUC_PROPS_PAIR)
+NOT_ONTO_IND_SUC = CONJUNCT2(_IND_SUC_PROPS_PAIR)
 
 
 # ---------------------------------------------------------------------------
@@ -115,71 +101,32 @@ _y_ind = Var("y", ind_ty)
 _z_ind = Var("z", ind_ty)
 
 
-def _prove_exists_witness():
-    """ |- ?z. !x. ~(IND_SUC x = z). """
-    # Step a: unfold ~(ONTO IND_SUC) using ONTO_DEF.
-    # ONTO_DEF : |- ONTO = \f. !y. ?x. y = f x   (polymorphic).  Instantiate at ind->ind.
-    onto_def_ind = INST_TYPE([(ind_ty, aty), (ind_ty, bty)], ONTO_DEF)
-    # AP_THM at IND_SUC:  |- ONTO IND_SUC = (\f. ...) IND_SUC.
-    eq1 = AP_THM(onto_def_ind, IND_SUC)
-    # BETA-reduce the RHS to the unfolded body.
-    eq2 = BETA_RULE(eq1)                             # |- ONTO IND_SUC = !y. ?x. y = IND_SUC x
-    # Negate both sides:
-    NOT_C = mk_const("~", [])
-    not_eq = AP_TERM(NOT_C, eq2)                     # |- ~(ONTO IND_SUC) = ~(!y. ?x. y = IND_SUC x)
-    not_forall = EQ_MP(not_eq, NOT_ONTO_IND_SUC)     # |- ~(!y. ?x. y = IND_SUC x)
-
-    # Step b: NOT_FORALL_TO_EX_NOT to get ?y. ~(?x. y = IND_SUC x).
-    inner_pred = mk_abs(_y_ind,
-                    mk_exists(_x_ind, mk_eq(_y_ind, mk_comb(IND_SUC, _x_ind))))
-    ex_not = NOT_FORALL_TO_EX_NOT(not_forall, inner_pred)
-    # ex_not : |- ?y. ~(?x. y = IND_SUC x)
-
-    # Step c: For each y in scope, convert ~(?x. y = IND_SUC x) to !x. ~(y = IND_SUC x)
-    # via NOT_EX_TO_FORALL_NOT, then to !x. ~(IND_SUC x = y) by NE_SYM.
-    # We use ELIM_EX: pull out the witness y from ex_not, do the conversion,
-    # then re-EXISTS over z.
-    ex_pred_outer = mk_abs(_y_ind,
-                       mk_not(mk_exists(_x_ind, mk_eq(_y_ind, mk_comb(IND_SUC, _x_ind)))))
-
-    def body_fn(th_at_y):
-        # th_at_y : {body_at_y} |- ~(?x. y' = IND_SUC x)  with y' = @ex_pred_outer.
-        # The witness here is @ex_pred_outer, but we keep using `_y_ind` symbolically:
-        # ELIM_EX substitutes via vsubst, so th_at_y uses the actual witness term.
-        # We use NOT_EX_TO_FORALL_NOT with pred = \x. y' = IND_SUC x.
-        # Recover y' from the structure of th_at_y._concl.
-        # th_at_y._concl  = ~(?x. y' = IND_SUC x).
-        not_ex_term = th_at_y._concl
-        ex_term = rand(not_ex_term)              # ?x. y' = IND_SUC x
-        ex_pred = rand(ex_term)                  # \x. y' = IND_SUC x  (Abs)
-        # Apply NOT_EX_TO_FORALL_NOT.
-        forall_not = NOT_EX_TO_FORALL_NOT(th_at_y, ex_pred)
-        # forall_not : |- !x. ~(y' = IND_SUC x)
-        # Now rewrite each instance via NE_SYM under GEN.
-        spec_x = SPEC(_x_ind, forall_not)        # |- ~(y' = IND_SUC x)
-        sym_x  = NE_SYM(spec_x)                  # |- ~(IND_SUC x = y')
-        forall_swapped = GEN(_x_ind, sym_x)      # |- !x. ~(IND_SUC x = y')
-        # Existentially introduce z over y'.
-        # Pred:  \z. !x. ~(IND_SUC x = z)
-        target_pred = mk_abs(_z_ind,
-                          mk_forall(_x_ind,
-                              mk_not(mk_eq(mk_comb(IND_SUC, _x_ind), _z_ind))))
-        # The witness is the actual y' inside th_at_y, which is dest_eq's lhs of
-        # an inner equality. Recover it from forall_swapped's body.
-        # forall_swapped._concl = !x. ~(IND_SUC x = y'). Extract y' from inside:
-        body_forall = rand(forall_swapped._concl)  # \x. ~(IND_SUC x = y')
-        # The body of the inner Abs has the form ~(IND_SUC x = y').
-        not_eq_inside = body_forall.body          # ~(IND_SUC x = y')
-        eq_inside = rand(not_eq_inside)            # IND_SUC x = y'
-        y_witness = rand(eq_inside)                # y'
-        return EXISTS(target_pred, y_witness, forall_swapped)
-
-    final = ELIM_EX(ex_pred_outer, ex_not._concl, body_fn)
-    final = PROVE_HYP(ex_not, final)
-    return final
+_NOT_C = mk_const("~", [])
+_ONTO_DEF_IND = INST_TYPE([(ind_ty, aty), (ind_ty, bty)], ONTO_DEF)
+# |- ~(ONTO IND_SUC) = ~(!y. ?x. y = IND_SUC x)
+_NOT_ONTO_UNFOLD = AP_TERM(_NOT_C, BETA_RULE(AP_THM(_ONTO_DEF_IND, IND_SUC)))
 
 
-_EXISTS_WITNESS = _prove_exists_witness()  # |- ?z. !x. ~(IND_SUC x = z)
+@proof
+def _EXISTS_WITNESS(prf):
+    prf.goal("?z:ind. !x:ind. ~(IND_SUC x = z)")
+    prf.have("not_forall: ~(!y:ind. ?x:ind. y = IND_SUC x)") \
+        .by_eq_mp(_NOT_ONTO_UNFOLD, NOT_ONTO_IND_SUC)
+    # NOT_FORALL_TO_EX_NOT swaps the outer quantifier to existential.
+    _outer_pred = parse("\\y:ind. ?x:ind. y = IND_SUC x")
+    prf.have("ex_not: ?y:ind. ~(?x:ind. y = IND_SUC x)") \
+        .by_thm(NOT_FORALL_TO_EX_NOT(prf.fact("not_forall"), _outer_pred))
+    prf.choose("y: ~(?x:ind. y = IND_SUC x)", from_="ex_not")
+    # NOT_EX_TO_FORALL_NOT then NE_SYM to swap the inner equation orientation.
+    _inner_pred = prf._parse("\\x:ind. y = IND_SUC x")
+    prf.have("forall_neq: !x:ind. ~(y = IND_SUC x)") \
+        .by_thm(NOT_EX_TO_FORALL_NOT(prf.fact("y_eq"), _inner_pred))
+    with prf.have("forall_swapped: !x:ind. ~(IND_SUC x = y)").proof():
+        prf.fix("x")
+        prf.thus("~(IND_SUC x = y)") \
+            .by_thm(NE_SYM(SPEC(prf._parse("x"), prf.fact("forall_neq"))))
+    prf.thus("?z:ind. !x:ind. ~(IND_SUC x = z)") \
+        .by_witness("y", "forall_swapped")
 
 
 # Define IND_1 = @z. !x. ~(IND_SUC x = z).
@@ -190,44 +137,20 @@ _witness_pred = mk_abs(_z_ind,
 IND_1_DEF = new_basic_definition(
     mk_eq(Var("IND_1", ind_ty), mk_comb(_select_ind, _witness_pred)))
 IND_1 = mk_const("IND_1", [])
+DEFAULT_SIG.add_const("IND_1", IND_1)
 
 
-def _prove_ind_suc_neq_ind_1():
-    """ |- !x. ~(IND_SUC x = IND_1). """
-    # SELECT_AX gives:  P x ==> P (@P).  Specialise at _witness_pred.
-    sel_inst = INST_TYPE([(ind_ty, aty)], SELECT_AX)
-    sel_pq = SPEC(_z_ind, SPEC(_witness_pred, sel_inst))
-    # |- _witness_pred z ==> _witness_pred (@_witness_pred)
-    # Pull the existential body via ELIM_EX.
-    def body_fn(th_at_z):
-        # th_at_z : {body_at_z} |- !x. ~(IND_SUC x = z')   where z' = @_witness_pred
-        return th_at_z
-
-    raw = ELIM_EX(_witness_pred, _EXISTS_WITNESS._concl, body_fn)
-    raw = PROVE_HYP(_EXISTS_WITNESS, raw)
-    # raw : |- !x. ~(IND_SUC x = w)   where w = @_witness_pred.
-    # Rewrite w to IND_1 using SYM(IND_1_DEF).
-    sel_eq_ind1 = SYM(IND_1_DEF)                  # |- @_witness_pred = IND_1
-    # The conclusion of `raw` is `!x. ~(IND_SUC x = w)`.  We need to substitute
-    # w by IND_1 inside the equation `IND_SUC x = w`.  Build the abstraction
-    # `\w. !x. ~(IND_SUC x = w)`, AP_TERM to sel_eq_ind1, and EQ_MP raw.
-    w_var = Var("w", ind_ty)
-    big_pred = mk_abs(w_var,
-                  mk_forall(_x_ind,
-                      mk_not(mk_eq(mk_comb(IND_SUC, _x_ind), w_var))))
-    # |- (\w. !x. ~(IND_SUC x = w)) (@_witness_pred) = (\w. ...) IND_1
-    func_eq = AP_TERM(big_pred, sel_eq_ind1)
-    # Beta-normalise both sides.
-    func_eq_norm_lhs = BETA_CONV(mk_comb(big_pred, mk_comb(_select_ind, _witness_pred)))
-    func_eq_norm_rhs = BETA_CONV(mk_comb(big_pred, IND_1))
-    # |- (\w. ...) (@_witness_pred) = !x. ~(IND_SUC x = @_witness_pred)
-    # |- (\w. ...) IND_1 = !x. ~(IND_SUC x = IND_1)
-    bridge = TRANS_CHAIN([SYM(func_eq_norm_lhs), func_eq, func_eq_norm_rhs])
-    # bridge : |- !x. ~(IND_SUC x = w) = !x. ~(IND_SUC x = IND_1)
-    return EQ_MP(bridge, raw)
-
-
-IND_SUC_NEQ_IND_1 = _prove_ind_suc_neq_ind_1()  # |- !x. ~(IND_SUC x = IND_1)
+@proof
+def IND_SUC_NEQ_IND_1(prf):
+    # _EXISTS_WITNESS : |- ?z. !x. ~(IND_SUC x = z); IND_1_DEF picks the very
+    # @-witness as IND_1, so chooser-bind z and rewrite z -> IND_1.  The
+    # rewrite engine doesn't descend into binders, so we bridge by hand: at
+    # the abstraction \w. !x. ~(IND_SUC x = w), apply IND_1_DEF and BETA_RULE.
+    prf.goal("!x:ind. ~(IND_SUC x = IND_1)")
+    prf.choose("z: !x:ind. ~(IND_SUC x = z)", from_=_EXISTS_WITNESS)
+    bridge_pred = parse("\\w:ind. !x:ind. ~(IND_SUC x = w)")
+    bridge = BETA_RULE(AP_TERM(bridge_pred, SYM(IND_1_DEF)))
+    prf.thus("!x:ind. ~(IND_SUC x = IND_1)").by_eq_mp(bridge, "z_eq")
 
 
 # ---------------------------------------------------------------------------
@@ -251,22 +174,13 @@ NUM_REP_DEF = new_basic_definition(
                                         mk_comb(_P_ind, mk_comb(IND_SUC, _i_ind))))),
                       mk_comb(_P_ind, _a_ind))))))
 NUM_REP = mk_const("NUM_REP", [])
+DEFAULT_SIG.add_const("NUM_REP", NUM_REP)
+_P_ind_ty = mk_fun_ty(ind_ty, bool_ty)
 
 
 def _NUM_REP_unfold(a_term):
     r""" |- NUM_REP a = (!P. P IND_1 /\ (!i. P i ==> P (IND_SUC i)) ==> P a). """
     return BETA_RULE(AP_THM(NUM_REP_DEF, a_term))
-
-
-# Register surface syntax for the ind-typed kernel constants we've built so
-# far. Without these, @proof blocks below cannot mention IND_1, IND_SUC or
-# NUM_REP by name. (Per-proof type annotations still cover ind-typed bound
-# variables, since `num` isn't yet the default var type.)
-DEFAULT_SIG.add_type("ind", ind_ty)
-DEFAULT_SIG.add_const("IND_1", IND_1)
-DEFAULT_SIG.add_const("IND_SUC", IND_SUC)
-DEFAULT_SIG.add_const("NUM_REP", NUM_REP)
-_P_ind_ty = mk_fun_ty(ind_ty, bool_ty)
 
 
 # ---------------------------------------------------------------------------
