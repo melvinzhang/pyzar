@@ -420,8 +420,6 @@ def INDUCTION(p):
     with p.have("Q_1: Q IND_1").proof():
         p.have("P_mk_ind1: P (mk_num IND_1)") \
             .by_eq_mp(AP_TERM(P, ONE_DEF), "h_base")
-        # CONJ produces the unfolded body; conversion-on-match in _finish
-        # refolds to ``Q IND_1`` to satisfy the (folded) sub-frame goal.
         p.thus("Q IND_1") \
             .by(CONJ, NUM_REP_IND_1, "P_mk_ind1")
 
@@ -578,12 +576,7 @@ def R_STEP(p):
     p.goal("!n m. R c h n m ==> R c h (SUC n) (h n m)", types=_R_TYPES)
     p.fix("n m")
     p.assume("hR: R c h n m")
-    # The thus's body is folded ``R c h (SUC n) (h n m)``; ``proof()`` would
-    # see a non-forall sub-goal, so prove the !Q-shaped body separately and
-    # refold via the trailing thus + by_thm.
-    with p.have("step_body: !Q. (Q 1 c /\\ "
-                "(!k a. Q k a ==> Q (SUC k) (h k a))) ==> "
-                "Q (SUC n) (h n m)").proof():
+    with p.thus("R c h (SUC n) (h n m)").proof():
         p.fix("Q")
         p.assume("hyp: Q 1 c /\\ (!k a. Q k a ==> Q (SUC k) (h k a))")
         p.split_conj("hyp", "_h_base", "h_close")
@@ -591,7 +584,6 @@ def R_STEP(p):
         p.have("step_at: Q n m ==> Q (SUC n) (h n m)") \
             .by_thm(SPEC(_m, SPEC(_n, p.fact("h_close"))))
         p.thus("Q (SUC n) (h n m)").by("step_at", "Q_n_m")
-    p.thus("R c h (SUC n) (h n m)").by_thm(p.fact("step_body"))
 
 
 def _mk_unique_at(n_term):
@@ -614,22 +606,16 @@ def R_UNIQUE_BASE(p):
            types=_R_TYPES)
     # Existence: witness m = c, via R_AT_1.
     p.have("exist: ?m. R c h 1 m").by_witness("c", R_AT_1)
-    # Closure of Qp. The sub-proof needs the unfolded body shape so
-    # ``assume`` peels the implication; conversion-on-match in
-    # ``by_thm`` then refolds to ``Qp 1 c``.
-    with p.have("Qp_1_c_body: (1 = 1) ==> (c = c)").proof():
+    # Closure of Qp.
+    with p.have("Qp_1_c: Qp 1 c").proof():
         p.assume("h11: 1 = 1")
         p.thus("c = c").by_thm(REFL(_c))
-    p.have("Qp_1_c: Qp 1 c").by_thm(p.fact("Qp_1_c_body"))
-    with p.have("Qp_close_body: !k a. Qp k a ==> "
-                "((SUC k = 1) ==> (h k a = c))").proof():
+    with p.have("Qp_close: !k a. Qp k a ==> Qp (SUC k) (h k a)").proof():
         p.fix("k a")
         p.assume("h_Qpka: Qp k a")
         # Vacuous: SUC k = 1 contradicts AXIOM_3 at k.
         p.assume("h_eq1: SUC k = 1")
         p.absurd().by_conj("h_eq1", SPEC(_k, AXIOM_3))
-    p.have("Qp_close: !k a. Qp k a ==> Qp (SUC k) (h k a)") \
-        .by_thm(p.fact("Qp_close_body"))
     p.have("Qp_closure: Qp 1 c /\\ "
            "(!k a. Qp k a ==> Qp (SUC k) (h k a))") \
         .by(CONJ, "Qp_1_c", "Qp_close")
@@ -673,26 +659,17 @@ def R_UNIQUE_STEP(p):
     p.let("Qp(k, a) := R c h k a /\\ (k = SUC n ==> a = h n m_n)",
            types=_R_TYPES)
     # Qp 1 c: R c h 1 c (R_AT_1) ∧ (1 = SUC n ==> c = h n m_n) (vacuous).
-    # Prove the unfolded body and refold via _finish's conversion-on-match.
-    with p.have("Qp_1_c_body: R c h 1 c /\\ "
-                "(1 = SUC n ==> c = h n m_n)").proof():
+    with p.have("Qp_1_c: Qp 1 c").proof():
         with p.have("vac1: 1 = SUC n ==> c = h n m_n").proof():
             p.assume("h_1_sn: 1 = SUC n")
             p.absurd().by_conj(SYM(p.fact("h_1_sn")), SPEC(_n, AXIOM_3))
         p.thus("R c h 1 c /\\ (1 = SUC n ==> c = h n m_n)") \
             .by(CONJ, R_AT_1, "vac1")
-    p.have("Qp_1_c: Qp 1 c").by_thm(p.fact("Qp_1_c_body"))
     # !k a. Qp k a ==> Qp (SUC k) (h k a).
-    # Build the unfolded body shape so we can split h_Qpka_un and refold via
-    # the trailing thus.
-    with p.have("Qp_close_body: !k a. Qp k a ==> "
-                "(R c h (SUC k) (h k a) /\\ "
-                "(SUC k = SUC n ==> h k a = h n m_n))").proof():
+    with p.have("Qp_close: !k a. Qp k a ==> Qp (SUC k) (h k a)").proof():
         p.fix("k a")
         p.assume("h_Qpka: Qp k a")
-        p.have("h_Qpka_un: R c h k a /\\ (k = SUC n ==> a = h n m_n)") \
-            .by_thm(p.fact("h_Qpka"))
-        p.split_conj("h_Qpka_un", "R_k_a", "_step_part")
+        p.split_conj("h_Qpka", "R_k_a", "_step_part")
         p.have("R_sk_hka: R c h (SUC k) (h k a)") \
             .by(R_STEP, "k", "a", "R_k_a")
         with p.have("vac2: SUC k = SUC n ==> h k a = h n m_n").proof():
@@ -723,11 +700,7 @@ def R_UNIQUE_STEP(p):
                 AP_THM(AP_TERM(_h, p.fact("k_eq_n")), _a),
                 AP_TERM(mk_comb(_h, _n), p.fact("a_eq_mn")))
             p.thus("h k a = h n m_n").by_thm(h_k_a_eq_h_n_mn)
-        p.thus("R c h (SUC k) (h k a) /\\ "
-               "(SUC k = SUC n ==> h k a = h n m_n)") \
-            .by(CONJ, "R_sk_hka", "vac2")
-    p.have("Qp_close: !k a. Qp k a ==> Qp (SUC k) (h k a)") \
-        .by_thm(p.fact("Qp_close_body"))
+        p.thus("Qp (SUC k) (h k a)").by(CONJ, "R_sk_hka", "vac2")
     p.have("Qp_closure: Qp 1 c /\\ "
            "(!k a. Qp k a ==> Qp (SUC k) (h k a))") \
         .by(CONJ, "Qp_1_c", "Qp_close")

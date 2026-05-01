@@ -29,7 +29,7 @@ import re
 from fusion import (
     Var, Const, Comb, Abs, thm,
     aconv, concl, HolError, ASSUME, EQ_MP, BETA, INST, mk_abs, mk_comb,
-    rand, type_of, TRANS, mk_eq, mk_fun_ty, MK_COMB, ABS, REFL,
+    rand, type_of, TRANS, mk_eq, mk_fun_ty, MK_COMB, ABS, REFL, dest_eq,
 )
 from axioms import T, F, mk_select, mk_forall
 from tactics import (
@@ -172,18 +172,18 @@ class Proof:
         return out
 
     def _unfold_lazy_lets_in_term(self, tm, carriers=None):
-        """Bottom-up unfold of every lazy-let application in ``tm``, returning
-        ``|- tm = tm_unfolded``.
+        """Fixpoint simp pass over ``tm`` against the active lazy-let rules,
+        returning ``|- tm = tm_norm``.
 
-        Bypasses ``REWRITE_CONV``'s blanket "no hyp-bearing rules under
-        binders" rule. The relaxation is sound here because lazy-let
-        equation hyps are exactly ``!args. carrier args = body`` and
-        ``ABS`` succeeds under binders (the bvar is not free in the hyp).
+        Walks bottom-up; each carrier application fires its rule, and the
+        substituted body is re-walked so nested carriers also normalize.
+        Self-reference is bounded by a per-descent ``blocked`` set so a let
+        whose body mentions itself unfolds once and stops.
 
-        Self-reference is bounded: each carrier may fire at most once on
-        any descent path. A self-referential body (carrier appearing in
-        its own RHS) therefore unfolds once and stops, rather than
-        looping.
+        Bypasses ``REWRITE_CONV``'s "no hyp-bearing rules under binders"
+        filter — sound because lazy-let equation hyps are
+        ``!args. carrier args = body`` and ``ABS`` succeeds under binders
+        (bvar isn't free in the hyp).
         """
         if carriers is None:
             carriers = self._lazy_let_carriers()
@@ -198,9 +198,6 @@ class Proof:
                 return REFL(tm)
             return ABS(tm.bvar, body_eq)
         if isinstance(tm, Comb):
-            # Walk the spine; if the head is a lazy-let carrier and we have
-            # enough args, fire the rule at the spine root then recurse on
-            # the surplus arguments and child positions.
             spine = []
             head = tm
             while isinstance(head, Comb):
@@ -217,8 +214,6 @@ class Proof:
                     eq = lz.eq_th
                     for i in range(n):
                         eq = SPEC(rand(arg_eqs[i]._concl), eq)
-                    # In the unfolded body, the same carrier should not fire
-                    # again on this descent (else self-referential lets loop).
                     rhs_unfolded = self._unfold_walk(
                         rand(eq._concl), carriers, blocked | {head})
                     eq = TRANS(eq, rhs_unfolded)
@@ -230,7 +225,6 @@ class Proof:
                     for i in range(n, len(spine)):
                         cur = MK_COMB(cur, arg_eqs[i])
                     return cur
-            # No rule fires at the head; recurse into fun and arg.
             f_eq = self._unfold_walk(tm.fun, carriers, blocked)
             a_eq = self._unfold_walk(tm.arg, carriers, blocked)
             if (aconv(rand(f_eq._concl), tm.fun)
@@ -689,9 +683,22 @@ class Proof:
             ant = g.fun.arg
             cons = g.arg
             if not aconv(ant, term):
-                raise HolError(
-                    "assume: hypothesis does not match antecedent\n"
-                    f"  antecedent: {pp(ant)}\n  given:      {pp(term)}")
+                # Simp-aware match: `Q i` (folded) should accept the
+                # unfolded antecedent `NUM_REP i /\ P (mk_num i)` and vice
+                # versa. The hyp added to the frame uses the *given* term
+                # (user's shape), with ASSUME on the actual antecedent so
+                # downstream facts stay sound.
+                carriers = self._lazy_let_carriers()
+                ok = False
+                if carriers:
+                    ant_eq = self._unfold_lazy_lets_in_term(ant, carriers)
+                    term_eq = self._unfold_lazy_lets_in_term(term, carriers)
+                    if aconv(rand(ant_eq._concl), rand(term_eq._concl)):
+                        ok = True
+                if not ok:
+                    raise HolError(
+                        "assume: hypothesis does not match antecedent\n"
+                        f"  antecedent: {pp(ant)}\n  given:      {pp(term)}")
             self._cur.goal = cons
             self._cur.hyps_added.append((label, ant))
             self._register_fact(label, ASSUME(ant))
@@ -1193,8 +1200,25 @@ class _Have:
                              on_close=self._finish)
 
     def by_eq_mp(self, eq_th, ref):
-        """``EQ_MP(eq_th, fact)`` -- rewrite a fact through an equation."""
-        return self._finish(EQ_MP(eq_th, self.p._resolve_fact(ref)))
+        """``EQ_MP(eq_th, fact)`` -- rewrite a fact through an equation.
+
+        Aligns the equation's LHS with the fact's conclusion via simp on
+        the active lazy-let set, so the user can mix folded/unfolded forms
+        across an EQ_MP boundary (e.g. an equation stated in folded shape
+        applied to a fact whose conclusion was simp-normalized by an earlier
+        ``split_conj``).
+        """
+        eq_th_resolved = eq_th if isinstance(eq_th, thm) else self.p._resolve_fact(eq_th)
+        ref_th = self.p._resolve_fact(ref)
+        try:
+            lhs, _ = dest_eq(eq_th_resolved._concl)
+        except HolError:
+            return self._finish(EQ_MP(eq_th_resolved, ref_th))
+        if not aconv(lhs, ref_th._concl):
+            lifted = self.p._match_modulo_lazy_lets(lhs, ref_th)
+            if lifted is not None:
+                ref_th = lifted
+        return self._finish(EQ_MP(eq_th_resolved, ref_th))
 
     def by_fold(self, ref):
         """Inverse of an unfolder: if the have-term is ``a R b`` for a
@@ -1421,7 +1445,19 @@ class _SubFrameCtx:
         self.auto_choose = auto_choose
 
     def __enter__(self):
-        fr = _Frame(goal=self.goal, kind=self.kind)
+        # Simp-normalize the sub-goal against the active lazy-let set so the
+        # inner proof can ``fix`` over a forall hidden inside a folded
+        # carrier (e.g. ``thus("R c h (SUC n) (h n m)").proof()``: `R` peels
+        # to ``!Q. ...``, exposing the binder). The normalized form goes into
+        # the frame's `goal`; on close, ``_finish`` re-folds via simp-match
+        # against the original have-term.
+        carriers = self.p._lazy_let_carriers()
+        goal = self.goal
+        if carriers:
+            eq = self.p._unfold_lazy_lets_in_term(goal, carriers)
+            if not aconv(rand(eq._concl), goal):
+                goal = rand(eq._concl)
+        fr = _Frame(goal=goal, kind=self.kind)
         self.p._frames.append(fr)
         for label, th in self.extra_facts:
             if label is None:
