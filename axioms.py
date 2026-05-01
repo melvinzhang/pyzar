@@ -66,6 +66,18 @@ EXISTS_DEF = new_basic_definition(
 def mk_exists(v, body):
     return mk_comb(mk_const("?", [(v.ty, aty)]), mk_abs(v, body))
 
+# (\/) = \p q. !r. (p ==> r) ==> (q ==> r) ==> r
+r_b = Var("r", bool_ty)
+OR_DEF = new_basic_definition(
+    mk_eq(Var("\\/", bbb_ty),
+          mk_abs(p, mk_abs(q,
+              mk_forall(r_b,
+                  mk_imp(mk_imp(p, r_b),
+                         mk_imp(mk_imp(q, r_b), r_b)))))))
+
+def mk_or(a, b):
+    return mk_comb(mk_comb(mk_const("\\/", []), a), b)
+
 # F = !p:bool. p
 F_DEF = new_basic_definition(
     mk_eq(Var("F", bool_ty), mk_forall(p, p)))
@@ -155,6 +167,7 @@ from parser import DEFAULT_SIG
 DEFAULT_SIG.add_type("bool", bool_ty)
 DEFAULT_SIG.add_infix("=",   40, mk_eq,  assoc="non")
 DEFAULT_SIG.add_infix("/\\", 30, mk_and, assoc="right")
+DEFAULT_SIG.add_infix("\\/", 20, mk_or,  assoc="right")
 DEFAULT_SIG.add_infix("==>", 10, mk_imp, assoc="right")
 DEFAULT_SIG.add_prefix("~",      mk_not)
 DEFAULT_SIG.add_binder("!",      mk_forall)

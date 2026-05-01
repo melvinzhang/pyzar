@@ -28,13 +28,13 @@ from fusion import (
     rator, rand, freesl, variant, aconv,
     REFL, TRANS, MK_COMB, ABS, BETA, ASSUME, EQ_MP,
     DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
-    concl, hyp, HolError, new_basic_definition,
+    concl, hyp, HolError,
 )
 from axioms import (
     T, F,
-    T_DEF, AND_DEF, IMP_DEF, FORALL_DEF, EXISTS_DEF, F_DEF, NOT_DEF,
+    T_DEF, AND_DEF, OR_DEF, IMP_DEF, FORALL_DEF, EXISTS_DEF, F_DEF, NOT_DEF,
     SELECT_AX, ETA_AX,
-    mk_and, mk_imp, mk_forall, mk_exists, mk_not, mk_select,
+    mk_and, mk_or, mk_imp, mk_forall, mk_exists, mk_not, mk_select,
 )
 
 
@@ -269,21 +269,7 @@ def EQF_ELIM(th):
     return NOT_INTRO(th_imp_F)
 
 
-# Disjunction.   OR_DEF :  (\/) = \p q. !r. (p ==> r) ==> (q ==> r) ==> r.
-
-_p_b = Var("p", bool_ty)
-_q_b = Var("q", bool_ty)
-_r_b = Var("r", bool_ty)
-_bbb = mk_fun_ty(bool_ty, mk_fun_ty(bool_ty, bool_ty))
-OR_DEF = new_basic_definition(
-    mk_eq(Var("\\/", _bbb),
-          mk_abs(_p_b, mk_abs(_q_b,
-              mk_forall(_r_b,
-                  mk_imp(mk_imp(_p_b, _r_b),
-                         mk_imp(mk_imp(_q_b, _r_b), _r_b)))))))
-
-def mk_or(a, b):
-    return mk_comb(mk_comb(mk_const("\\/", []), a), b)
+# Disjunction rules.   OR_DEF lives in axioms.py.
 
 def _or_unfold(p_t, q_t):
     """ |- (p \\/ q) = (!r. (p==>r) ==> (q==>r) ==> r) """
@@ -855,15 +841,6 @@ def REWRITE_AC_PROVE(rules, op_const, assoc_thm, comm_thm, target_eq, *, ac_rule
         return TRANS(eq_l, SYM(eq_r))
     eq_ac = AC_PROVE(op_const, assoc_thm, comm_thm, mk_eq(nl, nr))
     return TRANS(eq_l, TRANS(eq_ac, SYM(eq_r)))
-
-
-# ---------------------------------------------------------------------------
-# Register surface syntax for the operators defined in this module.
-# ---------------------------------------------------------------------------
-
-from parser import DEFAULT_SIG
-
-DEFAULT_SIG.add_infix("\\/", 20, mk_or, assoc="right")
 
 
 # ---------------------------------------------------------------------------

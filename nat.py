@@ -43,13 +43,13 @@ from fusion import (
 )
 from axioms import (
     F,
-    mk_and, mk_imp, mk_forall, mk_exists, mk_not, mk_select,
+    mk_and, mk_or, mk_imp, mk_forall, mk_exists, mk_not, mk_select,
 )
 from tactics import (
     AP_TERM, AP_THM, BETA_CONV, SYM,
     SPEC, GEN, CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP,
     CONTR, NOT_ELIM, NOT_INTRO, NOT_CONST,
-    mk_or, DISJ1, DISJ2, DISJ_CASES,
+    DISJ1, DISJ2, DISJ_CASES,
     NE_SYM, REWRITE_NE, EXISTS,
     PROVE_HYP, ELIM_EX,
     SPECL, GENL, DISCHL, TRANS_CHAIN, CASE_OR,

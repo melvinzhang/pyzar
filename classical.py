@@ -19,12 +19,12 @@ from fusion import (
     rand, rator,
     REFL, TRANS, ASSUME, EQ_MP, INST_TYPE,
 )
-from axioms import T, F, SELECT_AX, mk_not, mk_exists
+from axioms import T, F, SELECT_AX, mk_not, mk_or, mk_exists
 from tactics import (
     AP_TERM, BETA_CONV, SYM, TRUTH, EQT_INTRO,
     SPEC, GEN, DISCH, MP, NOT_INTRO, NOT_ELIM,
     DISJ2, EXISTS, FUN_EXT,
-    mk_or, _select_const,
+    _select_const,
 )
 from proof import proof
 

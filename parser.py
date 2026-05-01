@@ -517,9 +517,8 @@ def _selftest():
     import nat  # noqa: F401
     from fusion import aconv, dest_eq, mk_const, mk_eq, mk_fun_ty
     from axioms import (
-        bool_ty, mk_and, mk_imp, mk_not, mk_forall, mk_exists,
+        bool_ty, mk_and, mk_or, mk_imp, mk_not, mk_forall, mk_exists,
     )
-    from tactics import mk_or
     from fusion import mk_abs
     from num import x as VX, y as VY, z as VZ, mk_suc, num_ty, ONE
 
