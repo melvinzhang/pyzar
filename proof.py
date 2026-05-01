@@ -39,7 +39,7 @@ from axioms import (
 )
 from tactics import (
     SPEC, GEN, DISCH, MP, MP_LIST, DISJ_CASES, BETA_CONV, BETA_NORM, SYM,
-    AP_TERM, AP_THM, PROVE_HYP, ELIM_EX, CHOOSE_WITNESS, subst_term,
+    AP_TERM, AP_THM, PROVE_HYP, ELIM_EX, CHOOSE_WITNESS, UNFOLD, subst_term,
     NOT_INTRO, NOT_ELIM, CONTR, REWRITE_NE, EXISTS, DISJ1, DISJ2,
     CONJUNCT1, CONJUNCT2,
     REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV, BETA_RULE,
@@ -88,6 +88,47 @@ def register_contra_finder(rel_a, rel_b, finder):
     _CONTRA_FINDERS[(rel_a, rel_b)] = finder
     if rel_a != rel_b:
         _CONTRA_FINDERS[(rel_b, rel_a)] = lambda x, y: finder(y, x)
+
+
+# ---------------------------------------------------------------------------
+# Induction strategy registry: each entry maps a hol_type to an
+# ``InductionStrategy`` describing the base term, the successor function,
+# and the kernel induction principle. ``num.py`` registers the natural-
+# number strategy at import time; other domains (lists, trees, ...) can
+# register their own without touching ``proof.py``. This breaks the
+# old circular ``proof <-> num`` dependency: ``proof.py`` no longer
+# names ``num`` at all.
+# ---------------------------------------------------------------------------
+
+class InductionStrategy:
+    """How to do induction on a single ``hol_type``.
+
+    * ``ty``          : the type whose vars this strategy applies to.
+    * ``base_term``   : closed term of type ``ty`` that the base case
+                         substitutes for the induction var.
+    * ``succ_fn``     : ``term -> term``; the successor used in the
+                         step case (e.g. ``v -> SUC v``).
+    * ``induct_prove``: ``(var, body, base_th, step_fn) -> thm`` — the
+                         kernel principle. Receives the base proof and a
+                         function that, given the IH theorem, returns
+                         the step proof; produces ``|- !var. body``.
+    """
+    __slots__ = ("ty", "base_term", "succ_fn", "induct_prove")
+
+    def __init__(self, ty, base_term, succ_fn, induct_prove):
+        self.ty = ty
+        self.base_term = base_term
+        self.succ_fn = succ_fn
+        self.induct_prove = induct_prove
+
+
+_INDUCTION_STRATEGIES = {}   # hol_type -> InductionStrategy
+
+def register_induction(strategy):
+    """Plugins call this once at import time to teach ``p.induction(v)``
+    how to handle a new type. Re-registering the same type overrides
+    (so test code can install fakes)."""
+    _INDUCTION_STRATEGIES[strategy.ty] = strategy
 
 
 def _hook(registry, term):
@@ -508,7 +549,6 @@ class Proof:
         Thin wrapper over ``tactics.UNFOLD`` that resolves each string arg
         in the current scope before delegating; kernel-term args pass
         through.  See ``tactics.UNFOLD`` for the underlying behavior."""
-        from tactics import UNFOLD
         resolved = [self._parse(a) if isinstance(a, str) else a for a in args]
         return UNFOLD(def_th, *resolved)
 
@@ -831,20 +871,25 @@ class Proof:
         # so the user doesn't need an intermediate fix() call.
         pred = dest_forall(body)
         if pred is not None and pred.bvar.name == var_name:
-            return _InductionCtx(self, pred.bvar, pred.body, peel_forall=True)
-        env = self._scope_env()
-        if var_name not in env:
-            raise HolError(f"induction: unknown variable {var_name!r}")
-        return _InductionCtx(self, env[var_name], body, peel_forall=False)
+            var, inner_body, peel = pred.bvar, pred.body, True
+        else:
+            env = self._scope_env()
+            if var_name not in env:
+                raise HolError(f"induction: unknown variable {var_name!r}")
+            var, inner_body, peel = env[var_name], body, False
+        strategy = _INDUCTION_STRATEGIES.get(var.ty)
+        if strategy is None:
+            raise HolError(
+                f"induction: no strategy registered for type {var.ty!r}")
+        return _InductionCtx(self, var, inner_body, strategy,
+                              peel_forall=peel)
 
     def base(self):
-        from num import ONE
         fr = self._cur
         if fr.kind != "_induction":
             raise HolError("base() outside induction()")
-        var = fr.data["var"]
-        body = fr.data["body"]
-        sub_goal = subst_term(var, ONE, body)
+        s = fr.data["strategy"]
+        sub_goal = subst_term(fr.data["var"], s.base_term, fr.data["body"])
 
         def on_close(th):
             fr.data["base_th"] = th
@@ -853,13 +898,12 @@ class Proof:
                              on_close=on_close)
 
     def step(self, ih_label="IH"):
-        from num import mk_suc
         fr = self._cur
         if fr.kind != "_induction":
             raise HolError("step() outside induction()")
-        var = fr.data["var"]
-        body = fr.data["body"]
-        sub_goal = subst_term(var, mk_suc(var), body)
+        s = fr.data["strategy"]
+        var, body = fr.data["var"], fr.data["body"]
+        sub_goal = subst_term(var, s.succ_fn(var), body)
 
         def on_close(th):
             fr.data["step_th"] = th
@@ -1501,15 +1545,17 @@ class _SubFrameCtx:
 # ---------------------------------------------------------------------------
 
 class _InductionCtx:
-    def __init__(self, p, var, body, peel_forall=False):
+    def __init__(self, p, var, body, strategy, peel_forall=False):
         self.p = p
         self.var = var
         self.body = body
+        self.strategy = strategy
         self.peel_forall = peel_forall
 
     def __enter__(self):
         fr = _Frame(goal=None, kind="_induction")
         fr.data = {"var": self.var, "body": self.body,
+                   "strategy": self.strategy,
                    "base_th": None, "step_th": None}
         self.p._frames.append(fr)
         return self.p
@@ -1524,13 +1570,12 @@ class _InductionCtx:
         if d["step_th"] is None:
             raise HolError("induction: missing step()")
         # User's step_th already contains ASSUME(body) as a hypothesis (under
-        # the IH label). INDUCT_PROVE wraps that with DISCH(body, ...) and
+        # the IH label). induct_prove wraps that with DISCH(body, ...) and
         # GEN(var, ...) to produce |- !var. body. If the parent's goal already
         # has a !var binder, leave it as is; otherwise SPEC var back out so
         # the parent's body-shaped goal matches.
-        from num import INDUCT_PROVE
-        forall_th = INDUCT_PROVE(self.var, self.body, d["base_th"],
-                                  lambda IH: d["step_th"])
+        forall_th = self.strategy.induct_prove(
+            self.var, self.body, d["base_th"], lambda IH: d["step_th"])
         body_th = forall_th if self.peel_forall else SPEC(self.var, forall_th)
         body_th = self.p._close_frame(fr, body_th)
         self.p._drop_facts(fr.facts_added)
@@ -1677,6 +1722,12 @@ def proof(fn):
 # ---------------------------------------------------------------------------
 
 def _selftest():
+    # When proof.py runs as __main__, num.py's ``from proof import
+    # register_induction`` would otherwise load a *separate* module
+    # instance whose ``_INDUCTION_STRATEGIES`` is invisible to us. Alias
+    # __main__ as ``proof`` so the registration lands in this same dict.
+    import sys
+    sys.modules.setdefault("proof", sys.modules[__name__])
     import nat
     from nat import (
         ADD_1, ADD_SUC, UNFOLD_LE, LT_TO_LE, SATZ_16A,

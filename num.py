@@ -503,6 +503,18 @@ def INDUCT_PROVE(var, body, base, step_fn):
     return INDUCT(pred, base, step)
 
 
+# Register the natural-number induction strategy with the proof DSL.
+# This is what makes ``p.induction("n")`` work for ``n : num`` without
+# ``proof.py`` needing to import anything from this module.
+from proof import register_induction, InductionStrategy
+register_induction(InductionStrategy(
+    ty=num_ty,
+    base_term=ONE,
+    succ_fn=mk_suc,
+    induct_prove=INDUCT_PROVE,
+))
+
+
 # ---------------------------------------------------------------------------
 # Primitive recursion theorem.
 #

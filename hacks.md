@@ -7,7 +7,7 @@ Catalogue of dubious patterns. Each entry: where it lives, why it's a smell, and
 | # | Status | Notes |
 |---|--------|-------|
 | H1 | ✅ | Renamed to `subst_term` in `fc6b43f`; redundant local import removed. |
-| H2 | ⏳ | Not addressed. Requires breaking the `proof ↔ num` cycle. |
+| H2 | ✅ | `InductionStrategy` registry in `proof.py`; `num.py` registers ℕ-induction at import time. No `from num` in the proof core. |
 | H3 | ⏳ | Not addressed. |
 | H4 | ✅ | Alpha-aware Abs match in `fc6b43f`. |
 | H5 | ✅ | `_term_match` mutates `subst` in place in `fc6b43f`. |
@@ -47,7 +47,7 @@ lying about the contract.
 
 ---
 
-## H2. Lazy local imports from `num` to dodge a circular dependency
+## H2. Lazy local imports from `num` to dodge a circular dependency  ✅
 
 **Where:** `proof.py:469` (`from tactics import UNFOLD` — duplicate of top-level),
 `proof.py:778` (`from num import ONE`), `proof.py:793` (`from num import mk_suc`),
