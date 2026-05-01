@@ -1002,6 +1002,19 @@ class _Have:
         self.term = term
         self.is_thus = is_thus
 
+    # ----- builder protocol: resolve refs then finish -----
+
+    def _resolved(self, refs):
+        """List form of ``Proof._resolve_fact``: each ref → ``thm``."""
+        return [self.p._resolve_fact(r) for r in refs]
+
+    def _via(self, builder, *args):
+        """Resolve each arg as a fact and feed positional results into
+        ``builder``; ``_finish`` the produced theorem. The protocol every
+        ``by_*`` whose justification is "kernel rule applied to facts"
+        collapses through."""
+        return self._finish(builder(*self._resolved(args)))
+
     # ----- finishing: alpha-check, register, optionally close goal -----
 
     def _finish(self, th):
@@ -1061,14 +1074,12 @@ class _Have:
 
         Each rule may be a Theorem or a string label naming a fact in scope.
         """
-        rule_thms = [self.p._resolve_fact(r) for r in rules]
-        return self._finish(REWRITE_PROVE(rule_thms, self.term))
+        return self._finish(REWRITE_PROVE(self._resolved(rules), self.term))
 
     def by_rewrite_of(self, ref, rules):
         """Rewrite an existing fact `ref` with `rules` to obtain the have-term."""
-        rule_thms = [self.p._resolve_fact(r) for r in rules]
-        fact_th = self.p._resolve_fact(ref)
-        return self._finish(REWRITE_RULE(rule_thms, fact_th))
+        return self._finish(REWRITE_RULE(self._resolved(rules),
+                                          self.p._resolve_fact(ref)))
 
     def by_select(self, axiom, *args):
         """Higher-order-to-first-order boundary helper.
@@ -1121,7 +1132,7 @@ class _Have:
         (e.g. SATZ_9) to a goal stated using the defined symbol (SATZ_10's
         ``>`` / ``<``)."""
         src_th = self.p._resolve_fact(src)
-        rules = [self.p._resolve_fact(d) for d in defs]
+        rules = self._resolved(defs)
         eq_unfold = REWRITE_CONV(rules, self.term)
         eq_beta = BETA_NORM(rand(eq_unfold._concl))
         eq_goal = TRANS(eq_unfold, eq_beta)
@@ -1140,10 +1151,7 @@ class _Have:
         if len(eqs) != 2:
             raise HolError(
                 f"by_rewrite_ne: expected 2 side equations, got {len(eqs)}")
-        ne_th = self.p._resolve_fact(ref)
-        eq_l_th = self.p._resolve_fact(eqs[0])
-        eq_r_th = self.p._resolve_fact(eqs[1])
-        return self._finish(REWRITE_NE(ne_th, eq_l_th, eq_r_th))
+        return self._via(REWRITE_NE, ref, eqs[0], eqs[1])
 
     def by_cases(self, ref, *args):
         """Open a cases-on block whose target is the have-term (rather than
@@ -1171,9 +1179,7 @@ class _Have:
 
         Aligns the equation's LHS with the fact's conclusion via simp, so
         the user can mix folded/unfolded forms across an EQ_MP boundary."""
-        eq_th_resolved = self.p._resolve_fact(eq_th)
-        ref_th = self.p._resolve_fact(ref)
-        return self._finish(self.p.simp_eq_mp(eq_th_resolved, ref_th))
+        return self._via(self.p.simp_eq_mp, eq_th, ref)
 
     def by_fold(self, ref):
         """Inverse of an unfolder: if the have-term is ``a R b`` for a
@@ -1275,10 +1281,9 @@ class _Have:
     def by_rewrite_ac(self, rules, op, assoc, comm, ac_rules=()):
         """REWRITE_AC_PROVE -- rewrite both sides under ``rules`` (and optional
         ``ac_rules`` for canonicalisation), then close by AC over ``op``."""
-        rule_thms = [self.p._resolve_fact(r) for r in rules]
-        ac_thms = tuple(self.p._resolve_fact(r) for r in ac_rules)
-        return self._finish(REWRITE_AC_PROVE(rule_thms, op, assoc, comm,
-                                              self.term, ac_rules=ac_thms))
+        return self._finish(REWRITE_AC_PROVE(
+            self._resolved(rules), op, assoc, comm, self.term,
+            ac_rules=tuple(self._resolved(ac_rules))))
 
 
 # ---------------------------------------------------------------------------
