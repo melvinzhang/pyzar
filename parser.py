@@ -334,11 +334,18 @@ class _Builder(Interpreter):
             n = str(vd.children[0])
             ty = None
             if len(vd.children) > 1:
-                # Explicit type annotation `name:ty_name`.
+                # Explicit type annotation `name:ty_name`.  Resolves against
+                # the registered signature first, then env-provided type
+                # aliases (so callers can pass fresh tyvars via `types=`).
                 ty_name = str(vd.children[1])
-                if ty_name not in self.sig.type:
-                    raise ParseError(f"unknown type name {ty_name!r}")
-                ty = self.sig.type[ty_name]
+                if ty_name in self.sig.type:
+                    ty = self.sig.type[ty_name]
+                else:
+                    binding = self.env.get(ty_name)
+                    if isinstance(binding, (Tyvar, Tyapp)):
+                        ty = binding
+                    else:
+                        raise ParseError(f"unknown type name {ty_name!r}")
             elif n in self.env:
                 # Inherit type from an env-provided binding so callers can
                 # introduce higher-order binders (e.g. !f. ... where

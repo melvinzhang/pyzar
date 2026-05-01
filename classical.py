@@ -15,18 +15,24 @@ Provides:
 
 from fusion import (
     Var,
-    bool_ty, aty, mk_abs, mk_comb, mk_eq,
+    bool_ty, aty, mk_fun_ty, mk_abs, mk_comb, mk_eq,
     rand, rator,
     REFL, TRANS, ASSUME, EQ_MP, INST_TYPE,
 )
-from axioms import T, F, SELECT_AX, mk_not, mk_or, mk_exists
+from axioms import T, F, SELECT_AX, mk_not, mk_or
 from tactics import (
-    AP_TERM, BETA_CONV, SYM, TRUTH, EQT_INTRO,
-    SPEC, GEN, DISCH, MP, NOT_INTRO, NOT_ELIM,
-    DISJ2, EXISTS, FUN_EXT,
+    AP_TERM, BETA_CONV, BETA_RULE, SYM, TRUTH, EQT_INTRO,
+    SPEC, GEN, MP, NOT_ELIM,
+    DISJ2, FUN_EXT,
     _select_const,
 )
 from proof import proof
+
+
+# Polymorphic predicate type ``A -> bool`` used by the quantifier-negation
+# universal forms below.  ``aty`` is the kernel's stock tyvar ``A``; declarative
+# proofs that need polymorphism pass it via ``types={"A": aty, ...}``.
+_pred_ty = mk_fun_ty(aty, bool_ty)
 
 
 # ---------------------------------------------------------------------------
@@ -138,32 +144,63 @@ def NOT_NOT_ELIM(th):
     return MP(SPEC(p_t, NOT_NOT_ELIM_AX), th)
 
 
+# ---------------------------------------------------------------------------
+# Polymorphic universal forms of the quantifier-negation rules.  Each takes a
+# generic predicate ``p : A -> bool`` and discharges a quantifier flip.  Call
+# sites use the thin Python wrappers below: ``SPEC`` at the concrete predicate,
+# ``BETA_RULE`` to normalise the (\\v. body) v redex, then ``MP``.
+# ---------------------------------------------------------------------------
+
+@proof
+def NOT_EX_TO_FORALL_NOT_AX(prf):
+    prf.goal("!p. ~(?v:A. p v) ==> !v:A. ~(p v)",
+             types={"p": _pred_ty, "A": aty})
+    prf.fix("p")
+    prf.assume("hne: ~(?v:A. p v)")
+    with prf.thus("!v:A. ~(p v)").proof():
+        prf.fix("v")
+        with prf.suppose("hpv: p v"):
+            prf.have("hex: ?v:A. p v").by_witness("v", "hpv")
+            prf.absurd().by_conj("hne", "hex")
+
+
+@proof
+def NOT_FORALL_TO_EX_NOT_AX(prf):
+    prf.goal("!p. ~(!v:A. p v) ==> ?v:A. ~(p v)",
+             types={"p": _pred_ty, "A": aty})
+    prf.fix("p")
+    prf.assume("hnf: ~(!v:A. p v)")
+    with prf.thus("?v:A. ~(p v)").proof():
+        with prf.cases_on(EXCLUDED_MIDDLE, "?v:A. ~(p v)"):
+            with prf.case("hex: ?v:A. ~(p v)"):
+                prf.thus("?v:A. ~(p v)").by_thm(prf.fact("hex"))
+            with prf.case("hne: ~(?v:A. ~(p v))"):
+                with prf.have("hall: !v:A. p v").proof():
+                    prf.fix("v")
+                    with prf.have("nn: ~~(p v)").proof():
+                        with prf.suppose("hnpv: ~(p v)"):
+                            prf.have("hex_neg: ?v:A. ~(p v)")\
+                                .by_witness("v", "hnpv")
+                            prf.absurd().by_conj("hne", "hex_neg")
+                    prf.thus("p v").by_thm(NOT_NOT_ELIM(prf.fact("nn")))
+                prf.absurd().by_conj("hnf", "hall")
+
+
+def _spec_quant_ax(ax, pred):
+    """Common scaffold: ``INST_TYPE`` ``ax`` to the predicate's tyvar, ``SPEC``
+    at ``pred``, ``BETA_RULE`` away the resulting (\\v. body) v redex."""
+    v_ty = pred.bvar.ty
+    return BETA_RULE(SPEC(pred, INST_TYPE([(v_ty, aty)], ax)))
+
+
 def NOT_EX_TO_FORALL_NOT(not_th, pred):
     """ |- ~(?v. body[v])   =>   |- !v. ~body[v]    where pred = \\v. body. """
-    v_var = pred.bvar
-    body_v = mk_comb(pred, v_var)
-    body_v_term = rand(BETA_CONV(body_v)._concl)
-    body_assume = ASSUME(body_v_term)
-    ex_th = EXISTS(pred, v_var, body_assume)
-    th_F = MP(NOT_ELIM(not_th), ex_th)
-    return GEN(v_var, NOT_INTRO(DISCH(body_v_term, th_F)))
+    return MP(_spec_quant_ax(NOT_EX_TO_FORALL_NOT_AX, pred), not_th)
 
 
 def NOT_FORALL_TO_EX_NOT(not_th, pred):
     """ |- ~(!v. body[v])   =>   |- ?v. ~body[v].   Requires EM (classical). """
-    v_var = pred.bvar
-    body_v = mk_comb(pred, v_var)
-    body_v_term = rand(BETA_CONV(body_v)._concl)
-    not_pred = mk_abs(v_var, mk_not(body_v_term))
-    target = mk_exists(v_var, mk_not(body_v_term))
-    h_not_target = ASSUME(mk_not(target))
-    forall_nn = NOT_EX_TO_FORALL_NOT(h_not_target, not_pred)
-    spec_nn = SPEC(v_var, forall_nn)
-    body_v_th = NOT_NOT_ELIM(spec_nn)
-    forall_body = GEN(v_var, body_v_th)
-    th_F = MP(NOT_ELIM(not_th), forall_body)
-    th_nn_target = NOT_INTRO(DISCH(mk_not(target), th_F))
-    return NOT_NOT_ELIM(th_nn_target)
+    return MP(_spec_quant_ax(NOT_FORALL_TO_EX_NOT_AX, pred), not_th)
 
 
 # ---------------------------------------------------------------------------
