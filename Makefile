@@ -1,12 +1,12 @@
 PY := uv run python
 
-.PHONY: test test-kernel test-tactics test-parser test-proof test-theories
+.PHONY: test test-kernel test-tactics test-parser test-axioms test-proof test-theories
 
 # Layered test runner. Each layer depends only on the ones below it, so a
 # failure at a lower layer makes upper-layer failures meaningless to debug.
 # `make test` runs everything bottom-up; `make test-<layer>` runs one layer.
 
-test: test-kernel test-tactics test-parser test-proof test-theories
+test: test-kernel test-tactics test-parser test-axioms test-proof test-theories
 
 # L1 -- kernel: fusion (terms, types, primitive inference rules).
 test-kernel:
@@ -18,13 +18,17 @@ test-tactics:
 
 # L3 -- surface syntax: Lark grammar, label/let-spec parsers, pp.
 test-parser:
-	$(PY) parser.py
+	$(PY) parser_test.py
 
-# L4 -- proof DSL: have/thus, by/by_match, induction, choose, lazy lets.
+# L4 -- axioms: HOL Light boolean definitions and the 3 axioms.
+test-axioms:
+	$(PY) axioms_test.py
+
+# L5 -- proof DSL: have/thus, by/by_match, induction, choose, lazy lets.
 test-proof:
 	$(PY) proof_test.py
 
-# L5 -- theories: classical logic, then the Landau development bottom-up
+# L6 -- theories: classical logic, then the Landau development bottom-up
 # (num builds the natural numbers; nat proves Landau's Sätze on them; frac
 # builds rationals on top of nat).
 test-theories:
