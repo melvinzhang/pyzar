@@ -3,13 +3,11 @@ import fusion
 from fusion import (
     Tyvar, Tyapp, Var, Const, Comb, Abs,
     bool_ty, aty,
-    mk_type, mk_vartype, dest_type, dest_vartype, is_type, is_vartype,
+    mk_type,
     tyvars, type_subst,
     types, get_type_arity, new_type,
     constants, get_const_type, new_constant,
-    mk_var, mk_const, mk_abs, mk_comb,
-    dest_var, dest_const, dest_comb, dest_abs,
-    is_var, is_const, is_abs, is_comb,
+    mk_comb,
     type_of, frees, freesin, vfree_in,
     type_vars_in_term, variant, vsubst, inst,
     alphaorder,
@@ -21,6 +19,10 @@ from fusion import (
 )
 from basics import (
     bty,
+    mk_vartype, dest_type, dest_vartype, is_type, is_vartype,
+    mk_var, mk_const, mk_abs,
+    dest_var, dest_const, dest_comb, dest_abs,
+    is_var, is_const, is_abs, is_comb,
     freesl,
     rator, rand, dest_eq,
     aconv,

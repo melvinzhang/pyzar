@@ -34,14 +34,14 @@ Coverage:
 
 from fusion import (
     Var, Comb, Abs,
-    bool_ty, aty, mk_abs, mk_comb, mk_const,
+    bool_ty, aty, mk_comb,
     HolError,
     REFL, TRANS, MK_COMB, ABS, BETA, ASSUME, EQ_MP,
     DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
     hyp,
 )
 from basics import (
-    mk_app, mk_eq, mk_fun_ty,
+    mk_abs, mk_app, mk_const, mk_eq, mk_fun_ty,
     dest_eq, aconv,
     rator, rand,
 )

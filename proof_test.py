@@ -14,10 +14,10 @@ from nat import (
 )
 from num import ONE, num_ty, SUC_DEF
 from fusion import (
-    mk_var, bool_ty, Var, ASSUME, EQ_MP, REFL, MK_COMB, concl,
+    bool_ty, Var, ASSUME, EQ_MP, REFL, MK_COMB, concl,
     mk_comb, HolError,
 )
-from basics import aconv, mk_eq, mk_fun_ty, mk_app
+from basics import aconv, mk_app, mk_eq, mk_fun_ty, mk_var
 from axioms import mk_forall
 from tactics import SPEC, GEN, DISCH, SYM, AP_THM, BETA_RULE, NOT_ELIM, MP
 from parser import parse, pp

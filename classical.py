@@ -15,10 +15,10 @@ Provides:
 
 from fusion import (
     Var,
-    bool_ty, aty, mk_abs, mk_comb,
+    bool_ty, aty, mk_comb,
     REFL, TRANS, ASSUME, EQ_MP, INST_TYPE,
 )
-from basics import mk_fun_ty, mk_eq, rand, rator
+from basics import mk_abs, mk_fun_ty, mk_eq, rand, rator
 from axioms import T, F, SELECT_AX, mk_not, mk_or
 from tactics import (
     AP_TERM, BETA_CONV, BETA_RULE, SYM, TRUTH, EQT_INTRO,

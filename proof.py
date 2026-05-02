@@ -30,11 +30,11 @@ import re
 
 from fusion import (
     Var, Comb, Abs, thm,
-    concl, HolError, ASSUME, EQ_MP, BETA, INST, mk_abs, mk_comb,
+    concl, HolError, ASSUME, EQ_MP, BETA, INST, mk_comb,
     type_of, TRANS, MK_COMB, ABS, REFL,
 )
 from basics import (
-    aconv, mk_app, rand, rator, mk_eq, mk_fun_ty, dest_eq, dest_binop_any,
+    aconv, mk_abs, mk_app, rand, rator, mk_eq, mk_fun_ty, dest_eq, dest_binop_any,
 )
 from axioms import (
     T, F, mk_select, mk_forall,

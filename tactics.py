@@ -23,7 +23,7 @@ surface syntax.
 
 from fusion import (
     Var, Const, Comb, Abs, thm,
-    bool_ty, aty, mk_abs, mk_comb, mk_const,
+    bool_ty, aty, mk_comb,
     type_of,
     variant,
     REFL, TRANS, MK_COMB, ABS, BETA, ASSUME, EQ_MP,
@@ -31,7 +31,7 @@ from fusion import (
     concl, hyp, HolError,
 )
 from basics import (
-    bty, mk_app, mk_eq, mk_fun_ty, dest_eq,
+    bty, mk_abs, mk_app, mk_const, mk_eq, mk_fun_ty, dest_eq,
     rator, rand, freesl, aconv,
 )
 from axioms import (

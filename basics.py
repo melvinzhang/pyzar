@@ -1,20 +1,97 @@
 # Derived term/type syntax built on the HOL Light kernel.
 # Mirrors the helpers in https://github.com/jrh13/hol-light/blob/master/basics.ml
 
-from typing import Callable
-
 from fusion import (
-    Comb, Const, Abs,
+    Tyvar, Tyapp,
+    Var, Comb, Const, Abs,
     HolError,
     aty,
     alphaorder,
     dest_thm,
     frees,
+    get_const_type,
     inst,
-    mk_comb, mk_const, mk_type, mk_vartype,
-    type_of,
+    mk_comb, mk_type,
+    type_of, type_subst,
     term, hol_type, thm,
 )
+
+# ---------------------------------------------------------------------------
+# Type discriminators / constructors / destructors
+# ---------------------------------------------------------------------------
+
+def mk_vartype(v: str) -> hol_type:
+    return Tyvar(v)
+
+def dest_type(ty: hol_type):
+    match ty:
+        case Tyapp(tyop, args):
+            return tyop, list(args)
+    raise HolError("dest_type: type variable not a constructor")
+
+def dest_vartype(ty: hol_type) -> str:
+    match ty:
+        case Tyvar(name):
+            return name
+    raise HolError("dest_vartype: type constructor not a variable")
+
+def is_type(ty: hol_type) -> bool:
+    return isinstance(ty, Tyapp)
+
+def is_vartype(ty: hol_type) -> bool:
+    return isinstance(ty, Tyvar)
+
+# ---------------------------------------------------------------------------
+# Term constructors
+# ---------------------------------------------------------------------------
+
+def mk_var(v: str, ty: hol_type) -> term:
+    return Var(v, ty)
+
+def mk_const(name: str, theta: list) -> term:
+    try:
+        uty = get_const_type(name)
+    except KeyError:
+        raise HolError("mk_const: not a constant name")
+    return Const(name, type_subst(theta, uty))
+
+def mk_abs(bvar: term, body: term) -> term:
+    if not isinstance(bvar, Var):
+        raise HolError("mk_abs: not a variable")
+    return Abs(bvar, body)
+
+# ---------------------------------------------------------------------------
+# Term discriminators
+# ---------------------------------------------------------------------------
+
+def is_var(tm: term) -> bool:   return isinstance(tm, Var)
+def is_const(tm: term) -> bool: return isinstance(tm, Const)
+def is_abs(tm: term) -> bool:   return isinstance(tm, Abs)
+def is_comb(tm: term) -> bool:  return isinstance(tm, Comb)
+
+# ---------------------------------------------------------------------------
+# Term destructors
+# ---------------------------------------------------------------------------
+
+def dest_var(tm: term):
+    if isinstance(tm, Var):
+        return tm.name, tm.ty
+    raise HolError("dest_var: not a variable")
+
+def dest_const(tm: term):
+    if isinstance(tm, Const):
+        return tm.name, tm.ty
+    raise HolError("dest_const: not a constant")
+
+def dest_comb(tm: term):
+    if isinstance(tm, Comb):
+        return tm.fun, tm.arg
+    raise HolError("dest_comb: not a combination")
+
+def dest_abs(tm: term):
+    if isinstance(tm, Abs):
+        return tm.bvar, tm.body
+    raise HolError("dest_abs: not an abstraction")
 
 # ---------------------------------------------------------------------------
 # Iterated combination

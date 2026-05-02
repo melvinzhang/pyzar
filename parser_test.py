@@ -6,9 +6,11 @@ import nat  # noqa: F401
 
 from fusion import (
     Const,
-    mk_abs, mk_comb, mk_const, mk_var,
+    mk_comb,
 )
-from basics import aconv, dest_eq, mk_app, mk_eq, mk_fun_ty
+from basics import (
+    aconv, dest_eq, mk_abs, mk_app, mk_const, mk_eq, mk_fun_ty, mk_var,
+)
 from axioms import (
     bool_ty, mk_and, mk_or, mk_imp, mk_not, mk_forall, mk_exists, mk_select,
 )

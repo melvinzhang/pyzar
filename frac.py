@@ -15,11 +15,11 @@ on natural numbers (matching Landau's surface syntax exactly).
 Each Satz is checked by running ``uv run frac.py``.
 """
 from fusion import (
-    Var, Comb, mk_const,
+    Var, Comb,
     bool_ty, type_of,
     REFL, TRANS, INST, MK_COMB,
 )
-from basics import mk_app, mk_eq, mk_fun_ty, dest_eq, rator, rand
+from basics import mk_app, mk_const, mk_eq, mk_fun_ty, dest_eq, rator, rand
 from nat import (
     num_ty, ONE, mk_add, mk_mul, PLUS, TIMES,
     x as _xnat,

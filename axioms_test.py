@@ -2,10 +2,10 @@ import unittest
 
 from fusion import (
     aty, bool_ty,
-    Abs, Var, mk_const, mk_comb, type_of,
+    Abs, Var, mk_comb, type_of,
     concl, hyp, axioms, definitions, get_const_type,
 )
-from basics import mk_fun_ty
+from basics import mk_const, mk_fun_ty
 import axioms as ax
 from axioms import (
     T, F, mk_and, mk_or, mk_imp, mk_not, mk_forall, mk_exists, mk_select,

@@ -13,14 +13,14 @@ Mirrors `nums.ml` from HOL Light.
 
 from fusion import (
     Var, Abs, Comb,
-    aty, bool_ty, mk_abs, mk_comb, mk_const,
+    aty, bool_ty, mk_comb,
     mk_type, new_constant, new_type,
     new_basic_definition, new_basic_type_definition,
     type_of,
     REFL, TRANS, MK_COMB, ABS, ASSUME, EQ_MP, INST, INST_TYPE, HolError,
 )
 from basics import (
-    bty, mk_app, mk_eq, mk_fun_ty,
+    bty, mk_abs, mk_app, mk_const, mk_eq, mk_fun_ty,
     rator, rand, dest_eq,
 )
 from axioms import (
