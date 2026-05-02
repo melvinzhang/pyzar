@@ -79,7 +79,7 @@ def SATZ_1(p):
     p.fix("x y")
     p.assume("hxy: ~(x = y)")
     with p.suppose("h: SUC x = SUC y"):
-        p.have("xy: x = y").by(AXIOM_4, "x", "y", "h")
+        p.have("xy: x = y").by_match(AXIOM_4, "h")
         p.have("imp: (x = y) ==> F").by(NOT_ELIM, "hxy")
         p.thus("F").by(MP, "imp", "xy")
 
@@ -97,9 +97,9 @@ def SATZ_2(p):
     p.fix("x")
     with p.induction("x"):
         with p.base():
-            p.thus("~(SUC 1 = 1)").by(AXIOM_3, "1")
+            p.thus("~(SUC 1 = 1)").by_match(AXIOM_3)
         with p.step("IH"):
-            p.thus("~(SUC (SUC x) = SUC x)").by(SATZ_1, "SUC x", "x", "IH")
+            p.thus("~(SUC (SUC x) = SUC x)").by_match(SATZ_1, "IH")
 
 
 # ---------------------------------------------------------------------------
@@ -274,13 +274,13 @@ def SATZ_7(p):
     p.fix("x y")
     with p.induction("y"):
         with p.base():
-            p.have("ne_sx: ~(SUC x = 1)").by(AXIOM_3, "x")
+            p.have("ne_sx: ~(SUC x = 1)").by_match(AXIOM_3)
             p.have("ne1: ~(1 = SUC x)").by(NE_SYM, "ne_sx")
             p.thus("~(1 = x + 1)")\
                 .by_rewrite_ne("ne1", [REFL(ONE), SYM(SPEC(x, ADD_1))])
         with p.step("IH"):
             p.have("ne_succ: ~(SUC y = SUC (x + y))")\
-                .by(SATZ_1, "y", "x + y", "IH")
+                .by_match(SATZ_1, "IH")
             p.thus("~(SUC y = x + SUC y)")\
                 .by_rewrite_ne("ne_succ",
                                [REFL(mk_suc(y)), SYM(SPECL([x, y], ADD_SUC))])
@@ -298,13 +298,13 @@ def SATZ_8(p):
     p.assume("hyp_yz: ~(y = z)")
     with p.induction("x"):
         with p.base():
-            p.have("ne_suc: ~(SUC y = SUC z)").by(SATZ_1, "y", "z", "hyp_yz")
+            p.have("ne_suc: ~(SUC y = SUC z)").by_match(SATZ_1, "hyp_yz")
             p.thus("~(1 + y = 1 + z)")\
                 .by_rewrite_ne("ne_suc",
                                [SYM(SPEC(y, ONE_PLUS)), SYM(SPEC(z, ONE_PLUS))])
         with p.step("IH"):
             p.have("ne_sum: ~(SUC (x + y) = SUC (x + z))")\
-                .by(SATZ_1, "x + y", "x + z", "IH")
+                .by_match(SATZ_1, "IH")
             p.thus("~(SUC x + y = SUC x + z)")\
                 .by_rewrite_ne("ne_sum",
                                [SYM(SPECL([x, y], SUC_PLUS)),
@@ -501,7 +501,7 @@ def SATZ_13(p):
     p.assume("h: x >= y")
     with p.have("yx_or: (y < x) \\/ (y = x)").by_cases("h"):
         with p.case("h_gt: x > y"):
-            p.have("yx_lt: y < x").by(SATZ_11, "x", "y", "h_gt")
+            p.have("yx_lt: y < x").by_match(SATZ_11, "h_gt")
             p.thus("(y < x) \\/ (y = x)").by_disj("yx_lt")
         with p.case("h_eq: x = y"):
             p.have("yx_eq: y = x").by(SYM, "h_eq")
@@ -516,7 +516,7 @@ def SATZ_14(p):
     p.assume("h: x <= y")
     with p.have("yx_or: (y > x) \\/ (y = x)").by_cases("h"):
         with p.case("h_lt: x < y"):
-            p.have("yx_gt: y > x").by(SATZ_12, "x", "y", "h_lt")
+            p.have("yx_gt: y > x").by_match(SATZ_12, "h_lt")
             p.thus("(y > x) \\/ (y = x)").by_disj("yx_gt")
         with p.case("h_eq: x = y"):
             p.have("yx_eq: y = x").by(SYM, "h_eq")
@@ -567,7 +567,7 @@ def SATZ_16A(p):
     p.assume("hxy: x <= y", "hyz: y < z")
     with p.cases_on("hxy"):
         with p.case("x < y"):
-            p.thus("x < z").by(SATZ_15, "x", "y", "z", -1, "hyz")
+            p.thus("x < z").by_match(SATZ_15, -1, "hyz")
         with p.case("x = y"):
             p.thus("x < z").by_rewrite_of("hyz", [SYM(p.fact(-1))])
 
@@ -579,7 +579,7 @@ def SATZ_16B(p):
     p.assume("hxy: x < y", "hyz: y <= z")
     with p.cases_on("hyz"):
         with p.case("y < z"):
-            p.thus("x < z").by(SATZ_15, "x", "y", "z", "hxy", -1)
+            p.thus("x < z").by_match(SATZ_15, "hxy", -1)
         with p.case("y = z"):
             p.thus("x < z").by_rewrite_of("hxy", [-1])
 
@@ -593,7 +593,7 @@ def SATZ_17(p):
     p.assume("hxy: x <= y", "hyz: y <= z")
     with p.cases_on("hyz"):
         with p.case("y < z"):
-            p.have("xz_lt: x < z").by(SATZ_16A, "x", "y", "z", "hxy", -1)
+            p.have("xz_lt: x < z").by_match(SATZ_16A, "hxy", -1)
             p.thus("x <= z").by(LT_TO_LE, "xz_lt")
         with p.case("y = z"):
             p.thus("x <= z").by_rewrite_of("hxy", [-1])
@@ -635,9 +635,9 @@ def SATZ_19C(p):
     p.goal("!x y z. x < y ==> x + z < y + z")
     p.fix("x y z")
     p.assume("h: x < y")
-    p.have("yx_gt: y > x").by(SATZ_12, "x", "y", "h")
-    p.have("yz_gt_xz: y + z > x + z").by(SATZ_19A, "y", "x", "z", "yx_gt")
-    p.thus("x + z < y + z").by(SATZ_11, "y + z", "x + z", "yz_gt_xz")
+    p.have("yx_gt: y > x").by_match(SATZ_12, "h")
+    p.have("yz_gt_xz: y + z > x + z").by_match(SATZ_19A, "yx_gt")
+    p.thus("x + z < y + z").by_match(SATZ_11, "yz_gt_xz")
 
 
 # Theorem 21:   x > y, z > u  ==>  x + z > y + u.
@@ -648,16 +648,16 @@ def SATZ_21(p):
     p.goal("!x y z u. x > y ==> z > u ==> x + z > y + u")
     p.fix("x y z u")
     p.assume("hxy: x > y", "hzu: z > u")
-    p.have("xz_gt_yz: x + z > y + z").by(SATZ_19A, "x", "y", "z", "hxy")
-    p.have("zy_gt_uy: z + y > u + y").by(SATZ_19A, "z", "u", "y", "hzu")
+    p.have("xz_gt_yz: x + z > y + z").by_match(SATZ_19A, "hxy")
+    p.have("zy_gt_uy: z + y > u + y").by_match(SATZ_19A, "hzu")
     p.have("yz_gt_yu: y + z > y + u")\
         .by_rewrite_of("zy_gt_uy",
                        [SPECL([z, y], SATZ_6), SPECL([u, y], SATZ_6)])
-    p.have("yu_lt_yz: y + u < y + z").by(SATZ_11, "y + z", "y + u", "yz_gt_yu")
-    p.have("yz_lt_xz: y + z < x + z").by(SATZ_11, "x + z", "y + z", "xz_gt_yz")
+    p.have("yu_lt_yz: y + u < y + z").by_match(SATZ_11, "yz_gt_yu")
+    p.have("yz_lt_xz: y + z < x + z").by_match(SATZ_11, "xz_gt_yz")
     p.have("yu_lt_xz: y + u < x + z")\
-        .by(SATZ_15, "y + u", "y + z", "x + z", "yu_lt_yz", "yz_lt_xz")
-    p.thus("x + z > y + u").by(SATZ_12, "y + u", "x + z", "yu_lt_xz")
+        .by_match(SATZ_15, "yu_lt_yz", "yz_lt_xz")
+    p.thus("x + z > y + u").by_match(SATZ_12, "yu_lt_xz")
 
 
 # Theorem 22:   x >= y, z > u  ==>  x + z > y + u   (and the other "or" form).
@@ -669,9 +669,9 @@ def SATZ_22A(p):
     p.assume("hge: x >= y", "hgt: z > u")
     with p.cases_on("hge"):
         with p.case("x > y"):
-            p.thus("x + z > y + u").by(SATZ_21, "x", "y", "z", "u", -1, "hgt")
+            p.thus("x + z > y + u").by_match(SATZ_21, -1, "hgt")
         with p.case("hxy: x = y"):
-            p.have("zy_gt_uy: z + y > u + y").by(SATZ_19A, "z", "u", "y", "hgt")
+            p.have("zy_gt_uy: z + y > u + y").by_match(SATZ_19A, "hgt")
             p.have("yz_gt_yu: y + z > y + u")\
                 .by_rewrite_of("zy_gt_uy",
                                [SPECL([z, y], SATZ_6), SPECL([u, y], SATZ_6)])
@@ -686,9 +686,9 @@ def SATZ_22B(p):
     p.assume("hgt: x > y", "hge: z >= u")
     with p.cases_on("hge"):
         with p.case("z > u"):
-            p.thus("x + z > y + u").by(SATZ_21, "x", "y", "z", "u", "hgt", -1)
+            p.thus("x + z > y + u").by_match(SATZ_21, "hgt", -1)
         with p.case("hzu: z = u"):
-            p.have("xz_gt_yz: x + z > y + z").by(SATZ_19A, "x", "y", "z", "hgt")
+            p.have("xz_gt_yz: x + z > y + z").by_match(SATZ_19A, "hgt")
             p.thus("x + z > y + u").by_rewrite_of(
                 "xz_gt_yz",
                 [AP_TERM(mk_comb(PLUS, y), p.fact("hzu"))])
@@ -703,14 +703,12 @@ def SATZ_23(p):
     p.assume("hxy: x >= y", "hzu: z >= u")
     with p.cases_on("hxy"):
         with p.case("hgt_xy: x > y"):
-            p.have("gt: x + z > y + u").by(SATZ_22B, "x", "y", "z", "u",
-                                            "hgt_xy", "hzu")
+            p.have("gt: x + z > y + u").by_match(SATZ_22B, "hgt_xy", "hzu")
             p.thus("x + z >= y + u").by(GT_TO_GE, "gt")
         with p.case("heq_xy: x = y"):
             with p.cases_on("hzu"):
                 with p.case("hgt_zu: z > u"):
-                    p.have("gt: x + z > y + u").by(SATZ_22A, "x", "y", "z", "u",
-                                                    "hxy", "hgt_zu")
+                    p.have("gt: x + z > y + u").by_match(SATZ_22A, "hxy", "hgt_zu")
                     p.thus("x + z >= y + u").by(GT_TO_GE, "gt")
                 with p.case("heq_zu: z = u"):
                     p.have("eq: x + z = y + u").by_rewrite(["heq_xy", "heq_zu"])
@@ -723,7 +721,7 @@ def SATZ_23(p):
 def SATZ_24(p):
     p.goal("!x. x >= 1")
     p.fix("x")
-    p.have("lp: (x = 1) \\/ (?u. x = SUC u)").by(LEMMA_PRED, "x")
+    p.have("lp: (x = 1) \\/ (?u. x = SUC u)").by_match(LEMMA_PRED)
     with p.cases_on("lp"):
         with p.case("hx1: x = 1"):
             p.thus("x >= 1").by(EQ_TO_GE, "hx1")
@@ -742,9 +740,9 @@ def SATZ_25(p):
     p.fix("x y")
     p.assume("h: y > x")
     p.choose("u: y = x + u", from_="h")
-    p.have("u_ge_1: u >= 1").by(SATZ_24, "u")
+    p.have("u_ge_1: u >= 1").by_match(SATZ_24)
     p.have("sum_ge: x + u >= x + 1")\
-        .by(SATZ_23, "x", "x", "u", "1", EQ_TO_GE(REFL(x)), "u_ge_1")
+        .by_match(SATZ_23, EQ_TO_GE(REFL(x)), "u_ge_1")
     p.thus("y >= x + 1").by_rewrite_of("sum_ge", [SYM(p.fact("u_eq"))])
 
 
@@ -841,7 +839,7 @@ def SATZ_26(p):
         with p.case("h_eq: y = x"):
             p.thus("y <= x").by(EQ_TO_LE, "h_eq")
         with p.case("h_gt: y > x"):
-            p.have("y_ge_x1: y >= x + 1").by(SATZ_25, "x", "y", "h_gt")
+            p.have("y_ge_x1: y >= x + 1").by_match(SATZ_25, "h_gt")
             with p.cases_on("y_ge_x1"):
                 with p.case("h_g: y > x + 1"):
                     p.absurd().auto("h", "h_g")
@@ -880,8 +878,8 @@ def _SATZ_27_NOT_M_SUCC(p):
     p.fix("N y")
     p.assume("hNy: N y")
     with p.suppose("hM: !n. N n ==> y + 1 <= n"):
-        p.have("le: y + 1 <= y").by("hM", "y", "hNy")
-        p.have("gt: y + 1 > y").by(SATZ_18, "y", "1")
+        p.have("le: y + 1 <= y").by_match("hM", "hNy")
+        p.have("gt: y + 1 > y").by_match(SATZ_18)
         with p.cases_on("le"):
             with p.case("h_lt: y + 1 < y"):
                 p.absurd().auto("h_lt", "gt")
@@ -931,11 +929,11 @@ def _SATZ_27_EXISTS_M(p):
                                 p.have("conj: P x /\\ ~ P (x + 1)")\
                                     .by(CONJ, "IH", "hnP1")
                                 p.have("not_conj: ~(P x /\\ ~ P (x + 1))")\
-                                    .by("forall_nQ", "x")
+                                    .by_match("forall_nQ")
                                 p.absurd().by_conj("conj", "not_conj")
             p.choose("n0: N n0", from_="hNonempty")
-            p.have("Pn1: P (n0 + 1)").by("forall_P", "n0 + 1")
-            p.have("nPn1: ~ P (n0 + 1)").by("hStepFail", "n0", "n0_eq")
+            p.have("Pn1: P (n0 + 1)").by_match("forall_P")
+            p.have("nPn1: ~ P (n0 + 1)").by_match("hStepFail", "n0_eq")
             p.absurd().by_conj("Pn1", "nPn1")
 
 
@@ -962,7 +960,7 @@ def _SATZ_27_FROM_M(p):
             with p.have("M_m1: !n. N n ==> m + 1 <= n").proof():
                 p.fix("n")
                 p.assume("hNn: N n")
-                p.have("le: m <= n").by("hM", "n", "hNn")
+                p.have("le: m <= n").by_match("hM", "hNn")
                 with p.have("ne: ~ (m = n)").proof():
                     with p.suppose("eq: m = n"):
                         p.have("Nm_via: N m")\
@@ -973,9 +971,9 @@ def _SATZ_27_FROM_M(p):
                         p.thus("m < n").by_thm(p.fact("h_lt"))
                     with p.case("h_eq: m = n"):
                         p.absurd().by_conj("h_eq", "ne")
-                p.have("gt: n > m").by(SATZ_12, "m", "n", "lt")
-                p.have("ge: n >= m + 1").by(SATZ_25, "m", "n", "gt")
-                p.thus("m + 1 <= n").by(SATZ_13, "n", "m + 1", "ge")
+                p.have("gt: n > m").by_match(SATZ_12, "lt")
+                p.have("ge: n >= m + 1").by_match(SATZ_25, "gt")
+                p.thus("m + 1 <= n").by_match(SATZ_13, "ge")
             p.absurd().by_conj("M_m1", "hnM1")
     p.thus("N m /\\ (!k. N k ==> m <= k)").by(CONJ, "Nm", "hM")
 
@@ -999,8 +997,8 @@ def SATZ_27(p):
     with p.have("M_1: M 1").proof():
         p.fix("n")
         p.assume("hNn: N n")
-        p.have("ge1: n >= 1").by(SATZ_24, "n")
-        p.thus("1 <= n").by(SATZ_13, "n", "1", "ge1")
+        p.have("ge1: n >= 1").by_match(SATZ_24)
+        p.thus("1 <= n").by_match(SATZ_13, "ge1")
 
     # Step 2: !y. N y ==> ~ M (y + 1).  _SATZ_27_NOT_M_SUCC is stated in the
     # unfolded form, which is exactly what ``M (y + 1)`` parses to via the let.
@@ -1151,10 +1149,10 @@ def SATZ_31(p):
 def RIGHT_DISTRIB(p):
     p.goal("!a b c. (a + b) * c = a * c + b * c")
     p.fix("a b c")
-    p.have("flip: (a + b) * c = c * (a + b)").by(SATZ_29, "a + b", "c")
-    p.have("dist: c * (a + b) = c * a + c * b").by(SATZ_30, "c", "a", "b")
-    p.have("ca: c * a = a * c").by(SATZ_29, "c", "a")
-    p.have("cb: c * b = b * c").by(SATZ_29, "c", "b")
+    p.have("flip: (a + b) * c = c * (a + b)").by_match(SATZ_29)
+    p.have("dist: c * (a + b) = c * a + c * b").by_match(SATZ_30)
+    p.have("ca: c * a = a * c").by_match(SATZ_29)
+    p.have("cb: c * b = b * c").by_match(SATZ_29)
     p.thus("(a + b) * c = a * c + b * c")\
         .by_rewrite(["flip", "dist", "ca", "cb"])
 
@@ -1183,9 +1181,9 @@ def SATZ_32C(p):
     p.goal("!x y z. x < y ==> x * z < y * z")
     p.fix("x y z")
     p.assume("h: x < y")
-    p.have("yx: y > x").by(SATZ_12, "x", "y", "h")
-    p.have("yz_gt: y * z > x * z").by(SATZ_32A, "y", "x", "z", "yx")
-    p.thus("x * z < y * z").by(SATZ_11, "y * z", "x * z", "yz_gt")
+    p.have("yx: y > x").by_match(SATZ_12, "h")
+    p.have("yz_gt: y * z > x * z").by_match(SATZ_32A, "yx")
+    p.thus("x * z < y * z").by_match(SATZ_11, "yz_gt")
 
 
 # Theorem 34:  x>y, z>u  ==>  x*z > y*u.   Mirror of Theorem 21.
@@ -1195,16 +1193,16 @@ def SATZ_34(p):
     p.goal("!x y z u. x > y ==> z > u ==> x * z > y * u")
     p.fix("x y z u")
     p.assume("hxy: x > y", "hzu: z > u")
-    p.have("xz_gt_yz: x * z > y * z").by(SATZ_32A, "x", "y", "z", "hxy")
-    p.have("zy_gt_uy: z * y > u * y").by(SATZ_32A, "z", "u", "y", "hzu")
+    p.have("xz_gt_yz: x * z > y * z").by_match(SATZ_32A, "hxy")
+    p.have("zy_gt_uy: z * y > u * y").by_match(SATZ_32A, "hzu")
     p.have("yz_gt_yu: y * z > y * u")\
         .by_rewrite_of("zy_gt_uy",
                        [SPECL([z, y], SATZ_29), SPECL([u, y], SATZ_29)])
-    p.have("yu_lt_yz: y * u < y * z").by(SATZ_11, "y * z", "y * u", "yz_gt_yu")
-    p.have("yz_lt_xz: y * z < x * z").by(SATZ_11, "x * z", "y * z", "xz_gt_yz")
+    p.have("yu_lt_yz: y * u < y * z").by_match(SATZ_11, "yz_gt_yu")
+    p.have("yz_lt_xz: y * z < x * z").by_match(SATZ_11, "xz_gt_yz")
     p.have("yu_lt_xz: y * u < x * z")\
-        .by(SATZ_15, "y * u", "y * z", "x * z", "yu_lt_yz", "yz_lt_xz")
-    p.thus("x * z > y * u").by(SATZ_12, "y * u", "x * z", "yu_lt_xz")
+        .by_match(SATZ_15, "yu_lt_yz", "yz_lt_xz")
+    p.thus("x * z > y * u").by_match(SATZ_12, "yu_lt_xz")
 
 
 # Theorem 35:  x>=y, z>u (or x>y, z>=u)  ==>  x*z > y*u.
@@ -1216,9 +1214,9 @@ def SATZ_35A(p):
     p.assume("hge: x >= y", "hgt: z > u")
     with p.cases_on("hge"):
         with p.case("x > y"):
-            p.thus("x * z > y * u").by(SATZ_34, "x", "y", "z", "u", -1, "hgt")
+            p.thus("x * z > y * u").by_match(SATZ_34, -1, "hgt")
         with p.case("hxy: x = y"):
-            p.have("zy_gt_uy: z * y > u * y").by(SATZ_32A, "z", "u", "y", "hgt")
+            p.have("zy_gt_uy: z * y > u * y").by_match(SATZ_32A, "hgt")
             p.have("yz_gt_yu: y * z > y * u")\
                 .by_rewrite_of("zy_gt_uy",
                                [SPECL([z, y], SATZ_29), SPECL([u, y], SATZ_29)])
@@ -1233,9 +1231,9 @@ def SATZ_35B(p):
     p.assume("hgt: x > y", "hge: z >= u")
     with p.cases_on("hge"):
         with p.case("z > u"):
-            p.thus("x * z > y * u").by(SATZ_34, "x", "y", "z", "u", "hgt", -1)
+            p.thus("x * z > y * u").by_match(SATZ_34, "hgt", -1)
         with p.case("hzu: z = u"):
-            p.have("xz_gt_yz: x * z > y * z").by(SATZ_32A, "x", "y", "z", "hgt")
+            p.have("xz_gt_yz: x * z > y * z").by_match(SATZ_32A, "hgt")
             p.thus("x * z > y * u").by_rewrite_of(
                 "xz_gt_yz",
                 [AP_TERM(mk_comb(TIMES, y), p.fact("hzu"))])
@@ -1250,14 +1248,12 @@ def SATZ_36(p):
     p.assume("hxy: x >= y", "hzu: z >= u")
     with p.cases_on("hxy"):
         with p.case("hgt_xy: x > y"):
-            p.have("gt: x * z > y * u").by(SATZ_35B, "x", "y", "z", "u",
-                                            "hgt_xy", "hzu")
+            p.have("gt: x * z > y * u").by_match(SATZ_35B, "hgt_xy", "hzu")
             p.thus("x * z >= y * u").by(GT_TO_GE, "gt")
         with p.case("heq_xy: x = y"):
             with p.cases_on("hzu"):
                 with p.case("hgt_zu: z > u"):
-                    p.have("gt: x * z > y * u").by(SATZ_35A, "x", "y", "z", "u",
-                                                    "hxy", "hgt_zu")
+                    p.have("gt: x * z > y * u").by_match(SATZ_35A, "hxy", "hgt_zu")
                     p.thus("x * z >= y * u").by(GT_TO_GE, "gt")
                 with p.case("heq_zu: z = u"):
                     p.have("eq: x * z = y * u").by_rewrite(["heq_xy", "heq_zu"])
@@ -1326,12 +1322,12 @@ def SATZ_20A(p):
     p.assume("h_a: x + z > y + z")
     with p.cases_on(SATZ_10, "x", "y"):
         with p.case("h_eq: x = y"):
-            p.have("eq_sum: x + z = y + z").by(SATZ_19B, "x", "y", "z", "h_eq")
+            p.have("eq_sum: x + z = y + z").by_match(SATZ_19B, "h_eq")
             p.absurd().auto("h_a", "eq_sum")
         with p.case("h_gt: x > y"):
             p.thus("x > y").by_thm(p.fact("h_gt"))
         with p.case("h_lt: x < y"):
-            p.have("lt_sum: x + z < y + z").by(SATZ_19C, "x", "y", "z", "h_lt")
+            p.have("lt_sum: x + z < y + z").by_match(SATZ_19C, "h_lt")
             p.absurd().auto("lt_sum", "h_a")
 
 
@@ -1344,10 +1340,10 @@ def SATZ_20B(p):
         with p.case("h_eq: x = y"):
             p.thus("x = y").by_thm(p.fact("h_eq"))
         with p.case("h_gt: x > y"):
-            p.have("gt_sum: x + z > y + z").by(SATZ_19A, "x", "y", "z", "h_gt")
+            p.have("gt_sum: x + z > y + z").by_match(SATZ_19A, "h_gt")
             p.absurd().auto("gt_sum", "h_b")
         with p.case("h_lt: x < y"):
-            p.have("lt_sum: x + z < y + z").by(SATZ_19C, "x", "y", "z", "h_lt")
+            p.have("lt_sum: x + z < y + z").by_match(SATZ_19C, "h_lt")
             p.absurd().auto("lt_sum", "h_b")
 
 
@@ -1358,10 +1354,10 @@ def SATZ_20C(p):
     p.assume("h_c: x + z < y + z")
     with p.cases_on(SATZ_10, "x", "y"):
         with p.case("h_eq: x = y"):
-            p.have("eq_sum: x + z = y + z").by(SATZ_19B, "x", "y", "z", "h_eq")
+            p.have("eq_sum: x + z = y + z").by_match(SATZ_19B, "h_eq")
             p.absurd().auto("h_c", "eq_sum")
         with p.case("h_gt: x > y"):
-            p.have("gt_sum: x + z > y + z").by(SATZ_19A, "x", "y", "z", "h_gt")
+            p.have("gt_sum: x + z > y + z").by_match(SATZ_19A, "h_gt")
             p.absurd().auto("h_c", "gt_sum")
         with p.case("h_lt: x < y"):
             p.thus("x < y").by_thm(p.fact("h_lt"))
@@ -1385,12 +1381,12 @@ def SATZ_33A(p):
     p.assume("h_a: x * z > y * z")
     with p.cases_on(SATZ_10, "x", "y"):
         with p.case("h_eq: x = y"):
-            p.have("eq_prod: x * z = y * z").by(SATZ_32B, "x", "y", "z", "h_eq")
+            p.have("eq_prod: x * z = y * z").by_match(SATZ_32B, "h_eq")
             p.absurd().auto("h_a", "eq_prod")
         with p.case("h_gt: x > y"):
             p.thus("x > y").by_thm(p.fact("h_gt"))
         with p.case("h_lt: x < y"):
-            p.have("lt_prod: x * z < y * z").by(SATZ_32C, "x", "y", "z", "h_lt")
+            p.have("lt_prod: x * z < y * z").by_match(SATZ_32C, "h_lt")
             p.absurd().auto("lt_prod", "h_a")
 
 
@@ -1403,10 +1399,10 @@ def SATZ_33B(p):
         with p.case("h_eq: x = y"):
             p.thus("x = y").by_thm(p.fact("h_eq"))
         with p.case("h_gt: x > y"):
-            p.have("gt_prod: x * z > y * z").by(SATZ_32A, "x", "y", "z", "h_gt")
+            p.have("gt_prod: x * z > y * z").by_match(SATZ_32A, "h_gt")
             p.absurd().auto("gt_prod", "h_b")
         with p.case("h_lt: x < y"):
-            p.have("lt_prod: x * z < y * z").by(SATZ_32C, "x", "y", "z", "h_lt")
+            p.have("lt_prod: x * z < y * z").by_match(SATZ_32C, "h_lt")
             p.absurd().auto("lt_prod", "h_b")
 
 
@@ -1417,10 +1413,10 @@ def SATZ_33C(p):
     p.assume("h_c: x * z < y * z")
     with p.cases_on(SATZ_10, "x", "y"):
         with p.case("h_eq: x = y"):
-            p.have("eq_prod: x * z = y * z").by(SATZ_32B, "x", "y", "z", "h_eq")
+            p.have("eq_prod: x * z = y * z").by_match(SATZ_32B, "h_eq")
             p.absurd().auto("h_c", "eq_prod")
         with p.case("h_gt: x > y"):
-            p.have("gt_prod: x * z > y * z").by(SATZ_32A, "x", "y", "z", "h_gt")
+            p.have("gt_prod: x * z > y * z").by_match(SATZ_32A, "h_gt")
             p.absurd().auto("h_c", "gt_prod")
         with p.case("h_lt: x < y"):
             p.thus("x < y").by_thm(p.fact("h_lt"))
