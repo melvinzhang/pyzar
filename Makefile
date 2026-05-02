@@ -1,12 +1,18 @@
+SHELL := /bin/bash
 PY := uv run python
 
-.PHONY: test test-kernel test-tactics test-parser test-axioms test-proof test-theories
+LANDAU_GOLDEN := landau.golden
+LANDAU_OUT    := landau.out
+
+.PHONY: test test-kernel test-tactics test-parser test-axioms test-proof \
+        test-theories test-golden update-golden clean
 
 # Layered test runner. Each layer depends only on the ones below it, so a
 # failure at a lower layer makes upper-layer failures meaningless to debug.
 # `make test` runs everything bottom-up; `make test-<layer>` runs one layer.
 
-test: test-kernel test-tactics test-parser test-axioms test-proof test-theories
+test: test-kernel test-tactics test-parser test-axioms test-proof \
+      test-theories test-golden
 
 # L1 -- kernel: fusion (terms, types, primitive inference rules).
 test-kernel:
@@ -30,9 +36,39 @@ test-proof:
 
 # L6 -- theories: classical logic, then the Landau development bottom-up
 # (num builds the natural numbers; nat proves Landau's Sätze on them; frac
-# builds rationals on top of nat).
+# builds rationals on top of nat).  Captures the printed `SATZ_N: |- ...`
+# lines from nat.py + frac.py into $(LANDAU_OUT) for the golden check below.
 test-theories:
 	$(PY) classical.py
 	$(PY) num.py
-	$(PY) nat.py
-	$(PY) frac.py
+	@set -o pipefail; \
+	  raw=$$(mktemp); \
+	  $(PY) nat.py | tee -a $$raw; \
+	  $(PY) frac.py | tee -a $$raw; \
+	  grep -E '^[[:space:]]*(SATZ|AXIOM|THEOREM)' $$raw > $(LANDAU_OUT); \
+	  rm -f $$raw
+
+# L7 -- golden: every theorem's pp(concl) matches the checked-in
+# `landau.golden`.  The kernel certifies inferences but cannot tell whether
+# the stated goal is what Landau actually wrote, so this layer locks down
+# the statements against silent drift across refactors.  Run after a
+# reviewed transcription audit; regenerate via `make update-golden` when a
+# statement change is intentional.
+test-golden: test-theories
+	@if diff -u $(LANDAU_GOLDEN) $(LANDAU_OUT); then \
+	  echo "Landau golden OK ($$(wc -l < $(LANDAU_GOLDEN)) theorems)."; \
+	else \
+	  echo ""; \
+	  echo "Landau golden mismatch -- inspect the diff above."; \
+	  echo "If the new statements are intentional, run: make update-golden"; \
+	  exit 1; \
+	fi
+
+# Regenerate the golden snapshot after an intentional statement change.
+# Requires test-theories to have produced a fresh $(LANDAU_OUT).
+update-golden: test-theories
+	@cp $(LANDAU_OUT) $(LANDAU_GOLDEN)
+	@echo "Updated $(LANDAU_GOLDEN) ($$(wc -l < $(LANDAU_GOLDEN)) theorems)."
+
+clean:
+	rm -f $(LANDAU_OUT)
