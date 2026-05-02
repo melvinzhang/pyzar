@@ -9,8 +9,8 @@ finds the same module instance.
 
 import nat
 from nat import (
-    ADD_1, ADD_SUC, UNFOLD_LE, LT_TO_LE, SATZ_16A,
-    GT_DEF, UNFOLD_GT, x as VX, y as VY, z as VZ,
+    ADD_1, ADD_SUC, UNFOLD_LE, LT_TO_LE, SATZ_1, SATZ_16A,
+    AXIOM_3, AXIOM_4, GT_DEF, UNFOLD_GT, x as VX, y as VY, z as VZ,
 )
 from num import ONE, num_ty, SUC_DEF
 from fusion import (
@@ -18,7 +18,7 @@ from fusion import (
     mk_eq, mk_fun_ty, mk_comb, mk_app, HolError,
 )
 from axioms import mk_forall
-from tactics import SPEC, GEN, DISCH, SYM, AP_THM, BETA_RULE
+from tactics import SPEC, GEN, DISCH, SYM, AP_THM, BETA_RULE, NOT_ELIM, MP
 from parser import parse, pp
 from proof import proof, Proof, LazyLetDef
 
@@ -58,6 +58,103 @@ def main():
     assert aconv(concl(SATZ_17_NEW), concl(nat.SATZ_17)), \
         f"SATZ_17 mismatch:\n  new: {pp(concl(SATZ_17_NEW))}\n  old: {pp(concl(nat.SATZ_17))}"
     assert SATZ_17_NEW._asl == nat.SATZ_17._asl
+
+    # ---- _Have.by_match smoke tests ------------------------------------
+    # Pure-match: AXIOM_4 = !x y. SUC x = SUC y ==> x = y.  Goal `x = y`
+    # determines both forall vars, so the call site lists only the
+    # antecedent fact.
+    @proof
+    def SATZ_1_BY_MATCH(p):
+        p.goal("!x y. ~(x = y) ==> ~(SUC x = SUC y)")
+        p.fix("x y")
+        p.assume("hxy: ~(x = y)")
+        with p.suppose("h: SUC x = SUC y"):
+            p.have("xy: x = y").by_match(AXIOM_4, "h")
+            p.have("imp: (x = y) ==> F").by(NOT_ELIM, "hxy")
+            p.thus("F").by(MP, "imp", "xy")
+    assert aconv(concl(SATZ_1_BY_MATCH), concl(nat.SATZ_1)), \
+        f"SATZ_1 by_match mismatch:\n  new: {pp(concl(SATZ_1_BY_MATCH))}\n  old: {pp(concl(nat.SATZ_1))}"
+    assert SATZ_1_BY_MATCH._asl == nat.SATZ_1._asl
+
+    # Name-collide: pattern var `x` and goal's outer-fixed `x` share a
+    # name; first-order match still binds pattern x to `SUC x` and
+    # pattern y to the outer `x`.
+    @proof
+    def SATZ_2_BY_MATCH(p):
+        p.goal("!x. ~(SUC x = x)")
+        p.fix("x")
+        with p.induction("x"):
+            with p.base():
+                p.thus("~(SUC 1 = 1)").by_match(AXIOM_3)
+            with p.step("IH"):
+                p.thus("~(SUC (SUC x) = SUC x)").by_match(SATZ_1, "IH")
+    assert aconv(concl(SATZ_2_BY_MATCH), concl(nat.SATZ_2)), \
+        f"SATZ_2 by_match mismatch:\n  new: {pp(concl(SATZ_2_BY_MATCH))}\n  old: {pp(concl(nat.SATZ_2))}"
+    assert SATZ_2_BY_MATCH._asl == nat.SATZ_2._asl
+
+    # Middle-var with explicit term hint: SATZ_16A = !x y z. x <= y ==>
+    # y < z ==> x < z.  Goal `x < z` leaves `y` undetermined; supplying
+    # it as a leading term arg still works.
+    @proof
+    def SATZ_17_BY_MATCH(p):
+        p.goal("!x y z. x <= y ==> y <= z ==> x <= z")
+        p.fix("x y z")
+        p.assume("hxy: x <= y", "hyz: y <= z")
+        p.have("yz_or: (y < z) \\/ (y = z)")\
+            .by_eq_mp(UNFOLD_LE(VY, VZ), "hyz")
+        with p.cases_on("yz_or"):
+            with p.case("y < z"):
+                p.have("xz_lt: x < z").by_match(SATZ_16A, "y", "hxy", -1)
+                p.thus("x <= z").by(LT_TO_LE, "xz_lt")
+            with p.case("y = z"):
+                p.thus("x <= z").by_rewrite_of("hxy", [-1])
+    assert aconv(concl(SATZ_17_BY_MATCH), concl(nat.SATZ_17)), \
+        f"SATZ_17 by_match mismatch:\n  new: {pp(concl(SATZ_17_BY_MATCH))}\n  old: {pp(concl(nat.SATZ_17))}"
+    assert SATZ_17_BY_MATCH._asl == nat.SATZ_17._asl
+
+    # Antecedent matching: same proof, but `y` is now inferred from
+    # ``hxy``'s type (`x <= y` matches the first antecedent and binds y),
+    # so no term arg is needed.
+    @proof
+    def SATZ_17_BY_MATCH_ANT(p):
+        p.goal("!x y z. x <= y ==> y <= z ==> x <= z")
+        p.fix("x y z")
+        p.assume("hxy: x <= y", "hyz: y <= z")
+        p.have("yz_or: (y < z) \\/ (y = z)")\
+            .by_eq_mp(UNFOLD_LE(VY, VZ), "hyz")
+        with p.cases_on("yz_or"):
+            with p.case("y < z"):
+                p.have("xz_lt: x < z").by_match(SATZ_16A, "hxy", -1)
+                p.thus("x <= z").by(LT_TO_LE, "xz_lt")
+            with p.case("y = z"):
+                p.thus("x <= z").by_rewrite_of("hxy", [-1])
+    assert aconv(concl(SATZ_17_BY_MATCH_ANT), concl(nat.SATZ_17)), \
+        f"SATZ_17 by_match (ant) mismatch:\n  new: {pp(concl(SATZ_17_BY_MATCH_ANT))}\n  old: {pp(concl(nat.SATZ_17))}"
+    assert SATZ_17_BY_MATCH_ANT._asl == nat.SATZ_17._asl
+
+    # Error: fact concl does not match the antecedent's pattern.
+    p_err = Proof()
+    p_err.goal("!x y z. x <= y ==> y < z ==> x < z")
+    p_err.fix("x y z")
+    p_err.assume("hxy: x <= y", "hyz: y < z")
+    try:
+        # Swapped order: hyz (y < z) cannot match first antecedent
+        # `x <= y`, so this is a step-3 (ordered) failure.
+        p_err.have("xz: x < z").by_match(SATZ_16A, "hyz", "hxy")
+    except HolError:
+        pass
+    else:
+        raise AssertionError("expected HolError for antecedent mismatch")
+
+    # Error: conclusion of justification cannot match goal at all.
+    p_err2 = Proof()
+    p_err2.goal("1 = 1")
+    try:
+        p_err2.thus("1 = 1").by_match(AXIOM_4)
+    except HolError:
+        pass
+    else:
+        raise AssertionError("expected HolError for unmatchable conclusion")
 
     # ---- p.let smoke tests (Isabelle-style) ----------------------------
 

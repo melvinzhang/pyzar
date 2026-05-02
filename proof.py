@@ -46,6 +46,7 @@ from tactics import (
     CONJUNCT1, CONJUNCT2,
     REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV, BETA_RULE,
     AC_PROVE, REWRITE_AC_PROVE,
+    _strip_forall, _term_match,
 )
 from parser import (
     parse, parse_label, parse_let_spec, pp, ParseError, DEFAULT_SIG,
@@ -1221,6 +1222,90 @@ class _Have:
             return self._finish(justification(*resolved))
         raise HolError(
             f"by: not a theorem or callable: {justification!r}")
+
+    def by_match(self, justification, *args):
+        """Backward-chaining variant of ``by``: infer SPEC instantiations
+        by first-order matching against both the goal and the supplied
+        facts, so the call site lists only what cannot be pinned down.
+
+        Strips outer foralls (their bvars become match variables) and
+        peels ``==>`` antecedents one at a time until the residual matches
+        the goal. Positional ``args`` are then walked in order, each
+        extending a single shared substitution:
+          - a fact arg (label / negative index / theorem) is matched
+            against the next peeled antecedent's pattern, then queued
+            for MP;
+          - a term arg (string / kernel term) is assigned to the next
+            still-unbound forall var.
+        After all args, every forall must be bound and every peeled
+        antecedent must have a fact. So a transitivity lemma whose
+        ``y`` is determined by a fact's type needs no term arg::
+
+            .by_match(SATZ_15, "hxy", "hyz")     # y inferred from hxy
+
+        whereas ``y`` only reachable through the goal still requires an
+        explicit term."""
+        p = self.p
+        if isinstance(justification, (str, int)):
+            justification = p._resolve_fact(justification)
+        if not isinstance(justification, thm):
+            raise HolError(
+                f"by_match: not a theorem: {justification!r}")
+        th = p.simp_norm_fact(justification)
+        vs, body = _strip_forall(th)
+        vars_set = set(vs)
+        pat = body._concl
+        n_stripped = 0
+        while (subst := _term_match(pat, self.term, vars_set, {})) is None:
+            parts = dest_imp(pat)
+            if parts is None:
+                raise HolError(
+                    f"by_match: no antecedent shape of {pp(body._concl)} "
+                    f"matches goal {pp(self.term)}")
+            pat = parts[1]
+            n_stripped += 1
+        ants = []
+        cur = body._concl
+        for _ in range(n_stripped):
+            a_pat, cur = dest_imp(cur)
+            ants.append(a_pat)
+        facts = []
+        ant_idx = 0
+        for a in args:
+            resolved = p._resolve_fact_or_term(a)
+            if isinstance(resolved, thm):
+                if ant_idx >= len(ants):
+                    raise HolError(
+                        f"by_match: extra fact arg, no antecedent left: "
+                        f"{a!r}")
+                ant_pat = ants[ant_idx]
+                if _term_match(ant_pat, resolved._concl,
+                               vars_set, subst) is None:
+                    raise HolError(
+                        f"by_match: fact concl {pp(resolved._concl)} "
+                        f"does not match antecedent {pp(ant_pat)}")
+                facts.append(resolved)
+                ant_idx += 1
+            else:
+                v = next((v for v in vs if v not in subst), None)
+                if v is None:
+                    raise HolError(
+                        f"by_match: extra term arg, all forall vars "
+                        f"bound: {a!r}")
+                subst[v] = resolved
+        unbound = [v.name for v in vs if v not in subst]
+        if unbound:
+            raise HolError(
+                f"by_match: forall vars not determined: {unbound}")
+        if ant_idx < len(ants):
+            raise HolError(
+                f"by_match: {len(ants) - ant_idx} antecedent(s) lack a "
+                "fact arg")
+        for v in vs:
+            th = SPEC(subst[v], th)
+        for fact_th in facts:
+            th = p.simp_mp(th, fact_th)
+        return self._finish(th)
 
     def by_rewrite(self, rules):
         """REWRITE_PROVE with the given rules.
