@@ -15,15 +15,6 @@ sys.setrecursionlimit(10000)
 class HolError(Exception):
     pass
 
-class SimpFailure(HolError):
-    """Raised by simp/rewrite infrastructure when an input can't be
-    normalized or matched. Subclasses ``HolError`` so legacy
-    ``except HolError`` blocks still catch it; a precise
-    ``except SimpFailure`` documents that the call site is intentionally
-    falling through on a simp-level shape mismatch (rather than masking a
-    genuine kernel error)."""
-    pass
-
 class Clash(Exception):
     def __init__(self, tm):
         super().__init__()
@@ -264,12 +255,6 @@ def mk_comb(f: term, a: term) -> term:
         return Comb(f, a)
     raise HolError("mk_comb: types do not agree")
 
-def mk_app(f: term, *args: term) -> term:
-    """Left-associated application: ``mk_app(f, a, b, c) == f a b c``."""
-    for a in args:
-        f = mk_comb(f, a)
-    return f
-
 def dest_var(tm: term):
     if isinstance(tm, Var):
         return tm.name, tm.ty
@@ -290,46 +275,6 @@ def dest_abs(tm: term):
         return tm.bvar, tm.body
     raise HolError("dest_abs: not an abstraction")
 
-# Connective shape helpers: name-parametric structural checks for terms of
-# the form ``op a b`` (binop), ``op x`` (unop), or ``op (\\v. body)``
-# (binder). ``is_*`` returns bool; ``dest_*`` returns the unpacked pieces
-# on match and ``None`` otherwise, so callers can write
-# ``if (parts := dest_binop(name, tm)) is not None: a, b = parts``.
-
-def is_binop(name: str, tm: term) -> bool:
-    return (isinstance(tm, Comb) and isinstance(tm.fun, Comb)
-            and isinstance(tm.fun.fun, Const) and tm.fun.fun.name == name)
-
-def dest_binop(name: str, tm: term):
-    if is_binop(name, tm):
-        return (tm.fun.arg, tm.arg)
-    return None
-
-def dest_binop_any(tm: term):
-    """If tm = op a b for some Const op, return (op_name, a, b); else None."""
-    if (isinstance(tm, Comb) and isinstance(tm.fun, Comb)
-            and isinstance(tm.fun.fun, Const)):
-        return (tm.fun.fun.name, tm.fun.arg, tm.arg)
-    return None
-
-def is_unop(name: str, tm: term) -> bool:
-    return (isinstance(tm, Comb) and isinstance(tm.fun, Const)
-            and tm.fun.name == name)
-
-def dest_unop(name: str, tm: term):
-    if is_unop(name, tm):
-        return tm.arg
-    return None
-
-def is_binder(name: str, tm: term) -> bool:
-    return is_unop(name, tm) and isinstance(tm.arg, Abs)
-
-def dest_binder(name: str, tm: term):
-    """If tm = `name` (\\v. body), return the Abs (\\v. body); else None."""
-    if is_binder(name, tm):
-        return tm.arg
-    return None
-
 # ---------------------------------------------------------------------------
 # Free variables
 # ---------------------------------------------------------------------------
@@ -349,14 +294,6 @@ def frees(tm: term) -> list:
                     seen.append(v)
             return seen
     raise HolError("frees: ill-formed term")
-
-def freesl(tml: list) -> list:
-    seen = []
-    for tm in tml:
-        for v in frees(tm):
-            if v not in seen:
-                seen.append(v)
-    return seen
 
 def freesin(acc: list, tm: term) -> bool:
     match tm:
@@ -494,29 +431,13 @@ def inst(tyin: list) -> Callable[[term], term]:
     return lambda tm: _inst([], tyin, tm)
 
 # ---------------------------------------------------------------------------
-# Derived syntax
+# Equality construction (kernel-internal: bypasses type_of for performance)
 # ---------------------------------------------------------------------------
-
-def rator(tm: term) -> term:
-    if isinstance(tm, Comb):
-        return tm.fun
-    raise HolError("rator: Not a combination")
-
-def rand(tm: term) -> term:
-    if isinstance(tm, Comb):
-        return tm.arg
-    raise HolError("rand: Not a combination")
 
 def safe_mk_eq(l: term, r: term) -> term:
     ty = type_of(l)
     eq = Const("=", Tyapp("fun", (ty, Tyapp("fun", (ty, bool_ty)))))
     return Comb(Comb(eq, l), r)
-
-def dest_eq(tm: term):
-    match tm:
-        case Comb(Comb(Const("=", _), l), r):
-            return l, r
-    raise HolError("dest_eq")
 
 # ---------------------------------------------------------------------------
 # Alpha ordering
@@ -811,34 +732,3 @@ def new_basic_type_definition(tyname: str, absname_repname,
                              safe_mk_eq(mk_comb(rep_c, mk_comb(abs_c, r)), r)))
     return th1, th2
 
-# ---------------------------------------------------------------------------
-# Additional derived syntax (from end of fusion.ml)
-# ---------------------------------------------------------------------------
-
-def mk_fun_ty(ty1: hol_type, ty2: hol_type) -> hol_type:
-    return mk_type("fun", [ty1, ty2])
-
-bty: hol_type = mk_vartype("B")
-
-def is_eq(tm: term) -> bool:
-    match tm:
-        case Comb(Comb(Const("=", _), _), _):
-            return True
-        case _:
-            return False
-
-_eq_const = mk_const("=", [])
-
-def mk_eq(l: term, r: term) -> term:
-    try:
-        ty = type_of(l)
-        eq_tm = inst([(ty, aty)])(_eq_const)
-        return mk_app(eq_tm, l, r)
-    except Exception:
-        raise HolError("mk_eq")
-
-def aconv(s: term, t: term) -> bool:
-    return alphaorder(s, t) == 0
-
-def equals_thm(th: thm, th2: thm) -> bool:
-    return dest_thm(th) == dest_thm(th2)

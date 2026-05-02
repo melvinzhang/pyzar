@@ -15,10 +15,10 @@ Provides:
 
 from fusion import (
     Var,
-    bool_ty, aty, mk_fun_ty, mk_abs, mk_comb, mk_eq,
-    rand, rator,
+    bool_ty, aty, mk_abs, mk_comb,
     REFL, TRANS, ASSUME, EQ_MP, INST_TYPE,
 )
+from basics import mk_fun_ty, mk_eq, rand, rator
 from axioms import T, F, SELECT_AX, mk_not, mk_or
 from tactics import (
     AP_TERM, BETA_CONV, BETA_RULE, SYM, TRUTH, EQT_INTRO,
@@ -219,7 +219,8 @@ def NOT_FORALL_TO_EX_NOT(not_th, pred):
 # ---------------------------------------------------------------------------
 
 def _selftest():
-    from fusion import aconv, concl, hyp
+    from fusion import concl, hyp
+    from basics import aconv
     pv = Var("p", bool_ty)
 
     em_p = SPEC(pv, EXCLUDED_MIDDLE)

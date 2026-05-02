@@ -36,9 +36,10 @@ from lark.visitors import Interpreter
 from fusion import (
     Var, Const, Comb, Abs,
     Tyvar, Tyapp,
-    mk_var, mk_app, mk_comb, mk_const, mk_eq,
+    mk_var, mk_comb, mk_const,
     concl, hyp, new_basic_definition,
 )
+from basics import mk_app, mk_eq
 
 
 class ParseError(Exception):

@@ -23,12 +23,16 @@ surface syntax.
 
 from fusion import (
     Var, Const, Comb, Abs, thm,
-    bool_ty, aty, bty, mk_abs, mk_app, mk_comb, mk_const, mk_eq, mk_fun_ty,
-    type_of, dest_eq,
-    rator, rand, freesl, variant, aconv,
+    bool_ty, aty, mk_abs, mk_comb, mk_const,
+    type_of,
+    variant,
     REFL, TRANS, MK_COMB, ABS, BETA, ASSUME, EQ_MP,
     DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
     concl, hyp, HolError,
+)
+from basics import (
+    bty, mk_app, mk_eq, mk_fun_ty, dest_eq,
+    rator, rand, freesl, aconv,
 )
 from axioms import (
     T, F,

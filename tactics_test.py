@@ -1,6 +1,7 @@
 """Self-tests for tactics.py — moved out of the module body (H17)."""
 
-from fusion import Var, bool_ty, ASSUME, aconv, concl, mk_eq
+from fusion import Var, bool_ty, ASSUME, concl
+from basics import aconv, mk_eq
 from axioms import T
 from tactics import SYM, EQT_INTRO, EQT_ELIM, TRUTH
 

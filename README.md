@@ -12,6 +12,7 @@ theorem in the development is built on top of that kernel.
 The codebase is layered; each file depends only on the ones above it.
 
 - [`fusion.py`](fusion.py): Kernel: types, terms, primitive inference rules
+- [`basics.py`](basics.py): Derived term/type syntax: `mk_eq`, `mk_app`, `rator`/`rand`, binop/unop/binder helpers
 - [`tactics.py`](tactics.py): Derived rules: SPEC, GEN, REWRITE, …
 - [`parser.py`](parser.py): Lark grammar, label/let-spec parsers, pretty printer
 - [`axioms.py`](axioms.py): Boolean definitions + the 3 axioms

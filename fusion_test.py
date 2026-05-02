@@ -2,7 +2,7 @@ import unittest
 import fusion
 from fusion import (
     Tyvar, Tyapp, Var, Const, Comb, Abs,
-    bool_ty, aty, bty,
+    bool_ty, aty,
     mk_type, mk_vartype, dest_type, dest_vartype, is_type, is_vartype,
     tyvars, type_subst,
     types, get_type_arity, new_type,
@@ -10,15 +10,20 @@ from fusion import (
     mk_var, mk_const, mk_abs, mk_comb,
     dest_var, dest_const, dest_comb, dest_abs,
     is_var, is_const, is_abs, is_comb,
-    type_of, frees, freesl, freesin, vfree_in,
+    type_of, frees, freesin, vfree_in,
     type_vars_in_term, variant, vsubst, inst,
-    rator, rand, dest_eq,
-    alphaorder, aconv,
+    alphaorder,
     dest_thm, hyp, concl,
     REFL, TRANS, MK_COMB, ABS, BETA, ASSUME, EQ_MP,
     DEDUCT_ANTISYM_RULE, INST_TYPE, INST,
     axioms, new_axiom, definitions, new_basic_definition,
     new_basic_type_definition,
+)
+from basics import (
+    bty,
+    freesl,
+    rator, rand, dest_eq,
+    aconv,
     mk_fun_ty, is_eq, mk_eq, equals_thm,
 )
 

@@ -6,10 +6,14 @@ the original HOL Light distribution.
 
 from fusion import (
     Var,
-    aty, bty, bool_ty,
-    dest_binder, dest_binop, dest_unop, is_binder, is_binop, is_unop,
-    mk_abs, mk_app, mk_comb, mk_const, mk_eq, mk_fun_ty, mk_type,
+    aty, bool_ty,
+    mk_abs, mk_comb, mk_const, mk_type,
     new_axiom, new_basic_definition, new_constant, new_type,
+)
+from basics import (
+    bty,
+    dest_binder, dest_binop, dest_unop, is_binder, is_binop, is_unop,
+    mk_app, mk_eq, mk_fun_ty,
 )
 
 # ---------------------------------------------------------------------------
