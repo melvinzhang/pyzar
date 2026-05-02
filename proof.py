@@ -1255,13 +1255,18 @@ class _Have:
         vs, body = _strip_forall(th)
         vars_set = set(vs)
         pat = body._concl
+        # Simp-normalize the goal to the same canonical form simp_norm_fact
+        # used on the theorem (lazy-let carriers unfolded), so matching works
+        # in lazy-let contexts. _finish will lift back to self.term shape.
+        goal_eq = p.simp_normalize(self.term)
+        target = rand(goal_eq._concl)
         n_stripped = 0
-        while (subst := _term_match(pat, self.term, vars_set, {})) is None:
+        while (subst := _term_match(pat, target, vars_set, {})) is None:
             parts = dest_imp(pat)
             if parts is None:
                 raise HolError(
                     f"by_match: no antecedent shape of {pp(body._concl)} "
-                    f"matches goal {pp(self.term)}")
+                    f"matches goal {pp(target)}")
             pat = parts[1]
             n_stripped += 1
         ants = []
@@ -1279,10 +1284,11 @@ class _Have:
                         f"by_match: extra fact arg, no antecedent left: "
                         f"{a!r}")
                 ant_pat = ants[ant_idx]
-                if _term_match(ant_pat, resolved._concl,
+                fact_concl = rand(p.simp_normalize(resolved._concl)._concl)
+                if _term_match(ant_pat, fact_concl,
                                vars_set, subst) is None:
                     raise HolError(
-                        f"by_match: fact concl {pp(resolved._concl)} "
+                        f"by_match: fact concl {pp(fact_concl)} "
                         f"does not match antecedent {pp(ant_pat)}")
                 facts.append(resolved)
                 ant_idx += 1

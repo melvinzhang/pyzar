@@ -429,7 +429,7 @@ def INDUCTION(p):
         p.assume("h_Qi: Q i")
         p.split_conj("h_Qi", "NR_i", "P_mki")
         p.have("NR_si: NUM_REP (IND_SUC i)") \
-            .by(NUM_REP_IND_SUC_CLOSED, "i", "NR_i")
+            .by_match(NUM_REP_IND_SUC_CLOSED, "NR_i")
         di_eq_i = EQ_MP(INST([(_i_ind, Var("r", ind_ty))], DEST_MK),
                          p.fact("NR_i"))
         SUC_mki_eq_mk_si = TRANS(
@@ -664,7 +664,7 @@ def R_UNIQUE_STEP(p):
     p.choose("m_n: R c h n m_n", from_="IH_exist")
     # Existence at SUC n: from R c h n m_n, R_STEP gives R c h (SUC n) (h n m_n).
     p.have("R_sn_hn: R c h (SUC n) (h n m_n)") \
-        .by(R_STEP, "n", "m_n", "m_n_eq")
+        .by_match(R_STEP, "m_n_eq")
     p.have("exist_sn: ?m. R c h (SUC n) m") \
         .by_witness("h n m_n", "R_sn_hn")
     # Uniqueness at SUC n via Qp.
@@ -683,10 +683,10 @@ def R_UNIQUE_STEP(p):
         p.assume("h_Qpka: Qp k a")
         p.split_conj("h_Qpka", "R_k_a", "_step_part")
         p.have("R_sk_hka: R c h (SUC k) (h k a)") \
-            .by(R_STEP, "k", "a", "R_k_a")
+            .by_match(R_STEP, "R_k_a")
         with p.have("vac2: SUC k = SUC n ==> h k a = h n m_n").proof():
             p.assume("h_sk_sn: SUC k = SUC n")
-            p.have("k_eq_n: k = n").by(AXIOM_4, "k", "n", "h_sk_sn")
+            p.have("k_eq_n: k = n").by_match(AXIOM_4, "h_sk_sn")
             # Rewrite R c h k a -> R c h n a using k = n. R_k_a's body is
             # under a !Q. binder and k_eq_n carries the SUC k = SUC n hyp,
             # so the rewriter's under-binder filter blocks it -- bridge by
