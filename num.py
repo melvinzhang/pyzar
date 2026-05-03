@@ -33,7 +33,10 @@ from tactics import (
 )
 from classical import NOT_FORALL_TO_EX_NOT, NOT_EX_TO_FORALL_NOT
 from proof import proof, register_induction, InductionStrategy
-from parser import DEFAULT_SIG, parse, define as _define
+from parser import (
+    parse, define as _define,
+    add_const, add_type, set_default_var_ty,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -65,10 +68,10 @@ IND_SUC = mk_const("IND_SUC", [])
 # the (ind->ind)-instantiated copies of ``ONE_ONE`` / ``ONTO`` -- registering
 # the polymorphic kernel constants directly would force the parser to do
 # type inference, so we expose them at the single instantiation we need.
-DEFAULT_SIG.add_type("ind", ind_ty)
-DEFAULT_SIG.add_const("IND_SUC", IND_SUC)
-DEFAULT_SIG.add_const("ONE_ONE_ind", _one_one_ind)
-DEFAULT_SIG.add_const("ONTO_ind",    _onto_ind)
+add_type("ind", ind_ty)
+add_const("IND_SUC", IND_SUC)
+add_const("ONE_ONE_ind", _one_one_ind)
+add_const("ONTO_ind",    _onto_ind)
 
 
 @proof
@@ -137,7 +140,7 @@ _witness_pred = mk_abs(_z_ind,
 IND_1_DEF = new_basic_definition(
     mk_eq(Var("IND_1", ind_ty), mk_comb(_select_ind, _witness_pred)))
 IND_1 = mk_const("IND_1", [])
-DEFAULT_SIG.add_const("IND_1", IND_1)
+add_const("IND_1", IND_1)
 
 
 @proof
@@ -171,7 +174,7 @@ NUM_REP_DEF = new_basic_definition(
                                         mk_comb(_P_ind, mk_comb(IND_SUC, _i_ind))))),
                       mk_comb(_P_ind, _a_ind))))))
 NUM_REP = mk_const("NUM_REP", [])
-DEFAULT_SIG.add_const("NUM_REP", NUM_REP)
+add_const("NUM_REP", NUM_REP)
 _P_ind_ty = mk_fun_ty(ind_ty, bool_ty)
 
 
@@ -259,10 +262,10 @@ dest_num = mk_const("dest_num", [])
 
 # Surface registration: num is the default type for free vars from this
 # point on, and mk_num / dest_num are first-class names in @proof blocks.
-DEFAULT_SIG.add_type("num", num_ty)
-DEFAULT_SIG.add_const("mk_num", mk_num)
-DEFAULT_SIG.add_const("dest_num", dest_num)
-DEFAULT_SIG.default_var_ty = num_ty
+add_type("num", num_ty)
+add_const("mk_num", mk_num)
+add_const("dest_num", dest_num)
+set_default_var_ty(num_ty)
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +278,7 @@ DEFAULT_SIG.default_var_ty = num_ty
 ONE_DEF = new_basic_definition(
     mk_eq(Var("1", num_ty), mk_comb(mk_num, IND_1)))
 ONE = mk_const("1", [])
-DEFAULT_SIG.add_const("1", ONE)
+add_const("1", ONE)
 
 _n_num = Var("n", num_ty)
 SUC_DEF = new_basic_definition(
@@ -284,7 +287,7 @@ SUC_DEF = new_basic_definition(
               mk_comb(mk_num,
                   mk_comb(IND_SUC, mk_comb(dest_num, _n_num))))))
 SUC = mk_const("SUC", [])
-DEFAULT_SIG.add_const("SUC", SUC)
+add_const("SUC", SUC)
 
 
 def mk_suc(t):
@@ -909,7 +912,7 @@ def define_recursive(name, fn_ty, x_var, c, h, *, prec=None, assoc="non"):
 
 
 # Surface registrations are now performed inline as each constant becomes
-# available (see the `DEFAULT_SIG.add_const(...)` calls above), so that
+# available (see the `add_const(...)` calls above), so that
 # @proof blocks within this module can refer to them by name.
 
 

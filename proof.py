@@ -50,7 +50,7 @@ from tactics import (
     _strip_forall, _term_match,
 )
 from parser import (
-    parse, parse_label, parse_let_spec, pp, ParseError, DEFAULT_SIG,
+    parse, parse_label, parse_let_spec, pp, ParseError, has_const,
 )
 
 
@@ -921,7 +921,7 @@ class Proof:
                     f"let: duplicate arg name {v.name!r} in {spec!r}")
             seen.add(v.name)
 
-        if name in DEFAULT_SIG.const:
+        if has_const(name):
             raise HolError(
                 f"let: {name!r} clashes with a registered constant")
 

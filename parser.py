@@ -18,8 +18,9 @@ Then `parse(...)` works for the chapter-1 surface:
 Adding a new operator is a single registration call in the module that
 introduces the kernel constant; nothing in `parser.py` needs to change:
 
-    DEFAULT_SIG.add_infix("-", 50, mk_sub, assoc="left")
-    DEFAULT_SIG.add_const("0", ZERO)
+    from parser import add_infix, add_const, parse
+    add_infix("-", 50, mk_sub, assoc="left")
+    add_const("0", ZERO)
     parse("x - 0 = x")
 
 Or build a private `Signature` and pass it via `parse(s, sig=my_sig)`.
@@ -133,6 +134,30 @@ class Signature:
 
 
 DEFAULT_SIG = Signature()
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers that mutate `DEFAULT_SIG`.  Theory modules import these
+# instead of poking the registry object directly, so the cross-module
+# interaction surface is just a handful of named functions.
+# ---------------------------------------------------------------------------
+
+add_infix  = DEFAULT_SIG.add_infix
+add_prefix = DEFAULT_SIG.add_prefix
+add_const  = DEFAULT_SIG.add_const
+add_type   = DEFAULT_SIG.add_type
+add_binder = DEFAULT_SIG.add_binder
+
+
+def set_default_var_ty(ty):
+    """Set the fallback type used when a free variable has no annotation and
+    isn't pinned by `env`.  Typically called once by `num.py`."""
+    DEFAULT_SIG.default_var_ty = ty
+
+
+def has_const(name):
+    """Whether `name` is registered as a kernel constant in DEFAULT_SIG."""
+    return name in DEFAULT_SIG.const
 
 
 # ---------------------------------------------------------------------------

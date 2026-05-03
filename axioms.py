@@ -15,7 +15,7 @@ from basics import (
     dest_binder, dest_binop, dest_unop, is_binder, is_binop, is_unop,
     mk_abs, mk_app, mk_const, mk_eq, mk_fun_ty,
 )
-from parser import DEFAULT_SIG
+from parser import add_type, add_infix, add_prefix, add_binder
 
 # ---------------------------------------------------------------------------
 # Boolean connectives (bool.ml)
@@ -185,13 +185,13 @@ INFINITY_AX = new_axiom(
 # Register surface syntax for the operators defined in this module.
 # ---------------------------------------------------------------------------
 
-DEFAULT_SIG.add_type("bool", bool_ty)
-DEFAULT_SIG.add_infix("=",   40, mk_eq,  assoc="non")
-DEFAULT_SIG.add_infix("/\\", 30, mk_and, assoc="right")
-DEFAULT_SIG.add_infix("\\/", 20, mk_or,  assoc="right")
-DEFAULT_SIG.add_infix("==>", 10, mk_imp, assoc="right")
-DEFAULT_SIG.add_prefix("~",      mk_not)
-DEFAULT_SIG.add_binder("!",      mk_forall)
-DEFAULT_SIG.add_binder("?",      mk_exists)
-DEFAULT_SIG.add_binder("\\",     mk_abs)
-DEFAULT_SIG.add_binder("@",      mk_select)
+add_type("bool", bool_ty)
+add_infix("=",   40, mk_eq,  assoc="non")
+add_infix("/\\", 30, mk_and, assoc="right")
+add_infix("\\/", 20, mk_or,  assoc="right")
+add_infix("==>", 10, mk_imp, assoc="right")
+add_prefix("~",      mk_not)
+add_binder("!",      mk_forall)
+add_binder("?",      mk_exists)
+add_binder("\\",     mk_abs)
+add_binder("@",      mk_select)
