@@ -53,7 +53,7 @@ p.thus("~(SUC x + y = SUC x + z)").by_rewrite_of("ne_sum", [SUC_PLUS])
 
 ---
 
-## 2. Trichotomy-driven inversion (Sätze 20, 33)
+## 2. Trichotomy-driven inversion (Sätze 20, 33) — ✅ shipped
 
 **Landau:** Satz 20 is one sentence (1.tex:606–608):
 
@@ -62,40 +62,39 @@ p.thus("~(SUC x + y = SUC x + z)").by_rewrite_of("ne_sum", [SUC_PLUS])
 
 Satz 33 is the same template with multiplication.
 
-**`nat.py`:** every inverse direction is its own ~13-line manual proof
-(SATZ_20A/B/C at 1322–1373, SATZ_33A/B/C at 1381–1432):
+**`nat.py` (before):** every inverse direction was its own ~13-line manual
+proof opening `cases_on(SATZ_10, "x", "y")`, calling
+`by_match(forward, ...)` and `absurd().auto(...)` per non-matching branch
+and `by_thm(p.fact(...))` in the matching branch. ~80 lines across the
+six theorems.
+
+**Fix landed.** New `by_trichotomy_invert` tactic on `_Have`:
 
 ```python
-@proof
-def SATZ_20A(p):
-    p.goal("!x y z. x + z > y + z ==> x > y")
-    p.fix("x y z")
-    p.assume("h_a: x + z > y + z")
-    with p.cases_on(SATZ_10, "x", "y"):
-        with p.case("h_eq: x = y"):
-            p.have("eq_sum: x + z = y + z").by_match(SATZ_19B, "h_eq")
-            p.absurd().auto("h_a", "eq_sum")
-        with p.case("h_gt: x > y"):
-            p.thus("x > y").by_thm(p.fact("h_gt"))
-        with p.case("h_lt: x < y"):
-            p.have("lt_sum: x + z < y + z").by_match(SATZ_19C, "h_lt")
-            p.absurd().auto("lt_sum", "h_a")
+.by_trichotomy_invert(trichotomy, comparands, source, *forwards)
 ```
 
-Plus three nearly identical clones for B/C — all 6 of these are scaffolding
-around the same Landau insight.
+specializes the trichotomy at `comparands`, splits its disjunction, and
+for each disjunct: returns the case fact directly when it alpha-matches
+the goal, else uses the corresponding `forward` to lift the case fact to
+the source's shape and closes via the registered contra finder. The
+forward's third forall (the lifting parameter `z`) is inferred by
+matching the forward's consequent against the lifted shape derived from
+`source`'s operands -- callers don't have to specialize.
 
-**Fix.** A single tactic
-`p.by_trichotomy_invert(SATZ_19, SATZ_10)` would discharge all three cases
-of SATZ_20 (and similarly SATZ_33) by:
-1. taking the user's assumed direction (e.g. `x+z > y+z`),
-2. casing on the supplied trichotomy (Satz 10),
-3. for the desired branch, return the trichotomy fact;
-4. for each other branch, apply the forward Satz 19 to that branch and
-   close with `absurd().auto`.
+The six call sites collapse to three lines each:
 
-Even better: a single `@proof` could prove all three at once and split
-into A/B/C with `CONJUNCT1/2`, mirroring Landau's "respectively" pattern.
+```python
+p.thus("x > y").by_trichotomy_invert(
+    SATZ_10, ["x", "y"], "h_a", SATZ_19B, SATZ_19A, SATZ_19C)
+```
+
+Forwards are listed in trichotomy disjunct order; the one matching the
+goal is unused. The same template handles SATZ_20A/B/C (with SATZ_19A/B/C)
+and SATZ_33A/B/C (with SATZ_32A/B/C). frac.py's SATZ_63 / SATZ_73 share
+the shape but operate over 4-ary fraction relations with manual UNFOLD
+bridges into num-level absurd; extending the tactic to those would
+require unfolder-aware lifting and is left for a future pass.
 
 ---
 
@@ -355,8 +354,7 @@ benefit):
 
 1. **Inequality-aware rewriting** (§1) — ✅ shipped.
 2. **Order-aware rewriting** (§5) — ✅ shipped.
-3. **`by_trichotomy_invert` tactic** (§2) — collapses SATZ_20A/B/C and
-   SATZ_33A/B/C from ~80 lines to ~10.
+3. **`by_trichotomy_invert` tactic** (§2) — ✅ shipped.
 4. **AC support for `*`** (§6) — RIGHT_DISTRIB shrinks; SUC_MUL becomes
    shorter; downstream multiplication AC chains stop needing ad-hoc
    commutativity rewrites.

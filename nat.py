@@ -1308,15 +1308,8 @@ def SATZ_20A(p):
     p.goal("!x y z. x + z > y + z ==> x > y")
     p.fix("x y z")
     p.assume("h_a: x + z > y + z")
-    with p.cases_on(SATZ_10, "x", "y"):
-        with p.case("h_eq: x = y"):
-            p.have("eq_sum: x + z = y + z").by_match(SATZ_19B, "h_eq")
-            p.absurd().auto("h_a", "eq_sum")
-        with p.case("h_gt: x > y"):
-            p.thus("x > y").by_thm(p.fact("h_gt"))
-        with p.case("h_lt: x < y"):
-            p.have("lt_sum: x + z < y + z").by_match(SATZ_19C, "h_lt")
-            p.absurd().auto("lt_sum", "h_a")
+    p.thus("x > y").by_trichotomy_invert(
+        SATZ_10, ["x", "y"], "h_a", SATZ_19B, SATZ_19A, SATZ_19C)
 
 
 @proof
@@ -1324,15 +1317,8 @@ def SATZ_20B(p):
     p.goal("!x y z. x + z = y + z ==> x = y")
     p.fix("x y z")
     p.assume("h_b: x + z = y + z")
-    with p.cases_on(SATZ_10, "x", "y"):
-        with p.case("h_eq: x = y"):
-            p.thus("x = y").by_thm(p.fact("h_eq"))
-        with p.case("h_gt: x > y"):
-            p.have("gt_sum: x + z > y + z").by_match(SATZ_19A, "h_gt")
-            p.absurd().auto("gt_sum", "h_b")
-        with p.case("h_lt: x < y"):
-            p.have("lt_sum: x + z < y + z").by_match(SATZ_19C, "h_lt")
-            p.absurd().auto("lt_sum", "h_b")
+    p.thus("x = y").by_trichotomy_invert(
+        SATZ_10, ["x", "y"], "h_b", SATZ_19B, SATZ_19A, SATZ_19C)
 
 
 @proof
@@ -1340,15 +1326,8 @@ def SATZ_20C(p):
     p.goal("!x y z. x + z < y + z ==> x < y")
     p.fix("x y z")
     p.assume("h_c: x + z < y + z")
-    with p.cases_on(SATZ_10, "x", "y"):
-        with p.case("h_eq: x = y"):
-            p.have("eq_sum: x + z = y + z").by_match(SATZ_19B, "h_eq")
-            p.absurd().auto("h_c", "eq_sum")
-        with p.case("h_gt: x > y"):
-            p.have("gt_sum: x + z > y + z").by_match(SATZ_19A, "h_gt")
-            p.absurd().auto("h_c", "gt_sum")
-        with p.case("h_lt: x < y"):
-            p.thus("x < y").by_thm(p.fact("h_lt"))
+    p.thus("x < y").by_trichotomy_invert(
+        SATZ_10, ["x", "y"], "h_c", SATZ_19B, SATZ_19A, SATZ_19C)
 
 
 SATZ_20 = GENL([x, y, z],
@@ -1367,15 +1346,8 @@ def SATZ_33A(p):
     p.goal("!x y z. x * z > y * z ==> x > y")
     p.fix("x y z")
     p.assume("h_a: x * z > y * z")
-    with p.cases_on(SATZ_10, "x", "y"):
-        with p.case("h_eq: x = y"):
-            p.have("eq_prod: x * z = y * z").by_match(SATZ_32B, "h_eq")
-            p.absurd().auto("h_a", "eq_prod")
-        with p.case("h_gt: x > y"):
-            p.thus("x > y").by_thm(p.fact("h_gt"))
-        with p.case("h_lt: x < y"):
-            p.have("lt_prod: x * z < y * z").by_match(SATZ_32C, "h_lt")
-            p.absurd().auto("lt_prod", "h_a")
+    p.thus("x > y").by_trichotomy_invert(
+        SATZ_10, ["x", "y"], "h_a", SATZ_32B, SATZ_32A, SATZ_32C)
 
 
 @proof
@@ -1383,15 +1355,8 @@ def SATZ_33B(p):
     p.goal("!x y z. x * z = y * z ==> x = y")
     p.fix("x y z")
     p.assume("h_b: x * z = y * z")
-    with p.cases_on(SATZ_10, "x", "y"):
-        with p.case("h_eq: x = y"):
-            p.thus("x = y").by_thm(p.fact("h_eq"))
-        with p.case("h_gt: x > y"):
-            p.have("gt_prod: x * z > y * z").by_match(SATZ_32A, "h_gt")
-            p.absurd().auto("gt_prod", "h_b")
-        with p.case("h_lt: x < y"):
-            p.have("lt_prod: x * z < y * z").by_match(SATZ_32C, "h_lt")
-            p.absurd().auto("lt_prod", "h_b")
+    p.thus("x = y").by_trichotomy_invert(
+        SATZ_10, ["x", "y"], "h_b", SATZ_32B, SATZ_32A, SATZ_32C)
 
 
 @proof
@@ -1399,15 +1364,8 @@ def SATZ_33C(p):
     p.goal("!x y z. x * z < y * z ==> x < y")
     p.fix("x y z")
     p.assume("h_c: x * z < y * z")
-    with p.cases_on(SATZ_10, "x", "y"):
-        with p.case("h_eq: x = y"):
-            p.have("eq_prod: x * z = y * z").by_match(SATZ_32B, "h_eq")
-            p.absurd().auto("h_c", "eq_prod")
-        with p.case("h_gt: x > y"):
-            p.have("gt_prod: x * z > y * z").by_match(SATZ_32A, "h_gt")
-            p.absurd().auto("h_c", "gt_prod")
-        with p.case("h_lt: x < y"):
-            p.thus("x < y").by_thm(p.fact("h_lt"))
+    p.thus("x < y").by_trichotomy_invert(
+        SATZ_10, ["x", "y"], "h_c", SATZ_32B, SATZ_32A, SATZ_32C)
 
 
 SATZ_33 = GENL([x, y, z],
