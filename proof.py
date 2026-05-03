@@ -278,7 +278,7 @@ class FrameKind(enum.Enum):
 class _Frame:
     __slots__ = ("goal", "kind", "vars_added", "hyps_added",
                  "facts_added", "choose_env", "type_env",
-                 "lazy_lets", "data", "result")
+                 "lazy_lets", "simp_rules", "data", "result")
 
     def __init__(self, goal=None, kind=FrameKind.ROOT):
         self.goal = goal
@@ -289,6 +289,7 @@ class _Frame:
         self.choose_env = {}      # name -> witness term (parser env entries)
         self.type_env = {}        # name -> hol_type for higher-order params
         self.lazy_lets = {}       # name -> LazyLetDef (Isabelle-style local equation)
+        self.simp_rules = []      # list of theorems used as default rewrite rules
         self.data = {}            # block-specific scratch
         self.result = None        # the theorem proving `goal`
 
@@ -376,6 +377,31 @@ class Proof:
             for lz in fr.lazy_lets.values():
                 out[lz.carrier] = lz
         return out
+
+    def _active_simp_rules(self):
+        """Theorems registered via ``p.simp(...)`` in any open frame, in
+        registration order (outer frames first, innermost last). Consumed
+        by ``by_rewrite`` / ``by_rewrite_of`` / ``disj`` / ``disj_witness``
+        as a default extension to the user's rule list."""
+        out = []
+        for fr in self._frames:
+            out.extend(fr.simp_rules)
+        return out
+
+    def simp(self, *rules):
+        """Register one or more theorems as default rewrite rules in the
+        current frame. Each rule is a fact label, negative index, or
+        theorem; rules are added to the active simp set in order and used
+        by every subsequent ``by_rewrite``-family / ``disj``-family call
+        in this frame and any nested frame.
+
+        Modeled after Isabelle's ``[simp]``: rules added here are applied
+        silently in addition to any user-supplied rule list. Frame-local
+        scoping means a sub-block can extend the simp set without
+        affecting the surrounding proof.
+        """
+        for r in rules:
+            self._cur.simp_rules.append(self._resolve_fact(r))
 
     def simp_normalize(self, tm, carriers=None):
         """Fixpoint simp pass over ``tm`` against the active simp set
@@ -1238,11 +1264,12 @@ class Proof:
         Replaces ``p.thus(<disj>).by_disj(ref)`` and the ``have eq →
         by_disj`` two-step.
         """
-        rules_thms = [self.simp_norm_fact(self._resolve_fact(r))
+        user_rules = [self.simp_norm_fact(self._resolve_fact(r))
                       for r in rules]
+        rules_thms = user_rules + self._active_simp_rules()
 
         def match(d):
-            for r_th in rules_thms:
+            for r_th in user_rules:
                 if aconv(d, r_th._concl):
                     return r_th
             try:
@@ -1272,7 +1299,8 @@ class Proof:
         """
         witness_t = (self._parse(witness) if isinstance(witness, str)
                      else witness)
-        rules_thms = [self._resolve_fact(r) for r in rules]
+        rules_thms = ([self._resolve_fact(r) for r in rules]
+                      + self._active_simp_rules())
 
         def try_existential(d):
             pred = dest_exists(d)
@@ -1608,17 +1636,19 @@ class _Have:
         return self._finish(th)
 
     def by_rewrite(self, rules, *, ac=None, ac_rules=()):
-        """REWRITE_PROVE with the given rules.
+        """REWRITE_PROVE with the given rules, plus any active simp set.
 
         Each rule may be a Theorem or a string label naming a fact in scope.
         Pass ``ac=(op, assoc, comm)`` to fall back to AC reasoning when the
         rewritten normal forms don't already match. ``ac_rules`` is an
         optional second-pass canonicalisation rule list applied after the
         main rewrite (e.g. ``SUC x → x + 1``-style normalization to expose
-        the AC operator).
+        the AC operator). Rules registered via ``p.simp(...)`` in any
+        enclosing frame are appended to the user's list.
         """
+        rules_thms = self._resolved(rules) + self.p._active_simp_rules()
         return self._finish(REWRITE_PROVE(
-            self._resolved(rules), self.term,
+            rules_thms, self.term,
             ac=ac,
             ac_rules=tuple(self._resolved(ac_rules))))
 
@@ -1647,7 +1677,7 @@ class _Have:
         """
         p = self.p
         th_src = p._resolve_fact(ref)
-        rules_thms = self._resolved(rules)
+        rules_thms = self._resolved(rules) + p._active_simp_rules()
         # Simp-normalize the source's conclusion, the target, and each
         # rule's conclusion to a common canonical form before the kernel
         # rewriter runs. Without this, REWRITE_CONV does syntactic

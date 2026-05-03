@@ -337,6 +337,7 @@ def LEMMA_PRED(p):
 @proof
 def SATZ_9(p):
     p.goal("!x y. (x = y) \\/ (?u. x = y + u) \\/ (?v. y = x + v)")
+    p.simp(ONE_PLUS, ADD_1, ADD_SUC, SUC_PLUS)
     p.fix("x y")
     with p.induction("y"):
         with p.base():
@@ -344,20 +345,19 @@ def SATZ_9(p):
                 with p.case("hx1: x = 1"):
                     p.disj("hx1")
                 with p.case("hxs: ?u. x = SUC u"):
-                    p.disj_witness("u", "u_eq", ONE_PLUS)
+                    p.disj_witness("u", "u_eq")
         with p.step("IH"):
             with p.cases_on("IH"):
                 with p.case("h_eq: x = y"):
-                    p.disj_witness("1", "h_eq", ADD_1)
+                    p.disj_witness("1", "h_eq")
                 with p.case("h_gt: ?u. x = y + u"):
                     with p.cases_on(LEMMA_PRED, "u"):
                         with p.case("u_is_1: u = 1"):
-                            p.disj("u_eq", "u_is_1", ADD_1)
+                            p.disj("u_eq", "u_is_1")
                         with p.case("u_succ: ?w. u = SUC w"):
-                            p.disj_witness("w", "u_eq", "w_eq",
-                                           ADD_SUC, SUC_PLUS)
+                            p.disj_witness("w", "u_eq", "w_eq")
                 with p.case("h_lt: ?v. y = x + v"):
-                    p.disj_witness("SUC v", "v_eq", ADD_SUC)
+                    p.disj_witness("SUC v", "v_eq")
 
 
 # ---------------------------------------------------------------------------
@@ -663,13 +663,14 @@ def SATZ_23(p):
 @proof
 def SATZ_24(p):
     p.goal("!x. x >= 1")
+    p.simp(ONE_PLUS)
     p.fix("x")
     p.have("lp: (x = 1) \\/ (?u. x = SUC u)").by_match(LEMMA_PRED)
     with p.cases_on("lp"):
         with p.case("hx1: x = 1"):
             p.thus("x >= 1").by(EQ_TO_GE, "hx1")
         with p.case("hex: ?u. x = SUC u"):
-            p.have("eq: x = 1 + u").by_rewrite(["u_eq", ONE_PLUS])
+            p.have("eq: x = 1 + u").by_rewrite(["u_eq"])
             p.have("gt1: x > 1").by_witness("u", "eq")
             p.thus("x >= 1").by(GT_TO_GE, "gt1")
 
