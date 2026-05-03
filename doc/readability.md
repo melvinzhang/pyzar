@@ -171,7 +171,7 @@ three sentences. The split exists to localise BETA bridges and
 
 3. **`EXCLUDED_MIDDLE` manually invoked twice** for what Landau states as
    a contrapositive. A `p.by_contradiction("hnex: ~ goal"): …` block
-   would absorb the `cases_on(EXCLUDED_MIDDLE, …)` ceremony.
+   would absorb the `cases_on(EXCLUDED_MIDDLE, …)` ceremony. ✅ shipped.
 
 **Fix.** Three separate ones:
 - A `p.set("M(x) := …")` that auto-unfolds at every `M t` site without
@@ -180,7 +180,12 @@ three sentences. The split exists to localise BETA bridges and
   form — internally normalize via `ADD_1`.
 - A `p.by_contradiction("h: ~ goal")` block as sugar for the
   `cases_on(EXCLUDED_MIDDLE, goal)` + trivial branch + non-trivial branch
-  pattern.
+  pattern. ✅ shipped: lives on `_Have`, so both
+  `p.thus(target).by_contradiction("hnex"):` and
+  `p.have("Nm: N m").by_contradiction("hnN"):` work; the body opens with
+  goal `F` and `~target` registered as a fact, and on close
+  `NOT_NOT_ELIM` lifts to the original target. The two SATZ_27
+  sub-lemma sites collapsed by 6 lines and one nesting level each.
 
 ---
 

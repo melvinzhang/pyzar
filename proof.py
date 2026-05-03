@@ -37,7 +37,7 @@ from basics import (
     aconv, mk_abs, mk_app, rand, rator, mk_eq, mk_fun_ty, dest_eq, dest_binop_any,
 )
 from axioms import (
-    T, F, mk_select, mk_forall,
+    T, F, mk_select, mk_forall, mk_not,
     dest_disj, dest_exists, dest_forall, dest_imp, dest_neg,
     is_conj, is_disj,
 )
@@ -1448,6 +1448,53 @@ class _Have:
         inline — the dream sketch's ``.proof(lambda q: …)`` block."""
         return _SubFrameCtx(self.p, self.term, kind=FrameKind.HAVE_PROOF,
                              on_close=self._finish)
+
+    def by_contradiction(self, label_spec):
+        """Classical proof by contradiction.
+
+        Open a sub-frame whose goal is ``F`` and whose extra fact is
+        ``label: ~target``; the body derives ``F`` (typically via
+        ``p.absurd().by_conj`` or ``.auto``); on close, ``NOT_NOT_ELIM``
+        lifts the resulting ``~~target`` back to ``target``.
+
+        ``label_spec`` may be a bare label (``"hnex"``) -- the negated
+        target is filled in -- or the explicit form
+        ``"hnex: ~target"`` (must match ``~self.term``).
+
+        Replaces the ``cases_on(EXCLUDED_MIDDLE, target)`` boilerplate
+        whose first branch is just ``thus(target).by_thm(p.fact("h"))``.
+        """
+        from classical import NOT_NOT_ELIM   # classical depends on proof
+        target = self.term
+        p = self.p
+        not_target = mk_not(target)
+
+        spec = label_spec.strip()
+        if re.fullmatch(r"[A-Za-z_]\w*", spec):
+            label = spec
+        else:
+            try:
+                label, hyp_term = parse_label(
+                    spec, _env_bindings=p._scope_env())
+            except ParseError as ex:
+                raise HolError(
+                    f"by_contradiction: cannot parse label spec: {ex}") from ex
+            if label is None:
+                raise HolError(
+                    f"by_contradiction: bad label spec: {label_spec!r}")
+            if not aconv(hyp_term, not_target):
+                raise HolError(
+                    "by_contradiction: hypothesis does not match negated "
+                    f"target\n  expected: {pp(not_target)}\n"
+                    f"  given:    {pp(hyp_term)}")
+
+        def on_close(F_th):
+            nn_th = NOT_INTRO(DISCH(not_target, F_th))
+            self._finish(NOT_NOT_ELIM(nn_th))
+
+        return _SubFrameCtx(p, F, kind=FrameKind.SUPPOSE,
+                             on_close=on_close,
+                             extra_facts=[(label, ASSUME(not_target))])
 
     def by_eq_mp(self, eq_th, ref):
         """``EQ_MP(eq_th, fact)`` -- rewrite a fact through an equation.

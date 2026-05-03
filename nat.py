@@ -889,34 +889,31 @@ def _SATZ_27_EXISTS_M(p):
     p.assume("hP1: P 1")
     p.assume("hStepFail: !y. N y ==> ~ P (y + 1)")
     p.assume("hNonempty: ?n. N n")
-    with p.thus("?m. P m /\\ ~ P (m + 1)").by_cases(
-            EXCLUDED_MIDDLE, "?m. P m /\\ ~ P (m + 1)"):
-        with p.case("hex: ?m. P m /\\ ~ P (m + 1)"):
-            p.thus("?m. P m /\\ ~ P (m + 1)").by_thm(p.fact("hex"))
-        with p.case("hnex: ~ (?m. P m /\\ ~ P (m + 1))"):
-            pred_Q = p._parse("\\x. P x /\\ ~ P (x + 1)")
-            p.have("forall_nQ: !x. ~(P x /\\ ~ P (x + 1))")\
-                .by_thm(NOT_EX_TO_FORALL_NOT(p.fact("hnex"), pred_Q))
-            with p.have("forall_P: !x. P x").proof():
-                with p.induction("x"):
-                    with p.base():
-                        p.thus("P 1").by_thm(p.fact("hP1"))
-                    with p.step("IH"):
-                        with p.cases_on(EXCLUDED_MIDDLE, "P (SUC x)"):
-                            with p.case("hPS: P (SUC x)"):
-                                p.thus("P (SUC x)").by_thm(p.fact("hPS"))
-                            with p.case("hnPS: ~ P (SUC x)"):
-                                p.have("hnP1: ~ P (x + 1)")\
-                                    .by_rewrite_of("hnPS", [ADD_1])
-                                p.have("conj: P x /\\ ~ P (x + 1)")\
-                                    .by(CONJ, "IH", "hnP1")
-                                p.have("not_conj: ~(P x /\\ ~ P (x + 1))")\
-                                    .by_match("forall_nQ")
-                                p.absurd().by_conj("conj", "not_conj")
-            p.choose("n0: N n0", from_="hNonempty")
-            p.have("Pn1: P (n0 + 1)").by_match("forall_P")
-            p.have("nPn1: ~ P (n0 + 1)").by_match("hStepFail", "n0_eq")
-            p.absurd().by_conj("Pn1", "nPn1")
+    with p.thus("?m. P m /\\ ~ P (m + 1)")\
+            .by_contradiction("hnex"):
+        pred_Q = p._parse("\\x. P x /\\ ~ P (x + 1)")
+        p.have("forall_nQ: !x. ~(P x /\\ ~ P (x + 1))")\
+            .by_thm(NOT_EX_TO_FORALL_NOT(p.fact("hnex"), pred_Q))
+        with p.have("forall_P: !x. P x").proof():
+            with p.induction("x"):
+                with p.base():
+                    p.thus("P 1").by_thm(p.fact("hP1"))
+                with p.step("IH"):
+                    with p.cases_on(EXCLUDED_MIDDLE, "P (SUC x)"):
+                        with p.case("hPS: P (SUC x)"):
+                            p.thus("P (SUC x)").by_thm(p.fact("hPS"))
+                        with p.case("hnPS: ~ P (SUC x)"):
+                            p.have("hnP1: ~ P (x + 1)")\
+                                .by_rewrite_of("hnPS", [ADD_1])
+                            p.have("conj: P x /\\ ~ P (x + 1)")\
+                                .by(CONJ, "IH", "hnP1")
+                            p.have("not_conj: ~(P x /\\ ~ P (x + 1))")\
+                                .by_match("forall_nQ")
+                            p.absurd().by_conj("conj", "not_conj")
+        p.choose("n0: N n0", from_="hNonempty")
+        p.have("Pn1: P (n0 + 1)").by_match("forall_P")
+        p.have("nPn1: ~ P (n0 + 1)").by_match("hStepFail", "n0_eq")
+        p.absurd().by_conj("Pn1", "nPn1")
 
 
 # Sub-lemma for SATZ_27 (Step 4). Given M(m) (= !n. N n ==> m <= n) and
@@ -935,28 +932,25 @@ def _SATZ_27_FROM_M(p):
     p.fix("N m")
     p.assume("hM: !n. N n ==> m <= n")
     p.assume("hnM1: ~(!n. N n ==> m + 1 <= n)")
-    with p.have("Nm: N m").by_cases(EXCLUDED_MIDDLE, "N m"):
-        with p.case("hN: N m"):
-            p.thus("N m").by_thm(p.fact("hN"))
-        with p.case("hnN: ~ N m"):
-            with p.have("M_m1: !n. N n ==> m + 1 <= n").proof():
-                p.fix("n")
-                p.assume("hNn: N n")
-                p.have("le: m <= n").by_match("hM", "hNn")
-                with p.have("ne: ~ (m = n)").proof():
-                    with p.suppose("eq: m = n"):
-                        p.have("Nm_via: N m")\
-                            .by_rewrite_of("hNn", ["eq"])
-                        p.absurd().by_conj("Nm_via", "hnN")
-                with p.have("lt: m < n").by_cases("le"):
-                    with p.case("h_lt: m < n"):
-                        p.thus("m < n").by_thm(p.fact("h_lt"))
-                    with p.case("h_eq: m = n"):
-                        p.absurd().by_conj("h_eq", "ne")
-                p.have("gt: n > m").by_match(SATZ_12, "lt")
-                p.have("ge: n >= m + 1").by_match(SATZ_25, "gt")
-                p.thus("m + 1 <= n").by_match(SATZ_13, "ge")
-            p.absurd().by_conj("M_m1", "hnM1")
+    with p.have("Nm: N m").by_contradiction("hnN"):
+        with p.have("M_m1: !n. N n ==> m + 1 <= n").proof():
+            p.fix("n")
+            p.assume("hNn: N n")
+            p.have("le: m <= n").by_match("hM", "hNn")
+            with p.have("ne: ~ (m = n)").proof():
+                with p.suppose("eq: m = n"):
+                    p.have("Nm_via: N m")\
+                        .by_rewrite_of("hNn", ["eq"])
+                    p.absurd().by_conj("Nm_via", "hnN")
+            with p.have("lt: m < n").by_cases("le"):
+                with p.case("h_lt: m < n"):
+                    p.thus("m < n").by_thm(p.fact("h_lt"))
+                with p.case("h_eq: m = n"):
+                    p.absurd().by_conj("h_eq", "ne")
+            p.have("gt: n > m").by_match(SATZ_12, "lt")
+            p.have("ge: n >= m + 1").by_match(SATZ_25, "gt")
+            p.thus("m + 1 <= n").by_match(SATZ_13, "ge")
+        p.absurd().by_conj("M_m1", "hnM1")
     p.thus("N m /\\ (!k. N k ==> m <= k)").by(CONJ, "Nm", "hM")
 
 
