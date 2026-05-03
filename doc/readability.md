@@ -34,23 +34,21 @@ p.thus("~(SUC y = x + SUC y)")\
 ```
 
 The `REFL(ONE)` and `REFL(mk_suc(y))` were no-op left-hand sides only there
-because `by_rewrite_ne` wanted two witnesses; the `SYM(SPEC(...))` re-oriented
-`ADD_1` and `ADD_SUC` because the rewriter was one-directional.
+because the (then-separate) `by_rewrite_ne` wanted two witnesses; the
+`SYM(SPEC(...))` re-oriented `ADD_1` and `ADD_SUC` because the rewriter was
+one-directional.
 
-**Fix landed.** `by_rewrite_ne(ref, rules)` now takes the same shape of
-rewrite-rule list as `by_rewrite`. It normalizes each side of the source
-and the target under `rules` and verifies that the pairwise normal forms
-agree; the REFL/SYM bridges that align source-to-target are computed
-internally. Callers no longer pass explicit `(eq_l, eq_r)` pairs.
-
-The four call sites in `nat.py` (SATZ_7 base/step, SATZ_8 base/step) are
-now one-liners:
+**Fix landed.** `~(=)` shapes are now handled by the unified two-sided
+`by_rewrite_of` (see §5): the bottom-up rewriter descends through `~` and
+`=` naturally, so source and target are normalized to a common form and
+bridged via `EQ_MP`. The four call sites in `nat.py` (SATZ_7 base/step,
+SATZ_8 base/step) are now one-liners:
 
 ```python
-p.thus("~(1 = x + 1)").by_rewrite_ne("ne1", [ADD_1])
-p.thus("~(SUC y = x + SUC y)").by_rewrite_ne("ne_succ", [ADD_SUC])
-p.thus("~(1 + y = 1 + z)").by_rewrite_ne("ne_suc", [ONE_PLUS])
-p.thus("~(SUC x + y = SUC x + z)").by_rewrite_ne("ne_sum", [SUC_PLUS])
+p.thus("~(1 = x + 1)").by_rewrite_of("ne1", [ADD_1])
+p.thus("~(SUC y = x + SUC y)").by_rewrite_of("ne_succ", [ADD_SUC])
+p.thus("~(1 + y = 1 + z)").by_rewrite_of("ne_suc", [ONE_PLUS])
+p.thus("~(SUC x + y = SUC x + z)").by_rewrite_of("ne_sum", [SUC_PLUS])
 ```
 
 ---

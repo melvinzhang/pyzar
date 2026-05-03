@@ -280,11 +280,11 @@ def SATZ_7(p):
         with p.base():
             p.have("ne_sx: ~(SUC x = 1)").by_match(AXIOM_3)
             p.have("ne1: ~(1 = SUC x)").by(NE_SYM, "ne_sx")
-            p.thus("~(1 = x + 1)").by_rewrite_ne("ne1", [ADD_1])
+            p.thus("~(1 = x + 1)").by_rewrite_of("ne1", [ADD_1])
         with p.step("IH"):
             p.have("ne_succ: ~(SUC y = SUC (x + y))")\
                 .by_match(SATZ_1, "IH")
-            p.thus("~(SUC y = x + SUC y)").by_rewrite_ne("ne_succ", [ADD_SUC])
+            p.thus("~(SUC y = x + SUC y)").by_rewrite_of("ne_succ", [ADD_SUC])
 
 
 # ---------------------------------------------------------------------------
@@ -300,11 +300,11 @@ def SATZ_8(p):
     with p.induction("x"):
         with p.base():
             p.have("ne_suc: ~(SUC y = SUC z)").by_match(SATZ_1, "hyp_yz")
-            p.thus("~(1 + y = 1 + z)").by_rewrite_ne("ne_suc", [ONE_PLUS])
+            p.thus("~(1 + y = 1 + z)").by_rewrite_of("ne_suc", [ONE_PLUS])
         with p.step("IH"):
             p.have("ne_sum: ~(SUC (x + y) = SUC (x + z))")\
                 .by_match(SATZ_1, "IH")
-            p.thus("~(SUC x + y = SUC x + z)").by_rewrite_ne("ne_sum", [SUC_PLUS])
+            p.thus("~(SUC x + y = SUC x + z)").by_rewrite_of("ne_sum", [SUC_PLUS])
 
 
 # ---------------------------------------------------------------------------

@@ -44,7 +44,7 @@ from axioms import (
 from tactics import (
     SPEC, GEN, DISCH, MP, MP_LIST, DISJ_CASES, BETA_CONV, BETA_NORM, SYM,
     AP_TERM, AP_THM, PROVE_HYP, ELIM_EX, CHOOSE_WITNESS, UNFOLD, subst_term,
-    NOT_INTRO, NOT_ELIM, CONTR, REWRITE_NE, EXISTS, DISJ1, DISJ2,
+    NOT_INTRO, NOT_ELIM, CONTR, EXISTS, DISJ1, DISJ2,
     CONJUNCT1, CONJUNCT2,
     REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV, BETA_RULE,
     AC_PROVE,
@@ -1327,13 +1327,17 @@ class _Have:
 
         Both the source's conclusion and the have-term are normalized
         under ``rules`` to a common form; an equality bridge connecting
-        them is then ``EQ_MP``'d against the source. This is the analogue
-        of ``by_rewrite_ne`` for non-``~`` shapes (orders, equations, any
-        boolean term) and supersedes one-sided ``REWRITE_RULE`` rewriting:
-        a plain equality fact ``hxy: x = y`` can be supplied directly to
-        bridge ``y + z > y + u`` to ``x + z > y + u`` even though the rule
-        only matches inside the target -- the rewriter normalizes both
-        ends and the bridge cancels.
+        them is then ``EQ_MP``'d against the source. The bottom-up
+        rewriter descends through any boolean shape (``=``, ``~``, the
+        order operators, applications), so this single tactic covers:
+
+        * one-sided rewrites where the source rewrites onto the target
+          (the historical ``REWRITE_RULE`` use case);
+        * targeted equality substitution where a bare ``hxy: x = y``
+          rewrites the target back onto the source -- e.g. bridging
+          ``y + z > y + u`` to ``x + z > y + u``;
+        * inequation rewriting where source and target are both
+          ``~(L = R)`` and the rules act under the equation.
         """
         th_src = self.p._resolve_fact(ref)
         rules_thms = self._resolved(rules)
@@ -1409,25 +1413,6 @@ class _Have:
                 f"  goal -> {pp(rand(eq_goal._concl))}\n"
                 f"  src  -> {pp(src_norm._concl)}")
         return self._finish(EQ_MP(SYM(eq_goal), src_norm))
-
-    def by_rewrite_ne(self, ref, rules):
-        """Rewrite an inequation fact into the have-term using rewrite rules.
-
-        ``ref`` is a fact ``~(a = b)``; the have-term is ``~(L = R)``;
-        ``rules`` is the same shape of rewrite-rule list as ``by_rewrite``.
-        Each side of the source and the target is normalized under
-        ``rules`` and the resulting normal forms must agree pairwise -- the
-        REFL/SYM bridges that align source-to-target are computed via
-        ``REWRITE_PROVE`` on each side, exactly as ``by_rewrite`` does for
-        a plain equational goal.
-        """
-        th_ne = self.p._resolve_fact(ref)
-        a, b = dest_eq(rand(th_ne._concl))
-        L, R = dest_eq(rand(self.term))
-        rules_thms = self._resolved(rules)
-        eq_l = REWRITE_PROVE(rules_thms, mk_eq(a, L))
-        eq_r = REWRITE_PROVE(rules_thms, mk_eq(b, R))
-        return self._finish(REWRITE_NE(th_ne, eq_l, eq_r))
 
     def by_cases(self, ref, *args):
         """Open a cases-on block whose target is the have-term (rather than
