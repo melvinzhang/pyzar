@@ -15,7 +15,7 @@ from basics import (
     dest_binder, dest_binop, dest_unop, is_binder, is_binop, is_unop,
     mk_abs, mk_app, mk_const, mk_eq, mk_fun_ty,
 )
-from parser import add_type, add_infix, add_prefix, add_binder
+from parser import add_type, add_infix, add_binder, infix, prefix, binder
 
 # Surface syntax for the kernel-level concepts that predate the parser:
 # `bool` is from fusion, `=` and `\` from basics.  Everything below this
@@ -46,18 +46,18 @@ AND_DEF = new_basic_definition(
               mk_eq(mk_abs(f_bbb, mk_app(f_bbb, p, q)),
                     mk_abs(f_bbb, mk_app(f_bbb, T, T)))))))
 
+@infix("/\\", 30, assoc="right")
 def mk_and(a, b):
     return mk_app(mk_const("/\\", []), a, b)
-add_infix("/\\", 30, mk_and, assoc="right")
 
 # (==>) = \p q. p /\ q <=> p
 IMP_DEF = new_basic_definition(
     mk_eq(Var("==>", bbb_ty),
           mk_abs(p, mk_abs(q, mk_eq(mk_and(p, q), p)))))
 
+@infix("==>", 10, assoc="right")
 def mk_imp(a, b):
     return mk_app(mk_const("==>", []), a, b)
-add_infix("==>", 10, mk_imp, assoc="right")
 
 # (!) = \P:A->bool. P = \x. T
 abty = mk_fun_ty(aty, bool_ty)
@@ -67,9 +67,9 @@ FORALL_DEF = new_basic_definition(
     mk_eq(Var("!", mk_fun_ty(abty, bool_ty)),
           mk_abs(P_ab, mk_eq(P_ab, mk_abs(x_a, T)))))
 
+@binder("!")
 def mk_forall(v, body):
     return mk_comb(mk_const("!", [(v.ty, aty)]), mk_abs(v, body))
-add_binder("!", mk_forall)
 
 # (?) = \P:A->bool. !q. (!x. P x ==> q) ==> q
 EXISTS_DEF = new_basic_definition(
@@ -79,9 +79,9 @@ EXISTS_DEF = new_basic_definition(
                   mk_imp(mk_forall(x_a, mk_imp(mk_comb(P_ab, x_a), q)),
                          q)))))
 
+@binder("?")
 def mk_exists(v, body):
     return mk_comb(mk_const("?", [(v.ty, aty)]), mk_abs(v, body))
-add_binder("?", mk_exists)
 
 # (\/) = \p q. !r. (p ==> r) ==> (q ==> r) ==> r
 r_b = Var("r", bool_ty)
@@ -92,9 +92,9 @@ OR_DEF = new_basic_definition(
                   mk_imp(mk_imp(p, r_b),
                          mk_imp(mk_imp(q, r_b), r_b)))))))
 
+@infix("\\/", 20, assoc="right")
 def mk_or(a, b):
     return mk_app(mk_const("\\/", []), a, b)
-add_infix("\\/", 20, mk_or, assoc="right")
 
 # F = !p:bool. p
 F_DEF = new_basic_definition(
@@ -106,9 +106,9 @@ NOT_DEF = new_basic_definition(
     mk_eq(Var("~", mk_fun_ty(bool_ty, bool_ty)),
           mk_abs(p, mk_imp(p, F))))
 
+@prefix("~")
 def mk_not(t):
     return mk_comb(mk_const("~", []), t)
-add_prefix("~", mk_not)
 
 # Bool-specific shape helpers: thin aliases over the kernel ``is_*``/
 # ``dest_*`` connective helpers so tactic call sites can ask
@@ -146,11 +146,11 @@ _P = Var("P", abty)
 _xs = Var("x", aty)
 _select = mk_const("@", [])
 
+@binder("@")
 def mk_select(v, body):
     """Build ``@v. body`` -- the SELECT-binder term picking some `v` of the
     same type with `body[v]` true (or any `v` if no such exists)."""
     return mk_comb(mk_const("@", [(v.ty, aty)]), mk_abs(v, body))
-add_binder("@", mk_select)
 
 SELECT_AX = new_axiom(
     mk_forall(_P, mk_forall(_xs,

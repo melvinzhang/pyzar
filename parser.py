@@ -161,6 +161,38 @@ def has_const(name):
 
 
 # ---------------------------------------------------------------------------
+# Decorators that register the decorated function as a builder for the named
+# operator -- syntactic sugar over add_infix/add_prefix/add_binder for the
+# common case where the surface metadata sits next to the builder def.
+# ---------------------------------------------------------------------------
+
+def infix(op, prec, assoc="left"):
+    """Register the decorated ``(lhs, rhs) -> term`` as the infix builder for
+    ``op`` at precedence `prec` (higher binds tighter)."""
+    def deco(builder):
+        add_infix(op, prec, builder, assoc=assoc)
+        return builder
+    return deco
+
+
+def prefix(op):
+    """Register the decorated ``term -> term`` as the prefix builder for `op`."""
+    def deco(builder):
+        add_prefix(op, builder)
+        return builder
+    return deco
+
+
+def binder(symbol):
+    """Register the decorated ``(var, body) -> term`` as the binder for
+    `symbol` (one of ``!``, ``?``, ``\\``, ``@``)."""
+    def deco(builder):
+        add_binder(symbol, builder)
+        return builder
+    return deco
+
+
+# ---------------------------------------------------------------------------
 # Pretty-printer (display only -- never used by proofs).
 #
 # Reads infix/prefix/binder operators from the supplied `Signature` so that
