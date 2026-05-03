@@ -729,10 +729,13 @@ def SATZ_25(p):
 # Each builds F from a pair of inconsistent order facts, via Theorem 7 + 6.
 # ---------------------------------------------------------------------------
 
-# Three Landau-style contradictions encoded as declarative ``@proof`` lemmas.
-# Each takes the trichotomy-pair as its hypotheses, eliminates the existentials
-# behind ``<`` / ``>`` via ``p.choose``, builds the resulting equation chain
-# ``b = b + (...)``, and contradicts ``SATZ_7_RIGHT`` (= ``~(y = y + x)``).
+# Four Landau-style contradictions encoded as declarative ``@proof`` lemmas.
+# Each takes a pair of order facts as hypotheses; ``@contra_finder`` registers
+# the lemma for ``p.absurd().auto(h1, h2)`` lookup by reading the relation
+# symbols out of its antecedents.
+from proof import contra_finder
+
+@contra_finder
 @proof
 def _CONTRA_LT_GT(p):
     p.goal("!a b. a < b ==> a > b ==> F")
@@ -747,6 +750,7 @@ def _CONTRA_LT_GT(p):
     p.absurd().by_conj("chain", "ne")
 
 
+@contra_finder
 @proof
 def _CONTRA_LT_EQ(p):
     p.goal("!a b. a < b ==> a = b ==> F")
@@ -759,6 +763,7 @@ def _CONTRA_LT_EQ(p):
     p.absurd().by_conj("v_eq", "ne")
 
 
+@contra_finder
 @proof
 def _CONTRA_GT_EQ(p):
     p.goal("!a b. a > b ==> a = b ==> F")
@@ -771,40 +776,9 @@ def _CONTRA_GT_EQ(p):
     p.absurd().by_conj("chain", "ne")
 
 
-# Wire the three contradictions into the proof DSL so call sites can use
-# ``p.absurd().auto(h1, h2)``. Each finder ``SPECL``s the matching ``@proof``
-# theorem at the operands of its order fact and applies the two hypotheses
-# via MP. Equality facts are accepted in either orientation.
-from proof import register_contra_finder
-
-def _ab_of(th):
-    """For a binary-relation theorem ``op a b``, return ``(a, b)``."""
-    return rand(rator(th._concl)), rand(th._concl)
-
-def _orient_eq(h_eq, a, b):
-    l, r = dest_eq(h_eq._concl)
-    if aconv(l, a) and aconv(r, b):
-        return h_eq
-    if aconv(l, b) and aconv(r, a):
-        return SYM(h_eq)
-    raise HolError(
-        f"absurd.auto: equality {pp(h_eq._concl)} does not relate "
-        f"{pp(a)} and {pp(b)}")
-
-def _contra_lt_gt(h_lt, h_gt):
-    a, b = _ab_of(h_lt)
-    return MP(MP(SPECL([a, b], _CONTRA_LT_GT), h_lt), h_gt)
-
-def _contra_lt_eq(h_lt, h_eq):
-    a, b = _ab_of(h_lt)
-    return MP(MP(SPECL([a, b], _CONTRA_LT_EQ), h_lt), _orient_eq(h_eq, a, b))
-
-def _contra_gt_eq(h_gt, h_eq):
-    a, b = _ab_of(h_gt)
-    return MP(MP(SPECL([a, b], _CONTRA_GT_EQ), h_gt), _orient_eq(h_eq, a, b))
-
 # `a < b` and `a >= b` together give F: case-split `>=` into `>` / `=` and
 # defer to the existing strict-vs-strict and strict-vs-equality lemmas.
+@contra_finder
 @proof
 def _CONTRA_LT_GE(p):
     p.goal("!a b. a < b ==> a >= b ==> F")
@@ -815,15 +789,6 @@ def _CONTRA_LT_GE(p):
             p.thus("F").by_match(_CONTRA_LT_GT, "h_lt", "h_gt")
         with p.case("h_eq: a = b"):
             p.thus("F").by_match(_CONTRA_LT_EQ, "h_lt", "h_eq")
-
-def _contra_lt_ge(h_lt, h_ge):
-    a, b = _ab_of(h_lt)
-    return MP(MP(SPECL([a, b], _CONTRA_LT_GE), h_lt), h_ge)
-
-register_contra_finder("<", ">", _contra_lt_gt)
-register_contra_finder("<", "=", _contra_lt_eq)
-register_contra_finder(">", "=", _contra_gt_eq)
-register_contra_finder("<", ">=", _contra_lt_ge)
 
 
 # `~(x <= y) ==> x > y`. Trichotomy excludes the `<` and `=` cases (each

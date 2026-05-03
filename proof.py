@@ -97,6 +97,87 @@ def register_contra_finder(rel_a, rel_b, finder):
         _CONTRA_FINDERS[(rel_b, rel_a)] = lambda x, y: finder(y, x)
 
 
+def contra_finder(thm):
+    """Decorator that registers a ``@proof``-built theorem of shape
+    ``!vs. R1 a b ==> R2 a b ==> F`` as a contradiction finder.
+
+    Reads the relation symbols from the antecedents, discovers the forall
+    substitution by matching the first antecedent against the input fact,
+    and auto-orients an equality second input. Stack on top of ``@proof``
+    to skip the manual ``_ab_of`` / ``_orient_eq`` adapter:
+
+        @contra_finder
+        @proof
+        def _CONTRA_LT_GT(p):
+            p.goal("!a b. a < b ==> a > b ==> F")
+            ...
+
+    Constraint: the first antecedent must uniquely determine the foralls
+    (i.e. its operands are the schematic ``a, b``). For symmetric-shape
+    antecedents like ``a = b``, put the rigid relation first.
+    """
+    vs, body = _strip_forall(thm)
+    parts = dest_imp(body._concl)
+    if parts is None:
+        raise HolError(
+            f"contra_finder: {pp(thm._concl)} is not an implication")
+    ant1, rest = parts
+    parts2 = dest_imp(rest)
+    if parts2 is None or not aconv(parts2[1], F):
+        raise HolError(
+            f"contra_finder: expected '!vs. A1 ==> A2 ==> F', got "
+            f"{pp(thm._concl)}")
+    ant2 = parts2[0]
+
+    def _rel_of(t):
+        c = dest_binop_any(t)
+        if c is None:
+            raise HolError(
+                f"contra_finder: antecedent {pp(t)} is not a binary relation")
+        return c[0]
+
+    rel1 = _rel_of(ant1)
+    rel2 = _rel_of(ant2)
+    vars_set = set(vs)
+
+    def adapter(th_a, th_b):
+        subst = _term_match(ant1, th_a._concl, vars_set, {})
+        if subst is None:
+            raise HolError(
+                f"contra_finder({rel1!r}, {rel2!r}): first fact "
+                f"{pp(th_a._concl)} does not match {pp(ant1)}")
+        if any(v not in subst for v in vs):
+            raise HolError(
+                f"contra_finder({rel1!r}, {rel2!r}): forall vars not "
+                f"determined by first fact {pp(th_a._concl)}")
+        specced = thm
+        for v in vs:
+            specced = SPEC(subst[v], specced)
+        ant2_inst = ant2
+        for v in vs:
+            ant2_inst = subst_term(v, subst[v], ant2_inst)
+        if aconv(th_b._concl, ant2_inst):
+            th_b_use = th_b
+        elif rel2 == "=":
+            l_exp, r_exp = dest_eq(ant2_inst)
+            l_got, r_got = dest_eq(th_b._concl)
+            if aconv(l_got, r_exp) and aconv(r_got, l_exp):
+                th_b_use = SYM(th_b)
+            else:
+                raise HolError(
+                    f"contra_finder({rel1!r}, {rel2!r}): equality "
+                    f"{pp(th_b._concl)} does not relate "
+                    f"{pp(l_exp)} and {pp(r_exp)}")
+        else:
+            raise HolError(
+                f"contra_finder({rel1!r}, {rel2!r}): second fact "
+                f"{pp(th_b._concl)} does not match expected {pp(ant2_inst)}")
+        return MP(MP(specced, th_a), th_b_use)
+
+    register_contra_finder(rel1, rel2, adapter)
+    return thm
+
+
 # ---------------------------------------------------------------------------
 # Induction strategy registry: each entry maps a hol_type to an
 # ``InductionStrategy`` describing the base term, the successor function,
