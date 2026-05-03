@@ -32,8 +32,8 @@ from tactics import (
     REWRITE_RULE,
 )
 from classical import NOT_FORALL_TO_EX_NOT, NOT_EX_TO_FORALL_NOT
-from proof import proof
-from parser import DEFAULT_SIG, parse
+from proof import proof, register_induction, InductionStrategy
+from parser import DEFAULT_SIG, parse, define as _define
 
 
 # ---------------------------------------------------------------------------
@@ -506,7 +506,6 @@ def INDUCT_PROVE(var, body, base, step_fn):
 # Register the natural-number induction strategy with the proof DSL.
 # This is what makes ``p.induction("n")`` work for ``n : num`` without
 # ``proof.py`` needing to import anything from this module.
-from proof import register_induction, InductionStrategy  # noqa: E402
 register_induction(InductionStrategy(
     ty=num_ty,
     base_term=ONE,
@@ -824,8 +823,6 @@ def NUM_RECURSION(p):
 # + the BETA-reduction dance that turns the raw `h n (fn n)` form into the
 # clean step body. Each new recursive operator becomes a one-liner.
 # ---------------------------------------------------------------------------
-
-from parser import define as _define  # noqa: E402
 
 
 def define_recursive(name, fn_ty, x_var, c, h, *, prec=None, assoc="non"):

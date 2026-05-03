@@ -50,7 +50,11 @@ from num import (
     x, y, z, AXIOM_3, AXIOM_4, INDUCTION, define_recursive,
 )
 from parser import define, pp_thm
-from proof import proof
+from proof import (
+    proof,
+    register_unfolder, register_disj_unfolder,
+    contra_finder,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -406,7 +410,6 @@ def UNFOLD_LT(a, b):
 
 # Register with the proof DSL so `p.choose(name, from_=label)` accepts a fact
 # whose conclusion is `> ` or `<`.
-from proof import register_unfolder, register_disj_unfolder  # noqa: E402
 register_unfolder(">", UNFOLD_GT)
 register_unfolder("<", UNFOLD_LT)
 
@@ -719,7 +722,6 @@ def SATZ_25(p):
 # Each takes a pair of order facts as hypotheses; ``@contra_finder`` registers
 # the lemma for ``p.absurd().auto(h1, h2)`` lookup by reading the relation
 # symbols out of its antecedents.
-from proof import contra_finder  # noqa: E402
 
 @contra_finder
 @proof
