@@ -1187,6 +1187,117 @@ class Proof:
         eq_label = eq_label or f"{name}_eq"
         self._register_fact(eq_label, witness_th)
 
+    def _close_disj(self, op, match):
+        """Walk the current frame's right-associated disjunction goal.
+
+        For each leaf (and the disjunction itself), call ``match(leaf)``;
+        it returns either a theorem of ``leaf`` or ``None``. First
+        success is ``DISJ1``/``DISJ2``-chained into the full disjunction,
+        simp-lifted to the original goal shape, and set as the frame
+        result. Shared between ``disj`` and ``disj_witness``.
+        """
+        fr = self._cur
+        if fr.goal is None:
+            raise HolError(f"{op}: no current goal")
+        target = fr.goal
+        target_eq = self.simp_normalize(target)
+        target_norm = rand(target_eq._concl)
+
+        def go(d):
+            m = match(d)
+            if m is not None:
+                return m
+            parts = dest_disj(d)
+            if parts is None:
+                return None
+            p_part, q_part = parts
+            left = go(p_part)
+            if left is not None:
+                return DISJ1(left, q_part)
+            right = go(q_part)
+            if right is not None:
+                return DISJ2(p_part, right)
+            return None
+
+        th = go(target_norm)
+        if th is None:
+            raise HolError(
+                f"{op}: no leaf discharged\n  goal: {pp(target)}")
+        th = self._simp_require(target, th, op=op)
+        self._set_frame_result(self._cur, th)
+        return th
+
+    def disj(self, *rules, ac=None):
+        """Close the current frame's disjunction goal by discharging a leaf
+        directly: a ``rule`` whose conclusion alpha-matches the leaf is
+        used as-is (fact-injection); otherwise the leaf is proved via
+        ``REWRITE_PROVE(rules, leaf, ac=ac)``. With no rules, collapses to
+        ``REFL`` for a tautological leaf.
+
+        Each ``rule`` is a fact label, negative index, or theorem.
+        Replaces ``p.thus(<disj>).by_disj(ref)`` and the ``have eq →
+        by_disj`` two-step.
+        """
+        rules_thms = [self.simp_norm_fact(self._resolve_fact(r))
+                      for r in rules]
+
+        def match(d):
+            for r_th in rules_thms:
+                if aconv(d, r_th._concl):
+                    return r_th
+            try:
+                return REWRITE_PROVE(rules_thms, d, ac=ac)
+            except HolError:
+                return None
+
+        return self._close_disj("disj", match)
+
+    def disj_witness(self, witness, *rules, ac=None):
+        """Close the current frame's disjunction goal by witnessing an
+        existential leaf.
+
+        For each leaf that is ``?w. body[w]`` (directly, or via a
+        registered unfolder for an order-style relation like ``a < b``),
+        attempts to prove ``body[witness/w]`` via ``REWRITE_PROVE(rules,
+        body_at_w, ac=ac)``. The first leaf that succeeds is wrapped via
+        ``EXISTS`` (folding any unfolder back), then ``DISJ1``/``DISJ2``-
+        chained into the full disjunction.
+
+        ``witness`` is parsed in the current scope (so ``case``-bound
+        names are available) or accepted as a kernel term. Each ``rule``
+        is a fact label, negative index, or theorem. Replaces the
+        ``have eq → by_witness → by_disj`` quartet, and the
+        relation-goal ``have eq → by_witness`` two-step when the goal
+        is a single ``a R b`` leaf.
+        """
+        witness_t = (self._parse(witness) if isinstance(witness, str)
+                     else witness)
+        rules_thms = [self._resolve_fact(r) for r in rules]
+
+        def try_existential(d):
+            pred = dest_exists(d)
+            if pred is None:
+                return None
+            body_at_w = subst_term(pred.bvar, witness_t, pred.body)
+            try:
+                body_th = REWRITE_PROVE(rules_thms, body_at_w, ac=ac)
+            except HolError:
+                return None
+            return EXISTS(pred, witness_t, body_th)
+
+        def match(d):
+            ex_th = try_existential(d)
+            if ex_th is not None:
+                return ex_th
+            unfold_eq = _hook(_UNFOLDERS, d)
+            if unfold_eq is not None:
+                ex_th = try_existential(rand(unfold_eq._concl))
+                if ex_th is not None:
+                    return EQ_MP(SYM(unfold_eq), ex_th)
+            return None
+
+        return self._close_disj("disj_witness", match)
+
     def _open_cases(self, ref, target, on_close, args=()):
         or_th = self._resolve_fact(ref)
         if args:

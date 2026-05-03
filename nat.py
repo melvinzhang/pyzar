@@ -109,7 +109,7 @@ def SATZ_3(p):
             p.absurd().by(MP, "imp", REFL(ONE))
         with p.step("IH"):
             p.assume("h: ~(SUC x = 1)")
-            p.thus("?u. SUC x = SUC u").by_witness("x", REFL(mk_suc(x)))
+            p.disj_witness("x")
 
 
 # ---------------------------------------------------------------------------
@@ -319,12 +319,9 @@ def LEMMA_PRED(p):
     p.fix("x")
     with p.induction("x"):
         with p.base():
-            p.have("e: 1 = 1").by_thm(REFL(ONE))
-            p.thus("(1 = 1) \\/ (?u. 1 = SUC u)").by_disj("e")
+            p.disj()
         with p.step("IH"):
-            p.have("ex: ?u. SUC x = SUC u")\
-                .by_witness("x", REFL(mk_suc(x)))
-            p.thus("(SUC x = 1) \\/ (?u. SUC x = SUC u)").by_disj("ex")
+            p.disj_witness("x")
 
 
 # ---------------------------------------------------------------------------
@@ -345,40 +342,22 @@ def SATZ_9(p):
         with p.base():
             with p.cases_on(LEMMA_PRED, "x"):
                 with p.case("hx1: x = 1"):
-                    p.thus("(x = 1) \\/ (?u. x = 1 + u) \\/ (?v. 1 = x + v)")\
-                        .by_disj("hx1")
+                    p.disj("hx1")
                 with p.case("hxs: ?u. x = SUC u"):
-                    p.have("eq: x = 1 + u").by_rewrite(["u_eq", ONE_PLUS])
-                    p.have("ex: ?u. x = 1 + u").by_witness("u", "eq")
-                    p.thus("(x = 1) \\/ (?u. x = 1 + u) \\/ (?v. 1 = x + v)")\
-                        .by_disj("ex")
+                    p.disj_witness("u", "u_eq", ONE_PLUS)
         with p.step("IH"):
             with p.cases_on("IH"):
                 with p.case("h_eq: x = y"):
-                    p.have("eq: SUC y = x + 1").by_rewrite(["h_eq", ADD_1])
-                    p.have("ex: ?v. SUC y = x + v").by_witness("1", "eq")
-                    p.thus("(x = SUC y) \\/ (?u. x = SUC y + u) "
-                           "\\/ (?v. SUC y = x + v)").by_disj("ex")
+                    p.disj_witness("1", "h_eq", ADD_1)
                 with p.case("h_gt: ?u. x = y + u"):
                     with p.cases_on(LEMMA_PRED, "u"):
                         with p.case("u_is_1: u = 1"):
-                            p.have("eq: x = SUC y")\
-                                .by_rewrite(["u_eq", "u_is_1", ADD_1])
-                            p.thus("(x = SUC y) \\/ (?u. x = SUC y + u) "
-                                   "\\/ (?v. SUC y = x + v)").by_disj("eq")
+                            p.disj("u_eq", "u_is_1", ADD_1)
                         with p.case("u_succ: ?w. u = SUC w"):
-                            p.have("eq: x = SUC y + w")\
-                                .by_rewrite(["u_eq", "w_eq",
-                                             ADD_SUC, SUC_PLUS])
-                            p.have("ex: ?u. x = SUC y + u")\
-                                .by_witness("w", "eq")
-                            p.thus("(x = SUC y) \\/ (?u. x = SUC y + u) "
-                                   "\\/ (?v. SUC y = x + v)").by_disj("ex")
+                            p.disj_witness("w", "u_eq", "w_eq",
+                                           ADD_SUC, SUC_PLUS)
                 with p.case("h_lt: ?v. y = x + v"):
-                    p.have("eq: SUC y = x + SUC v").by_rewrite(["v_eq", ADD_SUC])
-                    p.have("ex: ?v. SUC y = x + v").by_witness("SUC v", "eq")
-                    p.thus("(x = SUC y) \\/ (?u. x = SUC y + u) "
-                           "\\/ (?v. SUC y = x + v)").by_disj("ex")
+                    p.disj_witness("SUC v", "v_eq", ADD_SUC)
 
 
 # ---------------------------------------------------------------------------
@@ -473,10 +452,10 @@ def SATZ_13(p):
     with p.have("yx_or: (y < x) \\/ (y = x)").by_cases("h"):
         with p.case("h_gt: x > y"):
             p.have("yx_lt: y < x").by_match(SATZ_11, "h_gt")
-            p.thus("(y < x) \\/ (y = x)").by_disj("yx_lt")
+            p.disj("yx_lt")
         with p.case("h_eq: x = y"):
             p.have("yx_eq: y = x").by(SYM, "h_eq")
-            p.thus("(y < x) \\/ (y = x)").by_disj("yx_eq")
+            p.disj("yx_eq")
     p.thus("y <= x").by_fold("yx_or")
 
 
@@ -488,10 +467,10 @@ def SATZ_14(p):
     with p.have("yx_or: (y > x) \\/ (y = x)").by_cases("h"):
         with p.case("h_lt: x < y"):
             p.have("yx_gt: y > x").by_match(SATZ_12, "h_lt")
-            p.thus("(y > x) \\/ (y = x)").by_disj("yx_gt")
+            p.disj("yx_gt")
         with p.case("h_eq: x = y"):
             p.have("yx_eq: y = x").by(SYM, "h_eq")
-            p.thus("(y > x) \\/ (y = x)").by_disj("yx_eq")
+            p.disj("yx_eq")
     p.thus("y >= x").by_fold("yx_or")
 
 
@@ -504,8 +483,7 @@ def SATZ_15(p):
     p.assume("hxy: x < y", "hyz: y < z")
     p.choose("v: y = x + v", from_="hxy")
     p.choose("w: z = y + w", from_="hyz")
-    p.have("eq: z = x + (v + w)").by_rewrite(["w_eq", "v_eq", SATZ_5])
-    p.thus("x < z").by_witness("v + w", "eq")
+    p.disj_witness("v + w", "w_eq", "v_eq", SATZ_5)
 
 
 # Helpers turning < / = into <= and the analogues, used pervasively in #3.
@@ -578,7 +556,7 @@ def SATZ_17(p):
 def SATZ_18(p):
     p.goal("!x y. x + y > x")
     p.fix("x y")
-    p.thus("x + y > x").by_witness("y", REFL(mk_add(x, y)))
+    p.disj_witness("y")
 
 
 # Theorem 19 (in three pieces -- Landau states it via "respectively"):
@@ -592,9 +570,7 @@ def SATZ_19A(p):
     p.fix("x y z")
     p.assume("h: x > y")
     p.choose("u: x = y + u", from_="h")
-    p.have("eq: x + z = (y + z) + u")\
-        .by_rewrite(["u_eq"], ac=(PLUS, SATZ_5, SATZ_6))
-    p.thus("x + z > y + z").by_witness("u", "eq")
+    p.disj_witness("u", "u_eq", ac=(PLUS, SATZ_5, SATZ_6))
 
 @proof
 def SATZ_19B(p):
@@ -1063,8 +1039,7 @@ def SATZ_32A(p):
     p.fix("x y z")
     p.assume("h: x > y")
     p.choose("u: x = y + u", from_="h")
-    p.have("eq: x * z = y * z + u * z").by_rewrite(["u_eq", RIGHT_DISTRIB])
-    p.thus("x * z > y * z").by_witness("u * z", "eq")
+    p.disj_witness("u * z", "u_eq", RIGHT_DISTRIB)
 
 @proof
 def SATZ_32B(p):
