@@ -38,7 +38,7 @@ from basics import (
 )
 from axioms import (
     T, F, mk_select, mk_forall, mk_not,
-    dest_disj, dest_exists, dest_forall, dest_imp, dest_neg,
+    dest_conj, dest_disj, dest_exists, dest_forall, dest_imp, dest_neg,
     is_conj, is_disj,
 )
 from tactics import (
@@ -840,6 +840,29 @@ class Proof:
                 cur = CONJUNCT2(cur)
 
     def assume(self, *labelled):
+        """Consume the goal's antecedent(s) into facts.
+
+        Each ``labelled`` spec is ``"label"`` or ``"label: term"``. Two
+        modes:
+
+        * **==> chain (default)** — each spec consumes one ``==>`` from
+          the current goal, registering the antecedent as fact ``label``.
+
+        * **/\\ split (auto)** — when ``len(labelled) >= 2`` and the
+          goal is ``ant ==> cons`` with ``ant`` a right-associated
+          conjunction whose ``len(labelled)`` conjuncts each
+          alpha-match the user-supplied terms, the single ``==>`` is
+          consumed once and each conjunct is registered separately
+          (CONJUNCT1/2 chain). Replaces the
+          ``assume("h: A /\\ ..."); split_conj("h", ...)`` pattern.
+          All specs must carry an explicit term so the split is
+          unambiguous.
+        """
+        if len(labelled) >= 2 and self._cur.goal is not None:
+            split = self._try_assume_conj(labelled)
+            if split is not None:
+                return split
+
         for spec in labelled:
             label, term = self._split_label(spec)
             if label is None:
@@ -864,6 +887,56 @@ class Proof:
             term_eq_ant = self._derive_shape_eq(term, ant)
             self._cur.hyps_added.append((label, asm_th, term_eq_ant))
             self._register_fact(label, asm_th)
+
+    def _try_assume_conj(self, labelled):
+        """If the goal antecedent is a right-associated conjunction whose
+        conjuncts each alpha-match a user-supplied term in ``labelled``,
+        consume the single ``==>`` and register each conjunct as a fact.
+
+        Returns ``True`` (success marker) on success, ``None`` to fall
+        through to the ``==>`` chain interpretation."""
+        g = self._cur.goal
+        parts = dest_imp(g)
+        if parts is None:
+            return None
+        ant, cons = parts
+
+        conjuncts = []
+        cur = ant
+        for _ in range(len(labelled) - 1):
+            split = dest_conj(cur)
+            if split is None:
+                return None
+            conjuncts.append(split[0])
+            cur = split[1]
+        conjuncts.append(cur)
+
+        parsed = []
+        for spec, expected in zip(labelled, conjuncts):
+            label, term = self._split_label(spec)
+            if term is None:
+                return None
+            if not aconv(term, expected):
+                return None
+            if label is None:
+                label = self._fresh_label("h")
+            parsed.append((label, term))
+
+        asm_th = ASSUME(ant)
+        term_eq_ant = self._derive_shape_eq(ant, ant)
+        self._cur.hyps_added.append((parsed[0][0], asm_th, term_eq_ant))
+        self._cur.goal = cons
+
+        cur_th = asm_th
+        n = len(parsed)
+        for i, (label, _term) in enumerate(parsed):
+            if i == n - 1:
+                conj_th = cur_th
+            else:
+                conj_th = CONJUNCT1(cur_th)
+                cur_th = CONJUNCT2(cur_th)
+            self._register_fact(label, conj_th)
+        return True
 
     def _derive_shape_eq(self, lhs, rhs):
         """``|- lhs = rhs`` for two simp-equivalent terms. ``REFL`` when

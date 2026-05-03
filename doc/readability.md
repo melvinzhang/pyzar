@@ -313,13 +313,13 @@ exactly what Landau's prose does at sight.
 
 ---
 
-## 9. ADD_UNIQUE / MUL_UNIQUE assume+split ceremony
+## 9. ADD_UNIQUE / MUL_UNIQUE assume+split ceremony — ✅ shipped
 
 **Landau:** the uniqueness halves of Satz 4 / Satz 28 (1.tex:208–233 and
 730–753) state the four hypotheses inline with set-builder prose
 ("a₁ = x', b₁ = x', a_y' = (a_y)', b_y' = (b_y)'") and proceed.
 
-**`nat.py`** (177–192, 1061–1075):
+**`nat.py` (before):**
 
 ```python
 p.assume("h: f 1 = SUC x /\\ (!y. f (SUC y) = SUC (f y)) /\\ "
@@ -330,9 +330,23 @@ p.split_conj("h", "h_f1", "h_fstep", "h_g1", "h_gstep")
 The conjunction shape comes from `define_recursive`'s output spec, which
 is one statement; the split is purely syntactic.
 
-**Fix.** Allow `p.assume("h_f1: f 1 = SUC x", "h_fstep: …", "h_g1: …",
-"h_gstep: …")` to consume an `/\\`-conjunction and bind each conjunct in
-order. Today's multi-arg `p.assume` only handles `==>` chains.
+**Fix landed.** ``p.assume`` now auto-detects when its multi-arg
+invocation describes a conjunction split rather than an ``==>``-chain:
+when the goal antecedent is an N-ary right-associated ``/\\`` whose
+conjuncts each alpha-match the user-supplied terms, the single ``==>``
+is consumed once and ``CONJUNCT1`` / ``CONJUNCT2`` register each
+conjunct as its own fact. The two ``ADD_UNIQUE`` / ``MUL_UNIQUE`` sites
+collapse the assume + ``split_conj`` pair to a single ``p.assume`` call:
+
+```python
+p.assume("h_f1: f 1 = SUC x",
+         "h_fstep: !y. f (SUC y) = SUC (f y)",
+         "h_g1: g 1 = SUC x",
+         "h_gstep: !y. g (SUC y) = SUC (g y)")
+```
+
+The ``==>``-chain semantics is preserved when the antecedent isn't a
+matching conjunction, so existing call sites are unaffected.
 
 ---
 
@@ -353,7 +367,7 @@ benefit):
 6. **`p.set` / auto-unfolding predicate macro** (§4) — flattens SATZ_27.
 7. **`p.cases_on_pred`** (§8) — kills LEMMA_PRED.
 8. **`p.by_contrapositive`** (§7) — restores Landau's actual SATZ_26.
-9. **Conjunctive `p.assume`** (§9) — minor but pervasive.
+9. **Conjunctive `p.assume`** (§9) — ✅ shipped.
 
 The first four would do the most: they hit the proofs whose Landau
 versions are one-liners but whose nat.py versions are 10–30 lines, and
