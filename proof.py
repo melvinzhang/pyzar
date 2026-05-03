@@ -30,8 +30,7 @@ import re
 
 from fusion import (
     Var, Comb, Abs, thm,
-    concl, HolError, ASSUME, EQ_MP, BETA, INST, mk_comb,
-    type_of, TRANS, MK_COMB, ABS, REFL,
+    HolError, ASSUME, EQ_MP, INST, type_of, TRANS, MK_COMB, ABS, REFL,
 )
 from basics import (
     aconv, mk_abs, mk_app, rand, rator, mk_eq, mk_fun_ty, dest_eq, dest_binop_any,
@@ -42,8 +41,8 @@ from axioms import (
     is_conj, is_disj,
 )
 from tactics import (
-    SPEC, GEN, DISCH, MP, MP_LIST, DISJ_CASES, BETA_CONV, BETA_NORM, SYM,
-    AP_TERM, AP_THM, PROVE_HYP, ELIM_EX, CHOOSE_WITNESS, UNFOLD, subst_term,
+    SPEC, GEN, DISCH, MP, MP_LIST, DISJ_CASES, BETA_NORM, SYM,
+    AP_TERM, PROVE_HYP, CHOOSE_WITNESS, UNFOLD, subst_term,
     NOT_INTRO, NOT_ELIM, CONTR, EXISTS, DISJ1, DISJ2,
     CONJUNCT1, CONJUNCT2,
     REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV, BETA_RULE,
@@ -795,7 +794,7 @@ class Proof:
             del self._facts[label]
         if labels:
             drop = set(labels)
-            self._fact_order = [l for l in self._fact_order if l not in drop]
+            self._fact_order = [lbl for lbl in self._fact_order if lbl not in drop]
 
     def coerce(self, x, *, accept=("fact",)):
         """Resolve ``x`` to a theorem or term per the kinds in ``accept``.

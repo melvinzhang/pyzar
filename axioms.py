@@ -184,7 +184,7 @@ INFINITY_AX = new_axiom(
 # Register surface syntax for the operators defined in this module.
 # ---------------------------------------------------------------------------
 
-from parser import DEFAULT_SIG
+from parser import DEFAULT_SIG  # noqa: E402  -- registered after operators are defined
 
 DEFAULT_SIG.add_type("bool", bool_ty)
 DEFAULT_SIG.add_infix("=",   40, mk_eq,  assoc="non")

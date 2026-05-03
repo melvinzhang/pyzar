@@ -199,11 +199,11 @@ def dest_eq(tm: term):
 
 _eq_const = mk_const("=", [])
 
-def mk_eq(l: term, r: term) -> term:
+def mk_eq(lhs: term, r: term) -> term:
     try:
-        ty = type_of(l)
+        ty = type_of(lhs)
         eq_tm = inst([(ty, aty)])(_eq_const)
-        return mk_app(eq_tm, l, r)
+        return mk_app(eq_tm, lhs, r)
     except Exception:
         raise HolError("mk_eq")
 

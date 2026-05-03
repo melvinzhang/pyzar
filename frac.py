@@ -15,39 +15,38 @@ on natural numbers (matching Landau's surface syntax exactly).
 Each Satz is checked by running ``uv run frac.py``.
 """
 from fusion import (
-    Var, Comb,
-    bool_ty, type_of,
-    REFL, TRANS, INST, MK_COMB,
+    Var, bool_ty, REFL, TRANS, MK_COMB,
 )
-from basics import mk_app, mk_const, mk_eq, mk_fun_ty, dest_eq, rator, rand
+from basics import mk_app, mk_const, mk_eq, mk_fun_ty, rand
 from nat import (
-    num_ty, ONE, mk_add, mk_mul, PLUS, TIMES,
+    num_ty, mk_add, mk_mul, PLUS, TIMES,
     x as _xnat,
-    SATZ_5, SATZ_6, SATZ_7, SATZ_9, SATZ_10, SATZ_29, SATZ_30, SATZ_31, RIGHT_DISTRIB,
-    SATZ_32A, SATZ_32B, SATZ_32C, SATZ_33A, SATZ_33B, SATZ_33C,
-    SATZ_15, SATZ_16A, SATZ_16B, SATZ_17, SATZ_18,
-    SATZ_19A, SATZ_19B, SATZ_19C, SATZ_21, SATZ_22A, SATZ_22B, SATZ_23,
-    SATZ_11, SATZ_12, SATZ_13, SATZ_14,
-    GT_TO_GE, EQ_TO_GE, LT_TO_LE, EQ_TO_LE,
+    SATZ_5, SATZ_6, SATZ_10, SATZ_29, SATZ_30, SATZ_31, RIGHT_DISTRIB,
+    SATZ_32A, SATZ_32C, SATZ_33A, SATZ_33B, SATZ_33C,
+    SATZ_15, SATZ_18,
+    SATZ_19C, SATZ_22B, SATZ_11, SATZ_12, EQ_TO_GE,
 )
 from tactics import (
-    AP_TERM, AP_THM, SYM, SPEC, SPECL, GEN, GENL,
-    CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP,
-    DISJ1, DISJ2, NOT_ELIM,
-    REWRITE_RULE, REWRITE_PROVE, AC_PROVE, TRANS_CHAIN,
+    AP_TERM, AP_THM, SYM, SPECL, CONJ, DISJ1, DISJ2, AC_PROVE, TRANS_CHAIN,
     UNFOLD,
 )
-from parser import define, parse, pp_thm, DEFAULT_SIG
+from parser import define, pp_thm
 from proof import proof
 
 
 # Standard Landau variable names for fraction components, all of type num.
-x1 = Var("x1", num_ty); x2 = Var("x2", num_ty)
-y1 = Var("y1", num_ty); y2 = Var("y2", num_ty)
-z1 = Var("z1", num_ty); z2 = Var("z2", num_ty)
-u1 = Var("u1", num_ty); u2 = Var("u2", num_ty)
-v1 = Var("v1", num_ty); v2 = Var("v2", num_ty)
-w1 = Var("w1", num_ty); w2 = Var("w2", num_ty)
+x1 = Var("x1", num_ty)
+x2 = Var("x2", num_ty)
+y1 = Var("y1", num_ty)
+y2 = Var("y2", num_ty)
+z1 = Var("z1", num_ty)
+z2 = Var("z2", num_ty)
+u1 = Var("u1", num_ty)
+u2 = Var("u2", num_ty)
+v1 = Var("v1", num_ty)
+v2 = Var("v2", num_ty)
+w1 = Var("w1", num_ty)
+w2 = Var("w2", num_ty)
 
 
 _n4b = mk_fun_ty(num_ty,
@@ -649,7 +648,9 @@ def SATZ_59(p):
     Ap = mk_mul(mk_mul(x1, mk_mul(y2, z2)), mk_mul(mk_mul(x2, y2), z2))
     Bp = mk_mul(mk_mul(mk_mul(y1, z2), x2), mk_mul(mk_mul(x2, y2), z2))
     Cp = mk_mul(mk_mul(mk_mul(z1, y2), x2), mk_mul(mk_mul(x2, y2), z2))
-    eq_A = _mul_AC(A, Ap); eq_B = _mul_AC(B, Bp); eq_C = _mul_AC(C, Cp)
+    eq_A = _mul_AC(A, Ap)
+    eq_B = _mul_AC(B, Bp)
+    eq_C = _mul_AC(C, Cp)
 
     # LHS distribution: ((x1*y2+y1*x2)*z2 + z1*(x2*y2)) * (x2*(y2*z2)) = A+B+C.
     L_factor = mk_mul(x2, mk_mul(y2, z2))

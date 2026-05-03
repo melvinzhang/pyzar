@@ -5,17 +5,16 @@ from fusion import (
     Abs, Var, mk_comb, type_of,
     concl, hyp, axioms, definitions, get_const_type,
 )
-from basics import mk_const, mk_fun_ty
-import axioms as ax
+from basics import mk_fun_ty
 from axioms import (
-    T, F, mk_and, mk_or, mk_imp, mk_not, mk_forall, mk_exists, mk_select,
+    mk_and, mk_or, mk_imp, mk_not, mk_forall, mk_exists, mk_select,
     is_conj, dest_conj, is_disj, dest_disj, is_imp, dest_imp,
     is_neg, dest_neg, is_forall, dest_forall, is_exists, dest_exists,
     ETA_AX, SELECT_AX, INFINITY_AX,
     T_DEF, AND_DEF, IMP_DEF, FORALL_DEF, EXISTS_DEF, OR_DEF, F_DEF, NOT_DEF,
     ONE_ONE_DEF, ONTO_DEF,
 )
-from parser import DEFAULT_SIG, parse, pp
+from parser import parse, pp
 
 
 class TestBooleanConstants(unittest.TestCase):

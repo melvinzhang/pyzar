@@ -12,16 +12,13 @@ Mirrors `nums.ml` from HOL Light.
 """
 
 from fusion import (
-    Var, Abs, Comb,
-    aty, bool_ty, mk_comb,
-    mk_type, new_constant, new_type,
-    new_basic_definition, new_basic_type_definition,
-    type_of,
-    REFL, TRANS, MK_COMB, ABS, ASSUME, EQ_MP, INST, INST_TYPE, HolError,
+    Var, Abs, aty, bool_ty, mk_comb,
+    mk_type, new_basic_definition, new_basic_type_definition,
+    REFL, TRANS, ASSUME, EQ_MP, INST, INST_TYPE, HolError,
 )
 from basics import (
     bty, mk_abs, mk_app, mk_const, mk_eq, mk_fun_ty,
-    rator, rand, dest_eq,
+    rand,
 )
 from axioms import (
     SELECT_AX, INFINITY_AX, ONE_ONE_DEF, ONTO_DEF,
@@ -29,11 +26,10 @@ from axioms import (
     mk_and, mk_imp, mk_forall, mk_exists, mk_not,
 )
 from tactics import (
-    AP_TERM, AP_THM, BETA_CONV, BETA_NORM, SYM, SPEC, GEN, GENL,
+    AP_TERM, AP_THM, BETA_CONV, SYM, SPEC, GEN, GENL,
     CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP, EXISTS,
-    PROVE_HYP, ELIM_EX, CHOOSE_WITNESS, NOT_ELIM, NOT_INTRO, CONTR,
-    NE_SYM, TRANS_CHAIN, UNFOLD, unfold_def_at,
-    BETA_RULE, REWRITE_RULE,
+    CHOOSE_WITNESS, NOT_ELIM, NE_SYM, TRANS_CHAIN, UNFOLD, unfold_def_at,
+    REWRITE_RULE,
 )
 from classical import NOT_FORALL_TO_EX_NOT, NOT_EX_TO_FORALL_NOT
 from proof import proof
@@ -510,7 +506,7 @@ def INDUCT_PROVE(var, body, base, step_fn):
 # Register the natural-number induction strategy with the proof DSL.
 # This is what makes ``p.induction("n")`` work for ``n : num`` without
 # ``proof.py`` needing to import anything from this module.
-from proof import register_induction, InductionStrategy
+from proof import register_induction, InductionStrategy  # noqa: E402
 register_induction(InductionStrategy(
     ty=num_ty,
     base_term=ONE,
@@ -829,7 +825,7 @@ def NUM_RECURSION(p):
 # clean step body. Each new recursive operator becomes a one-liner.
 # ---------------------------------------------------------------------------
 
-from parser import define as _define
+from parser import define as _define  # noqa: E402
 
 
 def define_recursive(name, fn_ty, x_var, c, h, *, prec=None, assoc="non"):
@@ -898,7 +894,6 @@ def define_recursive(name, fn_ty, x_var, c, h, *, prec=None, assoc="non"):
     sel_step = CONJUNCT2(pc_at_sel_body)                    # |- !n. (@pred_clean) (SUC n) = clean_step[fn:=@pred_clean]
 
     # Connect (@pred_clean) y back to `name x y` via OP_DEF.
-    OP = mk_const(name, [])
     op_at_x = unfold_def_at(OP_DEF, x_var)        # |- name x = \y. (@pred_clean) y
 
     op_at_x_at_1 = unfold_def_at(op_at_x, ONE)

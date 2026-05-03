@@ -14,7 +14,7 @@ from nat import (
 )
 from num import ONE, num_ty, SUC_DEF
 from fusion import (
-    bool_ty, Var, ASSUME, EQ_MP, REFL, MK_COMB, concl,
+    bool_ty, Var, ASSUME, EQ_MP, REFL, concl,
     mk_comb, HolError,
 )
 from basics import aconv, mk_app, mk_eq, mk_fun_ty, mk_var

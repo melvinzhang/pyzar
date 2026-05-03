@@ -48,9 +48,9 @@ class TestKernelSanity(unittest.TestCase):
         x = mk_var("x", bool_ty)
         redex = mk_comb(mk_abs(x, mk_comb(f, x)), x)   # (\x. f x) x
         beta_th = BETA(redex)                          # |- (\x. f x) x = f x
-        l, r = dest_eq(concl(beta_th))
-        self.assertEqual(l, redex)
-        self.assertEqual(r, mk_comb(f, x))
+        lhs, rhs = dest_eq(concl(beta_th))
+        self.assertEqual(lhs, redex)
+        self.assertEqual(rhs, mk_comb(f, x))
         # Chain BETA with REFL via TRANS — middle terms must alpha-match.
         chained = TRANS(beta_th, REFL(mk_comb(f, x)))
         self.assertTrue(aconv(concl(chained), concl(beta_th)))
@@ -601,9 +601,9 @@ class TestEqSyntax(unittest.TestCase):
 
     def test_dest_eq(self):
         eq = mk_eq(self.x, self.y)
-        l, r = dest_eq(eq)
-        self.assertEqual(l, self.x)
-        self.assertEqual(r, self.y)
+        lhs, rhs = dest_eq(eq)
+        self.assertEqual(lhs, self.x)
+        self.assertEqual(rhs, self.y)
 
     def test_dest_eq_non_eq_raises(self):
         with self.assertRaises(Exception):
@@ -707,9 +707,9 @@ class TestTRANS(unittest.TestCase):
         th1 = ASSUME(mk_eq(self.x, self.y))   # {x=y} |- x=y
         th2 = ASSUME(mk_eq(self.y, self.z))   # {y=z} |- y=z
         th = TRANS(th1, th2)
-        l, r = dest_eq(concl(th))
-        self.assertEqual(l, self.x)
-        self.assertEqual(r, self.z)
+        lhs, rhs = dest_eq(concl(th))
+        self.assertEqual(lhs, self.x)
+        self.assertEqual(rhs, self.z)
 
     def test_trans_merges_hypotheses(self):
         th1 = ASSUME(mk_eq(self.x, self.y))
@@ -744,9 +744,9 @@ class TestTRANS(unittest.TestCase):
         th1 = ASSUME(mk_eq(f, abs1))    # {f=\a.a} |- f=\a.a
         th2 = ASSUME(mk_eq(abs2, g))    # {\b.b=g} |- \b.b=g
         th = TRANS(th1, th2)
-        l, r = dest_eq(concl(th))
-        self.assertEqual(l, f)
-        self.assertEqual(r, g)
+        lhs, rhs = dest_eq(concl(th))
+        self.assertEqual(lhs, f)
+        self.assertEqual(rhs, g)
 
 
 # ---------------------------------------------------------------------------
@@ -773,9 +773,9 @@ class TestMK_COMB(unittest.TestCase):
         th1 = ASSUME(mk_eq(self.f, self.g))
         th2 = ASSUME(mk_eq(self.x, self.y))
         th = MK_COMB(th1, th2)
-        l, r = dest_eq(concl(th))
-        self.assertEqual(l, mk_comb(self.f, self.x))
-        self.assertEqual(r, mk_comb(self.g, self.y))
+        lhs, rhs = dest_eq(concl(th))
+        self.assertEqual(lhs, mk_comb(self.f, self.x))
+        self.assertEqual(rhs, mk_comb(self.g, self.y))
 
     def test_mk_comb_merges_hypotheses(self):
         th1 = ASSUME(mk_eq(self.f, self.g))
@@ -814,9 +814,9 @@ class TestABS(unittest.TestCase):
     def test_abs_refl(self):
         # |- y=y  =>  |- (\x.y) = (\x.y)
         th = ABS(self.x, REFL(self.y))
-        l, r = dest_eq(concl(th))
-        self.assertEqual(l, mk_abs(self.x, self.y))
-        self.assertEqual(r, mk_abs(self.x, self.y))
+        lhs, rhs = dest_eq(concl(th))
+        self.assertEqual(lhs, mk_abs(self.x, self.y))
+        self.assertEqual(rhs, mk_abs(self.x, self.y))
         self.assertEqual(hyp(th), [])
 
     def test_abs_with_body_equation(self):
@@ -824,9 +824,9 @@ class TestABS(unittest.TestCase):
         z = mk_var("z", bool_ty)
         th_eq = ASSUME(mk_eq(self.x, self.y))   # {x=y} |- x=y
         th = ABS(z, th_eq)
-        l, r = dest_eq(concl(th))
-        self.assertEqual(l, mk_abs(z, self.x))
-        self.assertEqual(r, mk_abs(z, self.y))
+        lhs, rhs = dest_eq(concl(th))
+        self.assertEqual(lhs, mk_abs(z, self.x))
+        self.assertEqual(rhs, mk_abs(z, self.y))
 
     def test_abs_preserves_hypotheses(self):
         z = mk_var("z", bool_ty)
@@ -864,17 +864,17 @@ class TestBETA(unittest.TestCase):
         # (\x.x) x  =>  |- (\x.x) x = x
         tm = mk_comb(mk_abs(self.x, self.x), self.x)
         th = BETA(tm)
-        l, r = dest_eq(concl(th))
-        self.assertEqual(l, tm)
-        self.assertEqual(r, self.x)
+        lhs, rhs = dest_eq(concl(th))
+        self.assertEqual(lhs, tm)
+        self.assertEqual(rhs, self.x)
         self.assertEqual(hyp(th), [])
 
     def test_beta_constant_body(self):
         # (\x.y) x  =>  |- (\x.y) x = y
         tm = mk_comb(mk_abs(self.x, self.y), self.x)
         th = BETA(tm)
-        l, r = dest_eq(concl(th))
-        self.assertEqual(r, self.y)
+        _, rhs = dest_eq(concl(th))
+        self.assertEqual(rhs, self.y)
 
     def test_beta_non_trivial_raises(self):
         # (\x.x) y  where y ≠ x — not a trivial redex
@@ -998,9 +998,9 @@ class TestDEDUCT_ANTISYM_RULE(unittest.TestCase):
         th1 = ASSUME(self.p)
         th2 = ASSUME(self.q)
         th = DEDUCT_ANTISYM_RULE(th1, th2)
-        l, r = dest_eq(concl(th))
-        self.assertEqual(l, self.p)
-        self.assertEqual(r, self.q)
+        lhs, rhs = dest_eq(concl(th))
+        self.assertEqual(lhs, self.p)
+        self.assertEqual(rhs, self.q)
 
     def test_cancels_conclusions_from_hypotheses(self):
         # If concl(th2)=q is in hyp(th1), it gets removed, and vice versa
@@ -1036,9 +1036,9 @@ class TestDEDUCT_ANTISYM_RULE(unittest.TestCase):
         th1 = ASSUME(self.p)
         th2 = ASSUME(self.p)   # same term both sides
         th = DEDUCT_ANTISYM_RULE(th1, th2)
-        l, r = dest_eq(concl(th))
-        self.assertEqual(l, r)
-        self.assertEqual(l, self.p)
+        lhs, rhs = dest_eq(concl(th))
+        self.assertEqual(lhs, rhs)
+        self.assertEqual(lhs, self.p)
         # p appears as concl of th2 and is removed from hyp(th1)=[p]
         self.assertEqual(hyp(th), [])
 
@@ -1077,8 +1077,8 @@ class TestINST_TYPE(unittest.TestCase):
         ab = mk_abs(x_a, x_b_var)   # \(x:A). (y:B)  : A->B
         th = REFL(ab)
         th2 = INST_TYPE([(bool_ty, aty), (bool_ty, b)], th)
-        l, _ = dest_eq(concl(th2))
-        bv, body = dest_abs(l)
+        lhs, _ = dest_eq(concl(th2))
+        bv, body = dest_abs(lhs)
         self.assertEqual(bv.ty, bool_ty)
         self.assertEqual(body.ty, bool_ty)
 
@@ -1120,13 +1120,12 @@ class TestINST(unittest.TestCase):
         eq = mk_eq(self.x, self.y)
         th = ASSUME(eq)   # {x=y} |- x=y
         th2 = INST([(self.z, self.x), (self.x, self.y)], th)
-        l, r = dest_eq(concl(th2))
-        self.assertEqual(l, self.z)
-        self.assertEqual(r, self.x)
+        lhs, rhs = dest_eq(concl(th2))
+        self.assertEqual(lhs, self.z)
+        self.assertEqual(rhs, self.x)
 
     def test_inst_does_not_capture(self):
         # |- (\y. x) = (\y. x) ; replace x with y should rename binder
-        f_ty = mk_fun_ty(bool_ty, bool_ty)
         ab = mk_abs(self.y, self.x)   # \y. x
         th = REFL(ab)
         th2 = INST([(self.y, self.x)], th)
@@ -1185,9 +1184,9 @@ class TestDefinitions(KernelStateTestCase):
         defn_tm = mk_eq(mk_var("myid", ty), rhs)
         th = new_basic_definition(defn_tm)
         self.assertEqual(hyp(th), [])
-        l, r = dest_eq(concl(th))
-        self.assertIsInstance(l, Const)
-        self.assertEqual(l.name, "myid")
+        lhs, r = dest_eq(concl(th))
+        self.assertIsInstance(lhs, Const)
+        self.assertEqual(lhs.name, "myid")
         self.assertEqual(r, rhs)
 
     def test_new_basic_definition_appears_in_definitions(self):
@@ -1204,7 +1203,6 @@ class TestDefinitions(KernelStateTestCase):
 
     def test_new_basic_definition_open_term_raises(self):
         y = mk_var("y", bool_ty)
-        x = mk_var("x", bool_ty)
         # rhs contains free variable y
         defn_tm = mk_eq(mk_var("myfn", bool_ty), y)
         with self.assertRaises(Exception):
@@ -1240,19 +1238,19 @@ class TestNewBasicTypeDefinition(KernelStateTestCase):
         ex, P, w = self._build_existence_thm()
         th1, th2 = new_basic_type_definition("myty2", ("myabs2", "myrep2"), ex)
         self.assertEqual(hyp(th1), [])
-        l, r = dest_eq(concl(th1))
-        # l = abs(rep a), r = a
-        self.assertIsInstance(r, Var)
-        self.assertEqual(r.name, "a")
+        lhs, rhs = dest_eq(concl(th1))
+        # lhs = abs(rep a), rhs = a
+        self.assertIsInstance(rhs, Var)
+        self.assertEqual(rhs.name, "a")
 
     def test_th2_rep_abs_characterisation(self):
         # th2: |- P r = (rep(abs r) = r)
         ex, P, w = self._build_existence_thm()
         th1, th2 = new_basic_type_definition("myty3", ("myabs3", "myrep3"), ex)
         self.assertEqual(hyp(th2), [])
-        l, r = dest_eq(concl(th2))
-        # l = P r
-        self.assertIsInstance(l, Comb)
+        lhs, _rhs = dest_eq(concl(th2))
+        # lhs = P r
+        self.assertIsInstance(lhs, Comb)
 
     def test_registers_new_type(self):
         ex, P, w = self._build_existence_thm()

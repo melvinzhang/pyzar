@@ -373,10 +373,10 @@ def inst(tyin: list) -> Callable[[term], term]:
 # Equality construction (kernel-internal: bypasses type_of for performance)
 # ---------------------------------------------------------------------------
 
-def safe_mk_eq(l: term, r: term) -> term:
-    ty = type_of(l)
+def safe_mk_eq(lhs: term, r: term) -> term:
+    ty = type_of(lhs)
     eq = Const("=", Tyapp("fun", (ty, Tyapp("fun", (ty, bool_ty)))))
-    return Comb(Comb(eq, l), r)
+    return Comb(Comb(eq, lhs), r)
 
 # ---------------------------------------------------------------------------
 # Alpha ordering

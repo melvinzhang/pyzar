@@ -549,6 +549,7 @@ def define(name, ty, body, *, sig=None, prec=None, assoc=None):
         if assoc is None:
             raise ValueError(
                 f"define({name!r}): prec given but assoc missing")
-        builder = lambda a, b: mk_app(const, a, b)
+        def builder(a, b):
+            return mk_app(const, a, b)
         sig.add_infix(name, prec, builder, assoc=assoc)
     return def_th

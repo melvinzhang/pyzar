@@ -33,39 +33,23 @@ Coverage:
 """
 
 from fusion import (
-    Var, Comb, Abs,
-    bool_ty, aty,
-    HolError,
-    REFL, TRANS, MK_COMB, ABS, BETA, ASSUME, EQ_MP,
-    DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
-    hyp,
+    Var, bool_ty, REFL, EQ_MP,
 )
 from basics import (
     mk_abs, mk_app, mk_const, mk_eq, mk_fun_ty,
-    dest_eq, aconv,
-    rator, rand,
-)
-from axioms import (
-    F,
-    mk_and, mk_or, mk_imp, mk_forall, mk_exists, mk_not, mk_select,
+    dest_eq, rator, rand,
 )
 from tactics import (
-    BETA_CONV, SYM, UNFOLD,
-    SPEC, GEN, CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP,
-    CONTR, NOT_ELIM, NOT_INTRO, NOT_CONST,
-    DISJ1, DISJ2, DISJ_CASES,
-    NE_SYM, EXISTS,
-    SPECL, GENL, DISCHL, TRANS_CHAIN, CASE_OR,
-    AC_PROVE, AC_NORM,
+    SYM, UNFOLD,
+    SPEC, GEN, CONJ, CONJUNCT1, CONJUNCT2, MP,
+    NOT_ELIM, DISJ1, DISJ2, NE_SYM, SPECL, GENL,
 )
-from classical import EXCLUDED_MIDDLE, NOT_NOT_ELIM, NOT_EX_TO_FORALL_NOT
+from classical import EXCLUDED_MIDDLE, NOT_EX_TO_FORALL_NOT
 from num import (
-    num_ty, ONE, SUC, mk_suc,
-    x, y, z, u, v, w, P,
-    AXIOM_3, AXIOM_4, INDUCTION, INDUCT,
-    define_recursive,
+    num_ty, ONE, mk_suc,
+    x, y, z, AXIOM_3, AXIOM_4, INDUCTION, define_recursive,
 )
-from parser import pp, define, pp_thm
+from parser import define, pp_thm
 from proof import proof
 
 
@@ -422,7 +406,7 @@ def UNFOLD_LT(a, b):
 
 # Register with the proof DSL so `p.choose(name, from_=label)` accepts a fact
 # whose conclusion is `> ` or `<`.
-from proof import register_unfolder, register_disj_unfolder
+from proof import register_unfolder, register_disj_unfolder  # noqa: E402
 register_unfolder(">", UNFOLD_GT)
 register_unfolder("<", UNFOLD_LT)
 
@@ -524,7 +508,8 @@ def SATZ_15(p):
 # Helpers turning < / = into <= and the analogues, used pervasively in #3.
 
 def LT_TO_LE(th_lt):
-    a = rand(rator(th_lt._concl)); b = rand(th_lt._concl)
+    a = rand(rator(th_lt._concl))
+    b = rand(th_lt._concl)
     return EQ_MP(SYM(UNFOLD_LE(a, b)), DISJ1(th_lt, mk_eq(a, b)))
 
 def EQ_TO_LE(th_eq):
@@ -532,7 +517,8 @@ def EQ_TO_LE(th_eq):
     return EQ_MP(SYM(UNFOLD_LE(a, b)), DISJ2(mk_lt(a, b), th_eq))
 
 def GT_TO_GE(th_gt):
-    a = rand(rator(th_gt._concl)); b = rand(th_gt._concl)
+    a = rand(rator(th_gt._concl))
+    b = rand(th_gt._concl)
     return EQ_MP(SYM(UNFOLD_GE(a, b)), DISJ1(th_gt, mk_eq(a, b)))
 
 def EQ_TO_GE(th_eq):
@@ -733,7 +719,7 @@ def SATZ_25(p):
 # Each takes a pair of order facts as hypotheses; ``@contra_finder`` registers
 # the lemma for ``p.absurd().auto(h1, h2)`` lookup by reading the relation
 # symbols out of its antecedents.
-from proof import contra_finder
+from proof import contra_finder  # noqa: E402
 
 @contra_finder
 @proof

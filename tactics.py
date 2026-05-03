@@ -28,7 +28,7 @@ from fusion import (
     variant,
     REFL, TRANS, MK_COMB, ABS, BETA, ASSUME, EQ_MP,
     DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
-    concl, hyp, HolError,
+    HolError,
 )
 from basics import (
     bty, mk_abs, mk_app, mk_const, mk_eq, mk_fun_ty, dest_eq,
@@ -39,7 +39,7 @@ from axioms import (
     T_DEF, AND_DEF, OR_DEF, IMP_DEF, FORALL_DEF, EXISTS_DEF, F_DEF, NOT_DEF,
     SELECT_AX, ETA_AX,
     dest_forall, is_imp,
-    mk_and, mk_or, mk_imp, mk_forall, mk_exists, mk_not, mk_select,
+    mk_and, mk_imp, mk_forall, mk_select,
 )
 
 
@@ -364,7 +364,8 @@ def _all_vars(tm):
             if t not in seen:
                 seen.append(t)
         elif isinstance(t, Comb):
-            rec(t.fun); rec(t.arg)
+            rec(t.fun)
+            rec(t.arg)
         elif isinstance(t, Abs):
             if t.bvar not in seen:
                 seen.append(t.bvar)
