@@ -47,7 +47,7 @@ from tactics import (
     AP_TERM, PROVE_HYP, CHOOSE_WITNESS, UNFOLD, subst_term,
     NOT_INTRO, NOT_ELIM, CONTR, EXISTS, DISJ1, DISJ2,
     CONJUNCT1, CONJUNCT2,
-    REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV, BETA_RULE,
+    REWRITE_PROVE, REWRITE_CONV,
     AC_PROVE,
     _strip_forall, _term_match,
 )
@@ -58,27 +58,46 @@ from parser import (
 
 
 # ---------------------------------------------------------------------------
-# Unfolder registry: each entry maps a relation symbol (e.g. ">", "<") to
-# a function ``unfold(a, b) -> |- (op a b) = (?v. body)``. Modules that
-# introduce a relation can register here so ``p.choose(...)`` can be invoked
-# directly on facts of that relation.
+# Relation registry: each entry maps a relation symbol (e.g. ">", "<=") to
+# a ``RelationDef`` describing its unfold target. Two kinds:
+#
+#   "exists" -- unfold to ``?v. body``. Consumed by ``choose``,
+#               ``by_witness``, ``disj_witness``.
+#   "disj"   -- unfold to ``left \/ right``. Consumed by ``cases_on``.
+#
+# ``by_fold`` accepts either kind and folds the equation back through
+# ``SYM`` to re-introduce the relation. The ``register_unfolder`` /
+# ``register_disj_unfolder`` entry points are the user-facing API; both
+# route to ``_RELATIONS`` so a single ``_lookup_relation`` call can serve
+# every consumer (with an optional ``kind=`` filter for shape-discriminating
+# call sites).
 # ---------------------------------------------------------------------------
 
-_UNFOLDERS = {}
+@dataclasses.dataclass
+class RelationDef:
+    op: str
+    kind: str   # "exists" | "disj"
+    unfold: object   # (a, b) -> |- (op a b) = body
+
+
+_RELATIONS = {}   # op_name -> RelationDef
+
+
+def register_relation(rel):
+    """Register a binary relation's unfolder. ``rel`` is a ``RelationDef``."""
+    _RELATIONS[rel.op] = rel
+
 
 def register_unfolder(op_name, unfold_fn):
-    _UNFOLDERS[op_name] = unfold_fn
+    """Register an existential-shape unfolder for ``op_name``:
+    ``unfold_fn(a, b) -> |- (op_name a b) = (?v. body)``."""
+    register_relation(RelationDef(op_name, "exists", unfold_fn))
 
-
-# Parallel registry for disjunction-shaped unfolders (e.g. ``>=``, ``<=``):
-# each entry maps a relation symbol to a function ``unfold(a, b) -> |- (op a
-# b) = (left \/ right)``. ``cases_on`` consults this so it can take a fact of
-# the form ``a R b`` directly and case-split on the unfolded disjunction.
-
-_DISJ_UNFOLDERS = {}
 
 def register_disj_unfolder(op_name, unfold_fn):
-    _DISJ_UNFOLDERS[op_name] = unfold_fn
+    """Register a disjunction-shape unfolder for ``op_name``:
+    ``unfold_fn(a, b) -> |- (op_name a b) = (left \\/ right)``."""
+    register_relation(RelationDef(op_name, "disj", unfold_fn))
 
 
 # Contradiction-finder registry: each entry maps an unordered pair of
@@ -221,18 +240,19 @@ def register_induction(strategy):
     _INDUCTION_STRATEGIES[strategy.ty] = strategy
 
 
-def _hook(registry, term):
-    """If ``term`` is ``op a b`` for some ``op`` registered in ``registry``,
-    return ``registry[op](a, b)``; else ``None``. Unifies the
-    classify-then-apply pattern over the relation-hook registries."""
+def _lookup_relation(term, kind=None):
+    """If ``term`` is ``op a b`` for a registered relation that matches
+    the optional ``kind`` filter (``"exists"`` / ``"disj"``), return the
+    unfolding equation ``|- (op a b) = body``; else ``None``. Single
+    classify-then-apply path for every consumer of ``_RELATIONS``."""
     parts = dest_binop_any(term)
     if parts is None:
         return None
     op_name, a, b = parts
-    fn = registry.get(op_name)
-    if fn is None:
+    rel = _RELATIONS.get(op_name)
+    if rel is None or (kind is not None and rel.kind != kind):
         return None
-    return fn(a, b)
+    return rel.unfold(a, b)
 
 
 # ---------------------------------------------------------------------------
@@ -568,19 +588,6 @@ class Proof:
         eq2 = self.simp_normalize(t2)
         return aconv(rand(eq1._concl), rand(eq2._concl))
 
-    def simp_bridge(self, src, tgt):
-        """Return ``|- src = tgt`` if the two terms are simp-equivalent,
-        else ``None``. Builds the bridge as
-        ``TRANS(simp_normalize(src), SYM(simp_normalize(tgt)))`` after
-        verifying their normal forms ``aconv``. The returned equation
-        carries the simp-rule hypotheses (lazy-let local equations);
-        downstream consumers discharge them on frame close."""
-        eq1 = self.simp_normalize(src)
-        eq2 = self.simp_normalize(tgt)
-        if not aconv(rand(eq1._concl), rand(eq2._concl)):
-            return None
-        return TRANS(eq1, SYM(eq2))
-
     def materialize_let(self, th, name):
         """Substitute the named lazy-let carrier with its ``\\args. body``
         abstraction in ``th`` and BETA-normalize the result, returning a
@@ -656,6 +663,36 @@ class Proof:
             f"{op}: shape does not match\n"
             f"  expected: {pp(target)}\n"
             f"  got:      {pp(th._concl)}")
+
+    def _apply_chain(self, justification, args, *, simp, op):
+        """Drive the ``thm | callable | fact-ref`` dispatch shared by
+        ``_Have.by`` and ``_Absurd.by``.
+
+        - ``str``/``int`` ``justification`` is resolved via ``coerce``.
+        - ``thm``: walk ``args`` left-to-right, dispatching ``term -> SPEC``,
+          ``thm -> MP``. With ``simp=True``, the head is ``simp_norm_fact``-ed
+          and each MP goes through ``simp_mp`` (folded/unfolded bridging);
+          with ``simp=False``, the chain is the literal ``MP_LIST`` shape.
+        - ``callable``: invoked on the resolved args (each via ``coerce``
+          with ``accept_term=True``).
+        - anything else raises with an ``op``-prefixed message.
+        """
+        if isinstance(justification, (str, int)):
+            justification = self.coerce(justification)
+        if isinstance(justification, thm):
+            th = self.simp_norm_fact(justification) if simp else justification
+            for a in args:
+                resolved = self.coerce(a, accept_term=True)
+                if isinstance(resolved, thm):
+                    th = self.simp_mp(th, resolved) if simp else MP(th, resolved)
+                else:
+                    th = SPEC(resolved, th)
+            return th
+        if callable(justification):
+            resolved = [self.coerce(a, accept_term=True) for a in args]
+            return justification(*resolved)
+        raise HolError(
+            f"{op}: not a theorem or callable: {justification!r}")
 
     def _close_frame(self, fr, th):
         """Discharge a frame's accumulated bindings into ``th``.
@@ -1225,9 +1262,9 @@ class Proof:
         src_th = self.coerce(from_)
         c = src_th._concl
 
-        # If src is a relation registered with an unfolder, unfold to
-        # existential first.
-        unfold_eq = _hook(_UNFOLDERS, c)
+        # If src is a relation registered with an existential unfolder,
+        # unfold first.
+        unfold_eq = _lookup_relation(c, kind="exists")
         ex_th = EQ_MP(unfold_eq, src_th) if unfold_eq is not None else src_th
 
         # ex_th's conclusion must now be `?v. body`.
@@ -1270,19 +1307,18 @@ class Proof:
         eq_label = eq_label or f"{name}_eq"
         self._register_fact(eq_label, witness_th)
 
-    def _close_disj(self, op, match):
-        """Walk the current frame's right-associated disjunction goal.
+    def _build_disj(self, target, match, op):
+        """Walk ``target``'s right-associated disjunction.
 
         For each leaf (and the disjunction itself), call ``match(leaf)``;
-        it returns either a theorem of ``leaf`` or ``None``. First
-        success is ``DISJ1``/``DISJ2``-chained into the full disjunction,
-        simp-lifted to the original goal shape, and set as the frame
-        result. Shared between ``disj`` and ``disj_witness``.
+        it returns either a theorem of ``leaf`` or ``None``. First success
+        is ``DISJ1``/``DISJ2``-chained back into the full disjunction and
+        simp-lifted to ``target``'s original shape. Raises ``HolError``
+        when no leaf can be discharged. Shared by ``_close_disj`` (which
+        operates on the current frame's goal and writes ``fr.result``) and
+        ``_Have.by_disj`` (which operates on the have-term and feeds the
+        result through ``_finish``).
         """
-        fr = self._cur
-        if fr.goal is None:
-            raise HolError(f"{op}: no current goal")
-        target = fr.goal
         target_eq = self.simp_normalize(target)
         target_norm = rand(target_eq._concl)
 
@@ -1306,9 +1342,52 @@ class Proof:
         if th is None:
             raise HolError(
                 f"{op}: no leaf discharged\n  goal: {pp(target)}")
-        th = self._simp_require(target, th, op=op)
+        return self._simp_require(target, th, op=op)
+
+    def _close_disj(self, op, match):
+        """Walk the current frame's right-associated disjunction goal,
+        delegating to ``_build_disj``. The first match is set as the
+        frame's result. Shared between ``disj`` and ``disj_witness``."""
+        fr = self._cur
+        if fr.goal is None:
+            raise HolError(f"{op}: no current goal")
+        th = self._build_disj(fr.goal, match, op)
         self._cur.result = th
         return th
+
+    def _make_existential(self, target, witness, body_provider):
+        """Build a theorem of ``target`` from a body-proof provider.
+
+        Recognizes ``target`` as ``?v. body[v]`` directly, or as a relation
+        registered with ``register_unfolder`` whose unfolded form is
+        existential. ``body_provider(body_at_w) -> thm | None`` produces a
+        theorem whose conclusion is ``body[witness/v]``, or ``None`` to
+        signal the body couldn't be proved (caller treats the failure as a
+        non-match). Returns ``None`` when ``target`` is not an existential
+        / unfoldable-to-existential relation; lets ``body_provider``'s own
+        exceptions propagate for callers that want raise-on-mismatch.
+
+        Shared by ``_Have.by_witness`` (body proof = supplied fact lifted
+        via simp) and ``disj_witness`` (body proof = ``REWRITE_PROVE``).
+        """
+        pred = dest_exists(target)
+        if pred is not None:
+            body_at_w = subst_term(pred.bvar, witness, pred.body)
+            body_th = body_provider(body_at_w)
+            if body_th is None:
+                return None
+            return EXISTS(pred, witness, body_th)
+        unfold_eq = _lookup_relation(target, kind="exists")
+        if unfold_eq is not None:
+            ex_pred = dest_exists(rand(unfold_eq._concl))
+            if ex_pred is None:
+                return None
+            body_at_w = subst_term(ex_pred.bvar, witness, ex_pred.body)
+            body_th = body_provider(body_at_w)
+            if body_th is None:
+                return None
+            return EQ_MP(SYM(unfold_eq), EXISTS(ex_pred, witness, body_th))
+        return None
 
     def disj(self, *rules, ac=None):
         """Close the current frame's disjunction goal by discharging a leaf
@@ -1359,27 +1438,14 @@ class Proof:
         rules_thms = ([self.coerce(r) for r in rules]
                       + self._active_simp_rules())
 
-        def try_existential(d):
-            pred = dest_exists(d)
-            if pred is None:
-                return None
-            body_at_w = subst_term(pred.bvar, witness_t, pred.body)
+        def body_provider(body_at_w):
             try:
-                body_th = REWRITE_PROVE(rules_thms, body_at_w, ac=ac)
+                return REWRITE_PROVE(rules_thms, body_at_w, ac=ac)
             except HolError:
                 return None
-            return EXISTS(pred, witness_t, body_th)
 
         def match(d):
-            ex_th = try_existential(d)
-            if ex_th is not None:
-                return ex_th
-            unfold_eq = _hook(_UNFOLDERS, d)
-            if unfold_eq is not None:
-                ex_th = try_existential(rand(unfold_eq._concl))
-                if ex_th is not None:
-                    return EQ_MP(SYM(unfold_eq), ex_th)
-            return None
+            return self._make_existential(d, witness_t, body_provider)
 
         return self._close_disj("disj_witness", match)
 
@@ -1391,7 +1457,7 @@ class Proof:
         c = or_th._concl
         # If the source is a relation registered with a disjunction unfolder
         # (e.g. ``>=``, ``<=``), unfold to the disjunction first.
-        unfold_eq = _hook(_DISJ_UNFOLDERS, c)
+        unfold_eq = _lookup_relation(c, kind="disj")
         if unfold_eq is not None:
             or_th = EQ_MP(unfold_eq, or_th)
             c = or_th._concl
@@ -1581,25 +1647,13 @@ class _Have:
           a fact label or negative index.
         - ``callable + args``: each arg is resolved as a fact (string label,
           negative index, or theorem); the callable is invoked on them.
+
+        The thm-chain is simp-aware: the head is ``simp_norm_fact``-ed and
+        each MP goes through ``simp_mp`` so folded/unfolded forms bridge
+        across the chain.
         """
-        if isinstance(justification, (str, int)):
-            justification = self.p.coerce(justification)
-        if isinstance(justification, thm):
-            # Pattern B: simp-normalize the justification so SPECs find a
-            # forall to peel; Pattern A on each MP step via simp_mp.
-            th = self.p.simp_norm_fact(justification)
-            for a in args:
-                resolved = self.p.coerce(a, accept_term=True)
-                if isinstance(resolved, thm):
-                    th = self.p.simp_mp(th, resolved)
-                else:
-                    th = SPEC(resolved, th)
-            return self._finish(th)
-        if callable(justification):
-            resolved = [self.p.coerce(a, accept_term=True) for a in args]
-            return self._finish(justification(*resolved))
-        raise HolError(
-            f"by: not a theorem or callable: {justification!r}")
+        return self._finish(
+            self.p._apply_chain(justification, args, simp=True, op="by"))
 
     def by_match(self, justification, *args):
         """Backward-chaining variant of ``by``: infer SPEC instantiations
@@ -1708,7 +1762,7 @@ class _Have:
             ac=ac,
             ac_rules=tuple(self._resolved(ac_rules))))
 
-    def by_rewrite_of(self, ref, rules, *, ac=None):
+    def by_rewrite_of(self, ref, rules, *, ac=None, beta=False, op="by_rewrite_of"):
         """Rewrite a source fact ``ref`` to the have-term using ``rules``.
 
         Both the source's conclusion and the have-term are normalized
@@ -1730,6 +1784,11 @@ class _Have:
         replaces a hand-built list of ``SPECL([z, y], SATZ_29)``-style
         commutativity rewrites that would otherwise be needed to align
         the source's and target's product orderings.
+
+        With ``beta=True``, BETA-normalize both rewritten ends before
+        the aconv check -- needed when ``rules`` unfold a definition
+        whose body contains a lambda (e.g. ``FEQ_DEF: |- feq = \\a b c
+        d. ...``). ``by_unfold`` delegates here with ``beta=True``.
         """
         p = self.p
         th_src = p.coerce(ref)
@@ -1748,11 +1807,14 @@ class _Have:
         tgt_n = rand(tgt_simp._concl)
         eq_src_rw = REWRITE_CONV(rules_n, src_n, ac=ac)    # |- src_n = X
         eq_tgt_rw = REWRITE_CONV(rules_n, tgt_n, ac=ac)    # |- tgt_n = Y
+        if beta:
+            eq_src_rw = TRANS(eq_src_rw, BETA_NORM(rand(eq_src_rw._concl)))
+            eq_tgt_rw = TRANS(eq_tgt_rw, BETA_NORM(rand(eq_tgt_rw._concl)))
         n_src = rand(eq_src_rw._concl)
         n_tgt = rand(eq_tgt_rw._concl)
         if not aconv(n_src, n_tgt):
             raise HolError(
-                "by_rewrite_of: normal forms differ\n"
+                f"{op}: normal forms differ\n"
                 f"  source reduces to: {pp(n_src)}\n"
                 f"  target reduces to: {pp(n_tgt)}")
         # Chain: src = src_n = X = tgt_n = tgt
@@ -1767,19 +1829,10 @@ class _Have:
         must reduce to the same beta-normal form once ``defs`` fire as
         rewrite rules. Used to bridge a theorem stated in unfolded form
         (e.g. SATZ_9) to a goal stated using the defined symbol (SATZ_10's
-        ``>`` / ``<``)."""
-        src_th = self.p.coerce(src)
-        rules = self._resolved(defs)
-        eq_unfold = REWRITE_CONV(rules, self.term)
-        eq_beta = BETA_NORM(rand(eq_unfold._concl))
-        eq_goal = TRANS(eq_unfold, eq_beta)
-        src_norm = BETA_RULE(REWRITE_RULE(rules, src_th))
-        if not aconv(rand(eq_goal._concl), src_norm._concl):
-            raise HolError(
-                "by_unfold: normal forms differ\n"
-                f"  goal -> {pp(rand(eq_goal._concl))}\n"
-                f"  src  -> {pp(src_norm._concl)}")
-        return self._finish(EQ_MP(SYM(eq_goal), src_norm))
+        ``>`` / ``<``).
+
+        Thin wrapper over ``by_rewrite_of`` with ``beta=True``."""
+        return self.by_rewrite_of(src, list(defs), beta=True, op="by_unfold")
 
     def by_cases(self, ref, *args):
         """Open a cases-on block whose target is the have-term (rather than
@@ -1847,7 +1900,7 @@ class _Have:
         ``register_disj_unfolder``, fold ``ref`` (whose conclusion equals the
         unfolded form) back into ``a R b``."""
         target = self.term
-        unfold_eq = _hook(_UNFOLDERS, target) or _hook(_DISJ_UNFOLDERS, target)
+        unfold_eq = _lookup_relation(target)
         if unfold_eq is None:
             raise HolError(
                 f"by_fold: no unfolder registered for target: {pp(target)}")
@@ -1866,29 +1919,23 @@ class _Have:
         """
         target = self.term
         p = self.p
-
         fact_th = p.coerce(ref)
         witness_t = p._parse(witness) if isinstance(witness, str) else witness
 
-        # Direct existential: ?v. body.
-        target_pred = dest_exists(target)
-        if target_pred is not None:
-            expected = subst_term(target_pred.bvar, witness_t, target_pred.body)
-            fact_th = p._simp_require(expected, fact_th, op="by_witness")
-            return self._finish(EXISTS(target_pred, witness_t, fact_th))
+        def body_provider(body_at_w):
+            return p._simp_require(body_at_w, fact_th, op="by_witness")
 
-        # Registered relation a R b: unfold, EXISTS, fold back.
-        unfold_eq = _hook(_UNFOLDERS, target)
+        th = p._make_existential(target, witness_t, body_provider)
+        if th is not None:
+            return self._finish(th)
+
+        # body_provider raises rather than returning None, so a None here
+        # means the target shape didn't qualify.
+        unfold_eq = _lookup_relation(target, kind="exists")
         if unfold_eq is not None:
-            ex_term = rand(unfold_eq._concl)
-            ex_pred = dest_exists(ex_term)
-            if ex_pred is None:
-                raise HolError(
-                    f"by_witness: unfolded form is not "
-                    f"existential: {pp(ex_term)}")
-            ex_th = EXISTS(ex_pred, witness_t, fact_th)
-            return self._finish(EQ_MP(SYM(unfold_eq), ex_th))
-
+            raise HolError(
+                f"by_witness: unfolded form is not existential: "
+                f"{pp(rand(unfold_eq._concl))}")
         raise HolError(
             "by_witness: target is not existential or a registered relation: "
             f"{pp(target)}")
@@ -1897,31 +1944,13 @@ class _Have:
         """Given a fact whose conclusion alpha-matches one of the goal's
         right-associated disjuncts, build the ``DISJ1``/``DISJ2`` chain to
         inject it as the proof of the whole disjunction."""
-        target = self.term
         p = self.p
-        fact_th = p.coerce(ref)
-        # Pattern B: normalize fact and goal so the disjunction structure is
-        # exposed, build at the normalized shape; ``_finish`` re-folds via
-        # ``_simp_require``.
-        fact_th = p.simp_norm_fact(fact_th)
-        target_eq = p.simp_normalize(target)
-        target_norm = rand(target_eq._concl)
+        fact_th = p.simp_norm_fact(p.coerce(ref))
 
-        def build(disj, th):
-            if aconv(disj, th._concl):
-                return th
-            parts = dest_disj(disj)
-            if parts is None:
-                raise HolError(
-                    "by_disj: fact conclusion does not match any disjunct\n"
-                    f"  fact: {pp(th._concl)}\n"
-                    f"  goal: {pp(target)}")
-            p_part, q_part = parts
-            if aconv(p_part, th._concl):
-                return DISJ1(th, q_part)
-            return DISJ2(p_part, build(q_part, th))
+        def match(leaf):
+            return fact_th if aconv(leaf, fact_th._concl) else None
 
-        return self._finish(build(target_norm, fact_th))
+        return self._finish(p._build_disj(self.term, match, "by_disj"))
 
     def by_ac(self, op, assoc, comm):
         """AC_PROVE under ``(op, assoc, comm)`` for the (equation) have-term.
@@ -1955,14 +1984,8 @@ class _Absurd:
         return self._finish(th)
 
     def by(self, justification, *args):
-        if isinstance(justification, thm):
-            resolved = [self.p.coerce(a, accept_term=True) for a in args]
-            return self._finish(MP_LIST(justification, resolved))
-        if callable(justification):
-            resolved = [self.p.coerce(a, accept_term=True) for a in args]
-            return self._finish(justification(*resolved))
-        raise HolError(
-            f"absurd: not a theorem or callable: {justification!r}")
+        return self._finish(
+            self.p._apply_chain(justification, args, simp=False, op="absurd"))
 
     def by_conj(self, *refs):
         """Discharge F from a fact ``P`` and a fact ``~P`` (in either order).
@@ -2095,6 +2118,19 @@ class _Absurd:
 # discharge and reports the result back to the parent via ``on_close``.
 # ---------------------------------------------------------------------------
 
+def _exit_frame(p, exc_type, on_close):
+    """Common exit shape for proof-frame context managers: on clean exit,
+    pop the current frame and pass it to ``on_close(fr)`` for synthesis
+    and delivery. Returns ``False`` so exceptions propagate. ``on_close``
+    is responsible for calling ``p._drop_facts(fr.facts_added)`` at the
+    appropriate point in its work."""
+    if exc_type is not None:
+        return False
+    fr = p._frames.pop()
+    on_close(fr)
+    return False
+
+
 class _SubFrameCtx:
     def __init__(self, p, goal, kind, on_close, extra_facts=()):
         self.p = p
@@ -2125,16 +2161,15 @@ class _SubFrameCtx:
         return self.p
 
     def __exit__(self, exc_type, *_):
-        if exc_type is not None:
-            return False
-        fr = self.p._frames.pop()
+        return _exit_frame(self.p, exc_type, self._on_pop)
+
+    def _on_pop(self, fr):
         if fr.result is None:
             raise HolError(
                 f"{self.kind}: block did not discharge sub-goal via thus")
         th = self.p._close_frame(fr, fr.result)
         self.p._drop_facts(fr.facts_added)
         self.on_close(th)
-        return False
 
 
 # ---------------------------------------------------------------------------
@@ -2161,9 +2196,9 @@ class _InductionCtx:
         return self.p
 
     def __exit__(self, exc_type, *_):
-        if exc_type is not None:
-            return False
-        fr = self.p._frames.pop()
+        return _exit_frame(self.p, exc_type, self._on_pop)
+
+    def _on_pop(self, fr):
         d = fr.data
         if d.base_th is None:
             raise HolError("induction: missing base()")
@@ -2186,7 +2221,6 @@ class _InductionCtx:
                 f"  goal: {pp(parent.goal) if parent.goal else 'None'}\n"
                 f"  got:  {pp(body_th._concl)}")
         parent.result = body_th
-        return False
 
 
 # ---------------------------------------------------------------------------
@@ -2256,10 +2290,10 @@ class _CasesCtx:
         return self.p
 
     def __exit__(self, exc_type, *_):
-        if exc_type is not None:
-            return False
+        return _exit_frame(self.p, exc_type, self._on_pop)
+
+    def _on_pop(self, fr):
         op = self.op
-        fr = self.p._frames.pop()
         branches = fr.data.branches
         n = len(branches)
         if n < 2:
@@ -2301,7 +2335,6 @@ class _CasesCtx:
                     f"  got:    {pp(result._concl)}")
             result = lifted
         self.on_close(result)
-        return False
 
 
 # ---------------------------------------------------------------------------

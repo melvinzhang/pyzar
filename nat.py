@@ -811,7 +811,7 @@ _N_var = Var("N", _N_ty)
 # Theorem 27 (well-ordering). Direct port of Landau's four-sentence argument
 # (1.tex:685-706). Introduce ``M(x) := !n. N n ==> x <= n`` via ``p.let``;
 # the carrier-Var trick keeps the symbol visible while the simp pipeline
-# (``simp_aconv`` / ``simp_bridge`` in ``proof.py``) bridges folded
+# (``simp_aconv`` / ``_derive_shape_eq`` in ``proof.py``) bridges folded
 # ``M (y+1)`` and unfolded ``!n. N n ==> y+1 <= n`` at every tactic
 # boundary -- so the proof reads in let-folded form throughout.
 
