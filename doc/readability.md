@@ -147,18 +147,22 @@ contradiction.
 - `_SATZ_27_FROM_M` (951–982): the contradictory case for `m ∈ 𝔑` — 32
   lines, including manual `EXCLUDED_MIDDLE`.
 - `SATZ_27` itself (992–1026): wires the three together via
-  `p.let("M(x) := !n. N n ==> x <= n")` and `by_select`.
+  `p.let("M(x) := !n. N n ==> x <= n")` and `by`.
 
 The three sub-lemmas are not really sub-lemmas in Landau's mind — they're
-three sentences. The split exists to localise BETA bridges and
-`by_select` plumbing.
+three sentences. The split exists to localise BETA bridges (now
+absorbed by simp) and the SUC/+1 induction-form mismatch.
 
 **Pain points:**
 
-1. **`p.let` / `by_select` for predicates** — Landau's "𝔐 is the set of
-   …" is direct; `by_select` requires materialising the let-bound macro as
-   a kernel lambda, BETA-normalising back, and MPing premises. The boundary
-   between the let macro and the unfolded body is structural noise.
+1. **HO-lemma boundary plumbing** — Landau's "𝔐 is the set of …" is
+   direct; passing `M` to a HO lemma quantified over a predicate used to
+   require `by_select` (materialise the let-bound macro as a kernel
+   lambda, BETA-normalise back, MP premises). ✅ shipped: the carrier-Var
+   trick already turned the SPEC into a single-step `SPEC(carrier, th)`,
+   and `by`'s string-arg path parses `"M"` to the carrier directly — so
+   the dedicated `by_select` tactic was redundant and is now removed.
+   Use `by(HO_LEMMA, "M", "fact1", ...)` everywhere.
 
 2. **Manual `ADD_1` / `SUC` bridge inside induction.** In
    `_SATZ_27_EXISTS_M` (931–932):
@@ -173,9 +177,10 @@ three sentences. The split exists to localise BETA bridges and
    a contrapositive. A `p.by_contradiction("hnex: ~ goal"): …` block
    would absorb the `cases_on(EXCLUDED_MIDDLE, …)` ceremony. ✅ shipped.
 
-**Fix.** Three separate ones:
-- A `p.set("M(x) := …")` that auto-unfolds at every `M t` site without
-  needing `by_select`.
+**Fix.** Two remaining; one shipped:
+- ~~A `p.set("M(x) := …")` that auto-unfolds at every `M t` site without
+  needing `by_select`.~~ ✅ obviated: `by_select` removed, `by` covers
+  the HO boundary uniformly.
 - Make `induction` accept a predicate stated in either `SUC x` or `x + 1`
   form — internally normalize via `ADD_1`.
 - A `p.by_contradiction("h: ~ goal")` block as sugar for the

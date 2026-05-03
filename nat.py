@@ -977,12 +977,12 @@ def SATZ_27(p):
         .by(_SATZ_27_NOT_M_SUCC, "N")
 
     # Step 3: ?m. M m /\ ~ M (m + 1).  _SATZ_27_EXISTS_M takes a higher-order
-    # predicate P; by_select materializes the let `M` as a kernel lambda for
-    # the SPEC, BETA_RULE-normalizes the resulting redexes back to the unfolded
-    # form, then MPs the premise facts.
+    # predicate P. The let-bound `M` is in the parser scope as its carrier
+    # `Var`, so `by`'s string-arg path parses ``"M"`` to that carrier and
+    # SPECs at it directly -- no Abs materialization or BETA bridge needed.
     p.have("ex: ?m. M m /\\ ~ M (m + 1)")\
-        .by_select(_SATZ_27_EXISTS_M, "M", "N",
-                    "M_1", "step_fail", "hNonempty")
+        .by(_SATZ_27_EXISTS_M, "M", "N",
+            "M_1", "step_fail", "hNonempty")
 
     # Step 4: choose the boundary witness, decompose, conclude via _SATZ_27_FROM_M.
     p.choose("m: M m /\\ ~ M (m + 1)", from_="ex")

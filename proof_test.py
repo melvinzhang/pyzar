@@ -197,19 +197,19 @@ def main():
         p.thus("R 1 1").by_thm(REFL(parse("1 + 1")))
     assert aconv(concl(LET_MULTI), parse("1 + 1 = 1 + 1"))
 
-    # (5) by_select with a multi-arg let: trivial 2-ary HO axiom
+    # (5) ``by`` with a multi-arg let: trivial 2-ary HO axiom
     # ``|- !Q. Q 1 1 ==> Q 1 1`` at ``R(a, b) := a = b``.
     Q2_ty = mk_fun_ty(num_ty, mk_fun_ty(num_ty, bool_ty))
     Q2_var = mk_var("Q", Q2_ty)
     Q2_at_11 = mk_app(Q2_var, ONE, ONE)
     trivial_HO_2 = GEN(Q2_var, DISCH(Q2_at_11, ASSUME(Q2_at_11)))
     @proof
-    def BY_SELECT_MULTI(p):
+    def BY_LET_MULTI(p):
         p.goal("1 = 1")
         p.let("R(a, b) := a = b")
         p.have("R_11: R 1 1").by_thm(REFL(ONE))
-        p.thus("R 1 1").by_select(trivial_HO_2, "R", "R_11")
-    assert aconv(concl(BY_SELECT_MULTI), parse("1 = 1"))
+        p.thus("R 1 1").by(trivial_HO_2, "R", "R_11")
+    assert aconv(concl(BY_LET_MULTI), parse("1 = 1"))
 
     # (6) Bad spec rejected.
     try:
@@ -249,21 +249,22 @@ def main():
     got_str = p_str.unfold(SUC_DEF, "x")
     assert aconv(got_str._concl, expected_unary._concl)
 
-    # ---- _Have.by_select smoke test -------------------------------------
-    # Build a tiny HO lemma `|- !P. P 1 ==> P 1` and apply by_select with a
-    # let-defined predicate plus a witness fact, verifying the SPEC + BETA_RULE
-    # + MP chain produces the right theorem.
+    # ---- _Have.by + let-bound predicate smoke test ----------------------
+    # Build a tiny HO lemma `|- !P. P 1 ==> P 1` and apply ``by`` with a
+    # let-defined predicate plus a witness fact: ``"M"`` parses to the
+    # carrier Var (it's in the parser scope) and ``by`` SPECs at it; the
+    # fact label MPs the antecedent.
     P_var = mk_var("P", mk_fun_ty(num_ty, bool_ty))
     P_1   = mk_comb(P_var, ONE)
     trivial_HO = GEN(P_var, DISCH(P_1, ASSUME(P_1)))   # |- !P. P 1 ==> P 1
 
     @proof
-    def BY_SELECT_TEST(p):
+    def BY_LET_TEST(p):
         p.goal("1 = 1")
         p.let("M(x) := x = x")
         p.have("M_1: M 1").by_thm(REFL(ONE))
-        p.thus("M 1").by_select(trivial_HO, "M", "M_1")
-    assert aconv(concl(BY_SELECT_TEST), parse("1 = 1"))
+        p.thus("M 1").by(trivial_HO, "M", "M_1")
+    assert aconv(concl(BY_LET_TEST), parse("1 = 1"))
 
     # ---- lazy-let registry smoke test -----------------------------------
     p_lazy = Proof()
@@ -301,7 +302,7 @@ def main():
     assert aconv(ld2.eq_th._concl, expected_eq2), \
         f"lazy-let multi-arg eq mismatch: {pp(ld2.eq_th._concl)}"
 
-    # ---- lazy by_select smoke test --------------------------------------
+    # ---- lazy by + let-carrier smoke test -------------------------------
     p_bsl = Proof()
     a_v_l = Var("x", num_ty)
     body_xx = mk_eq(a_v_l, a_v_l)
@@ -310,11 +311,11 @@ def main():
     eq_at_1 = SPEC(ONE, lz.eq_th)
     mz_1_th = EQ_MP(SYM(eq_at_1), REFL(ONE))
     p_bsl.have("MZ_1: MZ 1").by_thm(mz_1_th)
-    p_bsl.thus("MZ 1").by_select(trivial_HO, "MZ", "MZ_1")
+    p_bsl.thus("MZ 1").by(trivial_HO, "MZ", "MZ_1")
     assert p_bsl._cur.result is not None
     assert aconv(p_bsl._cur.result._concl, parse("MZ 1",
                                                   _env_bindings={"MZ": lz.carrier})), \
-        f"lazy by_select: unexpected concl {pp(p_bsl._cur.result._concl)}"
+        f"lazy by + let: unexpected concl {pp(p_bsl._cur.result._concl)}"
 
     # ---- p.unfold_let / p.fold_let smoke test ---------------------------
     p_ul = Proof()

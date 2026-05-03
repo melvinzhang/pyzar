@@ -454,9 +454,9 @@ class Proof:
     def simp_norm_fact(self, th):
         """Simp-normalize ``th``'s conclusion, returning a theorem whose
         conclusion is the normal form. Pattern B: structural exposure —
-        used by tactics that need the unfolded shape (``by`` / ``by_select``
-        before SPEC chains, ``split_conj`` to expose the top conjunction,
-        ``by_disj`` to expose the disjunction)."""
+        used by tactics that need the unfolded shape (``by`` before SPEC
+        chains, ``split_conj`` to expose the top conjunction, ``by_disj``
+        to expose the disjunction)."""
         eq = self.simp_normalize(th._concl)
         if aconv(rand(eq._concl), th._concl):
             return th
@@ -1518,49 +1518,6 @@ class _Have:
                 f"  source reduces to: {pp(n_src)}\n"
                 f"  target reduces to: {pp(n_tgt)}")
         return self._finish(EQ_MP(TRANS(eq_src, SYM(eq_tgt)), th_src))
-
-    def by_select(self, axiom, *args):
-        """Higher-order-to-first-order boundary helper.
-
-        ``axiom`` is the HO theorem (e.g. ``SELECT_AX`` after ``INST_TYPE``,
-        or any custom lemma like ``_SATZ_27_EXISTS_M``).  Each subsequent
-        arg is dispatched in order:
-
-        - ``str`` matching a let-name in scope: materialize as kernel ``Abs``,
-          ``SPEC`` at it, and ``BETA_RULE`` the result (so the redexes that
-          ``SPEC`` introduces normalize back to the let-expansion shape that
-          surrounding ``have``/``thus`` terms agree with).
-        - ``str`` matching a fact label: ``MP``.
-        - ``str`` otherwise: parse as a term and ``SPEC``.
-        - kernel ``thm``: ``MP``.
-        - kernel term (Var/Const/Comb/Abs): ``SPEC``.
-
-        Replaces the manual ``MP_LIST(BETA_RULE(SPECL([...], LEMMA)), [...])``
-        chain at every HO-lemma boundary.
-        """
-        p = self.p
-        th = p._resolve_fact(axiom)
-        # Pattern B: simp-normalize the axiom so the SPEC chain finds a
-        # forall to peel; Pattern A on each MP step via simp_mp.
-        th = p.simp_norm_fact(th)
-        for a in args:
-            if isinstance(a, str):
-                lz = p._lookup_lazy_let(a)
-                if lz is not None:
-                    # Lazy let: SPEC the HO axiom at the carrier ``Var``
-                    # directly. No Abs materialization, no BETA needed.
-                    th = SPEC(lz.carrier, th)
-                    continue
-                if a in p._facts:
-                    th = p.simp_mp(th, p._facts[a])
-                    continue
-                th = SPEC(p._parse(a), th)
-                continue
-            if isinstance(a, thm):
-                th = p.simp_mp(th, a)
-                continue
-            th = SPEC(a, th)
-        return self._finish(th)
 
     def by_unfold(self, src, *defs):
         """Prove the goal from ``src`` by unfolding the given definition

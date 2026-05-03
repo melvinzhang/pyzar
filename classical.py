@@ -100,7 +100,7 @@ def EXCLUDED_MIDDLE(p):
     p.have("U_F: U F").by_disj(REFL(F))
     p.have("V_T: V T").by_disj(REFL(T))
 
-    # by_select with the lazy carriers produces ``|- U (@ U)`` /
+    # ``by`` with the lazy carriers produces ``|- U (@ U)`` /
     # ``|- V (@ V)`` (folded). The downstream cases_on and the
     # _diaconescu_F_eq_T helper expect the unfolded ``@x. body`` shape,
     # so build the SPEC/MP chain by hand and materialize the carrier

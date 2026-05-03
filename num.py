@@ -452,8 +452,8 @@ def INDUCTION(p):
         NR_da_unfold = EQ_MP(_NUM_REP_unfold(mk_comb(dest_num, x)),
                              SPEC(x, NUM_REP_dest_num))
         p.have("Q_da: Q (dest_num x)") \
-            .by_select(NR_da_unfold, "Q",
-                       CONJ(p.fact("Q_1"), p.fact("Q_step")))
+            .by(NR_da_unfold, "Q",
+                CONJ(p.fact("Q_1"), p.fact("Q_step")))
         p.split_conj("Q_da", "_NR_dx", "P_mk_dx")
         p.thus("P x").by_eq_mp(
             AP_TERM(P, INST([(x, Var("a", num_ty))], MK_DEST)),
@@ -641,9 +641,9 @@ def R_UNIQUE_BASE(p):
         p.assume("h_conj: R c h 1 m1 /\\ R c h 1 m2")
         p.split_conj("h_conj", "h_R_m1", "h_R_m2")
         p.have("Qp_1_m1: Qp 1 m1") \
-            .by_select("h_R_m1", "Qp", "Qp_closure")
+            .by("h_R_m1", "Qp", "Qp_closure")
         p.have("Qp_1_m2: Qp 1 m2") \
-            .by_select("h_R_m2", "Qp", "Qp_closure")
+            .by("h_R_m2", "Qp", "Qp_closure")
         p.have("m1_eq_c: m1 = c").by("Qp_1_m1", REFL(ONE))
         p.have("m2_eq_c: m2 = c").by("Qp_1_m2", REFL(ONE))
         p.thus("m1 = m2").by_rewrite(["m1_eq_c", "m2_eq_c"])
@@ -726,9 +726,9 @@ def R_UNIQUE_STEP(p):
         p.assume("h_conj: R c h (SUC n) m1 /\\ R c h (SUC n) m2")
         p.split_conj("h_conj", "h_R_m1", "h_R_m2")
         p.have("Qp_sn_m1: Qp (SUC n) m1") \
-            .by_select("h_R_m1", "Qp", "Qp_closure")
+            .by("h_R_m1", "Qp", "Qp_closure")
         p.have("Qp_sn_m2: Qp (SUC n) m2") \
-            .by_select("h_R_m2", "Qp", "Qp_closure")
+            .by("h_R_m2", "Qp", "Qp_closure")
         p.split_conj("Qp_sn_m1", "_R_sn_m1", "step1")
         p.split_conj("Qp_sn_m2", "_R_sn_m2", "step2")
         p.have("m1_eq: m1 = h n m_n").by("step1", REFL(mk_suc(_n)))
