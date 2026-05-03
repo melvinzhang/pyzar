@@ -1,11 +1,7 @@
 # pyzar
 
 A small HOL Light–style proof kernel in Python, used to formalise Edmund
-Landau's *Grundlagen der Analysis* from the Peano axioms.
-
-The kernel is faithful to `hol-light/fusion.ml`: 10 primitive inference
-rules, 3 logical axioms (ETA, SELECT, INFINITY), and nothing else. Every
-theorem in the development is built on top of that kernel.
+Landau's *Grundlagen der Analysis* as readable Python.
 
 ## Layout
 
