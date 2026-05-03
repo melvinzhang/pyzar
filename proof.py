@@ -47,7 +47,7 @@ from tactics import (
     NOT_INTRO, NOT_ELIM, CONTR, REWRITE_NE, EXISTS, DISJ1, DISJ2,
     CONJUNCT1, CONJUNCT2,
     REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV, BETA_RULE,
-    AC_PROVE, REWRITE_AC_PROVE,
+    AC_PROVE,
     _strip_forall, _term_match,
 )
 from parser import (
@@ -1390,14 +1390,24 @@ class _Have:
                 f"  src  -> {pp(src_norm._concl)}")
         return self._finish(EQ_MP(SYM(eq_goal), src_norm))
 
-    def by_rewrite_ne(self, ref, eqs):
-        """REWRITE_NE on a non-equation fact: takes ``~(a = b)`` and rewrites
-        each side via ``[eq_l, eq_r]`` (theorems ``a = a'`` and ``b = b'``)
-        to produce the have-term ``~(a' = b')``."""
-        if len(eqs) != 2:
-            raise HolError(
-                f"by_rewrite_ne: expected 2 side equations, got {len(eqs)}")
-        return self._via(REWRITE_NE, ref, eqs[0], eqs[1])
+    def by_rewrite_ne(self, ref, rules):
+        """Rewrite an inequation fact into the have-term using rewrite rules.
+
+        ``ref`` is a fact ``~(a = b)``; the have-term is ``~(L = R)``;
+        ``rules`` is the same shape of rewrite-rule list as ``by_rewrite``.
+        Each side of the source and the target is normalized under
+        ``rules`` and the resulting normal forms must agree pairwise -- the
+        REFL/SYM bridges that align source-to-target are computed via
+        ``REWRITE_PROVE`` on each side, exactly as ``by_rewrite`` does for
+        a plain equational goal.
+        """
+        th_ne = self.p._resolve_fact(ref)
+        a, b = dest_eq(rand(th_ne._concl))
+        L, R = dest_eq(rand(self.term))
+        rules_thms = self._resolved(rules)
+        eq_l = REWRITE_PROVE(rules_thms, mk_eq(a, L))
+        eq_r = REWRITE_PROVE(rules_thms, mk_eq(b, R))
+        return self._finish(REWRITE_NE(th_ne, eq_l, eq_r))
 
     def by_cases(self, ref, *args):
         """Open a cases-on block whose target is the have-term (rather than
@@ -1514,10 +1524,12 @@ class _Have:
         return self._finish(AC_PROVE(op, assoc, comm, self.term))
 
     def by_rewrite_ac(self, rules, op, assoc, comm, ac_rules=()):
-        """REWRITE_AC_PROVE -- rewrite both sides under ``rules`` (and optional
-        ``ac_rules`` for canonicalisation), then close by AC over ``op``."""
-        return self._finish(REWRITE_AC_PROVE(
-            self._resolved(rules), op, assoc, comm, self.term,
+        """``by_rewrite`` with an AC fallback over ``op`` if the rewritten
+        normal forms don't already match. ``ac_rules`` is an optional
+        second-pass canonicalisation rule list."""
+        return self._finish(REWRITE_PROVE(
+            self._resolved(rules), self.term,
+            ac=(op, assoc, comm),
             ac_rules=tuple(self._resolved(ac_rules))))
 
 

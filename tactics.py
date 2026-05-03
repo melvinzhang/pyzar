@@ -10,7 +10,7 @@ Provides:
     CONTR, NOT_ELIM/INTRO, EQF_ELIM/INTRO, DISJ1/2, DISJ_CASES, EXISTS,
     FUN_EXT, ELIM_EX, list-form combinators (SPECL, GENL, ...).
   * Rewriting tactics: REWRITE_CONV, REWRITE_RULE, REWRITE_PROVE, BETA_RULE.
-  * AC tactics: AC_NORM, AC_PROVE, REWRITE_AC_PROVE.
+  * AC tactics: AC_NORM, AC_PROVE (and ``REWRITE_PROVE(..., ac=...)``).
 
 The classical theorems built on top (``F_NEQ_T``, ``EXCLUDED_MIDDLE``,
 ``NOT_NOT_ELIM``, ``NOT_EX_TO_FORALL_NOT``, ``NOT_FORALL_TO_EX_NOT``) live
@@ -791,20 +791,33 @@ def REWRITE_RULE(rules_thms, th):
     return th if aconv(lhs, rhs) else EQ_MP(eq, th)
 
 
-def REWRITE_PROVE(rules_thms, target_eq):
-    """Prove target_eq (= mk_eq(lhs, rhs)) by reducing both sides to a common
-       normal form under the rewrite rules."""
+def REWRITE_PROVE(rules_thms, target_eq, *, ac=None, ac_rules=()):
+    """Prove target_eq (= mk_eq(lhs, rhs)) by reducing both sides to a
+    common normal form under ``rules_thms``.
+
+    If ``ac`` is given as the triple ``(op, assoc, comm)``, the residual
+    gap between normal forms is closed by AC reasoning over ``op``;
+    otherwise a mismatch raises ``HolError``. ``ac_rules`` is an optional
+    second-pass rule list applied after the main rewrite (e.g. to
+    canonicalise ``SUC x`` into ``x + 1`` form before AC matching)."""
     lhs, rhs = dest_eq(target_eq)
     eq_l = REWRITE_CONV(rules_thms, lhs)
     eq_r = REWRITE_CONV(rules_thms, rhs)
+    if ac_rules:
+        eq_l = TRANS(eq_l, REWRITE_CONV(ac_rules, rand(eq_l._concl)))
+        eq_r = TRANS(eq_r, REWRITE_CONV(ac_rules, rand(eq_r._concl)))
     nl, nr = rand(eq_l._concl), rand(eq_r._concl)
-    if not aconv(nl, nr):
+    if aconv(nl, nr):
+        return TRANS(eq_l, SYM(eq_r))
+    if ac is None:
         raise HolError(
             "REWRITE_PROVE: normal forms differ\n"
             f"  LHS reduces to: {nl}\n"
             f"  RHS reduces to: {nr}"
         )
-    return TRANS(eq_l, SYM(eq_r))
+    op_const, assoc_thm, comm_thm = ac
+    eq_ac = AC_PROVE(op_const, assoc_thm, comm_thm, mk_eq(nl, nr))
+    return TRANS(eq_l, TRANS(eq_ac, SYM(eq_r)))
 
 
 # ---------------------------------------------------------------------------
@@ -924,23 +937,6 @@ def AC_PROVE(op_const, assoc_thm, comm_thm, target_eq):
             f"  RHS canonical: {nr}"
         )
     return TRANS(eq_l, SYM(eq_r))
-
-
-def REWRITE_AC_PROVE(rules, op_const, assoc_thm, comm_thm, target_eq, *, ac_rules=()):
-    """Combined: reduce both sides under `rules`, optionally a second pass with
-       `ac_rules` (e.g. SUC→+1 to canonicalize before AC), then close with AC.
-       Falls back to TRANS+SYM if normal forms already match exactly."""
-    lhs, rhs = dest_eq(target_eq)
-    eq_l = REWRITE_CONV(rules, lhs)
-    eq_r = REWRITE_CONV(rules, rhs)
-    if ac_rules:
-        eq_l = TRANS(eq_l, REWRITE_CONV(ac_rules, rand(eq_l._concl)))
-        eq_r = TRANS(eq_r, REWRITE_CONV(ac_rules, rand(eq_r._concl)))
-    nl, nr = rand(eq_l._concl), rand(eq_r._concl)
-    if aconv(nl, nr):
-        return TRANS(eq_l, SYM(eq_r))
-    eq_ac = AC_PROVE(op_const, assoc_thm, comm_thm, mk_eq(nl, nr))
-    return TRANS(eq_l, TRANS(eq_ac, SYM(eq_r)))
 
 
 # Self-tests live in tactics_test.py (H17).

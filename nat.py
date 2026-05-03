@@ -58,7 +58,7 @@ from tactics import (
     PROVE_HYP, ELIM_EX,
     SPECL, GENL, DISCHL, TRANS_CHAIN, CASE_OR,
     REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV,
-    AC_PROVE, AC_NORM, REWRITE_AC_PROVE,
+    AC_PROVE, AC_NORM,
 )
 from classical import EXCLUDED_MIDDLE, NOT_NOT_ELIM, NOT_EX_TO_FORALL_NOT
 from num import (
@@ -280,14 +280,11 @@ def SATZ_7(p):
         with p.base():
             p.have("ne_sx: ~(SUC x = 1)").by_match(AXIOM_3)
             p.have("ne1: ~(1 = SUC x)").by(NE_SYM, "ne_sx")
-            p.thus("~(1 = x + 1)")\
-                .by_rewrite_ne("ne1", [REFL(ONE), SYM(SPEC(x, ADD_1))])
+            p.thus("~(1 = x + 1)").by_rewrite_ne("ne1", [ADD_1])
         with p.step("IH"):
             p.have("ne_succ: ~(SUC y = SUC (x + y))")\
                 .by_match(SATZ_1, "IH")
-            p.thus("~(SUC y = x + SUC y)")\
-                .by_rewrite_ne("ne_succ",
-                               [REFL(mk_suc(y)), SYM(SPECL([x, y], ADD_SUC))])
+            p.thus("~(SUC y = x + SUC y)").by_rewrite_ne("ne_succ", [ADD_SUC])
 
 
 # ---------------------------------------------------------------------------
@@ -303,16 +300,11 @@ def SATZ_8(p):
     with p.induction("x"):
         with p.base():
             p.have("ne_suc: ~(SUC y = SUC z)").by_match(SATZ_1, "hyp_yz")
-            p.thus("~(1 + y = 1 + z)")\
-                .by_rewrite_ne("ne_suc",
-                               [SYM(SPEC(y, ONE_PLUS)), SYM(SPEC(z, ONE_PLUS))])
+            p.thus("~(1 + y = 1 + z)").by_rewrite_ne("ne_suc", [ONE_PLUS])
         with p.step("IH"):
             p.have("ne_sum: ~(SUC (x + y) = SUC (x + z))")\
                 .by_match(SATZ_1, "IH")
-            p.thus("~(SUC x + y = SUC x + z)")\
-                .by_rewrite_ne("ne_sum",
-                               [SYM(SPECL([x, y], SUC_PLUS)),
-                                SYM(SPECL([x, z], SUC_PLUS))])
+            p.thus("~(SUC x + y = SUC x + z)").by_rewrite_ne("ne_sum", [SUC_PLUS])
 
 
 # ---------------------------------------------------------------------------
