@@ -616,7 +616,7 @@ def SATZ_19A(p):
     p.assume("h: x > y")
     p.choose("u: x = y + u", from_="h")
     p.have("eq: x + z = (y + z) + u")\
-        .by_rewrite_ac(["u_eq"], PLUS, SATZ_5, SATZ_6)
+        .by_rewrite(["u_eq"], ac=(PLUS, SATZ_5, SATZ_6))
     p.thus("x + z > y + z").by_witness("u", "eq")
 
 @proof
@@ -1086,8 +1086,8 @@ def SUC_MUL(p):
             p.thus("SUC x * 1 = x * 1 + 1").by_rewrite([MUL_1, ADD_1_REV])
         with p.step("IH"):
             p.thus("SUC x * SUC y = x * SUC y + SUC y")\
-                .by_rewrite_ac([MUL_SUC, "IH"], PLUS, SATZ_5, SATZ_6,
-                                ac_rules=[ADD_1_REV])
+                .by_rewrite([MUL_SUC, "IH"], ac=(PLUS, SATZ_5, SATZ_6),
+                            ac_rules=[ADD_1_REV])
 
 
 # Theorem 29 (commutative law of multiplication):  |- !x y. x * y = y * x.

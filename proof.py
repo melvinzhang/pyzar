@@ -1315,12 +1315,20 @@ class _Have:
             th = p.simp_mp(th, fact_th)
         return self._finish(th)
 
-    def by_rewrite(self, rules):
+    def by_rewrite(self, rules, *, ac=None, ac_rules=()):
         """REWRITE_PROVE with the given rules.
 
         Each rule may be a Theorem or a string label naming a fact in scope.
+        Pass ``ac=(op, assoc, comm)`` to fall back to AC reasoning when the
+        rewritten normal forms don't already match. ``ac_rules`` is an
+        optional second-pass canonicalisation rule list applied after the
+        main rewrite (e.g. ``SUC x → x + 1``-style normalization to expose
+        the AC operator).
         """
-        return self._finish(REWRITE_PROVE(self._resolved(rules), self.term))
+        return self._finish(REWRITE_PROVE(
+            self._resolved(rules), self.term,
+            ac=ac,
+            ac_rules=tuple(self._resolved(ac_rules))))
 
     def by_rewrite_of(self, ref, rules):
         """Rewrite a source fact ``ref`` to the have-term using ``rules``.
@@ -1525,17 +1533,12 @@ class _Have:
         return self._finish(build(target_norm, fact_th))
 
     def by_ac(self, op, assoc, comm):
-        """AC_PROVE under ``(op, assoc, comm)`` for the (equation) have-term."""
-        return self._finish(AC_PROVE(op, assoc, comm, self.term))
+        """AC_PROVE under ``(op, assoc, comm)`` for the (equation) have-term.
 
-    def by_rewrite_ac(self, rules, op, assoc, comm, ac_rules=()):
-        """``by_rewrite`` with an AC fallback over ``op`` if the rewritten
-        normal forms don't already match. ``ac_rules`` is an optional
-        second-pass canonicalisation rule list."""
-        return self._finish(REWRITE_PROVE(
-            self._resolved(rules), self.term,
-            ac=(op, assoc, comm),
-            ac_rules=tuple(self._resolved(ac_rules))))
+        Equivalent to ``by_rewrite([], ac=(op, assoc, comm))`` but skips
+        the empty-rule normalization for the common no-rewrite case.
+        """
+        return self._finish(AC_PROVE(op, assoc, comm, self.term))
 
 
 # ---------------------------------------------------------------------------
