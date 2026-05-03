@@ -220,7 +220,7 @@ the middle). `AP_THM` and `mk_comb` are no longer needed in `nat.py`.
 
 ---
 
-## 6. RIGHT_DISTRIB and the SATZ_29 rewrite-loop
+## 6. RIGHT_DISTRIB and the SATZ_29 rewrite-loop — ✅ shipped
 
 **Landau:** Satz 30 *Vorbemerkung* (1.tex:820–823):
 
@@ -230,7 +230,7 @@ the middle). `AP_THM` and `mk_comb` are no longer needed in `nat.py`.
 
 Effectively free.
 
-**`nat.py`** (1153–1161):
+**`nat.py` (before):**
 
 ```python
 @proof
@@ -245,15 +245,26 @@ def RIGHT_DISTRIB(p):
         .by_rewrite(["flip", "dist", "ca", "cb"])
 ```
 
-The comment at 1149–1151 explains: *"Plain commutativity (SATZ_29) loops as
-a free rewrite rule, so we name the four intermediate equations
-explicitly."*
+Plain commutativity (SATZ_29) loops as a free rewrite rule, so the four
+intermediate equations had to be named explicitly.
 
-**Fix.** The AC machinery already handles `+` (via `SATZ_5`/`SATZ_6` —
-e.g. `ADD_RIGHT_SWAP` at 262–265). It should equally handle `*` once
-SATZ_29 + SATZ_31 are proved. With AC normalisation for `*`, RIGHT_DISTRIB
-collapses to `.by_ac(TIMES, SATZ_31, SATZ_29) + .by_match(SATZ_30, …)`
-or simply `by_rewrite_ac([SATZ_30], TIMES, SATZ_31, SATZ_29)`.
+**Fix landed.** The bottom-up rewriter now accepts ``ac=(op, assoc, comm)``
+and AC-normalizes every ``op``-application it visits *during* traversal,
+not just at the top after both sides finish reducing. SATZ_30
+(``x*(y+z) = x*y + x*z``) fires regardless of which side carries the sum
+because the ``*``-tree is canonicalised at every node. RIGHT_DISTRIB
+collapses to one line:
+
+```python
+p.thus("(a + b) * c = a * c + b * c")\
+    .by_rewrite([SATZ_30], ac=(TIMES, SATZ_31, SATZ_29))
+```
+
+``by_rewrite_of`` gained the same ``ac=`` parameter; downstream
+multiplication AC chains in SATZ_34, SATZ_35A, frac.py SATZ_44 and
+SATZ_50 collapsed their ``SPECL([_, _], SATZ_29)``-style commutativity
+rewrites and ``AC_PROVE``-built bridges to one ``ac=(TIMES, SATZ_31,
+SATZ_29)`` parameter.
 
 ---
 
@@ -330,9 +341,7 @@ benefit):
 3. **`by_trichotomy_invert` tactic** (§2) — ✅ shipped (later swapped for
    the smaller `_Absurd.via` primitive).
 4. **CONTRA closure-CPS** (§3) — ✅ shipped.
-4. **AC support for `*`** (§6) — RIGHT_DISTRIB shrinks; SUC_MUL becomes
-   shorter; downstream multiplication AC chains stop needing ad-hoc
-   commutativity rewrites.
+4. **AC support for `*`** (§6) — ✅ shipped.
 5. **`p.choose` on free-standing theorems** (§3) — collapses
    CONTRA_LT_GT/EQ/_GT_EQ from 70 lines of nested CPS to ~30 lines of
    declarative proof, removes `register_contra_finder` plumbing.

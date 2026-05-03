@@ -709,7 +709,7 @@ def _try_rules_at(rules, tm):
     return None
 
 
-def _bottom_up(rules, tm, under_binder=False):
+def _bottom_up(rules, tm, under_binder=False, ac=None):
     """One bottom-up pass: rewrite children once, then iterate rules at the root
        (without descending into the new RHS — that's what the outer fixpoint loop
        in REWRITE_CONV is for).  Returns |- tm = tm' or None if unchanged.
@@ -717,12 +717,18 @@ def _bottom_up(rules, tm, under_binder=False):
        Inside an Abs body, only rules with empty assumptions are considered:
        hypothetical local facts (e.g. ``ASSUME``-derived equations) routinely
        have RHS terms that re-introduce their own LHS under a binder, which
-       would loop.  Closed rewrite rules are safe."""
+       would loop.  Closed rewrite rules are safe.
+
+       When ``ac=(op, assoc, comm)`` is supplied, every visit to a node whose
+       head is ``op`` AC-normalizes that node before/after root-rule firing.
+       This makes commutativity-like rules (which would loop as free rewrites)
+       implicit at the matching op symbol, so e.g. ``SATZ_30: x*(y+z) = x*y+x*z``
+       fires under ``ac=(*, ...)`` even when the source shape is ``(y+z)*x``."""
     active = [r for r in rules if not r[3]._asl] if under_binder else rules
 
     if isinstance(tm, Comb):
-        l_step = _bottom_up(rules, tm.fun, under_binder)
-        r_step = _bottom_up(rules, tm.arg, under_binder)
+        l_step = _bottom_up(rules, tm.fun, under_binder, ac)
+        r_step = _bottom_up(rules, tm.arg, under_binder, ac)
         if l_step is None and r_step is None:
             inner = REFL(tm)
             inner_changed = False
@@ -732,7 +738,7 @@ def _bottom_up(rules, tm, under_binder=False):
             inner = MK_COMB(l_eq, r_eq)
             inner_changed = True
     elif isinstance(tm, Abs):
-        body_step = _bottom_up(rules, tm.body, under_binder=True)
+        body_step = _bottom_up(rules, tm.body, under_binder=True, ac=ac)
         if body_step is None:
             inner = REFL(tm)
             inner_changed = False
@@ -751,8 +757,17 @@ def _bottom_up(rules, tm, under_binder=False):
         inner = REFL(tm)
         inner_changed = False
 
+    op_const = ac[0] if ac is not None else None
+
     for _ in range(SIMP_ROOT_FIRE_LIMIT):
         cur = rand(inner._concl)
+        if op_const is not None and _is_op_app(op_const, cur):
+            ac_step = AC_NORM(op_const, ac[1], ac[2], cur)
+            ac_lhs, ac_rhs = dest_eq(ac_step._concl)
+            if not aconv(ac_lhs, ac_rhs):
+                inner = TRANS(inner, ac_step)
+                inner_changed = True
+                cur = ac_rhs
         root_step = _try_rules_at(active, cur)
         if root_step is None:
             break
@@ -766,17 +781,20 @@ def _bottom_up(rules, tm, under_binder=False):
     return inner if inner_changed else None
 
 
-def REWRITE_CONV(rules_thms, tm, max_passes=SIMP_OUTER_PASS_LIMIT):
+def REWRITE_CONV(rules_thms, tm, max_passes=SIMP_OUTER_PASS_LIMIT, *, ac=None):
     """Rewrite tm with the given equation theorems to fixpoint, bottom-up.
        Raises HolError if no fixpoint reached after max_passes outer passes
-       (likely a non-terminating rule set)."""
+       (likely a non-terminating rule set).
+
+       Pass ``ac=(op, assoc, comm)`` to AC-normalize every op-application
+       visited during traversal; see ``_bottom_up`` for the rationale."""
     rules = [r for r in (_prepare_rule(t) for t in rules_thms) if r is not None]
-    if not rules:
+    if not rules and ac is None:
         return REFL(tm)
     th = REFL(tm)
     for _ in range(max_passes):
         cur = rand(th._concl)
-        step = _bottom_up(rules, cur)
+        step = _bottom_up(rules, cur, ac=ac)
         if step is None:
             return th
         th = TRANS(th, step)
@@ -795,17 +813,20 @@ def REWRITE_PROVE(rules_thms, target_eq, *, ac=None, ac_rules=()):
     """Prove target_eq (= mk_eq(lhs, rhs)) by reducing both sides to a
     common normal form under ``rules_thms``.
 
-    If ``ac`` is given as the triple ``(op, assoc, comm)``, the residual
-    gap between normal forms is closed by AC reasoning over ``op``;
-    otherwise a mismatch raises ``HolError``. ``ac_rules`` is an optional
-    second-pass rule list applied after the main rewrite (e.g. to
-    canonicalise ``SUC x`` into ``x + 1`` form before AC matching)."""
+    If ``ac`` is given as the triple ``(op, assoc, comm)``, the bottom-up
+    rewriter AC-normalizes every ``op``-application it visits so rules
+    whose source shape is one of the AC-equivalent forms still fire (e.g.
+    ``SATZ_30: x*(y+z) = x*y+x*z`` against ``(y+z)*x``); any residual gap
+    between the normal forms is then closed by a top-level AC step.
+    ``ac_rules`` is an optional second-pass rule list applied after the
+    main rewrite (e.g. to canonicalise ``SUC x`` into ``x + 1`` form
+    before AC matching)."""
     lhs, rhs = dest_eq(target_eq)
-    eq_l = REWRITE_CONV(rules_thms, lhs)
-    eq_r = REWRITE_CONV(rules_thms, rhs)
+    eq_l = REWRITE_CONV(rules_thms, lhs, ac=ac)
+    eq_r = REWRITE_CONV(rules_thms, rhs, ac=ac)
     if ac_rules:
-        eq_l = TRANS(eq_l, REWRITE_CONV(ac_rules, rand(eq_l._concl)))
-        eq_r = TRANS(eq_r, REWRITE_CONV(ac_rules, rand(eq_r._concl)))
+        eq_l = TRANS(eq_l, REWRITE_CONV(ac_rules, rand(eq_l._concl), ac=ac))
+        eq_r = TRANS(eq_r, REWRITE_CONV(ac_rules, rand(eq_r._concl), ac=ac))
     nl, nr = rand(eq_l._concl), rand(eq_r._concl)
     if aconv(nl, nr):
         return TRANS(eq_l, SYM(eq_r))

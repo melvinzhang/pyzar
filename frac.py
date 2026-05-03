@@ -207,9 +207,7 @@ def SATZ_44(p):
         .by_match(SATZ_32A, "g")
     # AC swap on both sides.
     p.have("ineq2: (u1*z2)*(x1*y2) > (u1*z2)*(y1*x2)") \
-        .by_rewrite_of("ineq",
-                       [SPECL([mk_mul(x1, y2), mk_mul(u1, z2)], SATZ_29),
-                        SPECL([mk_mul(y1, x2), mk_mul(u1, z2)], SATZ_29)])
+        .by_rewrite_of("ineq", [], ac=(TIMES, SATZ_31, SATZ_29))
     # Splice eq into ineq2 LHS.
     p.have("final_ineq: (z1*u2)*(y1*x2) > (u1*z2)*(y1*x2)") \
         .by_rewrite_of("ineq2", [SYM(p.fact("eq"))])
@@ -368,22 +366,14 @@ def SATZ_50(p):
     p.have("m2_raw: (y1*z2)*(y1*x2) < (z1*y2)*(y1*x2)") \
         .by_match(SATZ_32C, "l2")
     p.have("m2: (y1*x2)*(y1*z2) < (y1*x2)*(z1*y2)") \
-        .by_rewrite_of("m2_raw",
-                       [SPECL([mk_mul(y1, z2), mk_mul(y1, x2)], SATZ_29),
-                        SPECL([mk_mul(z1, y2), mk_mul(y1, x2)], SATZ_29)])
+        .by_rewrite_of("m2_raw", [], ac=(TIMES, SATZ_31, SATZ_29))
     # Transitivity: (x1*y2)*(y1*z2) < (y1*x2)*(z1*y2).
     p.have("m: (x1*y2)*(y1*z2) < (y1*x2)*(z1*y2)") \
         .by_match(SATZ_15,
             "m1", "m2")
     # AC bridge to (x1*z2)*(y1*y2) < (z1*x2)*(y1*y2).
-    ac_l = AC_PROVE(TIMES, SATZ_31, SATZ_29,
-                    mk_eq(mk_mul(mk_mul(x1, y2), mk_mul(y1, z2)),
-                          mk_mul(mk_mul(x1, z2), mk_mul(y1, y2))))
-    ac_r = AC_PROVE(TIMES, SATZ_31, SATZ_29,
-                    mk_eq(mk_mul(mk_mul(y1, x2), mk_mul(z1, y2)),
-                          mk_mul(mk_mul(z1, x2), mk_mul(y1, y2))))
     p.have("m_can: (x1*z2)*(y1*y2) < (z1*x2)*(y1*y2)") \
-        .by_rewrite_of("m", [ac_l, ac_r])
+        .by_rewrite_of("m", [], ac=(TIMES, SATZ_31, SATZ_29))
     # Cancel y1*y2 (Satz 33C).
     p.have("res: x1*z2 < z1*x2") \
         .by_match(SATZ_33C, "m_can")

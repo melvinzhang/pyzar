@@ -1330,7 +1330,7 @@ class _Have:
             ac=ac,
             ac_rules=tuple(self._resolved(ac_rules))))
 
-    def by_rewrite_of(self, ref, rules):
+    def by_rewrite_of(self, ref, rules, *, ac=None):
         """Rewrite a source fact ``ref`` to the have-term using ``rules``.
 
         Both the source's conclusion and the have-term are normalized
@@ -1346,11 +1346,17 @@ class _Have:
           ``y + z > y + u`` to ``x + z > y + u``;
         * inequation rewriting where source and target are both
           ``~(L = R)`` and the rules act under the equation.
+
+        Pass ``ac=(op, assoc, comm)`` to AC-normalize every ``op``-node
+        encountered during traversal -- e.g. ``ac=(TIMES, SATZ_31, SATZ_29)``
+        replaces a hand-built list of ``SPECL([z, y], SATZ_29)``-style
+        commutativity rewrites that would otherwise be needed to align
+        the source's and target's product orderings.
         """
         th_src = self.p._resolve_fact(ref)
         rules_thms = self._resolved(rules)
-        eq_src = REWRITE_CONV(rules_thms, th_src._concl)
-        eq_tgt = REWRITE_CONV(rules_thms, self.term)
+        eq_src = REWRITE_CONV(rules_thms, th_src._concl, ac=ac)
+        eq_tgt = REWRITE_CONV(rules_thms, self.term, ac=ac)
         n_src, n_tgt = rand(eq_src._concl), rand(eq_tgt._concl)
         if not aconv(n_src, n_tgt):
             raise HolError(

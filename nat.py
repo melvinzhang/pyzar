@@ -634,8 +634,7 @@ def SATZ_21(p):
     p.have("xz_gt_yz: x + z > y + z").by_match(SATZ_19A, "hxy")
     p.have("zy_gt_uy: z + y > u + y").by_match(SATZ_19A, "hzu")
     p.have("yz_gt_yu: y + z > y + u")\
-        .by_rewrite_of("zy_gt_uy",
-                       [SPECL([z, y], SATZ_6), SPECL([u, y], SATZ_6)])
+        .by_rewrite_of("zy_gt_uy", [], ac=(PLUS, SATZ_5, SATZ_6))
     p.have("yu_lt_yz: y + u < y + z").by_match(SATZ_11, "yz_gt_yu")
     p.have("yz_lt_xz: y + z < x + z").by_match(SATZ_11, "xz_gt_yz")
     p.have("yu_lt_xz: y + u < x + z")\
@@ -656,8 +655,7 @@ def SATZ_22A(p):
         with p.case("hxy: x = y"):
             p.have("zy_gt_uy: z + y > u + y").by_match(SATZ_19A, "hgt")
             p.have("yz_gt_yu: y + z > y + u")\
-                .by_rewrite_of("zy_gt_uy",
-                               [SPECL([z, y], SATZ_6), SPECL([u, y], SATZ_6)])
+                .by_rewrite_of("zy_gt_uy", [], ac=(PLUS, SATZ_5, SATZ_6))
             p.thus("x + z > y + u").by_rewrite_of("yz_gt_yu", ["hxy"])
 
 @proof
@@ -1126,19 +1124,16 @@ def SATZ_31(p):
 
 
 # Right-distributivity, the corollary Landau notes after Satz 30:
-#   (a+b)*c = a*c + b*c.   Used as a rewrite in the order/multiplication proofs.
-# Plain commutativity (SATZ_29) loops as a free rewrite rule, so we name the
-# four intermediate equations explicitly and let `by_rewrite` chain them.
+#   (a+b)*c = a*c + b*c.   AC-aware rewriting under SATZ_29/SATZ_31 normalises
+# every multiplication so SATZ_30 fires regardless of which side carries the
+# sum -- exactly the freedom Landau takes (1.tex:820-823: "brauchen nicht
+# besonders als Sätze formuliert oder auch nur aufgeschrieben zu werden").
 @proof
 def RIGHT_DISTRIB(p):
     p.goal("!a b c. (a + b) * c = a * c + b * c")
     p.fix("a b c")
-    p.have("flip: (a + b) * c = c * (a + b)").by_match(SATZ_29)
-    p.have("dist: c * (a + b) = c * a + c * b").by_match(SATZ_30)
-    p.have("ca: c * a = a * c").by_match(SATZ_29)
-    p.have("cb: c * b = b * c").by_match(SATZ_29)
     p.thus("(a + b) * c = a * c + b * c")\
-        .by_rewrite(["flip", "dist", "ca", "cb"])
+        .by_rewrite([SATZ_30], ac=(TIMES, SATZ_31, SATZ_29))
 
 
 # Theorem 32 (3-fold "respectively"):  From  x>y / x=y / x<y  it follows  xz > yz / xz = yz / xz < yz.
@@ -1180,8 +1175,7 @@ def SATZ_34(p):
     p.have("xz_gt_yz: x * z > y * z").by_match(SATZ_32A, "hxy")
     p.have("zy_gt_uy: z * y > u * y").by_match(SATZ_32A, "hzu")
     p.have("yz_gt_yu: y * z > y * u")\
-        .by_rewrite_of("zy_gt_uy",
-                       [SPECL([z, y], SATZ_29), SPECL([u, y], SATZ_29)])
+        .by_rewrite_of("zy_gt_uy", [], ac=(TIMES, SATZ_31, SATZ_29))
     p.have("yu_lt_yz: y * u < y * z").by_match(SATZ_11, "yz_gt_yu")
     p.have("yz_lt_xz: y * z < x * z").by_match(SATZ_11, "xz_gt_yz")
     p.have("yu_lt_xz: y * u < x * z")\
@@ -1202,8 +1196,7 @@ def SATZ_35A(p):
         with p.case("hxy: x = y"):
             p.have("zy_gt_uy: z * y > u * y").by_match(SATZ_32A, "hgt")
             p.have("yz_gt_yu: y * z > y * u")\
-                .by_rewrite_of("zy_gt_uy",
-                               [SPECL([z, y], SATZ_29), SPECL([u, y], SATZ_29)])
+                .by_rewrite_of("zy_gt_uy", [], ac=(TIMES, SATZ_31, SATZ_29))
             p.thus("x * z > y * u").by_rewrite_of("yz_gt_yu", ["hxy"])
 
 @proof
