@@ -803,33 +803,62 @@ def _contra_gt_eq(h_gt, h_eq):
     a, b = _ab_of(h_gt)
     return MP(MP(SPECL([a, b], _CONTRA_GT_EQ), h_gt), _orient_eq(h_eq, a, b))
 
+# `a < b` and `a >= b` together give F: case-split `>=` into `>` / `=` and
+# defer to the existing strict-vs-strict and strict-vs-equality lemmas.
+@proof
+def _CONTRA_LT_GE(p):
+    p.goal("!a b. a < b ==> a >= b ==> F")
+    p.fix("a b")
+    p.assume("h_lt: a < b", "h_ge: a >= b")
+    with p.cases_on("h_ge"):
+        with p.case("h_gt: a > b"):
+            p.thus("F").by_match(_CONTRA_LT_GT, "h_lt", "h_gt")
+        with p.case("h_eq: a = b"):
+            p.thus("F").by_match(_CONTRA_LT_EQ, "h_lt", "h_eq")
+
+def _contra_lt_ge(h_lt, h_ge):
+    a, b = _ab_of(h_lt)
+    return MP(MP(SPECL([a, b], _CONTRA_LT_GE), h_lt), h_ge)
+
 register_contra_finder("<", ">", _contra_lt_gt)
 register_contra_finder("<", "=", _contra_lt_eq)
 register_contra_finder(">", "=", _contra_gt_eq)
+register_contra_finder("<", ">=", _contra_lt_ge)
+
+
+# `~(x <= y) ==> x > y`. Trichotomy excludes the `<` and `=` cases (each
+# would imply `x <= y`); the surviving `>` case is the conclusion. Lets
+# proofs flip a negated `<=` hypothesis into a strict order without an
+# inline ``cases_on(SATZ_10)`` block at every site.
+@proof
+def NOT_LE(p):
+    p.goal("!x y. ~(x <= y) ==> x > y")
+    p.fix("x y")
+    p.assume("hn: ~(x <= y)")
+    with p.cases_on(SATZ_10, "x", "y"):
+        with p.case("h_eq: x = y"):
+            p.have("hle: x <= y").by(EQ_TO_LE, "h_eq")
+            p.absurd().by_conj("hle", "hn")
+        with p.case("h_gt: x > y"):
+            p.thus("x > y").by_thm(p.fact("h_gt"))
+        with p.case("h_lt: x < y"):
+            p.have("hle: x <= y").by(LT_TO_LE, "h_lt")
+            p.absurd().by_conj("hle", "hn")
 
 
 # Theorem 26:   y < x + 1  ==>  y <= x.    Contrapositive of Theorem 25.
-# Landau: "Otherwise we'd have y > x, hence by Theorem 25 y >= x + 1."
-# We prove it via Theorem 9 (trichotomy): if y > x, then y >= x + 1, contradicting y < x + 1.
-# Otherwise y = x or y < x, both giving y <= x.
-
+# Landau: "Sonst wäre y > x, also nach Satz 25 y >= x + 1." -- assume the
+# negation of the goal, lift to ``y > x`` via NOT_LE, apply Satz 25 to get
+# ``y >= x + 1``, contradicting ``h: y < x + 1`` via the (<, >=) finder.
 @proof
 def SATZ_26(p):
     p.goal("!x y. y < x + 1 ==> y <= x")
     p.fix("x y")
     p.assume("h: y < x + 1")
-    with p.cases_on(SATZ_10, "y", "x"):
-        with p.case("h_eq: y = x"):
-            p.thus("y <= x").by(EQ_TO_LE, "h_eq")
-        with p.case("h_gt: y > x"):
-            p.have("y_ge_x1: y >= x + 1").by_match(SATZ_25, "h_gt")
-            with p.cases_on("y_ge_x1"):
-                with p.case("h_g: y > x + 1"):
-                    p.absurd().auto("h", "h_g")
-                with p.case("h_e: y = x + 1"):
-                    p.absurd().auto("h", "h_e")
-        with p.case("h_lt: y < x"):
-            p.thus("y <= x").by(LT_TO_LE, "h_lt")
+    with p.thus("y <= x").by_contradiction("hn"):
+        p.have("y_gt: y > x").by_match(NOT_LE, "hn")
+        p.have("y_ge: y >= x + 1").by_match(SATZ_25, "y_gt")
+        p.absurd().auto("h", "y_ge")
 
 
 

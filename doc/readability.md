@@ -273,7 +273,7 @@ SATZ_29)`` parameter.
 
 ---
 
-## 7. SATZ_26 — Landau uses contrapositive, nat.py uses trichotomy
+## 7. SATZ_26 — Landau uses contrapositive, nat.py uses trichotomy — ✅ shipped
 
 **Landau** (1.tex:677–680):
 
@@ -283,33 +283,36 @@ Sonst wäre y > x, also nach Satz 25 y ≥ x + 1.
 
 Two-line contrapositive of Satz 25.
 
-**`nat.py`** SATZ_26 (838–853): forward proof via SATZ_10 (trichotomy),
-splits three ways, the `y > x` branch invokes SATZ_25 then case-splits the
-resulting `y ≥ x+1` into `>` and `=` and `absurd`s both. 16 lines.
+**`nat.py` (before):** SATZ_26 was a forward proof via SATZ_10 (trichotomy)
+that split three ways; the `y > x` branch invoked SATZ_25 and then
+case-split the resulting `y ≥ x+1` into `>` and `=` and `absurd`d both.
+16 lines.
 
-**Fix.** A `p.by_contrapositive(SATZ_25, "h: y < x + 1")` tactic that
-takes a target `~A ==> ~B` and discharges via the forward `B ==> A`.
-Combined with the `~(y ≤ x) <=> y > x` rewrite (which doesn't exist as a
-named lemma), SATZ_26 becomes ~3 lines.
+**Fix landed.** Two small additions reinstate Landau's "Sonst wäre …"
+move without a dedicated `by_contrapositive` tactic:
 
----
+- `NOT_LE: !x y. ~(x <= y) ==> x > y` — a one-shot inversion via
+  `cases_on(SATZ_10)`. Lifts a negated `<=` hypothesis to a strict `>`.
+- A `(<, >=)` contra finder (`_CONTRA_LT_GE`) that defers to the existing
+  `_CONTRA_LT_GT` / `_CONTRA_LT_EQ` lemmas after splitting the `>=`.
+  Lets `absurd().auto` close `y < x + 1` against `y >= x + 1` directly.
 
-## 8. LEMMA_PRED — needed only because `induction` can't pattern-split
+SATZ_26 then collapses into the existing `by_contradiction` block (§4):
 
-**Landau:** Satz 9 base case (1.tex:383–387):
+```python
+p.assume("h: y < x + 1")
+with p.thus("y <= x").by_contradiction("hn"):
+    p.have("y_gt: y > x").by_match(NOT_LE, "hn")
+    p.have("y_ge: y >= x + 1").by_match(SATZ_25, "y_gt")
+    p.absurd().auto("h", "y_ge")
+```
 
-> *Für y = 1 ist nach Satz 3 entweder `x = 1 = y` (Fall 1) oder
-> `x = u' = 1 + u = y + u` (Fall 2).*
-
-Just inlines Satz 3.
-
-**`nat.py`:** `LEMMA_PRED` (326–336) exists purely to repackage Satz 3 as
-a clean disjunction `(x = 1) \/ (?u. x = SUC u)` so `cases_on` can
-consume it. Then SATZ_9 uses it twice (355, 372).
-
-**Fix.** A `p.cases_on_pred(x)` tactic that internally uses Satz 3 to
-split `x` into `1` vs `SUC u` cases (and binds `u` automatically) —
-exactly what Landau's prose does at sight.
+The body is three lines that mirror Landau's prose: negate the goal, lift
+to `y > x`, hit Satz 25, contradict `h`. No new dedicated tactic was
+needed — the proposed `by_contrapositive` would have required matching
+`~(y ≤ x) ⇔ y > x` and `y < x + 1 ⇔ ~(y ≥ x + 1)` rewrites it doesn't
+have, so we kept the contradiction explicit and added the two missing
+primitives instead.
 
 ---
 
@@ -365,8 +368,7 @@ benefit):
    CONTRA_LT_GT/EQ/_GT_EQ from 70 lines of nested CPS to ~30 lines of
    declarative proof, removes `register_contra_finder` plumbing.
 6. **`p.set` / auto-unfolding predicate macro** (§4) — flattens SATZ_27.
-7. **`p.cases_on_pred`** (§8) — kills LEMMA_PRED.
-8. **`p.by_contrapositive`** (§7) — restores Landau's actual SATZ_26.
+8. **`NOT_LE` + `(<, >=)` contra finder** (§7) — ✅ shipped.
 9. **Conjunctive `p.assume`** (§9) — ✅ shipped.
 
 The first four would do the most: they hit the proofs whose Landau
