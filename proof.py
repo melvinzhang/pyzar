@@ -1323,9 +1323,29 @@ class _Have:
         return self._finish(REWRITE_PROVE(self._resolved(rules), self.term))
 
     def by_rewrite_of(self, ref, rules):
-        """Rewrite an existing fact `ref` with `rules` to obtain the have-term."""
-        return self._finish(REWRITE_RULE(self._resolved(rules),
-                                          self.p._resolve_fact(ref)))
+        """Rewrite a source fact ``ref`` to the have-term using ``rules``.
+
+        Both the source's conclusion and the have-term are normalized
+        under ``rules`` to a common form; an equality bridge connecting
+        them is then ``EQ_MP``'d against the source. This is the analogue
+        of ``by_rewrite_ne`` for non-``~`` shapes (orders, equations, any
+        boolean term) and supersedes one-sided ``REWRITE_RULE`` rewriting:
+        a plain equality fact ``hxy: x = y`` can be supplied directly to
+        bridge ``y + z > y + u`` to ``x + z > y + u`` even though the rule
+        only matches inside the target -- the rewriter normalizes both
+        ends and the bridge cancels.
+        """
+        th_src = self.p._resolve_fact(ref)
+        rules_thms = self._resolved(rules)
+        eq_src = REWRITE_CONV(rules_thms, th_src._concl)
+        eq_tgt = REWRITE_CONV(rules_thms, self.term)
+        n_src, n_tgt = rand(eq_src._concl), rand(eq_tgt._concl)
+        if not aconv(n_src, n_tgt):
+            raise HolError(
+                "by_rewrite_of: normal forms differ\n"
+                f"  source reduces to: {pp(n_src)}\n"
+                f"  target reduces to: {pp(n_tgt)}")
+        return self._finish(EQ_MP(TRANS(eq_src, SYM(eq_tgt)), th_src))
 
     def by_select(self, axiom, *args):
         """Higher-order-to-first-order boundary helper.

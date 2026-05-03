@@ -214,35 +214,39 @@ three sentences. The split exists to localise BETA bridges and
 
 ---
 
-## 5. Equality substitution under an order op (Sätze 22, 35)
+## 5. Equality substitution under an order op (Sätze 22, 35) — ✅ shipped
 
 **Landau:** Satz 22 (1.tex:632–633): "*Mit dem Gleichheitszeichen in der
 Voraussetzung durch Satz 19, sonst durch Satz 21 erledigt.*" One clause.
 
-**`nat.py`:** SATZ_22A's equality branch (677–684):
+**`nat.py` (before):** SATZ_22A's equality branch built `|- y + z = x + z`
+by hand using `AP_THM(AP_TERM(PLUS, SYM h), z)`; same pattern in SATZ_22B,
+SATZ_35A, SATZ_35B.
 
 ```python
-with p.case("hxy: x = y"):
-    p.have("zy_gt_uy: z + y > u + y").by_match(SATZ_19A, "hgt")
-    p.have("yz_gt_yu: y + z > y + u")\
-        .by_rewrite_of("zy_gt_uy",
-                       [SPECL([z, y], SATZ_6), SPECL([u, y], SATZ_6)])
-    p.thus("x + z > y + u").by_rewrite_of(
-        "yz_gt_yu",
-        [AP_THM(AP_TERM(PLUS, SYM(p.fact("hxy"))), z)])
+p.thus("x + z > y + u").by_rewrite_of(
+    "yz_gt_yu",
+    [AP_THM(AP_TERM(PLUS, SYM(p.fact("hxy"))), z)])
 ```
 
-That last line constructs `|- y + z = x + z` by hand using `AP_THM(AP_TERM(PLUS, SYM h), z)`. Same pattern in SATZ_35A/B at 1227–1229 and 1241–1243.
-
-**Fix.** `by_rewrite_of` should accept a plain equality fact and figure
-out where to apply it inside the goal — even when the goal is `> / </ ≥`
-rather than a plain equation. The current rewriter bails on terms whose
-top connective isn't `=`; it should descend through `>`, `<`, `≥`, `≤`,
-`+`, `*` automatically. With that, the three lines above become:
+**Fix landed.** `by_rewrite_of` is now two-sided: it normalizes the source
+fact's conclusion *and* the have-term under the supplied rules and bridges
+the result via ``EQ_MP``. A plain equality fact ``hxy: x = y`` can be
+supplied directly even when only one side of the bridge contains the
+matchable subterm — the rewriter normalizes both ends and the over-
+application cancels. The four manual surgical sites collapse to one-liners:
 
 ```python
 p.thus("x + z > y + u").by_rewrite_of("yz_gt_yu", ["hxy"])
+p.thus("x + z > y + u").by_rewrite_of("xz_gt_yz", ["hzu"])
+p.thus("x * z > y * u").by_rewrite_of("yz_gt_yu", ["hxy"])
+p.thus("x * z > y * u").by_rewrite_of("xz_gt_yz", ["hzu"])
 ```
+
+The same upgrade also let several spots in SATZ_16A, SATZ_25, and the
+SATZ_27 sub-lemmas drop their pre-orienting ``SYM(...)`` wrappers (the
+forward orientation now rewrites the target side and meets the source in
+the middle). `AP_THM` and `mk_comb` are no longer needed in `nat.py`.
 
 ---
 
@@ -351,10 +355,8 @@ order. Today's multi-arg `p.assume` only handles `==>` chains.
 Ranked by impact (LOC saved across §2 of nat.py, plus how many proofs
 benefit):
 
-1. **Inequality-aware rewriting** (§1) — cleans SATZ_1/7/8 and any
-   future ≠ proof.
-2. **Order-aware rewriting** (§5) — `by_rewrite_of` should descend through
-   `<`, `>`, `≥`, `≤`. Cleans SATZ_22A/B and SATZ_35A/B.
+1. **Inequality-aware rewriting** (§1) — ✅ shipped.
+2. **Order-aware rewriting** (§5) — ✅ shipped.
 3. **`by_trichotomy_invert` tactic** (§2) — collapses SATZ_20A/B/C and
    SATZ_33A/B/C from ~80 lines to ~10.
 4. **AC support for `*`** (§6) — RIGHT_DISTRIB shrinks; SUC_MUL becomes

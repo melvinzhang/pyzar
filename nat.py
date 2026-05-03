@@ -34,7 +34,7 @@ Coverage:
 
 from fusion import (
     Var, Comb, Abs,
-    bool_ty, aty, mk_comb,
+    bool_ty, aty,
     HolError,
     REFL, TRANS, MK_COMB, ABS, BETA, ASSUME, EQ_MP,
     DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
@@ -50,7 +50,7 @@ from axioms import (
     mk_and, mk_or, mk_imp, mk_forall, mk_exists, mk_not, mk_select,
 )
 from tactics import (
-    AP_TERM, AP_THM, BETA_CONV, SYM, UNFOLD,
+    AP_TERM, BETA_CONV, SYM, UNFOLD,
     SPEC, GEN, CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP,
     CONTR, NOT_ELIM, NOT_INTRO, NOT_CONST,
     DISJ1, DISJ2, DISJ_CASES,
@@ -565,7 +565,7 @@ def SATZ_16A(p):
         with p.case("x < y"):
             p.thus("x < z").by_match(SATZ_15, -1, "hyz")
         with p.case("x = y"):
-            p.thus("x < z").by_rewrite_of("hyz", [SYM(p.fact(-1))])
+            p.thus("x < z").by_rewrite_of("hyz", [-1])
 
 @proof
 def SATZ_16B(p):
@@ -671,9 +671,7 @@ def SATZ_22A(p):
             p.have("yz_gt_yu: y + z > y + u")\
                 .by_rewrite_of("zy_gt_uy",
                                [SPECL([z, y], SATZ_6), SPECL([u, y], SATZ_6)])
-            p.thus("x + z > y + u").by_rewrite_of(
-                "yz_gt_yu",
-                [AP_THM(AP_TERM(PLUS, SYM(p.fact("hxy"))), z)])
+            p.thus("x + z > y + u").by_rewrite_of("yz_gt_yu", ["hxy"])
 
 @proof
 def SATZ_22B(p):
@@ -685,9 +683,7 @@ def SATZ_22B(p):
             p.thus("x + z > y + u").by_match(SATZ_21, "hgt", -1)
         with p.case("hzu: z = u"):
             p.have("xz_gt_yz: x + z > y + z").by_match(SATZ_19A, "hgt")
-            p.thus("x + z > y + u").by_rewrite_of(
-                "xz_gt_yz",
-                [AP_TERM(mk_comb(PLUS, y), p.fact("hzu"))])
+            p.thus("x + z > y + u").by_rewrite_of("xz_gt_yz", ["hzu"])
 
 
 # Theorem 23:   x >= y, z >= u  ==>  x + z >= y + u.
@@ -739,7 +735,7 @@ def SATZ_25(p):
     p.have("u_ge_1: u >= 1").by_match(SATZ_24)
     p.have("sum_ge: x + u >= x + 1")\
         .by_match(SATZ_23, EQ_TO_GE(REFL(x)), "u_ge_1")
-    p.thus("y >= x + 1").by_rewrite_of("sum_ge", [SYM(p.fact("u_eq"))])
+    p.thus("y >= x + 1").by_rewrite_of("sum_ge", ["u_eq"])
 
 
 # ---------------------------------------------------------------------------
@@ -921,7 +917,7 @@ def _SATZ_27_EXISTS_M(p):
                                 p.thus("P (SUC x)").by_thm(p.fact("hPS"))
                             with p.case("hnPS: ~ P (SUC x)"):
                                 p.have("hnP1: ~ P (x + 1)")\
-                                    .by_rewrite_of("hnPS", [SYM(SPEC(x, ADD_1))])
+                                    .by_rewrite_of("hnPS", [ADD_1])
                                 p.have("conj: P x /\\ ~ P (x + 1)")\
                                     .by(CONJ, "IH", "hnP1")
                                 p.have("not_conj: ~(P x /\\ ~ P (x + 1))")\
@@ -960,7 +956,7 @@ def _SATZ_27_FROM_M(p):
                 with p.have("ne: ~ (m = n)").proof():
                     with p.suppose("eq: m = n"):
                         p.have("Nm_via: N m")\
-                            .by_rewrite_of("hNn", [SYM(p.fact("eq"))])
+                            .by_rewrite_of("hNn", ["eq"])
                         p.absurd().by_conj("Nm_via", "hnN")
                 with p.have("lt: m < n").by_cases("le"):
                     with p.case("h_lt: m < n"):
@@ -1216,9 +1212,7 @@ def SATZ_35A(p):
             p.have("yz_gt_yu: y * z > y * u")\
                 .by_rewrite_of("zy_gt_uy",
                                [SPECL([z, y], SATZ_29), SPECL([u, y], SATZ_29)])
-            p.thus("x * z > y * u").by_rewrite_of(
-                "yz_gt_yu",
-                [AP_THM(AP_TERM(TIMES, SYM(p.fact("hxy"))), z)])
+            p.thus("x * z > y * u").by_rewrite_of("yz_gt_yu", ["hxy"])
 
 @proof
 def SATZ_35B(p):
@@ -1230,9 +1224,7 @@ def SATZ_35B(p):
             p.thus("x * z > y * u").by_match(SATZ_34, "hgt", -1)
         with p.case("hzu: z = u"):
             p.have("xz_gt_yz: x * z > y * z").by_match(SATZ_32A, "hgt")
-            p.thus("x * z > y * u").by_rewrite_of(
-                "xz_gt_yz",
-                [AP_TERM(mk_comb(TIMES, y), p.fact("hzu"))])
+            p.thus("x * z > y * u").by_rewrite_of("xz_gt_yz", ["hzu"])
 
 
 # Theorem 36:  x>=y, z>=u  ==>  x*z >= y*u.
