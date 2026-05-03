@@ -17,6 +17,13 @@ from basics import (
 )
 from parser import add_type, add_infix, add_prefix, add_binder
 
+# Surface syntax for the kernel-level concepts that predate the parser:
+# `bool` is from fusion, `=` and `\` from basics.  Everything below this
+# line registers itself inline next to where the operator is defined.
+add_type("bool", bool_ty)
+add_infix("=", 40, mk_eq, assoc="non")
+add_binder("\\", mk_abs)
+
 # ---------------------------------------------------------------------------
 # Boolean connectives (bool.ml)
 # ---------------------------------------------------------------------------
@@ -41,6 +48,7 @@ AND_DEF = new_basic_definition(
 
 def mk_and(a, b):
     return mk_app(mk_const("/\\", []), a, b)
+add_infix("/\\", 30, mk_and, assoc="right")
 
 # (==>) = \p q. p /\ q <=> p
 IMP_DEF = new_basic_definition(
@@ -49,6 +57,7 @@ IMP_DEF = new_basic_definition(
 
 def mk_imp(a, b):
     return mk_app(mk_const("==>", []), a, b)
+add_infix("==>", 10, mk_imp, assoc="right")
 
 # (!) = \P:A->bool. P = \x. T
 abty = mk_fun_ty(aty, bool_ty)
@@ -60,6 +69,7 @@ FORALL_DEF = new_basic_definition(
 
 def mk_forall(v, body):
     return mk_comb(mk_const("!", [(v.ty, aty)]), mk_abs(v, body))
+add_binder("!", mk_forall)
 
 # (?) = \P:A->bool. !q. (!x. P x ==> q) ==> q
 EXISTS_DEF = new_basic_definition(
@@ -71,6 +81,7 @@ EXISTS_DEF = new_basic_definition(
 
 def mk_exists(v, body):
     return mk_comb(mk_const("?", [(v.ty, aty)]), mk_abs(v, body))
+add_binder("?", mk_exists)
 
 # (\/) = \p q. !r. (p ==> r) ==> (q ==> r) ==> r
 r_b = Var("r", bool_ty)
@@ -83,6 +94,7 @@ OR_DEF = new_basic_definition(
 
 def mk_or(a, b):
     return mk_app(mk_const("\\/", []), a, b)
+add_infix("\\/", 20, mk_or, assoc="right")
 
 # F = !p:bool. p
 F_DEF = new_basic_definition(
@@ -96,6 +108,7 @@ NOT_DEF = new_basic_definition(
 
 def mk_not(t):
     return mk_comb(mk_const("~", []), t)
+add_prefix("~", mk_not)
 
 # Bool-specific shape helpers: thin aliases over the kernel ``is_*``/
 # ``dest_*`` connective helpers so tactic call sites can ask
@@ -137,6 +150,7 @@ def mk_select(v, body):
     """Build ``@v. body`` -- the SELECT-binder term picking some `v` of the
     same type with `body[v]` true (or any `v` if no such exists)."""
     return mk_comb(mk_const("@", [(v.ty, aty)]), mk_abs(v, body))
+add_binder("@", mk_select)
 
 SELECT_AX = new_axiom(
     mk_forall(_P, mk_forall(_xs,
@@ -179,19 +193,3 @@ INFINITY_AX = new_axiom(
     mk_exists(_fi,
         mk_and(mk_comb(_one_one, _fi),
                mk_not(mk_comb(_onto, _fi)))))
-
-
-# ---------------------------------------------------------------------------
-# Register surface syntax for the operators defined in this module.
-# ---------------------------------------------------------------------------
-
-add_type("bool", bool_ty)
-add_infix("=",   40, mk_eq,  assoc="non")
-add_infix("/\\", 30, mk_and, assoc="right")
-add_infix("\\/", 20, mk_or,  assoc="right")
-add_infix("==>", 10, mk_imp, assoc="right")
-add_prefix("~",      mk_not)
-add_binder("!",      mk_forall)
-add_binder("?",      mk_exists)
-add_binder("\\",     mk_abs)
-add_binder("@",      mk_select)
