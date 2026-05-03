@@ -843,118 +843,12 @@ _N_ty = mk_fun_ty(num_ty, bool_ty)
 _N_var = Var("N", _N_ty)
 
 
-# Sub-lemma for SATZ_27 (Step 2). Stated in unfolded M-form: if y is in N then
-# the predicate ``M(y+1) := !n. N n ==> y+1 <= n`` cannot hold (would give
-# ``y+1 <= y`` contradicting ``y+1 > y``). Used inside _prove_satz_27 with a
-# BETA bridge to switch between the unfolded form and ``M_pred (y+1)``.
-
-@proof
-def _SATZ_27_NOT_M_SUCC(p):
-    p.goal("!N y. N y ==> ~(!n. N n ==> y + 1 <= n)",
-           types={"N": _N_ty})
-    p.fix("N y")
-    p.assume("hNy: N y")
-    with p.suppose("hM: !n. N n ==> y + 1 <= n"):
-        p.have("le: y + 1 <= y").by_match("hM", "hNy")
-        p.have("gt: y + 1 > y").by_match(SATZ_18)
-        with p.cases_on("le"):
-            with p.case("h_lt: y + 1 < y"):
-                p.absurd().auto("h_lt", "gt")
-            with p.case("h_eq: y + 1 = y"):
-                p.absurd().auto("gt", "h_eq")
-
-
-# Sub-lemma for SATZ_27 (Step 3). Generic well-ordering kernel: if a
-# predicate ``P`` holds at 1, fails at the successor of every element of N,
-# and N is non-empty, then there is some boundary ``m`` with ``P m`` and
-# ``~ P (m+1)``.  This is the abstract content of Landau's Step 3.
-# Proof: by contradiction. If no such m exists then ``!x. ~(P x /\\ ~P(x+1))``,
-# which gives ``!x. P x ==> P (x+1)`` and (by induction on x in SUC form,
-# bridged by ADD_1) ``!x. P x``. Pick n in N, then P(n+1) holds, contradicting
-# ``hStepFail`` at y := n.
-
-@proof
-def _SATZ_27_EXISTS_M(p):
-    p.goal("!P N. P 1 ==> "
-           "(!y. N y ==> ~ P (y + 1)) ==> "
-           "(?n. N n) ==> "
-           "?m. P m /\\ ~ P (m + 1)",
-           types={"P": _N_ty, "N": _N_ty})
-    p.fix("P N")
-    p.assume("hP1: P 1")
-    p.assume("hStepFail: !y. N y ==> ~ P (y + 1)")
-    p.assume("hNonempty: ?n. N n")
-    with p.thus("?m. P m /\\ ~ P (m + 1)")\
-            .by_contradiction("hnex"):
-        pred_Q = p._parse("\\x. P x /\\ ~ P (x + 1)")
-        p.have("forall_nQ: !x. ~(P x /\\ ~ P (x + 1))")\
-            .by_thm(NOT_EX_TO_FORALL_NOT(p.fact("hnex"), pred_Q))
-        with p.have("forall_P: !x. P x").proof():
-            with p.induction("x"):
-                with p.base():
-                    p.thus("P 1").by_thm(p.fact("hP1"))
-                with p.step("IH"):
-                    with p.cases_on(EXCLUDED_MIDDLE, "P (SUC x)"):
-                        with p.case("hPS: P (SUC x)"):
-                            p.thus("P (SUC x)").by_thm(p.fact("hPS"))
-                        with p.case("hnPS: ~ P (SUC x)"):
-                            p.have("hnP1: ~ P (x + 1)")\
-                                .by_rewrite_of("hnPS", [ADD_1])
-                            p.have("conj: P x /\\ ~ P (x + 1)")\
-                                .by(CONJ, "IH", "hnP1")
-                            p.have("not_conj: ~(P x /\\ ~ P (x + 1))")\
-                                .by_match("forall_nQ")
-                            p.absurd().by_conj("conj", "not_conj")
-        p.choose("n0: N n0", from_="hNonempty")
-        p.have("Pn1: P (n0 + 1)").by_match("forall_P")
-        p.have("nPn1: ~ P (n0 + 1)").by_match("hStepFail", "n0_eq")
-        p.absurd().by_conj("Pn1", "nPn1")
-
-
-# Sub-lemma for SATZ_27 (Step 4). Given M(m) (= !n. N n ==> m <= n) and
-# ~M(m+1) (= ~(!n. N n ==> m+1 <= n)), deduce that m itself satisfies
-# ``N m /\ (!k. N k ==> m <= k)`` — i.e., m is the witness we need.
-# Proof: the right conjunct is just M(m) renamed; for the left, suppose ~N m,
-# then for each n in N we have m <= n and m != n (else N m), hence m < n,
-# hence m+1 <= n (Sätze 12, 25, 13). That builds M(m+1), contradicting ~M(m+1).
-
-@proof
-def _SATZ_27_FROM_M(p):
-    p.goal("!N m. (!n. N n ==> m <= n) ==> "
-           "~(!n. N n ==> m + 1 <= n) ==> "
-           "N m /\\ (!k. N k ==> m <= k)",
-           types={"N": _N_ty})
-    p.fix("N m")
-    p.assume("hM: !n. N n ==> m <= n")
-    p.assume("hnM1: ~(!n. N n ==> m + 1 <= n)")
-    with p.have("Nm: N m").by_contradiction("hnN"):
-        with p.have("M_m1: !n. N n ==> m + 1 <= n").proof():
-            p.fix("n")
-            p.assume("hNn: N n")
-            p.have("le: m <= n").by_match("hM", "hNn")
-            with p.have("ne: ~ (m = n)").proof():
-                with p.suppose("eq: m = n"):
-                    p.have("Nm_via: N m")\
-                        .by_rewrite_of("hNn", ["eq"])
-                    p.absurd().by_conj("Nm_via", "hnN")
-            with p.have("lt: m < n").by_cases("le"):
-                with p.case("h_lt: m < n"):
-                    p.thus("m < n").by_thm(p.fact("h_lt"))
-                with p.case("h_eq: m = n"):
-                    p.absurd().by_conj("h_eq", "ne")
-            p.have("gt: n > m").by_match(SATZ_12, "lt")
-            p.have("ge: n >= m + 1").by_match(SATZ_25, "gt")
-            p.thus("m + 1 <= n").by_match(SATZ_13, "ge")
-        p.absurd().by_conj("M_m1", "hnM1")
-    p.thus("N m /\\ (!k. N k ==> m <= k)").by(CONJ, "Nm", "hM")
-
-
-# Theorem 27 (well-ordering). Direct port of Landau's argument: introduce the
-# schematic predicate ``M(x) := !n. N n ==> x <= n`` via ``p.let``, build M(1),
-# show M fails at successors of N-elements, invoke the abstract well-ordering
-# kernel _SATZ_27_EXISTS_M to get a boundary m, then conclude via _SATZ_27_FROM_M.
-# Eager substitution at parse time means ``M m`` and the unfolded body share the
-# same kernel term, so no BETA-bridge plumbing is needed at the boundaries.
+# Theorem 27 (well-ordering). Direct port of Landau's four-sentence argument
+# (1.tex:685-706). Introduce ``M(x) := !n. N n ==> x <= n`` via ``p.let``;
+# the carrier-Var trick keeps the symbol visible while the simp pipeline
+# (``simp_aconv`` / ``simp_bridge`` in ``proof.py``) bridges folded
+# ``M (y+1)`` and unfolded ``!n. N n ==> y+1 <= n`` at every tactic
+# boundary -- so the proof reads in let-folded form throughout.
 
 @proof
 def SATZ_27(p):
@@ -964,33 +858,79 @@ def SATZ_27(p):
     p.assume("hNonempty: ?n. N n")
     p.let("M(x) := !n. N n ==> x <= n")
 
-    # Step 1: M 1, i.e. !n. N n ==> 1 <= n.
+    # 1 ∈ M (Satz 24).
     with p.have("M_1: M 1").proof():
         p.fix("n")
         p.assume("hNn: N n")
         p.have("ge1: n >= 1").by_match(SATZ_24)
         p.thus("1 <= n").by_match(SATZ_13, "ge1")
 
-    # Step 2: !y. N y ==> ~ M (y + 1).  _SATZ_27_NOT_M_SUCC is stated in the
-    # unfolded form, which is exactly what ``M (y + 1)`` parses to via the let.
-    p.have("step_fail: !y. N y ==> ~ M (y + 1)")\
-        .by(_SATZ_27_NOT_M_SUCC, "N")
+    # For every y in N, y + 1 ∉ M, since y + 1 > y (Satz 18).
+    with p.have("step_fail: !y. N y ==> ~ M (y + 1)").proof():
+        p.fix("y")
+        p.assume("hNy: N y")
+        with p.suppose("hM: M (y + 1)"):
+            p.have("le: y + 1 <= y").by_match("hM", "hNy")
+            p.have("gt: y + 1 > y").by_match(SATZ_18)
+            with p.cases_on("le"):
+                with p.case("h_lt: y + 1 < y"):
+                    p.absurd().auto("h_lt", "gt")
+                with p.case("h_eq: y + 1 = y"):
+                    p.absurd().auto("gt", "h_eq")
 
-    # Step 3: ?m. M m /\ ~ M (m + 1).  _SATZ_27_EXISTS_M takes a higher-order
-    # predicate P. The let-bound `M` is in the parser scope as its carrier
-    # `Var`, so `by`'s string-arg path parses ``"M"`` to that carrier and
-    # SPECs at it directly -- no Abs materialization or BETA bridge needed.
-    p.have("ex: ?m. M m /\\ ~ M (m + 1)")\
-        .by(_SATZ_27_EXISTS_M, "M", "N",
-            "M_1", "step_fail", "hNonempty")
+    # Hence not every x is in M; otherwise Axiom 5 would give M for all x,
+    # but then for any n ∈ N we'd have M (n+1), contradicting step_fail.
+    # Contrapositive: there is m ∈ M with m + 1 ∉ M.
+    with p.have("ex: ?m. M m /\\ ~ M (m + 1)").by_contradiction("hnex"):
+        pred_Q = p._parse("\\x. M x /\\ ~ M (x + 1)")
+        p.have("forall_nQ: !x. ~(M x /\\ ~ M (x + 1))")\
+            .by_thm(NOT_EX_TO_FORALL_NOT(p.fact("hnex"), pred_Q))
+        with p.have("forall_M: !x. M x").proof():
+            with p.induction("x"):
+                with p.base():
+                    p.thus("M 1").by_thm(p.fact("M_1"))
+                with p.step("IH"):
+                    with p.cases_on(EXCLUDED_MIDDLE, "M (SUC x)"):
+                        with p.case("hMS: M (SUC x)"):
+                            p.thus("M (SUC x)").by_thm(p.fact("hMS"))
+                        with p.case("hnMS: ~ M (SUC x)"):
+                            p.have("hnM1: ~ M (x + 1)")\
+                                .by_rewrite_of("hnMS", [ADD_1])
+                            p.have("conj: M x /\\ ~ M (x + 1)")\
+                                .by(CONJ, "IH", "hnM1")
+                            p.have("not_conj: ~(M x /\\ ~ M (x + 1))")\
+                                .by_match("forall_nQ")
+                            p.absurd().by_conj("conj", "not_conj")
+        p.choose("n0: N n0", from_="hNonempty")
+        p.have("Mn1: M (n0 + 1)").by("forall_M", "n0 + 1")
+        p.have("nMn1: ~ M (n0 + 1)").by_match("step_fail", "n0_eq")
+        p.absurd().by_conj("Mn1", "nMn1")
 
-    # Step 4: choose the boundary witness, decompose, conclude via _SATZ_27_FROM_M.
+    # Of that m: it is ≤ every n ∈ N (M m), and m ∈ N (else m < n for every
+    # n ∈ N, hence m + 1 ≤ n by Satz 25, hence m + 1 ∈ M -- contradicting
+    # ¬ M (m+1)).
     p.choose("m: M m /\\ ~ M (m + 1)", from_="ex")
     p.split_conj("m_eq", "Mm", "nMm1")
-    p.have("conj: N m /\\ (!k. N k ==> m <= k)")\
-        .by(_SATZ_27_FROM_M, "N", "m", "Mm", "nMm1")
-    p.thus("?m. N m /\\ (!k. N k ==> m <= k)")\
-        .by_witness("m", "conj")
+    with p.have("Nm: N m").by_contradiction("hnN"):
+        with p.have("M_m1: M (m + 1)").proof():
+            p.fix("n")
+            p.assume("hNn: N n")
+            p.have("le: m <= n").by_match("Mm", "hNn")
+            with p.have("ne: ~ (m = n)").proof():
+                with p.suppose("eq: m = n"):
+                    p.have("Nm_via: N m").by_rewrite_of("hNn", ["eq"])
+                    p.absurd().by_conj("Nm_via", "hnN")
+            with p.have("lt: m < n").by_cases("le"):
+                with p.case("h_lt: m < n"):
+                    p.thus("m < n").by_thm(p.fact("h_lt"))
+                with p.case("h_eq: m = n"):
+                    p.absurd().by_conj("h_eq", "ne")
+            p.have("gt: n > m").by_match(SATZ_12, "lt")
+            p.have("ge: n >= m + 1").by_match(SATZ_25, "gt")
+            p.thus("m + 1 <= n").by_match(SATZ_13, "ge")
+        p.absurd().by_conj("M_m1", "nMm1")
+    p.have("conj: N m /\\ (!k. N k ==> m <= k)").by(CONJ, "Nm", "Mm")
+    p.thus("?m. N m /\\ (!k. N k ==> m <= k)").by_witness("m", "conj")
 
 
 # ---------------------------------------------------------------------------

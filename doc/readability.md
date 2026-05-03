@@ -130,7 +130,7 @@ and `CHOOSE_GT` are removed (no other callers).
 
 ---
 
-## 4. SATZ_27 (well-ordering)
+## 4. SATZ_27 (well-ordering) — ✅ shipped
 
 **Landau:** 1.tex:685–706, ~20 lines of running prose. Defines
 `𝔐 := {x : x ≤ every n in 𝔑}` casually, observes 1 ∈ 𝔐 (Satz 24),
@@ -138,49 +138,66 @@ observes 𝔐 misses some x because y+1 ∉ 𝔐 for y ∈ 𝔑, applies Axiom 5
 contrapositively to get a boundary m, and concludes m ∈ 𝔑 by
 contradiction.
 
-**`nat.py`:** 1029 → 1027 across **three sub-lemmas** plus the main proof:
+**`nat.py` (before):** 1029 → 1027 across **three sub-lemmas** plus the
+main proof (`_SATZ_27_NOT_M_SUCC`, `_SATZ_27_EXISTS_M`,
+`_SATZ_27_FROM_M`). The split existed to localise BETA bridges and the
+folded/unfolded boundary -- whenever an inner block needed `M` in its
+unfolded `!n. N n ==> x <= n` shape, abstracting `M` out as a generic
+predicate `P` made the sub-lemma's proof terms align without simp.
 
-- `_SATZ_27_NOT_M_SUCC` (878–891): "y ∈ 𝔑 ⟹ y+1 ∉ 𝔐" — 14 lines.
-- `_SATZ_27_EXISTS_M` (903–941): the abstract Axiom-5-contrapositive
-  kernel — 39 lines, includes a manual induction with an `ADD_1` ↔ `SUC`
-  bridge (`SYM(SPEC(x, ADD_1))`) and two `EXCLUDED_MIDDLE` calls.
-- `_SATZ_27_FROM_M` (951–982): the contradictory case for `m ∈ 𝔑` — 32
-  lines, including manual `EXCLUDED_MIDDLE`.
-- `SATZ_27` itself (992–1026): wires the three together via
-  `p.let("M(x) := !n. N n ==> x <= n")` and `by`.
+**Fix landed.** SATZ_27 is now a single proof block (~70 lines) that
+mirrors Landau's paragraph: introduce `M`, show `1 ∈ M`, show
+`y + 1 ∉ M`, derive a boundary `m` by contradiction (induction inside
+the by_contradiction body), conclude `m ∈ 𝔑` by contradiction. The
+three sub-lemmas are gone.
 
-The three sub-lemmas are not really sub-lemmas in Landau's mind — they're
-three sentences. The split exists to localise BETA bridges (now
-absorbed by simp) and the SUC/+1 induction-form mismatch.
+What unlocked it: pushing the simp-quotient through the rest of the
+DSL. Six tactics that used strict `aconv` checks now bridge folded and
+unfolded shapes via `simp_aconv` / `simp_match`:
 
-**Pain points:**
+- `suppose`'s hypothesis spec accepts the folded form even when the
+  parent goal was already simp-unfolded.
+- `by_contradiction`'s explicit-form spec does the same.
+- `cases_on`'s on-close conclusion check lifts via `simp_match` so a
+  `DISJ_CASES` over an unfolded discriminator can satisfy a folded
+  target.
+- `absurd().by_conj` lifts the positive fact to the negation's inner
+  shape so `M (m+1)` matches `~(!n. N n ==> m+1 <= n)`.
+- `by_rewrite_of` simp-normalizes source, target, and rules before
+  `REWRITE_CONV`. This unblocked the choose-witness `SELECT` term in
+  step 4: when `m` is an `@m. M m /\ ~ M (m+1)`-shaped term, the
+  user's rewrite rule's LHS still aligns with subterms of the target.
 
-1. **HO-lemma boundary plumbing** — Landau's "𝔐 is the set of …" is
-   direct; passing `M` to a HO lemma quantified over a predicate used to
-   require `by_select` (materialise the let-bound macro as a kernel
-   lambda, BETA-normalise back, MP premises). ✅ shipped: the carrier-Var
-   trick already turned the SPEC into a single-step `SPEC(carrier, th)`,
-   and `by`'s string-arg path parses `"M"` to the carrier directly — so
-   the dedicated `by_select` tactic was redundant and is now removed.
-   Use `by(HO_LEMMA, "M", "fact1", ...)` everywhere.
+These five surface-area changes plus two new helpers (`simp_aconv`,
+`simp_bridge`) on `Proof` make the simp-equivalence consistent across
+every term-comparison site in the DSL. The `_SATZ_27_FROM_M` use of
+`by_rewrite_of("hNn", ["eq"])` -- which was the load-bearing reason
+to abstract `m` as a free variable in a sub-lemma -- now works with
+`m` as the choose-witness `SELECT` term.
 
-2. **Manual `ADD_1` / `SUC` bridge inside induction.** In
-   `_SATZ_27_EXISTS_M` (931–932):
-   ```python
-   p.have("hnP1: ~ P (x + 1)")
-       .by_rewrite_of("hnPS", [SYM(SPEC(x, ADD_1))])
-   ```
-   `induction` produces a `SUC x` step, but the predicate is in `+1` form.
-   A user shouldn't have to choose; either form should work.
+**Pain points (resolved):**
 
-3. **`EXCLUDED_MIDDLE` manually invoked twice** for what Landau states as
-   a contrapositive. A `p.by_contradiction("hnex: ~ goal"): …` block
-   would absorb the `cases_on(EXCLUDED_MIDDLE, …)` ceremony. ✅ shipped.
+1. **HO-lemma boundary plumbing** ✅ — `by_select` removed; `by` parses
+   `"M"` to the carrier `Var` and SPECs at it directly.
+
+2. **Manual `ADD_1` / `SUC` bridge inside induction.** Still present
+   inside the inlined SATZ_27 (the EXCLUDED_MIDDLE case at the SUC
+   step still does `by_rewrite_of("hnMS", [ADD_1])`). Frame-local
+   `ADD_1` simp rule inside `induction` blocks would dissolve this;
+   gain is small (~3 sites total across the codebase) so deferred.
+
+3. **`EXCLUDED_MIDDLE` manually invoked** ✅ — `p.by_contradiction`
+   absorbs the case-split.
+
+4. **Folded/unfolded boundary** ✅ — `simp_aconv` / `simp_bridge` make
+   six DSL tactics simp-equivalence-aware (suppose, by_contradiction,
+   cases_on, absurd.by_conj, by_rewrite_of, plus the helpers used in
+   `_finish` already). The user writes `M (y+1)` everywhere; simp
+   bridges to the unfolded form on demand.
 
 **Fix.** Two remaining; one shipped:
 - ~~A `p.set("M(x) := …")` that auto-unfolds at every `M t` site without
-  needing `by_select`.~~ ✅ obviated: `by_select` removed, `by` covers
-  the HO boundary uniformly.
+  needing `by_select`.~~ ✅ obviated.
 - Make `induction` accept a predicate stated in either `SUC x` or `x + 1`
   form — internally normalize via `ADD_1`.
 - A `p.by_contradiction("h: ~ goal")` block as sugar for the

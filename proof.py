@@ -462,6 +462,34 @@ class Proof:
             return th
         return EQ_MP(eq, th)
 
+    def simp_aconv(self, t1, t2):
+        """Term-level analogue of ``aconv`` modulo the active simp set.
+
+        Two terms are simp-equivalent iff their bottom-up unfolds (via the
+        lazy-let carriers and globally-registered ``define`` rules)
+        produce alpha-equivalent normal forms. Used by tactics that
+        compare a user-supplied term against a frame-stored canonical
+        form which was already simp-normalized at frame entry (e.g.
+        ``suppose``, ``by_contradiction``)."""
+        if aconv(t1, t2):
+            return True
+        eq1 = self.simp_normalize(t1)
+        eq2 = self.simp_normalize(t2)
+        return aconv(rand(eq1._concl), rand(eq2._concl))
+
+    def simp_bridge(self, src, tgt):
+        """Return ``|- src = tgt`` if the two terms are simp-equivalent,
+        else ``None``. Builds the bridge as
+        ``TRANS(simp_normalize(src), SYM(simp_normalize(tgt)))`` after
+        verifying their normal forms ``aconv``. The returned equation
+        carries the simp-rule hypotheses (lazy-let local equations);
+        downstream consumers discharge them on frame close."""
+        eq1 = self.simp_normalize(src)
+        eq2 = self.simp_normalize(tgt)
+        if not aconv(rand(eq1._concl), rand(eq2._concl)):
+            return None
+        return TRANS(eq1, SYM(eq2))
+
     @staticmethod
     def _carrier_abs_body(lz):
         """``\\b1..bn. body`` -- the abstraction that replaces ``lz``'s
@@ -1223,7 +1251,7 @@ class Proof:
                 raise HolError(f"suppose: cannot parse hypothesis: {ex}") from ex
             if label is None:
                 raise HolError(f"suppose: bad label spec: {label_spec!r}")
-            if not aconv(hyp_term, body):
+            if not self.simp_aconv(hyp_term, body):
                 raise HolError(
                     "suppose: hypothesis does not match negated body\n"
                     f"  body:  {pp(body)}\n  given: {pp(hyp_term)}")
@@ -1507,17 +1535,35 @@ class _Have:
         commutativity rewrites that would otherwise be needed to align
         the source's and target's product orderings.
         """
-        th_src = self.p._resolve_fact(ref)
+        p = self.p
+        th_src = p._resolve_fact(ref)
         rules_thms = self._resolved(rules)
-        eq_src = REWRITE_CONV(rules_thms, th_src._concl, ac=ac)
-        eq_tgt = REWRITE_CONV(rules_thms, self.term, ac=ac)
-        n_src, n_tgt = rand(eq_src._concl), rand(eq_tgt._concl)
+        # Simp-normalize the source's conclusion, the target, and each
+        # rule's conclusion to a common canonical form before the kernel
+        # rewriter runs. Without this, REWRITE_CONV does syntactic
+        # subterm matching on the user's chosen form (folded or
+        # unfolded) and a rule whose LHS is in the other form silently
+        # no-ops -- the bug that bit the SATZ_27 inlining attempt at
+        # the choose-witness SELECT term.
+        src_simp = p.simp_normalize(th_src._concl)        # |- src = src_n
+        tgt_simp = p.simp_normalize(self.term)             # |- tgt = tgt_n
+        rules_n = [p.simp_norm_fact(r) for r in rules_thms]
+        src_n = rand(src_simp._concl)
+        tgt_n = rand(tgt_simp._concl)
+        eq_src_rw = REWRITE_CONV(rules_n, src_n, ac=ac)    # |- src_n = X
+        eq_tgt_rw = REWRITE_CONV(rules_n, tgt_n, ac=ac)    # |- tgt_n = Y
+        n_src = rand(eq_src_rw._concl)
+        n_tgt = rand(eq_tgt_rw._concl)
         if not aconv(n_src, n_tgt):
             raise HolError(
                 "by_rewrite_of: normal forms differ\n"
                 f"  source reduces to: {pp(n_src)}\n"
                 f"  target reduces to: {pp(n_tgt)}")
-        return self._finish(EQ_MP(TRANS(eq_src, SYM(eq_tgt)), th_src))
+        # Chain: src = src_n = X = tgt_n = tgt
+        eq_src_full = TRANS(src_simp, eq_src_rw)            # |- src = X
+        eq_tgt_full = TRANS(tgt_simp, eq_tgt_rw)            # |- tgt = X
+        bridge = TRANS(eq_src_full, SYM(eq_tgt_full))       # |- src = tgt
+        return self._finish(EQ_MP(bridge, th_src))
 
     def by_unfold(self, src, *defs):
         """Prove the goal from ``src`` by unfolding the given definition
@@ -1593,7 +1639,7 @@ class _Have:
             if label is None:
                 raise HolError(
                     f"by_contradiction: bad label spec: {label_spec!r}")
-            if not aconv(hyp_term, not_target):
+            if not p.simp_aconv(hyp_term, not_target):
                 raise HolError(
                     "by_contradiction: hypothesis does not match negated "
                     f"target\n  expected: {pp(not_target)}\n"
@@ -1748,8 +1794,16 @@ class _Absurd:
         ths = [self.p._resolve_fact(r) for r in refs]
         for pos, neg in (ths, ths[::-1]):
             inner = dest_neg(neg._concl)
-            if inner is not None and aconv(inner, pos._concl):
+            if inner is None:
+                continue
+            if aconv(inner, pos._concl):
                 return self._finish(MP(NOT_ELIM(neg), pos))
+            # Lift the positive fact to the negation's inner-shape via
+            # simp so a folded ``M (m+1)`` matches an unfolded
+            # ``~(!n. N n ==> m+1 <= n)``.
+            lifted = self.p.simp_match(inner, pos)
+            if lifted is not None:
+                return self._finish(MP(NOT_ELIM(neg), lifted))
         raise HolError(
             "absurd: by_conj could not match P / ~P among "
             f"{pp(ths[0]._concl)} / {pp(ths[1]._concl)}")
@@ -2056,10 +2110,16 @@ class _CasesCtx:
         result = self.p._discharge_lazy_lets(fr, result)
         self.p._drop_facts(fr.facts_added)
         if not aconv(self.target, result._concl):
-            raise HolError(
-                "cases_on: produced wrong conclusion\n"
-                f"  target: {pp(self.target)}\n"
-                f"  got:    {pp(result._concl)}")
+            # Bridge folded/unfolded forms via simp -- cases_on's combined
+            # result may have the unfolded shape while the user's target
+            # was written using a let-bound symbol (or vice versa).
+            lifted = self.p.simp_match(self.target, result)
+            if lifted is None:
+                raise HolError(
+                    "cases_on: produced wrong conclusion\n"
+                    f"  target: {pp(self.target)}\n"
+                    f"  got:    {pp(result._concl)}")
+            result = lifted
         self.on_close(result)
         return False
 
