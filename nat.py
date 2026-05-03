@@ -50,14 +50,12 @@ from axioms import (
     mk_and, mk_or, mk_imp, mk_forall, mk_exists, mk_not, mk_select,
 )
 from tactics import (
-    AP_TERM, BETA_CONV, SYM, UNFOLD,
+    BETA_CONV, SYM, UNFOLD,
     SPEC, GEN, CONJ, CONJUNCT1, CONJUNCT2, DISCH, MP,
     CONTR, NOT_ELIM, NOT_INTRO, NOT_CONST,
     DISJ1, DISJ2, DISJ_CASES,
-    NE_SYM, REWRITE_NE, EXISTS,
-    PROVE_HYP, ELIM_EX,
+    NE_SYM, EXISTS,
     SPECL, GENL, DISCHL, TRANS_CHAIN, CASE_OR,
-    REWRITE_PROVE, REWRITE_RULE, REWRITE_CONV,
     AC_PROVE, AC_NORM,
 )
 from classical import EXCLUDED_MIDDLE, NOT_NOT_ELIM, NOT_EX_TO_FORALL_NOT
@@ -67,7 +65,7 @@ from num import (
     AXIOM_3, AXIOM_4, INDUCTION, INDUCT,
     define_recursive,
 )
-from parser import parse, pp, define, pp_thm, DEFAULT_SIG
+from parser import pp, define, pp_thm
 from proof import proof
 
 
@@ -287,6 +285,18 @@ def SATZ_7(p):
             p.thus("~(SUC y = x + SUC y)").by_rewrite_of("ne_succ", [ADD_SUC])
 
 
+# Sister of Satz 7 with the addend on the right.  Used by the contradiction
+# helpers below: every chain of the form ``b = b + (u+v)`` -- where the second
+# ``b`` ends up on the right of ``+`` -- contradicts ``SATZ_7_RIGHT`` directly,
+# without an inline ``SPECL`` of ``SATZ_6`` to commute the addend each time.
+@proof
+def SATZ_7_RIGHT(p):
+    p.goal("!x y. ~(y = y + x)")
+    p.fix("x y")
+    p.have("ne: ~(y = x + y)").by_match(SATZ_7)
+    p.thus("~(y = y + x)").by_rewrite_of("ne", [SPECL([x, y], SATZ_6)])
+
+
 # ---------------------------------------------------------------------------
 # Theorem 8.   |- !x y z. ~(y = z) ==> ~(x + y = x + z).
 # Proof (Landau): induction on x with y, z fixed and y != z.
@@ -414,29 +424,6 @@ def UNFOLD_LT(a, b):
 from proof import register_unfolder, register_disj_unfolder
 register_unfolder(">", UNFOLD_GT)
 register_unfolder("<", UNFOLD_LT)
-
-def CHOOSE_GT(h_gt, body_fn):
-    """h_gt : ... |- a > b.  Calls body_fn(eq, witness) with
-       eq : ... |- a = b + witness.  Returns body_fn's result with the
-       existential discharged."""
-    a_t = rand(rator(h_gt._concl))
-    b_t = rand(h_gt._concl)
-    ex = EQ_MP(UNFOLD_GT(a_t, b_t), h_gt)
-    pred = parse("\\u. ${a} = ${b} + u", a=a_t, b=b_t)
-    return PROVE_HYP(ex, ELIM_EX(pred, ex._concl,
-                                  lambda eq: body_fn(eq, rand(rand(eq._concl)))))
-
-
-def CHOOSE_LT(h_lt, body_fn):
-    """h_lt : ... |- a < b.  Calls body_fn(eq, witness) with
-       eq : ... |- b = a + witness."""
-    a_t = rand(rator(h_lt._concl))
-    b_t = rand(h_lt._concl)
-    ex = EQ_MP(UNFOLD_LT(a_t, b_t), h_lt)
-    pred = parse("\\v. ${b} = ${a} + v", a=a_t, b=b_t)
-    return PROVE_HYP(ex, ELIM_EX(pred, ex._concl,
-                                  lambda eq: body_fn(eq, rand(rand(eq._concl)))))
-
 
 # Theorem 10:  |- !x y. (x = y) \/ (x > y) \/ (x < y).    By Theorem 9 + Definitions 2, 3.
 
@@ -743,56 +730,57 @@ def SATZ_25(p):
 # Each builds F from a pair of inconsistent order facts, via Theorem 7 + 6.
 # ---------------------------------------------------------------------------
 
-def CONTRA_LT_GT(a_t, b_t, h_lt, h_gt):
-    """ |- a < b,  |- a > b   =>   {a<b, a>b} |- F. """
-    def _inner_v(eq_v, v0):
-        def _inner_u(eq_u, u0):
-            # Avoid rewriter loop (eq_v↔eq_u cycle): chain eq_v then rewrite RHS only.
-            rhs_eq = REWRITE_PROVE([eq_u, SATZ_5],
-                          parse("${a} + ${v0} = ${b} + (${u0} + ${v0})",
-                                a=a_t, b=b_t, u0=u0, v0=v0))
-            chain = TRANS(eq_v, rhs_eq)               # b = b + (u0+v0)
-            ne   = SPECL([mk_add(u0, v0), b_t], SATZ_7)
-            ne_f = REWRITE_NE(ne, REFL(b_t), SPECL([mk_add(u0, v0), b_t], SATZ_6))
-            return MP(NOT_ELIM(ne_f), chain)
-        return CHOOSE_GT(h_gt, _inner_u)
-    return CHOOSE_LT(h_lt, _inner_v)
+# Three Landau-style contradictions encoded as declarative ``@proof`` lemmas.
+# Each takes the trichotomy-pair as its hypotheses, eliminates the existentials
+# behind ``<`` / ``>`` via ``p.choose``, builds the resulting equation chain
+# ``b = b + (...)``, and contradicts ``SATZ_7_RIGHT`` (= ``~(y = y + x)``).
+@proof
+def _CONTRA_LT_GT(p):
+    p.goal("!a b. a < b ==> a > b ==> F")
+    p.fix("a b")
+    p.assume("h_lt: a < b")
+    p.assume("h_gt: a > b")
+    p.choose("v: b = a + v", from_="h_lt")
+    p.choose("u: a = b + u", from_="h_gt")
+    p.have("chain: b = b + (u + v)")\
+        .by_rewrite_of("v_eq", ["u_eq", SATZ_5])
+    p.have("ne: ~(b = b + (u + v))").by_match(SATZ_7_RIGHT)
+    p.absurd().by_conj("chain", "ne")
 
 
-def CONTRA_LT_EQ(a_t, b_t, h_lt, h_eq):
-    """ |- a < b,  |- a = b   =>   F. """
-    th_bb = EQ_MP(MK_COMB(AP_TERM(LT, h_eq), REFL(b_t)), h_lt)
-    def _inner(eq, v0):
-        comm = SPECL([v0, b_t], SATZ_6)
-        ne   = SPECL([v0, b_t], SATZ_7)
-        ne_f = REWRITE_NE(ne, REFL(b_t), comm)
-        return MP(NOT_ELIM(ne_f), eq)
-    return CHOOSE_LT(th_bb, _inner)
+@proof
+def _CONTRA_LT_EQ(p):
+    p.goal("!a b. a < b ==> a = b ==> F")
+    p.fix("a b")
+    p.assume("h_lt: a < b")
+    p.assume("h_eq: a = b")
+    p.have("h_bb: b < b").by_rewrite_of("h_lt", ["h_eq"])
+    p.choose("v: b = b + v", from_="h_bb")
+    p.have("ne: ~(b = b + v)").by_match(SATZ_7_RIGHT)
+    p.absurd().by_conj("v_eq", "ne")
 
 
-def CONTRA_GT_EQ(a_t, b_t, h_gt, h_eq):
-    """ |- a > b,  |- a = b   =>   F. """
-    def _inner(eq_a, u0):
-        chain = TRANS(SYM(h_eq), eq_a)                       # b = b + u0
-        comm = SPECL([u0, b_t], SATZ_6)
-        ne   = SPECL([u0, b_t], SATZ_7)
-        ne_f = REWRITE_NE(ne, REFL(b_t), comm)
-        return MP(NOT_ELIM(ne_f), chain)
-    return CHOOSE_GT(h_gt, _inner)
+@proof
+def _CONTRA_GT_EQ(p):
+    p.goal("!a b. a > b ==> a = b ==> F")
+    p.fix("a b")
+    p.assume("h_gt: a > b")
+    p.assume("h_eq: a = b")
+    p.choose("u: a = b + u", from_="h_gt")
+    p.have("chain: b = b + u").by_rewrite_of("u_eq", ["h_eq"])
+    p.have("ne: ~(b = b + u)").by_match(SATZ_7_RIGHT)
+    p.absurd().by_conj("chain", "ne")
 
 
 # Wire the three contradictions into the proof DSL so call sites can use
-# ``p.absurd().auto(h1, h2)`` instead of naming the lemma. Each finder
-# extracts the term pair from its order fact; equality facts are accepted in
-# either orientation (the finder applies SYM if needed).
+# ``p.absurd().auto(h1, h2)``. Each finder ``SPECL``s the matching ``@proof``
+# theorem at the operands of its order fact and applies the two hypotheses
+# via MP. Equality facts are accepted in either orientation.
 from proof import register_contra_finder
 
-def _dest_op(t):
-    return rator(rator(t)), rand(rator(t)), rand(t)
-
-def _contra_lt_gt(h_lt, h_gt):
-    _, a, b = _dest_op(h_lt._concl)
-    return CONTRA_LT_GT(a, b, h_lt, h_gt)
+def _ab_of(th):
+    """For a binary-relation theorem ``op a b``, return ``(a, b)``."""
+    return rand(rator(th._concl)), rand(th._concl)
 
 def _orient_eq(h_eq, a, b):
     l, r = dest_eq(h_eq._concl)
@@ -804,13 +792,17 @@ def _orient_eq(h_eq, a, b):
         f"absurd.auto: equality {pp(h_eq._concl)} does not relate "
         f"{pp(a)} and {pp(b)}")
 
+def _contra_lt_gt(h_lt, h_gt):
+    a, b = _ab_of(h_lt)
+    return MP(MP(SPECL([a, b], _CONTRA_LT_GT), h_lt), h_gt)
+
 def _contra_lt_eq(h_lt, h_eq):
-    _, a, b = _dest_op(h_lt._concl)
-    return CONTRA_LT_EQ(a, b, h_lt, _orient_eq(h_eq, a, b))
+    a, b = _ab_of(h_lt)
+    return MP(MP(SPECL([a, b], _CONTRA_LT_EQ), h_lt), _orient_eq(h_eq, a, b))
 
 def _contra_gt_eq(h_gt, h_eq):
-    _, a, b = _dest_op(h_gt._concl)
-    return CONTRA_GT_EQ(a, b, h_gt, _orient_eq(h_eq, a, b))
+    a, b = _ab_of(h_gt)
+    return MP(MP(SPECL([a, b], _CONTRA_GT_EQ), h_gt), _orient_eq(h_eq, a, b))
 
 register_contra_finder("<", ">", _contra_lt_gt)
 register_contra_finder("<", "=", _contra_lt_eq)

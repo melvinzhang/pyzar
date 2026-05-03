@@ -100,7 +100,7 @@ issue dissolves because there's no auto-detection of disjunct shape.
 
 ---
 
-## 3. CONTRA_LT_GT and friends — closure-CPS for `?u. …`
+## 3. CONTRA_LT_GT and friends — closure-CPS for `?u. …` — ✅ shipped
 
 **Landau:** Satz 9 part A (1.tex:373–378):
 
@@ -111,51 +111,22 @@ x = y + u = (x + v) + u = x + (v + u) = (v + u) + x.
 Five terms, four equalities, conclusion is `x = (v+u) + x` which contradicts
 Satz 7. One line of math.
 
-**`nat.py`:** `CONTRA_LT_GT` (758–771) needs nested closures because each
-existential elimination is CPS:
+**`nat.py` (before):** `CONTRA_LT_GT`, `CONTRA_LT_EQ`, `CONTRA_GT_EQ` were
+each kernel-level helpers using `CHOOSE_LT`/`CHOOSE_GT` (a CPS
+``ELIM_EX`` wrapper) with nested closures per existential. The whole
+~70-line block was plumbing for what Landau does in one equation chain.
 
-```python
-def CONTRA_LT_GT(a_t, b_t, h_lt, h_gt):
-    def _inner_v(eq_v, v0):
-        def _inner_u(eq_u, u0):
-            rhs_eq = REWRITE_PROVE([eq_u, SATZ_5],
-                          parse("${a} + ${v0} = ${b} + (${u0} + ${v0})", …))
-            chain = TRANS(eq_v, rhs_eq)
-            ne   = SPECL([mk_add(u0, v0), b_t], SATZ_7)
-            ne_f = REWRITE_NE(ne, REFL(b_t), SPECL([mk_add(u0, v0), b_t], SATZ_6))
-            return MP(NOT_ELIM(ne_f), chain)
-        return CHOOSE_GT(h_gt, _inner_u)
-    return CHOOSE_LT(h_lt, _inner_v)
-```
+**Fix landed.** Three declarative `@proof` theorems
+(`_CONTRA_LT_GT`, `_CONTRA_LT_EQ`, `_CONTRA_GT_EQ`) use `p.choose` and
+`p.absurd().by_conj` instead of nested CPS callbacks. The contra-finder
+adapters (`_contra_lt_gt`, etc.) are now thin one-liners that ``SPECL``
+the matching theorem at the operands and ``MP`` in the two hypotheses.
 
-Then this gets registered as a contra finder via `register_contra_finder`
-so call sites can write `p.absurd().auto(h_lt, h_gt)`. The whole 70-line
-block at 758–829 (three `CONTRA_*` + three `_contra_*` adapters + three
-registrations) is plumbing for what Landau does in one equation chain.
-
-**Fix.** A declarative `@proof` of Satz 9 part A that uses the existing
-`p.choose` (which is the proof-DSL surface for ELIM_EX) instead of nested
-CPS callbacks:
-
-```python
-@proof
-def CONTRA_LT_GT_THM(p):
-    p.goal("!a b. a < b /\\ a > b ==> F")
-    p.fix("a b")
-    p.assume("h: a < b /\\ a > b")
-    p.split_conj("h", "h_lt", "h_gt")
-    p.choose("v: b = a + v", from_="h_lt")
-    p.choose("u: a = b + u", from_="h_gt")
-    p.have("chain: b = b + (u + v)").by_rewrite_ac(["v_eq", "u_eq"], …)
-    p.absurd().by_match(SATZ_7, "chain")  # b = (u+v) + b after one comm
-```
-
-Then `_contra_lt_gt` becomes `SPECL([a, b], CONTRA_LT_GT_THM)` and the
-nested-closure trio collapses.
-
-The deeper fix is making `p.choose` available as a free-standing kernel
-combinator on raw theorems, not just inside `@proof` bodies. That would
-also clean up `CHOOSE_GT`/`CHOOSE_LT` themselves (425–446).
+A new helper `SATZ_7_RIGHT` (`!x y. ~(y = y + x)`) avoids per-call-site
+``SPECL`` of `SATZ_6` to commute the addend; every contradiction chain
+in the three `_CONTRA_*` proofs ends with `b = b + (...)` and contradicts
+`SATZ_7_RIGHT` directly via `by_match`. The CPS combinators `CHOOSE_LT`
+and `CHOOSE_GT` are removed (no other callers).
 
 ---
 
@@ -356,7 +327,9 @@ benefit):
 
 1. **Inequality-aware rewriting** (§1) — ✅ shipped.
 2. **Order-aware rewriting** (§5) — ✅ shipped.
-3. **`by_trichotomy_invert` tactic** (§2) — ✅ shipped.
+3. **`by_trichotomy_invert` tactic** (§2) — ✅ shipped (later swapped for
+   the smaller `_Absurd.via` primitive).
+4. **CONTRA closure-CPS** (§3) — ✅ shipped.
 4. **AC support for `*`** (§6) — RIGHT_DISTRIB shrinks; SUC_MUL becomes
    shorter; downstream multiplication AC chains stop needing ad-hoc
    commutativity rewrites.
