@@ -68,33 +68,35 @@ proof opening `cases_on(SATZ_10, "x", "y")`, calling
 and `by_thm(p.fact(...))` in the matching branch. ~80 lines across the
 six theorems.
 
-**Fix landed.** New `by_trichotomy_invert` tactic on `_Have`:
+**Fix landed.** New `_Absurd.via(forward, case, source=...)` primitive:
 
 ```python
-.by_trichotomy_invert(trichotomy, comparands, source, *forwards)
+with p.cases_on(SATZ_10, "x", "y"):
+    with p.case("h_eq: x = y"):
+        p.absurd().via(SATZ_19B, "h_eq", source="h_a")
+    with p.case("h_gt: x > y"):
+        p.thus("x > y").by_thm(p.fact("h_gt"))
+    with p.case("h_lt: x < y"):
+        p.absurd().via(SATZ_19C, "h_lt", source="h_a")
 ```
 
-specializes the trichotomy at `comparands`, splits its disjunction, and
-for each disjunct: returns the case fact directly when it alpha-matches
-the goal, else uses the corresponding `forward` to lift the case fact to
-the source's shape and closes via the registered contra finder. The
-forward's third forall (the lifting parameter `z`) is inferred by
-matching the forward's consequent against the lifted shape derived from
-`source`'s operands -- callers don't have to specialize.
+`via` does one job: specialize `forward` so its consequent matches a
+shape derived from `source`'s operands and `case`'s relation, MP with
+`case`, then close as if `auto(source, lifted)` had been called. The
+forward's foralls are inferred via `_term_match` on antecedent ↔ case
+and consequent ↔ ``op_case(L, R)``. Callers never specialize manually.
 
-The six call sites collapse to three lines each:
+Each non-matching `case` body collapses from a two-line
+``by_match(...)``/``absurd().auto(...)`` ritual to one ``via(...)``
+line. The matching case stays explicit (``thus(...).by_thm(...)``) so
+the structure of the case-split remains visible.
 
-```python
-p.thus("x > y").by_trichotomy_invert(
-    SATZ_10, ["x", "y"], "h_a", SATZ_19B, SATZ_19A, SATZ_19C)
-```
-
-Forwards are listed in trichotomy disjunct order; the one matching the
-goal is unused. The same template handles SATZ_20A/B/C (with SATZ_19A/B/C)
-and SATZ_33A/B/C (with SATZ_32A/B/C). frac.py's SATZ_63 / SATZ_73 share
-the shape but operate over 4-ary fraction relations with manual UNFOLD
-bridges into num-level absurd; extending the tactic to those would
-require unfolder-aware lifting and is left for a future pass.
+`via` lives on ``_Absurd`` rather than as a trichotomy-specific tactic,
+so it composes with anything ``cases_on`` supports (let-bound
+predicates, registered disj-unfolders, custom disjunctions) and any
+number of cases. frac.py's SATZ_63 / SATZ_73 will be able to use it
+once contra finders are registered for fraction relations -- the 4-arity
+issue dissolves because there's no auto-detection of disjunct shape.
 
 ---
 

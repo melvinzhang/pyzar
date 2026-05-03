@@ -1432,107 +1432,6 @@ class _Have:
         a theorem source inline."""
         return self.p._open_cases(ref, self.term, self._finish, args=args)
 
-    def by_trichotomy_invert(self, trichotomy, comparands, source, *forwards):
-        """Invert a 'respectively' theorem via trichotomy + mutual exclusion.
-
-        Discharges a goal of the form ``a R_i b`` (one disjunct of the
-        trichotomy) given:
-
-        - ``trichotomy``: a theorem whose conclusion, after ``SPEC``-ing
-          at ``comparands``, is a right-associated disjunction
-          ``D_1 \\/ ... \\/ D_n``;
-        - ``comparands``: terms (or strings) to specialize ``trichotomy``;
-        - ``source``: a fact whose conclusion is mutually exclusive with
-          the lifted form of every non-matching disjunct (e.g. the
-          assumed ``x + z > y + z`` when inverting Satz 19);
-        - ``*forwards``: ``n`` theorems in trichotomy disjunct order, each
-          of shape ``... a R_i b ==> g(a) R_i g(b)``. The forward whose
-          disjunct matches the goal is unused (the case fact directly
-          proves the goal); each other forward lifts its case fact to a
-          shape that ``absurd().auto`` can pair with ``source``.
-
-        Replaces the explicit ``cases_on(trichotomy, ...)`` /
-        ``case`` / ``absurd().auto`` triple at SATZ_20A/B/C and SATZ_33A/B/C.
-        """
-        p = self.p
-        target = self.term
-
-        trich = p._resolve_fact(trichotomy)
-        for c in comparands:
-            c_t = p._parse(c) if isinstance(c, str) else c
-            trich = SPEC(c_t, trich)
-
-        leaves = _split_disj_n(trich._concl, len(forwards))
-        if leaves is None:
-            raise HolError(
-                f"by_trichotomy_invert: trichotomy doesn't split into "
-                f"{len(forwards)} disjuncts: {pp(trich._concl)}")
-
-        src_th = p._resolve_fact(source)
-        fwd_thms = [p._resolve_fact(f) for f in forwards]
-
-        # Lifted derived shape per non-matching branch is `op_i(L, R)` where
-        # op_i is the i-th disjunct's relation and (L, R) come from `source`.
-        src_concl_norm = rand(p.simp_normalize(src_th._concl)._concl)
-        if not isinstance(src_concl_norm, Comb) or not isinstance(
-                src_concl_norm.fun, Comb):
-            raise HolError(
-                "by_trichotomy_invert: source is not a binary relation: "
-                f"{pp(src_th._concl)}")
-        src_L, src_R = src_concl_norm.fun.arg, src_concl_norm.arg
-
-        branches = []
-        for leaf, forward in zip(leaves, fwd_thms):
-            case_th = ASSUME(leaf)
-            if aconv(leaf, target):
-                branches.append((leaf, case_th))
-                continue
-            # Build the target lifted shape by swapping in the source operands
-            # under the leaf's relation: leaf = `op_i(a, b)` -> `op_i(L, R)`.
-            leaf_op = leaf.fun.fun
-            target_lifted = mk_app(leaf_op, src_L, src_R)
-            # Specialize forward by matching antecedent ↔ leaf and consequent
-            # ↔ target_lifted; that pins every forall in the forward.
-            fwd = p.simp_norm_fact(forward)
-            vs, fwd_body = _strip_forall(fwd)
-            vars_set = set(vs)
-            parts = dest_imp(fwd_body._concl)
-            if parts is None:
-                raise HolError(
-                    f"by_trichotomy_invert: forward is not an implication: "
-                    f"{pp(fwd._concl)}")
-            ant_pat, con_pat = parts
-            subst = _term_match(ant_pat, leaf, vars_set, {})
-            if subst is None:
-                raise HolError(
-                    f"by_trichotomy_invert: forward antecedent {pp(ant_pat)} "
-                    f"does not match leaf {pp(leaf)}")
-            subst = _term_match(con_pat, target_lifted, vars_set, subst)
-            if subst is None:
-                raise HolError(
-                    f"by_trichotomy_invert: forward consequent {pp(con_pat)} "
-                    f"does not match {pp(target_lifted)}")
-            unbound = [v.name for v in vs if v not in subst]
-            if unbound:
-                raise HolError(
-                    f"by_trichotomy_invert: forall vars not determined: "
-                    f"{unbound}")
-            specced = fwd
-            for v in vs:
-                specced = SPEC(subst[v], specced)
-            lifted = p.simp_mp(specced, case_th)
-            cs_src = dest_binop_any(src_th._concl)
-            cs_lif = dest_binop_any(lifted._concl)
-            finder = _CONTRA_FINDERS.get((cs_src[0], cs_lif[0]))
-            if finder is None:
-                raise HolError(
-                    f"by_trichotomy_invert: no contra finder for "
-                    f"({cs_src[0]!r}, {cs_lif[0]!r})")
-            F_th = finder(src_th, lifted)
-            branches.append((leaf, CONTR(target, F_th)))
-
-        return self._finish(_build_disj_cases(trich, branches))
-
     def proof(self):
         """Open a sub-frame whose goal is the have-term. The body proves it
         via standard tactics (``thus``, ``cases_on``, ``induction``, …); on
@@ -1714,6 +1613,81 @@ class _Absurd:
             raise HolError(
                 f"absurd: auto() has no finder for ({rel0!r}, {rel1!r})")
         return self._finish(finder(ths[0], ths[1]))
+
+    def via(self, forward, case, *, source):
+        """Lift ``case`` through ``forward`` to a fact contradicting ``source``.
+
+        ``forward`` is a theorem ``... case_pattern ==> lifted_pattern``;
+        ``case`` is a fact whose conclusion matches ``case_pattern``;
+        ``source`` is a fact (a binary relation ``op_src(L, R)``) whose
+        relation is mutually exclusive with ``case``'s once both are over
+        the same operands.
+
+        The forward's foralls are inferred by matching its antecedent
+        against ``case``'s conclusion and its consequent against
+        ``op_case(L, R)`` -- where ``op_case`` is ``case``'s top-level
+        relation and ``L``, ``R`` come from ``source``. ``finder``
+        registered via ``register_contra_finder`` for
+        ``(rel(source), rel(lifted))`` produces ``|- F``.
+
+        Used inside a ``cases_on`` branch as the one-line analogue of
+        ``p.have(...).by_match(forward, case); p.absurd().auto(source, ...)``.
+        """
+        p = self.p
+        case_th = p._resolve_fact(case)
+        src_th = p._resolve_fact(source)
+        fwd_th = p._resolve_fact(forward)
+
+        # Build the lifted target shape: case's relation applied to source's
+        # operands. Both must be binary applications.
+        src_concl = rand(p.simp_normalize(src_th._concl)._concl)
+        case_concl = rand(p.simp_normalize(case_th._concl)._concl)
+        for tm, label in ((src_concl, "source"), (case_concl, "case")):
+            if not (isinstance(tm, Comb) and isinstance(tm.fun, Comb)):
+                raise HolError(
+                    f"absurd.via: {label} is not a binary relation: {pp(tm)}")
+        src_L, src_R = src_concl.fun.arg, src_concl.arg
+        case_op = case_concl.fun.fun
+        target_lifted = mk_app(case_op, src_L, src_R)
+
+        # Specialize forward by matching antecedent ↔ case and consequent ↔
+        # target_lifted; then MP with case_th.
+        fwd = p.simp_norm_fact(fwd_th)
+        vs, fwd_body = _strip_forall(fwd)
+        vars_set = set(vs)
+        parts = dest_imp(fwd_body._concl)
+        if parts is None:
+            raise HolError(
+                f"absurd.via: forward is not an implication: {pp(fwd._concl)}")
+        ant_pat, con_pat = parts
+        subst = _term_match(ant_pat, case_concl, vars_set, {})
+        if subst is None:
+            raise HolError(
+                f"absurd.via: forward antecedent {pp(ant_pat)} "
+                f"does not match case {pp(case_concl)}")
+        subst = _term_match(con_pat, target_lifted, vars_set, subst)
+        if subst is None:
+            raise HolError(
+                f"absurd.via: forward consequent {pp(con_pat)} "
+                f"does not match target {pp(target_lifted)}")
+        unbound = [v.name for v in vs if v not in subst]
+        if unbound:
+            raise HolError(
+                f"absurd.via: forall vars not determined: {unbound}")
+        specced = fwd
+        for v in vs:
+            specced = SPEC(subst[v], specced)
+        lifted = p.simp_mp(specced, case_th)
+
+        # Pair source and lifted via auto.
+        cs_src = dest_binop_any(src_th._concl)
+        cs_lif = dest_binop_any(lifted._concl)
+        finder = _CONTRA_FINDERS.get((cs_src[0], cs_lif[0]))
+        if finder is None:
+            raise HolError(
+                f"absurd.via: no contra finder for "
+                f"({cs_src[0]!r}, {cs_lif[0]!r})")
+        return self._finish(finder(src_th, lifted))
 
 
 # ---------------------------------------------------------------------------
