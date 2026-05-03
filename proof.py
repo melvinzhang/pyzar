@@ -25,12 +25,14 @@ The decorator runs the script and returns the resulting kernel theorem.
 """
 
 import contextlib
+import dataclasses
 import enum
 import re
 
 from fusion import (
     Var, Comb, Abs, thm,
     HolError, ASSUME, EQ_MP, INST, type_of, TRANS, MK_COMB, ABS, REFL,
+    vfree_in,
 )
 from basics import (
     aconv, mk_abs, mk_app, rand, rator, mk_eq, mk_fun_ty, dest_eq, dest_binop_any,
@@ -50,7 +52,8 @@ from tactics import (
     _strip_forall, _term_match,
 )
 from parser import (
-    parse, parse_label, parse_let_spec, pp, ParseError, has_const,
+    parse, parse_label, parse_let_spec, peel_label_prefix,
+    pp, ParseError, has_const,
 )
 
 
@@ -258,6 +261,39 @@ class LazyLetDef:
         self.eq_th = eq_th       # [eq_term] |- !b1...bn. R b1..bn = body
 
 
+def _carrier_abs_body(lz):
+    """``\\b1..bn. body`` -- the abstraction that replaces ``lz``'s
+    carrier under INST."""
+    abs_body = lz.body
+    for bv in reversed(lz.bvars):
+        abs_body = mk_abs(bv, abs_body)
+    return abs_body
+
+
+def _substitute_carrier(lz, th):
+    """Substitute lazy-let ``lz``'s carrier with ``\\args. body`` in
+    ``th`` and discharge the local-equation hypothesis. The returned
+    theorem still has beta-redexes at every former carrier-application
+    site; callers responsible for any conclusion BETA cleanup."""
+    abs_body = _carrier_abs_body(lz)
+    th_inst = INST([(abs_body, lz.carrier)], th)
+    # Build the now-trivially-true equation hyp:
+    # |- !b1..bn. (\b1..bn. body) b1..bn = body
+    eq_th = BETA_NORM(mk_app(abs_body, *lz.bvars))
+    for bv in reversed(lz.bvars):
+        eq_th = GEN(bv, eq_th)
+    return PROVE_HYP(eq_th, th_inst)
+
+
+def _beta_norm_concl(th):
+    """If ``th``'s conclusion has beta-redexes, lift through the
+    normalizing equation; else return unchanged."""
+    nf_eq = BETA_NORM(th._concl)
+    if aconv(rand(nf_eq._concl), th._concl):
+        return th
+    return EQ_MP(nf_eq, th)
+
+
 class FrameKind(enum.Enum):
     """Discriminator for ``_Frame``. Replaces ad-hoc string tags so
     misspellings fail loudly at the use site instead of silently never
@@ -275,6 +311,45 @@ class FrameKind(enum.Enum):
         return self.value
 
 
+@dataclasses.dataclass
+class _InductionData:
+    """Per-frame state for ``FrameKind.INDUCTION``. Populated by
+    ``_InductionCtx.__enter__``; the ``base_th`` / ``step_th`` slots are
+    filled by the corresponding sub-frames' ``on_close`` callbacks and
+    consumed by ``_InductionCtx.__exit__``."""
+    var: object
+    body: object
+    strategy: InductionStrategy
+    base_th: object = None
+    step_th: object = None
+
+
+@dataclasses.dataclass
+class _CasesData:
+    """Per-frame state for ``FrameKind.CASES``. ``or_concl`` is the
+    full right-associated disjunction theorem's conclusion (used by
+    ``case()`` to find the matching leaf); ``branches`` is appended to
+    by each ``case()``'s ``on_close`` and consumed by
+    ``_CasesCtx.__exit__``."""
+    or_concl: object
+    branches: list = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass
+class _AssumeHyp:
+    """Per-frame entry recorded by ``Proof.assume``: the user-visible
+    label, the kernel ``ASSUME`` theorem, and a shape equation bridging
+    the user's surface term to the goal's antecedent.
+
+    ``_discharge_lazy_lets`` mutates ``asm`` and ``term_eq_ant`` in place
+    when a lazy let goes out of scope; ``_close_frame`` later DISCHes
+    them in the original registration order.
+    """
+    label: str
+    asm: object
+    term_eq_ant: object
+
+
 class _Frame:
     __slots__ = ("goal", "kind", "vars_added", "hyps_added",
                  "facts_added", "choose_env", "type_env",
@@ -284,13 +359,13 @@ class _Frame:
         self.goal = goal
         self.kind = kind
         self.vars_added = []      # for fix(): GEN at close
-        self.hyps_added = []      # for assume(): list of (label, term); DISCH at close
+        self.hyps_added = []      # list of _AssumeHyp; DISCH'd at close
         self.facts_added = []     # labels added at this frame; popped on exit
         self.choose_env = {}      # name -> witness term (parser env entries)
         self.type_env = {}        # name -> hol_type for higher-order params
         self.lazy_lets = {}       # name -> LazyLetDef (Isabelle-style local equation)
         self.simp_rules = []      # list of theorems used as default rewrite rules
-        self.data = {}            # block-specific scratch
+        self.data = None          # _InductionData / _CasesData (kind-specific)
         self.result = None        # the theorem proving `goal`
 
 
@@ -359,17 +434,6 @@ class Proof:
                 env[name] = lz.carrier
         return env
 
-    def _set_frame_result(self, frame, th):
-        """Record ``th`` as ``frame.result``.
-
-        ``choose()`` registers the SELECT_AX-derived witness theorem
-        directly as the equation fact, so the user's proof carries the
-        existential's hyps (rather than ``body_at_w``) all along — there
-        is nothing to discharge at frame close. The frame-close DISCH /
-        GEN steps in ``_close_frame`` handle the rest.
-        """
-        frame.result = th
-
     def _lazy_let_carriers(self):
         """Map every in-scope lazy-let carrier ``Var`` to its ``LazyLetDef``."""
         out = {}
@@ -401,7 +465,7 @@ class Proof:
         affecting the surrounding proof.
         """
         for r in rules:
-            self._cur.simp_rules.append(self._resolve_fact(r))
+            self._cur.simp_rules.append(self.coerce(r))
 
     def simp_normalize(self, tm, carriers=None):
         """Fixpoint simp pass over ``tm`` against the active simp set
@@ -434,12 +498,14 @@ class Proof:
                 return REFL(tm)
             # ``ABS`` fails if ``tm.bvar`` is free in some hyp of ``body_eq``.
             # That's a legitimate "can't lift this rewrite under the binder"
-            # signal, not a bug — fall back to no-progress at this node and
-            # let the caller see the un-normalized lambda.
-            try:
-                return ABS(tm.bvar, body_eq)
-            except HolError:
+            # signal, not a bug -- fall back to no-progress at this node and
+            # let the caller see the un-normalized lambda. Check the
+            # precondition explicitly rather than catching the kernel
+            # ``HolError``, which would also mask signature / non-equation
+            # bugs (the kernel returns the same error for all three).
+            if any(vfree_in(tm.bvar, h) for h in body_eq._asl):
                 return REFL(tm)
+            return ABS(tm.bvar, body_eq)
         if isinstance(tm, Comb):
             spine = []
             head = tm
@@ -515,39 +581,6 @@ class Proof:
             return None
         return TRANS(eq1, SYM(eq2))
 
-    @staticmethod
-    def _carrier_abs_body(lz):
-        """``\\b1..bn. body`` -- the abstraction that replaces ``lz``'s
-        carrier under INST."""
-        abs_body = lz.body
-        for bv in reversed(lz.bvars):
-            abs_body = mk_abs(bv, abs_body)
-        return abs_body
-
-    @staticmethod
-    def _substitute_carrier(lz, th):
-        """Substitute lazy-let ``lz``'s carrier with ``\\args. body`` in
-        ``th`` and discharge the local-equation hypothesis. The returned
-        theorem still has beta-redexes at every former carrier-application
-        site; callers responsible for any conclusion BETA cleanup."""
-        abs_body = Proof._carrier_abs_body(lz)
-        th_inst = INST([(abs_body, lz.carrier)], th)
-        # Build the now-trivially-true equation hyp:
-        # |- !b1..bn. (\b1..bn. body) b1..bn = body
-        eq_th = BETA_NORM(mk_app(abs_body, *lz.bvars))
-        for bv in reversed(lz.bvars):
-            eq_th = GEN(bv, eq_th)
-        return PROVE_HYP(eq_th, th_inst)
-
-    @staticmethod
-    def _beta_norm_concl(th):
-        """If ``th``'s conclusion has beta-redexes, lift through the
-        normalizing equation; else return unchanged."""
-        nf_eq = BETA_NORM(th._concl)
-        if aconv(rand(nf_eq._concl), th._concl):
-            return th
-        return EQ_MP(nf_eq, th)
-
     def materialize_let(self, th, name):
         """Substitute the named lazy-let carrier with its ``\\args. body``
         abstraction in ``th`` and BETA-normalize the result, returning a
@@ -562,7 +595,7 @@ class Proof:
         lz = self._lookup_lazy_let(name)
         if lz is None:
             raise HolError(f"materialize_let: no lazy let named {name!r}")
-        return self._beta_norm_concl(self._substitute_carrier(lz, th))
+        return _beta_norm_concl(_substitute_carrier(lz, th))
 
     def simp_mp(self, th_imp, th_arg):
         """``MP(th_imp, th_arg)`` modulo simp on the antecedent.
@@ -648,15 +681,15 @@ class Proof:
         (the ``GEN`` happens earlier via ``INDUCT_PROVE``), so for
         that caller this collapses to ``_discharge_lazy_lets``.
         """
-        for _, asm, term_eq_ant in reversed(fr.hyps_added):
-            th = DISCH(asm._concl, th)
+        for h in reversed(fr.hyps_added):
+            th = DISCH(h.asm._concl, th)
             consequent = rand(th._concl)
             imp_eq_const = rator(rator(th._concl))   # the (==>) const
-            imp_eq = MK_COMB(AP_TERM(imp_eq_const, term_eq_ant),
+            imp_eq = MK_COMB(AP_TERM(imp_eq_const, h.term_eq_ant),
                              REFL(consequent))
             th = EQ_MP(imp_eq, th)
         th = self._discharge_lazy_lets(fr, th)
-        th = self._beta_norm_concl(th)
+        th = _beta_norm_concl(th)
         for v in reversed(fr.vars_added):
             th = GEN(v, th)
         return th
@@ -684,7 +717,7 @@ class Proof:
         if not frame.lazy_lets:
             return th
         for lz in reversed(list(frame.lazy_lets.values())):
-            th = self._substitute_carrier(lz, th)
+            th = _substitute_carrier(lz, th)
             # Sync saved ASSUMEs and shape equations in lockstep.
             #   * Plain INST on each ASSUME: keeps its _concl matching
             #     th._asl. _substitute_carrier would risk discharging
@@ -693,12 +726,11 @@ class Proof:
             #   * _substitute_carrier on each shape equation: it carries
             #     the lazy-let equation hyp internally, so we want it
             #     discharged the same way as in th.
-            sub = (self._carrier_abs_body(lz), lz.carrier)
-            frame.hyps_added = [
-                (label, INST([sub], asm),
-                 self._substitute_carrier(lz, term_eq_ant))
-                for label, asm, term_eq_ant in frame.hyps_added]
-        return self._beta_norm_concl(th)
+            sub = (_carrier_abs_body(lz), lz.carrier)
+            for h in frame.hyps_added:
+                h.asm = INST([sub], h.asm)
+                h.term_eq_ant = _substitute_carrier(lz, h.term_eq_ant)
+        return _beta_norm_concl(th)
 
     def _parse(self, s):
         return parse(s, _env_bindings=self._scope_env())
@@ -782,26 +814,39 @@ class Proof:
         """
         return parse_label(spec, _env_bindings=self._scope_env())
 
-    _LABEL_PEEL_RE = re.compile(
-        r"^\s*([A-Za-z_]\w*)\s*:(?!=)\s*(.*)$", re.DOTALL)
-
-    @classmethod
-    def _peel_label(cls, spec):
-        """Structural-only split of ``"label: rest"`` -- returns
-        ``(label, rest_str)`` or ``None``. Used when the body must be
-        parsed lazily because its env depends on the label name (see
-        ``choose``); callers that can parse eagerly should prefer
-        ``parser.parse_label`` instead.
-        """
-        m = cls._LABEL_PEEL_RE.match(spec)
-        return (m.group(1), m.group(2)) if m else None
-
     def _fresh_label(self, prefix="h"):
         while True:
             self._anon += 1
             name = f"_{prefix}{self._anon}"
             if name not in self._facts:
                 return name
+
+    _BARE_LABEL_RE = re.compile(r"[A-Za-z_]\w*")
+
+    def _parse_label_or_check(self, label_spec, expected, op):
+        """Resolve a ``"label"`` or ``"label: term"`` spec for tactics that
+        already know the expected hypothesis (``suppose`` / ``by_contradiction``).
+
+        Bare labels short-circuit with no parse. Explicit specs are parsed
+        via ``parse_label``; the body is then simp-aconv-checked against
+        ``expected``. Raises ``HolError`` with ``op``-prefixed messages on
+        any failure. Returns the resolved label.
+        """
+        spec = label_spec.strip()
+        if self._BARE_LABEL_RE.fullmatch(spec):
+            return spec
+        try:
+            label, hyp_term = parse_label(spec, _env_bindings=self._scope_env())
+        except ParseError as ex:
+            raise HolError(f"{op}: cannot parse label spec: {ex}") from ex
+        if label is None:
+            raise HolError(f"{op}: bad label spec: {label_spec!r}")
+        if not self.simp_aconv(hyp_term, expected):
+            raise HolError(
+                f"{op}: hypothesis does not match expected\n"
+                f"  expected: {pp(expected)}\n"
+                f"  given:    {pp(hyp_term)}")
+        return label
 
     # ---- facts -----------------------------------------------------------
 
@@ -822,49 +867,47 @@ class Proof:
             drop = set(labels)
             self._fact_order = [lbl for lbl in self._fact_order if lbl not in drop]
 
-    def coerce(self, x, *, accept=("fact",)):
-        """Resolve ``x`` to a theorem or term per the kinds in ``accept``.
+    def coerce(self, x, *, accept_term=False):
+        """Resolve ``x`` to a theorem -- or, when ``accept_term`` is true,
+        to a kernel term as a fallback.
 
-        Kinds:
-          - ``"fact"``: ``thm`` | fact-label ``str`` | fact-index ``int`` → ``thm``
-          - ``"term"``: kernel term object | non-fact ``str`` (parsed) → ``term``
+        Always-fact (``accept_term=False``, default):
+          - ``thm`` -- returned unchanged.
+          - ``int`` -- looked up in the fact registry by insertion index.
+          - ``str`` -- looked up as a fact label; an unknown label raises.
+          - kernel term object -- rejected.
 
-        Theorems short-circuit when ``"fact"`` is accepted; bare kernel
-        term objects short-circuit when ``"term"`` is accepted. Strings
-        dispatch in the order ``accept`` lists — each kind in turn tries
-        to match (``"fact"`` looks up the label table; ``"term"`` parses).
+        Fact-or-term (``accept_term=True``): same as above, plus:
+          - ``str`` not in the fact table -- parsed as a term in the
+            current scope.
+          - kernel term object -- returned as-is.
+
+        Used by tactics that take a single named theorem ref (``simp``,
+        ``by_rewrite_of``, ``cases_on``, ...) in the default mode, and
+        by variadic-arg tactics (``_Have.by``, ``by_match``,
+        ``cases_on``'s extra ``*args``) in fact-or-term mode where
+        positional args may mix theorem refs and specialization terms.
         """
         if isinstance(x, thm):
-            if "fact" not in accept:
-                raise HolError(f"coerce: theorem not accepted (accept={accept!r})")
             return x
         if isinstance(x, int):
-            if "fact" not in accept:
-                raise HolError(f"coerce: integer index not accepted (accept={accept!r})")
             try:
                 return self._facts[self._fact_order[x]]
             except IndexError:
                 raise HolError(f"fact index out of range: {x}")
         if isinstance(x, str):
-            for kind in accept:
-                if kind == "fact" and x in self._facts:
-                    return self._facts[x]
-                if kind == "term":
-                    return self._parse(x)
+            if x in self._facts:
+                return self._facts[x]
+            if accept_term:
+                return self._parse(x)
             raise HolError(f"unknown fact label: {x!r}")
-        if "term" not in accept:
-            raise HolError(f"coerce: cannot resolve reference: {x!r}")
-        return x
-
-    def _resolve_fact(self, ref):
-        return self.coerce(ref)
+        if accept_term:
+            return x
+        raise HolError(f"coerce: cannot resolve reference: {x!r}")
 
     def fact(self, ref):
         """Public accessor: returns the theorem associated with a label or index."""
         return self.coerce(ref)
-
-    def _resolve_fact_or_term(self, ref):
-        return self.coerce(ref, accept=("fact", "term"))
 
     # ---- public API: opening declarations --------------------------------
 
@@ -956,7 +999,7 @@ class Proof:
     def split_conj(self, ref, *labels):
         """Split a right-associated conjunction fact ``h : a /\\ b /\\ ... /\\ z``
         into the supplied labels, registering each conjunct as its own fact."""
-        th = self._resolve_fact(ref)
+        th = self.coerce(ref)
         # Pattern B: simp-normalize the fact so the top-level conjunction is
         # exposed (idempotent if already in normal form).
         th = self.simp_norm_fact(th)
@@ -1006,20 +1049,19 @@ class Proof:
             if parts is None:
                 raise HolError(f"assume: goal is not an implication: {pp(g)}")
             ant, cons = parts
-            # Simp-aware match: `Q i` (folded) should accept the unfolded
-            # antecedent `NUM_REP i /\ P (mk_num i)` and vice versa. The
-            # registered ASSUME is on the kernel-literal antecedent so
-            # downstream facts stay sound.
-            self._simp_require(ant, ASSUME(term), op="assume")
-            self._cur.goal = cons
             # Register the user's surface-form ASSUME so ``p.fact(label)``
             # returns what they wrote. ``term_eq_ant : |- term = ant``
-            # bridges the surface form to the kernel-form antecedent at
+            # bridges the surface form (which may be folded while ``ant``
+            # is unfolded, or vice versa) to the kernel-form antecedent at
             # frame close, so the resulting implication has the goal's
-            # original shape.
+            # original shape. The shape equation also serves as the
+            # simp-equivalence check: ``_derive_shape_eq`` raises if the
+            # user's term and the goal's antecedent don't normalize to
+            # the same shape.
+            self._cur.goal = cons
             asm_th = ASSUME(term)
-            term_eq_ant = self._derive_shape_eq(term, ant)
-            self._cur.hyps_added.append((label, asm_th, term_eq_ant))
+            term_eq_ant = self._derive_shape_eq(term, ant, op="assume")
+            self._cur.hyps_added.append(_AssumeHyp(label, asm_th, term_eq_ant))
             self._register_fact(label, asm_th)
 
     def _try_assume_conj(self, labelled):
@@ -1058,7 +1100,7 @@ class Proof:
 
         asm_th = ASSUME(ant)
         term_eq_ant = self._derive_shape_eq(ant, ant)
-        self._cur.hyps_added.append((parsed[0][0], asm_th, term_eq_ant))
+        self._cur.hyps_added.append(_AssumeHyp(parsed[0][0], asm_th, term_eq_ant))
         self._cur.goal = cons
 
         cur_th = asm_th
@@ -1072,18 +1114,24 @@ class Proof:
             self._register_fact(label, conj_th)
         return True
 
-    def _derive_shape_eq(self, lhs, rhs):
+    def _derive_shape_eq(self, lhs, rhs, op="_derive_shape_eq"):
         """``|- lhs = rhs`` for two simp-equivalent terms. ``REFL`` when
         they're already kernel-aconv; otherwise composed from the two
-        ``simp_normalize`` equations through the shared normal form."""
+        ``simp_normalize`` equations through the shared normal form.
+
+        Raises ``HolError`` (prefixed with ``op``) if the two terms are
+        not simp-equivalent, so callers can use this both as a shape
+        bridge and as a simp-equivalence check in one step.
+        """
         if aconv(lhs, rhs):
             return REFL(lhs)
         lhs_eq = self.simp_normalize(lhs)
         rhs_eq = self.simp_normalize(rhs)
         if not aconv(rand(lhs_eq._concl), rand(rhs_eq._concl)):
             raise HolError(
-                "_derive_shape_eq: terms not simp-equivalent\n"
-                f"  lhs: {pp(lhs)}\n  rhs: {pp(rhs)}")
+                f"{op}: shape does not match\n"
+                f"  expected: {pp(rhs)}\n"
+                f"  got:      {pp(lhs)}")
         return TRANS(lhs_eq, SYM(rhs_eq))
 
     # ---- have / thus -----------------------------------------------------
@@ -1123,29 +1171,38 @@ class Proof:
         fr = self._cur
         if fr.kind != FrameKind.INDUCTION:
             raise HolError("base() outside induction()")
-        s = fr.data["strategy"]
-        sub_goal = subst_term(fr.data["var"], s.base_term, fr.data["body"])
+        d = fr.data
+        sub_goal = subst_term(d.var, d.strategy.base_term, d.body)
 
         def on_close(th):
-            fr.data["base_th"] = th
+            d.base_th = th
 
         return _SubFrameCtx(self, sub_goal, kind=FrameKind.IND_BASE,
                              on_close=on_close)
 
-    def step(self, ih_label="IH"):
+    def step(self, ih_label):
+        """Open the inductive-step sub-block.
+
+        ``ih_label`` (required) is the name under which the induction
+        hypothesis is registered as a fact for the duration of the
+        block. The label is written explicitly at every call site so
+        the binding is visible at the block opener -- mirroring the
+        ``with p.case("..."):`` pattern -- and so nested inductions
+        must pick distinct labels rather than silently colliding on a
+        shared default.
+        """
         fr = self._cur
         if fr.kind != FrameKind.INDUCTION:
             raise HolError("step() outside induction()")
-        s = fr.data["strategy"]
-        var, body = fr.data["var"], fr.data["body"]
-        sub_goal = subst_term(var, s.succ_fn(var), body)
+        d = fr.data
+        sub_goal = subst_term(d.var, d.strategy.succ_fn(d.var), d.body)
 
         def on_close(th):
-            fr.data["step_th"] = th
+            d.step_th = th
 
         return _SubFrameCtx(self, sub_goal, kind=FrameKind.IND_STEP,
                              on_close=on_close,
-                             extra_facts=[(ih_label, ASSUME(body))])
+                             extra_facts=[(ih_label, ASSUME(d.body))])
 
     def choose(self, name_spec, from_, eq_label=None):
         """Eliminate an existential, bringing a witness into scope.
@@ -1158,14 +1215,14 @@ class Proof:
             defaults to ``f"{name}_eq"`` so it doesn't clash with the witness
             name (which lives in the parser env).
         """
-        peeled = self._peel_label(name_spec)
+        peeled = peel_label_prefix(name_spec)
         if peeled is not None:
             name, eq_check = peeled
         else:
             name = name_spec.strip()
             eq_check = None
 
-        src_th = self._resolve_fact(from_)
+        src_th = self.coerce(from_)
         c = src_th._concl
 
         # If src is a relation registered with an unfolder, unfold to
@@ -1250,7 +1307,7 @@ class Proof:
             raise HolError(
                 f"{op}: no leaf discharged\n  goal: {pp(target)}")
         th = self._simp_require(target, th, op=op)
-        self._set_frame_result(self._cur, th)
+        self._cur.result = th
         return th
 
     def disj(self, *rules, ac=None):
@@ -1264,7 +1321,7 @@ class Proof:
         Replaces ``p.thus(<disj>).by_disj(ref)`` and the ``have eq →
         by_disj`` two-step.
         """
-        user_rules = [self.simp_norm_fact(self._resolve_fact(r))
+        user_rules = [self.simp_norm_fact(self.coerce(r))
                       for r in rules]
         rules_thms = user_rules + self._active_simp_rules()
 
@@ -1299,7 +1356,7 @@ class Proof:
         """
         witness_t = (self._parse(witness) if isinstance(witness, str)
                      else witness)
-        rules_thms = ([self._resolve_fact(r) for r in rules]
+        rules_thms = ([self.coerce(r) for r in rules]
                       + self._active_simp_rules())
 
         def try_existential(d):
@@ -1326,10 +1383,10 @@ class Proof:
 
         return self._close_disj("disj_witness", match)
 
-    def _open_cases(self, ref, target, on_close, args=()):
-        or_th = self._resolve_fact(ref)
+    def _open_cases(self, ref, target, on_close, args=(), op="cases_on"):
+        or_th = self.coerce(ref)
         if args:
-            resolved = [self._resolve_fact_or_term(a) for a in args]
+            resolved = [self.coerce(a, accept_term=True) for a in args]
             or_th = MP_LIST(or_th, resolved)
         c = or_th._concl
         # If the source is a relation registered with a disjunction unfolder
@@ -1340,8 +1397,8 @@ class Proof:
             c = or_th._concl
         # Expect (p \/ q) at the top.
         if not is_disj(c):
-            raise HolError(f"cases_on: not a disjunction: {pp(c)}")
-        return _CasesCtx(self, or_th, target, on_close)
+            raise HolError(f"{op}: not a disjunction: {pp(c)}")
+        return _CasesCtx(self, or_th, target, on_close, op=op)
 
     def cases_on(self, ref, *args):
         """Case-split on a disjunction.
@@ -1358,10 +1415,10 @@ class Proof:
         parent = self._cur
         if parent.goal is None:
             raise HolError("cases_on: no current goal")
-        return self._open_cases(
-            ref, parent.goal,
-            lambda res: self._set_frame_result(parent, res),
-            args=args)
+        def on_close(res):
+            parent.result = res
+
+        return self._open_cases(ref, parent.goal, on_close, args=args)
 
     def suppose(self, label_spec):
         """Open a hypothetical sub-block to prove a negation goal.
@@ -1378,25 +1435,11 @@ class Proof:
                 f"suppose: current goal is not a negation: "
                 f"{pp(g) if g is not None else 'None'}")
 
-        spec = label_spec.strip()
-        if re.fullmatch(r"[A-Za-z_]\w*", spec):
-            label = spec
-        else:
-            try:
-                label, hyp_term = parse_label(
-                    spec, _env_bindings=self._scope_env())
-            except ParseError as ex:
-                raise HolError(f"suppose: cannot parse hypothesis: {ex}") from ex
-            if label is None:
-                raise HolError(f"suppose: bad label spec: {label_spec!r}")
-            if not self.simp_aconv(hyp_term, body):
-                raise HolError(
-                    "suppose: hypothesis does not match negated body\n"
-                    f"  body:  {pp(body)}\n  given: {pp(hyp_term)}")
+        label = self._parse_label_or_check(label_spec, body, op="suppose")
 
         def on_close(F_th):
             not_th = NOT_INTRO(DISCH(body, F_th))
-            self._set_frame_result(self._cur, not_th)
+            self._cur.result = not_th
 
         return _SubFrameCtx(self, F, kind=FrameKind.SUPPOSE,
                              on_close=on_close,
@@ -1414,14 +1457,43 @@ class Proof:
             raise HolError("absurd: no current goal")
         return _Absurd(self, fr.goal)
 
+    def _auto_choose_for_case_leaf(self, leaf, user_term):
+        """If ``leaf`` is ``?v. body``, derive a witness inside the
+        just-entered case sub-frame so the user gets ``v`` in scope and
+        ``v_eq: body[v]`` as a fact -- exactly as if they had written
+        ``p.choose("v: body", from_=label)`` themselves.
+
+        The display name follows the *user*'s spec bvar (so they can
+        rename to avoid clashes with outer scopes); when the spec isn't
+        an existential, falls back to the leaf's own bvar name. The
+        witness theorem is SELECT_AX-derived from ``ASSUME(leaf)``, so
+        its hyp set is ``{leaf}`` -- which the case's outer ``DISCH(leaf)``
+        already retires.
+
+        No-op when ``leaf`` is not existential.
+        """
+        leaf_pred = dest_exists(leaf)
+        if leaf_pred is None:
+            return
+        leaf_v = leaf_pred.bvar
+        w_term = mk_select(leaf_v, leaf_pred.body)
+        user_pred = dest_exists(user_term)
+        wit_name = (user_pred.bvar.name if user_pred is not None
+                    else leaf_v.name)
+        eq_label = f"{wit_name}_eq"
+        witness_th = CHOOSE_WITNESS(leaf_pred, ASSUME(leaf))
+        self._require_fresh_name(wit_name, "case")
+        self._cur.choose_env[wit_name] = w_term
+        self._register_fact(eq_label, witness_th)
+
     @contextlib.contextmanager
     def case(self, branch_spec):
         fr = self._cur
         if fr.kind != FrameKind.CASES:
             raise HolError("case() outside cases_on()")
         label, user_term = self._split_label(branch_spec)
-        outer_goal = fr.data["goal"]
-        or_concl = fr.data["or_concl"]
+        outer_goal = fr.goal
+        or_concl = fr.data.or_concl
 
         # Walk the right-associated disjunction to find the leaf this user
         # spec corresponds to (alpha-equivalence). Using the *leaf* term for
@@ -1435,33 +1507,13 @@ class Proof:
                 f"  disj:   {pp(or_concl)}")
 
         def on_close(th):
-            fr.data["branches"].append((leaf, th))
+            fr.data.branches.append((leaf, th))
 
         sub_ctx = _SubFrameCtx(self, outer_goal, kind=FrameKind.CASE,
                                 on_close=on_close,
                                 extra_facts=[(label, ASSUME(leaf))])
         with sub_ctx as inner_p:
-            # If the branch hypothesis is itself an existential
-            # ``?v. body``, auto-choose the witness inside the case body
-            # so the user gets ``v`` in scope and ``v_eq: body[v]`` as a
-            # fact, exactly as if they had written ``p.choose("v: body",
-            # from_=label)`` themselves. The display name follows the
-            # *user*'s spec bvar (so they can rename to avoid clashes
-            # with outer scopes); the witness theorem is SELECT_AX-
-            # derived from ``ASSUME(leaf)`` so its hyp set is ``{leaf}``
-            # -- which the case's outer DISCH(leaf) already retires.
-            leaf_pred = dest_exists(leaf)
-            if leaf_pred is not None:
-                leaf_v = leaf_pred.bvar
-                w_term = mk_select(leaf_v, leaf_pred.body)
-                user_pred = dest_exists(user_term)
-                wit_name = (user_pred.bvar.name if user_pred is not None
-                            else leaf_v.name)
-                eq_label = f"{wit_name}_eq"
-                witness_th = CHOOSE_WITNESS(leaf_pred, ASSUME(leaf))
-                self._require_fresh_name(wit_name, "case")
-                self._cur.choose_env[wit_name] = w_term
-                self._register_fact(eq_label, witness_th)
+            self._auto_choose_for_case_leaf(leaf, user_term)
             yield inner_p
 
 
@@ -1481,8 +1533,8 @@ class _Have:
     # ----- builder protocol: resolve refs then finish -----
 
     def _resolved(self, refs):
-        """List form of ``Proof._resolve_fact``: each ref → ``thm``."""
-        return [self.p._resolve_fact(r) for r in refs]
+        """List form of ``Proof.coerce``: each ref → ``thm``."""
+        return [self.p.coerce(r) for r in refs]
 
     def _via(self, builder, *args):
         """Resolve each arg as a fact and feed positional results into
@@ -1494,18 +1546,22 @@ class _Have:
     # ----- finishing: alpha-check, register, optionally close goal -----
 
     def _finish(self, th):
-        # Pattern A: lift th to the user-supplied have-term shape.
-        th = self.p._simp_require(self.term, th, op="have")
-        label = self.label or self.p._fresh_label("h")
-        self.p._register_fact(label, th)
+        # When ``thus``-ing, lift directly to the current goal's shape
+        # (the have-term and the goal must be simp-equivalent anyway,
+        # since ``thus`` discharges the goal). Registering at goal shape
+        # avoids a redundant simp lift through the user's have-term form;
+        # ``thus``-registered facts have a frame-bounded lifetime, so the
+        # shape change has no downstream consumers.
         if self.is_thus:
             cur = self.p._cur
             if cur.goal is None:
                 raise HolError("thus: no current goal")
-            # Lift th from have-term shape to current-goal shape so the
-            # frame's recorded result matches the original goal.
             th = self.p._simp_require(cur.goal, th, op="thus")
-            self.p._set_frame_result(cur, th)
+            cur.result = th
+        else:
+            th = self.p._simp_require(self.term, th, op="have")
+        label = self.label or self.p._fresh_label("h")
+        self.p._register_fact(label, th)
         return th
 
     # ----- justification methods -----
@@ -1527,20 +1583,20 @@ class _Have:
           negative index, or theorem); the callable is invoked on them.
         """
         if isinstance(justification, (str, int)):
-            justification = self.p._resolve_fact(justification)
+            justification = self.p.coerce(justification)
         if isinstance(justification, thm):
             # Pattern B: simp-normalize the justification so SPECs find a
             # forall to peel; Pattern A on each MP step via simp_mp.
             th = self.p.simp_norm_fact(justification)
             for a in args:
-                resolved = self.p._resolve_fact_or_term(a)
+                resolved = self.p.coerce(a, accept_term=True)
                 if isinstance(resolved, thm):
                     th = self.p.simp_mp(th, resolved)
                 else:
                     th = SPEC(resolved, th)
             return self._finish(th)
         if callable(justification):
-            resolved = [self.p._resolve_fact_or_term(a) for a in args]
+            resolved = [self.p.coerce(a, accept_term=True) for a in args]
             return self._finish(justification(*resolved))
         raise HolError(
             f"by: not a theorem or callable: {justification!r}")
@@ -1569,7 +1625,7 @@ class _Have:
         explicit term."""
         p = self.p
         if isinstance(justification, (str, int)):
-            justification = p._resolve_fact(justification)
+            justification = p.coerce(justification)
         if not isinstance(justification, thm):
             raise HolError(
                 f"by_match: not a theorem: {justification!r}")
@@ -1599,7 +1655,7 @@ class _Have:
         facts = []
         ant_idx = 0
         for a in args:
-            resolved = p._resolve_fact_or_term(a)
+            resolved = p.coerce(a, accept_term=True)
             if isinstance(resolved, thm):
                 if ant_idx >= len(ants):
                     raise HolError(
@@ -1676,7 +1732,7 @@ class _Have:
         the source's and target's product orderings.
         """
         p = self.p
-        th_src = p._resolve_fact(ref)
+        th_src = p.coerce(ref)
         rules_thms = self._resolved(rules) + p._active_simp_rules()
         # Simp-normalize the source's conclusion, the target, and each
         # rule's conclusion to a common canonical form before the kernel
@@ -1712,7 +1768,7 @@ class _Have:
         rewrite rules. Used to bridge a theorem stated in unfolded form
         (e.g. SATZ_9) to a goal stated using the defined symbol (SATZ_10's
         ``>`` / ``<``)."""
-        src_th = self.p._resolve_fact(src)
+        src_th = self.p.coerce(src)
         rules = self._resolved(defs)
         eq_unfold = REWRITE_CONV(rules, self.term)
         eq_beta = BETA_NORM(rand(eq_unfold._concl))
@@ -1733,7 +1789,8 @@ class _Have:
 
         Like ``cases_on``, accepts extra ``*args`` to ``MP_LIST``-specialize
         a theorem source inline."""
-        return self.p._open_cases(ref, self.term, self._finish, args=args)
+        return self.p._open_cases(
+            ref, self.term, self._finish, args=args, op="by_cases")
 
     def proof(self):
         """Open a sub-frame whose goal is the have-term. The body proves it
@@ -1766,24 +1823,8 @@ class _Have:
         p = self.p
         not_target = mk_not(target)
 
-        spec = label_spec.strip()
-        if re.fullmatch(r"[A-Za-z_]\w*", spec):
-            label = spec
-        else:
-            try:
-                label, hyp_term = parse_label(
-                    spec, _env_bindings=p._scope_env())
-            except ParseError as ex:
-                raise HolError(
-                    f"by_contradiction: cannot parse label spec: {ex}") from ex
-            if label is None:
-                raise HolError(
-                    f"by_contradiction: bad label spec: {label_spec!r}")
-            if not p.simp_aconv(hyp_term, not_target):
-                raise HolError(
-                    "by_contradiction: hypothesis does not match negated "
-                    f"target\n  expected: {pp(not_target)}\n"
-                    f"  given:    {pp(hyp_term)}")
+        label = p._parse_label_or_check(
+            label_spec, not_target, op="by_contradiction")
 
         def on_close(F_th):
             nn_th = NOT_INTRO(DISCH(not_target, F_th))
@@ -1810,7 +1851,7 @@ class _Have:
         if unfold_eq is None:
             raise HolError(
                 f"by_fold: no unfolder registered for target: {pp(target)}")
-        fact = self.p._resolve_fact(ref)
+        fact = self.p.coerce(ref)
         return self._finish(EQ_MP(SYM(unfold_eq), fact))
 
     def by_witness(self, witness, ref):
@@ -1826,7 +1867,7 @@ class _Have:
         target = self.term
         p = self.p
 
-        fact_th = p._resolve_fact(ref)
+        fact_th = p.coerce(ref)
         witness_t = p._parse(witness) if isinstance(witness, str) else witness
 
         # Direct existential: ?v. body.
@@ -1858,7 +1899,7 @@ class _Have:
         inject it as the proof of the whole disjunction."""
         target = self.term
         p = self.p
-        fact_th = p._resolve_fact(ref)
+        fact_th = p.coerce(ref)
         # Pattern B: normalize fact and goal so the disjunction structure is
         # exposed, build at the normalized shape; ``_finish`` re-folds via
         # ``_simp_require``.
@@ -1907,7 +1948,7 @@ class _Absurd:
             raise HolError(
                 f"absurd: justification did not produce F: {pp(F_th._concl)}")
         result = CONTR(self.target, F_th)
-        self.p._set_frame_result(self.p._cur, result)
+        self.p._cur.result = result
         return result
 
     def by_thm(self, th):
@@ -1915,10 +1956,10 @@ class _Absurd:
 
     def by(self, justification, *args):
         if isinstance(justification, thm):
-            resolved = [self.p._resolve_fact_or_term(a) for a in args]
+            resolved = [self.p.coerce(a, accept_term=True) for a in args]
             return self._finish(MP_LIST(justification, resolved))
         if callable(justification):
-            resolved = [self.p._resolve_fact_or_term(a) for a in args]
+            resolved = [self.p.coerce(a, accept_term=True) for a in args]
             return self._finish(justification(*resolved))
         raise HolError(
             f"absurd: not a theorem or callable: {justification!r}")
@@ -1931,8 +1972,9 @@ class _Absurd:
         if len(refs) != 2:
             raise HolError(
                 f"absurd: by_conj requires exactly two facts, got {len(refs)}")
-        ths = [self.p._resolve_fact(r) for r in refs]
-        for pos, neg in (ths, ths[::-1]):
+        a, b = (self.p.coerce(r) for r in refs)
+        # Try `a` as the negation, then `b`.
+        for neg, pos in ((a, b), (b, a)):
             inner = dest_neg(neg._concl)
             if inner is None:
                 continue
@@ -1946,7 +1988,7 @@ class _Absurd:
                 return self._finish(MP(NOT_ELIM(neg), lifted))
         raise HolError(
             "absurd: by_conj could not match P / ~P among "
-            f"{pp(ths[0]._concl)} / {pp(ths[1]._concl)}")
+            f"{pp(a._concl)} / {pp(b._concl)}")
 
     def auto(self, *refs):
         """Discharge F by inspecting the conclusions of the supplied facts.
@@ -1959,7 +2001,7 @@ class _Absurd:
         if len(refs) != 2:
             raise HolError(
                 f"absurd: auto() requires exactly two facts, got {len(refs)}")
-        ths = [self.p._resolve_fact(r) for r in refs]
+        ths = [self.p.coerce(r) for r in refs]
         cs = [dest_binop_any(th._concl) for th in ths]
         if cs[0] is None or cs[1] is None:
             raise HolError(
@@ -1992,9 +2034,9 @@ class _Absurd:
         ``p.have(...).by_match(forward, case); p.absurd().auto(source, ...)``.
         """
         p = self.p
-        case_th = p._resolve_fact(case)
-        src_th = p._resolve_fact(source)
-        fwd_th = p._resolve_fact(forward)
+        case_th = p.coerce(case)
+        src_th = p.coerce(source)
+        fwd_th = p.coerce(forward)
 
         # Build the lifted target shape: case's relation applied to source's
         # operands. Both must be binary applications.
@@ -2113,9 +2155,8 @@ class _InductionCtx:
 
     def __enter__(self):
         fr = _Frame(goal=None, kind=FrameKind.INDUCTION)
-        fr.data = {"var": self.var, "body": self.body,
-                   "strategy": self.strategy,
-                   "base_th": None, "step_th": None}
+        fr.data = _InductionData(var=self.var, body=self.body,
+                                  strategy=self.strategy)
         self.p._frames.append(fr)
         return self.p
 
@@ -2124,9 +2165,9 @@ class _InductionCtx:
             return False
         fr = self.p._frames.pop()
         d = fr.data
-        if d["base_th"] is None:
+        if d.base_th is None:
             raise HolError("induction: missing base()")
-        if d["step_th"] is None:
+        if d.step_th is None:
             raise HolError("induction: missing step()")
         # User's step_th already contains ASSUME(body) as a hypothesis (under
         # the IH label). induct_prove wraps that with DISCH(body, ...) and
@@ -2134,7 +2175,7 @@ class _InductionCtx:
         # has a !var binder, leave it as is; otherwise SPEC var back out so
         # the parent's body-shaped goal matches.
         forall_th = self.strategy.induct_prove(
-            self.var, self.body, d["base_th"], lambda IH: d["step_th"])
+            self.var, self.body, d.base_th, lambda IH: d.step_th)
         body_th = forall_th if self.peel_forall else SPEC(self.var, forall_th)
         body_th = self.p._close_frame(fr, body_th)
         self.p._drop_facts(fr.facts_added)
@@ -2144,7 +2185,7 @@ class _InductionCtx:
                 "induction: produced wrong conclusion\n"
                 f"  goal: {pp(parent.goal) if parent.goal else 'None'}\n"
                 f"  got:  {pp(body_th._concl)}")
-        self.p._set_frame_result(parent, body_th)
+        parent.result = body_th
         return False
 
 
@@ -2190,10 +2231,8 @@ def _build_disj_cases(or_th, branches):
     where each ``branch_th`` proves the target under hypothesis
     ``disjunct_term``. Returns the combined theorem with all branch
     hypotheses discharged."""
-    if len(branches) == 2:
-        l_term, l_th = branches[0]
-        r_term, r_th = branches[1]
-        return DISJ_CASES(or_th, DISCH(l_term, l_th), DISCH(r_term, r_th))
+    if len(branches) == 1:
+        return branches[0][1]
     head_term, head_th = branches[0]
     rest_or = or_th._concl.arg
     inner_th = _build_disj_cases(ASSUME(rest_or), branches[1:])
@@ -2203,32 +2242,33 @@ def _build_disj_cases(or_th, branches):
 
 
 class _CasesCtx:
-    def __init__(self, p, or_th, target, on_close):
+    def __init__(self, p, or_th, target, on_close, op="cases_on"):
         self.p = p
         self.or_th = or_th
         self.target = target
         self.on_close = on_close
+        self.op = op
 
     def __enter__(self):
         fr = _Frame(goal=self.target, kind=FrameKind.CASES)
-        fr.data = {"goal": self.target, "branches": [],
-                    "or_concl": self.or_th._concl}
+        fr.data = _CasesData(or_concl=self.or_th._concl)
         self.p._frames.append(fr)
         return self.p
 
     def __exit__(self, exc_type, *_):
         if exc_type is not None:
             return False
+        op = self.op
         fr = self.p._frames.pop()
-        branches = fr.data["branches"]
+        branches = fr.data.branches
         n = len(branches)
         if n < 2:
             raise HolError(
-                f"cases_on: need at least 2 case() blocks, got {n}")
+                f"{op}: need at least 2 case() blocks, got {n}")
         leaves = _split_disj_n(self.or_th._concl, n)
         if leaves is None:
             raise HolError(
-                f"cases_on: cannot split into {n} disjuncts: "
+                f"{op}: cannot split into {n} disjuncts: "
                 f"{pp(self.or_th._concl)}")
         # Match each user-supplied case to a leaf (preserves leaf order).
         slots = [None] * n
@@ -2241,11 +2281,11 @@ class _CasesCtx:
                     break
             if not placed:
                 raise HolError(
-                    f"cases_on: branch does not match any disjunct: "
+                    f"{op}: branch does not match any disjunct: "
                     f"{pp(branch_term)}")
         if any(s is None for s in slots):
             missing = [pp(leaves[i]) for i, s in enumerate(slots) if s is None]
-            raise HolError(f"cases_on: missing case for {missing}")
+            raise HolError(f"{op}: missing case for {missing}")
         result = _build_disj_cases(self.or_th, slots)
         result = self.p._discharge_lazy_lets(fr, result)
         self.p._drop_facts(fr.facts_added)
@@ -2256,7 +2296,7 @@ class _CasesCtx:
             lifted = self.p.simp_match(self.target, result)
             if lifted is None:
                 raise HolError(
-                    "cases_on: produced wrong conclusion\n"
+                    f"{op}: produced wrong conclusion\n"
                     f"  target: {pp(self.target)}\n"
                     f"  got:    {pp(result._concl)}")
             result = lifted

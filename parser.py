@@ -562,6 +562,24 @@ def parse_label(s, sig=None, _env_bindings=None, **bindings):
     return _Builder(sig or DEFAULT_SIG, merged).visit(tree)
 
 
+_LABEL_PEEL_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*:(?!=)\s*(.*)$", re.DOTALL)
+
+
+def peel_label_prefix(spec):
+    """Structural-only split of ``"label: rest"`` -- returns
+    ``(label, rest_str)`` or ``None`` if the spec has no leading label.
+
+    The ``label:`` form is structurally unambiguous (see ``parse_label``);
+    this helper exists for the rare case where the body must be parsed
+    lazily because its env depends on the about-to-be-bound label (e.g.
+    ``Proof.choose``'s ``"name: equation"`` form, where ``name`` is a
+    parser binding consumed by the equation parse). Callers that can
+    parse eagerly should prefer ``parse_label``.
+    """
+    m = _LABEL_PEEL_RE.match(spec)
+    return (m.group(1), m.group(2)) if m else None
+
+
 def parse_let_spec(s, sig=None, _env_bindings=None, **bindings):
     """Parse ``"NAME(arg1, arg2, ...) := body"``.
 
