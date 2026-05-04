@@ -27,7 +27,8 @@ from tactics import (
     DISJ1, DISJ_CASES, REFL,
 )
 from basics import dest_eq, rand
-from axioms import dest_imp, dest_forall, dest_disj
+from axioms import dest_imp, dest_forall, dest_disj, dest_exists, dest_neg
+from classical import NOT_EX_TO_FORALL_NOT
 from proof import proof
 
 
@@ -195,20 +196,25 @@ def CLASS_AC(p):
 # ``q ==> p`` into ``p = q``).
 # ---------------------------------------------------------------------------
 
-def GEN_IFF(th_fab, th_fba):
-    """``|- !x. P x ==> Q x``, ``|- !x. Q x ==> P x``  =>  ``|- !x. P x = Q x``.
+def IFF_AT(th_pq, th_qp):
+    """``|- p ==> q``, ``|- q ==> p``  =>  ``|- p = q``.
 
-    Iff-intro under a leading universal. Uses ``DEDUCT_ANTISYM_RULE`` after
-    crossing the two implications under ASSUMEd antecedents."""
-    pred = dest_forall(th_fab._concl)
-    x = pred.bvar
-    th_pq = SPEC(x, th_fab)
-    th_qp = SPEC(x, th_fba)
+    Iff-intro at a single point. Uses ``DEDUCT_ANTISYM_RULE`` after crossing
+    the two implications under ASSUMEd antecedents."""
     p_t, _ = dest_imp(th_pq._concl)
     q_t, _ = dest_imp(th_qp._concl)
     th_q = MP(th_pq, ASSUME(p_t))
     th_p = MP(th_qp, ASSUME(q_t))
-    return GEN(x, SYM(DEDUCT_ANTISYM_RULE(th_q, th_p)))
+    return SYM(DEDUCT_ANTISYM_RULE(th_q, th_p))
+
+
+def GEN_IFF(th_fab, th_fba):
+    """``|- !x. P x ==> Q x``, ``|- !x. Q x ==> P x``  =>  ``|- !x. P x = Q x``.
+
+    Pointwise iff-intro under a leading universal."""
+    pred = dest_forall(th_fab._concl)
+    x = pred.bvar
+    return GEN(x, IFF_AT(SPEC(x, th_fab), SPEC(x, th_fba)))
 
 
 @proof
@@ -313,6 +319,55 @@ def NO_UNIVERSAL(p):
         p.absurd().by_conj("h_uu", "h_not")
 
 
+# ---------------------------------------------------------------------------
+# Empty set: existence and uniqueness.
+#
+# Existence: INFINITY's first clause supplies a member of the inductive
+# set with no members of its own -- that's our empty set.
+# Uniqueness: pure EXTENSIONALITY -- two memberless sets agree on every
+# membership predicate, hence are equal.
+# ---------------------------------------------------------------------------
+
+def NOT_EX_PRED(not_th):
+    """``|- ~(?v. body)``  =>  ``|- !v. ~body``."""
+    return NOT_EX_TO_FORALL_NOT(not_th, dest_exists(dest_neg(not_th._concl)))
+
+
+@proof
+def EMPTY_EXISTS(p):
+    p.goal("?e. !x. ~In x e")
+    p.have("h_inf: ?I. (?z. In z I /\\ ~(?w. In w z)) /\\ "
+           "(!x. In x I ==> ?y. In y I /\\ (!w. In w y = (In w x \\/ w = x)))") \
+        .by(INFINITY)
+    p.choose("I", from_="h_inf")               # I_eq : conjunction
+    p.have("h_empty_in_I: ?z. In z I /\\ ~(?w. In w z)").by(CONJUNCT1, "I_eq")
+    p.choose("z", from_="h_empty_in_I")        # z_eq : In z I /\ ~(?w. In w z)
+    p.have("h_no_w: ~(?w. In w z)").by(CONJUNCT2, "z_eq")
+    p.have("h_forall: !x. ~In x z").by(NOT_EX_PRED, "h_no_w")
+    p.thus("?e. !x. ~In x e").by_witness("z", "h_forall")
+
+
+@proof
+def EMPTY_UNIQUE(p):
+    p.goal("!a b. (!x. ~In x a) /\\ (!x. ~In x b) ==> a = b")
+    p.fix("a b")
+    p.assume("(ha, hb): (!x. ~In x a) /\\ (!x. ~In x b)")
+    with p.have("hext: !x. In x a = In x b").proof():
+        p.fix("x")
+        p.have("h_na: ~In x a").by("ha", "x")
+        p.have("h_nb: ~In x b").by("hb", "x")
+        # ~In x a and ~In x b both reduce to F via boolean reasoning, so
+        # In x a = In x b. Use iff-intro under ASSUMEd absurd antecedents.
+        with p.have("imp_ab: In x a ==> In x b").proof():
+            p.assume("hxa: In x a")
+            p.absurd().by_conj("hxa", "h_na")
+        with p.have("imp_ba: In x b ==> In x a").proof():
+            p.assume("hxb: In x b")
+            p.absurd().by_conj("hxb", "h_nb")
+        p.thus("In x a = In x b").by(IFF_AT, "imp_ab", "imp_ba")
+    p.thus("a = b").by_match(EXTENSIONALITY, "hext")
+
+
 if __name__ == "__main__":
     for label, th in [
         ("SUBSET_DEF", SUBSET_DEF),
@@ -330,5 +385,7 @@ if __name__ == "__main__":
         ("SUBSET_ANTISYM", SUBSET_ANTISYM),
         ("NO_SELF_MEMBER", NO_SELF_MEMBER),
         ("NO_UNIVERSAL", NO_UNIVERSAL),
+        ("EMPTY_EXISTS", EMPTY_EXISTS),
+        ("EMPTY_UNIQUE", EMPTY_UNIQUE),
     ]:
         print(f"{label}: {pp_thm(th)}")
