@@ -279,4 +279,50 @@ produced by `have` / `choose` / an MP chain still needs hand-written
 `CHOOSE_WITNESS` / `EQ_IMP` / etc. -- but conjunctions are covered
 end-to-end by `assume`'s tuple pattern and `p.split`.
 
+### No rewriter for an explicit-binder bridge
+
+`by_rewrite` / `by_rewrite_of` filter out rewrites whose equation
+mentions a bound variable of the surrounding term, so an equation
+like `k = n` cannot be lifted under a `!Q. ...` binder that captures
+neither side. The escape hatch is to build the abstraction by hand
+(`mk_abs(kk, body)`) and chain `SYM(BETA_CONV) ; AP_TERM(...) ;
+BETA_CONV` — the `R_func_a` dance in `R_UNIQUE_STEP` (`num.py:691`).
+A `p.rewrite_at(var, eq)` (or relaxed filter that takes an explicit
+abstraction point) would absorb this. **Workaround**: hand-roll the
+beta bridge as in `num.py:691-700`.
+
+### `by_witness` doesn't beta-reduce the substituted body
+
+When the witness term is a `\n. ...` whose application beta-reduces
+to the user's target, `by_witness` (via `simp_require`) doesn't
+chain the BETAs needed to align the existential body with the fact.
+The escape hatch is a manual `BETA_CONV` triple +
+`TRANS_CHAIN` — `NUM_RECURSION` does this at `num.py:791-805`
+(`beta_1`, `beta_n`, `beta_sn`, then `fn_sn_eq = TRANS_CHAIN(...)`).
+Beta-aware matching in `by_witness` would collapse the tail.
+
+### `MK_DEST` / `DEST_MK` peel idiom not abstracted
+
+Each proof that crosses the `num`/`ind` type-definition boundary
+re-derives the same instantiation pattern: `INST([(t, r_var)],
+DEST_MK)` for some `t`, then `EQ_MP` to peel the
+`NUM_REP`-wrapped form. `AXIOM_3`, `AXIOM_4`, and `INDUCTION` all
+do this (`num.py:360-362, 387-389, 449-457`). The proofs read
+declaratively except for these peels. There's no DSL-level helper
+because the pattern is specific to `new_basic_type_definition`'s
+output shape; a `peel_NUM_REP(t)` rule (or, more generally, a
+`peel_subtype(MK_DEST, DEST_MK, t)` factory) would let those proofs
+go through `by_thm` without the inline `INST`/`EQ_MP` plumbing.
+
+### Order/disjunction folders aren't first-class
+
+`LT_TO_LE`, `EQ_TO_LE`, `GT_TO_GE`, `EQ_TO_GE` (`nat.py:490-506`)
+are written as ~1-line raw-kernel helpers
+(`EQ_MP(SYM(UNFOLD_LE(a,b)), DISJ_(...))`) because they have to
+return a `thm` — `by_match` slots take theorems, not in-block proof
+calls. The DSL's `by_fold` + `by_disj` cover the same ground but
+only inside a proof block, so these helpers can't be expressed with
+them. A "promote a `by_*` chain to a standalone rule" facility, or
+just rewriting the four as `@proof` lemmas, would close the gap.
+
 ---
