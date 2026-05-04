@@ -133,13 +133,22 @@ handler via `proof.register_pattern_handler(PatType, handler)`. The
 handler receives `(p, pat, th)` where `th` is a kernel theorem of the
 consumed antecedent's shape.
 
-### `p.split_conj(ref, *labels)`
+### `p.split(ref, spec)`
 
-Split a right-associated conjunction fact into the supplied labels,
-registering each conjunct as its own fact. Simp-normalizes first.
-Mostly subsumed by `assume`'s tuple pattern; still useful for
-splitting an existing fact mid-proof (one not coming through
-`assume`).
+Run the same pattern grammar as `assume` on an arbitrary existing
+fact (label, index, or theorem). The pattern destructures `ref`'s
+conclusion and registers the resulting sub-theorems as facts;
+simp-normalization happens inside the conjunction-pattern handler so
+folded carriers whose unfolded form is a conjunction still expose the
+top `/\\`. The optional `: term` annotation is
+simp-equivalence-checked against `ref`'s conclusion.
+
+```python
+p.split("h", "(h1, h2)")            # split a conjunction fact
+p.split("h", "(h1, _, h3)")         # discard middle conjunct
+p.split(-1, "(h1, (h2, h3))")       # nested destructure
+p.split("h", "(h1, h2): A /\\ B")   # with shape annotation
+```
 
 ---
 

@@ -174,8 +174,8 @@ There is no `with p.conj(): ...` to split `a /\ b` into two sub-goals.
 Conjunctions are proved by `by_rewrite`, by deriving each conjunct as
 a `have` and then using `CONJ_PAIR`-style assembly, or by
 `by_match`-ing a lemma. The DSL is asymmetric: conjunction
-*elimination* is first-class (`split_conj`, `assume`'s tuple
-pattern), but introduction is not.
+*elimination* is first-class (`assume`'s tuple pattern, `p.split`),
+but introduction is not.
 
 ### Witnesses from `choose` are SELECT terms only
 
@@ -265,19 +265,18 @@ The `(p1, p2): A /\\ B` form binds the parts but discards the whole
 conjunction fact. If a downstream step needs both `h1: A`, `h2: B`
 *and* `h: A /\\ B` (e.g., to MP a lemma whose antecedent is
 `A /\\ B`), the tuple pattern alone won't do it; you must fall back
-to `assume("h: ...") + split_conj("h", "h1", "h2")`. There is no
+to `assume("h: ...") + split("h", "(h1, h2)")`. There is no
 "bind whole + destructure" pattern syntax (e.g. `@h(h1, h2): ...`)
 to capture both at once.
 
-### Pattern destructure is `assume`-only
+### Pattern destructure ships only conjunction + name
 
-The pattern grammar (`PatName`, `PatConj`, future kinds) is
-dispatched only by `assume` on the consumed antecedent. To
-destructure a fact produced elsewhere — `have`, `choose`'s witness
-equation, the result of an MP chain — you still need `split_conj`
-(for conjunctions) or hand-written `CONJUNCT1`/`CONJUNCT2` /
-`CHOOSE_WITNESS` / etc. There is no `p.split(ref, "(h1, h2)")`
-generalization that runs the pattern dispatch on an arbitrary
-existing fact.
+The pattern registry currently has handlers only for `PatName` and
+`PatConj`. New pattern kinds (existential witness, iff-split,
+disjunction case-split, ...) need a `register_pattern_handler`
+plugin. Until those land, destructuring an existential or iff fact
+produced by `have` / `choose` / an MP chain still needs hand-written
+`CHOOSE_WITNESS` / `EQ_IMP` / etc. -- but conjunctions are covered
+end-to-end by `assume`'s tuple pattern and `p.split`.
 
 ---

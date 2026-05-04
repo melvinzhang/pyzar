@@ -874,7 +874,7 @@ def SATZ_27(p):
     # n ∈ N, hence m + 1 ≤ n by Satz 25, hence m + 1 ∈ M -- contradicting
     # ¬ M (m+1)).
     p.choose("m: M m /\\ ~ M (m + 1)", from_="ex")
-    p.split_conj("m_eq", "Mm", "nMm1")
+    p.split("m_eq", "(Mm, nMm1)")
     with p.have("Nm: N m").by_contradiction("hnN"):
         with p.have("M_m1: M (m + 1)").proof():
             p.fix("n")

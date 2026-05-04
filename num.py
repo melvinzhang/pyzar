@@ -451,7 +451,7 @@ def INDUCTION(p):
         p.have("Q_da: Q (dest_num x)") \
             .by(NR_da_unfold, "Q",
                 CONJ(p.fact("Q_1"), p.fact("Q_step")))
-        p.split_conj("Q_da", "_NR_dx", "P_mk_dx")
+        p.split("Q_da", "(_NR_dx, P_mk_dx)")
         p.thus("P x").by_eq_mp(
             AP_TERM(P, INST([(x, Var("a", num_ty))], MK_DEST)),
             "P_mk_dx")
@@ -591,7 +591,7 @@ def R_STEP(p):
     with p.thus("R c h (SUC n) (h n m)").proof():
         p.fix("Q")
         p.assume("hyp: Q 1 c /\\ (!k a. Q k a ==> Q (SUC k) (h k a))")
-        p.split_conj("hyp", "_h_base", "h_close")
+        p.split("hyp", "(_h_base, h_close)")
         p.have("Q_n_m: Q n m").by("hR", "Q", "hyp")
         p.have("step_at: Q n m ==> Q (SUC n) (h n m)") \
             .by_thm(SPEC(_m, SPEC(_n, p.fact("h_close"))))
@@ -722,8 +722,8 @@ def R_UNIQUE_STEP(p):
             .by("h_R_m1", "Qp", "Qp_closure")
         p.have("Qp_sn_m2: Qp (SUC n) m2") \
             .by("h_R_m2", "Qp", "Qp_closure")
-        p.split_conj("Qp_sn_m1", "_R_sn_m1", "step1")
-        p.split_conj("Qp_sn_m2", "_R_sn_m2", "step2")
+        p.split("Qp_sn_m1", "(_R_sn_m1, step1)")
+        p.split("Qp_sn_m2", "(_R_sn_m2, step2)")
         p.have("m1_eq: m1 = h n m_n").by("step1", REFL(mk_suc(_n)))
         p.have("m2_eq: m2 = h n m_n").by("step2", REFL(mk_suc(_n)))
         p.thus("m1 = m2").by_rewrite(["m1_eq", "m2_eq"])

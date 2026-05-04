@@ -405,7 +405,7 @@ def main():
     assert H13_SURFACE._asl == []
     assert aconv(H13_SURFACE._concl, parse("(1 = 1) ==> (1 = 1)"))
 
-    # ---- assume pattern-style: tuple destructure replaces split_conj ----
+    # ---- assume pattern-style: tuple destructure on the antecedent ------
     @proof
     def PAT_TUPLE(p):
         p.goal("!x. (x = 1 /\\ x = x /\\ SUC x = SUC x) ==> x = 1")
@@ -457,6 +457,65 @@ def main():
     else:
         raise AssertionError(
             "expected HolError: tuple pattern requires >= 2 elements")
+
+    # ---- split: destructure an existing fact via pattern grammar --------
+    @proof
+    def SPLIT_FACT(p):
+        p.goal("!x. (x = 1 /\\ x = x /\\ SUC x = SUC x) ==> x = 1")
+        p.fix("x")
+        p.assume("h: x = 1 /\\ x = x /\\ SUC x = SUC x")
+        p.split("h", "(h_eq, _, _)")
+        p.thus("x = 1").by_thm(p.fact("h_eq"))
+    assert aconv(
+        SPLIT_FACT._concl,
+        parse("!x. (x = 1 /\\ x = x /\\ SUC x = SUC x) ==> x = 1"))
+
+    # ---- split: nested destructure on an existing fact ------------------
+    @proof
+    def SPLIT_NESTED(p):
+        p.goal("!x. (x = 1 /\\ (SUC x = SUC x /\\ x = x)) ==> x = 1")
+        p.fix("x")
+        p.assume("h: x = 1 /\\ (SUC x = SUC x /\\ x = x)")
+        p.split("h", "(h_eq, (_, _))")
+        p.thus("x = 1").by_thm(p.fact("h_eq"))
+    assert aconv(
+        SPLIT_NESTED._concl,
+        parse("!x. (x = 1 /\\ (SUC x = SUC x /\\ x = x)) ==> x = 1"))
+
+    # ---- split: annotated pattern body checks simp-equivalence ----------
+    @proof
+    def SPLIT_ANNOT(p):
+        p.goal("!x. (x = 1 /\\ x = x) ==> x = 1")
+        p.fix("x")
+        p.assume("h: x = 1 /\\ x = x")
+        p.split("h", "(h1, h2): x = 1 /\\ x = x")
+        p.thus("x = 1").by_thm(p.fact("h1"))
+    assert aconv(SPLIT_ANNOT._concl,
+                 parse("!x. (x = 1 /\\ x = x) ==> x = 1"))
+
+    # ---- split: error when pattern doesn't match the fact's shape -------
+    p_err3 = Proof()
+    p_err3.goal("(1 = 1) ==> (1 = 1)")
+    p_err3.assume("h: 1 = 1")
+    try:
+        p_err3.split("h", "(h1, h2)")
+    except HolError:
+        pass
+    else:
+        raise AssertionError(
+            "expected HolError: tuple pattern needs conjunction fact")
+
+    # ---- split: error on annotated body that doesn't match --------------
+    p_err4 = Proof()
+    p_err4.goal("(1 = 1 /\\ 1 = 1) ==> (1 = 1)")
+    p_err4.assume("h: 1 = 1 /\\ 1 = 1")
+    try:
+        p_err4.split("h", "(h1, h2): 1 = 1 /\\ 2 = 2")
+    except HolError:
+        pass
+    else:
+        raise AssertionError(
+            "expected HolError: split body shape mismatch")
 
     print("proof.py self-tests passed.")
 

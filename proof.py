@@ -649,8 +649,8 @@ class Proof:
         """Simp-normalize ``th``'s conclusion, returning a theorem whose
         conclusion is the normal form. Pattern B: structural exposure —
         used by tactics that need the unfolded shape (``by`` before SPEC
-        chains, ``split_conj`` to expose the top conjunction, ``by_disj``
-        to expose the disjunction)."""
+        chains, conjunction-pattern dispatch to expose the top ``/\\``,
+        ``by_disj`` to expose the disjunction)."""
         eq = self.simp_normalize(th._concl)
         if aconv(rand(eq._concl), th._concl):
             return th
@@ -1112,25 +1112,35 @@ class Proof:
 
         self._register_lazy_let(name, bvars, body)
 
-    def split_conj(self, ref, *labels):
-        """Split a right-associated conjunction fact ``h : a /\\ b /\\ ... /\\ z``
-        into the supplied labels, registering each conjunct as its own fact."""
+    def split(self, ref, spec):
+        """Destructure an existing fact via the pattern grammar shared with
+        ``assume``.
+
+        ``ref`` resolves through ``coerce`` (label, index, or theorem).
+        ``spec`` is a pattern -- optionally annotated ``: term`` --
+        using the same grammar as an ``assume`` spec body. The pattern
+        is dispatched on ``ref``'s conclusion through the registry that
+        ``assume`` uses, so any pattern kind installed via
+        ``register_pattern_handler`` works here too. Examples::
+
+            p.split("h", "(h1, h2)")            # split a conjunction
+            p.split("h", "(h1, _, h3)")         # discard middle conjunct
+            p.split(-1, "(h1, (h2, h3))")       # nested destructure
+
+        If the optional ``: term`` is supplied, ``term`` is
+        simp-equivalence-checked against ``ref``'s conclusion (as in
+        ``assume``).
+        """
         th = self.coerce(ref)
-        # Pattern B: simp-normalize the fact so the top-level conjunction is
-        # exposed (idempotent if already in normal form).
-        th = self.simp_norm_fact(th)
-        c = th._concl
-        if not is_conj(c):
+        try:
+            pattern, body_term = parse_pattern_spec(
+                spec, _env_bindings=self._scope_env())
+        except ParseError as ex:
             raise HolError(
-                f"split_conj: not a conjunction: {pp(c)}")
-        cur = th
-        n = len(labels)
-        for i, lbl in enumerate(labels):
-            if i == n - 1:
-                self._register_fact(lbl, cur)
-            else:
-                self._register_fact(lbl, CONJUNCT1(cur))
-                cur = CONJUNCT2(cur)
+                f"split: cannot parse spec {spec!r}: {ex}") from ex
+        if body_term is not None:
+            self._derive_shape_eq(body_term, th._concl, op="split")
+        _apply_pattern(self, pattern, th)
 
     def assume(self, *specs):
         """Consume the goal's antecedent(s) into facts via pattern destructuring.
@@ -1153,7 +1163,6 @@ class Proof:
             p.assume("h: A")                              # chain, one ==>
             p.assume("h1: A", "h2: B")                    # chain, two ==>s
             p.assume("(h1, h2): A /\\ B")                 # split: h1: A, h2: B
-            p.assume("(h_base, h_step): P 1 /\\ ...")     # replaces split_conj idiom
             p.assume("(h1, _, h3): A /\\ B /\\ C")        # discard middle conjunct
 
         New pattern kinds (existential witness, iff-split, ...) plug in

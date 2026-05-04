@@ -194,11 +194,11 @@ Required infrastructure (all shipped):
 
 ### Open
 
-6. 🟡 **`p.split_conj` for goals**. Today `split_conj` only takes
-   conjunction-shaped facts apart; goals of shape `A /\ B` must be
-   handled with two `p.have` plus a final `CONJ`. Auto-splitting the
-   goal would shave a few lines from `R_UNIQUE_BASE` / `R_UNIQUE_STEP`.
-   Minor — the workaround is fine.
+6. 🟡 **Conjunction-introduction block**. Today `p.split` takes
+   conjunction-shaped facts apart, but goals of shape `A /\ B` must
+   still be handled with two `p.have` plus a final `CONJ`.
+   Auto-splitting the goal would shave a few lines from
+   `R_UNIQUE_BASE` / `R_UNIQUE_STEP`. Minor — the workaround is fine.
 
 ---
 
