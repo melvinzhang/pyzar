@@ -368,6 +368,23 @@ def EMPTY_UNIQUE(p):
     p.thus("a = b").by_match(EXTENSIONALITY, "hext")
 
 
+# ---------------------------------------------------------------------------
+# Name the empty set as a kernel constant Empty (= Hilbert-select on the
+# empty-set existence). EMPTY_PROP exposes its characteristic property
+# ``!x. ~In x Empty`` for use by downstream proofs.
+# ---------------------------------------------------------------------------
+
+EMPTY_DEF = define("Empty", V, "@e. !x. ~In x e")
+
+
+@proof
+def EMPTY_PROP(p):
+    p.goal("!x. ~In x Empty")
+    p.have("hex: ?e. !x. ~In x e").by(EMPTY_EXISTS)
+    p.choose("e0: !x. ~In x e0", from_="hex")
+    p.thus("!x. ~In x Empty").by_rewrite_of("e0_eq", [SYM(EMPTY_DEF)])
+
+
 if __name__ == "__main__":
     for label, th in [
         ("SUBSET_DEF", SUBSET_DEF),
@@ -387,5 +404,7 @@ if __name__ == "__main__":
         ("NO_UNIVERSAL", NO_UNIVERSAL),
         ("EMPTY_EXISTS", EMPTY_EXISTS),
         ("EMPTY_UNIQUE", EMPTY_UNIQUE),
+        ("EMPTY_DEF", EMPTY_DEF),
+        ("EMPTY_PROP", EMPTY_PROP),
     ]:
         print(f"{label}: {pp_thm(th)}")
