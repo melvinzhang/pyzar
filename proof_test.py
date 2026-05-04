@@ -50,11 +50,11 @@ def main():
         p.have("yz_or: (y < z) \\/ (y = z)")\
             .by_eq_mp(UNFOLD_LE(VY, VZ), "hyz")
         with p.cases_on("yz_or"):
-            with p.case("y < z"):
-                p.have("xz_lt: x < z").by(SATZ_16A, "x", "y", "z", "hxy", -1)
+            with p.case("h: y < z"):
+                p.have("xz_lt: x < z").by(SATZ_16A, "x", "y", "z", "hxy", "h")
                 p.thus("x <= z").by(LT_TO_LE, "xz_lt")
-            with p.case("y = z"):
-                p.thus("x <= z").by_rewrite_of("hxy", [-1])
+            with p.case("h: y = z"):
+                p.thus("x <= z").by_rewrite_of("hxy", ["h"])
 
     assert aconv(concl(SATZ_17_NEW), concl(nat.SATZ_17)), \
         f"SATZ_17 mismatch:\n  new: {pp(concl(SATZ_17_NEW))}\n  old: {pp(concl(nat.SATZ_17))}"
@@ -104,11 +104,11 @@ def main():
         p.have("yz_or: (y < z) \\/ (y = z)")\
             .by_eq_mp(UNFOLD_LE(VY, VZ), "hyz")
         with p.cases_on("yz_or"):
-            with p.case("y < z"):
-                p.have("xz_lt: x < z").by_match(SATZ_16A, "y", "hxy", -1)
+            with p.case("h: y < z"):
+                p.have("xz_lt: x < z").by_match(SATZ_16A, "y", "hxy", "h")
                 p.thus("x <= z").by(LT_TO_LE, "xz_lt")
-            with p.case("y = z"):
-                p.thus("x <= z").by_rewrite_of("hxy", [-1])
+            with p.case("h: y = z"):
+                p.thus("x <= z").by_rewrite_of("hxy", ["h"])
     assert aconv(concl(SATZ_17_BY_MATCH), concl(nat.SATZ_17)), \
         f"SATZ_17 by_match mismatch:\n  new: {pp(concl(SATZ_17_BY_MATCH))}\n  old: {pp(concl(nat.SATZ_17))}"
     assert SATZ_17_BY_MATCH._asl == nat.SATZ_17._asl
@@ -124,11 +124,11 @@ def main():
         p.have("yz_or: (y < z) \\/ (y = z)")\
             .by_eq_mp(UNFOLD_LE(VY, VZ), "hyz")
         with p.cases_on("yz_or"):
-            with p.case("y < z"):
-                p.have("xz_lt: x < z").by_match(SATZ_16A, "hxy", -1)
+            with p.case("h: y < z"):
+                p.have("xz_lt: x < z").by_match(SATZ_16A, "hxy", "h")
                 p.thus("x <= z").by(LT_TO_LE, "xz_lt")
-            with p.case("y = z"):
-                p.thus("x <= z").by_rewrite_of("hxy", [-1])
+            with p.case("h: y = z"):
+                p.thus("x <= z").by_rewrite_of("hxy", ["h"])
     assert aconv(concl(SATZ_17_BY_MATCH_ANT), concl(nat.SATZ_17)), \
         f"SATZ_17 by_match (ant) mismatch:\n  new: {pp(concl(SATZ_17_BY_MATCH_ANT))}\n  old: {pp(concl(nat.SATZ_17))}"
     assert SATZ_17_BY_MATCH_ANT._asl == nat.SATZ_17._asl

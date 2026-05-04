@@ -480,7 +480,6 @@ class Proof:
     def __init__(self):
         self._frames = [_Frame(kind=FrameKind.ROOT)]
         self._facts = {}          # label -> thm
-        self._fact_order = []     # insertion order for negative-index lookup
         self._anon = 0
 
     @property
@@ -557,8 +556,8 @@ class Proof:
 
     def simp(self, *rules):
         """Register one or more theorems as default rewrite rules in the
-        current frame. Each rule is a fact label, negative index, or
-        theorem; rules are added to the active simp set in order and used
+        current frame. Each rule is a fact label or theorem; rules are
+        added to the active simp set in order and used
         by every subsequent ``by_rewrite``-family / ``disj``-family call
         in this frame and any nested frame.
 
@@ -760,7 +759,7 @@ class Proof:
           with ``accept_term=True``).
         - anything else raises with an ``op``-prefixed message.
         """
-        if isinstance(justification, (str, int)):
+        if isinstance(justification, str):
             justification = self.coerce(justification)
         if isinstance(justification, thm):
             th = self.simp_norm_fact(justification) if simp else justification
@@ -969,7 +968,6 @@ class Proof:
     def _register_fact(self, label, th):
         self._require_fresh_name(label, "register_fact")
         self._facts[label] = th
-        self._fact_order.append(label)
         self._cur.facts_added.append(label)
 
     def _drop_facts(self, labels):
@@ -979,9 +977,6 @@ class Proof:
                     f"_drop_facts: {label!r} not in fact registry "
                     "(facts_added must stay a subset of _facts)")
             del self._facts[label]
-        if labels:
-            drop = set(labels)
-            self._fact_order = [lbl for lbl in self._fact_order if lbl not in drop]
 
     def coerce(self, x, *, accept_term=False):
         """Resolve ``x`` to a theorem -- or, when ``accept_term`` is true,
@@ -989,7 +984,6 @@ class Proof:
 
         Always-fact (``accept_term=False``, default):
           - ``thm`` -- returned unchanged.
-          - ``int`` -- looked up in the fact registry by insertion index.
           - ``str`` -- looked up as a fact label; an unknown label raises.
           - kernel term object -- rejected.
 
@@ -1006,11 +1000,6 @@ class Proof:
         """
         if isinstance(x, thm):
             return x
-        if isinstance(x, int):
-            try:
-                return self._facts[self._fact_order[x]]
-            except IndexError:
-                raise HolError(f"fact index out of range: {x}")
         if isinstance(x, str):
             if x in self._facts:
                 return self._facts[x]
@@ -1443,8 +1432,8 @@ class Proof:
         ``REWRITE_PROVE(rules, leaf, ac=ac)``. With no rules, collapses to
         ``REFL`` for a tautological leaf.
 
-        Each ``rule`` is a fact label, negative index, or theorem.
-        Replaces ``p.thus(<disj>).by_disj(ref)`` and the ``have eq →
+        Each ``rule`` is a fact label or theorem. Replaces
+        ``p.thus(<disj>).by_disj(ref)`` and the ``have eq →
         by_disj`` two-step.
         """
         user_rules = [self.simp_norm_fact(self.coerce(r))
@@ -1475,7 +1464,7 @@ class Proof:
 
         ``witness`` is parsed in the current scope (so ``case``-bound
         names are available) or accepted as a kernel term. Each ``rule``
-        is a fact label, negative index, or theorem. Replaces the
+        is a fact label or theorem. Replaces the
         ``have eq → by_witness → by_disj`` quartet, and the
         relation-goal ``have eq → by_witness`` two-step when the goal
         is a single ``a R b`` leaf.
@@ -1691,9 +1680,9 @@ class _Have:
           Term arg becomes ``SPEC``, a Theorem arg becomes ``MP``. Strings
           in ``args`` are interpreted as fact labels (theorem) when known,
           else parsed as terms. A ``str`` ``justification`` is resolved as
-          a fact label or negative index.
-        - ``callable + args``: each arg is resolved as a fact (string label,
-          negative index, or theorem); the callable is invoked on them.
+          a fact label.
+        - ``callable + args``: each arg is resolved as a fact (string label
+          or theorem); the callable is invoked on them.
 
         The thm-chain is simp-aware: the head is ``simp_norm_fact``-ed and
         each MP goes through ``simp_mp`` so folded/unfolded forms bridge
@@ -1711,7 +1700,7 @@ class _Have:
         peels ``==>`` antecedents one at a time until the residual matches
         the goal. Positional ``args`` are then walked in order, each
         extending a single shared substitution:
-          - a fact arg (label / negative index / theorem) is matched
+          - a fact arg (label / theorem) is matched
             against the next peeled antecedent's pattern, then queued
             for MP;
           - a term arg (string / kernel term) is assigned to the next
@@ -1725,7 +1714,7 @@ class _Have:
         whereas ``y`` only reachable through the goal still requires an
         explicit term."""
         p = self.p
-        if isinstance(justification, (str, int)):
+        if isinstance(justification, str):
             justification = p.coerce(justification)
         if not isinstance(justification, thm):
             raise HolError(

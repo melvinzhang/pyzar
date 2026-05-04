@@ -353,7 +353,7 @@ equation to argument terms; string args parsed in scope.
 ### `p.simp(*rules)`
 
 Register one or more theorems as default rewrite rules in the current
-frame. Each rule is a fact label, negative index, or theorem. Rules
+frame. Each rule is a fact label or theorem. Rules
 extend the active simp set, used silently by every subsequent
 `by_rewrite`-family / `disj`-family call in this frame and any nested
 frame. Frame-scoped: a sub-block can extend without affecting the
@@ -455,7 +455,6 @@ Auto-generated labels are `_h{n}` (anonymous have/assume) and
 Fact references resolve via `coerce`:
 
 * `thm` → returned unchanged
-* `int` → fact at insertion index (negative indices supported)
 * `str` → fact label, or (with `accept_term=True`) parsed as a term in scope
 * term → returned (with `accept_term=True`) or rejected
 

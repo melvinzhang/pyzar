@@ -104,14 +104,6 @@ goal, do it before `goal(...)` (e.g., write the simp-equivalent form
 that you actually want), or open a `.proof()` sub-frame with the
 shape you want and discharge it with the original.
 
-### Negative `int` indexing into facts
-
-`p.fact(-1)` returns the most recent fact, but the index is into
-`_fact_order` — a Python list — so out-of-range raises. The
-`-1`/`-2` idiom is convenient but tightly coupled to insertion
-order; inserting an unrelated `have` between two uses of `-1` will
-silently shift what `-1` resolves to.
-
 ### `goal` `types=` is a parser hint, not a kernel binding
 
 Names declared in `types=` are not added to any kernel-value
