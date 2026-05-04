@@ -405,6 +405,59 @@ def main():
     assert H13_SURFACE._asl == []
     assert aconv(H13_SURFACE._concl, parse("(1 = 1) ==> (1 = 1)"))
 
+    # ---- assume pattern-style: tuple destructure replaces split_conj ----
+    @proof
+    def PAT_TUPLE(p):
+        p.goal("!x. (x = 1 /\\ x = x /\\ SUC x = SUC x) ==> x = 1")
+        p.fix("x")
+        p.assume("(h_eq, _, _): x = 1 /\\ x = x /\\ SUC x = SUC x")
+        p.thus("x = 1").by_thm(p.fact("h_eq"))
+    assert aconv(
+        PAT_TUPLE._concl,
+        parse("!x. (x = 1 /\\ x = x /\\ SUC x = SUC x) ==> x = 1"))
+
+    # ---- assume pattern-style: chain of two specs, each one ==> ---------
+    @proof
+    def PAT_CHAIN(p):
+        p.goal("!x y. x = 1 ==> y = 1 ==> x = y")
+        p.fix("x y")
+        p.assume("hx: x = 1", "hy: y = 1")
+        p.thus("x = y").by_rewrite(["hx", "hy"])
+    assert aconv(PAT_CHAIN._concl,
+                 parse("!x y. x = 1 ==> y = 1 ==> x = y"))
+
+    # ---- assume pattern-style: nested tuple destructure -----------------
+    @proof
+    def PAT_NESTED(p):
+        p.goal("!x. (x = 1 /\\ (SUC x = SUC x /\\ x = x)) ==> x = 1")
+        p.fix("x")
+        p.assume("(h_eq, (_, _)): x = 1 /\\ (SUC x = SUC x /\\ x = x)")
+        p.thus("x = 1").by_thm(p.fact("h_eq"))
+    assert aconv(PAT_NESTED._concl,
+                 parse("!x. (x = 1 /\\ (SUC x = SUC x /\\ x = x)) ==> x = 1"))
+
+    # ---- assume pattern-style: error on non-conjunction tuple -----------
+    p_err = Proof()
+    p_err.goal("(1 = 1) ==> (1 = 1)")
+    try:
+        p_err.assume("(h1, h2): 1 = 1")
+    except HolError:
+        pass
+    else:
+        raise AssertionError(
+            "expected HolError: tuple pattern needs conjunction antecedent")
+
+    # ---- assume pattern-style: error on bad pattern syntax --------------
+    p_err2 = Proof()
+    p_err2.goal("(1 = 1) ==> (1 = 1)")
+    try:
+        p_err2.assume("(h1,): 1 = 1")
+    except HolError:
+        pass
+    else:
+        raise AssertionError(
+            "expected HolError: tuple pattern requires >= 2 elements")
+
     print("proof.py self-tests passed.")
 
 

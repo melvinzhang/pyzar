@@ -221,8 +221,8 @@ def NUM_REP_IND_SUC_CLOSED(p):
                 "(!j:ind. P j ==> P (IND_SUC j)) ==> P (IND_SUC i)") \
             .proof():
         p.fix("P")
-        p.assume("hyp: P IND_1 /\\ (!j:ind. P j ==> P (IND_SUC j))")
-        p.split_conj("hyp", "h_base", "h_step")
+        p.assume("(h_base, h_step): "
+                 "P IND_1 /\\ (!j:ind. P j ==> P (IND_SUC j))")
         p.have("h_NRi_at_P: P IND_1 /\\ "
                "(!j:ind. P j ==> P (IND_SUC j)) ==> P i") \
             .by(SPEC, "P", "h_NRi_unfold")
@@ -415,8 +415,7 @@ def INDUCTION(p):
     p.goal("!P. P 1 /\\ (!x. P x ==> P (SUC x)) ==> !x. P x",
            types={"P": _P_num_ty})
     p.fix("P")
-    p.assume("h: P 1 /\\ (!x. P x ==> P (SUC x))")
-    p.split_conj("h", "h_base", "h_step")
+    p.assume("(h_base, h_step): P 1 /\\ (!x. P x ==> P (SUC x))")
     p.let("Q(i:ind) := NUM_REP i /\\ P (mk_num i)")
 
     # ----- Q IND_1. -----
@@ -429,8 +428,7 @@ def INDUCTION(p):
     # ----- !i. Q i ==> Q (IND_SUC i). -----
     with p.have("Q_step: !i:ind. Q i ==> Q (IND_SUC i)").proof():
         p.fix("i")
-        p.assume("h_Qi: Q i")
-        p.split_conj("h_Qi", "NR_i", "P_mki")
+        p.assume("(NR_i, P_mki): Q i")
         p.have("NR_si: NUM_REP (IND_SUC i)") \
             .by_match(NUM_REP_IND_SUC_CLOSED, "NR_i")
         di_eq_i = EQ_MP(INST([(_i_ind, Var("r", ind_ty))], DEST_MK),
@@ -636,8 +634,7 @@ def R_UNIQUE_BASE(p):
     # Uniqueness.
     with p.have("unique: !m1 m2. R c h 1 m1 /\\ R c h 1 m2 ==> m1 = m2").proof():
         p.fix("m1 m2")
-        p.assume("h_conj: R c h 1 m1 /\\ R c h 1 m2")
-        p.split_conj("h_conj", "h_R_m1", "h_R_m2")
+        p.assume("(h_R_m1, h_R_m2): R c h 1 m1 /\\ R c h 1 m2")
         p.have("Qp_1_m1: Qp 1 m1") \
             .by("h_R_m1", "Qp", "Qp_closure")
         p.have("Qp_1_m2: Qp 1 m2") \
@@ -659,9 +656,8 @@ def R_UNIQUE_STEP(p):
            "(!m1 m2. R c h (SUC n) m1 /\\ R c h (SUC n) m2 ==> m1 = m2)",
            types=_R_TYPES)
     p.fix("n")
-    p.assume("hIH: (?m. R c h n m) /\\ "
+    p.assume("(IH_exist, IH_unique): (?m. R c h n m) /\\ "
              "(!m1 m2. R c h n m1 /\\ R c h n m2 ==> m1 = m2)")
-    p.split_conj("hIH", "IH_exist", "IH_unique")
     # Bring witness m_n with R c h n m_n into scope.
     p.choose("m_n: R c h n m_n", from_="IH_exist")
     # Existence at SUC n: from R c h n m_n, R_STEP gives R c h (SUC n) (h n m_n).
@@ -682,8 +678,7 @@ def R_UNIQUE_STEP(p):
     # !k a. Qp k a ==> Qp (SUC k) (h k a).
     with p.have("Qp_close: !k a. Qp k a ==> Qp (SUC k) (h k a)").proof():
         p.fix("k a")
-        p.assume("h_Qpka: Qp k a")
-        p.split_conj("h_Qpka", "R_k_a", "_step_part")
+        p.assume("(R_k_a, _step_part): Qp k a")
         p.have("R_sk_hka: R c h (SUC k) (h k a)") \
             .by_match(R_STEP, "R_k_a")
         with p.have("vac2: SUC k = SUC n ==> h k a = h n m_n").proof():
@@ -721,8 +716,8 @@ def R_UNIQUE_STEP(p):
     with p.have("unique_sn: !m1 m2. R c h (SUC n) m1 /\\ "
                 "R c h (SUC n) m2 ==> m1 = m2").proof():
         p.fix("m1 m2")
-        p.assume("h_conj: R c h (SUC n) m1 /\\ R c h (SUC n) m2")
-        p.split_conj("h_conj", "h_R_m1", "h_R_m2")
+        p.assume("(h_R_m1, h_R_m2): "
+                 "R c h (SUC n) m1 /\\ R c h (SUC n) m2")
         p.have("Qp_sn_m1: Qp (SUC n) m1") \
             .by("h_R_m1", "Qp", "Qp_closure")
         p.have("Qp_sn_m2: Qp (SUC n) m2") \

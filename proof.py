@@ -27,7 +27,6 @@ The decorator runs the script and returns the resulting kernel theorem.
 import contextlib
 import dataclasses
 import enum
-import re
 
 from fusion import (
     Var, Comb, Abs, thm,
@@ -52,8 +51,10 @@ from tactics import (
     _strip_forall, _term_match,
 )
 from parser import (
-    parse, parse_label, parse_let_spec, peel_label_prefix,
+    parse, parse_label, parse_label_or_bare, parse_let_spec,
+    parse_pattern_spec, peel_label_prefix,
     pp, ParseError, has_const,
+    PatName, PatConj,
 )
 
 
@@ -253,6 +254,88 @@ def _lookup_relation(term, kind=None):
     if rel is None or (kind is not None and rel.kind != kind):
         return None
     return rel.unfold(a, b)
+
+
+# ---------------------------------------------------------------------------
+# Assume-pattern dispatch registry.
+#
+# Each ``Proof.assume`` spec is parsed (by ``parser.parse_pattern_spec``)
+# into a tree of ``PatName`` / ``PatConj`` nodes describing how to
+# destructure the antecedent into named facts. Each top-level spec
+# consumes one ``==>``; the pattern drives further structural
+# decomposition of the consumed antecedent (conjunction split, etc).
+#
+# ``_PATTERN_HANDLERS`` maps a pattern node type to a handler
+# ``(p, pat, th) -> None`` that registers the appropriate facts for
+# ``th`` (a theorem whose conclusion has the shape the pattern expects).
+# Plugins add new pattern kinds by extending the lark grammar in
+# ``parser.py`` (the ``pattern`` rule + a visitor method) and
+# registering a handler here -- e.g. an existential-witness pattern,
+# an iff-split pattern, or a disjunction case-split pattern.
+# ---------------------------------------------------------------------------
+
+_PATTERN_HANDLERS = {}   # pattern type -> (p, pat, th) -> None
+
+
+def register_pattern_handler(pat_type, handler):
+    """Plugins call this at import time to teach ``Proof.assume`` how
+    to register facts for a new pattern node type. ``handler(p, pat, th)``
+    is invoked with the active ``Proof``, the pattern node, and a
+    kernel theorem whose conclusion is the term the pattern destructures.
+    Re-registering the same type overrides."""
+    _PATTERN_HANDLERS[pat_type] = handler
+
+
+def _apply_pattern(p, pat, th):
+    """Dispatch ``pat`` on ``th`` to register the corresponding facts."""
+    handler = _PATTERN_HANDLERS.get(type(pat))
+    if handler is None:
+        raise HolError(
+            f"assume: no handler for pattern type {type(pat).__name__}")
+    handler(p, pat, th)
+
+
+def _handle_name_pattern(p, pat, th):
+    label = pat.label if pat.label is not None else p._fresh_label("h")
+    p._register_fact(label, th)
+
+
+def _handle_conj_pattern(p, pat, th):
+    # Simp-normalize so a folded carrier whose unfolded form is a
+    # conjunction (e.g. ``Q args := A /\\ B``) still exposes the top
+    # ``/\\`` to CONJUNCT1/CONJUNCT2.
+    th = p.simp_norm_fact(th)
+    n = len(pat.parts)
+    cur = th
+    for i, sub in enumerate(pat.parts):
+        if i == n - 1:
+            _apply_pattern(p, sub, cur)
+        else:
+            if not is_conj(cur._concl):
+                raise HolError(
+                    f"assume: pattern expects conjunction, got "
+                    f"{pp(cur._concl)}")
+            _apply_pattern(p, sub, CONJUNCT1(cur))
+            cur = CONJUNCT2(cur)
+
+
+register_pattern_handler(PatName, _handle_name_pattern)
+register_pattern_handler(PatConj, _handle_conj_pattern)
+
+
+def _pattern_primary_label(pat):
+    """First named label found in ``pat`` (left-to-right). Used as the
+    informational label on the ``_AssumeHyp`` record; ``DISCH`` at frame
+    close uses ``asm._concl``, not the label, so any name suffices."""
+    if isinstance(pat, PatName):
+        return pat.label
+    if isinstance(pat, PatConj):
+        for sub in pat.parts:
+            lbl = _pattern_primary_label(sub)
+            if lbl is not None:
+                return lbl
+        return None
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -858,26 +941,22 @@ class Proof:
             if name not in self._facts:
                 return name
 
-    _BARE_LABEL_RE = re.compile(r"[A-Za-z_]\w*")
-
     def _parse_label_or_check(self, label_spec, expected, op):
         """Resolve a ``"label"`` or ``"label: term"`` spec for tactics that
         already know the expected hypothesis (``suppose`` / ``by_contradiction``).
 
-        Bare labels short-circuit with no parse. Explicit specs are parsed
-        via ``parse_label``; the body is then simp-aconv-checked against
-        ``expected``. Raises ``HolError`` with ``op``-prefixed messages on
-        any failure. Returns the resolved label.
+        A bare label short-circuits with no body check. An explicit
+        ``"label: term"`` spec has its body simp-aconv-checked against
+        ``expected``. Raises ``HolError`` with ``op``-prefixed messages
+        on any failure. Returns the resolved label.
         """
-        spec = label_spec.strip()
-        if self._BARE_LABEL_RE.fullmatch(spec):
-            return spec
         try:
-            label, hyp_term = parse_label(spec, _env_bindings=self._scope_env())
+            label, hyp_term = parse_label_or_bare(
+                label_spec, _env_bindings=self._scope_env())
         except ParseError as ex:
             raise HolError(f"{op}: cannot parse label spec: {ex}") from ex
-        if label is None:
-            raise HolError(f"{op}: bad label spec: {label_spec!r}")
+        if hyp_term is None:
+            return label
         if not self.simp_aconv(hyp_term, expected):
             raise HolError(
                 f"{op}: hypothesis does not match expected\n"
@@ -1053,41 +1132,49 @@ class Proof:
                 self._register_fact(lbl, CONJUNCT1(cur))
                 cur = CONJUNCT2(cur)
 
-    def assume(self, *labelled):
-        """Consume the goal's antecedent(s) into facts.
+    def assume(self, *specs):
+        """Consume the goal's antecedent(s) into facts via pattern destructuring.
 
-        Each ``labelled`` spec is ``"label"`` or ``"label: term"``. Two
-        modes:
+        Each spec consumes one ``==>`` from the current goal. The spec's
+        pattern then destructures the consumed antecedent into named
+        facts. Patterns:
 
-        * **==> chain (default)** — each spec consumes one ``==>`` from
-          the current goal, registering the antecedent as fact ``label``.
+        * ``label`` / ``label: term`` -- atomic: register the antecedent
+          as fact ``label``. ``_`` for an anonymous label. ``term`` (when
+          given) is simp-equivalence-checked against the goal antecedent
+          and preserves the user's surface form across frame close.
+        * ``(p1, p2, ..., pn)`` / ``(p1, p2, ..., pn): term`` -- split a
+          right-associated conjunction antecedent into ``n`` parts,
+          recursively applying each sub-pattern. Sub-patterns may
+          themselves be tuples (nested destructure) or names.
 
-        * **/\\ split (auto)** — when ``len(labelled) >= 2`` and the
-          goal is ``ant ==> cons`` with ``ant`` a right-associated
-          conjunction whose ``len(labelled)`` conjuncts each
-          alpha-match the user-supplied terms, the single ``==>`` is
-          consumed once and each conjunct is registered separately
-          (CONJUNCT1/2 chain). Replaces the
-          ``assume("h: A /\\ ..."); split_conj("h", ...)`` pattern.
-          All specs must carry an explicit term so the split is
-          unambiguous.
+        Examples::
+
+            p.assume("h: A")                              # chain, one ==>
+            p.assume("h1: A", "h2: B")                    # chain, two ==>s
+            p.assume("(h1, h2): A /\\ B")                 # split: h1: A, h2: B
+            p.assume("(h_base, h_step): P 1 /\\ ...")     # replaces split_conj idiom
+            p.assume("(h1, _, h3): A /\\ B /\\ C")        # discard middle conjunct
+
+        New pattern kinds (existential witness, iff-split, ...) plug in
+        via ``register_pattern_handler``; see the assume-pattern AST
+        block at the top of this module.
         """
-        if len(labelled) >= 2 and self._cur.goal is not None:
-            split = self._try_assume_conj(labelled)
-            if split is not None:
-                return split
-
-        for spec in labelled:
-            label, term = self._split_label(spec)
-            if label is None:
-                label = self._fresh_label("h")
+        for spec in specs:
+            try:
+                pattern, body_term = parse_pattern_spec(
+                    spec, _env_bindings=self._scope_env())
+            except ParseError as ex:
+                raise HolError(
+                    f"assume: cannot parse spec {spec!r}: {ex}") from ex
             g = self._cur.goal
             parts = dest_imp(g)
             if parts is None:
                 raise HolError(f"assume: goal is not an implication: {pp(g)}")
             ant, cons = parts
-            # Register the user's surface-form ASSUME so ``p.fact(label)``
-            # returns what they wrote. ``term_eq_ant : |- term = ant``
+            term = body_term if body_term is not None else ant
+            # Register the user's surface-form ASSUME so its conclusion
+            # matches what they wrote. ``term_eq_ant : |- term = ant``
             # bridges the surface form (which may be folded while ``ant``
             # is unfolded, or vice versa) to the kernel-form antecedent at
             # frame close, so the resulting implication has the goal's
@@ -1098,58 +1185,9 @@ class Proof:
             self._cur.goal = cons
             asm_th = ASSUME(term)
             term_eq_ant = self._derive_shape_eq(term, ant, op="assume")
-            self._cur.hyps_added.append(_AssumeHyp(label, asm_th, term_eq_ant))
-            self._register_fact(label, asm_th)
-
-    def _try_assume_conj(self, labelled):
-        """If the goal antecedent is a right-associated conjunction whose
-        conjuncts each alpha-match a user-supplied term in ``labelled``,
-        consume the single ``==>`` and register each conjunct as a fact.
-
-        Returns ``True`` (success marker) on success, ``None`` to fall
-        through to the ``==>`` chain interpretation."""
-        g = self._cur.goal
-        parts = dest_imp(g)
-        if parts is None:
-            return None
-        ant, cons = parts
-
-        conjuncts = []
-        cur = ant
-        for _ in range(len(labelled) - 1):
-            split = dest_conj(cur)
-            if split is None:
-                return None
-            conjuncts.append(split[0])
-            cur = split[1]
-        conjuncts.append(cur)
-
-        parsed = []
-        for spec, expected in zip(labelled, conjuncts):
-            label, term = self._split_label(spec)
-            if term is None:
-                return None
-            if not aconv(term, expected):
-                return None
-            if label is None:
-                label = self._fresh_label("h")
-            parsed.append((label, term))
-
-        asm_th = ASSUME(ant)
-        term_eq_ant = self._derive_shape_eq(ant, ant)
-        self._cur.hyps_added.append(_AssumeHyp(parsed[0][0], asm_th, term_eq_ant))
-        self._cur.goal = cons
-
-        cur_th = asm_th
-        n = len(parsed)
-        for i, (label, _term) in enumerate(parsed):
-            if i == n - 1:
-                conj_th = cur_th
-            else:
-                conj_th = CONJUNCT1(cur_th)
-                cur_th = CONJUNCT2(cur_th)
-            self._register_fact(label, conj_th)
-        return True
+            primary = _pattern_primary_label(pattern) or self._fresh_label("h")
+            self._cur.hyps_added.append(_AssumeHyp(primary, asm_th, term_eq_ant))
+            _apply_pattern(self, pattern, asm_th)
 
     def _derive_shape_eq(self, lhs, rhs, op="_derive_shape_eq"):
         """``|- lhs = rhs`` for two simp-equivalent terms. ``REFL`` when

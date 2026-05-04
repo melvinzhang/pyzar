@@ -166,10 +166,9 @@ def ADD_UNIQUE(p):
                   "==> !y. f y = g y",
            types={"f": _fn_ty, "g": _fn_ty})
     p.fix("x f g")
-    p.assume("h_f1: f 1 = SUC x",
-             "h_fstep: !y. f (SUC y) = SUC (f y)",
-             "h_g1: g 1 = SUC x",
-             "h_gstep: !y. g (SUC y) = SUC (g y)")
+    p.assume("(h_f1, h_fstep, h_g1, h_gstep): "
+             "f 1 = SUC x /\\ (!y. f (SUC y) = SUC (f y)) /\\ "
+             "g 1 = SUC x /\\ (!y. g (SUC y) = SUC (g y))")
     with p.induction("y"):
         with p.base():
             p.thus("f 1 = g 1").by_rewrite(["h_f1", "h_g1"])
@@ -936,10 +935,9 @@ def MUL_UNIQUE(p):
                   "==> !y. f y = g y",
            types={"f": _fn_ty, "g": _fn_ty})
     p.fix("x f g")
-    p.assume("h_f1: f 1 = x",
-             "h_fstep: !y. f (SUC y) = f y + x",
-             "h_g1: g 1 = x",
-             "h_gstep: !y. g (SUC y) = g y + x")
+    p.assume("(h_f1, h_fstep, h_g1, h_gstep): "
+             "f 1 = x /\\ (!y. f (SUC y) = f y + x) /\\ "
+             "g 1 = x /\\ (!y. g (SUC y) = g y + x)")
     with p.induction("y"):
         with p.base():
             p.thus("f 1 = g 1").by_rewrite(["h_f1", "h_g1"])

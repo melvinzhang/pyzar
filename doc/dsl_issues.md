@@ -3,22 +3,23 @@
 Things that compile but don't do what they look like, or that surprise
 on first encounter. Listed roughly in order of how often they bite.
 
-### `assume` has two modes and silently picks one
+### `assume` patterns require explicit destructure syntax
 
 ```python
-p.assume("h1: A", "h2: B")
+p.assume("h1: A", "h2: B")                # chain: A ==> B ==> C
+p.assume("(h1, h2): A /\\ B")             # split: (A /\\ B) ==> C
 ```
 
-If the goal is `A /\ B ==> C` and both terms alpha-match the
-conjuncts, the single `==>` is consumed and the conjunction is split
-(`/\` mode). If they *don't* alpha-match — e.g. one term has the
-wrong variable — `_try_assume_conj` silently falls through to the
-`==>`-chain interpretation, which then fails with a different error
-(or, worse, succeeds against an unrelated `==>` shape). The decision
-is invisible at the call site. **Workaround**: when you want the
-split, double-check the conjunction shape; when you want a chain over
-two `==>`, prefer terms that *can't* accidentally look like a
-conjunction split.
+Each top-level spec consumes one `==>`. To split a conjunction
+antecedent into multiple facts, you must use the tuple pattern
+syntax. There is no auto-split based on goal shape — the call site
+unambiguously names its destructure. Mode confusion is a parse
+error, not a silent reinterpretation.
+
+If you forget the parens (`p.assume("h1: A", "h2: B")` against
+`(A /\ B) ==> C`), you'll get "goal is not an implication" on the
+second spec — chain mode tried to peel a second `==>` from `C`. The
+fix is the tuple form.
 
 ### `fix` requires exact name match
 
@@ -155,7 +156,7 @@ in `_finish` only checks shape, not your intent.
 ## Limitations
 
 Capabilities the DSL deliberately or incidentally lacks. Unlike the
-gotchas in §13, these are not surprises that bite during use — they
+gotchas above, these are not surprises that bite during use — they
 are walls you'll hit when reaching for something the DSL doesn't
 provide.
 
@@ -173,8 +174,8 @@ There is no `with p.conj(): ...` to split `a /\ b` into two sub-goals.
 Conjunctions are proved by `by_rewrite`, by deriving each conjunct as
 a `have` and then using `CONJ_PAIR`-style assembly, or by
 `by_match`-ing a lemma. The DSL is asymmetric: conjunction
-*elimination* is first-class (`split_conj`, `assume`'s `/\` mode),
-but introduction is not.
+*elimination* is first-class (`split_conj`, `assume`'s tuple
+pattern), but introduction is not.
 
 ### Witnesses from `choose` are SELECT terms only
 
@@ -257,5 +258,26 @@ Each frame holds one `result` theorem. A block opener that wants to
 discharge a goal multiple ways (e.g., redundant proofs for
 robustness) has to commit to one — there's no way to compose two
 candidate proofs into a single result.
+
+### `assume` patterns can't bind the whole and destructure
+
+The `(p1, p2): A /\\ B` form binds the parts but discards the whole
+conjunction fact. If a downstream step needs both `h1: A`, `h2: B`
+*and* `h: A /\\ B` (e.g., to MP a lemma whose antecedent is
+`A /\\ B`), the tuple pattern alone won't do it; you must fall back
+to `assume("h: ...") + split_conj("h", "h1", "h2")`. There is no
+"bind whole + destructure" pattern syntax (e.g. `@h(h1, h2): ...`)
+to capture both at once.
+
+### Pattern destructure is `assume`-only
+
+The pattern grammar (`PatName`, `PatConj`, future kinds) is
+dispatched only by `assume` on the consumed antecedent. To
+destructure a fact produced elsewhere — `have`, `choose`'s witness
+equation, the result of an MP chain — you still need `split_conj`
+(for conjunctions) or hand-written `CONJUNCT1`/`CONJUNCT2` /
+`CHOOSE_WITNESS` / etc. There is no `p.split(ref, "(h1, h2)")`
+generalization that runs the pattern dispatch on an arbitrary
+existing fact.
 
 ---

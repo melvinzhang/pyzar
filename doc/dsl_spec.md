@@ -89,23 +89,57 @@ binder body.
 
 ### `p.assume(*specs)`
 
-Consume the goal's antecedent(s) as facts. Each spec is `"label"` or
-`"label: term"`.
+Consume the goal's antecedent(s) as facts via pattern destructuring.
+Each spec consumes one `==>`; the spec's *pattern* then destructures
+the consumed antecedent into named facts.
 
-* **`==>` chain (default)**: each spec consumes one `==>`. The
-  user-supplied `term` (if given) is `simp_aconv`-checked against the
-  goal's antecedent; the surface form is preserved across frame close
-  via `_derive_shape_eq`.
-* **`/\\` split (auto)**: when `len(specs) >= 2` and the goal is
-  `ant ==> cons` with `ant` a right-associated conjunction whose
-  conjuncts each alpha-match the supplied terms, the single `==>` is
-  consumed once and the conjunction is split (CONJUNCT1/2 chain) into
-  separate facts. All specs must carry an explicit term.
+Pattern grammar (parsed by `parser.parse_pattern_spec`):
+
+```
+pattern_start := pattern (":" term)?
+pattern       := NAME                              # PatName
+               | "(" pattern ("," pattern)+ ")"    # PatConj (>= 2 parts)
+```
+
+Patterns:
+
+* **Atomic** — `label` / `label: term`: register the antecedent under
+  `label`. `_` is anonymous (auto-generated `_h{n}`). When `term` is
+  given, it is `simp_aconv`-checked against the goal's antecedent and
+  preserves the user's surface form across frame close via
+  `_derive_shape_eq`.
+* **Conjunction split** — `(p1, p2, ..., pn)` / `(p1, p2, ..., pn):
+  term`: the antecedent must be a right-associated conjunction with
+  `n` conjuncts; each sub-pattern receives the corresponding conjunct
+  via a `CONJUNCT1`/`CONJUNCT2` chain. Sub-patterns may themselves be
+  tuples (nested destructure) or names. Simp-normalizes the
+  assumption before splitting, so a folded carrier whose unfolded
+  form is a conjunction still works.
+
+Examples:
+
+```python
+p.assume("h: A")                              # atomic, one ==>
+p.assume("h1: A", "h2: B")                    # chain, two ==>s
+p.assume("(h1, h2): A /\\ B")                 # split: h1: A, h2: B
+p.assume("(h1, _, h3): A /\\ B /\\ C")        # _ discards a conjunct
+p.assume("(h, (a, b)): A /\\ (B /\\ C)")      # nested
+```
+
+New pattern kinds (existential witness, iff-split, disjunction
+case-split, …) plug in by extending `_GRAMMAR`'s `pattern` rule with
+a new alternative + visitor method in `parser.py`, then registering a
+handler via `proof.register_pattern_handler(PatType, handler)`. The
+handler receives `(p, pat, th)` where `th` is a kernel theorem of the
+consumed antecedent's shape.
 
 ### `p.split_conj(ref, *labels)`
 
 Split a right-associated conjunction fact into the supplied labels,
 registering each conjunct as its own fact. Simp-normalizes first.
+Mostly subsumed by `assume`'s tuple pattern; still useful for
+splitting an existing fact mid-proof (one not coming through
+`assume`).
 
 ---
 
@@ -373,6 +407,21 @@ antecedents like `a = b`, put the rigid relation first.
 
 `induct_prove(var, body, base_th, step_fn) -> |- !var. body` is the
 kernel principle; `step_fn(IH) -> step_th`.
+
+### Assume patterns — `register_pattern_handler(pat_type, handler)`
+
+`handler(p, pat, th) -> None` registers the facts for a pattern node
+type, given a kernel theorem `th` whose conclusion is the term the
+pattern destructures. Built-in handlers cover `PatName` (atomic
+binding) and `PatConj` (right-associated conjunction split). New
+pattern kinds require:
+
+1. A new alternative on the `pattern` rule in `parser.py`'s `_GRAMMAR`
+   plus a visitor method on `_Builder` returning a fresh AST node
+   class.
+2. A handler registered here.
+
+`assume` then dispatches automatically — no further core changes.
 
 ---
 

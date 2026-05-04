@@ -29,9 +29,10 @@ Free variables default to type `num` if a ``num`` type is registered, else
 they have no default and `env={name: ty}` (or a kernel term) is required.
 """
 
+import dataclasses
 import re
 
-from lark import Lark, LarkError
+from lark import Lark, LarkError, Token, Tree
 from lark.visitors import Interpreter
 
 from fusion import (
@@ -47,8 +48,29 @@ class ParseError(Exception):
     pass
 
 
+# ---------------------------------------------------------------------------
+# Assume-pattern AST (surface syntax). Consumed by ``Proof.assume`` to
+# destructure the goal antecedent into named facts. New pattern kinds are
+# added by extending ``_GRAMMAR`` (the ``pattern`` rule) and registering
+# a ``Proof``-level handler via ``proof.register_pattern_handler``.
+# ---------------------------------------------------------------------------
+
+@dataclasses.dataclass
+class PatName:
+    """Atomic pattern: bind the term under ``label`` (anonymous if
+    ``label is None``, written ``_`` in source)."""
+    label: object   # str | None
+
+
+@dataclasses.dataclass
+class PatConj:
+    """Conjunction-split pattern: term must be a right-associated
+    conjunction with ``len(parts)`` conjuncts; each sub-pattern receives
+    the corresponding conjunct."""
+    parts: list   # list of pattern nodes
+
+
 _SPLICE_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
-_NAME_RE   = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +264,16 @@ _GRAMMAR = r"""
 label_start: NAME ":" term         -> labelled
            | term                  -> unlabelled
 
+label_or_bare_start: NAME                  -> bare_label
+                   | NAME ":" term         -> labelled
+
 let_start: NAME "(" arglist ")" ":=" term -> let_spec_
+
+pattern_start: pattern ":" term    -> pattern_spec_with_term
+             | pattern             -> pattern_spec_bare
+
+pattern: NAME                              -> pat_name
+       | "(" pattern ("," pattern)+ ")"    -> pat_conj
 
 ?term: binder | infix_chain
 
@@ -277,7 +308,8 @@ OP:   /[+\-*=<>^&|\/\\]+|~/
 """
 
 _PARSER = Lark(_GRAMMAR, parser="lalr",
-               start=["start", "label_start", "let_start"])
+               start=["start", "label_start", "label_or_bare_start",
+                      "let_start", "pattern_start"])
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +433,9 @@ class _Builder(Interpreter):
     def unlabelled(self, tree):
         return None, self.visit(tree.children[0])
 
+    def bare_label(self, tree):
+        return str(tree.children[0]), None
+
     def let_spec_(self, tree):
         name = str(tree.children[0])
         decls = self._decls(tree.children[1])
@@ -414,6 +449,21 @@ class _Builder(Interpreter):
         body = self.visit(tree.children[2])
         self.scope.pop()
         return name, bvars, body
+
+    # ----- assume-pattern visitors -----
+
+    def pattern_spec_with_term(self, tree):
+        return self.visit(tree.children[0]), self.visit(tree.children[1])
+
+    def pattern_spec_bare(self, tree):
+        return self.visit(tree.children[0]), None
+
+    def pat_name(self, tree):
+        name = str(tree.children[0])
+        return PatName(label=None if name == "_" else name)
+
+    def pat_conj(self, tree):
+        return PatConj(parts=[self.visit(c) for c in tree.children])
 
     # ----- prefix + flat infix chain -----
 
@@ -476,10 +526,12 @@ def _climb(terms, ops):
 # Public API.
 # ---------------------------------------------------------------------------
 
-def _prepare(s, _env_bindings, bindings):
-    """Run antiquote substitution and unused-binding checks shared by
-    every public ``parse_*`` entry point. Returns ``(s_after_splice,
-    merged_env)``."""
+def _splice(s, _env_bindings, bindings):
+    """Antiquote substitution. Returns ``(s_after_splice, merged_env,
+    name_to_sentinel)``: the input string with ``${name}`` replaced by
+    fresh sentinel idents, the merged parser env including those
+    sentinels, and the original-name → sentinel mapping (used by the
+    post-parse unused-binding check)."""
     env_b = _env_bindings or {}
     name_to_sentinel = {}
     splice_env = {}
@@ -501,17 +553,51 @@ def _prepare(s, _env_bindings, bindings):
         return name_to_sentinel[name]
 
     s2 = _SPLICE_RE.sub(_repl, s)
+    return s2, {**env_b, **bindings, **splice_env}, name_to_sentinel
 
-    if bindings:
-        bare_names = set(_NAME_RE.findall(s2)) - set(name_to_sentinel.values())
-        referenced = set(name_to_sentinel) | (set(bindings) & bare_names)
-        unused = set(bindings) - referenced
-        if unused:
-            raise ParseError(
-                f"unused binding(s): {sorted(unused)} "
-                "(neither bare name nor ${{...}} reference appears in source)")
 
-    return s2, {**env_b, **bindings, **splice_env}
+def _walk_name_tokens(tree):
+    """Yield every ``NAME`` token's string value found in ``tree``."""
+    stack = [tree]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, Tree):
+            stack.extend(node.children)
+        elif isinstance(node, Token) and node.type == "NAME":
+            yield str(node)
+
+
+def _check_unused_bindings(tree, bindings, name_to_sentinel):
+    """Raise ``ParseError`` if any kwarg in ``bindings`` is unreferenced
+    (neither as a bare ``NAME`` in the parse tree nor as ``${name}``)."""
+    if not bindings:
+        return
+    sentinel_set = set(name_to_sentinel.values())
+    bare_names = set(_walk_name_tokens(tree)) - sentinel_set
+    referenced = set(name_to_sentinel) | (set(bindings) & bare_names)
+    unused = set(bindings) - referenced
+    if unused:
+        raise ParseError(
+            f"unused binding(s): {sorted(unused)} "
+            "(neither bare name nor ${{...}} reference appears in source)")
+
+
+def _lark_parse(s, start):
+    """Run the Lark parser and rewrap lexer/parser errors as
+    ``ParseError`` so callers don't have to know about lark."""
+    try:
+        return _PARSER.parse(s, start=start)
+    except LarkError as ex:
+        raise ParseError(str(ex)) from ex
+
+
+def _run_parse(s, start, sig, _env_bindings, bindings):
+    """Splice → parse → unused-binding check → visit. Shared spine for
+    every public ``parse_*`` entry point."""
+    s2, merged, name_to_sentinel = _splice(s, _env_bindings, bindings)
+    tree = _lark_parse(s2, start)
+    _check_unused_bindings(tree, bindings, name_to_sentinel)
+    return _Builder(sig or DEFAULT_SIG, merged).visit(tree)
 
 
 def parse(s, sig=None, _env_bindings=None, **bindings):
@@ -534,18 +620,7 @@ def parse(s, sig=None, _env_bindings=None, **bindings):
     `_env_bindings` is private: callers (e.g. `Proof._parse`) use it to
     pass long-lived bindings that bypass the unused check.
     """
-    s2, merged = _prepare(s, _env_bindings, bindings)
-    tree = _lark_parse(s2, "start")
-    return _Builder(sig or DEFAULT_SIG, merged).visit(tree)
-
-
-def _lark_parse(s, start):
-    """Run the Lark parser and rewrap lexer/parser errors as
-    ``ParseError`` so callers don't have to know about lark."""
-    try:
-        return _PARSER.parse(s, start=start)
-    except LarkError as ex:
-        raise ParseError(str(ex)) from ex
+    return _run_parse(s, "start", sig, _env_bindings, bindings)
 
 
 def parse_label(s, sig=None, _env_bindings=None, **bindings):
@@ -557,9 +632,21 @@ def parse_label(s, sig=None, _env_bindings=None, **bindings):
     commits once it sees ``NAME ":"``: a body-level ``ParseError``
     propagates rather than triggering a misleading whole-spec retry.
     """
-    s2, merged = _prepare(s, _env_bindings, bindings)
-    tree = _lark_parse(s2, "label_start")
-    return _Builder(sig or DEFAULT_SIG, merged).visit(tree)
+    return _run_parse(s, "label_start", sig, _env_bindings, bindings)
+
+
+def parse_label_or_bare(s, sig=None, _env_bindings=None, **bindings):
+    """Parse ``"label"`` or ``"label: term"`` (no bare-term form).
+
+    Returns ``(label, term_or_None)``: ``term`` is ``None`` for the
+    bare-label form, or the parsed kernel body otherwise. Used by
+    tactics (``suppose`` / ``by_contradiction``) where a bare
+    identifier means "use this as the label, body is implicit"; an
+    explicit form lets the caller verify the body against an
+    expected hypothesis.
+    """
+    return _run_parse(
+        s, "label_or_bare_start", sig, _env_bindings, bindings)
 
 
 _LABEL_PEEL_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*:(?!=)\s*(.*)$", re.DOTALL)
@@ -590,9 +677,24 @@ def parse_let_spec(s, sig=None, _env_bindings=None, **bindings):
     the registry's default-var type. The body is parsed with all args
     in scope.
     """
-    s2, merged = _prepare(s, _env_bindings, bindings)
-    tree = _lark_parse(s2, "let_start")
-    return _Builder(sig or DEFAULT_SIG, merged).visit(tree)
+    return _run_parse(s, "let_start", sig, _env_bindings, bindings)
+
+
+def parse_pattern_spec(s, sig=None, _env_bindings=None, **bindings):
+    """Parse ``"pattern: term"`` or ``"pattern"`` (assume-spec form).
+
+    Returns ``(pattern, term_or_None)``. ``pattern`` is a tree of
+    ``PatName`` / ``PatConj`` nodes; ``term`` is the parsed kernel
+    term body (or ``None`` when the spec carries no body). The body
+    is parsed in the supplied scope so identifiers introduced by
+    earlier ``fix``/``choose``/``let`` resolve correctly.
+
+    The grammar:
+        pattern_start := pattern (":" term)?
+        pattern       := NAME                              # PatName
+                       | "(" pattern ("," pattern)+ ")"    # PatConj (>= 2 parts)
+    """
+    return _run_parse(s, "pattern_start", sig, _env_bindings, bindings)
 
 
 def define(name, ty, body, *, sig=None, prec=None, assoc=None):
