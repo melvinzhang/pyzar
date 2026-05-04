@@ -36,9 +36,10 @@ from lark import Lark, LarkError, Token, Tree
 from lark.visitors import Interpreter
 
 from fusion import (
+    HolError,
     Var, Const, Comb, Abs,
     Tyvar, Tyapp,
-    mk_comb,
+    mk_comb, mk_type,
     concl, hyp, new_basic_definition,
 )
 from basics import mk_app, mk_const, mk_eq, mk_var
@@ -71,6 +72,13 @@ class PatConj:
 
 
 _SPLICE_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _is_tyvar_name(name):
+    """Surface convention: a single uppercase letter denotes a type
+    variable (e.g. ``A``, ``B``); every other identifier must resolve
+    to a registered type constructor."""
+    return len(name) == 1 and "A" <= name <= "Z"
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +283,17 @@ pattern_start: pattern ":" term    -> pattern_spec_with_term
 pattern: NAME                              -> pat_name
        | "(" pattern ("," pattern)+ ")"    -> pat_conj
 
+?type_start: arrow_type
+
+?arrow_type: app_type OP arrow_type        -> arrow_
+           | app_type
+
+?app_type: app_type NAME                   -> tapp_
+         | atom_type
+
+?atom_type: "(" arrow_type ")"
+          | NAME                           -> tname_
+
 ?term: binder | infix_chain
 
 binder: "!" varlist "." term       -> forall_
@@ -309,7 +328,7 @@ OP:   /[+\-*=<>^&|\/\\]+|~/
 
 _PARSER = Lark(_GRAMMAR, parser="lalr",
                start=["start", "label_start", "label_or_bare_start",
-                      "let_start", "pattern_start"])
+                      "let_start", "pattern_start", "type_start"])
 
 
 # ---------------------------------------------------------------------------
@@ -464,6 +483,43 @@ class _Builder(Interpreter):
 
     def pat_conj(self, tree):
         return PatConj(parts=[self.visit(c) for c in tree.children])
+
+    # ----- type-expression visitors -----
+
+    def arrow_(self, tree):
+        op = str(tree.children[1])
+        if op != "->":
+            raise ParseError(
+                f"expected '->' between types, got {op!r}")
+        a = self.visit(tree.children[0])
+        b = self.visit(tree.children[2])
+        return mk_type("fun", [a, b])
+
+    def tapp_(self, tree):
+        arg = self.visit(tree.children[0])
+        name = str(tree.children[1])
+        # Registered constructors win over the tyvar rule, so a theory
+        # that registers a single-letter type (e.g. ``V`` for sets) keeps
+        # working.
+        if name not in self.sig.type and _is_tyvar_name(name):
+            raise ParseError(
+                f"{name!r} is a type variable and cannot be applied "
+                "as a type constructor")
+        try:
+            return mk_type(name, [arg])
+        except HolError as ex:
+            raise ParseError(str(ex)) from ex
+
+    def tname_(self, tree):
+        name = str(tree.children[0])
+        if name in self.sig.type:
+            return self.sig.type[name]
+        if _is_tyvar_name(name):
+            return Tyvar(name)
+        try:
+            return mk_type(name, [])
+        except HolError as ex:
+            raise ParseError(str(ex)) from ex
 
     # ----- prefix + flat infix chain -----
 
@@ -697,12 +753,37 @@ def parse_pattern_spec(s, sig=None, _env_bindings=None, **bindings):
     return _run_parse(s, "pattern_start", sig, _env_bindings, bindings)
 
 
+def parse_type(s, sig=None):
+    """Parse a type expression into a kernel ``hol_type``.
+
+    Surface syntax:
+
+      - ``bool``, ``num``        -- registered type constructors (0-ary).
+      - ``A``, ``B``, ...        -- single uppercase letter = ``Tyvar``,
+                                    *unless* the same name is registered
+                                    as a type (e.g. ``V`` in set theory),
+                                    in which case the registration wins.
+      - ``T1 -> T2``             -- right-associative function type.
+      - ``T name``               -- postfix unary application
+                                    (e.g. ``num list`` once ``list`` is
+                                    introduced).
+      - ``(T)``                  -- grouping.
+
+    Multi-argument constructors aren't yet wired up; build those with
+    ``mk_type`` directly until the surface need shows up.
+    """
+    sig = sig or DEFAULT_SIG
+    tree = _lark_parse(s, "type_start")
+    return _Builder(sig, {}).visit(tree)
+
+
 def define(name, ty, body, *, sig=None, prec=None, assoc=None):
     """Introduce a new defined constant.
 
     Parameters:
       name -- the constant's surface name (e.g. ``">"`` or ``"+"``).
-      ty   -- the constant's `hol_type`.
+      ty   -- the constant's type, either a string (parsed via
+              `parse_type(ty, sig=sig)`) or a pre-built `hol_type`.
       body -- the definition's right-hand side, either a string (parsed
               via `parse(body, sig=sig)`) or a pre-built kernel term.
       sig  -- target `Signature`; defaults to `DEFAULT_SIG`.
@@ -718,6 +799,8 @@ def define(name, ty, body, *, sig=None, prec=None, assoc=None):
     Returns the definition theorem ``|- name = body``.
     """
     sig = sig or DEFAULT_SIG
+    if isinstance(ty, str):
+        ty = parse_type(ty, sig=sig)
     rhs = parse(body, sig=sig) if isinstance(body, str) else body
     def_th = new_basic_definition(mk_eq(Var(name, ty), rhs))
     const = mk_const(name, [])

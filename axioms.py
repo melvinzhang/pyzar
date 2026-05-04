@@ -13,9 +13,11 @@ from fusion import (
 from basics import (
     bty,
     dest_binder, dest_binop, dest_unop, is_binder, is_binop, is_unop,
-    mk_abs, mk_app, mk_const, mk_eq, mk_fun_ty,
+    mk_abs, mk_app, mk_const, mk_eq,
 )
-from parser import add_type, add_infix, add_binder, infix, prefix, binder
+from parser import (
+    add_type, add_infix, add_binder, infix, prefix, binder, parse_type,
+)
 
 # Surface syntax for the kernel-level concepts that predate the parser:
 # `bool` is from fusion, `=` and `\` from basics.  Everything below this
@@ -38,7 +40,7 @@ T_DEF = new_basic_definition(
 T = mk_const("T", [])
 
 # (/\) = \p q. (\f. f p q) = (\f. f T T)
-bbb_ty = mk_fun_ty(bool_ty, mk_fun_ty(bool_ty, bool_ty))
+bbb_ty = parse_type("bool -> bool -> bool")
 f_bbb = Var("f", bbb_ty)
 AND_DEF = new_basic_definition(
     mk_eq(Var("/\\", bbb_ty),
@@ -60,11 +62,11 @@ def mk_imp(a, b):
     return mk_app(mk_const("==>", []), a, b)
 
 # (!) = \P:A->bool. P = \x. T
-abty = mk_fun_ty(aty, bool_ty)
+abty = parse_type("A -> bool")
 P_ab = Var("P", abty)
 x_a = Var("x", aty)
 FORALL_DEF = new_basic_definition(
-    mk_eq(Var("!", mk_fun_ty(abty, bool_ty)),
+    mk_eq(Var("!", parse_type("(A -> bool) -> bool")),
           mk_abs(P_ab, mk_eq(P_ab, mk_abs(x_a, T)))))
 
 @binder("!")
@@ -73,7 +75,7 @@ def mk_forall(v, body):
 
 # (?) = \P:A->bool. !q. (!x. P x ==> q) ==> q
 EXISTS_DEF = new_basic_definition(
-    mk_eq(Var("?", mk_fun_ty(abty, bool_ty)),
+    mk_eq(Var("?", parse_type("(A -> bool) -> bool")),
           mk_abs(P_ab,
               mk_forall(q,
                   mk_imp(mk_forall(x_a, mk_imp(mk_comb(P_ab, x_a), q)),
@@ -103,7 +105,7 @@ F = mk_const("F", [])
 
 # (~) = \p. p ==> F
 NOT_DEF = new_basic_definition(
-    mk_eq(Var("~", mk_fun_ty(bool_ty, bool_ty)),
+    mk_eq(Var("~", parse_type("bool -> bool")),
           mk_abs(p, mk_imp(p, F))))
 
 @prefix("~")
@@ -131,7 +133,7 @@ def dest_exists(tm): return dest_binder("?", tm)
 # Axiom 1: ETA_AX (bool.ml)        |- !t:A->B. (\x. t x) = t
 # ---------------------------------------------------------------------------
 
-_ab_ty = mk_fun_ty(aty, bty)
+_ab_ty = parse_type("A -> B")
 _t = Var("t", _ab_ty)
 _x = Var("x", aty)
 ETA_AX = new_axiom(
@@ -141,7 +143,7 @@ ETA_AX = new_axiom(
 # Axiom 2: SELECT_AX (class.ml)    |- !P (x:A). P x ==> P((@) P)
 # ---------------------------------------------------------------------------
 
-new_constant("@", mk_fun_ty(abty, aty))
+new_constant("@", parse_type("(A -> bool) -> A"))
 _P = Var("P", abty)
 _xs = Var("x", aty)
 _select = mk_const("@", [])
@@ -165,12 +167,12 @@ new_type("ind", 0)
 ind_ty = mk_type("ind", [])
 
 # ONE_ONE = \f:A->B. !x1 x2. f x1 = f x2 ==> x1 = x2
-_fab_ty = mk_fun_ty(aty, bty)
+_fab_ty = parse_type("A -> B")
 _f = Var("f", _fab_ty)
 _x1 = Var("x1", aty)
 _x2 = Var("x2", aty)
 ONE_ONE_DEF = new_basic_definition(
-    mk_eq(Var("ONE_ONE", mk_fun_ty(_fab_ty, bool_ty)),
+    mk_eq(Var("ONE_ONE", parse_type("(A -> B) -> bool")),
           mk_abs(_f,
               mk_forall(_x1, mk_forall(_x2,
                   mk_imp(mk_eq(mk_comb(_f, _x1), mk_comb(_f, _x2)),
@@ -180,12 +182,12 @@ ONE_ONE_DEF = new_basic_definition(
 _y = Var("y", bty)
 _xo = Var("x", aty)
 ONTO_DEF = new_basic_definition(
-    mk_eq(Var("ONTO", mk_fun_ty(_fab_ty, bool_ty)),
+    mk_eq(Var("ONTO", parse_type("(A -> B) -> bool")),
           mk_abs(_f,
               mk_forall(_y,
                   mk_exists(_xo, mk_eq(_y, mk_comb(_f, _xo)))))))
 
-_ind_ind = mk_fun_ty(ind_ty, ind_ty)
+_ind_ind = parse_type("ind -> ind")
 _fi = Var("f", _ind_ind)
 _one_one = mk_const("ONE_ONE", [(ind_ty, aty), (ind_ty, bty)])
 _onto = mk_const("ONTO", [(ind_ty, aty), (ind_ty, bty)])

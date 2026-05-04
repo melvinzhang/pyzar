@@ -18,8 +18,9 @@ from fusion import (
     bool_ty, aty, mk_comb,
     REFL, TRANS, ASSUME, EQ_MP, INST_TYPE,
 )
-from basics import mk_abs, mk_fun_ty, mk_eq, rand, rator
+from basics import mk_abs, mk_eq, rand, rator
 from axioms import T, F, SELECT_AX, mk_not, mk_or
+from parser import parse_type
 from tactics import (
     AP_TERM, BETA_CONV, BETA_RULE, SYM, TRUTH, EQT_INTRO,
     SPEC, GEN, MP, NOT_ELIM,
@@ -32,7 +33,7 @@ from proof import proof
 # Polymorphic predicate type ``A -> bool`` used by the quantifier-negation
 # universal forms below.  ``aty`` is the kernel's stock tyvar ``A``; declarative
 # proofs that need polymorphism pass it via ``types={"A": aty, ...}``.
-_pred_ty = mk_fun_ty(aty, bool_ty)
+_pred_ty = parse_type("A -> bool")
 
 
 # ---------------------------------------------------------------------------

@@ -40,6 +40,7 @@ test-proof:
 # lines from nat.py + frac.py into $(LANDAU_OUT) for the golden check below.
 test-theories:
 	$(PY) classical.py
+	$(PY) tg_set_theory.py
 	$(PY) num.py
 	@set -o pipefail; \
 	  raw=$$(mktemp); \

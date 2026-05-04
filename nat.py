@@ -33,10 +33,10 @@ Coverage:
 """
 
 from fusion import (
-    Var, bool_ty, REFL, EQ_MP,
+    Var, REFL, EQ_MP,
 )
 from basics import (
-    mk_abs, mk_app, mk_const, mk_eq, mk_fun_ty,
+    mk_abs, mk_app, mk_const, mk_eq,
     dest_eq, rator, rand,
 )
 from tactics import (
@@ -49,7 +49,7 @@ from num import (
     num_ty, ONE, mk_suc,
     x, y, z, AXIOM_3, AXIOM_4, INDUCTION, define_recursive,
 )
-from parser import define, pp_thm
+from parser import define, parse_type, pp_thm
 from proof import (
     proof,
     register_unfolder, register_disj_unfolder,
@@ -127,7 +127,7 @@ def SATZ_3(p):
 # Then ADD_1 and ADD_SUC become *theorems*.
 # ---------------------------------------------------------------------------
 
-_nnn = mk_fun_ty(num_ty, mk_fun_ty(num_ty, num_ty))
+_nnn = parse_type("num -> num -> num")
 _k = Var("k", num_ty)
 _a = Var("a", num_ty)
 
@@ -157,7 +157,7 @@ ADD_1_REV = GEN(x, SYM(SPEC(x, ADD_1)))    # |- !x. SUC x = x + 1
 #       ==> !y. f y = g y.
 # ---------------------------------------------------------------------------
 
-_fn_ty = mk_fun_ty(num_ty, num_ty)
+_fn_ty = parse_type("num -> num")
 
 @proof
 def ADD_UNIQUE(p):
@@ -367,7 +367,7 @@ def SATZ_9(p):
 # Definition 3:  x < y  ≡  ?v. y = x + v
 # ---------------------------------------------------------------------------
 
-_nnb = mk_fun_ty(num_ty, mk_fun_ty(num_ty, bool_ty))
+_nnb = parse_type("num -> num -> bool")
 
 GT_DEF = define(">", _nnb, "\\x y. ?u. x = y + u", prec=40, assoc="non")
 LT_DEF = define("<", _nnb, "\\x y. ?v. y = x + v", prec=40, assoc="non")
@@ -803,7 +803,7 @@ def SATZ_26(p):
 # Theorem 25, hence m+1 ∈ M).  Both clauses of the conclusion follow.
 # ---------------------------------------------------------------------------
 
-_N_ty = mk_fun_ty(num_ty, bool_ty)
+_N_ty = parse_type("num -> bool")
 _N_var = Var("N", _N_ty)
 
 

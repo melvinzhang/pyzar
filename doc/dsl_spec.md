@@ -79,6 +79,10 @@ optional `{name: hol_type}` mapping for higher-order parameters; the
 parser consults it for bare identifiers and binders so `goal("!f. f
 0 = 0", types={"f": ind_to_ind})` works.
 
+`hol_type` values can be built with `parser.parse_type` instead of
+the kernel constructors, e.g. `types={"f": parse_type("ind -> ind")}`
+in place of `mk_fun_ty(ind_ty, ind_ty)`.
+
 ### `p.fix(names)`
 
 Peel one or more outer foralls. `names` is a string of
@@ -333,7 +337,8 @@ resulting theorem has no lazy-let baggage and never names `NAME`
 externally.
 
 `types` supplies types for fresh tyvars or function-typed bvars not
-registered as parser aliases.
+registered as parser aliases. Values may be built with
+`parser.parse_type` (e.g. `"num -> A -> bool"`) just as for `goal`.
 
 ### `p.unfold_let(name, *args)` / `p.fold_let(name, *args)`
 

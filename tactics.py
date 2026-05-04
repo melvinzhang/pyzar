@@ -31,7 +31,7 @@ from fusion import (
     HolError,
 )
 from basics import (
-    bty, mk_abs, mk_app, mk_const, mk_eq, mk_fun_ty, dest_eq,
+    bty, mk_abs, mk_app, mk_const, mk_eq, dest_eq,
     rator, rand, freesl, aconv,
 )
 from axioms import (
@@ -41,6 +41,10 @@ from axioms import (
     dest_forall, is_imp,
     mk_and, mk_imp, mk_forall, mk_select,
 )
+from parser import parse_type
+
+
+_BBB = parse_type("bool -> bool -> bool")
 
 
 # ---------------------------------------------------------------------------
@@ -166,8 +170,7 @@ def GEN(v, th):
 # Conjunction.
 
 def _bbb_var(name, avoid):
-    bbb = mk_fun_ty(bool_ty, mk_fun_ty(bool_ty, bool_ty))
-    return variant(avoid, Var(name, bbb))
+    return variant(avoid, Var(name, _BBB))
 
 def CONJ(th_p, th_q):
     r""" |- p, |- q   =>   |- p /\ q """

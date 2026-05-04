@@ -12,12 +12,12 @@ type-checks every axiom statement and rejects any ill-formed term.
 """
 
 from fusion import (
-    Var, bool_ty, mk_type, new_type, new_constant, new_axiom,
+    Var, mk_type, new_type, new_constant, new_axiom,
     ASSUME, EQ_MP, DEDUCT_ANTISYM_RULE,
 )
-from basics import mk_fun_ty, mk_const, mk_abs, mk_app
+from basics import mk_const, mk_abs, mk_app
 from parser import (
-    add_const, add_type, set_default_var_ty, parse, define, pp_thm,
+    add_const, add_type, set_default_var_ty, parse, parse_type, define, pp_thm,
 )
 import axioms  # noqa: F401 -- registers !, ?, /\, \/, ==>, ~, @, =, T, F
 from axioms import mk_select, mk_forall, mk_exists, mk_imp
@@ -41,13 +41,13 @@ V = mk_type("V", [])
 add_type("V", V)
 set_default_var_ty(V)
 
-new_constant("In", mk_fun_ty(V, mk_fun_ty(V, bool_ty)))
+new_constant("In", parse_type("V -> V -> bool"))
 In = mk_const("In", [])
 add_const("In", In)
 
 # Class functions V -> V are heavy use; expose the type as a parser alias
 # so axiom bodies can write ``?f:VV. ...``.
-VV = mk_fun_ty(V, V)
+VV = parse_type("V -> V")
 
 
 # ---------------------------------------------------------------------------
@@ -56,19 +56,19 @@ VV = mk_fun_ty(V, V)
 
 # Subset s t  <=>  every element of s is an element of t.
 SUBSET_DEF = define(
-    "Subset", mk_fun_ty(V, mk_fun_ty(V, bool_ty)),
+    "Subset", "V -> V -> bool",
     "\\s t. !x. In x s ==> In x t")
 
 # Trans u  <=>  every member of u is also a subset of u (transitive set).
 TRANS_DEF = define(
-    "Trans", mk_fun_ty(V, bool_ty),
+    "Trans", "V -> bool",
     "\\u. !x. In x u ==> Subset x u")
 
 # Equinum a b  <=>  there is a class function f : V -> V whose restriction
 # to a is a bijection onto b. Standard HOL-ZF encoding -- f is a
 # meta-level function, not an internal set-theoretic graph.
 EQUINUM_DEF = define(
-    "Equinum", mk_fun_ty(V, mk_fun_ty(V, bool_ty)),
+    "Equinum", "V -> V -> bool",
     parse(
         "\\a b. ?f:VV. "
         "(!x. In x a ==> In (f x) b) /\\ "
@@ -104,7 +104,7 @@ POWERSET = new_axiom(parse(
 # Replacement: if R is functional on a, then the R-image of a is a set.
 # Functionality is the explicit "at most one image" condition; we don't
 # need a unique-existential constant.
-RR = mk_fun_ty(V, mk_fun_ty(V, bool_ty))
+RR = parse_type("V -> V -> bool")
 REPLACEMENT = new_axiom(parse(
     "!a. (!x y1 y2. In x a /\\ R x y1 /\\ R x y2 ==> y1 = y2) ==> "
     "(?b. !y. In y b = (?x. In x a /\\ R x y))",

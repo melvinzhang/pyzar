@@ -15,9 +15,9 @@ on natural numbers (matching Landau's surface syntax exactly).
 Each Satz is checked by running ``uv run frac.py``.
 """
 from fusion import (
-    Var, bool_ty, REFL, TRANS, MK_COMB,
+    Var, REFL, TRANS, MK_COMB,
 )
-from basics import mk_app, mk_const, mk_eq, mk_fun_ty, rand
+from basics import mk_app, mk_const, mk_eq, rand
 from nat import (
     num_ty, mk_add, mk_mul, PLUS, TIMES,
     x as _xnat,
@@ -30,7 +30,7 @@ from tactics import (
     AP_TERM, AP_THM, SYM, SPECL, CONJ, DISJ1, DISJ2, AC_PROVE, TRANS_CHAIN,
     UNFOLD,
 )
-from parser import define, pp_thm
+from parser import define, parse_type, pp_thm
 from proof import proof
 
 
@@ -49,9 +49,7 @@ w1 = Var("w1", num_ty)
 w2 = Var("w2", num_ty)
 
 
-_n4b = mk_fun_ty(num_ty,
-        mk_fun_ty(num_ty,
-          mk_fun_ty(num_ty, mk_fun_ty(num_ty, bool_ty))))
+_n4b = parse_type("num -> num -> num -> num -> bool")
 
 
 # ---------------------------------------------------------------------------

@@ -16,8 +16,9 @@ from axioms import (
 )
 from num import x as VX, y as VY, z as VZ, mk_suc, num_ty, ONE
 from parser import (
-    DEFAULT_SIG, ParseError, Signature, define, parse,
+    DEFAULT_SIG, ParseError, Signature, define, parse, parse_type,
 )
+from fusion import Tyvar, Tyapp
 
 
 def _binop(name):
@@ -180,9 +181,9 @@ class TestDefine(unittest.TestCase):
         sig.add_infix("=", 40, mk_eq, assoc="non")
         sig.add_infix("+", 50, _add, assoc="left")
         sig.add_binder("\\", mk_abs)
-        nnn = mk_fun_ty(num_ty, mk_fun_ty(num_ty, num_ty))
+        sig.add_type("num", num_ty)
         op = "++"  # parser's OP token only accepts symbolic names
-        op_def = define(op, nnn, "\\a b. a + b", sig=sig,
+        op_def = define(op, "num -> num -> num", "\\a b. a + b", sig=sig,
                         prec=50, assoc="left")
         op_lhs, _ = dest_eq(op_def._concl)
         self.assertIsInstance(op_lhs, Const)
@@ -211,6 +212,66 @@ class TestSelectBinder(unittest.TestCase):
         u = mk_var("u", num_ty)
         self.assertTrue(aconv(parse("@u. x = SUC u"),
                               mk_select(u, mk_eq(VX, mk_suc(u)))))
+
+
+class TestParseType(unittest.TestCase):
+    """parse_type produces kernel types from surface syntax."""
+
+    def test_registered_zero_ary(self):
+        self.assertEqual(parse_type("bool"), bool_ty)
+        self.assertEqual(parse_type("num"), num_ty)
+
+    def test_single_uppercase_is_tyvar(self):
+        self.assertEqual(parse_type("A"), Tyvar("A"))
+        self.assertEqual(parse_type("Z"), Tyvar("Z"))
+
+    def test_arrow_right_associative(self):
+        self.assertEqual(
+            parse_type("A -> B -> C"),
+            mk_fun_ty(Tyvar("A"), mk_fun_ty(Tyvar("B"), Tyvar("C"))))
+
+    def test_parens_group(self):
+        self.assertEqual(
+            parse_type("(A -> B) -> C"),
+            mk_fun_ty(mk_fun_ty(Tyvar("A"), Tyvar("B")), Tyvar("C")))
+
+    def test_mixed_constructor_and_tyvar(self):
+        self.assertEqual(
+            parse_type("num -> num -> bool"),
+            mk_fun_ty(num_ty, mk_fun_ty(num_ty, bool_ty)))
+        self.assertEqual(
+            parse_type("A -> bool"),
+            mk_fun_ty(Tyvar("A"), bool_ty))
+
+    def test_unknown_constructor_errors(self):
+        with self.assertRaises(ParseError):
+            parse_type("nosuchtype")
+
+    def test_applying_tyvar_errors(self):
+        # `B A` would mean "apply `A` to constructor `B`", but `B` is a
+        # type variable, not a constructor.
+        with self.assertRaises(ParseError):
+            parse_type("B A")
+
+    def test_registered_single_letter_beats_tyvar_rule(self):
+        # If a theory registers a single-letter type (set theory uses
+        # ``V``), parse_type must resolve to that constructor, not a
+        # fresh Tyvar.
+        sig = Signature()
+        from fusion import new_type, mk_type
+        try:
+            new_type("X", 0)
+        except Exception:
+            pass
+        X = mk_type("X", [])
+        sig.add_type("X", X)
+        self.assertEqual(parse_type("X", sig=sig), X)
+        self.assertEqual(
+            parse_type("X -> X", sig=sig), mk_fun_ty(X, X))
+
+    def test_non_arrow_op_errors(self):
+        with self.assertRaises(ParseError):
+            parse_type("A + B")
 
 
 if __name__ == "__main__":

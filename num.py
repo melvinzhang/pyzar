@@ -17,7 +17,7 @@ from fusion import (
     REFL, TRANS, ASSUME, EQ_MP, INST, INST_TYPE, HolError,
 )
 from basics import (
-    bty, mk_abs, mk_app, mk_const, mk_eq, mk_fun_ty,
+    bty, mk_abs, mk_app, mk_const, mk_eq,
     rand,
 )
 from axioms import (
@@ -34,7 +34,7 @@ from tactics import (
 from classical import NOT_FORALL_TO_EX_NOT, NOT_EX_TO_FORALL_NOT
 from proof import proof, register_induction, InductionStrategy
 from parser import (
-    parse, define as _define,
+    parse, parse_type, define as _define,
     add_const, add_type, set_default_var_ty,
 )
 
@@ -46,7 +46,7 @@ from parser import (
 #   IND_SUC := @f. ONE_ONE f /\ ~(ONTO f).
 # ---------------------------------------------------------------------------
 
-_ind_ind = mk_fun_ty(ind_ty, ind_ty)
+_ind_ind = parse_type("ind -> ind")
 _one_one_ind = mk_const("ONE_ONE", [(ind_ty, aty), (ind_ty, bty)])
 _onto_ind    = mk_const("ONTO",    [(ind_ty, aty), (ind_ty, bty)])
 
@@ -161,10 +161,11 @@ def IND_SUC_NEQ_IND_1(prf):
 
 _a_ind  = Var("a", ind_ty)
 _i_ind  = Var("i", ind_ty)
-_P_ind  = Var("P", mk_fun_ty(ind_ty, bool_ty))
+_P_ind_ty = parse_type("ind -> bool")
+_P_ind  = Var("P", _P_ind_ty)
 
 NUM_REP_DEF = new_basic_definition(
-    mk_eq(Var("NUM_REP", mk_fun_ty(ind_ty, bool_ty)),
+    mk_eq(Var("NUM_REP", _P_ind_ty),
           mk_abs(_a_ind,
               mk_forall(_P_ind,
                   mk_imp(
@@ -175,7 +176,6 @@ NUM_REP_DEF = new_basic_definition(
                       mk_comb(_P_ind, _a_ind))))))
 NUM_REP = mk_const("NUM_REP", [])
 add_const("NUM_REP", NUM_REP)
-_P_ind_ty = mk_fun_ty(ind_ty, bool_ty)
 
 
 def _NUM_REP_unfold(a_term):
@@ -282,7 +282,7 @@ add_const("1", ONE)
 
 _n_num = Var("n", num_ty)
 SUC_DEF = new_basic_definition(
-    mk_eq(Var("SUC", mk_fun_ty(num_ty, num_ty)),
+    mk_eq(Var("SUC", parse_type("num -> num")),
           mk_abs(_n_num,
               mk_comb(mk_num,
                   mk_comb(IND_SUC, mk_comb(dest_num, _n_num))))))
@@ -301,7 +301,7 @@ z = Var("z", num_ty)
 u = Var("u", num_ty)
 v = Var("v", num_ty)
 w = Var("w", num_ty)
-P = Var("P", mk_fun_ty(num_ty, bool_ty))
+P = Var("P", parse_type("num -> bool"))
 
 
 # ---------------------------------------------------------------------------
@@ -407,7 +407,7 @@ def AXIOM_4(p):
 #            hence P (mk_num (dest_num a)) = P a (via MK_DEST).
 # ---------------------------------------------------------------------------
 
-_P_num_ty = mk_fun_ty(num_ty, bool_ty)
+_P_num_ty = parse_type("num -> bool")
 
 
 @proof
@@ -529,10 +529,10 @@ register_induction(InductionStrategy(
 # Standard variable names used in the recursion proof (live at type variable A
 # so the final theorem is polymorphic).
 _A = aty
-_num_to_A     = mk_fun_ty(num_ty, _A)
-_A_to_A       = mk_fun_ty(_A, _A)
-_h_ty         = mk_fun_ty(num_ty, _A_to_A)
-_Q_ty         = mk_fun_ty(num_ty, mk_fun_ty(_A, bool_ty))
+_num_to_A     = parse_type("num -> A")
+_A_to_A       = parse_type("A -> A")
+_h_ty         = parse_type("num -> A -> A")
+_Q_ty         = parse_type("num -> A -> bool")
 
 _c   = Var("c", _A)
 _h   = Var("h", _h_ty)
@@ -828,7 +828,7 @@ def define_recursive(name, fn_ty, x_var, c, h, *, prec=None, assoc="non"):
         raise HolError(
             "define_recursive: h must be Abs(k, Abs(a, body))")
 
-    fn_to_num = mk_fun_ty(num_ty, num_ty)
+    fn_to_num = parse_type("num -> num")
     fn_var = Var("fn", fn_to_num)
     n_var = Var("n", num_ty)
     y_var = Var("y", num_ty)
