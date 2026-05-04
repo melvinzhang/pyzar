@@ -23,10 +23,11 @@ import axioms  # noqa: F401 -- registers !, ?, /\, \/, ==>, ~, @, =, T, F
 from axioms import mk_select, mk_forall, mk_exists, mk_imp
 from tactics import (
     SPEC, SPECL, GEN, GENL, DISCH, MP, EXISTS, AP_TERM, AP_THM, SYM,
-    BETA_CONV, CHOOSE_WITNESS, CONJUNCT1, CONJUNCT2, UNFOLD,
+    BETA_CONV, CHOOSE_WITNESS, CONJ, CONJUNCT1, CONJUNCT2, UNFOLD,
+    DISJ1, DISJ_CASES, REFL,
 )
-from basics import dest_eq  # for occasional shape checks
-from axioms import dest_imp, dest_forall
+from basics import dest_eq, rand
+from axioms import dest_imp, dest_forall, dest_disj
 from proof import proof
 
 
@@ -221,6 +222,97 @@ def SUBSET_ANTISYM(p):
     p.thus("a = b").by_match(EXTENSIONALITY, "ext")
 
 
+# ---------------------------------------------------------------------------
+# No set is its own member.
+#
+# Classic ZF theorem: ``!x. ~In x x``. Proof (Foundation + Pairing): assume
+# In x x. PAIRING(x, x) gives the singleton {x}. Apply FOUNDATION to {x};
+# the unique disjoint element must be x itself, but In x x and In x in {x}
+# witness non-disjointness -- contradiction.
+#
+# This is the first theorem in the file that actually uses both PAIRING and
+# FOUNDATION. NO_UNIVERSAL ("there is no universal set") follows as a
+# one-line corollary: a universal U would satisfy In U U, contradicting
+# this theorem.
+# ---------------------------------------------------------------------------
+
+def IN_SINGLETON(sing_eq):
+    """``|- !w. In w s = (w = a \\/ w = a)``  =>  ``|- In a s``.
+
+    The pairing-given equation for the singleton ``{a}``, instantiated at
+    ``a`` itself: ``a = a \\/ a = a`` is true by REFL, so the pulled-back
+    membership is too. The body's left disjunct supplies ``a`` directly,
+    so the helper carries no extra args."""
+    pred = dest_forall(sing_eq._concl)
+    _, rhs_body = dest_eq(pred.body)
+    left_eq, _ = dest_disj(rhs_body)
+    _, a_t = dest_eq(left_eq)
+    spec = SPEC(a_t, sing_eq)                         # |- In a s = (a = a \/ a = a)
+    _, right_disj = dest_disj(rand(spec._concl))
+    or_th = DISJ1(REFL(a_t), right_disj)              # |- a = a \/ a = a
+    return EQ_MP(SYM(spec), or_th)
+
+
+def OR_REFL_ELIM(or_th):
+    """``|- p \\/ p``  =>  ``|- p``. Iff-of-degenerate-disjunction."""
+    p_t, _ = dest_disj(or_th._concl)
+    th_imp = DISCH(p_t, ASSUME(p_t))                  # |- p ==> p
+    return DISJ_CASES(or_th, th_imp, th_imp)
+
+
+def MEMBER_DISJ(spec_eq, in_th):
+    """Combine ``|- In a s = (a = x \\/ a = x)`` and ``|- In a s`` into
+    ``|- a = x`` -- specialise singleton membership to a singleton's
+    canonical element."""
+    return OR_REFL_ELIM(EQ_MP(spec_eq, in_th))
+
+
+@proof
+def NO_SELF_MEMBER(p):
+    p.goal("!x. ~In x x")
+    p.fix("x")
+    with p.suppose("hxx: In x x"):
+        # PAIRING(x, x) -- the unordered pair {x, x} = {x}.
+        p.have("h_pair: ?p. !w. In w p = (w = x \\/ w = x)").by_match(PAIRING)
+        p.choose("s", from_="h_pair")          # s_eq : !w. In w s = (w = x \/ w = x)
+        p.have("h_xs: In x s").by(IN_SINGLETON, "s_eq")
+
+        # FOUNDATION applied to the non-empty {x}.
+        p.have("h_ne: ?z. In z s").by_witness("x", "h_xs")
+        p.have("h_found: ?y. In y s /\\ ~(?z. In z s /\\ In z y)") \
+            .by_match(FOUNDATION, "h_ne")
+        p.choose("y", from_="h_found")         # y_eq : In y s /\ ~(?z. In z s /\ In z y)
+        p.have("y_in: In y s").by(CONJUNCT1, "y_eq")
+        p.have("y_disj: ~(?z. In z s /\\ In z y)").by(CONJUNCT2, "y_eq")
+
+        # The singleton has only x as a member, so y = x.
+        p.have("s_at_y: In y s = (y = x \\/ y = x)").by("s_eq", "y")
+        p.have("eq_yx: y = x").by(MEMBER_DISJ, "s_at_y", "y_in")
+
+        # Substitute y |-> x in y_disj and witness the existential at z = x.
+        p.have("y_disj_x: ~(?z. In z s /\\ In z x)").by_rewrite_of("y_disj", ["eq_yx"])
+        p.have("h_conj: In x s /\\ In x x").by(CONJ, "h_xs", "hxx")
+        p.have("h_ex: ?z. In z s /\\ In z x").by_witness("x", "h_conj")
+        p.absurd().by_conj("h_ex", "y_disj_x")
+
+
+# ---------------------------------------------------------------------------
+# No universal set (Russell-style corollary).
+#
+# A universal U would satisfy In U U, contradicting NO_SELF_MEMBER. The
+# proof is one ``choose`` plus the corollary instantiation.
+# ---------------------------------------------------------------------------
+
+@proof
+def NO_UNIVERSAL(p):
+    p.goal("~(?u. !x. In x u)")
+    with p.suppose("hu: ?u. !x. In x u"):
+        p.choose("u", from_="hu")              # u_eq : !x. In x u
+        p.have("h_uu: In u u").by("u_eq", "u")
+        p.have("h_not: ~In u u").by(NO_SELF_MEMBER, "u")
+        p.absurd().by_conj("h_uu", "h_not")
+
+
 if __name__ == "__main__":
     for label, th in [
         ("SUBSET_DEF", SUBSET_DEF),
@@ -236,5 +328,7 @@ if __name__ == "__main__":
         ("TARSKI_A", TARSKI_A),
         ("CLASS_AC", CLASS_AC),
         ("SUBSET_ANTISYM", SUBSET_ANTISYM),
+        ("NO_SELF_MEMBER", NO_SELF_MEMBER),
+        ("NO_UNIVERSAL", NO_UNIVERSAL),
     ]:
         print(f"{label}: {pp_thm(th)}")
