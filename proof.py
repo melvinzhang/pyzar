@@ -1301,13 +1301,16 @@ class Proof:
     def choose(self, name_spec, from_, eq_label=None):
         """Eliminate an existential, bringing a witness into scope.
 
-        ``name_spec``: ``"name"`` or ``"name: equation"``. The latter form
-            verifies the equation matches the body the witness satisfies.
+        ``name_spec``: ``"name"`` (or whitespace-separated ``"n1 n2 ..."`` to
+            peel multiple binders in one step), optionally followed by
+            ``": equation"`` to verify the final body. With multiple names,
+            the source is peeled once per name; only the outer level may be
+            an order-relation auto-unfold.
         ``from_``: label of the source fact, which must be ``?v. body``,
             or ``x > y``, or ``x < y`` (auto-unfolded).
         ``eq_label``: label under which to register the equation fact;
-            defaults to ``f"{name}_eq"`` so it doesn't clash with the witness
-            name (which lives in the parser env).
+            defaults to ``f"{last_name}_eq"`` so it doesn't clash with the
+            witness names (which live in the parser env).
         """
         peeled = peel_label_prefix(name_spec)
         if peeled is not None:
@@ -1316,53 +1319,49 @@ class Proof:
             name = name_spec.strip()
             eq_check = None
 
-        src_th = self.coerce(from_)
-        c = src_th._concl
+        names = name.split()
+        if not names:
+            raise HolError("choose: empty name spec")
 
+        src_th = self.coerce(from_)
         # If src is a relation registered with an existential unfolder,
         # unfold first.
-        unfold_eq = _lookup_relation(c, kind="exists")
-        ex_th = EQ_MP(unfold_eq, src_th) if unfold_eq is not None else src_th
+        unfold_eq = _lookup_relation(src_th._concl, kind="exists")
+        cur_th = EQ_MP(unfold_eq, src_th) if unfold_eq is not None else src_th
 
-        # ex_th's conclusion must now be `?v. body`.
-        pred = dest_exists(ex_th._concl)
-        if pred is None:
-            raise HolError(
-                f"choose: source {from_!r} is not an existential or order relation: "
-                f"{pp(c)}")
-        v_var = pred.bvar
-        w_term = mk_select(v_var, pred.body)
-        # SELECT_AX-derive the witness fact directly from ex_th. The
-        # registered theorem's _asl mirrors ex_th's, so the user's proof
-        # accumulates ex_th's hyps rather than a free-floating ASSUME of
-        # body_at_w that would have to be reconciled at frame close. The
-        # term ``body_at_w`` is computed inside CHOOSE_WITNESS exactly
-        # once.
-        witness_th = CHOOSE_WITNESS(pred, ex_th)
-        body_at_w = witness_th._concl
+        for nm in names:
+            pred = dest_exists(cur_th._concl)
+            if pred is None:
+                raise HolError(
+                    f"choose: source {from_!r} is not an existential or order relation: "
+                    f"{pp(cur_th._concl)}")
+            v_var = pred.bvar
+            w_term = mk_select(v_var, pred.body)
+            # SELECT_AX-derive the witness fact directly. The registered
+            # theorem's _asl mirrors the source's, so the user's proof
+            # accumulates the source's hyps rather than a free-floating
+            # ASSUME that would have to be reconciled at frame close.
+            cur_th = CHOOSE_WITNESS(pred, cur_th)
+            self._require_fresh_name(nm, "choose")
+            self._cur.choose_env[nm] = w_term
 
         if eq_check is not None:
             env = self._scope_env()
-            env[name] = w_term
             try:
                 expected = parse(eq_check, _env_bindings=env)
             except ParseError as ex:
                 raise HolError(f"choose: cannot parse equation spec: {ex}") from ex
             # Simp-aware match: user may have written a folded shape whose
-            # unfolded form equals body_at_w (or vice versa).
-            if self.simp_match(expected, witness_th) is None:
+            # unfolded form equals the witness body (or vice versa).
+            if self.simp_match(expected, cur_th) is None:
                 raise HolError(
                     "choose: equation spec doesn't match witness body\n"
-                    f"  expected: {pp(body_at_w)}\n"
+                    f"  expected: {pp(cur_th._concl)}\n"
                     f"  given:    {pp(expected)}")
 
-        # Register witness in parser env on the current frame.
-        self._require_fresh_name(name, "choose")
-        self._cur.choose_env[name] = w_term
-
-        # Register the equation as a fact (default label = "{name}_eq").
-        eq_label = eq_label or f"{name}_eq"
-        self._register_fact(eq_label, witness_th)
+        # Register the equation as a fact (default label = "{last_name}_eq").
+        eq_label = eq_label or f"{names[-1]}_eq"
+        self._register_fact(eq_label, cur_th)
 
     def _build_disj(self, target, match, op):
         """Walk ``target``'s right-associated disjunction.
@@ -1445,6 +1444,29 @@ class Proof:
                 return None
             return EQ_MP(SYM(unfold_eq), EXISTS(ex_pred, witness, body_th))
         return None
+
+    def _make_existential_multi(self, target, witnesses, body_provider):
+        """Multi-witness variant of ``_make_existential``: peels one
+        existential level per witness, so a target ``?v1 ... vn. P`` (or a
+        registered relation whose unfold begins with that shape) becomes a
+        single ``EXISTS`` chain. ``body_provider`` is invoked once with the
+        innermost body ``P[w1/v1, ..., wn/vn]``. Returns ``None`` only if
+        the outermost level isn't a recognized existential shape; deeper
+        non-existential mismatches raise."""
+        if not witnesses:
+            return body_provider(target)
+        w0, rest = witnesses[0], witnesses[1:]
+
+        def inner(body_at_w0):
+            inner_th = self._make_existential_multi(
+                body_at_w0, rest, body_provider)
+            if inner_th is None and rest:
+                raise HolError(
+                    "by_witness: target has fewer existential levels "
+                    f"than witnesses; stuck at: {pp(body_at_w0)}")
+            return inner_th
+
+        return self._make_existential(target, w0, inner)
 
     def disj(self, *rules, ac=None):
         """Close the current frame's disjunction goal by discharging a leaf
@@ -1971,18 +1993,26 @@ class _Have:
         (and fold back through the relation's unfolder if applicable).
 
         ``witness`` is parsed in the current scope (so ``choose``-bound names
-        are available) or accepted as a kernel term directly. ``ref`` is a
-        fact label, fact index, or a theorem.
+        are available) or accepted as a kernel term directly. A list/tuple
+        of witnesses peels that many ``?`` levels in one call (the supplied
+        fact must match the innermost body). ``ref`` is a fact label, fact
+        index, or a theorem.
         """
         target = self.term
         p = self.p
         fact_th = p.coerce(ref)
-        witness_t = p._parse(witness) if isinstance(witness, str) else witness
+
+        if isinstance(witness, (list, tuple)):
+            witnesses = [p._parse(w) if isinstance(w, str) else w
+                         for w in witness]
+        else:
+            witnesses = [p._parse(witness) if isinstance(witness, str)
+                         else witness]
 
         def body_provider(body_at_w):
             return p._simp_require(body_at_w, fact_th, op="by_witness")
 
-        th = p._make_existential(target, witness_t, body_provider)
+        th = p._make_existential_multi(target, witnesses, body_provider)
         if th is not None:
             return self._finish(th)
 

@@ -113,7 +113,7 @@
   DEST_RAT_FEQ:   |- (!a. (!b. ((dest_rat (mk_rat ((feq a) b))) = ((feq a) b))))
   RAT_EQ:         |- (!a. (!b. (!c. (!d. ((((Q a) b) = ((Q c) d)) = ((((feq a) b) c) d))))))
   IS_RAT_DEST:    |- (!X. (IS_RAT (dest_rat X)))
-  Q_SURJ:         |- (!X. (?pa. (?pb. (X = ((Q pa) pb)))))
+  Q_SURJ:         |- (!X. (?a. (?b. (X = ((Q a) b)))))
   SATZ_78:        |- (!X. (X = X))
   SATZ_79:        |- (!X. (!Y. ((X = Y) ==> (Y = X))))
   SATZ_80:        |- (!X. (!Y. (!Z. ((X = Y) ==> ((Y = Z) ==> (X = Z))))))

@@ -704,7 +704,8 @@ def parse_label_or_bare(s, sig=None, _env_bindings=None, **bindings):
         s, "label_or_bare_start", sig, _env_bindings, bindings)
 
 
-_LABEL_PEEL_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*:(?!=)\s*(.*)$", re.DOTALL)
+_LABEL_PEEL_RE = re.compile(
+    r"^\s*([A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*)\s*:(?!=)\s*(.*)$", re.DOTALL)
 
 
 def peel_label_prefix(spec):

@@ -390,33 +390,17 @@ def Q_SURJ(p):
     unfold_th = UNFOLD(IS_RAT_DEF, dr_X)   # |- IS_RAT (dest_rat X) = ?pa pb. dest_rat X = feq pa pb
     p.have("ex: ?pa pb. dest_rat X = feq pa pb") \
         .by_eq_mp(unfold_th, "isr")
-    p.choose("pa: ?pb. dest_rat X = feq pa pb", from_="ex")
-    p.choose("pb: dest_rat X = feq pa pb", from_="pa_eq")
-    # Now we have pb_eq: |- dest_rat X = feq pa pb.
+    p.choose("pa pb: dest_rat X = feq pa pb", from_="ex")
     pb_eq = p.fact("pb_eq")
-    # Apply mk_rat: mk_rat (dest_rat X) = mk_rat (feq pa pb).
-    mk_eq_th = AP_TERM(mk_rat, pb_eq)
-    # mk_rat (dest_rat X) = X.
+    mk_eq_th = AP_TERM(mk_rat, pb_eq)        # mk_rat (dest_rat X) = mk_rat (feq pa pb)
     a_var = Var("a", rat_ty)
-    md_X = INST([(X_t, a_var)], MK_RAT_DEST)
-    # mk_rat (feq pa pb) = Q pa pb (by SYM of Q_DEF unfolded).
-    pa_t = p._parse("pa")
-    pb_t = p._parse("pb")
-    Q_unfold = UNFOLD(Q_DEF, pa_t, pb_t)   # |- Q pa pb = mk_rat (feq pa pb).
+    md_X = INST([(X_t, a_var)], MK_RAT_DEST)  # mk_rat (dest_rat X) = X
+    Q_unfold = UNFOLD(Q_DEF, p._parse("pa"), p._parse("pb"))
     with p.calc("Xpapb: X") as c:
         c.step("= mk_rat (dest_rat X)").by_thm(SYM(md_X))
         c.step("= mk_rat (feq pa pb)").by_thm(mk_eq_th)
         c.step("= Q pa pb").by_thm(SYM(Q_unfold))
-    # Build nested existentials manually (with fresh bound names).
-    pa_w = p._parse("pa")
-    pb_w = p._parse("pb")
-    inner = EXISTS(
-        mk_abs(_pb, mk_eq(X_t, mk_app(Q, pa_w, _pb))),
-        pb_w, p.fact("Xpapb"))
-    outer = EXISTS(
-        mk_abs(_pa, mk_exists(_pb, mk_eq(X_t, mk_app(Q, _pa, _pb)))),
-        pa_w, inner)
-    p.thus("?a b. X = Q a b").by_thm(outer)
+    p.thus("?a b. X = Q a b").by_witness(["pa", "pb"], "Xpapb")
 
 
 # ---------------------------------------------------------------------------
@@ -478,48 +462,11 @@ def RGT_INTRO(p):
     p.goal("!a b c d. fgt a b c d ==> rgt (Q a b) (Q c d)")
     p.fix("a b c d")
     p.assume("hgt: fgt a b c d")
-    a_t = p._parse("a")
-    b_t = p._parse("b")
-    c_t = p._parse("c")
-    d_t = p._parse("d")
-    Q_ab = mk_app(Q, a_t, b_t)
-    Q_cd = mk_app(Q, c_t, d_t)
-    refl_ab = REFL(Q_ab)        # |- Q a b = Q a b
-    refl_cd = REFL(Q_cd)        # |- Q c d = Q c d
-    # Combined: Q a b = Q a b /\ Q c d = Q c d /\ fgt a b c d.
-    body_inner = CONJ(refl_ab, CONJ(refl_cd, p.fact("hgt")))
-    # Build existentials: ?a' b' c' d'. Q a b = Q a' b' /\ Q c d = Q c' d' /\ fgt a' b' c' d'.
-    _qa = Var("qa", num_ty)
-    _qb = Var("qb", num_ty)
-    _qc = Var("qc", num_ty)
-    _qd = Var("qd", num_ty)
-    inner_d = EXISTS(
-        mk_abs(_qd,
-            mk_and(mk_eq(Q_ab, mk_app(Q, a_t, b_t)),
-            mk_and(mk_eq(Q_cd, mk_app(Q, c_t, _qd)),
-                   mk_app(FGT, a_t, b_t, c_t, _qd)))),
-        d_t, body_inner)
-    inner_c = EXISTS(
-        mk_abs(_qc, mk_exists(_qd,
-            mk_and(mk_eq(Q_ab, mk_app(Q, a_t, b_t)),
-            mk_and(mk_eq(Q_cd, mk_app(Q, _qc, _qd)),
-                   mk_app(FGT, a_t, b_t, _qc, _qd))))),
-        c_t, inner_d)
-    inner_b = EXISTS(
-        mk_abs(_qb, mk_exists(_qc, mk_exists(_qd,
-            mk_and(mk_eq(Q_ab, mk_app(Q, a_t, _qb)),
-            mk_and(mk_eq(Q_cd, mk_app(Q, _qc, _qd)),
-                   mk_app(FGT, a_t, _qb, _qc, _qd)))))),
-        b_t, inner_c)
-    inner_a = EXISTS(
-        mk_abs(_qa, mk_exists(_qb, mk_exists(_qc, mk_exists(_qd,
-            mk_and(mk_eq(Q_ab, mk_app(Q, _qa, _qb)),
-            mk_and(mk_eq(Q_cd, mk_app(Q, _qc, _qd)),
-                   mk_app(FGT, _qa, _qb, _qc, _qd))))))),
-        a_t, inner_b)
-    # |- ?a' b' c' d'. (Q a b = Q a' b') /\ (Q c d = Q c' d') /\ fgt a' b' c' d'.
-    # Bridge to rgt (Q a b) (Q c d) via the registered unfolder.
-    p.thus("rgt (Q a b) (Q c d)").by_fold(inner_a)
+    Q_ab = p._parse("Q a b")
+    Q_cd = p._parse("Q c d")
+    body_inner = CONJ(REFL(Q_ab), CONJ(REFL(Q_cd), p.fact("hgt")))
+    p.thus("rgt (Q a b) (Q c d)") \
+        .by_witness(["a", "b", "c", "d"], body_inner)
 
 
 @proof
@@ -527,42 +474,11 @@ def RLT_INTRO(p):
     p.goal("!a b c d. flt a b c d ==> rlt (Q a b) (Q c d)")
     p.fix("a b c d")
     p.assume("hlt: flt a b c d")
-    a_t = p._parse("a")
-    b_t = p._parse("b")
-    c_t = p._parse("c")
-    d_t = p._parse("d")
-    Q_ab = mk_app(Q, a_t, b_t)
-    Q_cd = mk_app(Q, c_t, d_t)
+    Q_ab = p._parse("Q a b")
+    Q_cd = p._parse("Q c d")
     body_inner = CONJ(REFL(Q_ab), CONJ(REFL(Q_cd), p.fact("hlt")))
-    _qa = Var("qa", num_ty)
-    _qb = Var("qb", num_ty)
-    _qc = Var("qc", num_ty)
-    _qd = Var("qd", num_ty)
-    inner_d = EXISTS(
-        mk_abs(_qd,
-            mk_and(mk_eq(Q_ab, mk_app(Q, a_t, b_t)),
-            mk_and(mk_eq(Q_cd, mk_app(Q, c_t, _qd)),
-                   mk_app(FLT, a_t, b_t, c_t, _qd)))),
-        d_t, body_inner)
-    inner_c = EXISTS(
-        mk_abs(_qc, mk_exists(_qd,
-            mk_and(mk_eq(Q_ab, mk_app(Q, a_t, b_t)),
-            mk_and(mk_eq(Q_cd, mk_app(Q, _qc, _qd)),
-                   mk_app(FLT, a_t, b_t, _qc, _qd))))),
-        c_t, inner_d)
-    inner_b = EXISTS(
-        mk_abs(_qb, mk_exists(_qc, mk_exists(_qd,
-            mk_and(mk_eq(Q_ab, mk_app(Q, a_t, _qb)),
-            mk_and(mk_eq(Q_cd, mk_app(Q, _qc, _qd)),
-                   mk_app(FLT, a_t, _qb, _qc, _qd)))))),
-        b_t, inner_c)
-    inner_a = EXISTS(
-        mk_abs(_qa, mk_exists(_qb, mk_exists(_qc, mk_exists(_qd,
-            mk_and(mk_eq(Q_ab, mk_app(Q, _qa, _qb)),
-            mk_and(mk_eq(Q_cd, mk_app(Q, _qc, _qd)),
-                   mk_app(FLT, _qa, _qb, _qc, _qd))))))),
-        a_t, inner_b)
-    p.thus("rlt (Q a b) (Q c d)").by_fold(inner_a)
+    p.thus("rlt (Q a b) (Q c d)") \
+        .by_witness(["a", "b", "c", "d"], body_inner)
 
 
 # Elimination: rgt (Q a b) (Q c d) ==> fgt a b c d (and similarly for rlt).
@@ -573,14 +489,8 @@ def RGT_ELIM(p):
     p.goal("!a b c d. rgt (Q a b) (Q c d) ==> fgt a b c d")
     p.fix("a b c d")
     p.assume("h: rgt (Q a b) (Q c d)")
-    p.choose("a1: ?b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
+    p.choose("a1 b1 c1 d1: Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
              " /\\ fgt a1 b1 c1 d1", from_="h")
-    p.choose("b1: ?c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-             " /\\ fgt a1 b1 c1 d1", from_="a1_eq")
-    p.choose("c1: ?d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-             " /\\ fgt a1 b1 c1 d1", from_="b1_eq")
-    p.choose("d1: Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-             " /\\ fgt a1 b1 c1 d1", from_="c1_eq")
     p.split("d1_eq", "(hQab, hrest)")
     p.split("hrest", "(hQcd, hgt)")
     p.have("feq_ab: feq a b a1 b1").by_thm(Q_eq_to_feq(p.fact("hQab")))
@@ -596,14 +506,8 @@ def RLT_ELIM(p):
     p.goal("!a b c d. rlt (Q a b) (Q c d) ==> flt a b c d")
     p.fix("a b c d")
     p.assume("h: rlt (Q a b) (Q c d)")
-    p.choose("a1: ?b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
+    p.choose("a1 b1 c1 d1: Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
              " /\\ flt a1 b1 c1 d1", from_="h")
-    p.choose("b1: ?c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-             " /\\ flt a1 b1 c1 d1", from_="a1_eq")
-    p.choose("c1: ?d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-             " /\\ flt a1 b1 c1 d1", from_="b1_eq")
-    p.choose("d1: Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-             " /\\ flt a1 b1 c1 d1", from_="c1_eq")
     p.split("d1_eq", "(hQab, hrest)")
     p.split("hrest", "(hQcd, hlt)")
     p.have("feq_ab: feq a b a1 b1").by_thm(Q_eq_to_feq(p.fact("hQab")))
@@ -621,10 +525,8 @@ def SATZ_81(p):
     p.fix("X Y")
     p.have("eX: ?a b. X = Q a b").by_match(Q_SURJ)
     p.have("eY: ?a b. Y = Q a b").by_match(Q_SURJ)
-    p.choose("a: ?b. X = Q a b", from_="eX")
-    p.choose("b: X = Q a b", from_="a_eq")
-    p.choose("c: ?b. Y = Q c b", from_="eY")
-    p.choose("d: Y = Q c d", from_="c_eq")
+    p.choose("a b: X = Q a b", from_="eX")
+    p.choose("c d: Y = Q c d", from_="eY")
     # Trichotomy at fraction level.
     p.have("tri: feq a b c d \\/ fgt a b c d \\/ flt a b c d") \
         .by_match(SATZ_41)
@@ -670,10 +572,7 @@ def SATZ_82(p):
     p.fix("X Y")
     p.assume("h: rgt X Y")
     Y_t = p._parse("Y")
-    p.choose("a: ?b c d. X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="h")
-    p.choose("b: ?c d. X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="a_eq")
-    p.choose("c: ?d. X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="b_eq")
-    p.choose("d: X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="c_eq")
+    p.choose("a b c d: X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="h")
     p.split("d_eq", "(hX, h2)")
     p.split("h2", "(hY, hgt)")
     p.have("flt: flt c d a b").by_match(SATZ_42, "hgt")
@@ -693,10 +592,7 @@ def SATZ_83(p):
     p.fix("X Y")
     p.assume("h: rlt X Y")
     Y_t = p._parse("Y")
-    p.choose("a: ?b c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="h")
-    p.choose("b: ?c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="a_eq")
-    p.choose("c: ?d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="b_eq")
-    p.choose("d: X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="c_eq")
+    p.choose("a b c d: X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="h")
     p.split("d_eq", "(hX, h2)")
     p.split("h2", "(hY, hlt)")
     p.have("fgt: fgt c d a b").by_match(SATZ_43, "hlt")
@@ -762,18 +658,13 @@ def SATZ_86(p):
     p.fix("X Y Z")
     p.assume("h1: rlt X Y", "h2: rlt Y Z")
     X_t = p._parse("X")
-    p.choose("a: ?b c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="h1")
-    p.choose("b: ?c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="a_eq")
-    p.choose("c: ?d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="b_eq")
-    p.choose("d: X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="c_eq")
+    p.choose("a b c d: X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="h1")
     p.split("d_eq", "(hX, t1)")
     p.split("t1", "(hY1, hlt1)")
     # For the second hypothesis, we need a copy of Y's representation; it's
     # consistent with hY1, but the (e, f) representatives of Z are fresh.
-    p.choose("e1: ?q e f. Y = Q e1 q /\\ Z = Q e f /\\ flt e1 q e f", from_="h2")
-    p.choose("f1: ?e f. Y = Q e1 f1 /\\ Z = Q e f /\\ flt e1 f1 e f", from_="e1_eq")
-    p.choose("g1: ?f. Y = Q e1 f1 /\\ Z = Q g1 f /\\ flt e1 f1 g1 f", from_="f1_eq")
-    p.choose("h1n: Y = Q e1 f1 /\\ Z = Q g1 h1n /\\ flt e1 f1 g1 h1n", from_="g1_eq")
+    p.choose("e1 f1 g1 h1n: Y = Q e1 f1 /\\ Z = Q g1 h1n /\\ flt e1 f1 g1 h1n",
+             from_="h2")
     p.split("h1n_eq", "(hY2, t2)")
     p.split("t2", "(hZ, hlt2)")
     # Y = Q c d = Q e1 f1 ; so Q c d = Q e1 f1, hence feq c d e1 f1.
@@ -809,8 +700,7 @@ def SATZ_89(p):
     p.goal("!X. ?Z. rgt Z X", types=_R_TYPES)
     p.fix("X")
     p.have("ex: ?a b. X = Q a b").by_match(Q_SURJ)
-    p.choose("a: ?b. X = Q a b", from_="ex")
-    p.choose("b: X = Q a b", from_="a_eq")
+    p.choose("a b: X = Q a b", from_="ex")
     # Witness: Q (a+a) b. SATZ_53: fgt (x1+x1) x2 x1 x2.
     p.have("fg: fgt (a+a) b a b").by_match(SATZ_53)
     p.have("rg: rgt (Q (a+a) b) (Q a b)").by_match(RGT_INTRO, "fg")
@@ -829,8 +719,7 @@ def SATZ_90(p):
     p.goal("!X. ?Z. rlt Z X", types=_R_TYPES)
     p.fix("X")
     p.have("ex: ?a b. X = Q a b").by_match(Q_SURJ)
-    p.choose("a: ?b. X = Q a b", from_="ex")
-    p.choose("b: X = Q a b", from_="a_eq")
+    p.choose("a b: X = Q a b", from_="ex")
     p.have("fl: flt a (b+b) a b").by_match(SATZ_54)
     p.have("rl: rlt (Q a (b+b)) (Q a b)").by_match(RLT_INTRO, "fl")
     Z_witness = p._parse("Q a (b+b)")
@@ -904,10 +793,7 @@ def SATZ_91(p):
     p.assume("h: rlt X Y")
     p._parse("X")
     p._parse("Y")
-    p.choose("a: ?b c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="h")
-    p.choose("b: ?c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="a_eq")
-    p.choose("c: ?d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="b_eq")
-    p.choose("d: X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="c_eq")
+    p.choose("a b c d: X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="h")
     p.split("d_eq", "(hX, h2)")
     p.split("h2", "(hY, hlt)")
     # Witness midpoint Q (a+c) (b+d).
@@ -915,8 +801,7 @@ def SATZ_91(p):
     # Actually Satz 55 returns the conjunction directly via ?-witness.
     # We use SATZ_55 statement: flt x1 x2 y1 y2 ==> ?z1 z2. flt x1 x2 z1 z2 /\ flt z1 z2 y1 y2.
     p.have("ex55: ?z1 z2. flt a b z1 z2 /\\ flt z1 z2 c d").by_match(SATZ_55, "hlt")
-    p.choose("z1: ?z2. flt a b z1 z2 /\\ flt z1 z2 c d", from_="ex55")
-    p.choose("z2: flt a b z1 z2 /\\ flt z1 z2 c d", from_="z1_eq")
+    p.choose("z1 z2: flt a b z1 z2 /\\ flt z1 z2 c d", from_="ex55")
     p.split("z2_eq", "(flt_a, flt_b)")
     p.have("rl1_QabQz: rlt (Q a b) (Q z1 z2)").by_match(RLT_INTRO, "flt_a")
     p.have("rl2_QzQcd: rlt (Q z1 z2) (Q c d)").by_match(RLT_INTRO, "flt_b")
@@ -1080,10 +965,8 @@ def SATZ_92(p):
     Y_t = p._parse("Y")
     p.have("eX: ?a b. X = Q a b").by_match(Q_SURJ)
     p.have("eY: ?a b. Y = Q a b").by_match(Q_SURJ)
-    p.choose("a: ?b. X = Q a b", from_="eX")
-    p.choose("b: X = Q a b", from_="a_eq")
-    p.choose("c: ?b. Y = Q c b", from_="eY")
-    p.choose("d: Y = Q c d", from_="c_eq")
+    p.choose("a b: X = Q a b", from_="eX")
+    p.choose("c d: Y = Q c d", from_="eY")
     # radd X Y = radd (Q a b) (Q c d) = Q (a*d + c*b) (b*d).
     sub_XY = _bin_subst(p, RADD, p.fact("b_eq"), p.fact("d_eq"), X_t, Y_t)
     radd_XY_eq_canon_LR = TRANS(sub_XY, SPECL(
@@ -1116,12 +999,9 @@ def SATZ_93(p):
     p.have("eX: ?a b. X = Q a b").by_match(Q_SURJ)
     p.have("eY: ?a b. Y = Q a b").by_match(Q_SURJ)
     p.have("eZ: ?a b. Z = Q a b").by_match(Q_SURJ)
-    p.choose("a: ?b. X = Q a b", from_="eX")
-    p.choose("b: X = Q a b", from_="a_eq")
-    p.choose("c: ?b. Y = Q c b", from_="eY")
-    p.choose("d: Y = Q c d", from_="c_eq")
-    p.choose("e: ?b. Z = Q e b", from_="eZ")
-    p.choose("f: Z = Q e f", from_="e_eq")
+    p.choose("a b: X = Q a b", from_="eX")
+    p.choose("c d: Y = Q c d", from_="eY")
+    p.choose("e f: Z = Q e f", from_="eZ")
     a_t = p._parse("a")
     b_t = p._parse("b")
     c_t = p._parse("c")
@@ -1166,10 +1046,8 @@ def SATZ_94(p):
     Y_t = p._parse("Y")
     p.have("eX: ?a b. X = Q a b").by_match(Q_SURJ)
     p.have("eY: ?a b. Y = Q a b").by_match(Q_SURJ)
-    p.choose("a: ?b. X = Q a b", from_="eX")
-    p.choose("b: X = Q a b", from_="a_eq")
-    p.choose("c: ?b. Y = Q c b", from_="eY")
-    p.choose("d: Y = Q c d", from_="c_eq")
+    p.choose("a b: X = Q a b", from_="eX")
+    p.choose("c d: Y = Q c d", from_="eY")
     sub_XY = _bin_subst(p, RADD, p.fact("b_eq"), p.fact("d_eq"), X_t, Y_t)
     radd_eq_canon = TRANS(sub_XY, SPECL(
         [p._parse("a"), p._parse("b"), p._parse("c"), p._parse("d")],
@@ -1203,15 +1081,11 @@ def SATZ_95(p):
     X_t = p._parse("X")
     Y_t = p._parse("Y")
     Z_t = p._parse("Z")
-    p.choose("a: ?b c d. X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="h")
-    p.choose("b: ?c d. X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="a_eq")
-    p.choose("c: ?d. X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="b_eq")
-    p.choose("d: X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="c_eq")
+    p.choose("a b c d: X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="h")
     p.split("d_eq", "(hX, h2)")
     p.split("h2", "(hY, hgt)")
     p.have("eZ: ?a b. Z = Q a b").by_match(Q_SURJ)
-    p.choose("e: ?b. Z = Q e b", from_="eZ")
-    p.choose("f: Z = Q e f", from_="e_eq")
+    p.choose("e f: Z = Q e f", from_="eZ")
     a_t = p._parse("a")
     b_t = p._parse("b")
     c_t = p._parse("c")
@@ -1275,12 +1149,9 @@ def SATZ_97A(p):
     p.have("eX: ?a b. X = Q a b").by_match(Q_SURJ)
     p.have("eY: ?a b. Y = Q a b").by_match(Q_SURJ)
     p.have("eZ: ?a b. Z = Q a b").by_match(Q_SURJ)
-    p.choose("a: ?b. X = Q a b", from_="eX")
-    p.choose("b: X = Q a b", from_="a_eq")
-    p.choose("c: ?b. Y = Q c b", from_="eY")
-    p.choose("d: Y = Q c d", from_="c_eq")
-    p.choose("e: ?b. Z = Q e b", from_="eZ")
-    p.choose("f: Z = Q e f", from_="e_eq")
+    p.choose("a b: X = Q a b", from_="eX")
+    p.choose("c d: Y = Q c d", from_="eY")
+    p.choose("e f: Z = Q e f", from_="eZ")
     a_t = p._parse("a")
     b_t = p._parse("b")
     c_t = p._parse("c")
@@ -1315,12 +1186,9 @@ def SATZ_97B(p):
     p.have("eX: ?a b. X = Q a b").by_match(Q_SURJ)
     p.have("eY: ?a b. Y = Q a b").by_match(Q_SURJ)
     p.have("eZ: ?a b. Z = Q a b").by_match(Q_SURJ)
-    p.choose("a: ?b. X = Q a b", from_="eX")
-    p.choose("b: X = Q a b", from_="a_eq")
-    p.choose("c: ?b. Y = Q c b", from_="eY")
-    p.choose("d: Y = Q c d", from_="c_eq")
-    p.choose("e: ?b. Z = Q e b", from_="eZ")
-    p.choose("f: Z = Q e f", from_="e_eq")
+    p.choose("a b: X = Q a b", from_="eX")
+    p.choose("c d: Y = Q c d", from_="eY")
+    p.choose("e f: Z = Q e f", from_="eZ")
     a_t = p._parse("a")
     b_t = p._parse("b")
     c_t = p._parse("c")
@@ -1480,10 +1348,8 @@ def SATZ_101_EXIST(p):
     Y_t = p._parse("Y")
     p.have("eX: ?a b. X = Q a b").by_match(Q_SURJ)
     p.have("eY: ?a b. Y = Q a b").by_match(Q_SURJ)
-    p.choose("a: ?b. X = Q a b", from_="eX")
-    p.choose("b: X = Q a b", from_="a_eq")
-    p.choose("c: ?b. Y = Q c b", from_="eY")
-    p.choose("d: Y = Q c d", from_="c_eq")
+    p.choose("a b: X = Q a b", from_="eX")
+    p.choose("c d: Y = Q c d", from_="eY")
     p._parse("a")
     p._parse("b")
     c_t = p._parse("c")
@@ -1495,8 +1361,7 @@ def SATZ_101_EXIST(p):
     # SATZ_67_EXIST: ?u1 u2. feq (c*u2 + u1*d) (d*u2) a b.
     p.have("ex_uv: ?u1 u2. feq (c*u2 + u1*d) (d*u2) a b") \
         .by_match(SATZ_67_EXIST, "fg")
-    p.choose("u: ?u2. feq (c*u2 + u*d) (d*u2) a b", from_="ex_uv")
-    p.choose("v: feq (c*v + u*d) (d*v) a b", from_="u_eq")
+    p.choose("u v: feq (c*v + u*d) (d*v) a b", from_="ex_uv")
     u_t = p._parse("u")
     v_t = p._parse("v")
     # Q (c*v + u*d) (d*v) = Q a b.
@@ -1673,10 +1538,8 @@ def SATZ_102(p):
     Y_t = p._parse("Y")
     p.have("eX: ?a b. X = Q a b").by_match(Q_SURJ)
     p.have("eY: ?a b. Y = Q a b").by_match(Q_SURJ)
-    p.choose("a: ?b. X = Q a b", from_="eX")
-    p.choose("b: X = Q a b", from_="a_eq")
-    p.choose("c: ?b. Y = Q c b", from_="eY")
-    p.choose("d: Y = Q c d", from_="c_eq")
+    p.choose("a b: X = Q a b", from_="eX")
+    p.choose("c d: Y = Q c d", from_="eY")
     sub_XY = _bin_subst(p, RMUL, p.fact("b_eq"), p.fact("d_eq"), X_t, Y_t)
     rmul_XY = TRANS(sub_XY, SPECL(
         [p._parse("a"), p._parse("b"), p._parse("c"), p._parse("d")], RMUL_QQ))
@@ -1703,12 +1566,9 @@ def SATZ_103(p):
     p.have("eX: ?a b. X = Q a b").by_match(Q_SURJ)
     p.have("eY: ?a b. Y = Q a b").by_match(Q_SURJ)
     p.have("eZ: ?a b. Z = Q a b").by_match(Q_SURJ)
-    p.choose("a: ?b. X = Q a b", from_="eX")
-    p.choose("b: X = Q a b", from_="a_eq")
-    p.choose("c: ?b. Y = Q c b", from_="eY")
-    p.choose("d: Y = Q c d", from_="c_eq")
-    p.choose("e: ?b. Z = Q e b", from_="eZ")
-    p.choose("f: Z = Q e f", from_="e_eq")
+    p.choose("a b: X = Q a b", from_="eX")
+    p.choose("c d: Y = Q c d", from_="eY")
+    p.choose("e f: Z = Q e f", from_="eZ")
     a_t = p._parse("a")
     b_t = p._parse("b")
     c_t = p._parse("c")
@@ -1747,12 +1607,9 @@ def SATZ_104(p):
     p.have("eX: ?a b. X = Q a b").by_match(Q_SURJ)
     p.have("eY: ?a b. Y = Q a b").by_match(Q_SURJ)
     p.have("eZ: ?a b. Z = Q a b").by_match(Q_SURJ)
-    p.choose("a: ?b. X = Q a b", from_="eX")
-    p.choose("b: X = Q a b", from_="a_eq")
-    p.choose("c: ?b. Y = Q c b", from_="eY")
-    p.choose("d: Y = Q c d", from_="c_eq")
-    p.choose("e: ?b. Z = Q e b", from_="eZ")
-    p.choose("f: Z = Q e f", from_="e_eq")
+    p.choose("a b: X = Q a b", from_="eX")
+    p.choose("c d: Y = Q c d", from_="eY")
+    p.choose("e f: Z = Q e f", from_="eZ")
     a_t = p._parse("a")
     b_t = p._parse("b")
     c_t = p._parse("c")
@@ -1806,12 +1663,9 @@ def SATZ_105A(p):
     p.have("eX: ?a b. X = Q a b").by_match(Q_SURJ)
     p.have("eY: ?a b. Y = Q a b").by_match(Q_SURJ)
     p.have("eZ: ?a b. Z = Q a b").by_match(Q_SURJ)
-    p.choose("a: ?b. X = Q a b", from_="eX")
-    p.choose("b: X = Q a b", from_="a_eq")
-    p.choose("c: ?b. Y = Q c b", from_="eY")
-    p.choose("d: Y = Q c d", from_="c_eq")
-    p.choose("e: ?b. Z = Q e b", from_="eZ")
-    p.choose("f: Z = Q e f", from_="e_eq")
+    p.choose("a b: X = Q a b", from_="eX")
+    p.choose("c d: Y = Q c d", from_="eY")
+    p.choose("e f: Z = Q e f", from_="eZ")
     a_t = p._parse("a")
     b_t = p._parse("b")
     c_t = p._parse("c")
@@ -1868,12 +1722,9 @@ def SATZ_106A(p):
     p.have("eX: ?a b. X = Q a b").by_match(Q_SURJ)
     p.have("eY: ?a b. Y = Q a b").by_match(Q_SURJ)
     p.have("eZ: ?a b. Z = Q a b").by_match(Q_SURJ)
-    p.choose("a: ?b. X = Q a b", from_="eX")
-    p.choose("b: X = Q a b", from_="a_eq")
-    p.choose("c: ?b. Y = Q c b", from_="eY")
-    p.choose("d: Y = Q c d", from_="c_eq")
-    p.choose("e: ?b. Z = Q e b", from_="eZ")
-    p.choose("f: Z = Q e f", from_="e_eq")
+    p.choose("a b: X = Q a b", from_="eX")
+    p.choose("c d: Y = Q c d", from_="eY")
+    p.choose("e f: Z = Q e f", from_="eZ")
     a_t = p._parse("a")
     b_t = p._parse("b")
     c_t = p._parse("c")
@@ -1908,12 +1759,9 @@ def SATZ_106B(p):
     p.have("eX: ?a b. X = Q a b").by_match(Q_SURJ)
     p.have("eY: ?a b. Y = Q a b").by_match(Q_SURJ)
     p.have("eZ: ?a b. Z = Q a b").by_match(Q_SURJ)
-    p.choose("a: ?b. X = Q a b", from_="eX")
-    p.choose("b: X = Q a b", from_="a_eq")
-    p.choose("c: ?b. Y = Q c b", from_="eY")
-    p.choose("d: Y = Q c d", from_="c_eq")
-    p.choose("e: ?b. Z = Q e b", from_="eZ")
-    p.choose("f: Z = Q e f", from_="e_eq")
+    p.choose("a b: X = Q a b", from_="eX")
+    p.choose("c d: Y = Q c d", from_="eY")
+    p.choose("e f: Z = Q e f", from_="eZ")
     a_t = p._parse("a")
     b_t = p._parse("b")
     c_t = p._parse("c")
@@ -2072,10 +1920,8 @@ def SATZ_110_EXIST(p):
     p._parse("Y")
     p.have("eX: ?a b. X = Q a b").by_match(Q_SURJ)
     p.have("eY: ?a b. Y = Q a b").by_match(Q_SURJ)
-    p.choose("a: ?b. X = Q a b", from_="eX")
-    p.choose("b: X = Q a b", from_="a_eq")
-    p.choose("c: ?b. Y = Q c b", from_="eY")
-    p.choose("d: Y = Q c d", from_="c_eq")
+    p.choose("a b: X = Q a b", from_="eX")
+    p.choose("c d: Y = Q c d", from_="eY")
     p._parse("a")
     p._parse("b")
     c_t = p._parse("c")
@@ -2290,8 +2136,7 @@ def RMUL_ONE(p):
     p.fix("X")
     p._parse("X")
     p.have("eX: ?a b. X = Q a b").by_match(Q_SURJ)
-    p.choose("a: ?b. X = Q a b", from_="eX")
-    p.choose("b: X = Q a b", from_="a_eq")
+    p.choose("a b: X = Q a b", from_="eX")
     a_t = p._parse("a")
     b_t = p._parse("b")
     ONE_t = p._parse("1")
@@ -2385,8 +2230,7 @@ def SATZ_115(p):
     Z_t = p._parse("Z")
     # Reps z, v of Z.
     p.have("eZ: ?a b. Z = Q a b").by_match(Q_SURJ)
-    p.choose("z: ?b. Z = Q z b", from_="eZ")
-    p.choose("v: Z = Q z v", from_="z_eq")
+    p.choose("z v: Z = Q z v", from_="eZ")
     z_t = p._parse("z")
     v_t = p._parse("v")
     ONE_t = p._parse("1")
