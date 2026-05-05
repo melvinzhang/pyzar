@@ -571,18 +571,13 @@ def SATZ_82(p):
     p.goal("!X Y. rgt X Y ==> rlt Y X", types=_R_TYPES)
     p.fix("X Y")
     p.assume("h: rgt X Y")
-    Y_t = p._parse("Y")
     p.choose("a b c d: X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="h")
     p.split("d_eq", "(hX, h2)")
     p.split("h2", "(hY, hgt)")
+    p.simp("hX", "hY")
     p.have("flt: flt c d a b").by_match(SATZ_42, "hgt")
     p.have("rl_QcdQab: rlt (Q c d) (Q a b)").by_match(RLT_INTRO, "flt")
-    # rlt Y X = rlt (Q c d) (Q a b) via hY, hX.
-    sub_l = AP_TERM(RLT, p.fact("hY"))                       # rlt Y = rlt (Q c d)
-    sub_l2 = AP_THM(sub_l, p._parse("Q a b"))                 # rlt Y (Q a b) = rlt (Q c d) (Q a b)
-    sub_r = AP_TERM(mk_app(RLT, Y_t), p.fact("hX"))           # rlt Y X = rlt Y (Q a b)
-    sub_full = TRANS(sub_r, sub_l2)
-    p.thus("rlt Y X").by_eq_mp(SYM(sub_full), "rl_QcdQab")
+    p.thus("rlt Y X").by_rewrite_of("rl_QcdQab", [])
 
 
 # Satz 83:  rlt X Y ==> rgt Y X.
@@ -591,17 +586,13 @@ def SATZ_83(p):
     p.goal("!X Y. rlt X Y ==> rgt Y X", types=_R_TYPES)
     p.fix("X Y")
     p.assume("h: rlt X Y")
-    Y_t = p._parse("Y")
     p.choose("a b c d: X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="h")
     p.split("d_eq", "(hX, h2)")
     p.split("h2", "(hY, hlt)")
+    p.simp("hX", "hY")
     p.have("fgt: fgt c d a b").by_match(SATZ_43, "hlt")
     p.have("rg_QcdQab: rgt (Q c d) (Q a b)").by_match(RGT_INTRO, "fgt")
-    sub_l = AP_TERM(RGT, p.fact("hY"))
-    sub_l2 = AP_THM(sub_l, p._parse("Q a b"))
-    sub_r = AP_TERM(mk_app(RGT, Y_t), p.fact("hX"))
-    sub_full = TRANS(sub_r, sub_l2)
-    p.thus("rgt Y X").by_eq_mp(SYM(sub_full), "rg_QcdQab")
+    p.thus("rgt Y X").by_rewrite_of("rg_QcdQab", [])
 
 
 # Definition 20 / 21:  >= and <= on rat.
@@ -657,7 +648,6 @@ def SATZ_86(p):
     p.goal("!X Y Z. rlt X Y ==> rlt Y Z ==> rlt X Z", types=_R_TYPES)
     p.fix("X Y Z")
     p.assume("h1: rlt X Y", "h2: rlt Y Z")
-    X_t = p._parse("X")
     p.choose("a b c d: X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="h1")
     p.split("d_eq", "(hX, t1)")
     p.split("t1", "(hY1, hlt1)")
@@ -667,31 +657,19 @@ def SATZ_86(p):
              from_="h2")
     p.split("h1n_eq", "(hY2, t2)")
     p.split("t2", "(hZ, hlt2)")
+    p.simp("hX", "hZ")
     # Y = Q c d = Q e1 f1 ; so Q c d = Q e1 f1, hence feq c d e1 f1.
     p.have("Qcd_eq_Qe1f1: Q c d = Q e1 f1") \
         .by_thm(TRANS(SYM(p.fact("hY1")), p.fact("hY2")))
-    feq_cd_e1f1 = Q_eq_to_feq(p.fact("Qcd_eq_Qe1f1"))
-    p.have("feq_eq: feq c d e1 f1").by_thm(feq_cd_e1f1)
-    # SATZ_45: flt a b c d ==> feq a b c d ==> feq c d e f ==> flt e f e' f'.
-    # Actually SATZ_45 is: flt x1 x2 y1 y2, feq x1 x2 z1 z2, feq y1 y2 u1 u2 ==> flt z1 z2 u1 u2.
-    # We need a transit through (a, b)/(c, d) → use flt a b c d, transition c d → e1 f1 → flt a b e1 f1.
-    # flt c d g1 h1n combined with feq e1 f1 c d (= sym of feq_eq) gives flt e1 f1 g1 h1n? No,
-    # we have flt e1 f1 g1 h1n (hlt2). Transition e1 f1 → c d uses feq e1 f1 c d (from feq_eq).
+    p.have("feq_eq: feq c d e1 f1") \
+        .by_thm(Q_eq_to_feq(p.fact("Qcd_eq_Qe1f1")))
     p.have("feq_e1f1_cd: feq e1 f1 c d").by_match(SATZ_38, "feq_eq")
-    # SATZ_45: flt e1 f1 g1 h1n /\ feq e1 f1 c d /\ feq g1 h1n g1 h1n ==> flt c d g1 h1n.
     p.have("refl_gh: feq g1 h1n g1 h1n").by_match(SATZ_37)
     p.have("flt_cd_gh: flt c d g1 h1n") \
         .by_match(SATZ_45, "hlt2", "feq_e1f1_cd", "refl_gh")
-    # Now combine flt a b c d (hlt1) and flt c d g1 h1n (flt_cd_gh) via SATZ_50.
     p.have("flt_ab_gh: flt a b g1 h1n").by_match(SATZ_50, "hlt1", "flt_cd_gh")
-    # Lift to rlt (Q a b) (Q g1 h1n).
     p.have("rl: rlt (Q a b) (Q g1 h1n)").by_match(RLT_INTRO, "flt_ab_gh")
-    # Bridge to rlt X Z via X = Q a b, Z = Q g1 h1n.
-    sub_x = AP_TERM(RLT, p.fact("hX"))                          # rlt X = rlt (Q a b)
-    sub_x2 = AP_THM(sub_x, p._parse("Q g1 h1n"))                  # rlt X (Q g1 h1n) = rlt (Q a b) (Q g1 h1n)
-    sub_z = AP_TERM(mk_app(RLT, X_t), p.fact("hZ"))              # rlt X Z = rlt X (Q g1 h1n)
-    sub_full = TRANS(sub_z, sub_x2)
-    p.thus("rlt X Z").by_eq_mp(SYM(sub_full), "rl")
+    p.thus("rlt X Z").by_rewrite_of("rl", [])
 
 
 # Satz 89:  for any X there exists Z > X.
@@ -738,10 +716,7 @@ def SATZ_87A(p):
         with p.case("l: rlt X Y"):
             p.thus("rlt X Z").by_match(SATZ_86, "l", "hlt")
         with p.case("e: X = Y"):
-            # rlt Y Z and X = Y => rlt X Z by substitution.
-            sub = AP_TERM(RLT, p.fact("e"))   # rlt X = rlt Y
-            sub2 = AP_THM(sub, p._parse("Z"))  # rlt X Z = rlt Y Z
-            p.thus("rlt X Z").by_eq_mp(SYM(sub2), "hlt")
+            p.thus("rlt X Z").by_rewrite_of("hlt", ["e"])
 
 
 @proof
@@ -753,9 +728,7 @@ def SATZ_87B(p):
         with p.case("l: rlt Y Z"):
             p.thus("rlt X Z").by_match(SATZ_86, "hlt", "l")
         with p.case("e: Y = Z"):
-            sub = AP_TERM(mk_app(RLT, p._parse("X")), p.fact("e"))
-            # sub : |- rlt X Y = rlt X Z; forward EQ_MP from rlt X Y.
-            p.thus("rlt X Z").by_eq_mp(sub, "hlt")
+            p.thus("rlt X Z").by_rewrite_of("hlt", ["e"])
 
 
 # Satz 88:  rle X Y /\ rle Y Z  ==>  rle X Z.
@@ -764,7 +737,6 @@ def SATZ_88(p):
     p.goal("!X Y Z. rle X Y ==> rle Y Z ==> rle X Z", types=_R_TYPES)
     p.fix("X Y Z")
     p.assume("h1: rle X Y", "h2: rle Y Z")
-    Z_t = p._parse("Z")
     with p.thus("rle X Z").by_cases("h1"):
         with p.case("l1: rlt X Y"):
             p.have("lt_XZ: rlt X Z").by_match(SATZ_87B, "l1", "h2")
@@ -773,9 +745,7 @@ def SATZ_88(p):
         with p.case("e1: X = Y"):
             with p.thus("rle X Z").by_cases("h2"):
                 with p.case("l2: rlt Y Z"):
-                    sub = AP_TERM(RLT, p.fact("e1"))
-                    sub2 = AP_THM(sub, Z_t)   # rlt X Z = rlt Y Z
-                    p.have("lt_XZ: rlt X Z").by_eq_mp(SYM(sub2), "l2")
+                    p.have("lt_XZ: rlt X Z").by_rewrite_of("l2", ["e1"])
                     p.have("orL: rlt X Z \\/ X = Z").by(DISJ1, "lt_XZ", "X = Z")
                     p.thus("rle X Z").by_fold("orL")
                 with p.case("e2: Y = Z"):
@@ -805,15 +775,11 @@ def SATZ_91(p):
     p.split("z2_eq", "(flt_a, flt_b)")
     p.have("rl1_QabQz: rlt (Q a b) (Q z1 z2)").by_match(RLT_INTRO, "flt_a")
     p.have("rl2_QzQcd: rlt (Q z1 z2) (Q c d)").by_match(RLT_INTRO, "flt_b")
-    Z_witness = p._parse("Q z1 z2")
-    # rlt X (Q z1 z2): use hX for X = Q a b.
-    sub_x = AP_TERM(RLT, p.fact("hX"))             # rlt X = rlt (Q a b)
-    sub_x2 = AP_THM(sub_x, Z_witness)               # rlt X (Q z1 z2) = rlt (Q a b) (Q z1 z2)
-    p.have("rlt_XZ: rlt X (Q z1 z2)").by_eq_mp(SYM(sub_x2), "rl1_QabQz")
-    sub_y = AP_TERM(mk_app(RLT, Z_witness), p.fact("hY"))   # rlt (Q z1 z2) Y = rlt (Q z1 z2) (Q c d)
-    p.have("rlt_ZY: rlt (Q z1 z2) Y").by_eq_mp(SYM(sub_y), "rl2_QzQcd")
+    p.simp("hX", "hY")
+    p.have("rlt_XZ: rlt X (Q z1 z2)").by_rewrite_of("rl1_QabQz", [])
+    p.have("rlt_ZY: rlt (Q z1 z2) Y").by_rewrite_of("rl2_QzQcd", [])
     p.have("conj: rlt X (Q z1 z2) /\\ rlt (Q z1 z2) Y").by(CONJ, "rlt_XZ", "rlt_ZY")
-    p.thus("?Z. rlt X Z /\\ rlt Z Y").by_witness(Z_witness, "conj")
+    p.thus("?Z. rlt X Z /\\ rlt Z Y").by_witness(p._parse("Q z1 z2"), "conj")
 
 
 # ---------------------------------------------------------------------------
@@ -961,23 +927,21 @@ def _bin_subst(p, op_const, hX, hY, X_t, Y_t):
 def SATZ_92(p):
     p.goal("!X Y. radd X Y = radd Y X", types=_R_TYPES)
     p.fix("X Y")
-    X_t = p._parse("X")
-    Y_t = p._parse("Y")
     p.have("eX: ?a b. X = Q a b").by_match(Q_SURJ)
     p.have("eY: ?a b. Y = Q a b").by_match(Q_SURJ)
     p.choose("a b: X = Q a b", from_="eX")
     p.choose("c d: Y = Q c d", from_="eY")
     # radd X Y = radd (Q a b) (Q c d) = Q (a*d + c*b) (b*d).
+    X_t = p._parse("X")
+    Y_t = p._parse("Y")
     sub_XY = _bin_subst(p, RADD, p.fact("b_eq"), p.fact("d_eq"), X_t, Y_t)
     radd_XY_eq_canon_LR = TRANS(sub_XY, SPECL(
         [p._parse("a"), p._parse("b"), p._parse("c"), p._parse("d")],
         RADD_QQ))
-    # radd Y X = radd (Q c d) (Q a b) = Q (c*b + a*d) (d*b).
     sub_YX = _bin_subst(p, RADD, p.fact("d_eq"), p.fact("b_eq"), Y_t, X_t)
     radd_YX_eq_canon_RL = TRANS(sub_YX, SPECL(
         [p._parse("c"), p._parse("d"), p._parse("a"), p._parse("b")],
         RADD_QQ))
-    # The two canonical forms are =-equal by Satz 58 (fraction-level commutativity).
     p.have("feq58: feq (a*d + c*b) (b*d) (c*b + a*d) (d*b)") \
         .by_match(SATZ_58)
     p.have("Qcomm: Q (a*d + c*b) (b*d) = Q (c*b + a*d) (d*b)") \
@@ -1234,15 +1198,10 @@ def SATZ_98(p):
     Z_t = p._parse("Z")
     Y_t = p._parse("Y")
     U_t = p._parse("U")
-    p._parse("X")
     p.have("g1: rgt (radd X Z) (radd Y Z)").by_match(SATZ_95, "hXY")
     p.have("g2: rgt (radd Z Y) (radd U Y)").by_match(SATZ_95, "hZU")
-    com_ZY = SPECL([Z_t, Y_t], SATZ_92)         # Z+Y = Y+Z
-    com_UY = SPECL([U_t, Y_t], SATZ_92)         # U+Y = Y+U
-    bridge2 = _bin_subst(p, RGT, com_ZY, com_UY,
-                          mk_app(RADD, Z_t, Y_t), mk_app(RADD, U_t, Y_t))
-    p.have("g2b: rgt (radd Y Z) (radd Y U)").by_eq_mp(bridge2, "g2")
-    # Transit via rlt.
+    p.simp(SPECL([Z_t, Y_t], SATZ_92), SPECL([U_t, Y_t], SATZ_92))
+    p.have("g2b: rgt (radd Y Z) (radd Y U)").by_rewrite_of("g2", [])
     p.have("l1: rlt (radd Y Z) (radd X Z)").by_match(SATZ_82, "g1")
     p.have("l2: rlt (radd Y U) (radd Y Z)").by_match(SATZ_82, "g2b")
     p.have("l_chain: rlt (radd Y U) (radd X Z)") \
@@ -1266,17 +1225,11 @@ def SATZ_99A(p):
                 .by_match(SATZ_98, "g_xy", "hgt")
         with p.case("e_xy: X = Y"):
             p.have("g_zy: rgt (radd Z Y) (radd U Y)").by_match(SATZ_95, "hgt")
-            com_ZY = SPECL([Z_t, Y_t], SATZ_92)
-            com_UY = SPECL([U_t, Y_t], SATZ_92)
-            bridge = _bin_subst(p, RGT, com_ZY, com_UY,
-                                 mk_app(RADD, Z_t, Y_t),
-                                 mk_app(RADD, U_t, Y_t))
-            p.have("g_yzy: rgt (radd Y Z) (radd Y U)").by_eq_mp(bridge, "g_zy")
+            p.simp(SPECL([Z_t, Y_t], SATZ_92), SPECL([U_t, Y_t], SATZ_92))
+            p.have("g_yzy: rgt (radd Y Z) (radd Y U)").by_rewrite_of("g_zy", [])
             p.have("eq_xz_yz: radd X Z = radd Y Z").by_match(SATZ_96B, "e_xy")
-            sub_l = AP_TERM(RGT, p.fact("eq_xz_yz"))
-            sub_l_at = AP_THM(sub_l, mk_app(RADD, Y_t, U_t))
             p.thus("rgt (radd X Z) (radd Y U)") \
-                .by_eq_mp(SYM(sub_l_at), "g_yzy")
+                .by_rewrite_of("g_yzy", ["eq_xz_yz"])
 
 
 # Satz 99B:  rgt X Y, rge Z U ==> rgt (X + Z) (Y + U).
@@ -1295,11 +1248,8 @@ def SATZ_99B(p):
                 .by_match(SATZ_98, "hgt", "g_zu")
         with p.case("e_zu: Z = U"):
             p.have("g_xu: rgt (radd X U) (radd Y U)").by_match(SATZ_95, "hgt")
-            sub_eq_xz = AP_TERM(mk_app(RADD, X_t), p.fact("e_zu"))
-            sub_l = AP_TERM(RGT, sub_eq_xz)
-            sub_l_at = AP_THM(sub_l, mk_app(RADD, Y_t, U_t))
             p.thus("rgt (radd X Z) (radd Y U)") \
-                .by_eq_mp(SYM(sub_l_at), "g_xu")
+                .by_rewrite_of("g_xu", ["e_zu"])
 
 
 # Satz 100:  rge X Y, rge Z U ==> rge (X + Z) (Y + U).
@@ -1807,14 +1757,10 @@ def SATZ_107(p):
     Z_t = p._parse("Z")
     Y_t = p._parse("Y")
     U_t = p._parse("U")
-    p._parse("X")
     p.have("g1: rgt (rmul X Z) (rmul Y Z)").by_match(SATZ_105A, "hXY")
     p.have("g2: rgt (rmul Z Y) (rmul U Y)").by_match(SATZ_105A, "hZU")
-    com_ZY = SPECL([Z_t, Y_t], SATZ_102)         # ZY = YZ
-    com_UY = SPECL([U_t, Y_t], SATZ_102)         # UY = YU
-    bridge2 = _bin_subst(p, RGT, com_ZY, com_UY,
-                          mk_app(RMUL, Z_t, Y_t), mk_app(RMUL, U_t, Y_t))
-    p.have("g2b: rgt (rmul Y Z) (rmul Y U)").by_eq_mp(bridge2, "g2")
+    p.simp(SPECL([Z_t, Y_t], SATZ_102), SPECL([U_t, Y_t], SATZ_102))
+    p.have("g2b: rgt (rmul Y Z) (rmul Y U)").by_rewrite_of("g2", [])
     p.have("l1: rlt (rmul Y Z) (rmul X Z)").by_match(SATZ_82, "g1")
     p.have("l2: rlt (rmul Y U) (rmul Y Z)").by_match(SATZ_82, "g2b")
     p.have("l_chain: rlt (rmul Y U) (rmul X Z)") \
@@ -1839,18 +1785,12 @@ def SATZ_108A(p):
         with p.case("e_xy: X = Y"):
             p.have("g_zy: rgt (rmul Z Y) (rmul U Y)") \
                 .by_match(SATZ_105A, "hgt")
-            com_ZY = SPECL([Z_t, Y_t], SATZ_102)
-            com_UY = SPECL([U_t, Y_t], SATZ_102)
-            bridge = _bin_subst(p, RGT, com_ZY, com_UY,
-                                 mk_app(RMUL, Z_t, Y_t),
-                                 mk_app(RMUL, U_t, Y_t))
+            p.simp(SPECL([Z_t, Y_t], SATZ_102), SPECL([U_t, Y_t], SATZ_102))
             p.have("g_yzy: rgt (rmul Y Z) (rmul Y U)") \
-                .by_eq_mp(bridge, "g_zy")
+                .by_rewrite_of("g_zy", [])
             p.have("eq_xz_yz: rmul X Z = rmul Y Z").by_match(SATZ_105B, "e_xy")
-            sub_l = AP_TERM(RGT, p.fact("eq_xz_yz"))
-            sub_l_at = AP_THM(sub_l, mk_app(RMUL, Y_t, U_t))
             p.thus("rgt (rmul X Z) (rmul Y U)") \
-                .by_eq_mp(SYM(sub_l_at), "g_yzy")
+                .by_rewrite_of("g_yzy", ["eq_xz_yz"])
 
 
 # Satz 108B:  rgt X Y, rge Z U ==> rgt (X*Z) (Y*U).
@@ -1870,11 +1810,8 @@ def SATZ_108B(p):
         with p.case("e_zu: Z = U"):
             p.have("g_xu: rgt (rmul X U) (rmul Y U)") \
                 .by_match(SATZ_105A, "hgt")
-            sub_eq_xz = AP_TERM(mk_app(RMUL, X_t), p.fact("e_zu"))
-            sub_l = AP_TERM(RGT, sub_eq_xz)
-            sub_l_at = AP_THM(sub_l, mk_app(RMUL, Y_t, U_t))
             p.thus("rgt (rmul X Z) (rmul Y U)") \
-                .by_eq_mp(SYM(sub_l_at), "g_xu")
+                .by_rewrite_of("g_xu", ["e_zu"])
 
 
 # Satz 109:  rge X Y, rge Z U ==> rge (X*Z) (Y*U).
