@@ -17,6 +17,7 @@ The codebase is layered; each file depends only on the ones above it.
 - [`num.py`](num.py): Naturals carved from `ind`; Peano 3/4/5 as theorems; `INDUCT`, `NUM_RECURSION`
 - [`nat.py`](nat.py): Landau Kapitel 1: addition, order, multiplication (Sätze 1–36)
 - [`frac.py`](frac.py): Landau Kapitel 2 §§1–4: fractions (Sätze 37–77)
+- [`rat_int.py`](rat_int.py): Landau Kapitel 2 §5: rationals and integer rationals (Sätze 78–115)
 - [`landau.golden`](landau.golden): Pinned `pp(concl)` of every Satz/Axiom — locks statements against drift
 
 ## Running
