@@ -79,7 +79,7 @@ def SATZ_38(p):
     p.fix("x1 x2 y1 y2")
     p.assume("h: feq x1 x2 y1 y2")
     p.have("eq: x1*y2 = y1*x2") \
-        .by_eq_mp(UNFOLD(FEQ_DEF, x1, x2, y1, y2), "h")
+        .by_def(FEQ_DEF, "h")
     p.have("sym: y1*x2 = x1*y2").by(SYM, "eq")
     p.thus("feq y1 y2 x1 x2").by_unfold("sym", FEQ_DEF)
 
@@ -96,9 +96,9 @@ def SATZ_39(p):
     p.fix("x1 x2 y1 y2 z1 z2")
     p.assume("h1: feq x1 x2 y1 y2", "h2: feq y1 y2 z1 z2")
     p.have("e1: x1*y2 = y1*x2") \
-        .by_eq_mp(UNFOLD(FEQ_DEF, x1, x2, y1, y2), "h1")
+        .by_def(FEQ_DEF, "h1")
     p.have("e2: y1*z2 = z1*y2") \
-        .by_eq_mp(UNFOLD(FEQ_DEF, y1, y2, z1, z2), "h2")
+        .by_def(FEQ_DEF, "h2")
     # (x1*y2)*(y1*z2) = (y1*x2)*(z1*y2).
     prod = MK_COMB(AP_TERM(TIMES, p.fact("e1")), p.fact("e2"))
     with p.calc("can: (x1*z2)*(y1*y2)") as c:
@@ -149,7 +149,7 @@ def SATZ_42(p):
     p.fix("x1 x2 y1 y2")
     p.assume("h: fgt x1 x2 y1 y2")
     p.have("g: x1*y2 > y1*x2") \
-        .by_eq_mp(UNFOLD(FGT_DEF, x1, x2, y1, y2), "h")
+        .by_def(FGT_DEF, "h")
     p.have("l: y1*x2 < x1*y2").by_match(SATZ_11, "g")
     p.thus("flt y1 y2 x1 x2").by_unfold("l", FLT_DEF)
 
@@ -161,7 +161,7 @@ def SATZ_43(p):
     p.fix("x1 x2 y1 y2")
     p.assume("h: flt x1 x2 y1 y2")
     p.have("l: x1*y2 < y1*x2") \
-        .by_eq_mp(UNFOLD(FLT_DEF, x1, x2, y1, y2), "h")
+        .by_def(FLT_DEF, "h")
     p.have("g: y1*x2 > x1*y2").by_match(SATZ_12, "l")
     p.thus("fgt y1 y2 x1 x2").by_unfold("g", FGT_DEF)
 
@@ -180,11 +180,11 @@ def SATZ_44(p):
              "h1: feq x1 x2 z1 z2",
              "h2: feq y1 y2 u1 u2")
     p.have("g: x1*y2 > y1*x2") \
-        .by_eq_mp(UNFOLD(FGT_DEF, x1, x2, y1, y2), "hgt")
+        .by_def(FGT_DEF, "hgt")
     p.have("e1: x1*z2 = z1*x2") \
-        .by_eq_mp(UNFOLD(FEQ_DEF, x1, x2, z1, z2), "h1")
+        .by_def(FEQ_DEF, "h1")
     p.have("e2: y1*u2 = u1*y2") \
-        .by_eq_mp(UNFOLD(FEQ_DEF, y1, y2, u1, u2), "h2")
+        .by_def(FEQ_DEF, "h2")
     # (y1*u2)*(z1*x2) = (u1*y2)*(x1*z2).
     e_mul = MK_COMB(AP_TERM(TIMES, p.fact("e2")), SYM(p.fact("e1")))
     with p.calc("eq: (z1*u2)*(y1*x2)") as c:
@@ -241,7 +241,7 @@ def SATZ_46(p):
              "h1: feq x1 x2 z1 z2",
              "h2: feq y1 y2 u1 u2")
     p.have("disj: fgt x1 x2 y1 y2 \\/ feq x1 x2 y1 y2") \
-        .by_eq_mp(UNFOLD(FGE_DEF, x1, x2, y1, y2), "hge")
+        .by_def(FGE_DEF, "hge")
     with p.thus("fge z1 z2 u1 u2").by_cases("disj"):
         with p.case("g: fgt x1 x2 y1 y2"):
             p.have("g_zu: fgt z1 z2 u1 u2") \
@@ -273,7 +273,7 @@ def SATZ_47(p):
              "h1: feq x1 x2 z1 z2",
              "h2: feq y1 y2 u1 u2")
     p.have("disj: flt x1 x2 y1 y2 \\/ feq x1 x2 y1 y2") \
-        .by_eq_mp(UNFOLD(FLE_DEF, x1, x2, y1, y2), "hle")
+        .by_def(FLE_DEF, "hle")
     with p.thus("fle z1 z2 u1 u2").by_cases("disj"):
         with p.case("l: flt x1 x2 y1 y2"):
             p.have("l_zu: flt z1 z2 u1 u2") \
@@ -301,7 +301,7 @@ def SATZ_48(p):
     p.fix("x1 x2 y1 y2")
     p.assume("h: fge x1 x2 y1 y2")
     p.have("disj: fgt x1 x2 y1 y2 \\/ feq x1 x2 y1 y2") \
-        .by_eq_mp(UNFOLD(FGE_DEF, x1, x2, y1, y2), "h")
+        .by_def(FGE_DEF, "h")
     with p.thus("fle y1 y2 x1 x2").by_cases("disj"):
         with p.case("g: fgt x1 x2 y1 y2"):
             p.have("l: flt y1 y2 x1 x2").by_match(SATZ_42, "g")
@@ -322,7 +322,7 @@ def SATZ_49(p):
     p.fix("x1 x2 y1 y2")
     p.assume("h: fle x1 x2 y1 y2")
     p.have("disj: flt x1 x2 y1 y2 \\/ feq x1 x2 y1 y2") \
-        .by_eq_mp(UNFOLD(FLE_DEF, x1, x2, y1, y2), "h")
+        .by_def(FLE_DEF, "h")
     with p.thus("fge y1 y2 x1 x2").by_cases("disj"):
         with p.case("l: flt x1 x2 y1 y2"):
             p.have("g: fgt y1 y2 x1 x2").by_match(SATZ_43, "l")
@@ -345,9 +345,9 @@ def SATZ_50(p):
     p.fix("x1 x2 y1 y2 z1 z2")
     p.assume("h1: flt x1 x2 y1 y2", "h2: flt y1 y2 z1 z2")
     p.have("l1: x1*y2 < y1*x2") \
-        .by_eq_mp(UNFOLD(FLT_DEF, x1, x2, y1, y2), "h1")
+        .by_def(FLT_DEF, "h1")
     p.have("l2: y1*z2 < z1*y2") \
-        .by_eq_mp(UNFOLD(FLT_DEF, y1, y2, z1, z2), "h2")
+        .by_def(FLT_DEF, "h2")
     # Multiply (x1*y2 < y1*x2) by (y1*z2):  (x1*y2)*(y1*z2) < (y1*x2)*(y1*z2).
     p.have("m1: (x1*y2)*(y1*z2) < (y1*x2)*(y1*z2)") \
         .by_match(SATZ_32C, "l1")
@@ -378,7 +378,7 @@ def SATZ_51A(p):
     p.fix("x1 x2 y1 y2 z1 z2")
     p.assume("hle: fle x1 x2 y1 y2", "hlt: flt y1 y2 z1 z2")
     p.have("disj: flt x1 x2 y1 y2 \\/ feq x1 x2 y1 y2") \
-        .by_eq_mp(UNFOLD(FLE_DEF, x1, x2, y1, y2), "hle")
+        .by_def(FLE_DEF, "hle")
     with p.thus("flt x1 x2 z1 z2").by_cases("disj"):
         with p.case("l: flt x1 x2 y1 y2"):
             p.thus("flt x1 x2 z1 z2") \
@@ -399,7 +399,7 @@ def SATZ_51B(p):
     p.fix("x1 x2 y1 y2 z1 z2")
     p.assume("hlt: flt x1 x2 y1 y2", "hle: fle y1 y2 z1 z2")
     p.have("disj: flt y1 y2 z1 z2 \\/ feq y1 y2 z1 z2") \
-        .by_eq_mp(UNFOLD(FLE_DEF, y1, y2, z1, z2), "hle")
+        .by_def(FLE_DEF, "hle")
     with p.thus("flt x1 x2 z1 z2").by_cases("disj"):
         with p.case("l: flt y1 y2 z1 z2"):
             p.thus("flt x1 x2 z1 z2") \
@@ -419,9 +419,9 @@ def SATZ_52(p):
     p.fix("x1 x2 y1 y2 z1 z2")
     p.assume("h1: fle x1 x2 y1 y2", "h2: fle y1 y2 z1 z2")
     p.have("d1: flt x1 x2 y1 y2 \\/ feq x1 x2 y1 y2") \
-        .by_eq_mp(UNFOLD(FLE_DEF, x1, x2, y1, y2), "h1")
+        .by_def(FLE_DEF, "h1")
     p.have("d2: flt y1 y2 z1 z2 \\/ feq y1 y2 z1 z2") \
-        .by_eq_mp(UNFOLD(FLE_DEF, y1, y2, z1, z2), "h2")
+        .by_def(FLE_DEF, "h2")
     with p.thus("fle x1 x2 z1 z2").by_cases("d1"):
         with p.case("l1: flt x1 x2 y1 y2"):
             p.have("lt: flt x1 x2 z1 z2") \
@@ -485,7 +485,7 @@ def SATZ_55(p):
     p.fix("x1 x2 y1 y2")
     p.assume("h: flt x1 x2 y1 y2")
     p.have("k: x1*y2 < y1*x2") \
-        .by_eq_mp(UNFOLD(FLT_DEF, x1, x2, y1, y2), "h")
+        .by_def(FLT_DEF, "h")
     # x1*x2 + x1*y2 < x1*x2 + y1*x2  via SATZ_19C with z = x1*x2 on the left.
     p.have("step1_raw: x1*y2 + x1*x2 < y1*x2 + x1*x2") \
         .by_match(SATZ_19C, "k")
@@ -544,9 +544,9 @@ def SATZ_56(p):
     p.fix("x1 x2 y1 y2 z1 z2 u1 u2")
     p.assume("h1: feq x1 x2 y1 y2", "h2: feq z1 z2 u1 u2")
     p.have("e1: x1*y2 = y1*x2") \
-        .by_eq_mp(UNFOLD(FEQ_DEF, x1, x2, y1, y2), "h1")
+        .by_def(FEQ_DEF, "h1")
     p.have("e2: z1*u2 = u1*z2") \
-        .by_eq_mp(UNFOLD(FEQ_DEF, z1, z2, u1, u2), "h2")
+        .by_def(FEQ_DEF, "h2")
     # (x1*y2)*(z2*u2) = (y1*x2)*(z2*u2)  via AP_THM on e1.
     e1_zu = AP_THM(AP_TERM(TIMES, p.fact("e1")), mk_mul(z2, u2))
     # (z1*u2)*(x2*y2) = (u1*z2)*(x2*y2)  via AP_THM on e2.
@@ -705,7 +705,7 @@ def SATZ_61(p):
     p.fix("x1 x2 y1 y2 z1 z2")
     p.assume("h: fgt x1 x2 y1 y2")
     p.have("g0: x1*y2 > y1*x2") \
-        .by_eq_mp(UNFOLD(FGT_DEF, x1, x2, y1, y2), "h")
+        .by_def(FGT_DEF, "h")
     # Multiply by z2 (Satz 32A): (x1*y2)*z2 > (y1*x2)*z2.
     p.have("g1: (x1*y2)*z2 > (y1*x2)*z2") \
         .by_match(SATZ_32A, "g0")
@@ -835,13 +835,13 @@ def SATZ_63A(p):
     s1n, s1d = _sum_terms(x1, x2, z1, z2)
     s2n, s2d = _sum_terms(y1, y2, z1, z2)
     p.have("h_a_n: (x1*z2 + z1*x2)*(y2*z2) > (y1*z2 + z1*y2)*(x2*z2)") \
-        .by_eq_mp(UNFOLD(FGT_DEF, s1n, s1d, s2n, s2d), "h_a")
+        .by_def(FGT_DEF, "h_a")
     with p.cases_on(SATZ_41, "x1", "x2", "y1", "y2"):
         with p.case("h_eq: feq x1 x2 y1 y2"):
             p.have("eq_sum: feq (x1*z2 + z1*x2) (x2*z2) (y1*z2 + z1*y2) (y2*z2)") \
                 .by_match(SATZ_62B, "h_eq")
             p.have("eq_n: (x1*z2 + z1*x2)*(y2*z2) = (y1*z2 + z1*y2)*(x2*z2)") \
-                .by_eq_mp(UNFOLD(FEQ_DEF, s1n, s1d, s2n, s2d), "eq_sum")
+                .by_def(FEQ_DEF, "eq_sum")
             p.absurd().auto("h_a_n", "eq_n")
         with p.case("h_gt: fgt x1 x2 y1 y2"):
             p.thus("fgt x1 x2 y1 y2").by_thm(p.fact("h_gt"))
@@ -849,7 +849,7 @@ def SATZ_63A(p):
             p.have("lt_sum: flt (x1*z2 + z1*x2) (x2*z2) (y1*z2 + z1*y2) (y2*z2)") \
                 .by_match(SATZ_62C, "h_lt")
             p.have("lt_n: (x1*z2 + z1*x2)*(y2*z2) < (y1*z2 + z1*y2)*(x2*z2)") \
-                .by_eq_mp(UNFOLD(FLT_DEF, s1n, s1d, s2n, s2d), "lt_sum")
+                .by_def(FLT_DEF, "lt_sum")
             p.absurd().auto("lt_n", "h_a_n")
 
 
@@ -863,7 +863,7 @@ def SATZ_63B(p):
     s1n, s1d = _sum_terms(x1, x2, z1, z2)
     s2n, s2d = _sum_terms(y1, y2, z1, z2)
     p.have("h_a_n: (x1*z2 + z1*x2)*(y2*z2) = (y1*z2 + z1*y2)*(x2*z2)") \
-        .by_eq_mp(UNFOLD(FEQ_DEF, s1n, s1d, s2n, s2d), "h_a")
+        .by_def(FEQ_DEF, "h_a")
     with p.cases_on(SATZ_41, "x1", "x2", "y1", "y2"):
         with p.case("h_eq: feq x1 x2 y1 y2"):
             p.thus("feq x1 x2 y1 y2").by_thm(p.fact("h_eq"))
@@ -871,13 +871,13 @@ def SATZ_63B(p):
             p.have("gt_sum: fgt (x1*z2 + z1*x2) (x2*z2) (y1*z2 + z1*y2) (y2*z2)") \
                 .by_match(SATZ_61, "h_gt")
             p.have("gt_n: (x1*z2 + z1*x2)*(y2*z2) > (y1*z2 + z1*y2)*(x2*z2)") \
-                .by_eq_mp(UNFOLD(FGT_DEF, s1n, s1d, s2n, s2d), "gt_sum")
+                .by_def(FGT_DEF, "gt_sum")
             p.absurd().auto("gt_n", "h_a_n")
         with p.case("h_lt: flt x1 x2 y1 y2"):
             p.have("lt_sum: flt (x1*z2 + z1*x2) (x2*z2) (y1*z2 + z1*y2) (y2*z2)") \
                 .by_match(SATZ_62C, "h_lt")
             p.have("lt_n: (x1*z2 + z1*x2)*(y2*z2) < (y1*z2 + z1*y2)*(x2*z2)") \
-                .by_eq_mp(UNFOLD(FLT_DEF, s1n, s1d, s2n, s2d), "lt_sum")
+                .by_def(FLT_DEF, "lt_sum")
             p.absurd().auto("lt_n", "h_a_n")
 
 
@@ -891,19 +891,19 @@ def SATZ_63C(p):
     s1n, s1d = _sum_terms(x1, x2, z1, z2)
     s2n, s2d = _sum_terms(y1, y2, z1, z2)
     p.have("h_a_n: (x1*z2 + z1*x2)*(y2*z2) < (y1*z2 + z1*y2)*(x2*z2)") \
-        .by_eq_mp(UNFOLD(FLT_DEF, s1n, s1d, s2n, s2d), "h_a")
+        .by_def(FLT_DEF, "h_a")
     with p.cases_on(SATZ_41, "x1", "x2", "y1", "y2"):
         with p.case("h_eq: feq x1 x2 y1 y2"):
             p.have("eq_sum: feq (x1*z2 + z1*x2) (x2*z2) (y1*z2 + z1*y2) (y2*z2)") \
                 .by_match(SATZ_62B, "h_eq")
             p.have("eq_n: (x1*z2 + z1*x2)*(y2*z2) = (y1*z2 + z1*y2)*(x2*z2)") \
-                .by_eq_mp(UNFOLD(FEQ_DEF, s1n, s1d, s2n, s2d), "eq_sum")
+                .by_def(FEQ_DEF, "eq_sum")
             p.absurd().auto("h_a_n", "eq_n")
         with p.case("h_gt: fgt x1 x2 y1 y2"):
             p.have("gt_sum: fgt (x1*z2 + z1*x2) (x2*z2) (y1*z2 + z1*y2) (y2*z2)") \
                 .by_match(SATZ_61, "h_gt")
             p.have("gt_n: (x1*z2 + z1*x2)*(y2*z2) > (y1*z2 + z1*y2)*(x2*z2)") \
-                .by_eq_mp(UNFOLD(FGT_DEF, s1n, s1d, s2n, s2d), "gt_sum")
+                .by_def(FGT_DEF, "gt_sum")
             p.absurd().auto("h_a_n", "gt_n")
         with p.case("h_lt: flt x1 x2 y1 y2"):
             p.thus("flt x1 x2 y1 y2").by_thm(p.fact("h_lt"))
@@ -917,7 +917,7 @@ def SATZ_65A(p):
     p.fix("x1 x2 y1 y2 z1 z2 u1 u2")
     p.assume("hge: fge x1 x2 y1 y2", "hgt: fgt z1 z2 u1 u2")
     p.have("disj: fgt x1 x2 y1 y2 \\/ feq x1 x2 y1 y2") \
-        .by_eq_mp(UNFOLD(FGE_DEF, x1, x2, y1, y2), "hge")
+        .by_def(FGE_DEF, "hge")
     with p.thus("fgt (x1*z2 + z1*x2) (x2*z2) (y1*u2 + u1*y2) (y2*u2)") \
             .by_cases("disj"):
         with p.case("g_xy: fgt x1 x2 y1 y2"):
@@ -957,7 +957,7 @@ def SATZ_65B(p):
     p.fix("x1 x2 y1 y2 z1 z2 u1 u2")
     p.assume("hgt: fgt x1 x2 y1 y2", "hge: fge z1 z2 u1 u2")
     p.have("disj: fgt z1 z2 u1 u2 \\/ feq z1 z2 u1 u2") \
-        .by_eq_mp(UNFOLD(FGE_DEF, z1, z2, u1, u2), "hge")
+        .by_def(FGE_DEF, "hge")
     with p.thus("fgt (x1*z2 + z1*x2) (x2*z2) (y1*u2 + u1*y2) (y2*u2)") \
             .by_cases("disj"):
         with p.case("g_zu: fgt z1 z2 u1 u2"):
@@ -988,9 +988,9 @@ def SATZ_66(p):
     p.fix("x1 x2 y1 y2 z1 z2 u1 u2")
     p.assume("hxy: fge x1 x2 y1 y2", "hzu: fge z1 z2 u1 u2")
     p.have("d1: fgt x1 x2 y1 y2 \\/ feq x1 x2 y1 y2") \
-        .by_eq_mp(UNFOLD(FGE_DEF, x1, x2, y1, y2), "hxy")
+        .by_def(FGE_DEF, "hxy")
     p.have("d2: fgt z1 z2 u1 u2 \\/ feq z1 z2 u1 u2") \
-        .by_eq_mp(UNFOLD(FGE_DEF, z1, z2, u1, u2), "hzu")
+        .by_def(FGE_DEF, "hzu")
     with p.thus("fge (x1*z2 + z1*x2) (x2*z2) (y1*u2 + u1*y2) (y2*u2)") \
             .by_cases("d1"):
         with p.case("g_xy: fgt x1 x2 y1 y2"):
@@ -1041,7 +1041,7 @@ def SATZ_67_EXIST(p):
     p.fix("x1 x2 y1 y2")
     p.assume("h: fgt x1 x2 y1 y2")
     p.have("g: x1*y2 > y1*x2") \
-        .by_eq_mp(UNFOLD(FGT_DEF, x1, x2, y1, y2), "h")
+        .by_def(FGT_DEF, "h")
     p.choose("u: x1*y2 = y1*x2 + u", from_="g")
     # ``u`` in proof scope is a (@u. ...) select-term; extract it from u_eq.
     u_term = rand(p.fact("u_eq")._concl)             # y1*x2 + u
@@ -1124,9 +1124,9 @@ def SATZ_68(p):
     p.fix("x1 x2 y1 y2 z1 z2 u1 u2")
     p.assume("h1: feq x1 x2 y1 y2", "h2: feq z1 z2 u1 u2")
     p.have("e1: x1*y2 = y1*x2") \
-        .by_eq_mp(UNFOLD(FEQ_DEF, x1, x2, y1, y2), "h1")
+        .by_def(FEQ_DEF, "h1")
     p.have("e2: z1*u2 = u1*z2") \
-        .by_eq_mp(UNFOLD(FEQ_DEF, z1, z2, u1, u2), "h2")
+        .by_def(FEQ_DEF, "h2")
     # (x1*y2)*(z1*u2) = (y1*x2)*(u1*z2).
     prod = MK_COMB(AP_TERM(TIMES, p.fact("e1")), p.fact("e2"))
     with p.calc("eq: (x1*z1)*(y2*u2)") as c:
@@ -1218,7 +1218,7 @@ def SATZ_72A(p):
     p.fix("x1 x2 y1 y2 z1 z2")
     p.assume("h: fgt x1 x2 y1 y2")
     p.have("g0: x1*y2 > y1*x2") \
-        .by_eq_mp(UNFOLD(FGT_DEF, x1, x2, y1, y2), "h")
+        .by_def(FGT_DEF, "h")
     p.have("g1: (x1*y2)*(z1*z2) > (y1*x2)*(z1*z2)") \
         .by_match(SATZ_32A, "g0")
     # AC: (x1*y2)*(z1*z2) = (x1*z1)*(y2*z2);  (y1*x2)*(z1*z2) = (y1*z1)*(x2*z2).
@@ -1266,11 +1266,9 @@ def SATZ_73A(p):
             p.have("eq_p: feq (x1*z1) (x2*z2) (y1*z1) (y2*z2)") \
                 .by_match(SATZ_72B, "h_eq")
             p.have("h_n: (x1*z1)*(y2*z2) > (y1*z1)*(x2*z2)") \
-                .by_eq_mp(UNFOLD(FGT_DEF, mk_mul(x1, z1), mk_mul(x2, z2),
-                                  mk_mul(y1, z1), mk_mul(y2, z2)), "h")
+                .by_def(FGT_DEF, "h")
             p.have("eq_n: (x1*z1)*(y2*z2) = (y1*z1)*(x2*z2)") \
-                .by_eq_mp(UNFOLD(FEQ_DEF, mk_mul(x1, z1), mk_mul(x2, z2),
-                                  mk_mul(y1, z1), mk_mul(y2, z2)), "eq_p")
+                .by_def(FEQ_DEF, "eq_p")
             p.absurd().auto("h_n", "eq_n")
         with p.case("h_gt: fgt x1 x2 y1 y2"):
             p.thus("fgt x1 x2 y1 y2").by_thm(p.fact("h_gt"))
@@ -1278,11 +1276,9 @@ def SATZ_73A(p):
             p.have("lt_p: flt (x1*z1) (x2*z2) (y1*z1) (y2*z2)") \
                 .by_match(SATZ_72C, "h_lt")
             p.have("h_n: (x1*z1)*(y2*z2) > (y1*z1)*(x2*z2)") \
-                .by_eq_mp(UNFOLD(FGT_DEF, mk_mul(x1, z1), mk_mul(x2, z2),
-                                  mk_mul(y1, z1), mk_mul(y2, z2)), "h")
+                .by_def(FGT_DEF, "h")
             p.have("lt_n: (x1*z1)*(y2*z2) < (y1*z1)*(x2*z2)") \
-                .by_eq_mp(UNFOLD(FLT_DEF, mk_mul(x1, z1), mk_mul(x2, z2),
-                                  mk_mul(y1, z1), mk_mul(y2, z2)), "lt_p")
+                .by_def(FLT_DEF, "lt_p")
             p.absurd().auto("lt_n", "h_n")
 
 
@@ -1299,21 +1295,17 @@ def SATZ_73B(p):
             p.have("gt_p: fgt (x1*z1) (x2*z2) (y1*z1) (y2*z2)") \
                 .by_match(SATZ_72A, "h_gt")
             p.have("gt_n: (x1*z1)*(y2*z2) > (y1*z1)*(x2*z2)") \
-                .by_eq_mp(UNFOLD(FGT_DEF, mk_mul(x1, z1), mk_mul(x2, z2),
-                                  mk_mul(y1, z1), mk_mul(y2, z2)), "gt_p")
+                .by_def(FGT_DEF, "gt_p")
             p.have("h_n: (x1*z1)*(y2*z2) = (y1*z1)*(x2*z2)") \
-                .by_eq_mp(UNFOLD(FEQ_DEF, mk_mul(x1, z1), mk_mul(x2, z2),
-                                  mk_mul(y1, z1), mk_mul(y2, z2)), "h")
+                .by_def(FEQ_DEF, "h")
             p.absurd().auto("gt_n", "h_n")
         with p.case("h_lt: flt x1 x2 y1 y2"):
             p.have("lt_p: flt (x1*z1) (x2*z2) (y1*z1) (y2*z2)") \
                 .by_match(SATZ_72C, "h_lt")
             p.have("lt_n: (x1*z1)*(y2*z2) < (y1*z1)*(x2*z2)") \
-                .by_eq_mp(UNFOLD(FLT_DEF, mk_mul(x1, z1), mk_mul(x2, z2),
-                                  mk_mul(y1, z1), mk_mul(y2, z2)), "lt_p")
+                .by_def(FLT_DEF, "lt_p")
             p.have("h_n: (x1*z1)*(y2*z2) = (y1*z1)*(x2*z2)") \
-                .by_eq_mp(UNFOLD(FEQ_DEF, mk_mul(x1, z1), mk_mul(x2, z2),
-                                  mk_mul(y1, z1), mk_mul(y2, z2)), "h")
+                .by_def(FEQ_DEF, "h")
             p.absurd().auto("lt_n", "h_n")
 
 
@@ -1324,22 +1316,19 @@ def SATZ_73C(p):
     p.fix("x1 x2 y1 y2 z1 z2")
     p.assume("h: flt (x1*z1) (x2*z2) (y1*z1) (y2*z2)")
     p.have("h_n: (x1*z1)*(y2*z2) < (y1*z1)*(x2*z2)") \
-        .by_eq_mp(UNFOLD(FLT_DEF, mk_mul(x1, z1), mk_mul(x2, z2),
-                          mk_mul(y1, z1), mk_mul(y2, z2)), "h")
+        .by_def(FLT_DEF, "h")
     with p.cases_on(SATZ_41, "x1", "x2", "y1", "y2"):
         with p.case("h_eq: feq x1 x2 y1 y2"):
             p.have("eq_p: feq (x1*z1) (x2*z2) (y1*z1) (y2*z2)") \
                 .by_match(SATZ_72B, "h_eq")
             p.have("eq_n: (x1*z1)*(y2*z2) = (y1*z1)*(x2*z2)") \
-                .by_eq_mp(UNFOLD(FEQ_DEF, mk_mul(x1, z1), mk_mul(x2, z2),
-                                  mk_mul(y1, z1), mk_mul(y2, z2)), "eq_p")
+                .by_def(FEQ_DEF, "eq_p")
             p.absurd().auto("h_n", "eq_n")
         with p.case("h_gt: fgt x1 x2 y1 y2"):
             p.have("gt_p: fgt (x1*z1) (x2*z2) (y1*z1) (y2*z2)") \
                 .by_match(SATZ_72A, "h_gt")
             p.have("gt_n: (x1*z1)*(y2*z2) > (y1*z1)*(x2*z2)") \
-                .by_eq_mp(UNFOLD(FGT_DEF, mk_mul(x1, z1), mk_mul(x2, z2),
-                                  mk_mul(y1, z1), mk_mul(y2, z2)), "gt_p")
+                .by_def(FGT_DEF, "gt_p")
             p.absurd().auto("h_n", "gt_n")
         with p.case("h_lt: flt x1 x2 y1 y2"):
             p.thus("flt x1 x2 y1 y2").by_thm(p.fact("h_lt"))
@@ -1385,7 +1374,7 @@ def SATZ_75A(p):
     p.fix("x1 x2 y1 y2 z1 z2 u1 u2")
     p.assume("hge: fge x1 x2 y1 y2", "hgt: fgt z1 z2 u1 u2")
     p.have("disj: fgt x1 x2 y1 y2 \\/ feq x1 x2 y1 y2") \
-        .by_eq_mp(UNFOLD(FGE_DEF, x1, x2, y1, y2), "hge")
+        .by_def(FGE_DEF, "hge")
     with p.thus("fgt (x1*z1) (x2*z2) (y1*u1) (y2*u2)").by_cases("disj"):
         with p.case("g_xy: fgt x1 x2 y1 y2"):
             p.thus("fgt (x1*z1) (x2*z2) (y1*u1) (y2*u2)") \
@@ -1420,7 +1409,7 @@ def SATZ_75B(p):
     p.fix("x1 x2 y1 y2 z1 z2 u1 u2")
     p.assume("hgt: fgt x1 x2 y1 y2", "hge: fge z1 z2 u1 u2")
     p.have("disj: fgt z1 z2 u1 u2 \\/ feq z1 z2 u1 u2") \
-        .by_eq_mp(UNFOLD(FGE_DEF, z1, z2, u1, u2), "hge")
+        .by_def(FGE_DEF, "hge")
     with p.thus("fgt (x1*z1) (x2*z2) (y1*u1) (y2*u2)").by_cases("disj"):
         with p.case("g_zu: fgt z1 z2 u1 u2"):
             p.thus("fgt (x1*z1) (x2*z2) (y1*u1) (y2*u2)") \
@@ -1448,9 +1437,9 @@ def SATZ_76(p):
     p.fix("x1 x2 y1 y2 z1 z2 u1 u2")
     p.assume("hxy: fge x1 x2 y1 y2", "hzu: fge z1 z2 u1 u2")
     p.have("d1: fgt x1 x2 y1 y2 \\/ feq x1 x2 y1 y2") \
-        .by_eq_mp(UNFOLD(FGE_DEF, x1, x2, y1, y2), "hxy")
+        .by_def(FGE_DEF, "hxy")
     p.have("d2: fgt z1 z2 u1 u2 \\/ feq z1 z2 u1 u2") \
-        .by_eq_mp(UNFOLD(FGE_DEF, z1, z2, u1, u2), "hzu")
+        .by_def(FGE_DEF, "hzu")
     with p.thus("fge (x1*z1) (x2*z2) (y1*u1) (y2*u2)").by_cases("d1"):
         with p.case("g_xy: fgt x1 x2 y1 y2"):
             p.have("g: fgt (x1*z1) (x2*z2) (y1*u1) (y2*u2)") \

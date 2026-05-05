@@ -1974,6 +1974,47 @@ class _Have:
         the user can mix folded/unfolded forms across an EQ_MP boundary."""
         return self._via(self.p.simp_eq_mp, eq_th, ref)
 
+    def by_def(self, def_th, ref):
+        """Unfold ``def_th`` at ``ref``'s head args, then ``EQ_MP`` through.
+
+        Sugar for the ``by_eq_mp(UNFOLD(def_th, a1, ..., an), ref)`` cliche
+        that dominates relation-unfold proofs. ``def_th`` must be
+        ``|- C = \\x1...xn. body``; arity ``n`` is read off the RHS lambda
+        chain. ``ref``'s conclusion must be ``C t1 ... tn`` (modulo simp);
+        ``UNFOLD`` is auto-instantiated at those args, the resulting fact's
+        conclusion is ``body[xi := ti]``."""
+        p = self.p
+        th_ref = p.coerce(ref)
+        parts = dest_eq(def_th._concl)
+        if parts is None:
+            raise HolError(
+                f"by_def: definition is not an equation: "
+                f"{pp(def_th._concl)}")
+        head, rhs = parts
+        n = 0
+        while isinstance(rhs, Abs):
+            n += 1
+            rhs = rhs.body
+        if n == 0:
+            raise HolError(
+                f"by_def: definition RHS is not a lambda: "
+                f"{pp(def_th._concl)}")
+        concl = p.simp_norm_fact(th_ref)._concl
+        peeled = []
+        for _ in range(n):
+            if not isinstance(concl, Comb):
+                raise HolError(
+                    f"by_def: fact {pp(th_ref._concl)} is not applied to "
+                    f"{n} args (definition arity)")
+            peeled.append(concl.arg)
+            concl = concl.fun
+        peeled.reverse()
+        if not aconv(concl, head):
+            raise HolError(
+                f"by_def: fact head {pp(concl)} does not match "
+                f"definition LHS {pp(head)}")
+        return self._finish(p.simp_eq_mp(UNFOLD(def_th, *peeled), th_ref))
+
     def by_iff(self, fwd, rev):
         """For a boolean-equality have-term ``L = R``, combine two
         implications into the iff: ``fwd: L ==> R`` and ``rev: R ==> L``.

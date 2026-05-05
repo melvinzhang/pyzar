@@ -1871,7 +1871,7 @@ def SATZ_111B_FWD(p):
     y_t = p._parse("y")
     ONE_t = p._parse("1")
     p.have("eq_mul: x * 1 = y * 1") \
-        .by_eq_mp(UNFOLD(FEQ_DEF, x_t, ONE_t, y_t, ONE_t), "feq")
+        .by_def(FEQ_DEF, "feq")
     mul1_x = SPEC(x_t, MUL_1)
     mul1_y = SPEC(y_t, MUL_1)
     with p.calc("x", thus=True) as c:
@@ -1902,7 +1902,7 @@ def SATZ_111A_FWD(p):
     y_t = p._parse("y")
     ONE_t = p._parse("1")
     p.have("gt_mul: x * 1 > y * 1") \
-        .by_eq_mp(UNFOLD(FGT_DEF, x_t, ONE_t, y_t, ONE_t), "fg")
+        .by_def(FGT_DEF, "fg")
     p.thus("x > y").by_thm(REWRITE_RULE([MUL_1], p.fact("gt_mul")))
 
 
@@ -1939,7 +1939,7 @@ def SATZ_111C_FWD(p):
     y_t = p._parse("y")
     ONE_t = p._parse("1")
     p.have("lt_mul: x * 1 < y * 1") \
-        .by_eq_mp(UNFOLD(FLT_DEF, x_t, ONE_t, y_t, ONE_t), "fl")
+        .by_def(FLT_DEF, "fl")
     p.thus("x < y").by_thm(REWRITE_RULE([MUL_1], p.fact("lt_mul")))
 
 
@@ -2118,7 +2118,7 @@ def SATZ_115(p):
     # v >= 1 (nat).
     p.have("v_ge: v >= 1").by_match(SATZ_24)
     p.have("v_disj: v > 1 \\/ v = 1") \
-        .by_eq_mp(UNFOLD(GE_DEF, v_t, ONE_t), "v_ge")
+        .by_def(GE_DEF, "v_ge")
     mk_app(Q, ONE_t, ONE_t)
     Qv1 = mk_app(Q, v_t, ONE_t)
     with p.have("rge_v1: rge (Q v 1) (Q 1 1)").by_cases("v_disj"):

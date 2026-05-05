@@ -191,6 +191,7 @@ via `_simp_require`.
 | `.by_rewrite_of(ref, rules, *, ac=None, beta=False, op=...)` | rewrite source `ref` to the have-term via shared normal form    |
 | `.by_unfold(src, *defs)`                            | `by_rewrite_of` with `beta=True` — bridge unfolded ↔ defined-symbol forms |
 | `.by_eq_mp(eq_th, ref)`                             | `EQ_MP(eq_th, fact)` modulo simp on the LHS                            |
+| `.by_def(def_th, ref)`                              | unfold `def_th` at `ref`'s head args, then `EQ_MP` — sugar for `by_eq_mp(UNFOLD(def_th, ...), ref)` |
 | `.by_iff(fwd, rev)`                                 | iff-intro: combine `L ==> R` and `R ==> L` facts into the bool equality `L = R` (order-agnostic) |
 | `.by_fold(ref)`                                     | inverse of an unfolder: fold `ref` back into a registered relation     |
 | `.by_witness(witness, ref)`                         | `EXISTS` for an existential have-term                                  |
