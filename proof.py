@@ -2202,8 +2202,8 @@ class _Have:
 
         def prove(tm):
             if is_conj(tm):
-                l, r = dest_conj(tm)
-                return CONJ(prove(l), prove(r))
+                lhs, rhs = dest_conj(tm)
+                return CONJ(prove(lhs), prove(rhs))
             return REWRITE_PROVE(rules_thms, tm)
 
         th = p._make_existential_multi(target, witnesses_t, prove)
