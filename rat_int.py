@@ -75,7 +75,7 @@ from parser import (
     define, parse_type, pp_thm,
     add_const, add_type,
 )
-from proof import proof
+from proof import proof, register_unfolder, register_disj_unfolder
 
 
 # ---------------------------------------------------------------------------
@@ -467,6 +467,9 @@ RLT_DEF = define("rlt", "rat -> rat -> bool",
     infix=(40, "non"))
 RLT = mk_const("rlt", [])
 
+register_unfolder("rgt", lambda a, b: UNFOLD(RGT_DEF, a, b))
+register_unfolder("rlt", lambda a, b: UNFOLD(RLT_DEF, a, b))
+
 
 # Connection lemma: for any representatives, fgt at the fraction level lifts to
 # rgt at the rat level (and vice versa).
@@ -515,9 +518,8 @@ def RGT_INTRO(p):
                    mk_app(FGT, _qa, _qb, _qc, _qd))))))),
         a_t, inner_b)
     # |- ?a' b' c' d'. (Q a b = Q a' b') /\ (Q c d = Q c' d') /\ fgt a' b' c' d'.
-    # Bridge to rgt (Q a b) (Q c d).
-    rgt_unfold = UNFOLD(RGT_DEF, Q_ab, Q_cd)
-    p.thus("rgt (Q a b) (Q c d)").by_eq_mp(SYM(rgt_unfold), inner_a)
+    # Bridge to rgt (Q a b) (Q c d) via the registered unfolder.
+    p.thus("rgt (Q a b) (Q c d)").by_fold(inner_a)
 
 
 @proof
@@ -560,8 +562,7 @@ def RLT_INTRO(p):
             mk_and(mk_eq(Q_cd, mk_app(Q, _qc, _qd)),
                    mk_app(FLT, _qa, _qb, _qc, _qd))))))),
         a_t, inner_b)
-    rlt_unfold = UNFOLD(RLT_DEF, Q_ab, Q_cd)
-    p.thus("rlt (Q a b) (Q c d)").by_eq_mp(SYM(rlt_unfold), inner_a)
+    p.thus("rlt (Q a b) (Q c d)").by_fold(inner_a)
 
 
 # Elimination: rgt (Q a b) (Q c d) ==> fgt a b c d (and similarly for rlt).
@@ -572,13 +573,8 @@ def RGT_ELIM(p):
     p.goal("!a b c d. rgt (Q a b) (Q c d) ==> fgt a b c d")
     p.fix("a b c d")
     p.assume("h: rgt (Q a b) (Q c d)")
-    Q_ab = p._parse("Q a b")
-    Q_cd = p._parse("Q c d")
-    p.have("ex: ?a1 b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-           " /\\ fgt a1 b1 c1 d1") \
-        .by_eq_mp(UNFOLD(RGT_DEF, Q_ab, Q_cd), "h")
     p.choose("a1: ?b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-             " /\\ fgt a1 b1 c1 d1", from_="ex")
+             " /\\ fgt a1 b1 c1 d1", from_="h")
     p.choose("b1: ?c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
              " /\\ fgt a1 b1 c1 d1", from_="a1_eq")
     p.choose("c1: ?d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
@@ -600,13 +596,8 @@ def RLT_ELIM(p):
     p.goal("!a b c d. rlt (Q a b) (Q c d) ==> flt a b c d")
     p.fix("a b c d")
     p.assume("h: rlt (Q a b) (Q c d)")
-    Q_ab = p._parse("Q a b")
-    Q_cd = p._parse("Q c d")
-    p.have("ex: ?a1 b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-           " /\\ flt a1 b1 c1 d1") \
-        .by_eq_mp(UNFOLD(RLT_DEF, Q_ab, Q_cd), "h")
     p.choose("a1: ?b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-             " /\\ flt a1 b1 c1 d1", from_="ex")
+             " /\\ flt a1 b1 c1 d1", from_="h")
     p.choose("b1: ?c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
              " /\\ flt a1 b1 c1 d1", from_="a1_eq")
     p.choose("c1: ?d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
@@ -678,12 +669,8 @@ def SATZ_82(p):
     p.goal("!X Y. rgt X Y ==> rlt Y X", types=_R_TYPES)
     p.fix("X Y")
     p.assume("h: rgt X Y")
-    X_t = p._parse("X")
     Y_t = p._parse("Y")
-    # Unfold rgt to existential.
-    p.have("ex0: ?a b c d. X = Q a b /\\ Y = Q c d /\\ fgt a b c d") \
-        .by_eq_mp(UNFOLD(RGT_DEF, X_t, Y_t), "h")
-    p.choose("a: ?b c d. X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="ex0")
+    p.choose("a: ?b c d. X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="h")
     p.choose("b: ?c d. X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="a_eq")
     p.choose("c: ?d. X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="b_eq")
     p.choose("d: X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="c_eq")
@@ -705,11 +692,8 @@ def SATZ_83(p):
     p.goal("!X Y. rlt X Y ==> rgt Y X", types=_R_TYPES)
     p.fix("X Y")
     p.assume("h: rlt X Y")
-    X_t = p._parse("X")
     Y_t = p._parse("Y")
-    p.have("ex0: ?a b c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d") \
-        .by_eq_mp(UNFOLD(RLT_DEF, X_t, Y_t), "h")
-    p.choose("a: ?b c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="ex0")
+    p.choose("a: ?b c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="h")
     p.choose("b: ?c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="a_eq")
     p.choose("c: ?d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="b_eq")
     p.choose("d: X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="c_eq")
@@ -733,6 +717,9 @@ RLE_DEF = define("rle", "rat -> rat -> bool",
     "\\X:rat Y:rat. rlt X Y \\/ X = Y", infix=(40, "non"))
 RLE = mk_const("rle", [])
 
+register_disj_unfolder("rge", lambda a, b: UNFOLD(RGE_DEF, a, b))
+register_disj_unfolder("rle", lambda a, b: UNFOLD(RLE_DEF, a, b))
+
 
 # Satz 84:  rge X Y ==> rle Y X.
 @proof
@@ -740,19 +727,15 @@ def SATZ_84(p):
     p.goal("!X Y. rge X Y ==> rle Y X", types=_R_TYPES)
     p.fix("X Y")
     p.assume("h: rge X Y")
-    X_t = p._parse("X")
-    Y_t = p._parse("Y")
-    p.have("disj: rgt X Y \\/ X = Y") \
-        .by_eq_mp(UNFOLD(RGE_DEF, X_t, Y_t), "h")
-    with p.thus("rle Y X").by_cases("disj"):
+    with p.thus("rle Y X").by_cases("h"):
         with p.case("g: rgt X Y"):
             p.have("l: rlt Y X").by_match(SATZ_82, "g")
             p.have("orL: rlt Y X \\/ Y = X").by(DISJ1, "l", "Y = X")
-            p.thus("rle Y X").by_eq_mp(SYM(UNFOLD(RLE_DEF, Y_t, X_t)), "orL")
+            p.thus("rle Y X").by_fold("orL")
         with p.case("e: X = Y"):
             p.have("eYX: Y = X").by_thm(SYM(p.fact("e")))
             p.have("orR: rlt Y X \\/ Y = X").by(DISJ2, "rlt Y X", "eYX")
-            p.thus("rle Y X").by_eq_mp(SYM(UNFOLD(RLE_DEF, Y_t, X_t)), "orR")
+            p.thus("rle Y X").by_fold("orR")
 
 
 # Satz 85:  rle X Y ==> rge Y X.
@@ -761,19 +744,15 @@ def SATZ_85(p):
     p.goal("!X Y. rle X Y ==> rge Y X", types=_R_TYPES)
     p.fix("X Y")
     p.assume("h: rle X Y")
-    X_t = p._parse("X")
-    Y_t = p._parse("Y")
-    p.have("disj: rlt X Y \\/ X = Y") \
-        .by_eq_mp(UNFOLD(RLE_DEF, X_t, Y_t), "h")
-    with p.thus("rge Y X").by_cases("disj"):
+    with p.thus("rge Y X").by_cases("h"):
         with p.case("l: rlt X Y"):
             p.have("g: rgt Y X").by_match(SATZ_83, "l")
             p.have("orL: rgt Y X \\/ Y = X").by(DISJ1, "g", "Y = X")
-            p.thus("rge Y X").by_eq_mp(SYM(UNFOLD(RGE_DEF, Y_t, X_t)), "orL")
+            p.thus("rge Y X").by_fold("orL")
         with p.case("e: X = Y"):
             p.have("eYX: Y = X").by_thm(SYM(p.fact("e")))
             p.have("orR: rgt Y X \\/ Y = X").by(DISJ2, "rgt Y X", "eYX")
-            p.thus("rge Y X").by_eq_mp(SYM(UNFOLD(RGE_DEF, Y_t, X_t)), "orR")
+            p.thus("rge Y X").by_fold("orR")
 
 
 # Satz 86 (transitivity of <):  rlt X Y, rlt Y Z ==> rlt X Z.
@@ -783,11 +762,7 @@ def SATZ_86(p):
     p.fix("X Y Z")
     p.assume("h1: rlt X Y", "h2: rlt Y Z")
     X_t = p._parse("X")
-    Y_t = p._parse("Y")
-    Z_t = p._parse("Z")
-    p.have("ex1: ?a b c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d") \
-        .by_eq_mp(UNFOLD(RLT_DEF, X_t, Y_t), "h1")
-    p.choose("a: ?b c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="ex1")
+    p.choose("a: ?b c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="h1")
     p.choose("b: ?c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="a_eq")
     p.choose("c: ?d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="b_eq")
     p.choose("d: X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="c_eq")
@@ -795,9 +770,7 @@ def SATZ_86(p):
     p.split("t1", "(hY1, hlt1)")
     # For the second hypothesis, we need a copy of Y's representation; it's
     # consistent with hY1, but the (e, f) representatives of Z are fresh.
-    p.have("ex2: ?p q e f. Y = Q p q /\\ Z = Q e f /\\ flt p q e f") \
-        .by_eq_mp(UNFOLD(RLT_DEF, Y_t, Z_t), "h2")
-    p.choose("e1: ?q e f. Y = Q e1 q /\\ Z = Q e f /\\ flt e1 q e f", from_="ex2")
+    p.choose("e1: ?q e f. Y = Q e1 q /\\ Z = Q e f /\\ flt e1 q e f", from_="h2")
     p.choose("f1: ?e f. Y = Q e1 f1 /\\ Z = Q e f /\\ flt e1 f1 e f", from_="e1_eq")
     p.choose("g1: ?f. Y = Q e1 f1 /\\ Z = Q g1 f /\\ flt e1 f1 g1 f", from_="f1_eq")
     p.choose("h1n: Y = Q e1 f1 /\\ Z = Q g1 h1n /\\ flt e1 f1 g1 h1n", from_="g1_eq")
@@ -872,11 +845,7 @@ def SATZ_87A(p):
     p.goal("!X Y Z. rle X Y ==> rlt Y Z ==> rlt X Z", types=_R_TYPES)
     p.fix("X Y Z")
     p.assume("hle: rle X Y", "hlt: rlt Y Z")
-    X_t = p._parse("X")
-    Y_t = p._parse("Y")
-    p.have("disj: rlt X Y \\/ X = Y") \
-        .by_eq_mp(UNFOLD(RLE_DEF, X_t, Y_t), "hle")
-    with p.thus("rlt X Z").by_cases("disj"):
+    with p.thus("rlt X Z").by_cases("hle"):
         with p.case("l: rlt X Y"):
             p.thus("rlt X Z").by_match(SATZ_86, "l", "hlt")
         with p.case("e: X = Y"):
@@ -891,11 +860,7 @@ def SATZ_87B(p):
     p.goal("!X Y Z. rlt X Y ==> rle Y Z ==> rlt X Z", types=_R_TYPES)
     p.fix("X Y Z")
     p.assume("hlt: rlt X Y", "hle: rle Y Z")
-    Y_t = p._parse("Y")
-    Z_t = p._parse("Z")
-    p.have("disj: rlt Y Z \\/ Y = Z") \
-        .by_eq_mp(UNFOLD(RLE_DEF, Y_t, Z_t), "hle")
-    with p.thus("rlt X Z").by_cases("disj"):
+    with p.thus("rlt X Z").by_cases("hle"):
         with p.case("l: rlt Y Z"):
             p.thus("rlt X Z").by_match(SATZ_86, "hlt", "l")
         with p.case("e: Y = Z"):
@@ -910,31 +875,25 @@ def SATZ_88(p):
     p.goal("!X Y Z. rle X Y ==> rle Y Z ==> rle X Z", types=_R_TYPES)
     p.fix("X Y Z")
     p.assume("h1: rle X Y", "h2: rle Y Z")
-    X_t = p._parse("X")
-    Y_t = p._parse("Y")
     Z_t = p._parse("Z")
-    p.have("d1: rlt X Y \\/ X = Y") \
-        .by_eq_mp(UNFOLD(RLE_DEF, X_t, Y_t), "h1")
-    p.have("d2: rlt Y Z \\/ Y = Z") \
-        .by_eq_mp(UNFOLD(RLE_DEF, Y_t, Z_t), "h2")
-    with p.thus("rle X Z").by_cases("d1"):
+    with p.thus("rle X Z").by_cases("h1"):
         with p.case("l1: rlt X Y"):
             p.have("lt_XZ: rlt X Z").by_match(SATZ_87B, "l1", "h2")
             p.have("orL: rlt X Z \\/ X = Z").by(DISJ1, "lt_XZ", "X = Z")
-            p.thus("rle X Z").by_eq_mp(SYM(UNFOLD(RLE_DEF, X_t, Z_t)), "orL")
+            p.thus("rle X Z").by_fold("orL")
         with p.case("e1: X = Y"):
-            with p.thus("rle X Z").by_cases("d2"):
+            with p.thus("rle X Z").by_cases("h2"):
                 with p.case("l2: rlt Y Z"):
                     sub = AP_TERM(RLT, p.fact("e1"))
                     sub2 = AP_THM(sub, Z_t)   # rlt X Z = rlt Y Z
                     p.have("lt_XZ: rlt X Z").by_eq_mp(SYM(sub2), "l2")
                     p.have("orL: rlt X Z \\/ X = Z").by(DISJ1, "lt_XZ", "X = Z")
-                    p.thus("rle X Z").by_eq_mp(SYM(UNFOLD(RLE_DEF, X_t, Z_t)), "orL")
+                    p.thus("rle X Z").by_fold("orL")
                 with p.case("e2: Y = Z"):
                     p.have("eq_XZ: X = Z") \
                         .by_thm(TRANS(p.fact("e1"), p.fact("e2")))
                     p.have("orR: rlt X Z \\/ X = Z").by(DISJ2, "rlt X Z", "eq_XZ")
-                    p.thus("rle X Z").by_eq_mp(SYM(UNFOLD(RLE_DEF, X_t, Z_t)), "orR")
+                    p.thus("rle X Z").by_fold("orR")
 
 
 # Satz 91 (density of rationals):  rlt X Y ==> ?Z. rlt X Z /\ rlt Z Y.
@@ -943,11 +902,9 @@ def SATZ_91(p):
     p.goal("!X Y. rlt X Y ==> ?Z. rlt X Z /\\ rlt Z Y", types=_R_TYPES)
     p.fix("X Y")
     p.assume("h: rlt X Y")
-    X_t = p._parse("X")
-    Y_t = p._parse("Y")
-    p.have("ex0: ?a b c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d") \
-        .by_eq_mp(UNFOLD(RLT_DEF, X_t, Y_t), "h")
-    p.choose("a: ?b c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="ex0")
+    p._parse("X")
+    p._parse("Y")
+    p.choose("a: ?b c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="h")
     p.choose("b: ?c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="a_eq")
     p.choose("c: ?d. X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="b_eq")
     p.choose("d: X = Q a b /\\ Y = Q c d /\\ flt a b c d", from_="c_eq")
@@ -1246,9 +1203,7 @@ def SATZ_95(p):
     X_t = p._parse("X")
     Y_t = p._parse("Y")
     Z_t = p._parse("Z")
-    p.have("ex0: ?a b c d. X = Q a b /\\ Y = Q c d /\\ fgt a b c d") \
-        .by_eq_mp(UNFOLD(RGT_DEF, X_t, Y_t), "h")
-    p.choose("a: ?b c d. X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="ex0")
+    p.choose("a: ?b c d. X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="h")
     p.choose("b: ?c d. X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="a_eq")
     p.choose("c: ?d. X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="b_eq")
     p.choose("d: X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="c_eq")
@@ -1434,13 +1389,10 @@ def SATZ_99A(p):
            types=_R_TYPES)
     p.fix("X Y Z U")
     p.assume("hge: rge X Y", "hgt: rgt Z U")
-    X_t = p._parse("X")
     Y_t = p._parse("Y")
     Z_t = p._parse("Z")
     U_t = p._parse("U")
-    p.have("disj: rgt X Y \\/ X = Y") \
-        .by_eq_mp(UNFOLD(RGE_DEF, X_t, Y_t), "hge")
-    with p.thus("rgt (radd X Z) (radd Y U)").by_cases("disj"):
+    with p.thus("rgt (radd X Z) (radd Y U)").by_cases("hge"):
         with p.case("g_xy: rgt X Y"):
             p.thus("rgt (radd X Z) (radd Y U)") \
                 .by_match(SATZ_98, "g_xy", "hgt")
@@ -1468,11 +1420,8 @@ def SATZ_99B(p):
     p.assume("hgt: rgt X Y", "hge: rge Z U")
     X_t = p._parse("X")
     Y_t = p._parse("Y")
-    Z_t = p._parse("Z")
     U_t = p._parse("U")
-    p.have("disj: rgt Z U \\/ Z = U") \
-        .by_eq_mp(UNFOLD(RGE_DEF, Z_t, U_t), "hge")
-    with p.thus("rgt (radd X Z) (radd Y U)").by_cases("disj"):
+    with p.thus("rgt (radd X Z) (radd Y U)").by_cases("hge"):
         with p.case("g_zu: rgt Z U"):
             p.thus("rgt (radd X Z) (radd Y U)") \
                 .by_match(SATZ_98, "hgt", "g_zu")
@@ -1492,33 +1441,22 @@ def SATZ_100(p):
            types=_R_TYPES)
     p.fix("X Y Z U")
     p.assume("hge1: rge X Y", "hge2: rge Z U")
-    X_t = p._parse("X")
     Y_t = p._parse("Y")
-    Z_t = p._parse("Z")
-    U_t = p._parse("U")
-    sumXZ = mk_app(RADD, X_t, Z_t)
-    sumYU = mk_app(RADD, Y_t, U_t)
-    p.have("d1: rgt X Y \\/ X = Y") \
-        .by_eq_mp(UNFOLD(RGE_DEF, X_t, Y_t), "hge1")
-    p.have("d2: rgt Z U \\/ Z = U") \
-        .by_eq_mp(UNFOLD(RGE_DEF, Z_t, U_t), "hge2")
-    with p.thus("rge (radd X Z) (radd Y U)").by_cases("d1"):
+    with p.thus("rge (radd X Z) (radd Y U)").by_cases("hge1"):
         with p.case("g1: rgt X Y"):
             p.have("g_xy_zu: rgt (radd X Z) (radd Y U)") \
                 .by_match(SATZ_99B, "g1", "hge2")
             p.have("orL: rgt (radd X Z) (radd Y U) \\/ radd X Z = radd Y U") \
                 .by(DISJ1, "g_xy_zu", "radd X Z = radd Y U")
-            p.thus("rge (radd X Z) (radd Y U)") \
-                .by_eq_mp(SYM(UNFOLD(RGE_DEF, sumXZ, sumYU)), "orL")
+            p.thus("rge (radd X Z) (radd Y U)").by_fold("orL")
         with p.case("e1: X = Y"):
-            with p.thus("rge (radd X Z) (radd Y U)").by_cases("d2"):
+            with p.thus("rge (radd X Z) (radd Y U)").by_cases("hge2"):
                 with p.case("g2: rgt Z U"):
                     p.have("g_xz_yu: rgt (radd X Z) (radd Y U)") \
                         .by_match(SATZ_99A, "hge1", "g2")
                     p.have("orL: rgt (radd X Z) (radd Y U) \\/ radd X Z = radd Y U") \
                         .by(DISJ1, "g_xz_yu", "radd X Z = radd Y U")
-                    p.thus("rge (radd X Z) (radd Y U)") \
-                        .by_eq_mp(SYM(UNFOLD(RGE_DEF, sumXZ, sumYU)), "orL")
+                    p.thus("rge (radd X Z) (radd Y U)").by_fold("orL")
                 with p.case("e2: Z = U"):
                     p.have("eq_xz_yz: radd X Z = radd Y Z") \
                         .by_match(SATZ_96B, "e1")
@@ -1527,8 +1465,7 @@ def SATZ_100(p):
                         .by_thm(TRANS(p.fact("eq_xz_yz"), eq_yz_yu))
                     p.have("orR: rgt (radd X Z) (radd Y U) \\/ radd X Z = radd Y U") \
                         .by(DISJ2, "rgt (radd X Z) (radd Y U)", "eq_full")
-                    p.thus("rge (radd X Z) (radd Y U)") \
-                        .by_eq_mp(SYM(UNFOLD(RGE_DEF, sumXZ, sumYU)), "orR")
+                    p.thus("rge (radd X Z) (radd Y U)").by_fold("orR")
 
 
 # Satz 101 (existence & uniqueness of subtraction):  given rgt X Y, the
@@ -2044,13 +1981,10 @@ def SATZ_108A(p):
            types=_R_TYPES)
     p.fix("X Y Z U")
     p.assume("hge: rge X Y", "hgt: rgt Z U")
-    X_t = p._parse("X")
     Y_t = p._parse("Y")
     Z_t = p._parse("Z")
     U_t = p._parse("U")
-    p.have("disj: rgt X Y \\/ X = Y") \
-        .by_eq_mp(UNFOLD(RGE_DEF, X_t, Y_t), "hge")
-    with p.thus("rgt (rmul X Z) (rmul Y U)").by_cases("disj"):
+    with p.thus("rgt (rmul X Z) (rmul Y U)").by_cases("hge"):
         with p.case("g_xy: rgt X Y"):
             p.thus("rgt (rmul X Z) (rmul Y U)") \
                 .by_match(SATZ_107, "g_xy", "hgt")
@@ -2080,11 +2014,8 @@ def SATZ_108B(p):
     p.assume("hgt: rgt X Y", "hge: rge Z U")
     X_t = p._parse("X")
     Y_t = p._parse("Y")
-    Z_t = p._parse("Z")
     U_t = p._parse("U")
-    p.have("disj: rgt Z U \\/ Z = U") \
-        .by_eq_mp(UNFOLD(RGE_DEF, Z_t, U_t), "hge")
-    with p.thus("rgt (rmul X Z) (rmul Y U)").by_cases("disj"):
+    with p.thus("rgt (rmul X Z) (rmul Y U)").by_cases("hge"):
         with p.case("g_zu: rgt Z U"):
             p.thus("rgt (rmul X Z) (rmul Y U)") \
                 .by_match(SATZ_107, "hgt", "g_zu")
@@ -2105,33 +2036,22 @@ def SATZ_109(p):
            types=_R_TYPES)
     p.fix("X Y Z U")
     p.assume("hge1: rge X Y", "hge2: rge Z U")
-    X_t = p._parse("X")
     Y_t = p._parse("Y")
-    Z_t = p._parse("Z")
-    U_t = p._parse("U")
-    prodXZ = mk_app(RMUL, X_t, Z_t)
-    prodYU = mk_app(RMUL, Y_t, U_t)
-    p.have("d1: rgt X Y \\/ X = Y") \
-        .by_eq_mp(UNFOLD(RGE_DEF, X_t, Y_t), "hge1")
-    p.have("d2: rgt Z U \\/ Z = U") \
-        .by_eq_mp(UNFOLD(RGE_DEF, Z_t, U_t), "hge2")
-    with p.thus("rge (rmul X Z) (rmul Y U)").by_cases("d1"):
+    with p.thus("rge (rmul X Z) (rmul Y U)").by_cases("hge1"):
         with p.case("g1: rgt X Y"):
             p.have("g_xy_zu: rgt (rmul X Z) (rmul Y U)") \
                 .by_match(SATZ_108B, "g1", "hge2")
             p.have("orL: rgt (rmul X Z) (rmul Y U) \\/ rmul X Z = rmul Y U") \
                 .by(DISJ1, "g_xy_zu", "rmul X Z = rmul Y U")
-            p.thus("rge (rmul X Z) (rmul Y U)") \
-                .by_eq_mp(SYM(UNFOLD(RGE_DEF, prodXZ, prodYU)), "orL")
+            p.thus("rge (rmul X Z) (rmul Y U)").by_fold("orL")
         with p.case("e1: X = Y"):
-            with p.thus("rge (rmul X Z) (rmul Y U)").by_cases("d2"):
+            with p.thus("rge (rmul X Z) (rmul Y U)").by_cases("hge2"):
                 with p.case("g2: rgt Z U"):
                     p.have("g_xz_yu: rgt (rmul X Z) (rmul Y U)") \
                         .by_match(SATZ_108A, "hge1", "g2")
                     p.have("orL: rgt (rmul X Z) (rmul Y U) \\/ rmul X Z = rmul Y U") \
                         .by(DISJ1, "g_xz_yu", "rmul X Z = rmul Y U")
-                    p.thus("rge (rmul X Z) (rmul Y U)") \
-                        .by_eq_mp(SYM(UNFOLD(RGE_DEF, prodXZ, prodYU)), "orL")
+                    p.thus("rge (rmul X Z) (rmul Y U)").by_fold("orL")
                 with p.case("e2: Z = U"):
                     p.have("eq_xz_yz: rmul X Z = rmul Y Z") \
                         .by_match(SATZ_105B, "e1")
@@ -2140,8 +2060,7 @@ def SATZ_109(p):
                         .by_thm(TRANS(p.fact("eq_xz_yz"), eq_yz_yu))
                     p.have("orR: rgt (rmul X Z) (rmul Y U) \\/ rmul X Z = rmul Y U") \
                         .by(DISJ2, "rgt (rmul X Z) (rmul Y U)", "eq_full")
-                    p.thus("rge (rmul X Z) (rmul Y U)") \
-                        .by_eq_mp(SYM(UNFOLD(RGE_DEF, prodXZ, prodYU)), "orR")
+                    p.thus("rge (rmul X Z) (rmul Y U)").by_fold("orR")
 
 
 # Satz 110 (existence & uniqueness of division):  YU = X has a unique solution.
@@ -2487,30 +2406,24 @@ def SATZ_115(p):
     p.have("v_ge: v >= 1").by_match(SATZ_24)
     p.have("v_disj: v > 1 \\/ v = 1") \
         .by_eq_mp(UNFOLD(GE_DEF, v_t, ONE_t), "v_ge")
-    Q11 = mk_app(Q, ONE_t, ONE_t)
+    mk_app(Q, ONE_t, ONE_t)
     Qv1 = mk_app(Q, v_t, ONE_t)
     with p.have("rge_v1: rge (Q v 1) (Q 1 1)").by_cases("v_disj"):
         with p.case("g1: v > 1"):
             p.have("rg: rgt (Q v 1) (Q 1 1)").by_match(SATZ_111A_REV, "g1")
             p.have("orL: rgt (Q v 1) (Q 1 1) \\/ Q v 1 = Q 1 1") \
                 .by(DISJ1, "rg", "Q v 1 = Q 1 1")
-            p.thus("rge (Q v 1) (Q 1 1)") \
-                .by_eq_mp(SYM(UNFOLD(RGE_DEF, Qv1, Q11)), "orL")
+            p.thus("rge (Q v 1) (Q 1 1)").by_fold("orL")
         with p.case("e1: v = 1"):
             p.have("eq: Q v 1 = Q 1 1").by_match(SATZ_111B_REV, "e1")
             p.have("orR: rgt (Q v 1) (Q 1 1) \\/ Q v 1 = Q 1 1") \
                 .by(DISJ2, "rgt (Q v 1) (Q 1 1)", "eq")
-            p.thus("rge (Q v 1) (Q 1 1)") \
-                .by_eq_mp(SYM(UNFOLD(RGE_DEF, Qv1, Q11)), "orR")
+            p.thus("rge (Q v 1) (Q 1 1)").by_fold("orR")
     # rge (Z*X) (Z*X) (reflexivity).
     refl_ZX = REFL(mk_app(RMUL, Z_t, X_t))
     refl_orR = DISJ2(mk_app(RGT, mk_app(RMUL, Z_t, X_t),
                                   mk_app(RMUL, Z_t, X_t)), refl_ZX)
-    p.have("rge_ZX: rge (rmul Z X) (rmul Z X)") \
-        .by_eq_mp(SYM(UNFOLD(RGE_DEF,
-                              mk_app(RMUL, Z_t, X_t),
-                              mk_app(RMUL, Z_t, X_t))),
-                   refl_orR)
+    p.have("rge_ZX: rge (rmul Z X) (rmul Z X)").by_fold(refl_orR)
     # Multiplication monotonicity (Satz 109): rge (rmul (Q v 1) (Z*X)) (rmul (Q 1 1) (Z*X)).
     p.have("rge_full: rge (rmul (Q v 1) (rmul Z X)) (rmul (Q 1 1) (rmul Z X))") \
         .by_match(SATZ_109, "rge_v1", "rge_ZX")
