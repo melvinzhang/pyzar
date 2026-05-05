@@ -49,14 +49,11 @@ from fusion import (
     Var, REFL, TRANS, EQ_MP, INST, mk_comb, mk_type, new_basic_type_definition,
 )
 from basics import (
-    mk_abs, mk_app, mk_const, mk_eq, rand,
-)
-from axioms import (
-    mk_and, mk_exists,
+    mk_app, mk_const, mk_eq, rand,
 )
 from tactics import (
-    AP_TERM, AP_THM, FUN_EXT, SYM, SPEC, SPECL, GEN, CONJ, EXISTS, DISJ1, DISJ2,
-    CHOOSE_WITNESS, UNFOLD, REWRITE_RULE,
+    AP_TERM, AP_THM, FUN_EXT, SYM, SPEC, SPECL, GEN, CONJ, DISJ1, DISJ2,
+    UNFOLD, REWRITE_RULE,
 )
 from nat import (
     num_ty, ONE, mk_add, mk_mul, TIMES,
@@ -95,10 +92,6 @@ IS_RAT = mk_const("IS_RAT", [])
 # ---------------------------------------------------------------------------
 
 K_var = Var("K", n2b_ty)
-# Fresh bound-variable names for IS_RAT's existential (must not clash with
-# free-variable names like ``a``, ``b`` in callers).
-_pa = Var("pa", num_ty)
-_pb = Var("pb", num_ty)
 
 feq_1_1 = mk_app(FEQ, ONE, ONE)
 
@@ -106,15 +99,8 @@ feq_1_1 = mk_app(FEQ, ONE, ONE)
 @proof
 def IS_RAT_FEQ_1_1(p):
     p.goal("IS_RAT (feq 1 1)")
-    refl_th = REFL(feq_1_1)              # |- feq 1 1 = feq 1 1
-    inner = EXISTS(
-        mk_abs(_pb, mk_eq(feq_1_1, mk_app(FEQ, ONE, _pb))),
-        ONE, refl_th)                    # |- ?pb. feq 1 1 = feq 1 pb
-    outer = EXISTS(
-        mk_abs(_pa, mk_exists(_pb, mk_eq(feq_1_1, mk_app(FEQ, _pa, _pb)))),
-        ONE, inner)                      # |- ?pa pb. feq 1 1 = feq pa pb
-    p.thus("IS_RAT (feq 1 1)") \
-        .by_eq_mp(SYM(UNFOLD(IS_RAT_DEF, feq_1_1)), outer)
+    p.have("ex: ?pa pb. feq 1 1 = feq pa pb").by_exists(["1", "1"])
+    p.thus("IS_RAT (feq 1 1)").by_unfold("ex", IS_RAT_DEF)
 
 
 # ---------------------------------------------------------------------------
@@ -165,18 +151,8 @@ W = Var("W", rat_ty)
 def IS_RAT_FEQ(p):
     p.goal("!a b. IS_RAT (feq a b)")
     p.fix("a b")
-    a_t = p._parse("a")
-    b_t = p._parse("b")
-    feq_ab = mk_app(FEQ, a_t, b_t)
-    refl_th = REFL(feq_ab)
-    inner = EXISTS(
-        mk_abs(_pb, mk_eq(feq_ab, mk_app(FEQ, a_t, _pb))),
-        b_t, refl_th)
-    outer = EXISTS(
-        mk_abs(_pa, mk_exists(_pb, mk_eq(feq_ab, mk_app(FEQ, _pa, _pb)))),
-        a_t, inner)
-    p.thus("IS_RAT (feq a b)") \
-        .by_eq_mp(SYM(UNFOLD(IS_RAT_DEF, feq_ab)), outer)
+    p.have("ex: ?pa pb. feq a b = feq pa pb").by_exists(["a", "b"])
+    p.thus("IS_RAT (feq a b)").by_unfold("ex", IS_RAT_DEF)
 
 
 # ---------------------------------------------------------------------------
@@ -1241,19 +1217,9 @@ def RSUB_PROP(p):
     p.goal("!X Y. rgt X Y ==> radd Y (rsub X Y) = X", types=_R_TYPES)
     p.fix("X Y")
     p.assume("h: rgt X Y")
-    X_t = p._parse("X")
-    Y_t = p._parse("Y")
-    p.have("ex: ?U. radd Y U = X").by_match(SATZ_101_EXIST, "h")
-    # rsub X Y = @U. radd Y U = X (by RSUB_DEF unfold).
-    rsub_unfold = UNFOLD(RSUB_DEF, X_t, Y_t)
-    # CHOOSE_WITNESS gives the property at the @-witness.
-    U_var = Var("U", rat_ty)
-    pred_U = mk_abs(U_var, mk_eq(mk_app(RADD, Y_t, U_var), X_t))
-    sel_thm = CHOOSE_WITNESS(pred_U, p.fact("ex"))
-    # sel_thm : |- radd Y ((@) pred_U) = X (after beta).
-    # Rewrite ((@) pred_U) → rsub X Y via SYM(rsub_unfold).
-    res = REWRITE_RULE([SYM(rsub_unfold)], sel_thm)
-    p.thus("radd Y (rsub X Y) = X").by_thm(res)
+    p.have("ex: ?U:rat. radd Y U = X").by_match(SATZ_101_EXIST, "h")
+    p.thus("radd Y (rsub X Y) = X") \
+        .by_select_def(RSUB_DEF, "X", "Y", from_="ex")
 
 
 # ---------------------------------------------------------------------------
@@ -1277,77 +1243,24 @@ RMUL = mk_const("rmul", [])
 def RMUL_QQ(p):
     p.goal("!a b c d. rmul (Q a b) (Q c d) = Q (a*c) (b*d)")
     p.fix("a b c d")
-    a_t = p._parse("a")
-    b_t = p._parse("b")
-    c_t = p._parse("c")
-    d_t = p._parse("d")
-    Q_ab = mk_app(Q, a_t, b_t)
-    Q_cd = mk_app(Q, c_t, d_t)
-    canon = mk_app(Q, mk_mul(a_t, c_t), mk_mul(b_t, d_t))
-    _qa = Var("qa", num_ty)
-    _qb = Var("qb", num_ty)
-    _qc = Var("qc", num_ty)
-    _qd = Var("qd", num_ty)
-    _qZ = Var("qZ", rat_ty)
-    body_at_canon = CONJ(REFL(Q_ab), CONJ(REFL(Q_cd), REFL(canon)))
-    inner_d = EXISTS(
-        mk_abs(_qd,
-            mk_and(mk_eq(Q_ab, mk_app(Q, a_t, b_t)),
-            mk_and(mk_eq(Q_cd, mk_app(Q, c_t, _qd)),
-                   mk_eq(canon, mk_app(Q,
-                       mk_mul(a_t, c_t), mk_mul(b_t, _qd)))))),
-        d_t, body_at_canon)
-    inner_c = EXISTS(
-        mk_abs(_qc, mk_exists(_qd,
-            mk_and(mk_eq(Q_ab, mk_app(Q, a_t, b_t)),
-            mk_and(mk_eq(Q_cd, mk_app(Q, _qc, _qd)),
-                   mk_eq(canon, mk_app(Q,
-                       mk_mul(a_t, _qc), mk_mul(b_t, _qd))))))),
-        c_t, inner_d)
-    inner_b = EXISTS(
-        mk_abs(_qb, mk_exists(_qc, mk_exists(_qd,
-            mk_and(mk_eq(Q_ab, mk_app(Q, a_t, _qb)),
-            mk_and(mk_eq(Q_cd, mk_app(Q, _qc, _qd)),
-                   mk_eq(canon, mk_app(Q,
-                       mk_mul(a_t, _qc), mk_mul(_qb, _qd)))))))),
-        b_t, inner_c)
-    inner_a = EXISTS(
-        mk_abs(_qa, mk_exists(_qb, mk_exists(_qc, mk_exists(_qd,
-            mk_and(mk_eq(Q_ab, mk_app(Q, _qa, _qb)),
-            mk_and(mk_eq(Q_cd, mk_app(Q, _qc, _qd)),
-                   mk_eq(canon, mk_app(Q,
-                       mk_mul(_qa, _qc), mk_mul(_qb, _qd))))))))),
-        a_t, inner_b)
-    pred_Z = mk_abs(_qZ, mk_exists(_qa, mk_exists(_qb, mk_exists(_qc, mk_exists(_qd,
-        mk_and(mk_eq(Q_ab, mk_app(Q, _qa, _qb)),
-        mk_and(mk_eq(Q_cd, mk_app(Q, _qc, _qd)),
-               mk_eq(_qZ, mk_app(Q,
-                   mk_mul(_qa, _qc), mk_mul(_qb, _qd))))))))))
-    ex_Z = EXISTS(pred_Z, canon, inner_a)
-    body_at_sel = CHOOSE_WITNESS(pred_Z, ex_Z)
-    rmul_unfold = UNFOLD(RMUL_DEF, Q_ab, Q_cd)
-    body_with_rmul = REWRITE_RULE([SYM(rmul_unfold)], body_at_sel)
+    p.have("ex: ?Z:rat. ?a1 b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
+           " /\\ Z = Q (a1*c1) (b1*d1)") \
+        .by_exists(["Q (a*c) (b*d)", "a", "b", "c", "d"])
     p.have("sel_body: ?a1 b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
            " /\\ rmul (Q a b) (Q c d) = Q (a1*c1) (b1*d1)") \
-        .by_thm(body_with_rmul)
-    p.choose("a1: ?b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
+        .by_select_def(RMUL_DEF, "Q a b", "Q c d", from_="ex")
+    p.choose("a1 b1 c1 d1: Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
              " /\\ rmul (Q a b) (Q c d) = Q (a1*c1) (b1*d1)", from_="sel_body")
-    p.choose("b1: ?c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-             " /\\ rmul (Q a b) (Q c d) = Q (a1*c1) (b1*d1)", from_="a1_eq")
-    p.choose("c1: ?d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-             " /\\ rmul (Q a b) (Q c d) = Q (a1*c1) (b1*d1)", from_="b1_eq")
-    p.choose("d1: Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-             " /\\ rmul (Q a b) (Q c d) = Q (a1*c1) (b1*d1)", from_="c1_eq")
-    p.split("d1_eq", "(hQab, hrest)")
-    p.split("hrest", "(hQcd, hrmul)")
+    p.split("d1_eq", "(hQab, hQcd, hrmul)")
     p.have("feq_ab: feq a b a1 b1").by_thm(Q_eq_to_feq(p.fact("hQab")))
     p.have("feq_cd: feq c d c1 d1").by_thm(Q_eq_to_feq(p.fact("hQcd")))
     p.have("feq_prod: feq (a*c) (b*d) (a1*c1) (b1*d1)") \
         .by_match(SATZ_68, "feq_ab", "feq_cd")
     p.have("Qprod: Q (a*c) (b*d) = Q (a1*c1) (b1*d1)") \
         .by_thm(feq_to_Q_eq(p.fact("feq_prod")))
-    p.thus("rmul (Q a b) (Q c d) = Q (a*c) (b*d)") \
-        .by_thm(TRANS(p.fact("hrmul"), SYM(p.fact("Qprod"))))
+    with p.calc("rmul (Q a b) (Q c d)", thus=True) as cc:
+        cc.step("= Q (a1*c1) (b1*d1)").by_thm("hrmul")
+        cc.step("= Q (a*c) (b*d)").by_thm(SYM(p.fact("Qprod")))
 
 
 # Satz 102 (commutativity of rat multiplication):  X * Y = Y * X.
@@ -1756,15 +1669,9 @@ RDIV = mk_const("rdiv", [])
 def RDIV_PROP(p):
     p.goal("!X Y. rmul Y (rdiv X Y) = X", types=_R_TYPES)
     p.fix("X Y")
-    X_t = p._parse("X")
-    Y_t = p._parse("Y")
-    p.have("ex: ?U. rmul Y U = X").by_match(SATZ_110_EXIST)
-    rdiv_unfold = UNFOLD(RDIV_DEF, X_t, Y_t)
-    U_var = Var("U", rat_ty)
-    pred_U = mk_abs(U_var, mk_eq(mk_app(RMUL, Y_t, U_var), X_t))
-    sel_thm = CHOOSE_WITNESS(pred_U, p.fact("ex"))
-    res = REWRITE_RULE([SYM(rdiv_unfold)], sel_thm)
-    p.thus("rmul Y (rdiv X Y) = X").by_thm(res)
+    p.have("ex: ?U:rat. rmul Y U = X").by_match(SATZ_110_EXIST)
+    p.thus("rmul Y (rdiv X Y) = X") \
+        .by_select_def(RDIV_DEF, "X", "Y", from_="ex")
 
 
 # ---------------------------------------------------------------------------
