@@ -40,14 +40,14 @@ from basics import (
 from axioms import (
     T, F, mk_select, mk_forall, mk_not,
     dest_disj, dest_exists, dest_forall, dest_imp, dest_neg,
-    is_conj, is_disj,
+    dest_conj, is_conj, is_disj,
 )
 from tactics import (
     SPEC, GEN, DISCH, MP, MP_LIST, DISJ_CASES, BETA_NORM, SYM,
     AP_TERM, AP_THM, PROVE_HYP, CHOOSE_WITNESS, UNFOLD, subst_term,
     NOT_INTRO, NOT_ELIM, CONTR, EXISTS, DISJ1, DISJ2,
-    CONJUNCT1, CONJUNCT2, TRANS_CHAIN,
-    REWRITE_PROVE, REWRITE_CONV,
+    CONJ, CONJUNCT1, CONJUNCT2, TRANS_CHAIN,
+    REWRITE_PROVE, REWRITE_CONV, REWRITE_RULE,
     AC_PROVE,
     _strip_forall, _term_match,
 )
@@ -2180,6 +2180,67 @@ class _Have:
         raise HolError(
             "by_witness: target is not existential or a registered relation: "
             f"{pp(target)}")
+
+    def by_exists(self, witnesses, *rules):
+        """Introduce a multi-quantifier existential ``?v1 ... vn. body`` (or
+        a registered relation that unfolds to one) at concrete witnesses,
+        with the substituted body discharged automatically.
+
+        Each top-level ``/\\`` conjunct of the substituted body is proved
+        via ``REWRITE_PROVE(rules + active simp set)``; reflexive leaves
+        (``t = t``) need no rules at all. ``witnesses`` is a list/tuple of
+        terms (strings parsed in the current scope, or kernel terms).
+        """
+        p = self.p
+        target = self.term
+        if not isinstance(witnesses, (list, tuple)):
+            witnesses = [witnesses]
+        witnesses_t = [p._parse(w) if isinstance(w, str) else w
+                       for w in witnesses]
+        rules_thms = ([p.coerce(r) for r in rules]
+                      + p._active_simp_rules())
+
+        def prove(tm):
+            if is_conj(tm):
+                l, r = dest_conj(tm)
+                return CONJ(prove(l), prove(r))
+            return REWRITE_PROVE(rules_thms, tm)
+
+        th = p._make_existential_multi(target, witnesses_t, prove)
+        if th is None:
+            raise HolError(
+                "by_exists: target is not existential or unfoldable: "
+                f"{pp(target)}")
+        return self._finish(th)
+
+    def by_select_def(self, def_th, *args, from_):
+        """Read the body of a SELECT-style definition at concrete arguments.
+
+        Given ``def_th : |- f = \\x1 ... xk. @v. P v`` and a fact
+        ``from_ : ?v. P v`` (already instantiated at the same args),
+        derive ``P[(f arg1 ... argk) / v]`` by ``CHOOSE_WITNESS`` on
+        ``P``, then folding ``@v. P v`` back to ``f arg1 ... argk``
+        through ``SYM(UNFOLD(def_th, args))``.
+
+        The ``args`` are the SPECL terms (strings parsed in scope, or
+        kernel terms) the definition is to be instantiated at; the
+        existence fact's predicate must already match the body of
+        ``def_th`` after that instantiation.
+        """
+        p = self.p
+        def_eq = p.coerce(def_th)
+        ex_th = p.coerce(from_)
+        spec_args = [p._parse(a) if isinstance(a, str) else a for a in args]
+        unfold_eq = UNFOLD(def_eq, *spec_args)   # |- f a1...ak = @v. P v
+        pred = dest_exists(ex_th._concl)
+        if pred is None:
+            raise HolError(
+                "by_select_def: from_ is not existential: "
+                f"{pp(ex_th._concl)}")
+        body_at_sel = CHOOSE_WITNESS(pred, ex_th)   # asl |- P[(@v.Pv)/v]
+        folded = REWRITE_RULE([SYM(unfold_eq)], body_at_sel)
+        return self._finish(p._simp_require(
+            self.term, folded, op="by_select_def"))
 
     def by_disj(self, ref):
         """Given a fact whose conclusion alpha-matches one of the goal's

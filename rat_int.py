@@ -787,103 +787,28 @@ RADD = mk_const("radd", [])
 def RADD_QQ(p):
     p.goal("!a b c d. radd (Q a b) (Q c d) = Q (a*d + c*b) (b*d)")
     p.fix("a b c d")
-    a_t = p._parse("a")
-    b_t = p._parse("b")
-    c_t = p._parse("c")
-    d_t = p._parse("d")
-    Q_ab = mk_app(Q, a_t, b_t)
-    Q_cd = mk_app(Q, c_t, d_t)
-    canon = mk_app(Q, mk_add(mk_mul(a_t, d_t), mk_mul(c_t, b_t)),
-                   mk_mul(b_t, d_t))
-    mk_app(RADD, Q_ab, Q_cd)
-    # The predicate that radd-of-Q satisfies (after SELECT_AX): an existential
-    # over a', b', c', d'.  Build the canonical-witness existential first, then
-    # invoke SELECT_AX to get the same predicate at (@) of it.
-    _qa = Var("qa", num_ty)
-    _qb = Var("qb", num_ty)
-    _qc = Var("qc", num_ty)
-    _qd = Var("qd", num_ty)
-    _qZ = Var("qZ", rat_ty)
-    body_at_canon = CONJ(REFL(Q_ab), CONJ(REFL(Q_cd), REFL(canon)))
-    # body_at_canon : |- Q a b = Q a b /\ Q c d = Q c d /\ canon = Q (a*d + c*b) (b*d).
-    inner_d = EXISTS(
-        mk_abs(_qd,
-            mk_and(mk_eq(Q_ab, mk_app(Q, a_t, b_t)),
-            mk_and(mk_eq(Q_cd, mk_app(Q, c_t, _qd)),
-                   mk_eq(canon, mk_app(Q,
-                       mk_add(mk_mul(a_t, _qd), mk_mul(c_t, b_t)),
-                       mk_mul(b_t, _qd)))))),
-        d_t, body_at_canon)
-    inner_c = EXISTS(
-        mk_abs(_qc, mk_exists(_qd,
-            mk_and(mk_eq(Q_ab, mk_app(Q, a_t, b_t)),
-            mk_and(mk_eq(Q_cd, mk_app(Q, _qc, _qd)),
-                   mk_eq(canon, mk_app(Q,
-                       mk_add(mk_mul(a_t, _qd), mk_mul(_qc, b_t)),
-                       mk_mul(b_t, _qd))))))),
-        c_t, inner_d)
-    inner_b = EXISTS(
-        mk_abs(_qb, mk_exists(_qc, mk_exists(_qd,
-            mk_and(mk_eq(Q_ab, mk_app(Q, a_t, _qb)),
-            mk_and(mk_eq(Q_cd, mk_app(Q, _qc, _qd)),
-                   mk_eq(canon, mk_app(Q,
-                       mk_add(mk_mul(a_t, _qd), mk_mul(_qc, _qb)),
-                       mk_mul(_qb, _qd)))))))),
-        b_t, inner_c)
-    inner_a = EXISTS(
-        mk_abs(_qa, mk_exists(_qb, mk_exists(_qc, mk_exists(_qd,
-            mk_and(mk_eq(Q_ab, mk_app(Q, _qa, _qb)),
-            mk_and(mk_eq(Q_cd, mk_app(Q, _qc, _qd)),
-                   mk_eq(canon, mk_app(Q,
-                       mk_add(mk_mul(_qa, _qd), mk_mul(_qc, _qb)),
-                       mk_mul(_qb, _qd))))))))),
-        a_t, inner_b)
-    # inner_a : |- ?a' b' c' d'. Q a b = Q a' b' /\ Q c d = Q c' d'
-    #              /\ canon = Q (a'*d'+c'*b') (b'*d').
-    # Now: ?Z. Z = canon /\ ... — wait, we need to existentialize over Z too.
-    # Wait, the @ predicate is `\Z. ?a' b' c' d'. ... /\ Z = Q (a'*d'+c'*b') (b'*d')`.
-    # So `?Z. pred Z` is `?Z. ?a'b'c'd'. ... /\ Z = ...`. The Z existence at canon:
-    pred_Z = mk_abs(_qZ, mk_exists(_qa, mk_exists(_qb, mk_exists(_qc, mk_exists(_qd,
-        mk_and(mk_eq(Q_ab, mk_app(Q, _qa, _qb)),
-        mk_and(mk_eq(Q_cd, mk_app(Q, _qc, _qd)),
-               mk_eq(_qZ, mk_app(Q,
-                   mk_add(mk_mul(_qa, _qd), mk_mul(_qc, _qb)),
-                   mk_mul(_qb, _qd))))))))))
-    ex_Z = EXISTS(pred_Z, canon, inner_a)
-    # CHOOSE_WITNESS gives pred_body[(@) pred_Z / Z] -- already beta-reduced.
-    body_at_sel = CHOOSE_WITNESS(pred_Z, ex_Z)
-    # body_at_sel : |- ?a' b' c' d'. Q a b = Q a' b' /\ Q c d = Q c' d'
-    #                  /\ ((@) pred_Z) = Q (a'*d'+c'*b') (b'*d').
-    # Rewrite ((@) pred_Z) → radd (Q a b) (Q c d) using SYM(radd_unfold).
-    radd_unfold = UNFOLD(RADD_DEF, Q_ab, Q_cd)
-    body_with_radd = REWRITE_RULE([SYM(radd_unfold)], body_at_sel)
+    # Witness the SELECT body of RADD_DEF at canonical (a, b, c, d, Q ...);
+    # each conjunct is reflexive at this tuple.
+    p.have("ex: ?Z:rat. ?a1 b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
+           " /\\ Z = Q (a1*d1 + c1*b1) (b1*d1)") \
+        .by_exists(["Q (a*d + c*b) (b*d)", "a", "b", "c", "d"])
+    # Read radd's defining body at radd (Q a b) (Q c d) via SELECT_AX.
     p.have("sel_body: ?a1 b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
            " /\\ radd (Q a b) (Q c d) = Q (a1*d1 + c1*b1) (b1*d1)") \
-        .by_thm(body_with_radd)
-    p.choose("a1: ?b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
+        .by_select_def(RADD_DEF, "Q a b", "Q c d", from_="ex")
+    p.choose("a1 b1 c1 d1: Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
              " /\\ radd (Q a b) (Q c d) = Q (a1*d1 + c1*b1) (b1*d1)",
              from_="sel_body")
-    p.choose("b1: ?c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-             " /\\ radd (Q a b) (Q c d) = Q (a1*d1 + c1*b1) (b1*d1)",
-             from_="a1_eq")
-    p.choose("c1: ?d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-             " /\\ radd (Q a b) (Q c d) = Q (a1*d1 + c1*b1) (b1*d1)",
-             from_="b1_eq")
-    p.choose("d1: Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-             " /\\ radd (Q a b) (Q c d) = Q (a1*d1 + c1*b1) (b1*d1)",
-             from_="c1_eq")
-    p.split("d1_eq", "(hQab, hrest)")
-    p.split("hrest", "(hQcd, hradd)")
+    p.split("d1_eq", "(hQab, hQcd, hradd)")
     p.have("feq_ab: feq a b a1 b1").by_thm(Q_eq_to_feq(p.fact("hQab")))
     p.have("feq_cd: feq c d c1 d1").by_thm(Q_eq_to_feq(p.fact("hQcd")))
-    # Satz 56: feq (a*d + c*b) (b*d) (a1*d1 + c1*b1) (b1*d1).
     p.have("feq_sum: feq (a*d + c*b) (b*d) (a1*d1 + c1*b1) (b1*d1)") \
         .by_match(SATZ_56, "feq_ab", "feq_cd")
     p.have("Qsum: Q (a*d + c*b) (b*d) = Q (a1*d1 + c1*b1) (b1*d1)") \
         .by_thm(feq_to_Q_eq(p.fact("feq_sum")))
-    # radd (Q a b) (Q c d) = Q (a1*d1 + c1*b1) (b1*d1) = Q (a*d + c*b) (b*d).
-    p.thus("radd (Q a b) (Q c d) = Q (a*d + c*b) (b*d)") \
-        .by_thm(TRANS(p.fact("hradd"), SYM(p.fact("Qsum"))))
+    with p.calc("radd (Q a b) (Q c d)", thus=True) as cc:
+        cc.step("= Q (a1*d1 + c1*b1) (b1*d1)").by_thm("hradd")
+        cc.step("= Q (a*d + c*b) (b*d)").by_thm(SYM(p.fact("Qsum")))
 
 
 # Helpers for lifting binary operations / relations on rat to representatives.
