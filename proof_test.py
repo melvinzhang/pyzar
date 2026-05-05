@@ -517,6 +517,69 @@ def main():
         raise AssertionError(
             "expected HolError: split body shape mismatch")
 
+    # ---- calc: basic chain with by_thm justifications -------------------
+    # Prove (x + y) + 1 = x + (y + 1) via a two-step chain. Each segment is
+    # a known equation; calc TRANS-composes them.
+    @proof
+    def CALC_BASIC(p):
+        p.goal("!x y. (x + y) + 1 = x + (y + 1)")
+        p.fix("x y")
+        with p.calc("(x + y) + 1", thus=True) as c:
+            c.step("= SUC (x + y)").by_rewrite([ADD_1])
+            c.step("= x + SUC y").by_rewrite([ADD_SUC])
+            c.step("= x + (y + 1)").by_rewrite([ADD_1])
+    assert aconv(CALC_BASIC._concl,
+                 parse("!x y. (x + y) + 1 = x + (y + 1)")), \
+        f"CALC_BASIC: {pp(CALC_BASIC._concl)}"
+
+    # ---- calc: have-mode registers a fact, downstream thus uses it ------
+    @proof
+    def CALC_HAVE(p):
+        p.goal("!x y. (x + y) + 1 = x + (y + 1)")
+        p.fix("x y")
+        with p.calc("eq: (x + y) + 1") as c:
+            c.step("= SUC (x + y)").by_rewrite([ADD_1])
+            c.step("= x + SUC y").by_rewrite([ADD_SUC])
+            c.step("= x + (y + 1)").by_rewrite([ADD_1])
+        p.thus("(x + y) + 1 = x + (y + 1)").by_thm(p.fact("eq"))
+    assert aconv(CALC_HAVE._concl, CALC_BASIC._concl)
+
+    # ---- calc: empty chain raises ---------------------------------------
+    p_err_empty = Proof()
+    p_err_empty.goal("(1 + 1) + 1 = 1 + (1 + 1)")
+    try:
+        with p_err_empty.calc("(1 + 1) + 1", thus=True):
+            pass
+    except HolError:
+        pass
+    else:
+        raise AssertionError("expected HolError: empty calc chain")
+
+    # ---- calc: malformed step spec (no leading '=') raises --------------
+    p_err_step = Proof()
+    p_err_step.goal("!x. x + 1 = x + 1")
+    p_err_step.fix("x")
+    try:
+        with p_err_step.calc("x + 1", thus=True) as c:
+            c.step("x + 1").by_thm(REFL(parse("x + 1")))
+    except HolError:
+        pass
+    else:
+        raise AssertionError("expected HolError: malformed calc step")
+
+    # ---- calc: thus-mode with goal mismatch raises ----------------------
+    p_err_thus = Proof()
+    p_err_thus.goal("!x. x + 1 = x + (1 + 1)")
+    p_err_thus.fix("x")
+    try:
+        with p_err_thus.calc("x + 1", thus=True) as c:
+            c.step("= SUC x").by_rewrite([ADD_1])
+    except HolError:
+        pass
+    else:
+        raise AssertionError(
+            "expected HolError: calc final RHS doesn't match goal")
+
     print("proof.py self-tests passed.")
 
 

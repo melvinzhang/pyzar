@@ -1217,6 +1217,27 @@ class Proof:
         label, term = self._split_label(spec)
         return _Have(self, label, term, is_thus=True)
 
+    def calc(self, lhs_spec, *, thus=False):
+        """Open an equational-chain context (Mizar-style ``... .= ...``).
+
+        ``lhs_spec`` is ``"lhs"`` or ``"label: lhs"``. Inside the
+        ``with``, each ``c.step("= rhs").by(...)`` proves
+        ``cur_rhs = rhs`` and TRANS-composes it onto the running chain;
+        ``cur_rhs`` starts at ``lhs`` and advances after each step. On
+        exit the composed equation ``lhs = final_rhs`` is registered as
+        a fact (under ``label`` or an anonymous name).
+
+        With ``thus=True``, the composed equation must alpha-match the
+        current goal and discharges it (mirrors ``thus`` vs. ``have``).
+
+        Each ``_CalcStep`` is a ``_Have`` subclass, so every ``by_*``
+        justification (``by``, ``by_thm``, ``by_rewrite``,
+        ``by_rewrite_of``, ``by_match``, ``by_ac``, ``proof()``, ...)
+        works on a step.
+        """
+        label, lhs_term = self._split_label(lhs_spec)
+        return _CalcCtx(self, label, lhs_term, thus_mode=thus)
+
     # ---- block constructs ------------------------------------------------
 
     def induction(self, var_name):
@@ -2147,6 +2168,84 @@ class _Absurd:
                 f"absurd.via: no contra finder for "
                 f"({cs_src[0]!r}, {cs_lif[0]!r})")
         return self._finish(finder(src_th, lifted))
+
+
+# ---------------------------------------------------------------------------
+# Calc: equational-chain context, Mizar's ``... .= ...`` idiom.
+#
+# A calc has a running ``cur_rhs`` (initially the user's LHS) and a running
+# ``chain_th`` (initially ``None``, then ``|- lhs = cur_rhs``). Each
+# ``c.step("= rhs").by_*(...)`` proves the segment ``cur_rhs = rhs`` and
+# TRANS-composes it onto the chain. Steps don't push a frame and don't
+# register their own facts; only the composed equation is registered on
+# context exit.
+# ---------------------------------------------------------------------------
+
+class _CalcCtx:
+    __slots__ = ("p", "label", "lhs", "thus_mode", "cur_rhs", "chain_th")
+
+    def __init__(self, p, label, lhs, thus_mode):
+        self.p = p
+        self.label = label
+        self.lhs = lhs
+        self.thus_mode = thus_mode
+        self.cur_rhs = lhs
+        self.chain_th = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, *_):
+        if exc_type is not None:
+            return False
+        if self.chain_th is None:
+            raise HolError("calc: no steps in chain")
+        eq_th = self.chain_th
+        if self.thus_mode:
+            cur = self.p._cur
+            if cur.goal is None:
+                raise HolError("calc: thus=True but no current goal")
+            cur.result = self.p._simp_require(cur.goal, eq_th, op="calc")
+        label = self.label or self.p._fresh_label("h")
+        self.p._register_fact(label, eq_th)
+        return False
+
+    def step(self, spec):
+        s = spec.strip()
+        if not s.startswith("="):
+            raise HolError(
+                f"calc.step: expected '= rhs', got {spec!r}")
+        rhs_str = s[1:].strip()
+        try:
+            rhs_term = parse(rhs_str, _env_bindings=self.p._scope_env())
+        except ParseError as ex:
+            raise HolError(
+                f"calc.step: cannot parse RHS in {spec!r}: {ex}") from ex
+        segment = mk_eq(self.cur_rhs, rhs_term)
+        return _CalcStep(self, segment, rhs_term)
+
+
+class _CalcStep(_Have):
+    """One segment of a ``calc`` chain. Inherits every ``by_*`` from
+    ``_Have``; overrides ``_finish`` to TRANS the segment onto the
+    chain and advance ``cur_rhs`` instead of registering a fact."""
+    __slots__ = ("calc_ctx", "rhs")
+
+    def __init__(self, calc_ctx, segment_term, rhs_term):
+        super().__init__(calc_ctx.p, label=None, term=segment_term,
+                         is_thus=False)
+        self.calc_ctx = calc_ctx
+        self.rhs = rhs_term
+
+    def _finish(self, th):
+        c = self.calc_ctx
+        seg_th = self.p._simp_require(self.term, th, op="calc.step")
+        if c.chain_th is None:
+            c.chain_th = seg_th
+        else:
+            c.chain_th = TRANS(c.chain_th, seg_th)
+        c.cur_rhs = self.rhs
+        return seg_th
 
 
 # ---------------------------------------------------------------------------
