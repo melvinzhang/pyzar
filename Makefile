@@ -5,7 +5,9 @@ LANDAU_GOLDEN := landau.golden
 LANDAU_OUT    := landau.out
 
 .PHONY: test test-kernel test-tactics test-parser test-axioms test-proof \
-        test-theories test-golden update-golden clean
+        test-theories test-golden update-golden lint clean
+
+THEORY_FILES := classical.py num.py nat.py frac.py rat_int.py
 
 # Layered test runner. Each layer depends only on the ones below it, so a
 # failure at a lower layer makes upper-layer failures meaningless to debug.
@@ -72,6 +74,13 @@ test-golden: test-theories
 update-golden: test-theories
 	@cp $(LANDAU_OUT) $(LANDAU_GOLDEN)
 	@echo "Updated $(LANDAU_GOLDEN) ($$(wc -l < $(LANDAU_GOLDEN)) theorems)."
+
+# Declarativeness linter: flag direct kernel/tactics calls inside @proof
+# bodies (REFL/TRANS/MK_COMB/SPEC/MP/REWRITE_RULE/...). Exits non-zero
+# if any offender remains; not part of `make test` while the existing
+# escape hatches (e.g. MK_DEST/DEST_MK peels) still need landing.
+lint:
+	$(PY) lint_declarative.py $(THEORY_FILES)
 
 clean:
 	rm -f $(LANDAU_OUT)
