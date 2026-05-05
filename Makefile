@@ -5,7 +5,8 @@ LANDAU_GOLDEN := landau.golden
 LANDAU_OUT    := landau.out
 
 .PHONY: test test-kernel test-tactics test-parser test-axioms test-proof \
-        test-theories test-golden update-golden lint clean
+        test-theories test-golden update-golden lint flag-escapes \
+        format clean
 
 THEORY_FILES := classical.py num.py nat.py frac.py rat_int.py
 
@@ -75,12 +76,21 @@ update-golden: test-theories
 	@cp $(LANDAU_OUT) $(LANDAU_GOLDEN)
 	@echo "Updated $(LANDAU_GOLDEN) ($$(wc -l < $(LANDAU_GOLDEN)) theorems)."
 
-# Declarativeness linter: flag direct kernel/tactics calls inside @proof
-# bodies (REFL/TRANS/MK_COMB/SPEC/MP/REWRITE_RULE/...). Exits non-zero
-# if any offender remains; not part of `make test` while the existing
-# escape hatches (e.g. MK_DEST/DEST_MK peels) still need landing.
+# Style lint via ruff (unused imports, formatting drift, etc.).
 lint:
+	uv run ruff check
+
+# Flag escape hatches from the proof DSL: direct kernel/tactics calls
+# inside @proof bodies (REFL/TRANS/MK_COMB/SPEC/MP/REWRITE_RULE/...).
+# Exits non-zero if any offender remains; not part of `make test` while
+# the existing escape hatches (e.g. MK_DEST/DEST_MK peels) still need
+# landing.
+flag-escapes:
 	$(PY) lint_declarative.py $(THEORY_FILES)
+
+# Format the codebase in place with ruff format.
+format:
+	uv run ruff format
 
 clean:
 	rm -f $(LANDAU_OUT)
