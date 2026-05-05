@@ -55,7 +55,7 @@ from axioms import (
     mk_and, mk_exists,
 )
 from tactics import (
-    AP_TERM, AP_THM, FUN_EXT, SYM, SPEC, SPECL, GEN, CONJ, MP, EXISTS, DISJ1, DISJ2,
+    AP_TERM, AP_THM, FUN_EXT, SYM, SPEC, SPECL, GEN, CONJ, EXISTS, DISJ1, DISJ2,
     CHOOSE_WITNESS, UNFOLD, REWRITE_RULE,
 )
 from nat import (
@@ -221,8 +221,8 @@ def RAT_EQ(p):
     d_t = p._parse("d")
     mk_app(FEQ, a_t, b_t)
     mk_app(FEQ, c_t, d_t)
-    Q_ab = mk_app(Q, a_t, b_t)
-    Q_cd = mk_app(Q, c_t, d_t)
+    mk_app(Q, a_t, b_t)
+    mk_app(Q, c_t, d_t)
 
     # Q a b = mk_rat (feq a b)  via Q_DEF unfolded twice.
     p_var = Var("p", num_ty)
@@ -262,8 +262,8 @@ def RAT_EQ(p):
             p.fix("p q")
             p_t = p._parse("p")
             q_t = p._parse("q")
-            feq_ab_pq = mk_app(FEQ, a_t, b_t, p_t, q_t)
-            feq_cd_pq = mk_app(FEQ, c_t, d_t, p_t, q_t)
+            mk_app(FEQ, a_t, b_t, p_t, q_t)
+            mk_app(FEQ, c_t, d_t, p_t, q_t)
             # ==>: feq a b p q ==> feq c d p q via SATZ_38 + SATZ_39.
             with p.have("imp1: feq a b p q ==> feq c d p q").proof():
                 p.assume("hap: feq a b p q")
@@ -275,17 +275,7 @@ def RAT_EQ(p):
                 p.assume("hcp: feq c d p q")
                 p.thus("feq a b p q") \
                     .by_match(SATZ_39, "hf", "hcp")
-            # Bool equality from biconditional.
-            # We need: feq a b p q = feq c d p q.  Use IMP_ANTISYM_RULE? Simpler:
-            # bool extensionality by DEDUCT_ANTISYM_RULE which equates two formulas
-            # mutually implying each other.
-            from fusion import DEDUCT_ANTISYM_RULE, ASSUME
-            th_l = MP(p.fact("imp1"), ASSUME(feq_ab_pq))   # {feq_ab_pq} |- feq_cd_pq
-            th_r = MP(p.fact("imp2"), ASSUME(feq_cd_pq))   # {feq_cd_pq} |- feq_ab_pq
-            iff_th = SYM(DEDUCT_ANTISYM_RULE(th_l, th_r))
-            # DEDUCT_ANTISYM produces |- feq c d p q = feq a b p q (concl(th_l)
-            # on the lhs); we want the other orientation.
-            p.thus("feq a b p q = feq c d p q").by_thm(iff_th)
+            p.thus("feq a b p q = feq c d p q").by_iff("imp1", "imp2")
         # FUN_EXT twice.
         # ptw : |- !p q. feq a b p q = feq c d p q.
         # First strip the outer ! via SPEC then FUN_EXT on q.
@@ -307,14 +297,7 @@ def RAT_EQ(p):
             c.step("= mk_rat (feq c d)").by_thm(mk_eq_th)
             c.step("= Q c d").by_thm(SYM(Q_unfold_cd))
 
-    # Combine via IFF.
-    from fusion import DEDUCT_ANTISYM_RULE, ASSUME
-    th_fwd = MP(p.fact("fwd"), ASSUME(mk_eq(Q_ab, Q_cd)))   # {Q_ab=Q_cd} |- feq_abcd
-    feq_abcd = mk_app(FEQ, a_t, b_t, c_t, d_t)
-    th_rev = MP(p.fact("rev"), ASSUME(feq_abcd))            # {feq_abcd} |- Q_ab=Q_cd
-    # DEDUCT_ANTISYM(th_rev, th_fwd) yields |- (Q a b = Q c d) = feq a b c d.
-    iff_th = DEDUCT_ANTISYM_RULE(th_rev, th_fwd)
-    p.thus("(Q a b = Q c d) = feq a b c d").by_thm(iff_th)
+    p.thus("(Q a b = Q c d) = feq a b c d").by_iff("fwd", "rev")
 
 
 # A frequent shorthand: from (Q a b = Q c d) extract feq a b c d, and v.v.

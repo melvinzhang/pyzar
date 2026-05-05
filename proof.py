@@ -31,6 +31,7 @@ import enum
 from fusion import (
     Var, Comb, Abs, thm,
     HolError, ASSUME, EQ_MP, INST, type_of, TRANS, MK_COMB, ABS, REFL,
+    DEDUCT_ANTISYM_RULE,
     vfree_in,
 )
 from basics import (
@@ -1972,6 +1973,48 @@ class _Have:
         Aligns the equation's LHS with the fact's conclusion via simp, so
         the user can mix folded/unfolded forms across an EQ_MP boundary."""
         return self._via(self.p.simp_eq_mp, eq_th, ref)
+
+    def by_iff(self, fwd, rev):
+        """For a boolean-equality have-term ``L = R``, combine two
+        implications into the iff: ``fwd: L ==> R`` and ``rev: R ==> L``.
+
+        Argument order may be either direction; the matching against the
+        target's L/R disambiguates. Each ref is a fact label or theorem.
+        Internally: ``MP(impl, ASSUME(ant))`` on each side gives
+        ``{L} |- R`` and ``{R} |- L``, which DEDUCT_ANTISYM_RULE fuses
+        into ``|- L = R``."""
+        target = self.term
+        eq_parts = dest_eq(target)
+        if eq_parts is None:
+            raise HolError(
+                f"by_iff: target is not an equality: {pp(target)}")
+        L, R = eq_parts
+        p = self.p
+        th_a = p.simp_norm_fact(p.coerce(fwd))
+        th_b = p.simp_norm_fact(p.coerce(rev))
+
+        def matches(th, ant, conseq):
+            parts = dest_imp(th._concl)
+            if parts is None:
+                return False
+            a, c = parts
+            return aconv(a, ant) and aconv(c, conseq)
+
+        if matches(th_a, L, R) and matches(th_b, R, L):
+            th_lr, th_rl = th_a, th_b
+        elif matches(th_a, R, L) and matches(th_b, L, R):
+            th_lr, th_rl = th_b, th_a
+        else:
+            raise HolError(
+                f"by_iff: facts do not form L ==> R / R ==> L for goal "
+                f"{pp(target)}\n"
+                f"  fact A: {pp(th_a._concl)}\n"
+                f"  fact B: {pp(th_b._concl)}")
+
+        th_R_from_L = MP(th_lr, ASSUME(L))   # {L} |- R
+        th_L_from_R = MP(th_rl, ASSUME(R))   # {R} |- L
+        return self._finish(
+            DEDUCT_ANTISYM_RULE(th_L_from_R, th_R_from_L))
 
     def by_fold(self, ref):
         """Inverse of an unfolder: if the have-term is ``a R b`` for a

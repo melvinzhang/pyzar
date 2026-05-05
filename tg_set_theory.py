@@ -363,7 +363,7 @@ def EMPTY_UNIQUE(p):
         with p.have("imp_ba: In x b ==> In x a").proof():
             p.assume("hxb: In x b")
             p.absurd().by_conj("hxb", "h_nb")
-        p.thus("In x a = In x b").by(IFF_AT, "imp_ab", "imp_ba")
+        p.thus("In x a = In x b").by_iff("imp_ab", "imp_ba")
     p.thus("a = b").by_match(EXTENSIONALITY, "hext")
 
 
