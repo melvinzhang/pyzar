@@ -36,8 +36,9 @@ test-proof:
 
 # L6 -- theories: classical logic, then the Landau development bottom-up
 # (num builds the natural numbers; nat proves Landau's Sätze on them; frac
-# builds rationals on top of nat).  Captures the printed `SATZ_N: |- ...`
-# lines from nat.py + frac.py into $(LANDAU_OUT) for the golden check below.
+# builds rationals on top of nat; rat_int adds the integer-rational subset).
+# Captures the printed `SATZ_N: |- ...` lines from nat.py + frac.py +
+# rat_int.py into $(LANDAU_OUT) for the golden check below.
 test-theories:
 	$(PY) classical.py
 	$(PY) tg_set_theory.py
@@ -46,7 +47,8 @@ test-theories:
 	  raw=$$(mktemp); \
 	  $(PY) nat.py | tee -a $$raw; \
 	  $(PY) frac.py | tee -a $$raw; \
-	  grep -E '^[[:space:]]*(SATZ|AXIOM|THEOREM)' $$raw > $(LANDAU_OUT); \
+	  $(PY) rat_int.py | tee -a $$raw; \
+	  grep -E '^[[:space:]]*[A-Z][A-Z0-9_]*[[:space:]]*:.*\|-' $$raw > $(LANDAU_OUT); \
 	  rm -f $$raw
 
 # L7 -- golden: every theorem's pp(concl) matches the checked-in
