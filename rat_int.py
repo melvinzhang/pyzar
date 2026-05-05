@@ -49,15 +49,15 @@ from fusion import (
     Var, REFL, TRANS, EQ_MP, INST, mk_comb, mk_type, new_basic_type_definition,
 )
 from basics import (
-    mk_app, mk_const, mk_eq, rand,
+    mk_app, mk_const, rand,
 )
 from tactics import (
     AP_TERM, AP_THM, FUN_EXT, SYM, SPEC, SPECL, GEN, CONJ, DISJ1, DISJ2,
     UNFOLD, REWRITE_RULE,
 )
 from nat import (
-    num_ty, ONE, mk_add, mk_mul, TIMES,
-    SATZ_29, MUL_1, ONE_MUL, GT, LT, GE_DEF,
+    num_ty, ONE, mk_mul, TIMES,
+    SATZ_29, MUL_1, ONE_MUL, GE_DEF,
     AXIOM_3, AXIOM_4, SATZ_24,
 )
 from frac import (
@@ -878,7 +878,7 @@ def SATZ_93(p):
 def SATZ_94(p):
     p.goal("!X Y. rgt (radd X Y) X", types=_R_TYPES)
     p.fix("X Y")
-    X_t = p._parse("X")
+    p._parse("X")
     p._parse("Y")
     p.have("eX: ?a b. X = Q a b").by_match(Q_SURJ)
     p.have("eY: ?a b. Y = Q a b").by_match(Q_SURJ)
@@ -903,8 +903,8 @@ def SATZ_95(p):
     p.fix("X Y Z")
     p.assume("h: rgt X Y")
     p._parse("X")
-    Y_t = p._parse("Y")
-    Z_t = p._parse("Z")
+    p._parse("Y")
+    p._parse("Z")
     p.choose("a b c d: X = Q a b /\\ Y = Q c d /\\ fgt a b c d", from_="h")
     p.split("d_eq", "(hX, h2)")
     p.split("h2", "(hY, hgt)")
@@ -1688,7 +1688,7 @@ def SATZ_111B_FWD(p):
     p.have("feq: feq x 1 y 1").by_thm(Q_eq_to_feq(p.fact("h")))
     x_t = p._parse("x")
     y_t = p._parse("y")
-    ONE_t = p._parse("1")
+    p._parse("1")
     p.have("eq_mul: x * 1 = y * 1") \
         .by_def(FEQ_DEF, "feq")
     mul1_x = SPEC(x_t, MUL_1)
@@ -1717,9 +1717,9 @@ def SATZ_111A_FWD(p):
     p.fix("x y")
     p.assume("h: rgt (Q x 1) (Q y 1)")
     p.have("fg: fgt x 1 y 1").by_match(RGT_ELIM, "h")
-    x_t = p._parse("x")
-    y_t = p._parse("y")
-    ONE_t = p._parse("1")
+    p._parse("x")
+    p._parse("y")
+    p._parse("1")
     p.have("gt_mul: x * 1 > y * 1") \
         .by_def(FGT_DEF, "fg")
     p.thus("x > y").by_thm(REWRITE_RULE([MUL_1], p.fact("gt_mul")))
@@ -1750,9 +1750,9 @@ def SATZ_111C_FWD(p):
     p.fix("x y")
     p.assume("h: rlt (Q x 1) (Q y 1)")
     p.have("fl: flt x 1 y 1").by_match(RLT_ELIM, "h")
-    x_t = p._parse("x")
-    y_t = p._parse("y")
-    ONE_t = p._parse("1")
+    p._parse("x")
+    p._parse("y")
+    p._parse("1")
     p.have("lt_mul: x * 1 < y * 1") \
         .by_def(FLT_DEF, "fl")
     p.thus("x < y").by_thm(REWRITE_RULE([MUL_1], p.fact("lt_mul")))

@@ -28,7 +28,6 @@ from nat import (
 )
 from tactics import (
     AP_TERM, AP_THM, SYM, SPECL, CONJ, DISJ1, DISJ2, AC_PROVE, TRANS_CHAIN,
-    UNFOLD,
 )
 from parser import define, parse_type, pp_thm
 from proof import proof
