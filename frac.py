@@ -101,13 +101,10 @@ def SATZ_39(p):
         .by_eq_mp(UNFOLD(FEQ_DEF, y1, y2, z1, z2), "h2")
     # (x1*y2)*(y1*z2) = (y1*x2)*(z1*y2).
     prod = MK_COMB(AP_TERM(TIMES, p.fact("e1")), p.fact("e2"))
-    # Rearrange both sides via AC over (TIMES, SATZ_31, SATZ_29).
-    p.have("ac_l: (x1*y2)*(y1*z2) = (x1*z2)*(y1*y2)") \
-        .by_ac(TIMES, SATZ_31, SATZ_29)
-    p.have("ac_r: (y1*x2)*(z1*y2) = (z1*x2)*(y1*y2)") \
-        .by_ac(TIMES, SATZ_31, SATZ_29)
-    p.have("can: (x1*z2)*(y1*y2) = (z1*x2)*(y1*y2)") \
-        .by_thm(TRANS_CHAIN([SYM(p.fact("ac_l")), prod, p.fact("ac_r")]))
+    with p.calc("can: (x1*z2)*(y1*y2)") as c:
+        c.step("= (x1*y2)*(y1*z2)").by_ac(TIMES, SATZ_31, SATZ_29)
+        c.step("= (y1*x2)*(z1*y2)").by_thm(prod)
+        c.step("= (z1*x2)*(y1*y2)").by_ac(TIMES, SATZ_31, SATZ_29)
     p.have("res: x1*z2 = z1*x2") \
         .by_match(SATZ_33B, "can")
     p.thus("feq x1 x2 z1 z2").by_unfold("res", FEQ_DEF)
@@ -190,15 +187,10 @@ def SATZ_44(p):
         .by_eq_mp(UNFOLD(FEQ_DEF, y1, y2, u1, u2), "h2")
     # (y1*u2)*(z1*x2) = (u1*y2)*(x1*z2).
     e_mul = MK_COMB(AP_TERM(TIMES, p.fact("e2")), SYM(p.fact("e1")))
-    # AC-bridge each side: same multiset, different surface structure.
-    ac_l = AC_PROVE(TIMES, SATZ_31, SATZ_29,
-                    mk_eq(mk_mul(mk_mul(z1, u2), mk_mul(y1, x2)),
-                          mk_mul(mk_mul(y1, u2), mk_mul(z1, x2))))
-    ac_r = AC_PROVE(TIMES, SATZ_31, SATZ_29,
-                    mk_eq(mk_mul(mk_mul(u1, y2), mk_mul(x1, z2)),
-                          mk_mul(mk_mul(u1, z2), mk_mul(x1, y2))))
-    p.have("eq: (z1*u2)*(y1*x2) = (u1*z2)*(x1*y2)") \
-        .by_thm(TRANS_CHAIN([ac_l, e_mul, ac_r]))
+    with p.calc("eq: (z1*u2)*(y1*x2)") as c:
+        c.step("= (y1*u2)*(z1*x2)").by_ac(TIMES, SATZ_31, SATZ_29)
+        c.step("= (u1*y2)*(x1*z2)").by_thm(e_mul)
+        c.step("= (u1*z2)*(x1*y2)").by_ac(TIMES, SATZ_31, SATZ_29)
     # (x1*y2)*(u1*z2) > (y1*x2)*(u1*z2)  via Satz 32A.
     p.have("ineq: (x1*y2)*(u1*z2) > (y1*x2)*(u1*z2)") \
         .by_match(SATZ_32A, "g")
@@ -560,27 +552,26 @@ def SATZ_56(p):
     # (z1*u2)*(x2*y2) = (u1*z2)*(x2*y2)  via AP_THM on e2.
     e2_xy = AP_THM(AP_TERM(TIMES, p.fact("e2")), mk_mul(x2, y2))
     # AC-rebracket: (x1*z2)*(y2*u2) = (y1*u2)*(x2*z2).
-    eq_A = TRANS_CHAIN([
-        _mul_AC(mk_mul(mk_mul(x1, z2), mk_mul(y2, u2)),
-                mk_mul(mk_mul(x1, y2), mk_mul(z2, u2))),
-        e1_zu,
-        _mul_AC(mk_mul(mk_mul(y1, x2), mk_mul(z2, u2)),
-                mk_mul(mk_mul(y1, u2), mk_mul(x2, z2)))])
+    with p.calc("eq_A: (x1*z2)*(y2*u2)") as c:
+        c.step("= (x1*y2)*(z2*u2)").by_ac(TIMES, SATZ_31, SATZ_29)
+        c.step("= (y1*x2)*(z2*u2)").by_thm(e1_zu)
+        c.step("= (y1*u2)*(x2*z2)").by_ac(TIMES, SATZ_31, SATZ_29)
     # (z1*x2)*(y2*u2) = (u1*y2)*(x2*z2).
-    eq_B = TRANS_CHAIN([
-        _mul_AC(mk_mul(mk_mul(z1, x2), mk_mul(y2, u2)),
-                mk_mul(mk_mul(z1, u2), mk_mul(x2, y2))),
-        e2_xy,
-        _mul_AC(mk_mul(mk_mul(u1, z2), mk_mul(x2, y2)),
-                mk_mul(mk_mul(u1, y2), mk_mul(x2, z2)))])
+    with p.calc("eq_B: (z1*x2)*(y2*u2)") as c:
+        c.step("= (z1*u2)*(x2*y2)").by_ac(TIMES, SATZ_31, SATZ_29)
+        c.step("= (u1*z2)*(x2*y2)").by_thm(e2_xy)
+        c.step("= (u1*y2)*(x2*z2)").by_ac(TIMES, SATZ_31, SATZ_29)
     # Sum: (x1*z2)*(y2*u2) + (z1*x2)*(y2*u2) = (y1*u2)*(x2*z2) + (u1*y2)*(x2*z2).
-    sum_eq = MK_COMB(AP_TERM(PLUS, eq_A), eq_B)
+    sum_eq = MK_COMB(AP_TERM(PLUS, p.fact("eq_A")), p.fact("eq_B"))
     # Refold via RIGHT_DISTRIB:
     distr_l = SPECL([mk_mul(x1, z2), mk_mul(z1, x2), mk_mul(y2, u2)], RIGHT_DISTRIB)
     distr_r = SPECL([mk_mul(y1, u2), mk_mul(u1, y2), mk_mul(x2, z2)], RIGHT_DISTRIB)
-    res = TRANS_CHAIN([distr_l, sum_eq, SYM(distr_r)])
+    with p.calc("res: (x1*z2 + z1*x2)*(y2*u2)") as c:
+        c.step("= (x1*z2)*(y2*u2) + (z1*x2)*(y2*u2)").by_thm(distr_l)
+        c.step("= (y1*u2)*(x2*z2) + (u1*y2)*(x2*z2)").by_thm(sum_eq)
+        c.step("= (y1*u2 + u1*y2)*(x2*z2)").by_thm(SYM(distr_r))
     p.thus("feq (x1*z2 + z1*x2) (x2*z2) (y1*u2 + u1*y2) (y2*u2)") \
-        .by_unfold(res, FEQ_DEF)
+        .by_unfold("res", FEQ_DEF)
 
 
 # Satz 57:  x1/x + x2/x ~ (x1+x2)/x  -- Landau's "x1*x + x2*x over x*x ~ (x1+x2)/x".
@@ -590,10 +581,10 @@ def SATZ_57(p):
     p.fix("x1 x2 x")
     # Goal unfolds to: (x1*x + x2*x)*x = (x1+x2)*(x*x).
     rd = SPECL([x1, x2, _xnat], RIGHT_DISTRIB)         # (x1+x2)*x = x1*x + x2*x
-    eq1 = AP_THM(AP_TERM(TIMES, SYM(rd)), _xnat)        # (x1*x + x2*x)*x = ((x1+x2)*x)*x
-    eq2 = SPECL([mk_add(x1, x2), _xnat, _xnat], SATZ_31)
-    res = TRANS(eq1, eq2)
-    p.thus("feq (x1*x + x2*x) (x*x) (x1+x2) x").by_unfold(res, FEQ_DEF)
+    with p.calc("res: (x1*x + x2*x)*x") as c:
+        c.step("= ((x1+x2)*x)*x").by_thm(AP_THM(AP_TERM(TIMES, SYM(rd)), _xnat))
+        c.step("= (x1+x2)*(x*x)").by_ac(TIMES, SATZ_31, SATZ_29)
+    p.thus("feq (x1*x + x2*x) (x*x) (x1+x2) x").by_unfold("res", FEQ_DEF)
 
 
 # Satz 58 (commutativity of fraction sum):
@@ -603,27 +594,21 @@ def SATZ_58(p):
     p.goal("!x1 x2 y1 y2. feq (x1*y2 + y1*x2) (x2*y2) (y1*x2 + x1*y2) (y2*x2)")
     p.fix("x1 x2 y1 y2")
     # Goal unfolds to: (x1*y2 + y1*x2)*(y2*x2) = (y1*x2 + x1*y2)*(x2*y2).
-    # Distribute on both sides; each side becomes a sum of two monomials, AC-equal.
     distr_l = SPECL([mk_mul(x1, y2), mk_mul(y1, x2), mk_mul(y2, x2)], RIGHT_DISTRIB)
-    # (x1*y2 + y1*x2)*(y2*x2) = (x1*y2)*(y2*x2) + (y1*x2)*(y2*x2)
     distr_r = SPECL([mk_mul(y1, x2), mk_mul(x1, y2), mk_mul(x2, y2)], RIGHT_DISTRIB)
-    # (y1*x2 + x1*y2)*(x2*y2) = (y1*x2)*(x2*y2) + (x1*y2)*(x2*y2)
-    # Bridge each monomial in *-AC, then swap summands by +-AC.
+    # Bridge each monomial via *-AC, then swap summands via +-AC.
     m1 = _mul_AC(mk_mul(mk_mul(x1, y2), mk_mul(y2, x2)),
                  mk_mul(mk_mul(x1, y2), mk_mul(x2, y2)))
     m2 = _mul_AC(mk_mul(mk_mul(y1, x2), mk_mul(y2, x2)),
                  mk_mul(mk_mul(y1, x2), mk_mul(x2, y2)))
-    # |- (x1*y2)*(y2*x2) = (x1*y2)*(x2*y2)  and  (y1*x2)*(y2*x2) = (y1*x2)*(x2*y2).
     sum_norm = MK_COMB(AP_TERM(PLUS, m1), m2)
-    # |- (x1*y2)*(y2*x2) + (y1*x2)*(y2*x2) = (x1*y2)*(x2*y2) + (y1*x2)*(x2*y2).
-    sum_swap = AC_PROVE(PLUS, SATZ_5, SATZ_6,
-        mk_eq(mk_add(mk_mul(mk_mul(x1, y2), mk_mul(x2, y2)),
-                     mk_mul(mk_mul(y1, x2), mk_mul(x2, y2))),
-              mk_add(mk_mul(mk_mul(y1, x2), mk_mul(x2, y2)),
-                     mk_mul(mk_mul(x1, y2), mk_mul(x2, y2)))))
-    res = TRANS_CHAIN([distr_l, sum_norm, sum_swap, SYM(distr_r)])
+    with p.calc("res: (x1*y2 + y1*x2)*(y2*x2)") as c:
+        c.step("= (x1*y2)*(y2*x2) + (y1*x2)*(y2*x2)").by_thm(distr_l)
+        c.step("= (x1*y2)*(x2*y2) + (y1*x2)*(x2*y2)").by_thm(sum_norm)
+        c.step("= (y1*x2)*(x2*y2) + (x1*y2)*(x2*y2)").by_ac(PLUS, SATZ_5, SATZ_6)
+        c.step("= (y1*x2 + x1*y2)*(x2*y2)").by_thm(SYM(distr_r))
     p.thus("feq (x1*y2 + y1*x2) (x2*y2) (y1*x2 + x1*y2) (y2*x2)") \
-        .by_unfold(res, FEQ_DEF)
+        .by_unfold("res", FEQ_DEF)
 
 
 # Satz 59 (associativity of fraction sum). The unfolded goal,
@@ -1073,15 +1058,17 @@ def SATZ_67_EXIST(p):
     bridge_LHS_sum = MK_COMB(AP_TERM(PLUS, M1), M2)
     refold = SPECL([mk_mul(y1, mk_mul(x2, y2)), mk_mul(u_term, y2), x2],
                     RIGHT_DISTRIB)
-    # refold: (y1*(x2*y2) + u*y2)*x2 = (y1*(x2*y2))*x2 + (u*y2)*x2.
-    res = TRANS_CHAIN([
-        refold,                  # F = E
-        SYM(bridge_LHS_sum),      # E = D
-        SYM(distr_R),             # D = C
-        SYM(sub_eq),              # C = B
-        SYM(bridge_R)])           # B = A
+    # Goal unfolds to (y1*(x2*y2) + u*y2)*x2 = x1*(y2*(x2*y2)). Walk through:
+    #   refold (F=E), SYM(bridge_LHS_sum) (E=D), SYM(distr_R) (D=C),
+    #   SYM(sub_eq) (C=B), SYM(bridge_R) (B=A).
+    with p.calc("res: (y1*(x2*y2) + u*y2)*x2") as c:
+        c.step("= (y1*(x2*y2))*x2 + (u*y2)*x2").by_thm(refold)
+        c.step("= (y1*x2)*(x2*y2) + u*(x2*y2)").by_thm(SYM(bridge_LHS_sum))
+        c.step("= (y1*x2 + u)*(x2*y2)").by_thm(SYM(distr_R))
+        c.step("= (x1*y2)*(x2*y2)").by_thm(SYM(sub_eq))
+        c.step("= x1*(y2*(x2*y2))").by_thm(SYM(bridge_R))
     p.have("witness_eq: feq (y1*(x2*y2) + u*y2) (y2*(x2*y2)) x1 x2") \
-        .by_unfold(res, FEQ_DEF)
+        .by_unfold("res", FEQ_DEF)
     p.have("inner: ?u2. feq (y1*u2 + u*y2) (y2*u2) x1 x2") \
         .by_witness("x2*y2", "witness_eq")
     p.thus("?u1 u2. feq (y1*u2 + u1*y2) (y2*u2) x1 x2") \
@@ -1142,14 +1129,11 @@ def SATZ_68(p):
         .by_eq_mp(UNFOLD(FEQ_DEF, z1, z2, u1, u2), "h2")
     # (x1*y2)*(z1*u2) = (y1*x2)*(u1*z2).
     prod = MK_COMB(AP_TERM(TIMES, p.fact("e1")), p.fact("e2"))
-    # AC: (x1*z1)*(y2*u2) = (y1*u1)*(x2*z2).
-    eq = TRANS_CHAIN([
-        _mul_AC(mk_mul(mk_mul(x1, z1), mk_mul(y2, u2)),
-                mk_mul(mk_mul(x1, y2), mk_mul(z1, u2))),
-        prod,
-        _mul_AC(mk_mul(mk_mul(y1, x2), mk_mul(u1, z2)),
-                mk_mul(mk_mul(y1, u1), mk_mul(x2, z2)))])
-    p.thus("feq (x1*z1) (x2*z2) (y1*u1) (y2*u2)").by_unfold(eq, FEQ_DEF)
+    with p.calc("eq: (x1*z1)*(y2*u2)") as c:
+        c.step("= (x1*y2)*(z1*u2)").by_ac(TIMES, SATZ_31, SATZ_29)
+        c.step("= (y1*x2)*(u1*z2)").by_thm(prod)
+        c.step("= (y1*u1)*(x2*z2)").by_ac(TIMES, SATZ_31, SATZ_29)
+    p.thus("feq (x1*z1) (x2*z2) (y1*u1) (y2*u2)").by_unfold("eq", FEQ_DEF)
 
 
 # Satz 69 (commutativity of fraction product):
@@ -1215,10 +1199,16 @@ def SATZ_71(p):
     eq_M1 = _mul_AC(M1L, M1R)
     eq_M2 = _mul_AC(M2L, M2R)
     bridge = MK_COMB(AP_TERM(PLUS, eq_M1), eq_M2)
-    res = TRANS_CHAIN([chunk_L, bridge, SYM(chunk_R)])
+    with p.calc("res: (x1*(y1*z2 + z1*y2)) * ((x2*y2)*(x2*z2))") as c:
+        c.step("= (x1*(y1*z2))*((x2*y2)*(x2*z2)) + (x1*(z1*y2))*((x2*y2)*(x2*z2))") \
+            .by_thm(chunk_L)
+        c.step("= ((x1*y1)*(x2*z2))*(x2*(y2*z2)) + ((x1*z1)*(x2*y2))*(x2*(y2*z2))") \
+            .by_thm(bridge)
+        c.step("= ((x1*y1)*(x2*z2) + (x1*z1)*(x2*y2)) * (x2*(y2*z2))") \
+            .by_thm(SYM(chunk_R))
     p.thus("feq (x1*(y1*z2 + z1*y2)) (x2*(y2*z2)) "
            "((x1*y1)*(x2*z2) + (x1*z1)*(x2*y2)) ((x2*y2)*(x2*z2))") \
-        .by_unfold(res, FEQ_DEF)
+        .by_unfold("res", FEQ_DEF)
 
 
 # Satz 72a/b/c -- "respectively" forms of: x R y => x*z R y*z, R in {>, =, <}.
