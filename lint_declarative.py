@@ -29,76 +29,42 @@ import ast
 import pathlib
 import sys
 
+import fusion
+import tactics
+
+
+# fusion.py mixes inference rules with term/type helpers; the rules are the
+# ALL_CAPS callables plus this lowercase trio. tactics.py is entirely derived
+# rules, so every top-level callable defined there counts.
+_FUSION_LOWERCASE_RULES = frozenset(
+    {"new_axiom", "new_basic_definition", "new_basic_type_definition"}
+)
+
+
+def _module_callables(mod):
+    return {
+        name
+        for name, val in vars(mod).items()
+        if not name.startswith("_")
+        and callable(val)
+        and getattr(val, "__module__", None) == mod.__name__
+    }
+
+
+def _collect_non_declarative_names():
+    fusion_names = _module_callables(fusion)
+    rules = {n for n in fusion_names if n.isupper() or n in _FUSION_LOWERCASE_RULES}
+    rules |= _module_callables(tactics)
+    # Sentinel check: a refactor that breaks introspection (e.g. moves rules to
+    # a new module) would otherwise silently produce an empty allowlist.
+    for sentinel in ("REFL", "TRANS", "SPEC", "SYM", "MP"):
+        assert sentinel in rules, f"lint introspection lost sentinel {sentinel}"
+    return frozenset(rules)
+
 
 # Kernel inference rules and derived tactics. Calls to any of these from inside
 # an ``@proof`` body are non-declarative.
-NON_DECLARATIVE_NAMES = frozenset(
-    {
-        # fusion.py -- primitive inference rules
-        "REFL",
-        "TRANS",
-        "MK_COMB",
-        "ABS",
-        "BETA",
-        "ASSUME",
-        "EQ_MP",
-        "DEDUCT_ANTISYM_RULE",
-        "INST",
-        "INST_TYPE",
-        "new_axiom",
-        "new_basic_definition",
-        "new_basic_type_definition",
-        # tactics.py -- derived rules
-        "AP_TERM",
-        "AP_THM",
-        "BETA_CONV",
-        "BETA_NORM",
-        "BETA_RULE",
-        "beta_after",
-        "SYM",
-        "EQT_ELIM",
-        "EQT_INTRO",
-        "SPEC",
-        "SPECL",
-        "GEN",
-        "GENL",
-        "CONJ",
-        "CONJUNCT1",
-        "CONJUNCT2",
-        "DISCH",
-        "DISCHL",
-        "MP",
-        "UNDISCH",
-        "MP_LIST",
-        "CONTR",
-        "NOT_ELIM",
-        "NOT_INTRO",
-        "EQF_INTRO",
-        "EQF_ELIM",
-        "DISJ1",
-        "DISJ2",
-        "DISJ_CASES",
-        "CASE_OR",
-        "MK_EQ",
-        "NE_SYM",
-        "REWRITE_NE",
-        "subst_term",
-        "EXISTS",
-        "EXISTS_AT",
-        "TRANS_CHAIN",
-        "PROVE_HYP",
-        "CHOOSE_WITNESS",
-        "ELIM_EX",
-        "FUN_EXT",
-        "UNFOLD",
-        "unfold_def_at",
-        "REWRITE_CONV",
-        "REWRITE_RULE",
-        "REWRITE_PROVE",
-        "AC_NORM",
-        "AC_PROVE",
-    }
-)
+NON_DECLARATIVE_NAMES = _collect_non_declarative_names()
 
 
 def _is_proof_decorator(dec):
