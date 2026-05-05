@@ -243,13 +243,19 @@ def RAT_EQ(p):
     # Forward direction.
     with p.have("fwd: Q a b = Q c d ==> feq a b c d").proof():
         p.assume("hQ: Q a b = Q c d")
-        # mk_rat (feq a b) = mk_rat (feq c d).
-        h_mk = TRANS_CHAIN([SYM(Q_unfold_ab), p.fact("hQ"), Q_unfold_cd])
-        h_dest = AP_TERM(dest_rat, h_mk)
+        with p.calc("h_mk: mk_rat (feq a b)") as c:
+            c.step("= Q a b").by_thm(SYM(Q_unfold_ab))
+            c.step("= Q c d").by_thm(p.fact("hQ"))
+            c.step("= mk_rat (feq c d)").by_thm(Q_unfold_cd)
+        h_dest = AP_TERM(dest_rat, p.fact("h_mk"))
         # dest_rat (mk_rat (feq a b)) = feq a b.
         d_ab = SPECL([a_t, b_t], DEST_RAT_FEQ)
         d_cd = SPECL([c_t, d_t], DEST_RAT_FEQ)
-        feq_eq = TRANS_CHAIN([SYM(d_ab), h_dest, d_cd])  # |- feq a b = feq c d
+        with p.calc("feq_eq: feq a b") as c:
+            c.step("= dest_rat (mk_rat (feq a b))").by_thm(SYM(d_ab))
+            c.step("= dest_rat (mk_rat (feq c d))").by_thm(h_dest)
+            c.step("= feq c d").by_thm(d_cd)
+        feq_eq = p.fact("feq_eq")  # |- feq a b = feq c d
         # Apply at (c, d): feq a b c d = feq c d c d.
         feq_at_c = AP_THM(feq_eq, c_t)              # |- feq a b c = feq c d c
         feq_at_cd = AP_THM(feq_at_c, d_t)           # |- feq a b c d = feq c d c d
@@ -307,8 +313,10 @@ def RAT_EQ(p):
         # Apply mk_rat: mk_rat (feq a b) = mk_rat (feq c d).
         mk_eq_th = AP_TERM(mk_rat, feq_eq)
         # Bridge with Q_DEF unfolds.
-        Q_eq = TRANS_CHAIN([Q_unfold_ab, mk_eq_th, SYM(Q_unfold_cd)])
-        p.thus("Q a b = Q c d").by_thm(Q_eq)
+        with p.calc("Q a b", thus=True) as c:
+            c.step("= mk_rat (feq a b)").by_thm(Q_unfold_ab)
+            c.step("= mk_rat (feq c d)").by_thm(mk_eq_th)
+            c.step("= Q c d").by_thm(SYM(Q_unfold_cd))
 
     # Combine via IFF.
     from fusion import DEDUCT_ANTISYM_RULE, ASSUME
@@ -403,9 +411,10 @@ def Q_SURJ(p):
     # mk_rat (feq pa pb) = Q pa pb (by SYM of Q_DEF unfolded).
     pa_t = p._parse("pa"); pb_t = p._parse("pb")
     Q_unfold = UNFOLD(Q_DEF, pa_t, pb_t)   # |- Q pa pb = mk_rat (feq pa pb).
-    # Combine: X = mk_rat (dest_rat X) = mk_rat (feq pa pb) = Q pa pb.
-    X_eq = TRANS_CHAIN([SYM(md_X), mk_eq_th, SYM(Q_unfold)])
-    p.have("Xpapb: X = Q pa pb").by_thm(X_eq)
+    with p.calc("Xpapb: X") as c:
+        c.step("= mk_rat (dest_rat X)").by_thm(SYM(md_X))
+        c.step("= mk_rat (feq pa pb)").by_thm(mk_eq_th)
+        c.step("= Q pa pb").by_thm(SYM(Q_unfold))
     # Build nested existentials manually (with fresh bound names).
     pa_w = p._parse("pa"); pb_w = p._parse("pb")
     inner = EXISTS(

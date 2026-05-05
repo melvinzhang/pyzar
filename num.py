@@ -321,18 +321,24 @@ def AXIOM_3(p):
         # SUC x = mk_num (IND_SUC (dest_num x)) and 1 = mk_num IND_1, so the
         # hypothesis says mk_num (IND_SUC (dest_num x)) = mk_num IND_1. Apply
         # dest_num to both sides and peel via DEST_MK using NUM_REP closure.
-        h_unfold = TRANS_CHAIN([SYM(p.unfold(SUC_DEF, "x")),
-                                p.fact("h"), ONE_DEF])
-        h_dest = AP_TERM(dest_num, h_unfold)
+        with p.calc("h_unfold: mk_num (IND_SUC (dest_num x))") as c:
+            c.step("= SUC x").by_thm(SYM(p.unfold(SUC_DEF, "x")))
+            c.step("= 1").by_thm(p.fact("h"))
+            c.step("= mk_num IND_1").by_thm(ONE_DEF)
+        h_dest = AP_TERM(dest_num, p.fact("h_unfold"))
         r_var = Var("r", ind_ty)
         NR_si_dx = MP(SPEC(mk_comb(dest_num, x), NUM_REP_IND_SUC_CLOSED),
                       SPEC(x, NUM_REP_dest_num))
         s_dx = mk_comb(IND_SUC, mk_comb(dest_num, x))
         eq_lhs_peel = EQ_MP(INST([(s_dx, r_var)], DEST_MK), NR_si_dx)
         eq_rhs_peel = EQ_MP(INST([(IND_1, r_var)], DEST_MK), NUM_REP_IND_1)
-        h_peel = TRANS_CHAIN([SYM(eq_lhs_peel), h_dest, eq_rhs_peel])
+        with p.calc("h_peel: IND_SUC (dest_num x)") as c:
+            c.step("= dest_num (mk_num (IND_SUC (dest_num x)))") \
+                .by_thm(SYM(eq_lhs_peel))
+            c.step("= dest_num (mk_num IND_1)").by_thm(h_dest)
+            c.step("= IND_1").by_thm(eq_rhs_peel)
         neq_at_dx = SPEC(mk_comb(dest_num, x), IND_SUC_NEQ_IND_1)
-        p.absurd().by_thm(MP(NOT_ELIM(neq_at_dx), h_peel))
+        p.absurd().by_thm(MP(NOT_ELIM(neq_at_dx), p.fact("h_peel")))
 
 
 # ---------------------------------------------------------------------------
@@ -344,10 +350,11 @@ def AXIOM_4(p):
     p.goal("!x y. SUC x = SUC y ==> x = y")
     p.fix("x y")
     p.assume("h: SUC x = SUC y")
-    h_unfold = TRANS_CHAIN([SYM(p.unfold(SUC_DEF, "x")),
-                            p.fact("h"),
-                            p.unfold(SUC_DEF, "y")])
-    h_dest = AP_TERM(dest_num, h_unfold)
+    with p.calc("h_unfold: mk_num (IND_SUC (dest_num x))") as c:
+        c.step("= SUC x").by_thm(SYM(p.unfold(SUC_DEF, "x")))
+        c.step("= SUC y").by_thm(p.fact("h"))
+        c.step("= mk_num (IND_SUC (dest_num y))").by_thm(p.unfold(SUC_DEF, "y"))
+    h_dest = AP_TERM(dest_num, p.fact("h_unfold"))
     r_var = Var("r", ind_ty)
     NR_si_dx = MP(SPEC(mk_comb(dest_num, x), NUM_REP_IND_SUC_CLOSED),
                   SPEC(x, NUM_REP_dest_num))
@@ -357,15 +364,22 @@ def AXIOM_4(p):
     s_dy = mk_comb(IND_SUC, mk_comb(dest_num, y))
     eq_dx_peel = EQ_MP(INST([(s_dx, r_var)], DEST_MK), NR_si_dx)
     eq_dy_peel = EQ_MP(INST([(s_dy, r_var)], DEST_MK), NR_si_dy)
-    h_peeled = TRANS_CHAIN([SYM(eq_dx_peel), h_dest, eq_dy_peel])
+    with p.calc("h_peeled: IND_SUC (dest_num x)") as c:
+        c.step("= dest_num (mk_num (IND_SUC (dest_num x)))") \
+            .by_thm(SYM(eq_dx_peel))
+        c.step("= dest_num (mk_num (IND_SUC (dest_num y)))").by_thm(h_dest)
+        c.step("= IND_SUC (dest_num y)").by_thm(eq_dy_peel)
     oo = SPEC(mk_comb(dest_num, y),
               SPEC(mk_comb(dest_num, x), _ONE_ONE_IND_SUC_unfold))
-    dx_eq_dy = MP(oo, h_peeled)
+    dx_eq_dy = MP(oo, p.fact("h_peeled"))
     mk_app = AP_TERM(mk_num, dx_eq_dy)
     a_var = Var("a", num_ty)
     md_x = INST([(x, a_var)], MK_DEST)
     md_y = INST([(y, a_var)], MK_DEST)
-    p.thus("x = y").by_thm(TRANS_CHAIN([SYM(md_x), mk_app, md_y]))
+    with p.calc("x", thus=True) as c:
+        c.step("= mk_num (dest_num x)").by_thm(SYM(md_x))
+        c.step("= mk_num (dest_num y)").by_thm(mk_app)
+        c.step("= y").by_thm(md_y)
 
 
 # ---------------------------------------------------------------------------
