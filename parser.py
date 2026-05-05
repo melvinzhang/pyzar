@@ -37,10 +37,17 @@ from lark.visitors import Interpreter
 
 from fusion import (
     HolError,
-    Var, Const, Comb, Abs,
-    Tyvar, Tyapp,
-    mk_comb, mk_type,
-    concl, hyp, new_basic_definition,
+    Var,
+    Const,
+    Comb,
+    Abs,
+    Tyvar,
+    Tyapp,
+    mk_comb,
+    mk_type,
+    concl,
+    hyp,
+    new_basic_definition,
 )
 from basics import mk_app, mk_const, mk_eq, mk_var
 
@@ -56,11 +63,13 @@ class ParseError(Exception):
 # a ``Proof``-level handler via ``proof.register_pattern_handler``.
 # ---------------------------------------------------------------------------
 
+
 @dataclasses.dataclass
 class PatName:
     """Atomic pattern: bind the term under ``label`` (anonymous if
     ``label is None``, written ``_`` in source)."""
-    label: object   # str | None
+
+    label: object  # str | None
 
 
 @dataclasses.dataclass
@@ -68,7 +77,8 @@ class PatConj:
     """Conjunction-split pattern: term must be a right-associated
     conjunction with ``len(parts)`` conjuncts; each sub-pattern receives
     the corresponding conjunct."""
-    parts: list   # list of pattern nodes
+
+    parts: list  # list of pattern nodes
 
 
 _SPLICE_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -84,6 +94,7 @@ def _is_tyvar_name(name):
 # ---------------------------------------------------------------------------
 # Operator / constant / type registry.
 # ---------------------------------------------------------------------------
+
 
 class Signature:
     """Mutable registry of infix operators, prefix operators, named constants,
@@ -108,14 +119,15 @@ class Signature:
         Registers a binder keyword (``"!"``, ``"?"``, ``"\\"``).
         ``wrap(var, body) -> term`` builds the bound term.
     """
+
     __slots__ = ("infix", "prefix", "const", "type", "binder", "default_var_ty")
 
     def __init__(self, default_var_ty=None):
-        self.infix  = {}    # op_symbol -> (prec, assoc, builder)
-        self.prefix = {}    # op_symbol -> builder
-        self.const  = {}    # name      -> kernel term
-        self.type   = {}    # type-name -> hol_type
-        self.binder = {}    # binder-keyword -> wrap(var, body) -> term
+        self.infix = {}  # op_symbol -> (prec, assoc, builder)
+        self.prefix = {}  # op_symbol -> builder
+        self.const = {}  # name      -> kernel term
+        self.type = {}  # type-name -> hol_type
+        self.binder = {}  # binder-keyword -> wrap(var, body) -> term
         # The fallback type for a free variable that's neither in `env` nor
         # in `const`.  Set by whoever registers the "default" type (typically
         # `num.py`).  None means "free vars without a type are an error."
@@ -141,7 +153,8 @@ class Signature:
         if symbol not in ("!", "?", "\\", "@"):
             raise ValueError(
                 f"binder must be one of !, ?, \\\\, @ (got {symbol!r}); "
-                "the grammar reserves only those four keywords")
+                "the grammar reserves only those four keywords"
+            )
         self.binder[symbol] = wrap
 
     def _auto_register_const(self, name):
@@ -172,10 +185,10 @@ DEFAULT_SIG = Signature()
 # interaction surface is just a handful of named functions.
 # ---------------------------------------------------------------------------
 
-add_infix  = DEFAULT_SIG.add_infix
+add_infix = DEFAULT_SIG.add_infix
 add_prefix = DEFAULT_SIG.add_prefix
-add_const  = DEFAULT_SIG.add_const
-add_type   = DEFAULT_SIG.add_type
+add_const = DEFAULT_SIG.add_const
+add_type = DEFAULT_SIG.add_type
 add_binder = DEFAULT_SIG.add_binder
 
 
@@ -196,29 +209,36 @@ def has_const(name):
 # common case where the surface metadata sits next to the builder def.
 # ---------------------------------------------------------------------------
 
+
 def infix(op, prec, assoc="left"):
     """Register the decorated ``(lhs, rhs) -> term`` as the infix builder for
     ``op`` at precedence `prec` (higher binds tighter)."""
+
     def deco(builder):
         add_infix(op, prec, builder, assoc=assoc)
         return builder
+
     return deco
 
 
 def prefix(op):
     """Register the decorated ``term -> term`` as the prefix builder for `op`."""
+
     def deco(builder):
         add_prefix(op, builder)
         return builder
+
     return deco
 
 
 def binder(symbol):
     """Register the decorated ``(var, body) -> term`` as the binder for
     `symbol` (one of ``!``, ``?``, ``\\``, ``@``)."""
+
     def deco(builder):
         add_binder(symbol, builder)
         return builder
+
     return deco
 
 
@@ -231,6 +251,7 @@ def binder(symbol):
 # encoding and printed in binder form.
 # ---------------------------------------------------------------------------
 
+
 def pp(tm, sig=None):
     sig = sig or DEFAULT_SIG
     if isinstance(tm, Var):
@@ -240,13 +261,19 @@ def pp(tm, sig=None):
     if isinstance(tm, Abs):
         return f"(\\{tm.bvar.name}. {pp(tm.body, sig)})"
     if isinstance(tm, Comb):
-        if (isinstance(tm.fun, Const) and tm.fun.name in sig.binder
-                and isinstance(tm.arg, Abs)):
+        if (
+            isinstance(tm.fun, Const)
+            and tm.fun.name in sig.binder
+            and isinstance(tm.arg, Abs)
+        ):
             return f"({tm.fun.name}{tm.arg.bvar.name}. {pp(tm.arg.body, sig)})"
         if isinstance(tm.fun, Const) and tm.fun.name in sig.prefix:
             return f"{tm.fun.name}{pp(tm.arg, sig)}"
-        if (isinstance(tm.fun, Comb) and isinstance(tm.fun.fun, Const)
-                and tm.fun.fun.name in sig.infix):
+        if (
+            isinstance(tm.fun, Comb)
+            and isinstance(tm.fun.fun, Const)
+            and tm.fun.fun.name in sig.infix
+        ):
             op = tm.fun.fun.name
             a = pp(tm.fun.arg, sig)
             b = pp(tm.arg, sig)
@@ -329,21 +356,31 @@ OP:   /[+\-*=<>^&|\/\\]+|~/
 %ignore /[ \t\r\n]+/
 """
 
-_PARSER = Lark(_GRAMMAR, parser="lalr",
-               start=["start", "label_start", "label_or_bare_start",
-                      "let_start", "pattern_start", "type_start"])
+_PARSER = Lark(
+    _GRAMMAR,
+    parser="lalr",
+    start=[
+        "start",
+        "label_start",
+        "label_or_bare_start",
+        "let_start",
+        "pattern_start",
+        "type_start",
+    ],
+)
 
 
 # ---------------------------------------------------------------------------
 # Visitor: builds kernel terms by consulting the registry.
 # ---------------------------------------------------------------------------
 
+
 class _Builder(Interpreter):
     def __init__(self, sig, env):
         super().__init__()
         self.sig = sig
         self.env = dict(env or {})
-        self.scope = []          # stack of {name: Var}
+        self.scope = []  # stack of {name: Var}
 
     # ----- atom resolution -----
 
@@ -366,7 +403,8 @@ class _Builder(Interpreter):
         if ty is None:
             raise ParseError(
                 f"unknown identifier {name!r} (no default type registered; "
-                "pass via `env=` or register a const/default type)")
+                "pass via `env=` or register a const/default type)"
+            )
         return mk_var(name, ty)
 
     def name(self, tree):
@@ -410,8 +448,8 @@ class _Builder(Interpreter):
                 ty = self.sig.default_var_ty
             if ty is None:
                 raise ParseError(
-                    f"binder for {n!r} has no type and no default type "
-                    "is registered")
+                    f"binder for {n!r} has no type and no default type is registered"
+                )
             out.append((n, ty))
         return out
 
@@ -434,10 +472,17 @@ class _Builder(Interpreter):
             body = wrap(v, body)
         return body
 
-    def forall_(self, tree): return self._binder(tree, "!")
-    def exists_(self, tree): return self._binder(tree, "?")
-    def abs_(self,    tree): return self._binder(tree, "\\")
-    def select_(self, tree): return self._binder(tree, "@")
+    def forall_(self, tree):
+        return self._binder(tree, "!")
+
+    def exists_(self, tree):
+        return self._binder(tree, "?")
+
+    def abs_(self, tree):
+        return self._binder(tree, "\\")
+
+    def select_(self, tree):
+        return self._binder(tree, "@")
 
     # ----- spec-form starts (label / let) -----
 
@@ -485,8 +530,7 @@ class _Builder(Interpreter):
     def arrow_(self, tree):
         op = str(tree.children[1])
         if op != "->":
-            raise ParseError(
-                f"expected '->' between types, got {op!r}")
+            raise ParseError(f"expected '->' between types, got {op!r}")
         a = self.visit(tree.children[0])
         b = self.visit(tree.children[2])
         return mk_type("fun", [a, b])
@@ -500,7 +544,8 @@ class _Builder(Interpreter):
         if name not in self.sig.type and _is_tyvar_name(name):
             raise ParseError(
                 f"{name!r} is a type variable and cannot be applied "
-                "as a type constructor")
+                "as a type constructor"
+            )
         try:
             return mk_type(name, [arg])
         except HolError as ex:
@@ -540,7 +585,7 @@ class _Builder(Interpreter):
             meta = self.sig.infix.get(op)
             if meta is None:
                 raise ParseError(f"unknown infix operator {op!r}")
-            ops.append((op, *meta))           # (op, prec, assoc, builder)
+            ops.append((op, *meta))  # (op, prec, assoc, builder)
             terms.append(self.visit(children[i + 1]))
         return _climb(terms, ops)
 
@@ -567,7 +612,8 @@ def _climb(terms, ops):
                 continue
             if top_prec == prec and top_assoc == "non":
                 raise ParseError(
-                    f"non-associative operator {op!r} cannot chain with {top_op!r}")
+                    f"non-associative operator {op!r} cannot chain with {top_op!r}"
+                )
             break
         out.append(rhs)
         op_stack.append((op, prec, assoc, builder))
@@ -580,6 +626,7 @@ def _climb(terms, ops):
 # ---------------------------------------------------------------------------
 # Public API.
 # ---------------------------------------------------------------------------
+
 
 def _splice(s, _env_bindings, bindings):
     """Antiquote substitution. Returns ``(s_after_splice, merged_env,
@@ -599,8 +646,8 @@ def _splice(s, _env_bindings, bindings):
             value = env_b[name]
         else:
             raise ParseError(
-                f"antiquote ${{{name}}} has no binding "
-                f"(pass {name}=... to parse)")
+                f"antiquote ${{{name}}} has no binding (pass {name}=... to parse)"
+            )
         if name not in name_to_sentinel:
             sentinel = f"__splice{len(name_to_sentinel)}_{name}__"
             name_to_sentinel[name] = sentinel
@@ -634,7 +681,8 @@ def _check_unused_bindings(tree, bindings, name_to_sentinel):
     if unused:
         raise ParseError(
             f"unused binding(s): {sorted(unused)} "
-            "(neither bare name nor ${{...}} reference appears in source)")
+            "(neither bare name nor ${{...}} reference appears in source)"
+        )
 
 
 def _lark_parse(s, start):
@@ -700,12 +748,12 @@ def parse_label_or_bare(s, sig=None, _env_bindings=None, **bindings):
     explicit form lets the caller verify the body against an
     expected hypothesis.
     """
-    return _run_parse(
-        s, "label_or_bare_start", sig, _env_bindings, bindings)
+    return _run_parse(s, "label_or_bare_start", sig, _env_bindings, bindings)
 
 
 _LABEL_PEEL_RE = re.compile(
-    r"^\s*([A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*)\s*:(?!=)\s*(.*)$", re.DOTALL)
+    r"^\s*([A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*)\s*:(?!=)\s*(.*)$", re.DOTALL
+)
 
 
 def peel_label_prefix(spec):
@@ -778,8 +826,7 @@ def parse_type(s, sig=None):
     return _Builder(sig, {}).visit(tree)
 
 
-def define(name, ty, body, *, sig=None,
-           infix=None, prefix=False, **bindings):
+def define(name, ty, body, *, sig=None, infix=None, prefix=False, **bindings):
     """Introduce a new defined constant.
 
     Parameters:
@@ -807,8 +854,7 @@ def define(name, ty, body, *, sig=None,
     Returns the definition theorem ``|- name = body``.
     """
     if infix is not None and prefix:
-        raise ValueError(
-            f"define({name!r}): infix and prefix are mutually exclusive")
+        raise ValueError(f"define({name!r}): infix and prefix are mutually exclusive")
     sig = sig or DEFAULT_SIG
     if isinstance(ty, str):
         ty = parse_type(ty, sig=sig)
@@ -817,7 +863,8 @@ def define(name, ty, body, *, sig=None,
     else:
         if bindings:
             raise ValueError(
-                f"define({name!r}): bindings given but body is already a term")
+                f"define({name!r}): bindings given but body is already a term"
+            )
         rhs = body
     def_th = new_basic_definition(mk_eq(Var(name, ty), rhs))
     const = mk_const(name, [])

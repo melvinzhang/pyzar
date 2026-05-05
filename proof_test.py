@@ -9,13 +9,30 @@ finds the same module instance.
 
 import nat
 from nat import (
-    ADD_1, ADD_SUC, UNFOLD_LE, LT_TO_LE, SATZ_1, SATZ_16A,
-    AXIOM_3, AXIOM_4, GT_DEF, UNFOLD_GT, x as VX, y as VY, z as VZ,
+    ADD_1,
+    ADD_SUC,
+    UNFOLD_LE,
+    LT_TO_LE,
+    SATZ_1,
+    SATZ_16A,
+    AXIOM_3,
+    AXIOM_4,
+    GT_DEF,
+    UNFOLD_GT,
+    x as VX,
+    y as VY,
+    z as VZ,
 )
 from num import ONE, num_ty, SUC_DEF
 from fusion import (
-    bool_ty, Var, ASSUME, EQ_MP, REFL, concl,
-    mk_comb, HolError,
+    bool_ty,
+    Var,
+    ASSUME,
+    EQ_MP,
+    REFL,
+    concl,
+    mk_comb,
+    HolError,
 )
 from basics import aconv, mk_app, mk_eq, mk_fun_ty, mk_var
 from axioms import mk_forall
@@ -31,14 +48,13 @@ def main():
         p.fix("x y z")
         with p.induction("z"):
             with p.base():
-                p.thus("(x + y) + 1 = x + (y + 1)")\
-                    .by_rewrite([ADD_1, ADD_SUC])
+                p.thus("(x + y) + 1 = x + (y + 1)").by_rewrite([ADD_1, ADD_SUC])
             with p.step("IH"):
-                p.thus("(x + y) + SUC z = x + (y + SUC z)")\
-                    .by_rewrite([ADD_SUC, "IH"])
+                p.thus("(x + y) + SUC z = x + (y + SUC z)").by_rewrite([ADD_SUC, "IH"])
 
-    assert aconv(concl(SATZ_5_NEW), concl(nat.SATZ_5)), \
+    assert aconv(concl(SATZ_5_NEW), concl(nat.SATZ_5)), (
         f"SATZ_5 mismatch:\n  new: {pp(concl(SATZ_5_NEW))}\n  old: {pp(concl(nat.SATZ_5))}"
+    )
     assert SATZ_5_NEW._asl == nat.SATZ_5._asl
 
     # SATZ_17: x <= y, y <= z ==> x <= z. Cases on y < z \/ y = z.
@@ -47,8 +63,7 @@ def main():
         p.goal("!x y z. x <= y ==> y <= z ==> x <= z")
         p.fix("x y z")
         p.assume("hxy: x <= y", "hyz: y <= z")
-        p.have("yz_or: (y < z) \\/ (y = z)")\
-            .by_eq_mp(UNFOLD_LE(VY, VZ), "hyz")
+        p.have("yz_or: (y < z) \\/ (y = z)").by_eq_mp(UNFOLD_LE(VY, VZ), "hyz")
         with p.cases_on("yz_or"):
             with p.case("h: y < z"):
                 p.have("xz_lt: x < z").by(SATZ_16A, "x", "y", "z", "hxy", "h")
@@ -56,8 +71,9 @@ def main():
             with p.case("h: y = z"):
                 p.thus("x <= z").by_rewrite_of("hxy", ["h"])
 
-    assert aconv(concl(SATZ_17_NEW), concl(nat.SATZ_17)), \
+    assert aconv(concl(SATZ_17_NEW), concl(nat.SATZ_17)), (
         f"SATZ_17 mismatch:\n  new: {pp(concl(SATZ_17_NEW))}\n  old: {pp(concl(nat.SATZ_17))}"
+    )
     assert SATZ_17_NEW._asl == nat.SATZ_17._asl
 
     # ---- _Have.by_match smoke tests ------------------------------------
@@ -73,8 +89,10 @@ def main():
             p.have("xy: x = y").by_match(AXIOM_4, "h")
             p.have("imp: (x = y) ==> F").by(NOT_ELIM, "hxy")
             p.thus("F").by(MP, "imp", "xy")
-    assert aconv(concl(SATZ_1_BY_MATCH), concl(nat.SATZ_1)), \
+
+    assert aconv(concl(SATZ_1_BY_MATCH), concl(nat.SATZ_1)), (
         f"SATZ_1 by_match mismatch:\n  new: {pp(concl(SATZ_1_BY_MATCH))}\n  old: {pp(concl(nat.SATZ_1))}"
+    )
     assert SATZ_1_BY_MATCH._asl == nat.SATZ_1._asl
 
     # Name-collide: pattern var `x` and goal's outer-fixed `x` share a
@@ -89,8 +107,10 @@ def main():
                 p.thus("~(SUC 1 = 1)").by_match(AXIOM_3)
             with p.step("IH"):
                 p.thus("~(SUC (SUC x) = SUC x)").by_match(SATZ_1, "IH")
-    assert aconv(concl(SATZ_2_BY_MATCH), concl(nat.SATZ_2)), \
+
+    assert aconv(concl(SATZ_2_BY_MATCH), concl(nat.SATZ_2)), (
         f"SATZ_2 by_match mismatch:\n  new: {pp(concl(SATZ_2_BY_MATCH))}\n  old: {pp(concl(nat.SATZ_2))}"
+    )
     assert SATZ_2_BY_MATCH._asl == nat.SATZ_2._asl
 
     # Middle-var with explicit term hint: SATZ_16A = !x y z. x <= y ==>
@@ -101,16 +121,17 @@ def main():
         p.goal("!x y z. x <= y ==> y <= z ==> x <= z")
         p.fix("x y z")
         p.assume("hxy: x <= y", "hyz: y <= z")
-        p.have("yz_or: (y < z) \\/ (y = z)")\
-            .by_eq_mp(UNFOLD_LE(VY, VZ), "hyz")
+        p.have("yz_or: (y < z) \\/ (y = z)").by_eq_mp(UNFOLD_LE(VY, VZ), "hyz")
         with p.cases_on("yz_or"):
             with p.case("h: y < z"):
                 p.have("xz_lt: x < z").by_match(SATZ_16A, "y", "hxy", "h")
                 p.thus("x <= z").by(LT_TO_LE, "xz_lt")
             with p.case("h: y = z"):
                 p.thus("x <= z").by_rewrite_of("hxy", ["h"])
-    assert aconv(concl(SATZ_17_BY_MATCH), concl(nat.SATZ_17)), \
+
+    assert aconv(concl(SATZ_17_BY_MATCH), concl(nat.SATZ_17)), (
         f"SATZ_17 by_match mismatch:\n  new: {pp(concl(SATZ_17_BY_MATCH))}\n  old: {pp(concl(nat.SATZ_17))}"
+    )
     assert SATZ_17_BY_MATCH._asl == nat.SATZ_17._asl
 
     # Antecedent matching: same proof, but `y` is now inferred from
@@ -121,16 +142,17 @@ def main():
         p.goal("!x y z. x <= y ==> y <= z ==> x <= z")
         p.fix("x y z")
         p.assume("hxy: x <= y", "hyz: y <= z")
-        p.have("yz_or: (y < z) \\/ (y = z)")\
-            .by_eq_mp(UNFOLD_LE(VY, VZ), "hyz")
+        p.have("yz_or: (y < z) \\/ (y = z)").by_eq_mp(UNFOLD_LE(VY, VZ), "hyz")
         with p.cases_on("yz_or"):
             with p.case("h: y < z"):
                 p.have("xz_lt: x < z").by_match(SATZ_16A, "hxy", "h")
                 p.thus("x <= z").by(LT_TO_LE, "xz_lt")
             with p.case("h: y = z"):
                 p.thus("x <= z").by_rewrite_of("hxy", ["h"])
-    assert aconv(concl(SATZ_17_BY_MATCH_ANT), concl(nat.SATZ_17)), \
+
+    assert aconv(concl(SATZ_17_BY_MATCH_ANT), concl(nat.SATZ_17)), (
         f"SATZ_17 by_match (ant) mismatch:\n  new: {pp(concl(SATZ_17_BY_MATCH_ANT))}\n  old: {pp(concl(nat.SATZ_17))}"
+    )
     assert SATZ_17_BY_MATCH_ANT._asl == nat.SATZ_17._asl
 
     # Error: fact concl does not match the antecedent's pattern.
@@ -166,6 +188,7 @@ def main():
         p.goal("1 = 1")
         p.let("M(x) := x = x")
         p.thus("M 1").by_thm(REFL(ONE))
+
     assert aconv(concl(LET_REFL), parse("1 = 1"))
 
     # (2) Let-name in have-term, body closes over fix-var 'a'.
@@ -175,6 +198,7 @@ def main():
         p.fix("a")
         p.let("M(x) := x = a")
         p.thus("M a").by_thm(REFL(mk_var("a", num_ty)))
+
     assert aconv(concl(LET_FIX), parse("!a. a = a"))
 
     # (3) Collision with fix-var refused.
@@ -195,6 +219,7 @@ def main():
         p.goal("1 + 1 = 1 + 1")
         p.let("R(a, b) := a + b = b + a")
         p.thus("R 1 1").by_thm(REFL(parse("1 + 1")))
+
     assert aconv(concl(LET_MULTI), parse("1 + 1 = 1 + 1"))
 
     # (5) ``by`` with a multi-arg let: trivial 2-ary HO axiom
@@ -203,12 +228,14 @@ def main():
     Q2_var = mk_var("Q", Q2_ty)
     Q2_at_11 = mk_app(Q2_var, ONE, ONE)
     trivial_HO_2 = GEN(Q2_var, DISCH(Q2_at_11, ASSUME(Q2_at_11)))
+
     @proof
     def BY_LET_MULTI(p):
         p.goal("1 = 1")
         p.let("R(a, b) := a = b")
         p.have("R_11: R 1 1").by_thm(REFL(ONE))
         p.thus("R 1 1").by(trivial_HO_2, "R", "R_11")
+
     assert aconv(concl(BY_LET_MULTI), parse("1 = 1"))
 
     # (6) Bad spec rejected.
@@ -232,15 +259,15 @@ def main():
     x_v = mk_var("x", num_ty)
     expected_unary = BETA_RULE(AP_THM(SUC_DEF, x_v))
     got_unary = Proof().unfold(SUC_DEF, x_v)
-    assert aconv(got_unary._concl, expected_unary._concl), \
-        "p.unfold (unary): mismatch"
+    assert aconv(got_unary._concl, expected_unary._concl), "p.unfold (unary): mismatch"
     assert got_unary._asl == expected_unary._asl
 
     # Binary def: GT_DEF : |- > = \x y. ?u. x = y + u (defined in nat).
     expected_binary = UNFOLD_GT(VX, VY)
     got_binary = Proof().unfold(GT_DEF, VX, VY)
-    assert aconv(got_binary._concl, expected_binary._concl), \
+    assert aconv(got_binary._concl, expected_binary._concl), (
         "p.unfold (binary): mismatch"
+    )
 
     # String form: parses argument in current scope.
     p_str = Proof()
@@ -255,8 +282,8 @@ def main():
     # carrier Var (it's in the parser scope) and ``by`` SPECs at it; the
     # fact label MPs the antecedent.
     P_var = mk_var("P", mk_fun_ty(num_ty, bool_ty))
-    P_1   = mk_comb(P_var, ONE)
-    trivial_HO = GEN(P_var, DISCH(P_1, ASSUME(P_1)))   # |- !P. P 1 ==> P 1
+    P_1 = mk_comb(P_var, ONE)
+    trivial_HO = GEN(P_var, DISCH(P_1, ASSUME(P_1)))  # |- !P. P 1 ==> P 1
 
     @proof
     def BY_LET_TEST(p):
@@ -264,23 +291,26 @@ def main():
         p.let("M(x) := x = x")
         p.have("M_1: M 1").by_thm(REFL(ONE))
         p.thus("M 1").by(trivial_HO, "M", "M_1")
+
     assert aconv(concl(BY_LET_TEST), parse("1 = 1"))
 
     # ---- lazy-let registry smoke test -----------------------------------
     p_lazy = Proof()
     a_v = Var("a", num_ty)
-    body_aa = mk_eq(a_v, a_v)                    # body: a = a (bool)
+    body_aa = mk_eq(a_v, a_v)  # body: a = a (bool)
     ld = p_lazy._register_lazy_let("MX", [a_v], body_aa)
     # Carrier: Var named "MX" with type num -> bool.
     assert isinstance(ld.carrier, Var) and ld.carrier.name == "MX"
     assert ld.carrier.ty == mk_fun_ty(num_ty, bool_ty)
     # Equation conclusion: !a. MX a = (a = a).
     expected_eq = mk_forall(a_v, mk_eq(mk_comb(ld.carrier, a_v), body_aa))
-    assert aconv(ld.eq_th._concl, expected_eq), \
+    assert aconv(ld.eq_th._concl, expected_eq), (
         f"lazy-let eq mismatch: {pp(ld.eq_th._concl)} vs {pp(expected_eq)}"
+    )
     # Equation hypothesis: same as conclusion (introduced via ASSUME).
-    assert len(ld.eq_th._asl) == 1 and aconv(ld.eq_th._asl[0], expected_eq), \
+    assert len(ld.eq_th._asl) == 1 and aconv(ld.eq_th._asl[0], expected_eq), (
         f"lazy-let hyp mismatch: {ld.eq_th._asl}"
+    )
     # Lookup: scope chain finds it.
     assert p_lazy._lookup_lazy_let("MX") is ld
     assert p_lazy._lookup_lazy_let("missing") is None
@@ -297,10 +327,12 @@ def main():
     ld2 = p_lazy._register_lazy_let("MX2", [a_v, b_v], body_ab)
     expected_ty2 = mk_fun_ty(num_ty, mk_fun_ty(num_ty, bool_ty))
     assert ld2.carrier.ty == expected_ty2
-    expected_eq2 = mk_forall(a_v, mk_forall(b_v,
-        mk_eq(mk_app(ld2.carrier, a_v, b_v), body_ab)))
-    assert aconv(ld2.eq_th._concl, expected_eq2), \
+    expected_eq2 = mk_forall(
+        a_v, mk_forall(b_v, mk_eq(mk_app(ld2.carrier, a_v, b_v), body_ab))
+    )
+    assert aconv(ld2.eq_th._concl, expected_eq2), (
         f"lazy-let multi-arg eq mismatch: {pp(ld2.eq_th._concl)}"
+    )
 
     # ---- lazy by + let-carrier smoke test -------------------------------
     p_bsl = Proof()
@@ -313,9 +345,9 @@ def main():
     p_bsl.have("MZ_1: MZ 1").by_thm(mz_1_th)
     p_bsl.thus("MZ 1").by(trivial_HO, "MZ", "MZ_1")
     assert p_bsl._cur.result is not None
-    assert aconv(p_bsl._cur.result._concl, parse("MZ 1",
-                                                  _env_bindings={"MZ": lz.carrier})), \
-        f"lazy by + let: unexpected concl {pp(p_bsl._cur.result._concl)}"
+    assert aconv(
+        p_bsl._cur.result._concl, parse("MZ 1", _env_bindings={"MZ": lz.carrier})
+    ), f"lazy by + let: unexpected concl {pp(p_bsl._cur.result._concl)}"
 
     # ---- p.unfold_let / p.fold_let smoke test ---------------------------
     p_ul = Proof()
@@ -324,8 +356,9 @@ def main():
     lz_n = p_ul._register_lazy_let("MN", [x_v_u], plus_x_x)
     eq_at_one = p_ul.unfold_let("MN", ONE)
     expected = mk_eq(mk_comb(lz_n.carrier, ONE), parse("1 + 1"))
-    assert aconv(eq_at_one._concl, expected), \
+    assert aconv(eq_at_one._concl, expected), (
         f"unfold_let: {pp(eq_at_one._concl)} vs {pp(expected)}"
+    )
     p_ul.goal("MN 1 = 1 + 1")
     eq_str = p_ul.unfold_let("MN", "1")
     assert aconv(eq_str._concl, expected)
@@ -343,8 +376,9 @@ def main():
         raise AssertionError("expected HolError for unfold_let missing name")
     eq_folded = p_ul.fold_let("MN", ONE)
     expected_fold = mk_eq(parse("1 + 1"), mk_comb(lz_n.carrier, ONE))
-    assert aconv(eq_folded._concl, expected_fold), \
+    assert aconv(eq_folded._concl, expected_fold), (
         f"fold_let: {pp(eq_folded._concl)} vs {pp(expected_fold)}"
+    )
 
     # ---- lazy let end-to-end smoke test --------------------------------
     @proof
@@ -352,10 +386,13 @@ def main():
         p.let("MK(x) := x = x")
         p.goal("MK 1")
         p.thus("MK 1").by_eq_mp(p.fold_let("MK", ONE), REFL(ONE))
-    assert LAZY_LET_END2END._asl == [], \
+
+    assert LAZY_LET_END2END._asl == [], (
         f"lazy let: dangling hyp on result: {LAZY_LET_END2END._asl}"
-    assert aconv(LAZY_LET_END2END._concl, parse("1 = 1")), \
+    )
+    assert aconv(LAZY_LET_END2END._concl, parse("1 = 1")), (
         f"lazy let: unexpected concl {pp(LAZY_LET_END2END._concl)}"
+    )
 
     # ---- conversion-on-match smoke tests -------------------------------
     @proof
@@ -363,6 +400,7 @@ def main():
         p.let("MK(x) := x = x")
         p.goal("MK 1")
         p.thus("MK 1").by_thm(REFL(ONE))
+
     assert MATCH_FOLDED_TGT._asl == []
     assert aconv(MATCH_FOLDED_TGT._concl, parse("1 = 1"))
 
@@ -372,6 +410,7 @@ def main():
         p.goal("1 = 1")
         p.have("MK_1: MK 1").by_eq_mp(p.fold_let("MK", ONE), REFL(ONE))
         p.thus("1 = 1").by_thm(p.fact("MK_1"))
+
     assert MATCH_UNFOLDED_TGT._asl == []
     assert aconv(MATCH_UNFOLDED_TGT._concl, parse("1 = 1"))
 
@@ -381,14 +420,15 @@ def main():
     yv = Var("y", num_ty)
     M_carrier = Var("M", mk_fun_ty(num_ty, bool_ty))
     self_ref_body = mk_comb(M_carrier, yv)
-    eq_term_loop = mk_forall(yv,
-        mk_eq(mk_comb(M_carrier, yv), self_ref_body))
+    eq_term_loop = mk_forall(yv, mk_eq(mk_comb(M_carrier, yv), self_ref_body))
     p_loop._cur.lazy_lets["M"] = LazyLetDef(
-        "M", [yv], self_ref_body, M_carrier, ASSUME(eq_term_loop))
+        "M", [yv], self_ref_body, M_carrier, ASSUME(eq_term_loop)
+    )
     th_dummy = REFL(ONE)
     target_loop = parse("M 1", _env_bindings={"M": M_carrier})
-    assert p_loop.simp_match(target_loop, th_dummy) is None, \
+    assert p_loop.simp_match(target_loop, th_dummy) is None, (
         "self-ref lazy let: match must fail cleanly"
+    )
 
     # ---- H13: assume preserves user surface form -----------------------
     @proof
@@ -397,10 +437,11 @@ def main():
         p.goal("MK 1 ==> MK 1")
         p.assume("h: MK 1")
         # User-facing fact's _concl is the surface form they wrote.
-        assert aconv(p.fact("h")._concl,
-                     parse("MK 1", _env_bindings=p._scope_env())), \
+        assert aconv(p.fact("h")._concl, parse("MK 1", _env_bindings=p._scope_env())), (
             f"H13: surface form not preserved: {pp(p.fact('h')._concl)}"
+        )
         p.thus("MK 1").by_thm(p.fact("h"))
+
     # Closed theorem matches the unfolded goal exactly.
     assert H13_SURFACE._asl == []
     assert aconv(H13_SURFACE._concl, parse("(1 = 1) ==> (1 = 1)"))
@@ -412,9 +453,10 @@ def main():
         p.fix("x")
         p.assume("(h_eq, _, _): x = 1 /\\ x = x /\\ SUC x = SUC x")
         p.thus("x = 1").by_thm(p.fact("h_eq"))
+
     assert aconv(
-        PAT_TUPLE._concl,
-        parse("!x. (x = 1 /\\ x = x /\\ SUC x = SUC x) ==> x = 1"))
+        PAT_TUPLE._concl, parse("!x. (x = 1 /\\ x = x /\\ SUC x = SUC x) ==> x = 1")
+    )
 
     # ---- assume pattern-style: chain of two specs, each one ==> ---------
     @proof
@@ -423,8 +465,8 @@ def main():
         p.fix("x y")
         p.assume("hx: x = 1", "hy: y = 1")
         p.thus("x = y").by_rewrite(["hx", "hy"])
-    assert aconv(PAT_CHAIN._concl,
-                 parse("!x y. x = 1 ==> y = 1 ==> x = y"))
+
+    assert aconv(PAT_CHAIN._concl, parse("!x y. x = 1 ==> y = 1 ==> x = y"))
 
     # ---- assume pattern-style: nested tuple destructure -----------------
     @proof
@@ -433,8 +475,10 @@ def main():
         p.fix("x")
         p.assume("(h_eq, (_, _)): x = 1 /\\ (SUC x = SUC x /\\ x = x)")
         p.thus("x = 1").by_thm(p.fact("h_eq"))
-    assert aconv(PAT_NESTED._concl,
-                 parse("!x. (x = 1 /\\ (SUC x = SUC x /\\ x = x)) ==> x = 1"))
+
+    assert aconv(
+        PAT_NESTED._concl, parse("!x. (x = 1 /\\ (SUC x = SUC x /\\ x = x)) ==> x = 1")
+    )
 
     # ---- assume pattern-style: error on non-conjunction tuple -----------
     p_err = Proof()
@@ -445,7 +489,8 @@ def main():
         pass
     else:
         raise AssertionError(
-            "expected HolError: tuple pattern needs conjunction antecedent")
+            "expected HolError: tuple pattern needs conjunction antecedent"
+        )
 
     # ---- assume pattern-style: error on bad pattern syntax --------------
     p_err2 = Proof()
@@ -455,8 +500,7 @@ def main():
     except HolError:
         pass
     else:
-        raise AssertionError(
-            "expected HolError: tuple pattern requires >= 2 elements")
+        raise AssertionError("expected HolError: tuple pattern requires >= 2 elements")
 
     # ---- split: destructure an existing fact via pattern grammar --------
     @proof
@@ -466,9 +510,10 @@ def main():
         p.assume("h: x = 1 /\\ x = x /\\ SUC x = SUC x")
         p.split("h", "(h_eq, _, _)")
         p.thus("x = 1").by_thm(p.fact("h_eq"))
+
     assert aconv(
-        SPLIT_FACT._concl,
-        parse("!x. (x = 1 /\\ x = x /\\ SUC x = SUC x) ==> x = 1"))
+        SPLIT_FACT._concl, parse("!x. (x = 1 /\\ x = x /\\ SUC x = SUC x) ==> x = 1")
+    )
 
     # ---- split: nested destructure on an existing fact ------------------
     @proof
@@ -478,9 +523,11 @@ def main():
         p.assume("h: x = 1 /\\ (SUC x = SUC x /\\ x = x)")
         p.split("h", "(h_eq, (_, _))")
         p.thus("x = 1").by_thm(p.fact("h_eq"))
+
     assert aconv(
         SPLIT_NESTED._concl,
-        parse("!x. (x = 1 /\\ (SUC x = SUC x /\\ x = x)) ==> x = 1"))
+        parse("!x. (x = 1 /\\ (SUC x = SUC x /\\ x = x)) ==> x = 1"),
+    )
 
     # ---- split: annotated pattern body checks simp-equivalence ----------
     @proof
@@ -490,8 +537,8 @@ def main():
         p.assume("h: x = 1 /\\ x = x")
         p.split("h", "(h1, h2): x = 1 /\\ x = x")
         p.thus("x = 1").by_thm(p.fact("h1"))
-    assert aconv(SPLIT_ANNOT._concl,
-                 parse("!x. (x = 1 /\\ x = x) ==> x = 1"))
+
+    assert aconv(SPLIT_ANNOT._concl, parse("!x. (x = 1 /\\ x = x) ==> x = 1"))
 
     # ---- split: error when pattern doesn't match the fact's shape -------
     p_err3 = Proof()
@@ -502,8 +549,7 @@ def main():
     except HolError:
         pass
     else:
-        raise AssertionError(
-            "expected HolError: tuple pattern needs conjunction fact")
+        raise AssertionError("expected HolError: tuple pattern needs conjunction fact")
 
     # ---- split: error on annotated body that doesn't match --------------
     p_err4 = Proof()
@@ -514,8 +560,7 @@ def main():
     except HolError:
         pass
     else:
-        raise AssertionError(
-            "expected HolError: split body shape mismatch")
+        raise AssertionError("expected HolError: split body shape mismatch")
 
     # ---- calc: basic chain with by_thm justifications -------------------
     # Prove (x + y) + 1 = x + (y + 1) via a two-step chain. Each segment is
@@ -528,9 +573,10 @@ def main():
             c.step("= SUC (x + y)").by_rewrite([ADD_1])
             c.step("= x + SUC y").by_rewrite([ADD_SUC])
             c.step("= x + (y + 1)").by_rewrite([ADD_1])
-    assert aconv(CALC_BASIC._concl,
-                 parse("!x y. (x + y) + 1 = x + (y + 1)")), \
+
+    assert aconv(CALC_BASIC._concl, parse("!x y. (x + y) + 1 = x + (y + 1)")), (
         f"CALC_BASIC: {pp(CALC_BASIC._concl)}"
+    )
 
     # ---- calc: have-mode registers a fact, downstream thus uses it ------
     @proof
@@ -542,6 +588,7 @@ def main():
             c.step("= x + SUC y").by_rewrite([ADD_SUC])
             c.step("= x + (y + 1)").by_rewrite([ADD_1])
         p.thus("(x + y) + 1 = x + (y + 1)").by_thm(p.fact("eq"))
+
     assert aconv(CALC_HAVE._concl, CALC_BASIC._concl)
 
     # ---- calc: empty chain raises ---------------------------------------
@@ -577,8 +624,7 @@ def main():
     except HolError:
         pass
     else:
-        raise AssertionError(
-            "expected HolError: calc final RHS doesn't match goal")
+        raise AssertionError("expected HolError: calc final RHS doesn't match goal")
 
     print("proof.py self-tests passed.")
 

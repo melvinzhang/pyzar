@@ -33,26 +33,53 @@ Coverage:
 """
 
 from fusion import (
-    Var, REFL, EQ_MP,
+    Var,
+    REFL,
+    EQ_MP,
 )
 from basics import (
-    mk_abs, mk_app, mk_const, mk_eq,
-    dest_eq, rator, rand,
+    mk_abs,
+    mk_app,
+    mk_const,
+    mk_eq,
+    dest_eq,
+    rator,
+    rand,
 )
 from tactics import (
-    SYM, UNFOLD,
-    SPEC, GEN, CONJ, CONJUNCT1, CONJUNCT2, MP,
-    NOT_ELIM, DISJ1, DISJ2, NE_SYM, SPECL, GENL,
+    SYM,
+    UNFOLD,
+    SPEC,
+    GEN,
+    CONJ,
+    CONJUNCT1,
+    CONJUNCT2,
+    MP,
+    NOT_ELIM,
+    DISJ1,
+    DISJ2,
+    NE_SYM,
+    SPECL,
+    GENL,
 )
 from classical import EXCLUDED_MIDDLE, NOT_EX_TO_FORALL_NOT
 from num import (
-    num_ty, ONE, mk_suc,
-    x, y, z, AXIOM_3, AXIOM_4, INDUCTION, define_recursive,
+    num_ty,
+    ONE,
+    mk_suc,
+    x,
+    y,
+    z,
+    AXIOM_3,
+    AXIOM_4,
+    INDUCTION,
+    define_recursive,
 )
 from parser import define, parse_type, pp_thm
 from proof import (
     proof,
-    register_unfolder, register_disj_unfolder,
+    register_unfolder,
+    register_disj_unfolder,
     contra_finder,
 )
 
@@ -62,6 +89,7 @@ from proof import (
 # Proof (Landau): "Otherwise x' = y' would hold, hence by Axiom 4 x = y."
 # Formally: contrapositive of Axiom 4.
 # ---------------------------------------------------------------------------
+
 
 @proof
 def SATZ_1(p):
@@ -81,6 +109,7 @@ def SATZ_1(p):
 #   II) From x' != x, Theorem 1 gives (x')' != x'.
 # ---------------------------------------------------------------------------
 
+
 @proof
 def SATZ_2(p):
     p.goal("!x. ~(SUC x = x)")
@@ -97,6 +126,7 @@ def SATZ_2(p):
 # Proof (Landau): induction.  Trivial at x = 1 (the hypothesis is
 #                 contradictory); in the step: at x' take u = x.
 # ---------------------------------------------------------------------------
+
 
 @proof
 def SATZ_3(p):
@@ -132,19 +162,23 @@ _k = Var("k", num_ty)
 _a = Var("a", num_ty)
 
 ADD_1, ADD_SUC = define_recursive(
-    "+", _nnn, x,
-    c = mk_suc(x),
-    h = mk_abs(_k, mk_abs(_a, mk_suc(_a))),    # \k a. SUC a
+    "+",
+    _nnn,
+    x,
+    c=mk_suc(x),
+    h=mk_abs(_k, mk_abs(_a, mk_suc(_a))),  # \k a. SUC a
     infix=(50, "left"),
 )
 PLUS = mk_const("+", [])
 
+
 def mk_add(a, b):
     return mk_app(PLUS, a, b)
 
+
 # Reversed orientation of ADD_1, used as a rewrite to canonicalize SUC into
 # `+1`-form before AC reasoning.
-ADD_1_REV = GEN(x, SYM(SPEC(x, ADD_1)))    # |- !x. SUC x = x + 1
+ADD_1_REV = GEN(x, SYM(SPEC(x, ADD_1)))  # |- !x. SUC x = x + 1
 
 
 # ---------------------------------------------------------------------------
@@ -159,22 +193,26 @@ ADD_1_REV = GEN(x, SYM(SPEC(x, ADD_1)))    # |- !x. SUC x = x + 1
 
 _fn_ty = parse_type("num -> num")
 
+
 @proof
 def ADD_UNIQUE(p):
-    p.goal("!x f g. f 1 = SUC x /\\ (!y. f (SUC y) = SUC (f y)) /\\ "
-                  "g 1 = SUC x /\\ (!y. g (SUC y) = SUC (g y)) "
-                  "==> !y. f y = g y",
-           types={"f": _fn_ty, "g": _fn_ty})
+    p.goal(
+        "!x f g. f 1 = SUC x /\\ (!y. f (SUC y) = SUC (f y)) /\\ "
+        "g 1 = SUC x /\\ (!y. g (SUC y) = SUC (g y)) "
+        "==> !y. f y = g y",
+        types={"f": _fn_ty, "g": _fn_ty},
+    )
     p.fix("x f g")
-    p.assume("(h_f1, h_fstep, h_g1, h_gstep): "
-             "f 1 = SUC x /\\ (!y. f (SUC y) = SUC (f y)) /\\ "
-             "g 1 = SUC x /\\ (!y. g (SUC y) = SUC (g y))")
+    p.assume(
+        "(h_f1, h_fstep, h_g1, h_gstep): "
+        "f 1 = SUC x /\\ (!y. f (SUC y) = SUC (f y)) /\\ "
+        "g 1 = SUC x /\\ (!y. g (SUC y) = SUC (g y))"
+    )
     with p.induction("y"):
         with p.base():
             p.thus("f 1 = g 1").by_rewrite(["h_f1", "h_g1"])
         with p.step("IH"):
-            p.thus("f (SUC y) = g (SUC y)")\
-                .by_rewrite(["h_fstep", "h_gstep", "IH"])
+            p.thus("f (SUC y) = g (SUC y)").by_rewrite(["h_fstep", "h_gstep", "IH"])
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +220,7 @@ def ADD_UNIQUE(p):
 #   |- !x y z. (x + y) + z = x + (y + z).
 # Proof (Landau): induction on z.
 # ---------------------------------------------------------------------------
+
 
 @proof
 def SATZ_5(p):
@@ -191,8 +230,7 @@ def SATZ_5(p):
         with p.base():
             p.thus("(x + y) + 1 = x + (y + 1)").by_rewrite([ADD_1, ADD_SUC])
         with p.step("IH"):
-            p.thus("(x + y) + SUC z = x + (y + SUC z)")\
-                .by_rewrite([ADD_SUC, "IH"])
+            p.thus("(x + y) + SUC z = x + (y + SUC z)").by_rewrite([ADD_SUC, "IH"])
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +240,7 @@ def SATZ_5(p):
 # ONE_PLUS :  |- !y.    1 + y = SUC y
 # SUC_PLUS :  |- !x y.  SUC x + y = SUC (x + y)
 # ---------------------------------------------------------------------------
+
 
 @proof
 def ONE_PLUS(p):
@@ -213,6 +252,7 @@ def ONE_PLUS(p):
         with p.step("IH"):
             p.thus("1 + SUC y = SUC (SUC y)").by_rewrite([ADD_SUC, "IH"])
 
+
 @proof
 def SUC_PLUS(p):
     p.goal("!x y. SUC x + y = SUC (x + y)")
@@ -221,8 +261,7 @@ def SUC_PLUS(p):
         with p.base():
             p.thus("SUC x + 1 = SUC (x + 1)").by_rewrite([ADD_1])
         with p.step("IH"):
-            p.thus("SUC x + SUC y = SUC (x + SUC y)")\
-                .by_rewrite([ADD_SUC, "IH"])
+            p.thus("SUC x + SUC y = SUC (x + SUC y)").by_rewrite([ADD_SUC, "IH"])
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +269,7 @@ def SUC_PLUS(p):
 #   |- !x y. x + y = y + x.
 # Proof (Landau): induction on x with y fixed.
 # ---------------------------------------------------------------------------
+
 
 @proof
 def SATZ_6(p):
@@ -239,8 +279,7 @@ def SATZ_6(p):
         with p.base():
             p.thus("1 + y = y + 1").by_rewrite([ONE_PLUS, ADD_1])
         with p.step("IH"):
-            p.thus("SUC x + y = y + SUC x")\
-                .by_rewrite([SUC_PLUS, ADD_SUC, "IH"])
+            p.thus("SUC x + y = y + SUC x").by_rewrite([SUC_PLUS, ADD_SUC, "IH"])
 
 
 # AC-corollary used pervasively in the order proofs:  (a+b)+c = (a+c)+b.
@@ -258,6 +297,7 @@ def ADD_RIGHT_SWAP(p):
 #   II) From y != x + y: y' != (x+y)' = x + y'  by Theorem 1 and ADD_SUC.
 # ---------------------------------------------------------------------------
 
+
 @proof
 def SATZ_7(p):
     p.goal("!x y. ~(y = x + y)")
@@ -268,8 +308,7 @@ def SATZ_7(p):
             p.have("ne1: ~(1 = SUC x)").by(NE_SYM, "ne_sx")
             p.thus("~(1 = x + 1)").by_rewrite_of("ne1", [ADD_1])
         with p.step("IH"):
-            p.have("ne_succ: ~(SUC y = SUC (x + y))")\
-                .by_match(SATZ_1, "IH")
+            p.have("ne_succ: ~(SUC y = SUC (x + y))").by_match(SATZ_1, "IH")
             p.thus("~(SUC y = x + SUC y)").by_rewrite_of("ne_succ", [ADD_SUC])
 
 
@@ -290,6 +329,7 @@ def SATZ_7_RIGHT(p):
 # Proof (Landau): induction on x with y, z fixed and y != z.
 # ---------------------------------------------------------------------------
 
+
 @proof
 def SATZ_8(p):
     p.goal("!x y z. ~(y = z) ==> ~(x + y = x + z)")
@@ -300,8 +340,7 @@ def SATZ_8(p):
             p.have("ne_suc: ~(SUC y = SUC z)").by_match(SATZ_1, "hyp_yz")
             p.thus("~(1 + y = 1 + z)").by_rewrite_of("ne_suc", [ONE_PLUS])
         with p.step("IH"):
-            p.have("ne_sum: ~(SUC (x + y) = SUC (x + z))")\
-                .by_match(SATZ_1, "IH")
+            p.have("ne_sum: ~(SUC (x + y) = SUC (x + z))").by_match(SATZ_1, "IH")
             p.thus("~(SUC x + y = SUC x + z)").by_rewrite_of("ne_sum", [SUC_PLUS])
 
 
@@ -311,6 +350,7 @@ def SATZ_8(p):
 # This is the "M = {1} u {x : ?u. x = u'}" lemma underpinning Landau's
 # proof of Theorem 3 -- restated as a clean disjunction for use in Theorem 9.
 # ---------------------------------------------------------------------------
+
 
 @proof
 def LEMMA_PRED(p):
@@ -332,6 +372,7 @@ def LEMMA_PRED(p):
 #
 # Proof B (Landau): induction on y with x fixed.
 # ---------------------------------------------------------------------------
+
 
 @proof
 def SATZ_9(p):
@@ -375,16 +416,24 @@ LT_DEF = define("<", _nnb, "\\x y. ?v. y = x + v", infix=(40, "non"))
 GT = mk_const(">", [])
 LT = mk_const("<", [])
 
-def mk_gt(a, b): return mk_app(GT, a, b)
-def mk_lt(a, b): return mk_app(LT, a, b)
+
+def mk_gt(a, b):
+    return mk_app(GT, a, b)
+
+
+def mk_lt(a, b):
+    return mk_app(LT, a, b)
+
 
 def UNFOLD_GT(a, b):
-    """ |- (a > b) = (?u. a = b + u) """
+    """|- (a > b) = (?u. a = b + u)"""
     return UNFOLD(GT_DEF, a, b)
 
+
 def UNFOLD_LT(a, b):
-    """ |- (a < b) = (?v. b = a + v) """
+    """|- (a < b) = (?v. b = a + v)"""
     return UNFOLD(LT_DEF, a, b)
+
 
 # Register with the proof DSL so `p.choose(name, from_=label)` accepts a fact
 # whose conclusion is `> ` or `<`.
@@ -393,16 +442,19 @@ register_unfolder("<", UNFOLD_LT)
 
 # Theorem 10:  |- !x y. (x = y) \/ (x > y) \/ (x < y).    By Theorem 9 + Definitions 2, 3.
 
+
 @proof
 def SATZ_10(p):
     p.goal("!x y. (x = y) \\/ (x > y) \\/ (x < y)")
     p.fix("x y")
-    p.thus("(x = y) \\/ (x > y) \\/ (x < y)")\
-        .by_unfold(SPECL([x, y], SATZ_9), GT_DEF, LT_DEF)
+    p.thus("(x = y) \\/ (x > y) \\/ (x < y)").by_unfold(
+        SPECL([x, y], SATZ_9), GT_DEF, LT_DEF
+    )
 
 
 # Theorem 11:  |- !x y. (x > y) ==> (y < x).   Both sides unfold to ?u. x = y + u.
 # Theorem 12:  |- !x y. (x < y) ==> (y > x).   Symmetric.
+
 
 @proof
 def SATZ_11(p):
@@ -411,6 +463,7 @@ def SATZ_11(p):
     p.assume("h: x > y")
     p.have("ex: ?u. x = y + u").by_eq_mp(UNFOLD_GT(x, y), "h")
     p.thus("y < x").by_fold("ex")
+
 
 @proof
 def SATZ_12(p):
@@ -430,11 +483,22 @@ LE_DEF = define("<=", _nnb, "\\x y. x < y \\/ x = y", infix=(40, "non"))
 GE = mk_const(">=", [])
 LE = mk_const("<=", [])
 
-def mk_ge(a, b): return mk_app(GE, a, b)
-def mk_le(a, b): return mk_app(LE, a, b)
 
-def UNFOLD_GE(a, b): return UNFOLD(GE_DEF, a, b)
-def UNFOLD_LE(a, b): return UNFOLD(LE_DEF, a, b)
+def mk_ge(a, b):
+    return mk_app(GE, a, b)
+
+
+def mk_le(a, b):
+    return mk_app(LE, a, b)
+
+
+def UNFOLD_GE(a, b):
+    return UNFOLD(GE_DEF, a, b)
+
+
+def UNFOLD_LE(a, b):
+    return UNFOLD(LE_DEF, a, b)
+
 
 register_disj_unfolder(">=", UNFOLD_GE)
 register_disj_unfolder("<=", UNFOLD_LE)
@@ -442,6 +506,7 @@ register_disj_unfolder("<=", UNFOLD_LE)
 
 # Theorem 13:  |- !x y. (x >= y) ==> (y <= x).
 # Theorem 14:  |- !x y. (x <= y) ==> (y >= x).
+
 
 @proof
 def SATZ_13(p):
@@ -475,6 +540,7 @@ def SATZ_14(p):
 
 # Theorem 15 (transitivity of order):  |- !x y z. x < y ==> y < z ==> x < z.
 
+
 @proof
 def SATZ_15(p):
     p.goal("!x y z. x < y ==> y < z ==> x < z")
@@ -487,19 +553,23 @@ def SATZ_15(p):
 
 # Helpers turning < / = into <= and the analogues, used pervasively in #3.
 
+
 def LT_TO_LE(th_lt):
     a = rand(rator(th_lt._concl))
     b = rand(th_lt._concl)
     return EQ_MP(SYM(UNFOLD_LE(a, b)), DISJ1(th_lt, mk_eq(a, b)))
 
+
 def EQ_TO_LE(th_eq):
     a, b = dest_eq(th_eq._concl)
     return EQ_MP(SYM(UNFOLD_LE(a, b)), DISJ2(mk_lt(a, b), th_eq))
+
 
 def GT_TO_GE(th_gt):
     a = rand(rator(th_gt._concl))
     b = rand(th_gt._concl)
     return EQ_MP(SYM(UNFOLD_GE(a, b)), DISJ1(th_gt, mk_eq(a, b)))
+
 
 def EQ_TO_GE(th_eq):
     a, b = dest_eq(th_eq._concl)
@@ -509,9 +579,10 @@ def EQ_TO_GE(th_eq):
 # Theorem 16:   x <= y, y < z  =>  x < z   ;   x < y, y <= z  =>  x < z.
 # We prove both forms (Landau's "or" is a disjunctive hypothesis).
 
+
 @proof
 def SATZ_16A(p):
-    """ x <= y, y < z ==> x < z """
+    """x <= y, y < z ==> x < z"""
     p.goal("!x y z. x <= y ==> y < z ==> x < z")
     p.fix("x y z")
     p.assume("hxy: x <= y", "hyz: y < z")
@@ -521,9 +592,10 @@ def SATZ_16A(p):
         with p.case("h: x = y"):
             p.thus("x < z").by_rewrite_of("hyz", ["h"])
 
+
 @proof
 def SATZ_16B(p):
-    """ x < y, y <= z ==> x < z """
+    """x < y, y <= z ==> x < z"""
     p.goal("!x y z. x < y ==> y <= z ==> x < z")
     p.fix("x y z")
     p.assume("hxy: x < y", "hyz: y <= z")
@@ -535,6 +607,7 @@ def SATZ_16B(p):
 
 
 # Theorem 17:   x <= y, y <= z  =>  x <= z.
+
 
 @proof
 def SATZ_17(p):
@@ -551,6 +624,7 @@ def SATZ_17(p):
 
 # Theorem 18:  |- !x y. x + y > x.    Witness y in ?u. x+y = x+u.
 
+
 @proof
 def SATZ_18(p):
     p.goal("!x y. x + y > x")
@@ -563,6 +637,7 @@ def SATZ_18(p):
 #   19b:  x = y      ==>  x + z = y + z
 #   19c:  x < y      ==>  x + z < y + z
 
+
 @proof
 def SATZ_19A(p):
     p.goal("!x y z. x > y ==> x + z > y + z")
@@ -571,12 +646,14 @@ def SATZ_19A(p):
     p.choose("u: x = y + u", from_="h")
     p.disj_witness("u", "u_eq", ac=(PLUS, SATZ_5, SATZ_6))
 
+
 @proof
 def SATZ_19B(p):
     p.goal("!x y z. x = y ==> x + z = y + z")
     p.fix("x y z")
     p.assume("h: x = y")
     p.thus("x + z = y + z").by_rewrite(["h"])
+
 
 @proof
 def SATZ_19C(p):
@@ -591,6 +668,7 @@ def SATZ_19C(p):
 # Theorem 21:   x > y, z > u  ==>  x + z > y + u.
 # Proof: x+z > y+z (Theorem 19a) and y+z > y+u (Theorem 19a w/ commutativity).
 
+
 @proof
 def SATZ_21(p):
     p.goal("!x y z u. x > y ==> z > u ==> x + z > y + u")
@@ -598,16 +676,17 @@ def SATZ_21(p):
     p.assume("hxy: x > y", "hzu: z > u")
     p.have("xz_gt_yz: x + z > y + z").by_match(SATZ_19A, "hxy")
     p.have("zy_gt_uy: z + y > u + y").by_match(SATZ_19A, "hzu")
-    p.have("yz_gt_yu: y + z > y + u")\
-        .by_rewrite_of("zy_gt_uy", [], ac=(PLUS, SATZ_5, SATZ_6))
+    p.have("yz_gt_yu: y + z > y + u").by_rewrite_of(
+        "zy_gt_uy", [], ac=(PLUS, SATZ_5, SATZ_6)
+    )
     p.have("yu_lt_yz: y + u < y + z").by_match(SATZ_11, "yz_gt_yu")
     p.have("yz_lt_xz: y + z < x + z").by_match(SATZ_11, "xz_gt_yz")
-    p.have("yu_lt_xz: y + u < x + z")\
-        .by_match(SATZ_15, "yu_lt_yz", "yz_lt_xz")
+    p.have("yu_lt_xz: y + u < x + z").by_match(SATZ_15, "yu_lt_yz", "yz_lt_xz")
     p.thus("x + z > y + u").by_match(SATZ_12, "yu_lt_xz")
 
 
 # Theorem 22:   x >= y, z > u  ==>  x + z > y + u   (and the other "or" form).
+
 
 @proof
 def SATZ_22A(p):
@@ -619,9 +698,11 @@ def SATZ_22A(p):
             p.thus("x + z > y + u").by_match(SATZ_21, "h", "hgt")
         with p.case("hxy: x = y"):
             p.have("zy_gt_uy: z + y > u + y").by_match(SATZ_19A, "hgt")
-            p.have("yz_gt_yu: y + z > y + u")\
-                .by_rewrite_of("zy_gt_uy", [], ac=(PLUS, SATZ_5, SATZ_6))
+            p.have("yz_gt_yu: y + z > y + u").by_rewrite_of(
+                "zy_gt_uy", [], ac=(PLUS, SATZ_5, SATZ_6)
+            )
             p.thus("x + z > y + u").by_rewrite_of("yz_gt_yu", ["hxy"])
+
 
 @proof
 def SATZ_22B(p):
@@ -637,6 +718,7 @@ def SATZ_22B(p):
 
 
 # Theorem 23:   x >= y, z >= u  ==>  x + z >= y + u.
+
 
 @proof
 def SATZ_23(p):
@@ -659,6 +741,7 @@ def SATZ_23(p):
 
 # Theorem 24:  |- !x. x >= 1.    Either x = 1 or x = u' = u + 1 > 1.
 
+
 @proof
 def SATZ_24(p):
     p.goal("!x. x >= 1")
@@ -677,6 +760,7 @@ def SATZ_24(p):
 # Theorem 25:   y > x  ==>  y >= x + 1.
 # Proof: y = x + u, u >= 1, so y = x + u >= x + 1 (Theorem 23).
 
+
 @proof
 def SATZ_25(p):
     p.goal("!x y. y > x ==> y >= x + 1")
@@ -684,8 +768,7 @@ def SATZ_25(p):
     p.assume("h: y > x")
     p.choose("u: y = x + u", from_="h")
     p.have("u_ge_1: u >= 1").by_match(SATZ_24)
-    p.have("sum_ge: x + u >= x + 1")\
-        .by_match(SATZ_23, EQ_TO_GE(REFL(x)), "u_ge_1")
+    p.have("sum_ge: x + u >= x + 1").by_match(SATZ_23, EQ_TO_GE(REFL(x)), "u_ge_1")
     p.thus("y >= x + 1").by_rewrite_of("sum_ge", ["u_eq"])
 
 
@@ -699,6 +782,7 @@ def SATZ_25(p):
 # the lemma for ``p.absurd().auto(h1, h2)`` lookup by reading the relation
 # symbols out of its antecedents.
 
+
 @contra_finder
 @proof
 def _CONTRA_LT_GT(p):
@@ -708,8 +792,7 @@ def _CONTRA_LT_GT(p):
     p.assume("h_gt: a > b")
     p.choose("v: b = a + v", from_="h_lt")
     p.choose("u: a = b + u", from_="h_gt")
-    p.have("chain: b = b + (u + v)")\
-        .by_rewrite_of("v_eq", ["u_eq", SATZ_5])
+    p.have("chain: b = b + (u + v)").by_rewrite_of("v_eq", ["u_eq", SATZ_5])
     p.have("ne: ~(b = b + (u + v))").by_match(SATZ_7_RIGHT)
     p.absurd().by_conj("chain", "ne")
 
@@ -790,8 +873,6 @@ def SATZ_26(p):
         p.absurd().auto("h", "y_ge")
 
 
-
-
 # ---------------------------------------------------------------------------
 # Theorem 27 (well-ordering).
 #   |- !N. (?n. N n) ==> ?m. N m /\ (!k. N k ==> m <= k).
@@ -814,10 +895,10 @@ _N_var = Var("N", _N_ty)
 # ``M (y+1)`` and unfolded ``!n. N n ==> y+1 <= n`` at every tactic
 # boundary -- so the proof reads in let-folded form throughout.
 
+
 @proof
 def SATZ_27(p):
-    p.goal("!N. (?n. N n) ==> (?m. N m /\\ (!k. N k ==> m <= k))",
-           types={"N": _N_ty})
+    p.goal("!N. (?n. N n) ==> (?m. N m /\\ (!k. N k ==> m <= k))", types={"N": _N_ty})
     p.fix("N")
     p.assume("hNonempty: ?n. N n")
     p.let("M(x) := !n. N n ==> x <= n")
@@ -847,8 +928,9 @@ def SATZ_27(p):
     # Contrapositive: there is m ∈ M with m + 1 ∉ M.
     with p.have("ex: ?m. M m /\\ ~ M (m + 1)").by_contradiction("hnex"):
         pred_Q = p._parse("\\x. M x /\\ ~ M (x + 1)")
-        p.have("forall_nQ: !x. ~(M x /\\ ~ M (x + 1))")\
-            .by_thm(NOT_EX_TO_FORALL_NOT(p.fact("hnex"), pred_Q))
+        p.have("forall_nQ: !x. ~(M x /\\ ~ M (x + 1))").by_thm(
+            NOT_EX_TO_FORALL_NOT(p.fact("hnex"), pred_Q)
+        )
         with p.have("forall_M: !x. M x").proof():
             with p.induction("x"):
                 with p.base():
@@ -858,12 +940,11 @@ def SATZ_27(p):
                         with p.case("hMS: M (SUC x)"):
                             p.thus("M (SUC x)").by_thm(p.fact("hMS"))
                         with p.case("hnMS: ~ M (SUC x)"):
-                            p.have("hnM1: ~ M (x + 1)")\
-                                .by_rewrite_of("hnMS", [ADD_1])
-                            p.have("conj: M x /\\ ~ M (x + 1)")\
-                                .by(CONJ, "IH", "hnM1")
-                            p.have("not_conj: ~(M x /\\ ~ M (x + 1))")\
-                                .by_match("forall_nQ")
+                            p.have("hnM1: ~ M (x + 1)").by_rewrite_of("hnMS", [ADD_1])
+                            p.have("conj: M x /\\ ~ M (x + 1)").by(CONJ, "IH", "hnM1")
+                            p.have("not_conj: ~(M x /\\ ~ M (x + 1))").by_match(
+                                "forall_nQ"
+                            )
                             p.absurd().by_conj("conj", "not_conj")
         p.choose("n0: N n0", from_="hNonempty")
         p.have("Mn1: M (n0 + 1)").by("forall_M", "n0 + 1")
@@ -909,12 +990,15 @@ def SATZ_27(p):
 # Then:  x * 1 = x  and  x * (SUC y) = x * y + x.
 
 MUL_1, MUL_SUC = define_recursive(
-    "*", _nnn, x,
-    c = x,
-    h = mk_abs(_k, mk_abs(_a, mk_add(_a, x))),   # \k a. a + x
+    "*",
+    _nnn,
+    x,
+    c=x,
+    h=mk_abs(_k, mk_abs(_a, mk_add(_a, x))),  # \k a. a + x
     infix=(60, "left"),
 )
 TIMES = mk_const("*", [])
+
 
 def mk_mul(a, b):
     return mk_app(TIMES, a, b)
@@ -928,27 +1012,32 @@ def mk_mul(a, b):
 #       ==> !y. f y = g y.
 # ---------------------------------------------------------------------------
 
+
 @proof
 def MUL_UNIQUE(p):
-    p.goal("!x f g. f 1 = x /\\ (!y. f (SUC y) = f y + x) /\\ "
-                  "g 1 = x /\\ (!y. g (SUC y) = g y + x) "
-                  "==> !y. f y = g y",
-           types={"f": _fn_ty, "g": _fn_ty})
+    p.goal(
+        "!x f g. f 1 = x /\\ (!y. f (SUC y) = f y + x) /\\ "
+        "g 1 = x /\\ (!y. g (SUC y) = g y + x) "
+        "==> !y. f y = g y",
+        types={"f": _fn_ty, "g": _fn_ty},
+    )
     p.fix("x f g")
-    p.assume("(h_f1, h_fstep, h_g1, h_gstep): "
-             "f 1 = x /\\ (!y. f (SUC y) = f y + x) /\\ "
-             "g 1 = x /\\ (!y. g (SUC y) = g y + x)")
+    p.assume(
+        "(h_f1, h_fstep, h_g1, h_gstep): "
+        "f 1 = x /\\ (!y. f (SUC y) = f y + x) /\\ "
+        "g 1 = x /\\ (!y. g (SUC y) = g y + x)"
+    )
     with p.induction("y"):
         with p.base():
             p.thus("f 1 = g 1").by_rewrite(["h_f1", "h_g1"])
         with p.step("IH"):
-            p.thus("f (SUC y) = g (SUC y)")\
-                .by_rewrite(["h_fstep", "h_gstep", "IH"])
+            p.thus("f (SUC y) = g (SUC y)").by_rewrite(["h_fstep", "h_gstep", "IH"])
 
 
 # Helpers (from Landau's "construction in the proof of Theorem 28"):
 # ONE_MUL :  |- !y. 1 * y = y.
 # SUC_MUL :  |- !x y. (SUC x) * y = x * y + y.
+
 
 @proof
 def ONE_MUL(p):
@@ -960,6 +1049,7 @@ def ONE_MUL(p):
         with p.step("IH"):
             p.thus("1 * SUC y = SUC y").by_rewrite([MUL_SUC, ADD_1, "IH"])
 
+
 @proof
 def SUC_MUL(p):
     p.goal("!x y. SUC x * y = x * y + y")
@@ -968,12 +1058,13 @@ def SUC_MUL(p):
         with p.base():
             p.thus("SUC x * 1 = x * 1 + 1").by_rewrite([MUL_1, ADD_1_REV])
         with p.step("IH"):
-            p.thus("SUC x * SUC y = x * SUC y + SUC y")\
-                .by_rewrite([MUL_SUC, "IH"], ac=(PLUS, SATZ_5, SATZ_6),
-                            ac_rules=[ADD_1_REV])
+            p.thus("SUC x * SUC y = x * SUC y + SUC y").by_rewrite(
+                [MUL_SUC, "IH"], ac=(PLUS, SATZ_5, SATZ_6), ac_rules=[ADD_1_REV]
+            )
 
 
 # Theorem 29 (commutative law of multiplication):  |- !x y. x * y = y * x.
+
 
 @proof
 def SATZ_29(p):
@@ -983,11 +1074,11 @@ def SATZ_29(p):
         with p.base():
             p.thus("1 * y = y * 1").by_rewrite([ONE_MUL, MUL_1])
         with p.step("IH"):
-            p.thus("SUC x * y = y * SUC x")\
-                .by_rewrite([SUC_MUL, MUL_SUC, "IH"])
+            p.thus("SUC x * y = y * SUC x").by_rewrite([SUC_MUL, MUL_SUC, "IH"])
 
 
 # Theorem 30 (distributive):  |- !x y z. x * (y + z) = x*y + x*z.   Induction on z.
+
 
 @proof
 def SATZ_30(p):
@@ -995,14 +1086,15 @@ def SATZ_30(p):
     p.fix("x y z")
     with p.induction("z"):
         with p.base():
-            p.thus("x * (y + 1) = x * y + x * 1")\
-                .by_rewrite([ADD_1, MUL_1, MUL_SUC])
+            p.thus("x * (y + 1) = x * y + x * 1").by_rewrite([ADD_1, MUL_1, MUL_SUC])
         with p.step("IH"):
-            p.thus("x * (y + SUC z) = x * y + x * SUC z")\
-                .by_rewrite([ADD_SUC, MUL_SUC, SATZ_5, "IH"])
+            p.thus("x * (y + SUC z) = x * y + x * SUC z").by_rewrite(
+                [ADD_SUC, MUL_SUC, SATZ_5, "IH"]
+            )
 
 
 # Theorem 31 (associative law of multiplication):  |- !x y z. (x*y)*z = x*(y*z).
+
 
 @proof
 def SATZ_31(p):
@@ -1012,8 +1104,9 @@ def SATZ_31(p):
         with p.base():
             p.thus("(x * y) * 1 = x * (y * 1)").by_rewrite([MUL_1])
         with p.step("IH"):
-            p.thus("(x * y) * SUC z = x * (y * SUC z)")\
-                .by_rewrite([MUL_SUC, SATZ_30, "IH"])
+            p.thus("(x * y) * SUC z = x * (y * SUC z)").by_rewrite(
+                [MUL_SUC, SATZ_30, "IH"]
+            )
 
 
 # Right-distributivity, the corollary Landau notes after Satz 30:
@@ -1025,12 +1118,14 @@ def SATZ_31(p):
 def RIGHT_DISTRIB(p):
     p.goal("!a b c. (a + b) * c = a * c + b * c")
     p.fix("a b c")
-    p.thus("(a + b) * c = a * c + b * c")\
-        .by_rewrite([SATZ_30], ac=(TIMES, SATZ_31, SATZ_29))
+    p.thus("(a + b) * c = a * c + b * c").by_rewrite(
+        [SATZ_30], ac=(TIMES, SATZ_31, SATZ_29)
+    )
 
 
 # Theorem 32 (3-fold "respectively"):  From  x>y / x=y / x<y  it follows  xz > yz / xz = yz / xz < yz.
 # We prove the three pieces; same template as Theorem 19.
+
 
 @proof
 def SATZ_32A(p):
@@ -1040,12 +1135,14 @@ def SATZ_32A(p):
     p.choose("u: x = y + u", from_="h")
     p.disj_witness("u * z", "u_eq", RIGHT_DISTRIB)
 
+
 @proof
 def SATZ_32B(p):
     p.goal("!x y z. x = y ==> x * z = y * z")
     p.fix("x y z")
     p.assume("h: x = y")
     p.thus("x * z = y * z").by_rewrite(["h"])
+
 
 @proof
 def SATZ_32C(p):
@@ -1059,6 +1156,7 @@ def SATZ_32C(p):
 
 # Theorem 34:  x>y, z>u  ==>  x*z > y*u.   Mirror of Theorem 21.
 
+
 @proof
 def SATZ_34(p):
     p.goal("!x y z u. x > y ==> z > u ==> x * z > y * u")
@@ -1066,16 +1164,17 @@ def SATZ_34(p):
     p.assume("hxy: x > y", "hzu: z > u")
     p.have("xz_gt_yz: x * z > y * z").by_match(SATZ_32A, "hxy")
     p.have("zy_gt_uy: z * y > u * y").by_match(SATZ_32A, "hzu")
-    p.have("yz_gt_yu: y * z > y * u")\
-        .by_rewrite_of("zy_gt_uy", [], ac=(TIMES, SATZ_31, SATZ_29))
+    p.have("yz_gt_yu: y * z > y * u").by_rewrite_of(
+        "zy_gt_uy", [], ac=(TIMES, SATZ_31, SATZ_29)
+    )
     p.have("yu_lt_yz: y * u < y * z").by_match(SATZ_11, "yz_gt_yu")
     p.have("yz_lt_xz: y * z < x * z").by_match(SATZ_11, "xz_gt_yz")
-    p.have("yu_lt_xz: y * u < x * z")\
-        .by_match(SATZ_15, "yu_lt_yz", "yz_lt_xz")
+    p.have("yu_lt_xz: y * u < x * z").by_match(SATZ_15, "yu_lt_yz", "yz_lt_xz")
     p.thus("x * z > y * u").by_match(SATZ_12, "yu_lt_xz")
 
 
 # Theorem 35:  x>=y, z>u (or x>y, z>=u)  ==>  x*z > y*u.
+
 
 @proof
 def SATZ_35A(p):
@@ -1087,9 +1186,11 @@ def SATZ_35A(p):
             p.thus("x * z > y * u").by_match(SATZ_34, "h", "hgt")
         with p.case("hxy: x = y"):
             p.have("zy_gt_uy: z * y > u * y").by_match(SATZ_32A, "hgt")
-            p.have("yz_gt_yu: y * z > y * u")\
-                .by_rewrite_of("zy_gt_uy", [], ac=(TIMES, SATZ_31, SATZ_29))
+            p.have("yz_gt_yu: y * z > y * u").by_rewrite_of(
+                "zy_gt_uy", [], ac=(TIMES, SATZ_31, SATZ_29)
+            )
             p.thus("x * z > y * u").by_rewrite_of("yz_gt_yu", ["hxy"])
+
 
 @proof
 def SATZ_35B(p):
@@ -1105,6 +1206,7 @@ def SATZ_35B(p):
 
 
 # Theorem 36:  x>=y, z>=u  ==>  x*z >= y*u.
+
 
 @proof
 def SATZ_36(p):
@@ -1131,6 +1233,7 @@ def SATZ_36(p):
 #         /\ ~(x = y     /\  ?v. y = x + v)
 #         /\ ~((?u. x = y + u) /\ (?v. y = x + v))
 # ---------------------------------------------------------------------------
+
 
 @proof
 def _SATZ_9_EXCL_12(p):
@@ -1166,10 +1269,13 @@ def _SATZ_9_EXCL_23(p):
         p.absurd().auto("h_lt", "h_gt")
 
 
-SATZ_9_EXCL = GENL([x, y],
-                   CONJ(SPECL([x, y], _SATZ_9_EXCL_12),
-                        CONJ(SPECL([x, y], _SATZ_9_EXCL_13),
-                             SPECL([x, y], _SATZ_9_EXCL_23))))
+SATZ_9_EXCL = GENL(
+    [x, y],
+    CONJ(
+        SPECL([x, y], _SATZ_9_EXCL_12),
+        CONJ(SPECL([x, y], _SATZ_9_EXCL_13), SPECL([x, y], _SATZ_9_EXCL_23)),
+    ),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1179,6 +1285,7 @@ SATZ_9_EXCL = GENL([x, y],
 # Proof (Landau): from Theorem 19 + trichotomy, since the three cases of
 # trichotomy mutually exclude each other.
 # ---------------------------------------------------------------------------
+
 
 @proof
 def SATZ_20A(p):
@@ -1222,16 +1329,20 @@ def SATZ_20C(p):
             p.thus("x < y").by_thm(p.fact("h_lt"))
 
 
-SATZ_20 = GENL([x, y, z],
-               CONJ(SPECL([x, y, z], SATZ_20A),
-                    CONJ(SPECL([x, y, z], SATZ_20B),
-                         SPECL([x, y, z], SATZ_20C))))
+SATZ_20 = GENL(
+    [x, y, z],
+    CONJ(
+        SPECL([x, y, z], SATZ_20A),
+        CONJ(SPECL([x, y, z], SATZ_20B), SPECL([x, y, z], SATZ_20C)),
+    ),
+)
 
 
 # ---------------------------------------------------------------------------
 # Theorem 33.   Same template as Theorem 20, with multiplication.
 #   |- !x y z. (xz > yz ==> x > y) /\ (xz = yz ==> x = y) /\ (xz < yz ==> x < y).
 # ---------------------------------------------------------------------------
+
 
 @proof
 def SATZ_33A(p):
@@ -1275,10 +1386,13 @@ def SATZ_33C(p):
             p.thus("x < y").by_thm(p.fact("h_lt"))
 
 
-SATZ_33 = GENL([x, y, z],
-               CONJ(SPECL([x, y, z], SATZ_33A),
-                    CONJ(SPECL([x, y, z], SATZ_33B),
-                         SPECL([x, y, z], SATZ_33C))))
+SATZ_33 = GENL(
+    [x, y, z],
+    CONJ(
+        SPECL([x, y, z], SATZ_33A),
+        CONJ(SPECL([x, y, z], SATZ_33B), SPECL([x, y, z], SATZ_33C)),
+    ),
+)
 
 
 if __name__ == "__main__":
@@ -1336,7 +1450,9 @@ if __name__ == "__main__":
     print("  SATZ_24   :", pp_thm(SATZ_24))
     print("  SATZ_25   :", pp_thm(SATZ_25))
     print("  SATZ_26   :", pp_thm(SATZ_26))
-    print("Step 18 OK -- Definition 6 + Theorems 29-36 proved (Theorem 28 = Definition 6).")
+    print(
+        "Step 18 OK -- Definition 6 + Theorems 29-36 proved (Theorem 28 = Definition 6)."
+    )
     print("  MUL_UNIQUE:", pp_thm(MUL_UNIQUE))
     print("  ONE_MUL   :", pp_thm(ONE_MUL))
     print("  SUC_MUL   :", pp_thm(SUC_MUL))

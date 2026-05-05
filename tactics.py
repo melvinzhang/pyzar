@@ -22,24 +22,59 @@ surface syntax.
 """
 
 from fusion import (
-    Var, Const, Comb, Abs, thm,
-    bool_ty, aty, mk_comb,
+    Var,
+    Const,
+    Comb,
+    Abs,
+    thm,
+    bool_ty,
+    aty,
+    mk_comb,
     type_of,
     variant,
-    REFL, TRANS, MK_COMB, ABS, BETA, ASSUME, EQ_MP,
-    DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
+    REFL,
+    TRANS,
+    MK_COMB,
+    ABS,
+    BETA,
+    ASSUME,
+    EQ_MP,
+    DEDUCT_ANTISYM_RULE,
+    INST,
+    INST_TYPE,
     HolError,
 )
 from basics import (
-    bty, mk_abs, mk_app, mk_const, mk_eq, dest_eq,
-    rator, rand, freesl, aconv,
+    bty,
+    mk_abs,
+    mk_app,
+    mk_const,
+    mk_eq,
+    dest_eq,
+    rator,
+    rand,
+    freesl,
+    aconv,
 )
 from axioms import (
-    T, F,
-    T_DEF, AND_DEF, OR_DEF, IMP_DEF, FORALL_DEF, EXISTS_DEF, F_DEF, NOT_DEF,
-    SELECT_AX, ETA_AX,
-    dest_forall, is_imp,
-    mk_and, mk_imp, mk_forall, mk_select,
+    T,
+    F,
+    T_DEF,
+    AND_DEF,
+    OR_DEF,
+    IMP_DEF,
+    FORALL_DEF,
+    EXISTS_DEF,
+    F_DEF,
+    NOT_DEF,
+    SELECT_AX,
+    ETA_AX,
+    dest_forall,
+    is_imp,
+    mk_and,
+    mk_imp,
+    mk_forall,
+    mk_select,
 )
 from parser import parse_type
 
@@ -51,31 +86,34 @@ _BBB = parse_type("bool -> bool -> bool")
 # Congruence helpers.
 # ---------------------------------------------------------------------------
 
+
 def AP_TERM(tm, th):
-    """ |- a = b   =>   |- f a = f b """
+    """|- a = b   =>   |- f a = f b"""
     return MK_COMB(REFL(tm), th)
 
+
 def AP_THM(th, tm):
-    """ |- f = g   =>   |- f x = g x """
+    """|- f = g   =>   |- f x = g x"""
     return MK_COMB(th, REFL(tm))
 
 
 # General beta on (\x. body) t for any t.
 # Primitive BETA only fires when arg == bvar; we lift via INST.
 
+
 def BETA_CONV(tm):
-    r""" |- (\x. body) t = body[t/x] """
+    r"""|- (\x. body) t = body[t/x]"""
     if not isinstance(tm, Comb) or not isinstance(tm.fun, Abs):
         raise HolError("BETA_CONV: not a beta-redex")
     bvar = tm.fun.bvar
-    base = BETA(mk_comb(tm.fun, bvar))      # |- (\x. body) x = body
+    base = BETA(mk_comb(tm.fun, bvar))  # |- (\x. body) x = body
     if tm.arg == bvar:
         return base
-    return INST([(tm.arg, bvar)], base)     # |- (\x. body) t = body[t/x]
+    return INST([(tm.arg, bvar)], base)  # |- (\x. body) t = body[t/x]
 
 
 def BETA_NORM(tm):
-    """ |- tm = (full beta normal form of tm) """
+    """|- tm = (full beta normal form of tm)"""
     if isinstance(tm, Comb):
         f_th = BETA_NORM(tm.fun)
         a_th = BETA_NORM(tm.arg)
@@ -93,20 +131,20 @@ def BETA_NORM(tm):
 
 
 def beta_after(eq):
-    """ |- a = (\\v. body) x   =>   |- a = body[x/v].
+    """|- a = (\\v. body) x   =>   |- a = body[x/v].
 
     One BETA step at the rand of the equation. Composes with ``AP_THM`` to
-    walk a curried definition equation across its argument list. """
+    walk a curried definition equation across its argument list."""
     return TRANS(eq, BETA_CONV(rand(eq._concl)))
 
 
 def unfold_def_at(def_th, *args):
-    """ |- C = \\x1...xn. body   =>   |- C a1 ... an = body[ai/xi].
+    """|- C = \\x1...xn. body   =>   |- C a1 ... an = body[ai/xi].
 
     Per-argument ``AP_THM`` + ``BETA_CONV`` chain; the canonical way to
     instantiate a connective definition (``AND_DEF``, ``OR_DEF``,
     ``IMP_DEF``, ``NOT_DEF``, ``FORALL_DEF``, ``EXISTS_DEF``) at concrete
-    operands. """
+    operands."""
     eq = def_th
     for a in args:
         eq = beta_after(AP_THM(eq, a))
@@ -115,8 +153,9 @@ def unfold_def_at(def_th, *args):
 
 # Symmetry of equality.
 
+
 def SYM(th):
-    """ |- a = b   =>   |- b = a """
+    """|- a = b   =>   |- b = a"""
     a, _ = dest_eq(th._concl)
     eq_op = rator(rator(th._concl))
     th1 = AP_TERM(eq_op, th)
@@ -131,18 +170,20 @@ TRUTH = EQ_MP(SYM(T_DEF), REFL(mk_abs(_p_bool, _p_bool)))
 
 
 def EQT_ELIM(th):
-    """ |- p = T   =>   |- p """
+    """|- p = T   =>   |- p"""
     return EQ_MP(SYM(th), TRUTH)
 
+
 def EQT_INTRO(th):
-    """ |- p   =>   |- p = T """
+    """|- p   =>   |- p = T"""
     return DEDUCT_ANTISYM_RULE(th, TRUTH)
 
 
 # SPEC, GEN -- universal elimination / introduction.
 
+
 def SPEC(t, th):
-    """ |- !x. P[x]   =>   |- P[t] """
+    """|- !x. P[x]   =>   |- P[t]"""
     pred = rand(th._concl)
     if not isinstance(pred, Abs):
         raise HolError("SPEC: not a forall theorem")
@@ -157,7 +198,7 @@ def SPEC(t, th):
 
 
 def GEN(v, th):
-    """ |- P[v]   =>   |- !v. P[v]    (v not free in the hypotheses) """
+    """|- P[v]   =>   |- !v. P[v]    (v not free in the hypotheses)"""
     if not isinstance(v, Var):
         raise HolError("GEN: not a variable")
     th_eqT = EQT_INTRO(th)
@@ -169,11 +210,13 @@ def GEN(v, th):
 
 # Conjunction.
 
+
 def _bbb_var(name, avoid):
     return variant(avoid, Var(name, _BBB))
 
+
 def CONJ(th_p, th_q):
-    r""" |- p, |- q   =>   |- p /\ q """
+    r"""|- p, |- q   =>   |- p /\ q"""
     p_t, q_t = th_p._concl, th_q._concl
     and_eq = unfold_def_at(AND_DEF, p_t, q_t)
     avoid = freesl(list(th_p._asl) + list(th_q._asl) + [p_t, q_t])
@@ -196,6 +239,7 @@ def _CONJUNCT_proj(th, take_first):
     proj = mk_abs(a_v, mk_abs(b_v, a_v if take_first else b_v))
     th_app = AP_THM(th_eq, proj)
     lhs_app, rhs_app = dest_eq(th_app._concl)
+
     def _reduce(side, fst, snd):
         s1 = BETA_CONV(side)
         proj_fst = rator(rand(s1._concl))
@@ -203,36 +247,42 @@ def _CONJUNCT_proj(th, take_first):
         s2 = MK_COMB(s2_inner, REFL(snd))
         s3 = BETA_CONV(rand(s2._concl))
         return TRANS(s1, TRANS(s2, s3))
+
     lhs_norm = _reduce(lhs_app, p_t, q_t)
     rhs_norm = _reduce(rhs_app, T, T)
     p_or_q_eq_T = TRANS(SYM(lhs_norm), TRANS(th_app, rhs_norm))
     return EQT_ELIM(p_or_q_eq_T)
 
+
 def CONJUNCT1(th):
-    r""" |- p /\ q   =>   |- p """
+    r"""|- p /\ q   =>   |- p"""
     return _CONJUNCT_proj(th, take_first=True)
 
+
 def CONJUNCT2(th):
-    r""" |- p /\ q   =>   |- q """
+    r"""|- p /\ q   =>   |- q"""
     return _CONJUNCT_proj(th, take_first=False)
 
 
 # DISCH, MP, UNDISCH.
 
+
 def _imp_eq(p_t, q_t):
     r"""Build |- (p ==> q) = (p /\ q = p) from IMP_DEF."""
     return unfold_def_at(IMP_DEF, p_t, q_t)
 
+
 def DISCH(p_t, th):
-    """ asl |- q   =>   asl - {p}  |-  p ==> q """
+    """asl |- q   =>   asl - {p}  |-  p ==> q"""
     th1 = CONJ(ASSUME(p_t), th)
     th2 = CONJUNCT1(ASSUME(mk_and(p_t, th._concl)))
     th3 = DEDUCT_ANTISYM_RULE(th1, th2)
     eq = _imp_eq(p_t, th._concl)
     return EQ_MP(SYM(eq), th3)
 
+
 def MP(th_imp, th_p):
-    """ |- p ==> q,  |- p   =>   |- q """
+    """|- p ==> q,  |- p   =>   |- q"""
     p_t = th_p._concl
     if not is_imp(th_imp._concl):
         raise HolError("MP: first theorem is not an implication")
@@ -242,39 +292,45 @@ def MP(th_imp, th_p):
     th_pq = EQ_MP(SYM(th_pq_eq_p), th_p)
     return CONJUNCT2(th_pq)
 
+
 def UNDISCH(th):
-    """ |- p ==> q   =>   {p} |- q """
+    """|- p ==> q   =>   {p} |- q"""
     p_t = rand(rator(th._concl))
     return MP(th, ASSUME(p_t))
 
 
 # Falsity / contradiction / negation.
 
+
 def CONTR(tm, th_F):
-    """ |- F   =>   |- tm    (for any boolean tm) """
+    """|- F   =>   |- tm    (for any boolean tm)"""
     th_all = EQ_MP(F_DEF, th_F)
     return SPEC(tm, th_all)
 
+
 def NOT_ELIM(th):
-    """ |- ~p   =>   |- p ==> F """
+    """|- ~p   =>   |- p ==> F"""
     p_t = rand(th._concl)
     return EQ_MP(unfold_def_at(NOT_DEF, p_t), th)
 
+
 def NOT_INTRO(th_imp_F):
-    """ |- p ==> F   =>   |- ~p """
+    """|- p ==> F   =>   |- ~p"""
     p_t = rand(rator(th_imp_F._concl))
     return EQ_MP(SYM(unfold_def_at(NOT_DEF, p_t)), th_imp_F)
 
+
 def EQF_INTRO(th_not):
-    """ |- ~p   =>   |- p = F """
+    """|- ~p   =>   |- p = F"""
     p_t = rand(th_not._concl)
     th_p = ASSUME(p_t)
     th_F = MP(NOT_ELIM(th_not), th_p)
     th_fp = CONTR(p_t, ASSUME(F))
     return DEDUCT_ANTISYM_RULE(th_F, th_fp)
 
+
 def EQF_ELIM(th):
-    """ |- p = F   =>   |- ~p """
+    """|- p = F   =>   |- ~p"""
     p_t, _ = dest_eq(th._concl)
     th_imp_F = DISCH(p_t, EQ_MP(th, ASSUME(p_t)))
     return NOT_INTRO(th_imp_F)
@@ -282,9 +338,11 @@ def EQF_ELIM(th):
 
 # Disjunction rules.   OR_DEF lives in axioms.py.
 
+
 def _or_unfold(p_t, q_t):
-    """ |- (p \\/ q) = (!r. (p==>r) ==> (q==>r) ==> r) """
+    """|- (p \\/ q) = (!r. (p==>r) ==> (q==>r) ==> r)"""
     return unfold_def_at(OR_DEF, p_t, q_t)
+
 
 def _DISJ_inj(p_t, q_t, th, take_left):
     """Inject ``th`` into ``|- p \\/ q``: ``take_left`` selects DISJ1
@@ -297,16 +355,19 @@ def _DISJ_inj(p_t, q_t, th, take_left):
     th_inner = DISCH(p_imp_r, DISCH(q_imp_r, MP(use_imp, th)))
     return EQ_MP(SYM(_or_unfold(p_t, q_t)), GEN(r_v, th_inner))
 
+
 def DISJ1(th_p, q_t):
-    """ |- p   =>   |- p \\/ q """
+    """|- p   =>   |- p \\/ q"""
     return _DISJ_inj(th_p._concl, q_t, th_p, take_left=True)
 
+
 def DISJ2(p_t, th_q):
-    """ |- q   =>   |- p \\/ q """
+    """|- q   =>   |- p \\/ q"""
     return _DISJ_inj(p_t, th_q._concl, th_q, take_left=False)
 
+
 def DISJ_CASES(th_or, th_p_imp, th_q_imp):
-    """ |- p \\/ q,  asl_p, p |- r,  asl_q, q |- r   =>   asl |- r """
+    """|- p \\/ q,  asl_p, p |- r,  asl_q, q |- r   =>   asl |- r"""
     p_t = rand(rator(th_or._concl))
     q_t = rand(th_or._concl)
     r_t = rand(th_p_imp._concl)
@@ -319,26 +380,31 @@ def DISJ_CASES(th_or, th_p_imp, th_q_imp):
 
 NOT_CONST = mk_const("~", [])
 
+
 def _eq_const_for(ty):
     return mk_const("=", [(ty, aty)])
 
+
 def MK_EQ(eq_l, eq_r):
-    """ |- a = a',  |- b = b'   =>   |- (a = b) = (a' = b') """
+    """|- a = a',  |- b = b'   =>   |- (a = b) = (a' = b')"""
     return MK_COMB(AP_TERM(_eq_const_for(type_of(dest_eq(eq_l._concl)[0])), eq_l), eq_r)
 
+
 def NE_SYM(th):
-    """ |- ~(a = b)   =>   |- ~(b = a) """
+    """|- ~(a = b)   =>   |- ~(b = a)"""
     a, b = dest_eq(rand(th._concl))
     th_F = MP(NOT_ELIM(th), SYM(ASSUME(mk_eq(b, a))))
     return NOT_INTRO(DISCH(mk_eq(b, a), th_F))
 
+
 def REWRITE_NE(th_ne, eq_l, eq_r):
-    """ |- ~(a = b),  |- a = a',  |- b = b'   =>   |- ~(a' = b') """
+    """|- ~(a = b),  |- a = a',  |- b = b'   =>   |- ~(a' = b')"""
     eq_eq = MK_EQ(eq_l, eq_r)
     return EQ_MP(AP_TERM(NOT_CONST, eq_eq), th_ne)
 
 
 # Existential introduction.
+
 
 def subst_term(old, new, tm):
     """Capture-avoiding substitution: replace occurrences of ``old`` with
@@ -362,6 +428,7 @@ def subst_term(old, new, tm):
 def _all_vars(tm):
     """Every ``Var`` occurring in ``tm``, free or bound."""
     seen = []
+
     def rec(t):
         if isinstance(t, Var):
             if t not in seen:
@@ -373,6 +440,7 @@ def _all_vars(tm):
             if t.bvar not in seen:
                 seen.append(t.bvar)
             rec(t.body)
+
     rec(tm)
     return seen
 
@@ -391,7 +459,7 @@ def _subst_compound(old, new, tm):
             # frees of new and old. Inner binders cannot then shadow fresh.
             avoid = list({*_all_vars(tm.body), *freesl([new]), *freesl([old])})
             fresh = variant(avoid, tm.bvar)
-            renamed = subst_term(tm.bvar, fresh, tm.body)   # Var case
+            renamed = subst_term(tm.bvar, fresh, tm.body)  # Var case
             return mk_abs(fresh, _subst_compound(old, new, renamed))
         b2 = _subst_compound(old, new, tm.body)
         return tm if b2 is tm.body else mk_abs(tm.bvar, b2)
@@ -399,7 +467,7 @@ def _subst_compound(old, new, tm):
 
 
 def EXISTS(pred, witness, th):
-    """ pred = Abs(v, body)   ; th : |- body[witness/v]  =>   |- ?v. body """
+    """pred = Abs(v, body)   ; th : |- body[witness/v]  =>   |- ?v. body"""
     if not isinstance(pred, Abs):
         raise HolError("EXISTS: pred must be an Abs")
     v_var = pred.bvar
@@ -410,9 +478,9 @@ def EXISTS(pred, witness, th):
     pred_v = mk_comb(pred, v_var)
     forall_inner = mk_forall(v_var, mk_imp(pred_v, q_var))
     th_imp_q = SPEC(witness, ASSUME(forall_inner))
-    th_q     = MP(th_imp_q, th_pw)
+    th_q = MP(th_imp_q, th_pw)
     th_disch = DISCH(forall_inner, th_q)
-    th_gen   = GEN(q_var, th_disch)
+    th_gen = GEN(q_var, th_disch)
     edef = INST_TYPE([(v_var.ty, aty)], EXISTS_DEF)
     return EQ_MP(SYM(unfold_def_at(edef, pred)), th_gen)
 
@@ -426,20 +494,24 @@ def EXISTS(pred, witness, th):
 #   TRANS_CHAIN([t1,...,tn]) chains TRANS over a list of equalities.
 # ---------------------------------------------------------------------------
 
+
 def SPECL(args, th):
     for a in args:
         th = SPEC(a, th)
     return th
+
 
 def GENL(vars, th):
     for v in reversed(vars):
         th = GEN(v, th)
     return th
 
+
 def DISCHL(hyps, th):
     for h in reversed(hyps):
         th = DISCH(h, th)
     return th
+
 
 def TRANS_CHAIN(thms):
     if not thms:
@@ -458,6 +530,7 @@ def TRANS_CHAIN(thms):
 #   `MP(MP(SPECL([a, b, c], thm), th1), th2)` with
 #   `MP_LIST(thm, [a, b, c, th1, th2])`.
 # ---------------------------------------------------------------------------
+
 
 def MP_LIST(th, args):
     for a in args:
@@ -478,8 +551,9 @@ def MP_LIST(th, args):
 #   Each prover receives `ASSUME(h)` and returns the conclusion theorem.
 # ---------------------------------------------------------------------------
 
+
 def EXISTS_AT(witness, th):
-    """ |- body  =>  |- ?v. body[v/witness]   for a fresh `v`.
+    """|- body  =>  |- ?v. body[v/witness]   for a fresh `v`.
 
     Picks a fresh variable `v` of `witness`'s type, replaces every occurrence
     of `witness` in th's conclusion with `v`, and applies EXISTS.  Use when
@@ -510,6 +584,7 @@ def CASE_OR(or_thm, left, right):
 #   asl1 |- h ;  asl2 |- t   =>   asl1 ∪ (asl2 - {h}) |- t.
 # ---------------------------------------------------------------------------
 
+
 def PROVE_HYP(h_th, th):
     return EQ_MP(DEDUCT_ANTISYM_RULE(h_th, th), h_th)
 
@@ -529,43 +604,47 @@ def PROVE_HYP(h_th, th):
 # ASSUME pair whose term shape has to round-trip identically.
 # ---------------------------------------------------------------------------
 
+
 def CHOOSE_WITNESS(pred_in, ex_th):
-    """ pred = \\v. body_v ;  ex_th : asl |- ?v. body_v
-        =>   asl |- body_v[w/v]   where w = @v. body_v. """
+    """pred = \\v. body_v ;  ex_th : asl |- ?v. body_v
+    =>   asl |- body_v[w/v]   where w = @v. body_v."""
     if not isinstance(pred_in, Abs):
         raise HolError("CHOOSE_WITNESS: pred_in must be an Abs")
     v_var = pred_in.bvar
-    w_t = mk_select(v_var, pred_in.body)           # @v. body_v
+    w_t = mk_select(v_var, pred_in.body)  # @v. body_v
     sel_inst = INST_TYPE([(v_var.ty, aty)], SELECT_AX)
-    sel_pq = SPEC(v_var, SPEC(pred_in, sel_inst))   # |- pred v ==> pred (@pred)
+    sel_pq = SPEC(v_var, SPEC(pred_in, sel_inst))  # |- pred v ==> pred (@pred)
 
     pred_v = mk_comb(pred_in, v_var)
     pred_at_w = mk_comb(pred_in, w_t)
-    body_v = rand(BETA_CONV(pred_v)._concl)         # = body_v
-    body_at_w = rand(BETA_CONV(pred_at_w)._concl)   # = body_v[w/v]
+    body_v = rand(BETA_CONV(pred_v)._concl)  # = body_v
+    body_at_w = rand(BETA_CONV(pred_at_w)._concl)  # = body_v[w/v]
 
-    th_assume_body = EQ_MP(SYM(BETA_CONV(pred_v)), ASSUME(body_v))   # {body_v} |- pred v
-    th_pred_at_w   = MP(sel_pq, th_assume_body)                       # {body_v} |- pred (@pred)
-    th_body_at_w   = EQ_MP(BETA_CONV(pred_at_w), th_pred_at_w)         # {body_v} |- body_v[w/v]
-    body_imp = DISCH(body_v, th_body_at_w)                            # |- body_v ==> body_v[w/v]
-    body_imp_gen = GEN(v_var, body_imp)                                # |- !v. body_v ==> body_v[w/v]
+    th_assume_body = EQ_MP(SYM(BETA_CONV(pred_v)), ASSUME(body_v))  # {body_v} |- pred v
+    th_pred_at_w = MP(sel_pq, th_assume_body)  # {body_v} |- pred (@pred)
+    th_body_at_w = EQ_MP(BETA_CONV(pred_at_w), th_pred_at_w)  # {body_v} |- body_v[w/v]
+    body_imp = DISCH(body_v, th_body_at_w)  # |- body_v ==> body_v[w/v]
+    body_imp_gen = GEN(v_var, body_imp)  # |- !v. body_v ==> body_v[w/v]
 
     edef = INST_TYPE([(v_var.ty, aty)], EXISTS_DEF)
-    th_hyp_unfold = EQ_MP(unfold_def_at(edef, pred_in), ex_th)         # asl |- !r. (!v. P v ==> r) ==> r
-    th_spec_r = SPEC(body_at_w, th_hyp_unfold)                # asl |- (!v. P v ==> body_at_w) ==> body_at_w
-    bridge = BETA_CONV(pred_v)                                 # |- P v = body_v
-    spec_body_imp = SPEC(v_var, body_imp_gen)                  # |- body_v ==> body_at_w
-    p_v_to_body_at_w = DISCH(pred_v,
-                             MP(spec_body_imp, EQ_MP(bridge, ASSUME(pred_v))))
+    th_hyp_unfold = EQ_MP(
+        unfold_def_at(edef, pred_in), ex_th
+    )  # asl |- !r. (!v. P v ==> r) ==> r
+    th_spec_r = SPEC(
+        body_at_w, th_hyp_unfold
+    )  # asl |- (!v. P v ==> body_at_w) ==> body_at_w
+    bridge = BETA_CONV(pred_v)  # |- P v = body_v
+    spec_body_imp = SPEC(v_var, body_imp_gen)  # |- body_v ==> body_at_w
+    p_v_to_body_at_w = DISCH(pred_v, MP(spec_body_imp, EQ_MP(bridge, ASSUME(pred_v))))
     th_forall_pv_imp = GEN(v_var, p_v_to_body_at_w)
-    return MP(th_spec_r, th_forall_pv_imp)                     # asl |- body_at_w
+    return MP(th_spec_r, th_forall_pv_imp)  # asl |- body_at_w
 
 
 def ELIM_EX(pred_in, hyp_ex, body_fn):
-    """ Run ``body_fn`` under ``ASSUME(body_at_w)`` and discharge that
-        assumption against ``ASSUME(hyp_ex)``'s witness. """
-    th_witness = CHOOSE_WITNESS(pred_in, ASSUME(hyp_ex))    # {hyp_ex} |- body_at_w
-    th_target = body_fn(ASSUME(th_witness._concl))           # {body_at_w, ...} |- target
+    """Run ``body_fn`` under ``ASSUME(body_at_w)`` and discharge that
+    assumption against ``ASSUME(hyp_ex)``'s witness."""
+    th_witness = CHOOSE_WITNESS(pred_in, ASSUME(hyp_ex))  # {hyp_ex} |- body_at_w
+    th_target = body_fn(ASSUME(th_witness._concl))  # {body_at_w, ...} |- target
     return PROVE_HYP(th_witness, th_target)
 
 
@@ -574,33 +653,34 @@ def ELIM_EX(pred_in, hyp_ex, body_fn):
 # Combines ABS over the pointwise equality with two ETA_AX rewrites.
 # ---------------------------------------------------------------------------
 
+
 def _select_const(ty):
     """The (@) constant at type (ty -> bool) -> ty."""
     return mk_const("@", [(ty, aty)])
 
 
 def FUN_EXT(th_pointwise):
-    """ asl |- !x. f x = g x   =>   asl |- f = g.
-        f, g are recovered by `rator` of the two sides, so the pointwise
-        equation must literally have the shape `f x = g x` (not e.g.
-        `f x = T`).  x must not be free in any hypothesis. """
+    """asl |- !x. f x = g x   =>   asl |- f = g.
+    f, g are recovered by `rator` of the two sides, so the pointwise
+    equation must literally have the shape `f x = g x` (not e.g.
+    `f x = T`).  x must not be free in any hypothesis."""
     forall_term = th_pointwise._concl
     pred = rand(forall_term)
     if not isinstance(pred, Abs):
         raise HolError("FUN_EXT: not a forall theorem")
     x_var = pred.bvar
-    pw = SPEC(x_var, th_pointwise)            # asl |- f x = g x
+    pw = SPEC(x_var, th_pointwise)  # asl |- f x = g x
     f_x, g_x = dest_eq(pw._concl)
     if not (isinstance(f_x, Comb) and isinstance(g_x, Comb)):
         raise HolError("FUN_EXT: pointwise equation must be of form f x = g x")
-    abs_eq = ABS(x_var, pw)                   # asl |- (\x. f x) = (\x. g x)
+    abs_eq = ABS(x_var, pw)  # asl |- (\x. f x) = (\x. g x)
     f_term = rator(f_x)
     g_term = rator(g_x)
     a_ty = x_var.ty
     b_ty = type_of(f_x)
     eta_inst = INST_TYPE([(a_ty, aty), (b_ty, bty)], ETA_AX)
-    eta_f = SPEC(f_term, eta_inst)            # |- (\x. f x) = f
-    eta_g = SPEC(g_term, eta_inst)            # |- (\x. g x) = g
+    eta_f = SPEC(f_term, eta_inst)  # |- (\x. f x) = f
+    eta_g = SPEC(g_term, eta_inst)  # |- (\x. g x) = g
     return TRANS(SYM(eta_f), TRANS(abs_eq, eta_g))
 
 
@@ -621,18 +701,18 @@ def FUN_EXT(th_pointwise):
 # signal, not a "bump the limit" one. Kept generous so legitimately deep
 # proofs (the SATZ_27 well-ordering chain peeled through several lazy
 # lets, for instance) don't trip them.
-SIMP_ROOT_FIRE_LIMIT = 256       # max root-rule fires per ``_bottom_up`` call
-SIMP_OUTER_PASS_LIMIT = 64       # max outer fixpoint passes per ``REWRITE_CONV``
-SIMP_GROWTH_PASSES = 3           # consecutive >2x-growth passes that signal
-                                 # exponential blow-up (a self-recursive rule
-                                 # whose RHS embeds the LHS under a binder
-                                 # roughly doubles the term per pass; left to
-                                 # SIMP_OUTER_PASS_LIMIT alone the late passes
-                                 # cost O(2^N) and look like a hang). One-shot
-                                 # expansion (e.g. substituting a free var
-                                 # with a large SELECT-bound witness in
-                                 # by_rewrite_of) grows once and then reaches
-                                 # fixpoint, so it does not trip this guard.
+SIMP_ROOT_FIRE_LIMIT = 256  # max root-rule fires per ``_bottom_up`` call
+SIMP_OUTER_PASS_LIMIT = 64  # max outer fixpoint passes per ``REWRITE_CONV``
+SIMP_GROWTH_PASSES = 3  # consecutive >2x-growth passes that signal
+# exponential blow-up (a self-recursive rule
+# whose RHS embeds the LHS under a binder
+# roughly doubles the term per pass; left to
+# SIMP_OUTER_PASS_LIMIT alone the late passes
+# cost O(2^N) and look like a hang). One-shot
+# expansion (e.g. substituting a free var
+# with a large SELECT-bound witness in
+# by_rewrite_of) grows once and then reaches
+# fixpoint, so it does not trip this guard.
 
 
 def _term_size(tm):
@@ -688,10 +768,10 @@ def _prepare_rule(th):
 
 def _term_match(pat, tgt, vars_set, subst):
     """First-order match of pat against tgt.
-       pat-vars in vars_set are match variables; others must match literally.
-       Returns the (possibly extended) subst dict, or None on failure.
-       Mutates ``subst`` in place — safe because matching is deterministic
-       single-pass with no backtracking."""
+    pat-vars in vars_set are match variables; others must match literally.
+    Returns the (possibly extended) subst dict, or None on failure.
+    Mutates ``subst`` in place — safe because matching is deterministic
+    single-pass with no backtracking."""
     if isinstance(pat, Var) and pat in vars_set:
         if pat in subst:
             return subst if aconv(subst[pat], tgt) else None
@@ -734,19 +814,19 @@ def _try_rules_at(rules, tm):
 
 def _bottom_up(rules, tm, under_binder=False, ac=None):
     """One bottom-up pass: rewrite children once, then iterate rules at the root
-       (without descending into the new RHS — that's what the outer fixpoint loop
-       in REWRITE_CONV is for).  Returns |- tm = tm' or None if unchanged.
+    (without descending into the new RHS — that's what the outer fixpoint loop
+    in REWRITE_CONV is for).  Returns |- tm = tm' or None if unchanged.
 
-       Inside an Abs body, only rules with empty assumptions are considered:
-       hypothetical local facts (e.g. ``ASSUME``-derived equations) routinely
-       have RHS terms that re-introduce their own LHS under a binder, which
-       would loop.  Closed rewrite rules are safe.
+    Inside an Abs body, only rules with empty assumptions are considered:
+    hypothetical local facts (e.g. ``ASSUME``-derived equations) routinely
+    have RHS terms that re-introduce their own LHS under a binder, which
+    would loop.  Closed rewrite rules are safe.
 
-       When ``ac=(op, assoc, comm)`` is supplied, every visit to a node whose
-       head is ``op`` AC-normalizes that node before/after root-rule firing.
-       This makes commutativity-like rules (which would loop as free rewrites)
-       implicit at the matching op symbol, so e.g. ``SATZ_30: x*(y+z) = x*y+x*z``
-       fires under ``ac=(*, ...)`` even when the source shape is ``(y+z)*x``."""
+    When ``ac=(op, assoc, comm)`` is supplied, every visit to a node whose
+    head is ``op`` AC-normalizes that node before/after root-rule firing.
+    This makes commutativity-like rules (which would loop as free rewrites)
+    implicit at the matching op symbol, so e.g. ``SATZ_30: x*(y+z) = x*y+x*z``
+    fires under ``ac=(*, ...)`` even when the source shape is ``(y+z)*x``."""
     active = [r for r in rules if not r[3]._asl] if under_binder else rules
 
     if isinstance(tm, Comb):
@@ -799,18 +879,19 @@ def _bottom_up(rules, tm, under_binder=False, ac=None):
     else:
         raise HolError(
             f"REWRITE: root rule fired {SIMP_ROOT_FIRE_LIMIT} times — "
-            "likely non-terminating")
+            "likely non-terminating"
+        )
 
     return inner if inner_changed else None
 
 
 def REWRITE_CONV(rules_thms, tm, max_passes=SIMP_OUTER_PASS_LIMIT, *, ac=None):
     """Rewrite tm with the given equation theorems to fixpoint, bottom-up.
-       Raises HolError if no fixpoint reached after max_passes outer passes
-       (likely a non-terminating rule set).
+    Raises HolError if no fixpoint reached after max_passes outer passes
+    (likely a non-terminating rule set).
 
-       Pass ``ac=(op, assoc, comm)`` to AC-normalize every op-application
-       visited during traversal; see ``_bottom_up`` for the rationale."""
+    Pass ``ac=(op, assoc, comm)`` to AC-normalize every op-application
+    visited during traversal; see ``_bottom_up`` for the rationale."""
     rules = [r for r in (_prepare_rule(t) for t in rules_thms) if r is not None]
     if not rules and ac is None:
         return REFL(tm)
@@ -832,12 +913,15 @@ def REWRITE_CONV(rules_thms, tm, max_passes=SIMP_OUTER_PASS_LIMIT, *, ac=None):
                     f"consecutive passes (size now {new_size}); rules "
                     "likely non-terminating under a binder (e.g. an "
                     "equation whose RHS contains the LHS inside a SELECT "
-                    "term)")
+                    "term)"
+                )
         else:
             consec_growth = 0
         prev_size = new_size
-    raise HolError(f"REWRITE_CONV: did not reach fixpoint in {max_passes} passes "
-                   "(rules likely non-terminating)")
+    raise HolError(
+        f"REWRITE_CONV: did not reach fixpoint in {max_passes} passes "
+        "(rules likely non-terminating)"
+    )
 
 
 def REWRITE_RULE(rules_thms, th):
@@ -884,6 +968,7 @@ def REWRITE_PROVE(rules_thms, target_eq, *, ac=None, ac_rules=()):
 # a kernel proof showing the original equals the sorted form.
 # ---------------------------------------------------------------------------
 
+
 def _term_key(tm):
     """Stable structural ordering on terms (used to canonical-sort AC leaves)."""
     if isinstance(tm, Var):
@@ -899,19 +984,19 @@ def _term_key(tm):
 
 def _is_op_app(op_const, tm):
     """True iff tm = op a b for the given op_const."""
-    return (isinstance(tm, Comb) and isinstance(tm.fun, Comb)
-            and tm.fun.fun == op_const)
+    return isinstance(tm, Comb) and isinstance(tm.fun, Comb) and tm.fun.fun == op_const
 
 
 def _right_assoc_conv(op_const, assoc_thm, tm):
-    """ |- tm = right_assoc(tm).   Repeatedly applies assoc_thm L→R at the root
-        whenever the LHS of the root op is itself an op-application."""
+    """|- tm = right_assoc(tm).   Repeatedly applies assoc_thm L→R at the root
+    whenever the LHS of the root op is itself an op-application."""
     if not _is_op_app(op_const, tm):
         return REFL(tm)
     left, right = tm.fun.arg, tm.arg
     if not _is_op_app(op_const, left):
-        return AP_TERM(mk_comb(op_const, left),
-                       _right_assoc_conv(op_const, assoc_thm, right))
+        return AP_TERM(
+            mk_comb(op_const, left), _right_assoc_conv(op_const, assoc_thm, right)
+        )
     a, b = left.fun.arg, left.arg
     step = SPEC(right, SPEC(b, SPEC(a, assoc_thm)))
     return TRANS(step, _right_assoc_conv(op_const, assoc_thm, rand(step._concl)))
@@ -936,25 +1021,27 @@ def _build_right_assoc(op_const, leaves):
 
 
 def _swap_at(op_const, assoc_thm, comm_thm, leaves, idx):
-    """ |- right_assoc(leaves) = right_assoc(swap(leaves, idx, idx+1))."""
+    """|- right_assoc(leaves) = right_assoc(swap(leaves, idx, idx+1))."""
     a, b = leaves[idx], leaves[idx + 1]
-    rest = leaves[idx + 2:]
+    rest = leaves[idx + 2 :]
     if not rest:
         swap_eq = SPEC(b, SPEC(a, comm_thm))
     else:
         rest_term = _build_right_assoc(op_const, rest)
-        swap_eq = TRANS_CHAIN([
-            SYM(SPEC(rest_term, SPEC(b, SPEC(a, assoc_thm)))),
-            AP_THM(AP_TERM(op_const, SPEC(b, SPEC(a, comm_thm))), rest_term),
-            SPEC(rest_term, SPEC(a, SPEC(b, assoc_thm))),
-        ])
+        swap_eq = TRANS_CHAIN(
+            [
+                SYM(SPEC(rest_term, SPEC(b, SPEC(a, assoc_thm)))),
+                AP_THM(AP_TERM(op_const, SPEC(b, SPEC(a, comm_thm))), rest_term),
+                SPEC(rest_term, SPEC(a, SPEC(b, assoc_thm))),
+            ]
+        )
     for leaf in reversed(leaves[:idx]):
         swap_eq = AP_TERM(mk_comb(op_const, leaf), swap_eq)
     return swap_eq
 
 
 def _selection_sort_proof(op_const, assoc_thm, comm_thm, leaves):
-    """ |- right_assoc(leaves) = right_assoc(sorted_leaves)."""
+    """|- right_assoc(leaves) = right_assoc(sorted_leaves)."""
     cur = list(leaves)
     eq = REFL(_build_right_assoc(op_const, cur))
     n = len(cur)
@@ -972,8 +1059,8 @@ def _selection_sort_proof(op_const, assoc_thm, comm_thm, leaves):
 
 def AC_NORM(op_const, assoc_thm, comm_thm, tm):
     """Returns |- tm = canonical(tm) under AC of op_const.
-       assoc_thm: |- !x y z. op (op x y) z = op x (op y z)
-       comm_thm:  |- !x y. op x y = op y x"""
+    assoc_thm: |- !x y z. op (op x y) z = op x (op y z)
+    comm_thm:  |- !x y. op x y = op y x"""
     eq1 = _right_assoc_conv(op_const, assoc_thm, tm)
     rhs1 = rand(eq1._concl)
     leaves = _flatten_right_assoc(op_const, rhs1)

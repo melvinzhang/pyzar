@@ -12,18 +12,40 @@ type-checks every axiom statement and rejects any ill-formed term.
 """
 
 from fusion import (
-    mk_type, new_type, new_constant, new_axiom,
-    ASSUME, EQ_MP, DEDUCT_ANTISYM_RULE,
+    mk_type,
+    new_type,
+    new_constant,
+    new_axiom,
+    ASSUME,
+    EQ_MP,
+    DEDUCT_ANTISYM_RULE,
 )
 from basics import mk_const
 from parser import (
-    add_const, add_type, set_default_var_ty, parse, parse_type, define, pp_thm,
+    add_const,
+    add_type,
+    set_default_var_ty,
+    parse,
+    parse_type,
+    define,
+    pp_thm,
 )
 import axioms  # noqa: F401 -- registers !, ?, /\, \/, ==>, ~, @, =, T, F
 from tactics import (
-    SPEC, GEN, DISCH, MP, AP_TERM, AP_THM, SYM,
-    CONJ, CONJUNCT1, CONJUNCT2, UNFOLD,
-    DISJ1, DISJ_CASES, REFL,
+    SPEC,
+    GEN,
+    DISCH,
+    MP,
+    AP_TERM,
+    AP_THM,
+    SYM,
+    CONJ,
+    CONJUNCT1,
+    CONJUNCT2,
+    UNFOLD,
+    DISJ1,
+    DISJ_CASES,
+    REFL,
 )
 from basics import dest_eq, rand
 from axioms import dest_imp, dest_forall, dest_disj, dest_exists, dest_neg
@@ -54,26 +76,25 @@ VV = parse_type("V -> V")
 # ---------------------------------------------------------------------------
 
 # Subset s t  <=>  every element of s is an element of t.
-SUBSET_DEF = define(
-    "Subset", "V -> V -> bool",
-    "\\s t. !x. In x s ==> In x t")
+SUBSET_DEF = define("Subset", "V -> V -> bool", "\\s t. !x. In x s ==> In x t")
 
 # Trans u  <=>  every member of u is also a subset of u (transitive set).
-TRANS_DEF = define(
-    "Trans", "V -> bool",
-    "\\u. !x. In x u ==> Subset x u")
+TRANS_DEF = define("Trans", "V -> bool", "\\u. !x. In x u ==> Subset x u")
 
 # Equinum a b  <=>  there is a class function f : V -> V whose restriction
 # to a is a bijection onto b. Standard HOL-ZF encoding -- f is a
 # meta-level function, not an internal set-theoretic graph.
 EQUINUM_DEF = define(
-    "Equinum", "V -> V -> bool",
+    "Equinum",
+    "V -> V -> bool",
     parse(
         "\\a b. ?f:VV. "
         "(!x. In x a ==> In (f x) b) /\\ "
         "(!x y. In x a /\\ In y a /\\ f x = f y ==> x = y) /\\ "
         "(!y. In y b ==> ?x. In x a /\\ f x = y)",
-        VV=VV))
+        VV=VV,
+    ),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -81,40 +102,43 @@ EQUINUM_DEF = define(
 # ---------------------------------------------------------------------------
 
 # Extensionality: sets with the same members are equal.
-EXTENSIONALITY = new_axiom(parse(
-    "!a b. (!x. In x a = In x b) ==> a = b"))
+EXTENSIONALITY = new_axiom(parse("!a b. (!x. In x a = In x b) ==> a = b"))
 
 # Foundation: every nonempty set has an element disjoint from it.
-FOUNDATION = new_axiom(parse(
-    "!a. (?x. In x a) ==> (?x. In x a /\\ ~(?y. In y a /\\ In y x))"))
+FOUNDATION = new_axiom(
+    parse("!a. (?x. In x a) ==> (?x. In x a /\\ ~(?y. In y a /\\ In y x))")
+)
 
 # Pairing: for any two sets there is a set whose members are exactly them.
-PAIRING = new_axiom(parse(
-    "!a b. ?p. !x. In x p = (x = a \\/ x = b)"))
+PAIRING = new_axiom(parse("!a b. ?p. !x. In x p = (x = a \\/ x = b)"))
 
 # Union: for any set a, the union of its members exists as a set.
-UNION = new_axiom(parse(
-    "!a. ?u. !x. In x u = (?y. In x y /\\ In y a)"))
+UNION = new_axiom(parse("!a. ?u. !x. In x u = (?y. In x y /\\ In y a)"))
 
 # Powerset: for any set a, the set of subsets of a exists.
-POWERSET = new_axiom(parse(
-    "!a. ?p. !x. In x p = Subset x a"))
+POWERSET = new_axiom(parse("!a. ?p. !x. In x p = Subset x a"))
 
 # Replacement: if R is functional on a, then the R-image of a is a set.
 # Functionality is the explicit "at most one image" condition; we don't
 # need a unique-existential constant.
 RR = parse_type("V -> V -> bool")
-REPLACEMENT = new_axiom(parse(
-    "!a. (!x y1 y2. In x a /\\ R x y1 /\\ R x y2 ==> y1 = y2) ==> "
-    "(?b. !y. In y b = (?x. In x a /\\ R x y))",
-    R=RR))
+REPLACEMENT = new_axiom(
+    parse(
+        "!a. (!x y1 y2. In x a /\\ R x y1 /\\ R x y2 ==> y1 = y2) ==> "
+        "(?b. !y. In y b = (?x. In x a /\\ R x y))",
+        R=RR,
+    )
+)
 
 # Infinity: an inductive set exists -- it contains an empty set and is
 # closed under x |-> x u {x}. Stated unfolded so we don't yet need
 # constants for empty / successor.
-INFINITY = new_axiom(parse(
-    "?I. (?z. In z I /\\ ~(?w. In w z)) /\\ "
-    "(!x. In x I ==> (?y. In y I /\\ (!w. In w y = (In w x \\/ w = x))))"))
+INFINITY = new_axiom(
+    parse(
+        "?I. (?z. In z I /\\ ~(?w. In w z)) /\\ "
+        "(!x. In x I ==> (?y. In y I /\\ (!w. In w y = (In w x \\/ w = x))))"
+    )
+)
 
 
 # ---------------------------------------------------------------------------
@@ -131,10 +155,13 @@ INFINITY = new_axiom(parse(
 # universe), so we don't post it separately. ZF + A = TG.
 # ---------------------------------------------------------------------------
 
-TARSKI_A = new_axiom(parse(
-    "!x. ?u. In x u /\\ Trans u /\\ "
-    "(!y. In y u ==> (?p. In p u /\\ (!z. In z p = Subset z y))) /\\ "
-    "(!Y. Subset Y u ==> Equinum Y u \\/ In Y u)"))
+TARSKI_A = new_axiom(
+    parse(
+        "!x. ?u. In x u /\\ Trans u /\\ "
+        "(!y. In y u ==> (?p. In p u /\\ (!z. In z p = Subset z y))) /\\ "
+        "(!Y. Subset Y u ==> Equinum Y u \\/ In Y u)"
+    )
+)
 
 
 # ---------------------------------------------------------------------------
@@ -165,8 +192,8 @@ def FOLD_CHOOSE(y0_eq):
     Folds the SELECT-witness back through CHOOSE_DEF. ``x`` is read off
     the input theorem's conclusion so the helper carries no extra args."""
     x_t = y0_eq._concl.arg
-    eq = UNFOLD(CHOOSE_DEF, x_t)               # |- Choose x = @y. In y x
-    lift = AP_THM(AP_TERM(In, eq), x_t)        # |- In (Choose x) x = In (@y. In y x) x
+    eq = UNFOLD(CHOOSE_DEF, x_t)  # |- Choose x = @y. In y x
+    lift = AP_THM(AP_TERM(In, eq), x_t)  # |- In (Choose x) x = In (@y. In y x) x
     return EQ_MP(SYM(lift), y0_eq)
 
 
@@ -174,7 +201,8 @@ def FOLD_CHOOSE(y0_eq):
 def CLASS_AC(p):
     p.goal(
         "!X. (!x. In x X ==> ?y. In y x) ==> (?f:VV. !x. In x X ==> In (f x) x)",
-        types={"VV": VV})
+        types={"VV": VV},
+    )
     p.fix("X")
     p.assume("hX: !x. In x X ==> ?y. In y x")
     with p.have("hChoose: !x. In x X ==> In (Choose x) x").proof():
@@ -194,6 +222,7 @@ def CLASS_AC(p):
 # plus DEDUCT_ANTISYM_RULE (the iff-intro that turns ``p ==> q`` and
 # ``q ==> p`` into ``p = q``).
 # ---------------------------------------------------------------------------
+
 
 def IFF_AT(th_pq, th_qp):
     """``|- p ==> q``, ``|- q ==> p``  =>  ``|- p = q``.
@@ -241,6 +270,7 @@ def SUBSET_ANTISYM(p):
 # this theorem.
 # ---------------------------------------------------------------------------
 
+
 def IN_SINGLETON(sing_eq):
     """``|- !w. In w s = (w = a \\/ w = a)``  =>  ``|- In a s``.
 
@@ -252,16 +282,16 @@ def IN_SINGLETON(sing_eq):
     _, rhs_body = dest_eq(pred.body)
     left_eq, _ = dest_disj(rhs_body)
     _, a_t = dest_eq(left_eq)
-    spec = SPEC(a_t, sing_eq)                         # |- In a s = (a = a \/ a = a)
+    spec = SPEC(a_t, sing_eq)  # |- In a s = (a = a \/ a = a)
     _, right_disj = dest_disj(rand(spec._concl))
-    or_th = DISJ1(REFL(a_t), right_disj)              # |- a = a \/ a = a
+    or_th = DISJ1(REFL(a_t), right_disj)  # |- a = a \/ a = a
     return EQ_MP(SYM(spec), or_th)
 
 
 def OR_REFL_ELIM(or_th):
     """``|- p \\/ p``  =>  ``|- p``. Iff-of-degenerate-disjunction."""
     p_t, _ = dest_disj(or_th._concl)
-    th_imp = DISCH(p_t, ASSUME(p_t))                  # |- p ==> p
+    th_imp = DISCH(p_t, ASSUME(p_t))  # |- p ==> p
     return DISJ_CASES(or_th, th_imp, th_imp)
 
 
@@ -279,14 +309,15 @@ def NO_SELF_MEMBER(p):
     with p.suppose("hxx: In x x"):
         # PAIRING(x, x) -- the unordered pair {x, x} = {x}.
         p.have("h_pair: ?p. !w. In w p = (w = x \\/ w = x)").by_match(PAIRING)
-        p.choose("s", from_="h_pair")          # s_eq : !w. In w s = (w = x \/ w = x)
+        p.choose("s", from_="h_pair")  # s_eq : !w. In w s = (w = x \/ w = x)
         p.have("h_xs: In x s").by(IN_SINGLETON, "s_eq")
 
         # FOUNDATION applied to the non-empty {x}.
         p.have("h_ne: ?z. In z s").by_witness("x", "h_xs")
-        p.have("h_found: ?y. In y s /\\ ~(?z. In z s /\\ In z y)") \
-            .by_match(FOUNDATION, "h_ne")
-        p.choose("y", from_="h_found")         # y_eq : In y s /\ ~(?z. In z s /\ In z y)
+        p.have("h_found: ?y. In y s /\\ ~(?z. In z s /\\ In z y)").by_match(
+            FOUNDATION, "h_ne"
+        )
+        p.choose("y", from_="h_found")  # y_eq : In y s /\ ~(?z. In z s /\ In z y)
         p.have("y_in: In y s").by(CONJUNCT1, "y_eq")
         p.have("y_disj: ~(?z. In z s /\\ In z y)").by(CONJUNCT2, "y_eq")
 
@@ -308,11 +339,12 @@ def NO_SELF_MEMBER(p):
 # proof is one ``choose`` plus the corollary instantiation.
 # ---------------------------------------------------------------------------
 
+
 @proof
 def NO_UNIVERSAL(p):
     p.goal("~(?u. !x. In x u)")
     with p.suppose("hu: ?u. !x. In x u"):
-        p.choose("u", from_="hu")              # u_eq : !x. In x u
+        p.choose("u", from_="hu")  # u_eq : !x. In x u
         p.have("h_uu: In u u").by("u_eq", "u")
         p.have("h_not: ~In u u").by(NO_SELF_MEMBER, "u")
         p.absurd().by_conj("h_uu", "h_not")
@@ -327,6 +359,7 @@ def NO_UNIVERSAL(p):
 # membership predicate, hence are equal.
 # ---------------------------------------------------------------------------
 
+
 def NOT_EX_PRED(not_th):
     """``|- ~(?v. body)``  =>  ``|- !v. ~body``."""
     return NOT_EX_TO_FORALL_NOT(not_th, dest_exists(dest_neg(not_th._concl)))
@@ -335,12 +368,13 @@ def NOT_EX_PRED(not_th):
 @proof
 def EMPTY_EXISTS(p):
     p.goal("?e. !x. ~In x e")
-    p.have("h_inf: ?I. (?z. In z I /\\ ~(?w. In w z)) /\\ "
-           "(!x. In x I ==> ?y. In y I /\\ (!w. In w y = (In w x \\/ w = x)))") \
-        .by(INFINITY)
-    p.choose("I", from_="h_inf")               # I_eq : conjunction
+    p.have(
+        "h_inf: ?I. (?z. In z I /\\ ~(?w. In w z)) /\\ "
+        "(!x. In x I ==> ?y. In y I /\\ (!w. In w y = (In w x \\/ w = x)))"
+    ).by(INFINITY)
+    p.choose("I", from_="h_inf")  # I_eq : conjunction
     p.have("h_empty_in_I: ?z. In z I /\\ ~(?w. In w z)").by(CONJUNCT1, "I_eq")
-    p.choose("z", from_="h_empty_in_I")        # z_eq : In z I /\ ~(?w. In w z)
+    p.choose("z", from_="h_empty_in_I")  # z_eq : In z I /\ ~(?w. In w z)
     p.have("h_no_w: ~(?w. In w z)").by(CONJUNCT2, "z_eq")
     p.have("h_forall: !x. ~In x z").by(NOT_EX_PRED, "h_no_w")
     p.thus("?e. !x. ~In x e").by_witness("z", "h_forall")

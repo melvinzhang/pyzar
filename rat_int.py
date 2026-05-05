@@ -45,32 +45,89 @@ Two parts of §5 are deliberately not formalised:
                       proved as ``SATZ_113_3`` / ``SATZ_113_4`` plus the
                       trivial existence/successor facts.
 """
+
 from fusion import (
-    Var, REFL, TRANS, EQ_MP, INST, mk_comb, mk_type, new_basic_type_definition,
+    Var,
+    REFL,
+    TRANS,
+    EQ_MP,
+    INST,
+    mk_comb,
+    mk_type,
+    new_basic_type_definition,
 )
 from basics import (
-    mk_app, mk_const, rand,
+    mk_app,
+    mk_const,
+    rand,
 )
 from tactics import (
-    AP_TERM, AP_THM, FUN_EXT, SYM, SPEC, SPECL, GEN, CONJ, DISJ1, DISJ2,
-    UNFOLD, REWRITE_RULE,
+    AP_TERM,
+    AP_THM,
+    FUN_EXT,
+    SYM,
+    SPEC,
+    SPECL,
+    GEN,
+    CONJ,
+    DISJ1,
+    DISJ2,
+    UNFOLD,
+    REWRITE_RULE,
 )
 from nat import (
-    num_ty, ONE, mk_mul, TIMES,
-    SATZ_29, MUL_1, ONE_MUL, GE_DEF,
-    AXIOM_3, AXIOM_4, SATZ_24,
+    num_ty,
+    ONE,
+    mk_mul,
+    TIMES,
+    SATZ_29,
+    MUL_1,
+    ONE_MUL,
+    GE_DEF,
+    AXIOM_3,
+    AXIOM_4,
+    SATZ_24,
 )
 from frac import (
-    FEQ, FEQ_DEF, FGT_DEF, FLT_DEF, SATZ_37, SATZ_38, SATZ_39, SATZ_41, SATZ_42, SATZ_43, SATZ_44, SATZ_45,
+    FEQ,
+    FEQ_DEF,
+    FGT_DEF,
+    FLT_DEF,
+    SATZ_37,
+    SATZ_38,
+    SATZ_39,
+    SATZ_41,
+    SATZ_42,
+    SATZ_43,
+    SATZ_44,
+    SATZ_45,
     SATZ_50,
-    SATZ_53, SATZ_54, SATZ_55,
-    SATZ_56, SATZ_58, SATZ_59, SATZ_60,
-    SATZ_61, SATZ_63A, SATZ_63B, SATZ_67_EXIST, SATZ_68, SATZ_69, SATZ_70, SATZ_71,
-    SATZ_72A, SATZ_73A, SATZ_73B, SATZ_77_EXIST,
+    SATZ_53,
+    SATZ_54,
+    SATZ_55,
+    SATZ_56,
+    SATZ_58,
+    SATZ_59,
+    SATZ_60,
+    SATZ_61,
+    SATZ_63A,
+    SATZ_63B,
+    SATZ_67_EXIST,
+    SATZ_68,
+    SATZ_69,
+    SATZ_70,
+    SATZ_71,
+    SATZ_72A,
+    SATZ_73A,
+    SATZ_73B,
+    SATZ_77_EXIST,
 )
 from parser import (
-    define, parse_type, pp_thm,
-    add_const, add_type,
+    define,
+    parse_type,
+    pp_thm,
+    add_const,
+    add_type,
 )
 from proof import proof, register_unfolder, register_disj_unfolder
 
@@ -82,8 +139,9 @@ from proof import proof, register_unfolder, register_disj_unfolder
 
 n2b_ty = parse_type("num -> num -> bool")
 
-IS_RAT_DEF = define("IS_RAT", "(num -> num -> bool) -> bool",
-    "\\K:Knnb. ?a b. K = feq a b", Knnb=n2b_ty)
+IS_RAT_DEF = define(
+    "IS_RAT", "(num -> num -> bool) -> bool", "\\K:Knnb. ?a b. K = feq a b", Knnb=n2b_ty
+)
 IS_RAT = mk_const("IS_RAT", [])
 
 
@@ -108,7 +166,8 @@ def IS_RAT_FEQ_1_1(p):
 # ---------------------------------------------------------------------------
 
 MK_RAT_DEST, RAT_DEST_MK = new_basic_type_definition(
-    "rat", ("mk_rat", "dest_rat"), IS_RAT_FEQ_1_1)
+    "rat", ("mk_rat", "dest_rat"), IS_RAT_FEQ_1_1
+)
 # MK_RAT_DEST : |- mk_rat (dest_rat r) = r           (r : rat)
 # RAT_DEST_MK : |- IS_RAT K = (dest_rat (mk_rat K) = K)
 
@@ -126,9 +185,9 @@ add_const("dest_rat", dest_rat)
 # ---------------------------------------------------------------------------
 # Q a b := mk_rat (feq a b).
 
-Q_DEF = define("Q", "num -> num -> rat",
-    "\\a b. mk_rat (feq a b)")
+Q_DEF = define("Q", "num -> num -> rat", "\\a b. mk_rat (feq a b)")
 Q = mk_const("Q", [])
+
 
 def mk_Q(a, b):
     return mk_app(Q, a, b)
@@ -146,6 +205,7 @@ W = Var("W", rat_ty)
 # ---------------------------------------------------------------------------
 # Step 5.  Lemma:  |- IS_RAT (feq a b)  -- every "feq a b" is a class.
 # ---------------------------------------------------------------------------
+
 
 @proof
 def IS_RAT_FEQ(p):
@@ -171,8 +231,7 @@ def DEST_RAT_FEQ(p):
     feq_ab = mk_app(FEQ, p._parse("a"), p._parse("b"))
     # RAT_DEST_MK : |- IS_RAT r = (dest_rat (mk_rat r) = r)  with r : num->num->bool
     r_inst = INST([(feq_ab, _r_n2b)], RAT_DEST_MK)
-    p.thus("dest_rat (mk_rat (feq a b)) = feq a b") \
-        .by_eq_mp(r_inst, "isr")
+    p.thus("dest_rat (mk_rat (feq a b)) = feq a b").by_eq_mp(r_inst, "isr")
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +245,7 @@ def DEST_RAT_FEQ(p):
 #                 (each direction by SATZ_38/39), apply FUN_EXT twice to get
 #                 feq a b = feq c d, AP_TERM mk_rat to get Q a b = Q c d.
 # ---------------------------------------------------------------------------
+
 
 @proof
 def RAT_EQ(p):
@@ -203,8 +263,8 @@ def RAT_EQ(p):
     # Q a b = mk_rat (feq a b)  via Q_DEF unfolded twice.
     p_var = Var("p", num_ty)
     Var("q", num_ty)
-    Q_unfold_ab = UNFOLD(Q_DEF, a_t, b_t)        # |- Q a b = mk_rat (feq a b)
-    Q_unfold_cd = UNFOLD(Q_DEF, c_t, d_t)        # |- Q c d = mk_rat (feq c d)
+    Q_unfold_ab = UNFOLD(Q_DEF, a_t, b_t)  # |- Q a b = mk_rat (feq a b)
+    Q_unfold_cd = UNFOLD(Q_DEF, c_t, d_t)  # |- Q c d = mk_rat (feq c d)
 
     # Forward direction.
     with p.have("fwd: Q a b = Q c d ==> feq a b c d").proof():
@@ -223,9 +283,9 @@ def RAT_EQ(p):
             c.step("= feq c d").by_thm(d_cd)
         feq_eq = p.fact("feq_eq")  # |- feq a b = feq c d
         # Apply at (c, d): feq a b c d = feq c d c d.
-        feq_at_c = AP_THM(feq_eq, c_t)              # |- feq a b c = feq c d c
-        feq_at_cd = AP_THM(feq_at_c, d_t)           # |- feq a b c d = feq c d c d
-        refl_cd = SPECL([c_t, d_t], SATZ_37)        # |- feq c d c d
+        feq_at_c = AP_THM(feq_eq, c_t)  # |- feq a b c = feq c d c
+        feq_at_cd = AP_THM(feq_at_c, d_t)  # |- feq a b c d = feq c d c d
+        refl_cd = SPECL([c_t, d_t], SATZ_37)  # |- feq c d c d
         p.have("rcd: feq c d c d").by_thm(refl_cd)
         p.thus("feq a b c d").by_eq_mp(SYM(feq_at_cd), "rcd")
 
@@ -244,13 +304,11 @@ def RAT_EQ(p):
             with p.have("imp1: feq a b p q ==> feq c d p q").proof():
                 p.assume("hap: feq a b p q")
                 p.have("hcd_ab: feq c d a b").by_match(SATZ_38, "hf")
-                p.thus("feq c d p q") \
-                    .by_match(SATZ_39, "hcd_ab", "hap")
+                p.thus("feq c d p q").by_match(SATZ_39, "hcd_ab", "hap")
             # <==: feq c d p q ==> feq a b p q.
             with p.have("imp2: feq c d p q ==> feq a b p q").proof():
                 p.assume("hcp: feq c d p q")
-                p.thus("feq a b p q") \
-                    .by_match(SATZ_39, "hf", "hcp")
+                p.thus("feq a b p q").by_match(SATZ_39, "hf", "hcp")
             p.thus("feq a b p q = feq c d p q").by_iff("imp1", "imp2")
         # FUN_EXT twice.
         # ptw : |- !p q. feq a b p q = feq c d p q.
@@ -260,11 +318,11 @@ def RAT_EQ(p):
         # (Or: we directly call FUN_EXT on (!q. feq a b p q = feq c d p q) where
         #  the bound var is q.)
         # Let me build it manually:
-        spec_p = SPEC(p_var, p.fact("ptw"))   # |- !q. feq a b p q = feq c d p q
-        f_at_p_eq = FUN_EXT(spec_p)           # |- feq a b p = feq c d p
+        spec_p = SPEC(p_var, p.fact("ptw"))  # |- !q. feq a b p q = feq c d p q
+        f_at_p_eq = FUN_EXT(spec_p)  # |- feq a b p = feq c d p
         # Now we need !p. feq a b p = feq c d p, then FUN_EXT.
-        gen_f_at_p = GEN(p_var, f_at_p_eq)     # |- !p. feq a b p = feq c d p
-        feq_eq = FUN_EXT(gen_f_at_p)           # |- feq a b = feq c d
+        gen_f_at_p = GEN(p_var, f_at_p_eq)  # |- !p. feq a b p = feq c d p
+        feq_eq = FUN_EXT(gen_f_at_p)  # |- feq a b = feq c d
         # Apply mk_rat: mk_rat (feq a b) = mk_rat (feq c d).
         mk_eq_th = AP_TERM(mk_rat, feq_eq)
         # Bridge with Q_DEF unfolds.
@@ -278,8 +336,9 @@ def RAT_EQ(p):
 
 # A frequent shorthand: from (Q a b = Q c d) extract feq a b c d, and v.v.
 def Q_eq_to_feq(th):
-    """ |- Q a b = Q c d  ==>  |- feq a b c d. """
+    """|- Q a b = Q c d  ==>  |- feq a b c d."""
     from basics import dest_eq
+
     Q_ab, Q_cd = dest_eq(th._concl)
     a_t = Q_ab.fun.arg
     b_t = Q_ab.arg
@@ -290,12 +349,13 @@ def Q_eq_to_feq(th):
 
 
 def feq_to_Q_eq(th):
-    """ |- feq a b c d  ==>  |- Q a b = Q c d. """
+    """|- feq a b c d  ==>  |- Q a b = Q c d."""
     from basics import rator
+
     # th concl = feq a b c d = ((feq a) b c) d.
-    fcd = rator(th._concl)            # feq a b c
-    fc  = rator(fcd)                  # feq a b
-    fa  = rator(fc)                   # feq a
+    fcd = rator(th._concl)  # feq a b c
+    fc = rator(fcd)  # feq a b
+    fa = rator(fc)  # feq a
     a_t = rand(fa)
     b_t = rand(fc)
     c_t = rand(fcd)
@@ -315,8 +375,14 @@ def feq_to_Q_eq(th):
 X_var = Var("X", rat_ty)
 
 # Type annotations for rat-typed parameters in goal strings.
-_R_TYPES = {"X": rat_ty, "Y": rat_ty, "Z": rat_ty,
-            "U": rat_ty, "V": rat_ty, "W": rat_ty}
+_R_TYPES = {
+    "X": rat_ty,
+    "Y": rat_ty,
+    "Z": rat_ty,
+    "U": rat_ty,
+    "V": rat_ty,
+    "W": rat_ty,
+}
 
 
 @proof
@@ -346,12 +412,13 @@ def Q_SURJ(p):
     p.have("isr: IS_RAT (dest_rat X)").by_match(IS_RAT_DEST)
     # Unfold: ?pa pb. dest_rat X = feq pa pb.
     dr_X = mk_comb(dest_rat, X_t)
-    unfold_th = UNFOLD(IS_RAT_DEF, dr_X)   # |- IS_RAT (dest_rat X) = ?pa pb. dest_rat X = feq pa pb
-    p.have("ex: ?pa pb. dest_rat X = feq pa pb") \
-        .by_eq_mp(unfold_th, "isr")
+    unfold_th = UNFOLD(
+        IS_RAT_DEF, dr_X
+    )  # |- IS_RAT (dest_rat X) = ?pa pb. dest_rat X = feq pa pb
+    p.have("ex: ?pa pb. dest_rat X = feq pa pb").by_eq_mp(unfold_th, "isr")
     p.choose("pa pb: dest_rat X = feq pa pb", from_="ex")
     pb_eq = p.fact("pb_eq")
-    mk_eq_th = AP_TERM(mk_rat, pb_eq)        # mk_rat (dest_rat X) = mk_rat (feq pa pb)
+    mk_eq_th = AP_TERM(mk_rat, pb_eq)  # mk_rat (dest_rat X) = mk_rat (feq pa pb)
     a_var = Var("a", rat_ty)
     md_X = INST([(X_t, a_var)], MK_RAT_DEST)  # mk_rat (dest_rat X) = X
     Q_unfold = UNFOLD(Q_DEF, p._parse("pa"), p._parse("pb"))
@@ -400,14 +467,20 @@ def SATZ_80(p):
 # "for some" coincides with "for every").
 # ---------------------------------------------------------------------------
 
-RGT_DEF = define("rgt", "rat -> rat -> bool",
+RGT_DEF = define(
+    "rgt",
+    "rat -> rat -> bool",
     "\\X:rat Y:rat. ?a b c d. X = Q a b /\\ Y = Q c d /\\ fgt a b c d",
-    infix=(40, "non"))
+    infix=(40, "non"),
+)
 RGT = mk_const("rgt", [])
 
-RLT_DEF = define("rlt", "rat -> rat -> bool",
+RLT_DEF = define(
+    "rlt",
+    "rat -> rat -> bool",
     "\\X:rat Y:rat. ?a b c d. X = Q a b /\\ Y = Q c d /\\ flt a b c d",
-    infix=(40, "non"))
+    infix=(40, "non"),
+)
 RLT = mk_const("rlt", [])
 
 register_unfolder("rgt", lambda a, b: UNFOLD(RGT_DEF, a, b))
@@ -424,8 +497,7 @@ def RGT_INTRO(p):
     Q_ab = p._parse("Q a b")
     Q_cd = p._parse("Q c d")
     body_inner = CONJ(REFL(Q_ab), CONJ(REFL(Q_cd), p.fact("hgt")))
-    p.thus("rgt (Q a b) (Q c d)") \
-        .by_witness(["a", "b", "c", "d"], body_inner)
+    p.thus("rgt (Q a b) (Q c d)").by_witness(["a", "b", "c", "d"], body_inner)
 
 
 @proof
@@ -436,8 +508,7 @@ def RLT_INTRO(p):
     Q_ab = p._parse("Q a b")
     Q_cd = p._parse("Q c d")
     body_inner = CONJ(REFL(Q_ab), CONJ(REFL(Q_cd), p.fact("hlt")))
-    p.thus("rlt (Q a b) (Q c d)") \
-        .by_witness(["a", "b", "c", "d"], body_inner)
+    p.thus("rlt (Q a b) (Q c d)").by_witness(["a", "b", "c", "d"], body_inner)
 
 
 # Elimination: rgt (Q a b) (Q c d) ==> fgt a b c d (and similarly for rlt).
@@ -448,16 +519,17 @@ def RGT_ELIM(p):
     p.goal("!a b c d. rgt (Q a b) (Q c d) ==> fgt a b c d")
     p.fix("a b c d")
     p.assume("h: rgt (Q a b) (Q c d)")
-    p.choose("a1 b1 c1 d1: Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-             " /\\ fgt a1 b1 c1 d1", from_="h")
+    p.choose(
+        "a1 b1 c1 d1: Q a b = Q a1 b1 /\\ Q c d = Q c1 d1 /\\ fgt a1 b1 c1 d1",
+        from_="h",
+    )
     p.split("d1_eq", "(hQab, hrest)")
     p.split("hrest", "(hQcd, hgt)")
     p.have("feq_ab: feq a b a1 b1").by_thm(Q_eq_to_feq(p.fact("hQab")))
     p.have("feq_cd: feq c d c1 d1").by_thm(Q_eq_to_feq(p.fact("hQcd")))
     p.have("feq_ab_s: feq a1 b1 a b").by_match(SATZ_38, "feq_ab")
     p.have("feq_cd_s: feq c1 d1 c d").by_match(SATZ_38, "feq_cd")
-    p.thus("fgt a b c d") \
-        .by_match(SATZ_44, "hgt", "feq_ab_s", "feq_cd_s")
+    p.thus("fgt a b c d").by_match(SATZ_44, "hgt", "feq_ab_s", "feq_cd_s")
 
 
 @proof
@@ -465,16 +537,17 @@ def RLT_ELIM(p):
     p.goal("!a b c d. rlt (Q a b) (Q c d) ==> flt a b c d")
     p.fix("a b c d")
     p.assume("h: rlt (Q a b) (Q c d)")
-    p.choose("a1 b1 c1 d1: Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-             " /\\ flt a1 b1 c1 d1", from_="h")
+    p.choose(
+        "a1 b1 c1 d1: Q a b = Q a1 b1 /\\ Q c d = Q c1 d1 /\\ flt a1 b1 c1 d1",
+        from_="h",
+    )
     p.split("d1_eq", "(hQab, hrest)")
     p.split("hrest", "(hQcd, hlt)")
     p.have("feq_ab: feq a b a1 b1").by_thm(Q_eq_to_feq(p.fact("hQab")))
     p.have("feq_cd: feq c d c1 d1").by_thm(Q_eq_to_feq(p.fact("hQcd")))
     p.have("feq_ab_s: feq a1 b1 a b").by_match(SATZ_38, "feq_ab")
     p.have("feq_cd_s: feq c1 d1 c d").by_match(SATZ_38, "feq_cd")
-    p.thus("flt a b c d") \
-        .by_match(SATZ_45, "hlt", "feq_ab_s", "feq_cd_s")
+    p.thus("flt a b c d").by_match(SATZ_45, "hlt", "feq_ab_s", "feq_cd_s")
 
 
 # Satz 81 (trichotomy):  X = Y \/ rgt X Y \/ rlt X Y.
@@ -487,29 +560,31 @@ def SATZ_81(p):
     p.choose("a b: X = Q a b", from_="eX")
     p.choose("c d: Y = Q c d", from_="eY")
     # Trichotomy at fraction level.
-    p.have("tri: feq a b c d \\/ fgt a b c d \\/ flt a b c d") \
-        .by_match(SATZ_41)
+    p.have("tri: feq a b c d \\/ fgt a b c d \\/ flt a b c d").by_match(SATZ_41)
     with p.thus("X = Y \\/ rgt X Y \\/ rlt X Y").by_cases("tri"):
         with p.case("e: feq a b c d"):
             # X = Q a b = Q c d = Y.
-            Qab_eq_Qcd = feq_to_Q_eq(p.fact("e"))   # |- Q a b = Q c d
+            Qab_eq_Qcd = feq_to_Q_eq(p.fact("e"))  # |- Q a b = Q c d
             with p.calc("X_eq_Y: X") as c:
                 c.step("= Q a b").by_thm(p.fact("b_eq"))
                 c.step("= Q c d").by_thm(Qab_eq_Qcd)
                 c.step("= Y").by_thm(SYM(p.fact("d_eq")))
-            p.thus("X = Y \\/ rgt X Y \\/ rlt X Y") \
-                .by(DISJ1, "X_eq_Y", "rgt X Y \\/ rlt X Y")
+            p.thus("X = Y \\/ rgt X Y \\/ rlt X Y").by(
+                DISJ1, "X_eq_Y", "rgt X Y \\/ rlt X Y"
+            )
         with p.case("g: fgt a b c d"):
             p.have("rg: rgt (Q a b) (Q c d)").by_match(RGT_INTRO, "g")
             # rgt X Y via X = Q a b, Y = Q c d substitution.
-            p.have("rgXY: rgt X Y") \
-                .by_rewrite_of("rg", [SYM(p.fact("b_eq")), SYM(p.fact("d_eq"))])
+            p.have("rgXY: rgt X Y").by_rewrite_of(
+                "rg", [SYM(p.fact("b_eq")), SYM(p.fact("d_eq"))]
+            )
             p.have("orMid: rgt X Y \\/ rlt X Y").by(DISJ1, "rgXY", "rlt X Y")
             p.thus("X = Y \\/ rgt X Y \\/ rlt X Y").by(DISJ2, "X = Y", "orMid")
         with p.case("l: flt a b c d"):
             p.have("rl: rlt (Q a b) (Q c d)").by_match(RLT_INTRO, "l")
-            p.have("rlXY: rlt X Y") \
-                .by_rewrite_of("rl", [SYM(p.fact("b_eq")), SYM(p.fact("d_eq"))])
+            p.have("rlXY: rlt X Y").by_rewrite_of(
+                "rl", [SYM(p.fact("b_eq")), SYM(p.fact("d_eq"))]
+            )
             p.have("orMid: rgt X Y \\/ rlt X Y").by(DISJ2, "rgt X Y", "rlXY")
             p.thus("X = Y \\/ rgt X Y \\/ rlt X Y").by(DISJ2, "X = Y", "orMid")
 
@@ -549,12 +624,14 @@ def SATZ_83(p):
 
 
 # Definition 20 / 21:  >= and <= on rat.
-RGE_DEF = define("rge", "rat -> rat -> bool",
-    "\\X:rat Y:rat. rgt X Y \\/ X = Y", infix=(40, "non"))
+RGE_DEF = define(
+    "rge", "rat -> rat -> bool", "\\X:rat Y:rat. rgt X Y \\/ X = Y", infix=(40, "non")
+)
 RGE = mk_const("rge", [])
 
-RLE_DEF = define("rle", "rat -> rat -> bool",
-    "\\X:rat Y:rat. rlt X Y \\/ X = Y", infix=(40, "non"))
+RLE_DEF = define(
+    "rle", "rat -> rat -> bool", "\\X:rat Y:rat. rlt X Y \\/ X = Y", infix=(40, "non")
+)
 RLE = mk_const("rle", [])
 
 register_disj_unfolder("rge", lambda a, b: UNFOLD(RGE_DEF, a, b))
@@ -606,20 +683,22 @@ def SATZ_86(p):
     p.split("t1", "(hY1, hlt1)")
     # For the second hypothesis, we need a copy of Y's representation; it's
     # consistent with hY1, but the (e, f) representatives of Z are fresh.
-    p.choose("e1 f1 g1 h1n: Y = Q e1 f1 /\\ Z = Q g1 h1n /\\ flt e1 f1 g1 h1n",
-             from_="h2")
+    p.choose(
+        "e1 f1 g1 h1n: Y = Q e1 f1 /\\ Z = Q g1 h1n /\\ flt e1 f1 g1 h1n", from_="h2"
+    )
     p.split("h1n_eq", "(hY2, t2)")
     p.split("t2", "(hZ, hlt2)")
     p.simp("hX", "hZ")
     # Y = Q c d = Q e1 f1 ; so Q c d = Q e1 f1, hence feq c d e1 f1.
-    p.have("Qcd_eq_Qe1f1: Q c d = Q e1 f1") \
-        .by_thm(TRANS(SYM(p.fact("hY1")), p.fact("hY2")))
-    p.have("feq_eq: feq c d e1 f1") \
-        .by_thm(Q_eq_to_feq(p.fact("Qcd_eq_Qe1f1")))
+    p.have("Qcd_eq_Qe1f1: Q c d = Q e1 f1").by_thm(
+        TRANS(SYM(p.fact("hY1")), p.fact("hY2"))
+    )
+    p.have("feq_eq: feq c d e1 f1").by_thm(Q_eq_to_feq(p.fact("Qcd_eq_Qe1f1")))
     p.have("feq_e1f1_cd: feq e1 f1 c d").by_match(SATZ_38, "feq_eq")
     p.have("refl_gh: feq g1 h1n g1 h1n").by_match(SATZ_37)
-    p.have("flt_cd_gh: flt c d g1 h1n") \
-        .by_match(SATZ_45, "hlt2", "feq_e1f1_cd", "refl_gh")
+    p.have("flt_cd_gh: flt c d g1 h1n").by_match(
+        SATZ_45, "hlt2", "feq_e1f1_cd", "refl_gh"
+    )
     p.have("flt_ab_gh: flt a b g1 h1n").by_match(SATZ_50, "hlt1", "flt_cd_gh")
     p.have("rl: rlt (Q a b) (Q g1 h1n)").by_match(RLT_INTRO, "flt_ab_gh")
     p.thus("rlt X Z").by_rewrite_of("rl", [])
@@ -638,8 +717,7 @@ def SATZ_89(p):
     # rgt (Q (a+a) b) X via X = Q a b.
     Z_witness = p._parse("Q (a+a) b")
     p._parse("X")
-    p.have("rgZX: rgt (Q (a+a) b) X") \
-        .by_rewrite_of("rg", [SYM(p.fact("b_eq"))])
+    p.have("rgZX: rgt (Q (a+a) b) X").by_rewrite_of("rg", [SYM(p.fact("b_eq"))])
     p.thus("?Z. rgt Z X").by_witness(Z_witness, "rgZX")
 
 
@@ -653,8 +731,7 @@ def SATZ_90(p):
     p.have("fl: flt a (b+b) a b").by_match(SATZ_54)
     p.have("rl: rlt (Q a (b+b)) (Q a b)").by_match(RLT_INTRO, "fl")
     Z_witness = p._parse("Q a (b+b)")
-    p.have("rlZX: rlt (Q a (b+b)) X") \
-        .by_rewrite_of("rl", [SYM(p.fact("b_eq"))])
+    p.have("rlZX: rlt (Q a (b+b)) X").by_rewrite_of("rl", [SYM(p.fact("b_eq"))])
     p.thus("?Z. rlt Z X").by_witness(Z_witness, "rlZX")
 
 
@@ -701,8 +778,7 @@ def SATZ_88(p):
                     p.have("orL: rlt X Z \\/ X = Z").by(DISJ1, "lt_XZ", "X = Z")
                     p.thus("rle X Z").by_fold("orL")
                 with p.case("e2: Y = Z"):
-                    p.have("eq_XZ: X = Z") \
-                        .by_thm(TRANS(p.fact("e1"), p.fact("e2")))
+                    p.have("eq_XZ: X = Z").by_thm(TRANS(p.fact("e1"), p.fact("e2")))
                     p.have("orR: rlt X Z \\/ X = Z").by(DISJ2, "rlt X Z", "eq_XZ")
                     p.thus("rle X Z").by_fold("orR")
 
@@ -742,10 +818,13 @@ def SATZ_91(p):
 #   radd X Y := @Z. ?a b c d. X = Q a b /\ Y = Q c d /\ Z = Q (a*d + c*b) (b*d).
 # ---------------------------------------------------------------------------
 
-RADD_DEF = define("radd", "rat -> rat -> rat",
+RADD_DEF = define(
+    "radd",
+    "rat -> rat -> rat",
     "\\X:rat Y:rat. @Z:rat. ?a b c d. X = Q a b /\\ Y = Q c d "
     "/\\ Z = Q (a*d + c*b) (b*d)",
-    infix=(50, "left"))
+    infix=(50, "left"),
+)
 RADD = mk_const("radd", [])
 
 
@@ -765,23 +844,29 @@ def RADD_QQ(p):
     p.fix("a b c d")
     # Witness the SELECT body of RADD_DEF at canonical (a, b, c, d, Q ...);
     # each conjunct is reflexive at this tuple.
-    p.have("ex: ?Z:rat. ?a1 b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-           " /\\ Z = Q (a1*d1 + c1*b1) (b1*d1)") \
-        .by_exists(["Q (a*d + c*b) (b*d)", "a", "b", "c", "d"])
+    p.have(
+        "ex: ?Z:rat. ?a1 b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
+        " /\\ Z = Q (a1*d1 + c1*b1) (b1*d1)"
+    ).by_exists(["Q (a*d + c*b) (b*d)", "a", "b", "c", "d"])
     # Read radd's defining body at radd (Q a b) (Q c d) via SELECT_AX.
-    p.have("sel_body: ?a1 b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-           " /\\ radd (Q a b) (Q c d) = Q (a1*d1 + c1*b1) (b1*d1)") \
-        .by_select_def(RADD_DEF, "Q a b", "Q c d", from_="ex")
-    p.choose("a1 b1 c1 d1: Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-             " /\\ radd (Q a b) (Q c d) = Q (a1*d1 + c1*b1) (b1*d1)",
-             from_="sel_body")
+    p.have(
+        "sel_body: ?a1 b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
+        " /\\ radd (Q a b) (Q c d) = Q (a1*d1 + c1*b1) (b1*d1)"
+    ).by_select_def(RADD_DEF, "Q a b", "Q c d", from_="ex")
+    p.choose(
+        "a1 b1 c1 d1: Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
+        " /\\ radd (Q a b) (Q c d) = Q (a1*d1 + c1*b1) (b1*d1)",
+        from_="sel_body",
+    )
     p.split("d1_eq", "(hQab, hQcd, hradd)")
     p.have("feq_ab: feq a b a1 b1").by_thm(Q_eq_to_feq(p.fact("hQab")))
     p.have("feq_cd: feq c d c1 d1").by_thm(Q_eq_to_feq(p.fact("hQcd")))
-    p.have("feq_sum: feq (a*d + c*b) (b*d) (a1*d1 + c1*b1) (b1*d1)") \
-        .by_match(SATZ_56, "feq_ab", "feq_cd")
-    p.have("Qsum: Q (a*d + c*b) (b*d) = Q (a1*d1 + c1*b1) (b1*d1)") \
-        .by_thm(feq_to_Q_eq(p.fact("feq_sum")))
+    p.have("feq_sum: feq (a*d + c*b) (b*d) (a1*d1 + c1*b1) (b1*d1)").by_match(
+        SATZ_56, "feq_ab", "feq_cd"
+    )
+    p.have("Qsum: Q (a*d + c*b) (b*d) = Q (a1*d1 + c1*b1) (b1*d1)").by_thm(
+        feq_to_Q_eq(p.fact("feq_sum"))
+    )
     with p.calc("radd (Q a b) (Q c d)", thus=True) as cc:
         cc.step("= Q (a1*d1 + c1*b1) (b1*d1)").by_thm("hradd")
         cc.step("= Q (a*d + c*b) (b*d)").by_thm(SYM(p.fact("Qsum")))
@@ -795,20 +880,24 @@ def RADD_QQ(p):
 # arguments ``a, b, c, d`` are read out of the equations' RHS, so callers
 # never have to re-parse them.
 
+
 def _bin_subst(op_const, hX, hY):
-    """ |- op tX tY = op (Q a b) (Q c d). """
-    return TRANS(AP_THM(AP_TERM(op_const, hX), rand(hY._concl.fun)),
-                 AP_TERM(mk_app(op_const, rand(hX._concl)), hY))
+    """|- op tX tY = op (Q a b) (Q c d)."""
+    return TRANS(
+        AP_THM(AP_TERM(op_const, hX), rand(hY._concl.fun)),
+        AP_TERM(mk_app(op_const, rand(hX._concl)), hY),
+    )
 
 
 def _Q_canon(op_const, op_QQ, hX, hY):
-    """ |- op tX tY = Q (canonical), where ``op_QQ`` is the
-    ``!a b c d. op (Q a b) (Q c d) = Q (...)`` lemma. """
+    """|- op tX tY = Q (canonical), where ``op_QQ`` is the
+    ``!a b c d. op (Q a b) (Q c d) = Q (...)`` lemma."""
     Q_ab = rand(hX._concl)
     Q_cd = rand(hY._concl)
-    return TRANS(_bin_subst(op_const, hX, hY),
-                 SPECL([rand(Q_ab.fun), rand(Q_ab),
-                        rand(Q_cd.fun), rand(Q_cd)], op_QQ))
+    return TRANS(
+        _bin_subst(op_const, hX, hY),
+        SPECL([rand(Q_ab.fun), rand(Q_ab), rand(Q_cd.fun), rand(Q_cd)], op_QQ),
+    )
 
 
 # Satz 92 (commutativity of rat addition):  X + Y = Y + X.
@@ -822,10 +911,10 @@ def SATZ_92(p):
     p.choose("c d: Y = Q c d", from_="eY")
     radd_XY = _Q_canon(RADD, RADD_QQ, p.fact("b_eq"), p.fact("d_eq"))
     radd_YX = _Q_canon(RADD, RADD_QQ, p.fact("d_eq"), p.fact("b_eq"))
-    p.have("feq58: feq (a*d + c*b) (b*d) (c*b + a*d) (d*b)") \
-        .by_match(SATZ_58)
-    p.have("Qcomm: Q (a*d + c*b) (b*d) = Q (c*b + a*d) (d*b)") \
-        .by_thm(feq_to_Q_eq(p.fact("feq58")))
+    p.have("feq58: feq (a*d + c*b) (b*d) (c*b + a*d) (d*b)").by_match(SATZ_58)
+    p.have("Qcomm: Q (a*d + c*b) (b*d) = Q (c*b + a*d) (d*b)").by_thm(
+        feq_to_Q_eq(p.fact("feq58"))
+    )
     with p.calc("radd X Y", thus=True) as c:
         c.step("= Q (a*d + c*b) (b*d)").by_thm(radd_XY)
         c.step("= Q (c*b + a*d) (d*b)").by_thm(p.fact("Qcomm"))
@@ -861,15 +950,17 @@ def SATZ_93(p):
     # X + (radd Y Z) = Q (a*(d*f) + (c*f+e*d)*b) (b*(d*f)).
     rhs_canon = _Q_canon(RADD, RADD_QQ, p.fact("b_eq"), radd_YZ)
     # SATZ_59 gives the fraction-level associativity equivalence.
-    p.have("feq59: feq ((a*d + c*b)*f + e*(b*d)) ((b*d)*f) "
-           "(a*(d*f) + (c*f + e*d)*b) (b*(d*f))").by_match(SATZ_59)
-    p.have("Qassoc: Q ((a*d + c*b)*f + e*(b*d)) ((b*d)*f) "
-           "= Q (a*(d*f) + (c*f + e*d)*b) (b*(d*f))") \
-        .by_thm(feq_to_Q_eq(p.fact("feq59")))
+    p.have(
+        "feq59: feq ((a*d + c*b)*f + e*(b*d)) ((b*d)*f) "
+        "(a*(d*f) + (c*f + e*d)*b) (b*(d*f))"
+    ).by_match(SATZ_59)
+    p.have(
+        "Qassoc: Q ((a*d + c*b)*f + e*(b*d)) ((b*d)*f) "
+        "= Q (a*(d*f) + (c*f + e*d)*b) (b*(d*f))"
+    ).by_thm(feq_to_Q_eq(p.fact("feq59")))
     with p.calc("radd (radd X Y) Z", thus=True) as c:
         c.step("= Q ((a*d + c*b)*f + e*(b*d)) ((b*d)*f)").by_thm(lhs_canon)
-        c.step("= Q (a*(d*f) + (c*f + e*d)*b) (b*(d*f))") \
-            .by_thm(p.fact("Qassoc"))
+        c.step("= Q (a*(d*f) + (c*f + e*d)*b) (b*(d*f))").by_thm(p.fact("Qassoc"))
         c.step("= radd X (radd Y Z)").by_thm(SYM(rhs_canon))
 
 
@@ -884,16 +975,16 @@ def SATZ_94(p):
     p.have("eY: ?a b. Y = Q a b").by_match(Q_SURJ)
     p.choose("a b: X = Q a b", from_="eX")
     p.choose("c d: Y = Q c d", from_="eY")
-    p.have("radd_eq_canon:") \
-        .by_thm(_Q_canon(RADD, RADD_QQ, p.fact("b_eq"), p.fact("d_eq")))
+    p.have("radd_eq_canon:").by_thm(
+        _Q_canon(RADD, RADD_QQ, p.fact("b_eq"), p.fact("d_eq"))
+    )
     # radd_eq_canon : |- radd X Y = Q (a*d + c*b) (b*d).
     p.have("fg: fgt (a*d + c*b) (b*d) a b").by_match(SATZ_60)
-    p.have("rg_canon: rgt (Q (a*d + c*b) (b*d)) (Q a b)") \
-        .by_match(RGT_INTRO, "fg")
+    p.have("rg_canon: rgt (Q (a*d + c*b) (b*d)) (Q a b)").by_match(RGT_INTRO, "fg")
     # rg_canon rewritten back: lhs via SYM(radd_eq_canon), rhs via SYM(b_eq).
-    p.thus("rgt (radd X Y) X") \
-        .by_rewrite_of("rg_canon",
-                       [SYM(p.fact("radd_eq_canon")), SYM(p.fact("b_eq"))])
+    p.thus("rgt (radd X Y) X").by_rewrite_of(
+        "rg_canon", [SYM(p.fact("radd_eq_canon")), SYM(p.fact("b_eq"))]
+    )
 
 
 # Satz 95:  X > Y ==> X + Z > Y + Z.
@@ -917,19 +1008,17 @@ def SATZ_95(p):
     p._parse("e")
     p._parse("f")
     # Lift fgt to canonical-sum fgt via SATZ_61.
-    p.have("fg_sum: fgt (a*f + e*b) (b*f) (c*f + e*d) (d*f)") \
-        .by_match(SATZ_61, "hgt")
-    p.have("rg_canon: rgt (Q (a*f + e*b) (b*f)) (Q (c*f + e*d) (d*f))") \
-        .by_match(RGT_INTRO, "fg_sum")
+    p.have("fg_sum: fgt (a*f + e*b) (b*f) (c*f + e*d) (d*f)").by_match(SATZ_61, "hgt")
+    p.have("rg_canon: rgt (Q (a*f + e*b) (b*f)) (Q (c*f + e*d) (d*f))").by_match(
+        RGT_INTRO, "fg_sum"
+    )
     # X + Z = Q (a*f + e*b) (b*f).
-    p.have("radd_XZ:") \
-        .by_thm(_Q_canon(RADD, RADD_QQ, p.fact("hX"), p.fact("f_eq")))
-    p.have("radd_YZ:") \
-        .by_thm(_Q_canon(RADD, RADD_QQ, p.fact("hY"), p.fact("f_eq")))
+    p.have("radd_XZ:").by_thm(_Q_canon(RADD, RADD_QQ, p.fact("hX"), p.fact("f_eq")))
+    p.have("radd_YZ:").by_thm(_Q_canon(RADD, RADD_QQ, p.fact("hY"), p.fact("f_eq")))
     # rg_canon rewritten back: lhs/rhs Q-canonical → radd-form.
-    p.thus("rgt (radd X Z) (radd Y Z)") \
-        .by_rewrite_of("rg_canon",
-                       [SYM(p.fact("radd_XZ")), SYM(p.fact("radd_YZ"))])
+    p.thus("rgt (radd X Z) (radd Y Z)").by_rewrite_of(
+        "rg_canon", [SYM(p.fact("radd_XZ")), SYM(p.fact("radd_YZ"))]
+    )
 
 
 # Satz 96A = Satz 95.
@@ -982,10 +1071,12 @@ def SATZ_97A(p):
     radd_XZ = _Q_canon(RADD, RADD_QQ, p.fact("b_eq"), p.fact("f_eq"))
     radd_YZ = _Q_canon(RADD, RADD_QQ, p.fact("d_eq"), p.fact("f_eq"))
     bridge_h = _bin_subst(RGT, radd_XZ, radd_YZ)
-    p.have("rg_canon: rgt (Q (a*f + e*b) (b*f)) (Q (c*f + e*d) (d*f))") \
-        .by_eq_mp(bridge_h, "h")
-    p.have("fg_canon: fgt (a*f + e*b) (b*f) (c*f + e*d) (d*f)") \
-        .by_match(RGT_ELIM, "rg_canon")
+    p.have("rg_canon: rgt (Q (a*f + e*b) (b*f)) (Q (c*f + e*d) (d*f))").by_eq_mp(
+        bridge_h, "h"
+    )
+    p.have("fg_canon: fgt (a*f + e*b) (b*f) (c*f + e*d) (d*f)").by_match(
+        RGT_ELIM, "rg_canon"
+    )
     p.have("fg_orig: fgt a b c d").by_match(SATZ_63A, "fg_canon")
     p.have("rg_QQ: rgt (Q a b) (Q c d)").by_match(RGT_INTRO, "fg_orig")
     bridge_XY = _bin_subst(RGT, p.fact("b_eq"), p.fact("d_eq"))
@@ -1019,8 +1110,9 @@ def SATZ_97B(p):
         c.step("= radd X Z").by_thm(SYM(radd_XZ))
         c.step("= radd Y Z").by_thm(p.fact("h"))
         c.step("= Q (c*f + e*d) (d*f)").by_thm(radd_YZ)
-    p.have("feq_canon: feq (a*f + e*b) (b*f) (c*f + e*d) (d*f)") \
-        .by_thm(Q_eq_to_feq(p.fact("Qsum_eq")))
+    p.have("feq_canon: feq (a*f + e*b) (b*f) (c*f + e*d) (d*f)").by_thm(
+        Q_eq_to_feq(p.fact("Qsum_eq"))
+    )
     p.have("feq_orig: feq a b c d").by_match(SATZ_63B, "feq_canon")
     p.have("Q_eq: Q a b = Q c d").by_thm(feq_to_Q_eq(p.fact("feq_orig")))
     with p.calc("X", thus=True) as c:
@@ -1043,8 +1135,9 @@ def SATZ_97C(p):
 # Satz 98:  rgt X Y, rgt Z U ==> rgt (X + Z) (Y + U).
 @proof
 def SATZ_98(p):
-    p.goal("!X Y Z U. rgt X Y ==> rgt Z U ==> rgt (radd X Z) (radd Y U)",
-           types=_R_TYPES)
+    p.goal(
+        "!X Y Z U. rgt X Y ==> rgt Z U ==> rgt (radd X Z) (radd Y U)", types=_R_TYPES
+    )
     p.fix("X Y Z U")
     p.assume("hXY: rgt X Y", "hZU: rgt Z U")
     Z_t = p._parse("Z")
@@ -1056,16 +1149,16 @@ def SATZ_98(p):
     p.have("g2b: rgt (radd Y Z) (radd Y U)").by_rewrite_of("g2", [])
     p.have("l1: rlt (radd Y Z) (radd X Z)").by_match(SATZ_82, "g1")
     p.have("l2: rlt (radd Y U) (radd Y Z)").by_match(SATZ_82, "g2b")
-    p.have("l_chain: rlt (radd Y U) (radd X Z)") \
-        .by_match(SATZ_86, "l2", "l1")
+    p.have("l_chain: rlt (radd Y U) (radd X Z)").by_match(SATZ_86, "l2", "l1")
     p.thus("rgt (radd X Z) (radd Y U)").by_match(SATZ_83, "l_chain")
 
 
 # Satz 99A:  rge X Y, rgt Z U ==> rgt (X + Z) (Y + U).
 @proof
 def SATZ_99A(p):
-    p.goal("!X Y Z U. rge X Y ==> rgt Z U ==> rgt (radd X Z) (radd Y U)",
-           types=_R_TYPES)
+    p.goal(
+        "!X Y Z U. rge X Y ==> rgt Z U ==> rgt (radd X Z) (radd Y U)", types=_R_TYPES
+    )
     p.fix("X Y Z U")
     p.assume("hge: rge X Y", "hgt: rgt Z U")
     Y_t = p._parse("Y")
@@ -1073,22 +1166,21 @@ def SATZ_99A(p):
     U_t = p._parse("U")
     with p.thus("rgt (radd X Z) (radd Y U)").by_cases("hge"):
         with p.case("g_xy: rgt X Y"):
-            p.thus("rgt (radd X Z) (radd Y U)") \
-                .by_match(SATZ_98, "g_xy", "hgt")
+            p.thus("rgt (radd X Z) (radd Y U)").by_match(SATZ_98, "g_xy", "hgt")
         with p.case("e_xy: X = Y"):
             p.have("g_zy: rgt (radd Z Y) (radd U Y)").by_match(SATZ_95, "hgt")
             p.simp(SPECL([Z_t, Y_t], SATZ_92), SPECL([U_t, Y_t], SATZ_92))
             p.have("g_yzy: rgt (radd Y Z) (radd Y U)").by_rewrite_of("g_zy", [])
             p.have("eq_xz_yz: radd X Z = radd Y Z").by_match(SATZ_96B, "e_xy")
-            p.thus("rgt (radd X Z) (radd Y U)") \
-                .by_rewrite_of("g_yzy", ["eq_xz_yz"])
+            p.thus("rgt (radd X Z) (radd Y U)").by_rewrite_of("g_yzy", ["eq_xz_yz"])
 
 
 # Satz 99B:  rgt X Y, rge Z U ==> rgt (X + Z) (Y + U).
 @proof
 def SATZ_99B(p):
-    p.goal("!X Y Z U. rgt X Y ==> rge Z U ==> rgt (radd X Z) (radd Y U)",
-           types=_R_TYPES)
+    p.goal(
+        "!X Y Z U. rgt X Y ==> rge Z U ==> rgt (radd X Z) (radd Y U)", types=_R_TYPES
+    )
     p.fix("X Y Z U")
     p.assume("hgt: rgt X Y", "hge: rge Z U")
     p._parse("X")
@@ -1096,50 +1188,55 @@ def SATZ_99B(p):
     p._parse("U")
     with p.thus("rgt (radd X Z) (radd Y U)").by_cases("hge"):
         with p.case("g_zu: rgt Z U"):
-            p.thus("rgt (radd X Z) (radd Y U)") \
-                .by_match(SATZ_98, "hgt", "g_zu")
+            p.thus("rgt (radd X Z) (radd Y U)").by_match(SATZ_98, "hgt", "g_zu")
         with p.case("e_zu: Z = U"):
             p.have("g_xu: rgt (radd X U) (radd Y U)").by_match(SATZ_95, "hgt")
-            p.thus("rgt (radd X Z) (radd Y U)") \
-                .by_rewrite_of("g_xu", ["e_zu"])
+            p.thus("rgt (radd X Z) (radd Y U)").by_rewrite_of("g_xu", ["e_zu"])
 
 
 # Satz 100:  rge X Y, rge Z U ==> rge (X + Z) (Y + U).
 @proof
 def SATZ_100(p):
-    p.goal("!X Y Z U. rge X Y ==> rge Z U ==> rge (radd X Z) (radd Y U)",
-           types=_R_TYPES)
+    p.goal(
+        "!X Y Z U. rge X Y ==> rge Z U ==> rge (radd X Z) (radd Y U)", types=_R_TYPES
+    )
     p.fix("X Y Z U")
     p.assume("hge1: rge X Y", "hge2: rge Z U")
     Y_t = p._parse("Y")
     with p.thus("rge (radd X Z) (radd Y U)").by_cases("hge1"):
         with p.case("g1: rgt X Y"):
-            p.have("g_xy_zu: rgt (radd X Z) (radd Y U)") \
-                .by_match(SATZ_99B, "g1", "hge2")
-            p.have("orL: rgt (radd X Z) (radd Y U) \\/ radd X Z = radd Y U") \
-                .by(DISJ1, "g_xy_zu", "radd X Z = radd Y U")
+            p.have("g_xy_zu: rgt (radd X Z) (radd Y U)").by_match(
+                SATZ_99B, "g1", "hge2"
+            )
+            p.have("orL: rgt (radd X Z) (radd Y U) \\/ radd X Z = radd Y U").by(
+                DISJ1, "g_xy_zu", "radd X Z = radd Y U"
+            )
             p.thus("rge (radd X Z) (radd Y U)").by_fold("orL")
         with p.case("e1: X = Y"):
             with p.thus("rge (radd X Z) (radd Y U)").by_cases("hge2"):
                 with p.case("g2: rgt Z U"):
-                    p.have("g_xz_yu: rgt (radd X Z) (radd Y U)") \
-                        .by_match(SATZ_99A, "hge1", "g2")
-                    p.have("orL: rgt (radd X Z) (radd Y U) \\/ radd X Z = radd Y U") \
-                        .by(DISJ1, "g_xz_yu", "radd X Z = radd Y U")
+                    p.have("g_xz_yu: rgt (radd X Z) (radd Y U)").by_match(
+                        SATZ_99A, "hge1", "g2"
+                    )
+                    p.have("orL: rgt (radd X Z) (radd Y U) \\/ radd X Z = radd Y U").by(
+                        DISJ1, "g_xz_yu", "radd X Z = radd Y U"
+                    )
                     p.thus("rge (radd X Z) (radd Y U)").by_fold("orL")
                 with p.case("e2: Z = U"):
-                    p.have("eq_xz_yz: radd X Z = radd Y Z") \
-                        .by_match(SATZ_96B, "e1")
+                    p.have("eq_xz_yz: radd X Z = radd Y Z").by_match(SATZ_96B, "e1")
                     p.have("eq_yz_yu:").by_cong(mk_app(RADD, Y_t), "e2")
-                    p.have("eq_full: radd X Z = radd Y U") \
-                        .by_trans("eq_xz_yz", "eq_yz_yu")
-                    p.have("orR: rgt (radd X Z) (radd Y U) \\/ radd X Z = radd Y U") \
-                        .by(DISJ2, "rgt (radd X Z) (radd Y U)", "eq_full")
+                    p.have("eq_full: radd X Z = radd Y U").by_trans(
+                        "eq_xz_yz", "eq_yz_yu"
+                    )
+                    p.have("orR: rgt (radd X Z) (radd Y U) \\/ radd X Z = radd Y U").by(
+                        DISJ2, "rgt (radd X Z) (radd Y U)", "eq_full"
+                    )
                     p.thus("rge (radd X Z) (radd Y U)").by_fold("orR")
 
 
 # Satz 101 (existence & uniqueness of subtraction):  given rgt X Y, the
 # equation radd Y U = X has a unique solution U.
+
 
 @proof
 def SATZ_101_EXIST(p):
@@ -1161,18 +1258,16 @@ def SATZ_101_EXIST(p):
     p.have("rg_QQ: rgt (Q a b) (Q c d)").by_eq_mp(bridge_xy, "hgt")
     p.have("fg: fgt a b c d").by_match(RGT_ELIM, "rg_QQ")
     # SATZ_67_EXIST: ?u1 u2. feq (c*u2 + u1*d) (d*u2) a b.
-    p.have("ex_uv: ?u1 u2. feq (c*u2 + u1*d) (d*u2) a b") \
-        .by_match(SATZ_67_EXIST, "fg")
+    p.have("ex_uv: ?u1 u2. feq (c*u2 + u1*d) (d*u2) a b").by_match(SATZ_67_EXIST, "fg")
     p.choose("u v: feq (c*v + u*d) (d*v) a b", from_="ex_uv")
     u_t = p._parse("u")
     v_t = p._parse("v")
     # Q (c*v + u*d) (d*v) = Q a b.
-    p.have("Qsum_eq: Q (c*v + u*d) (d*v) = Q a b") \
-        .by_thm(feq_to_Q_eq(p.fact("v_eq")))
+    p.have("Qsum_eq: Q (c*v + u*d) (d*v) = Q a b").by_thm(feq_to_Q_eq(p.fact("v_eq")))
     # radd (Q c d) (Q u v) = Q (c*v + u*d) (d*v) by RADD_QQ.
     p.have("radd_canon:").by_inst(RADD_QQ, c_t, d_t, u_t, v_t)
     # radd Y (Q u v) = radd (Q c d) (Q u v).
-    p.have("sub_y:").by_cong(RADD, "d_eq")          # RADD Y = RADD (Q c d)
+    p.have("sub_y:").by_cong(RADD, "d_eq")  # RADD Y = RADD (Q c d)
     p.have("sub_y_at:").by_cong("sub_y", mk_app(Q, u_t, v_t))
     p.have("X_eq_Qab:").by_thm(SYM(p.fact("b_eq")))
     with p.calc("rad_eq_X: radd Y (Q u v)") as c:
@@ -1185,18 +1280,16 @@ def SATZ_101_EXIST(p):
 
 @proof
 def SATZ_101_UNIQUE(p):
-    p.goal("!X Y V W. radd Y V = X ==> radd Y W = X ==> V = W",
-           types={**_R_TYPES})
+    p.goal("!X Y V W. radd Y V = X ==> radd Y W = X ==> V = W", types={**_R_TYPES})
     p.fix("X Y V W")
     p.assume("hv: radd Y V = X", "hw: radd Y W = X")
     p.have("hw_sym:").by_thm(SYM(p.fact("hw")))
-    p.have("eq_yvw: radd Y V = radd Y W") \
-        .by_trans("hv", "hw_sym")
+    p.have("eq_yvw: radd Y V = radd Y W").by_trans("hv", "hw_sym")
     Y_t = p._parse("Y")
     V_t = p._parse("V")
     W_t = p._parse("W")
-    p.have("eq_vy_yv:").by_inst(SATZ_92, V_t, Y_t)            # V+Y = Y+V
-    p.have("eq_wy_yw:").by_inst(SATZ_92, W_t, Y_t)            # W+Y = Y+W
+    p.have("eq_vy_yv:").by_inst(SATZ_92, V_t, Y_t)  # V+Y = Y+V
+    p.have("eq_wy_yw:").by_inst(SATZ_92, W_t, Y_t)  # W+Y = Y+W
     with p.calc("eq_vw_swap: radd V Y") as c:
         c.step("= radd Y V").by_thm("eq_vy_yv")
         c.step("= radd Y W").by_thm("eq_yvw")
@@ -1205,9 +1298,12 @@ def SATZ_101_UNIQUE(p):
 
 
 # Definition 23:  X - Y is the unique U with radd Y U = X.
-RSUB_DEF = define("rsub", "rat -> rat -> rat",
+RSUB_DEF = define(
+    "rsub",
+    "rat -> rat -> rat",
     "\\X:rat Y:rat. @U:rat. radd Y U = X",
-    infix=(50, "left"))
+    infix=(50, "left"),
+)
 RSUB = mk_const("rsub", [])
 
 
@@ -1218,8 +1314,7 @@ def RSUB_PROP(p):
     p.fix("X Y")
     p.assume("h: rgt X Y")
     p.have("ex: ?U:rat. radd Y U = X").by_match(SATZ_101_EXIST, "h")
-    p.thus("radd Y (rsub X Y) = X") \
-        .by_select_def(RSUB_DEF, "X", "Y", from_="ex")
+    p.thus("radd Y (rsub X Y) = X").by_select_def(RSUB_DEF, "X", "Y", from_="ex")
 
 
 # ---------------------------------------------------------------------------
@@ -1230,10 +1325,12 @@ def RSUB_PROP(p):
 #   rmul X Y := @Z. ?a b c d. X = Q a b /\ Y = Q c d /\ Z = Q (a*c) (b*d).
 # ---------------------------------------------------------------------------
 
-RMUL_DEF = define("rmul", "rat -> rat -> rat",
-    "\\X:rat Y:rat. @Z:rat. ?a b c d. X = Q a b /\\ Y = Q c d "
-    "/\\ Z = Q (a*c) (b*d)",
-    infix=(60, "left"))
+RMUL_DEF = define(
+    "rmul",
+    "rat -> rat -> rat",
+    "\\X:rat Y:rat. @Z:rat. ?a b c d. X = Q a b /\\ Y = Q c d /\\ Z = Q (a*c) (b*d)",
+    infix=(60, "left"),
+)
 RMUL = mk_const("rmul", [])
 
 
@@ -1243,21 +1340,28 @@ RMUL = mk_const("rmul", [])
 def RMUL_QQ(p):
     p.goal("!a b c d. rmul (Q a b) (Q c d) = Q (a*c) (b*d)")
     p.fix("a b c d")
-    p.have("ex: ?Z:rat. ?a1 b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-           " /\\ Z = Q (a1*c1) (b1*d1)") \
-        .by_exists(["Q (a*c) (b*d)", "a", "b", "c", "d"])
-    p.have("sel_body: ?a1 b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-           " /\\ rmul (Q a b) (Q c d) = Q (a1*c1) (b1*d1)") \
-        .by_select_def(RMUL_DEF, "Q a b", "Q c d", from_="ex")
-    p.choose("a1 b1 c1 d1: Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
-             " /\\ rmul (Q a b) (Q c d) = Q (a1*c1) (b1*d1)", from_="sel_body")
+    p.have(
+        "ex: ?Z:rat. ?a1 b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
+        " /\\ Z = Q (a1*c1) (b1*d1)"
+    ).by_exists(["Q (a*c) (b*d)", "a", "b", "c", "d"])
+    p.have(
+        "sel_body: ?a1 b1 c1 d1. Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
+        " /\\ rmul (Q a b) (Q c d) = Q (a1*c1) (b1*d1)"
+    ).by_select_def(RMUL_DEF, "Q a b", "Q c d", from_="ex")
+    p.choose(
+        "a1 b1 c1 d1: Q a b = Q a1 b1 /\\ Q c d = Q c1 d1"
+        " /\\ rmul (Q a b) (Q c d) = Q (a1*c1) (b1*d1)",
+        from_="sel_body",
+    )
     p.split("d1_eq", "(hQab, hQcd, hrmul)")
     p.have("feq_ab: feq a b a1 b1").by_thm(Q_eq_to_feq(p.fact("hQab")))
     p.have("feq_cd: feq c d c1 d1").by_thm(Q_eq_to_feq(p.fact("hQcd")))
-    p.have("feq_prod: feq (a*c) (b*d) (a1*c1) (b1*d1)") \
-        .by_match(SATZ_68, "feq_ab", "feq_cd")
-    p.have("Qprod: Q (a*c) (b*d) = Q (a1*c1) (b1*d1)") \
-        .by_thm(feq_to_Q_eq(p.fact("feq_prod")))
+    p.have("feq_prod: feq (a*c) (b*d) (a1*c1) (b1*d1)").by_match(
+        SATZ_68, "feq_ab", "feq_cd"
+    )
+    p.have("Qprod: Q (a*c) (b*d) = Q (a1*c1) (b1*d1)").by_thm(
+        feq_to_Q_eq(p.fact("feq_prod"))
+    )
     with p.calc("rmul (Q a b) (Q c d)", thus=True) as cc:
         cc.step("= Q (a1*c1) (b1*d1)").by_thm("hrmul")
         cc.step("= Q (a*c) (b*d)").by_thm(SYM(p.fact("Qprod")))
@@ -1277,8 +1381,7 @@ def SATZ_102(p):
     rmul_XY = _Q_canon(RMUL, RMUL_QQ, p.fact("b_eq"), p.fact("d_eq"))
     rmul_YX = _Q_canon(RMUL, RMUL_QQ, p.fact("d_eq"), p.fact("b_eq"))
     p.have("feq69: feq (a*c) (b*d) (c*a) (d*b)").by_match(SATZ_69)
-    p.have("Qcomm: Q (a*c) (b*d) = Q (c*a) (d*b)") \
-        .by_thm(feq_to_Q_eq(p.fact("feq69")))
+    p.have("Qcomm: Q (a*c) (b*d) = Q (c*a) (d*b)").by_thm(feq_to_Q_eq(p.fact("feq69")))
     with p.calc("rmul X Y", thus=True) as c:
         c.step("= Q (a*c) (b*d)").by_thm(rmul_XY)
         c.step("= Q (c*a) (d*b)").by_thm(p.fact("Qcomm"))
@@ -1309,10 +1412,10 @@ def SATZ_103(p):
     lhs_canon = _Q_canon(RMUL, RMUL_QQ, rmul_XY, p.fact("f_eq"))
     rmul_YZ = _Q_canon(RMUL, RMUL_QQ, p.fact("d_eq"), p.fact("f_eq"))
     rhs_canon = _Q_canon(RMUL, RMUL_QQ, p.fact("b_eq"), rmul_YZ)
-    p.have("feq70: feq ((a*c)*e) ((b*d)*f) (a*(c*e)) (b*(d*f))") \
-        .by_match(SATZ_70)
-    p.have("Qassoc: Q ((a*c)*e) ((b*d)*f) = Q (a*(c*e)) (b*(d*f))") \
-        .by_thm(feq_to_Q_eq(p.fact("feq70")))
+    p.have("feq70: feq ((a*c)*e) ((b*d)*f) (a*(c*e)) (b*(d*f))").by_match(SATZ_70)
+    p.have("Qassoc: Q ((a*c)*e) ((b*d)*f) = Q (a*(c*e)) (b*(d*f))").by_thm(
+        feq_to_Q_eq(p.fact("feq70"))
+    )
     with p.calc("rmul (rmul X Y) Z", thus=True) as c:
         c.step("= Q ((a*c)*e) ((b*d)*f)").by_thm(lhs_canon)
         c.step("= Q (a*(c*e)) (b*(d*f))").by_thm(p.fact("Qassoc"))
@@ -1322,8 +1425,7 @@ def SATZ_103(p):
 # Satz 104 (distributivity):  X(Y + Z) = XY + XZ.
 @proof
 def SATZ_104(p):
-    p.goal("!X Y Z. rmul X (radd Y Z) = radd (rmul X Y) (rmul X Z)",
-           types=_R_TYPES)
+    p.goal("!X Y Z. rmul X (radd Y Z) = radd (rmul X Y) (rmul X Z)", types=_R_TYPES)
     p.fix("X Y Z")
     p._parse("X")
     p._parse("Y")
@@ -1351,16 +1453,16 @@ def SATZ_104(p):
     # XY + XZ = Q ((a*c)*(b*f) + (a*e)*(b*d)) ((b*d)*(b*f)).
     rhs_canon = _Q_canon(RADD, RADD_QQ, rmul_XY, rmul_XZ)
     # SATZ_71 fraction-level distributivity.
-    p.have("feq71: feq (a*(c*f + e*d)) (b*(d*f)) "
-           "((a*c)*(b*f) + (a*e)*(b*d)) ((b*d)*(b*f))") \
-        .by_match(SATZ_71)
-    p.have("Qdistr: Q (a*(c*f + e*d)) (b*(d*f)) "
-           "= Q ((a*c)*(b*f) + (a*e)*(b*d)) ((b*d)*(b*f))") \
-        .by_thm(feq_to_Q_eq(p.fact("feq71")))
+    p.have(
+        "feq71: feq (a*(c*f + e*d)) (b*(d*f)) ((a*c)*(b*f) + (a*e)*(b*d)) ((b*d)*(b*f))"
+    ).by_match(SATZ_71)
+    p.have(
+        "Qdistr: Q (a*(c*f + e*d)) (b*(d*f)) "
+        "= Q ((a*c)*(b*f) + (a*e)*(b*d)) ((b*d)*(b*f))"
+    ).by_thm(feq_to_Q_eq(p.fact("feq71")))
     with p.calc("rmul X (radd Y Z)", thus=True) as c:
         c.step("= Q (a*(c*f + e*d)) (b*(d*f))").by_thm(lhs_canon)
-        c.step("= Q ((a*c)*(b*f) + (a*e)*(b*d)) ((b*d)*(b*f))") \
-            .by_thm(p.fact("Qdistr"))
+        c.step("= Q ((a*c)*(b*f) + (a*e)*(b*d)) ((b*d)*(b*f))").by_thm(p.fact("Qdistr"))
         c.step("= radd (rmul X Y) (rmul X Z)").by_thm(SYM(rhs_canon))
 
 
@@ -1389,8 +1491,9 @@ def SATZ_105A(p):
     p.have("rg_QQ: rgt (Q a b) (Q c d)").by_eq_mp(bridge_xy, "h")
     p.have("fg: fgt a b c d").by_match(RGT_ELIM, "rg_QQ")
     p.have("fg_prod: fgt (a*e) (b*f) (c*e) (d*f)").by_match(SATZ_72A, "fg")
-    p.have("rg_canon: rgt (Q (a*e) (b*f)) (Q (c*e) (d*f))") \
-        .by_match(RGT_INTRO, "fg_prod")
+    p.have("rg_canon: rgt (Q (a*e) (b*f)) (Q (c*e) (d*f))").by_match(
+        RGT_INTRO, "fg_prod"
+    )
     rmul_XZ = _Q_canon(RMUL, RMUL_QQ, p.fact("b_eq"), p.fact("f_eq"))
     rmul_YZ = _Q_canon(RMUL, RMUL_QQ, p.fact("d_eq"), p.fact("f_eq"))
     bridge = _bin_subst(RGT, rmul_XZ, rmul_YZ)
@@ -1443,10 +1546,8 @@ def SATZ_106A(p):
     rmul_XZ = _Q_canon(RMUL, RMUL_QQ, p.fact("b_eq"), p.fact("f_eq"))
     rmul_YZ = _Q_canon(RMUL, RMUL_QQ, p.fact("d_eq"), p.fact("f_eq"))
     bridge_h = _bin_subst(RGT, rmul_XZ, rmul_YZ)
-    p.have("rg_canon: rgt (Q (a*e) (b*f)) (Q (c*e) (d*f))") \
-        .by_eq_mp(bridge_h, "h")
-    p.have("fg_canon: fgt (a*e) (b*f) (c*e) (d*f)") \
-        .by_match(RGT_ELIM, "rg_canon")
+    p.have("rg_canon: rgt (Q (a*e) (b*f)) (Q (c*e) (d*f))").by_eq_mp(bridge_h, "h")
+    p.have("fg_canon: fgt (a*e) (b*f) (c*e) (d*f)").by_match(RGT_ELIM, "rg_canon")
     p.have("fg_orig: fgt a b c d").by_match(SATZ_73A, "fg_canon")
     p.have("rg_QQ: rgt (Q a b) (Q c d)").by_match(RGT_INTRO, "fg_orig")
     bridge_xy = _bin_subst(RGT, p.fact("b_eq"), p.fact("d_eq"))
@@ -1480,8 +1581,9 @@ def SATZ_106B(p):
         c.step("= rmul X Z").by_thm(SYM(rmul_XZ))
         c.step("= rmul Y Z").by_thm(p.fact("h"))
         c.step("= Q (c*e) (d*f)").by_thm(rmul_YZ)
-    p.have("feq_canon: feq (a*e) (b*f) (c*e) (d*f)") \
-        .by_thm(Q_eq_to_feq(p.fact("Qprod_eq")))
+    p.have("feq_canon: feq (a*e) (b*f) (c*e) (d*f)").by_thm(
+        Q_eq_to_feq(p.fact("Qprod_eq"))
+    )
     p.have("feq_orig: feq a b c d").by_match(SATZ_73B, "feq_canon")
     p.have("Q_eq: Q a b = Q c d").by_thm(feq_to_Q_eq(p.fact("feq_orig")))
     with p.calc("X", thus=True) as c:
@@ -1504,8 +1606,9 @@ def SATZ_106C(p):
 # Satz 107:  rgt X Y, rgt Z U ==> rgt (X*Z) (Y*U).
 @proof
 def SATZ_107(p):
-    p.goal("!X Y Z U. rgt X Y ==> rgt Z U ==> rgt (rmul X Z) (rmul Y U)",
-           types=_R_TYPES)
+    p.goal(
+        "!X Y Z U. rgt X Y ==> rgt Z U ==> rgt (rmul X Z) (rmul Y U)", types=_R_TYPES
+    )
     p.fix("X Y Z U")
     p.assume("hXY: rgt X Y", "hZU: rgt Z U")
     Z_t = p._parse("Z")
@@ -1517,16 +1620,16 @@ def SATZ_107(p):
     p.have("g2b: rgt (rmul Y Z) (rmul Y U)").by_rewrite_of("g2", [])
     p.have("l1: rlt (rmul Y Z) (rmul X Z)").by_match(SATZ_82, "g1")
     p.have("l2: rlt (rmul Y U) (rmul Y Z)").by_match(SATZ_82, "g2b")
-    p.have("l_chain: rlt (rmul Y U) (rmul X Z)") \
-        .by_match(SATZ_86, "l2", "l1")
+    p.have("l_chain: rlt (rmul Y U) (rmul X Z)").by_match(SATZ_86, "l2", "l1")
     p.thus("rgt (rmul X Z) (rmul Y U)").by_match(SATZ_83, "l_chain")
 
 
 # Satz 108A:  rge X Y, rgt Z U ==> rgt (X*Z) (Y*U).
 @proof
 def SATZ_108A(p):
-    p.goal("!X Y Z U. rge X Y ==> rgt Z U ==> rgt (rmul X Z) (rmul Y U)",
-           types=_R_TYPES)
+    p.goal(
+        "!X Y Z U. rge X Y ==> rgt Z U ==> rgt (rmul X Z) (rmul Y U)", types=_R_TYPES
+    )
     p.fix("X Y Z U")
     p.assume("hge: rge X Y", "hgt: rgt Z U")
     Y_t = p._parse("Y")
@@ -1534,24 +1637,21 @@ def SATZ_108A(p):
     U_t = p._parse("U")
     with p.thus("rgt (rmul X Z) (rmul Y U)").by_cases("hge"):
         with p.case("g_xy: rgt X Y"):
-            p.thus("rgt (rmul X Z) (rmul Y U)") \
-                .by_match(SATZ_107, "g_xy", "hgt")
+            p.thus("rgt (rmul X Z) (rmul Y U)").by_match(SATZ_107, "g_xy", "hgt")
         with p.case("e_xy: X = Y"):
-            p.have("g_zy: rgt (rmul Z Y) (rmul U Y)") \
-                .by_match(SATZ_105A, "hgt")
+            p.have("g_zy: rgt (rmul Z Y) (rmul U Y)").by_match(SATZ_105A, "hgt")
             p.simp(SPECL([Z_t, Y_t], SATZ_102), SPECL([U_t, Y_t], SATZ_102))
-            p.have("g_yzy: rgt (rmul Y Z) (rmul Y U)") \
-                .by_rewrite_of("g_zy", [])
+            p.have("g_yzy: rgt (rmul Y Z) (rmul Y U)").by_rewrite_of("g_zy", [])
             p.have("eq_xz_yz: rmul X Z = rmul Y Z").by_match(SATZ_105B, "e_xy")
-            p.thus("rgt (rmul X Z) (rmul Y U)") \
-                .by_rewrite_of("g_yzy", ["eq_xz_yz"])
+            p.thus("rgt (rmul X Z) (rmul Y U)").by_rewrite_of("g_yzy", ["eq_xz_yz"])
 
 
 # Satz 108B:  rgt X Y, rge Z U ==> rgt (X*Z) (Y*U).
 @proof
 def SATZ_108B(p):
-    p.goal("!X Y Z U. rgt X Y ==> rge Z U ==> rgt (rmul X Z) (rmul Y U)",
-           types=_R_TYPES)
+    p.goal(
+        "!X Y Z U. rgt X Y ==> rge Z U ==> rgt (rmul X Z) (rmul Y U)", types=_R_TYPES
+    )
     p.fix("X Y Z U")
     p.assume("hgt: rgt X Y", "hge: rge Z U")
     p._parse("X")
@@ -1559,46 +1659,49 @@ def SATZ_108B(p):
     p._parse("U")
     with p.thus("rgt (rmul X Z) (rmul Y U)").by_cases("hge"):
         with p.case("g_zu: rgt Z U"):
-            p.thus("rgt (rmul X Z) (rmul Y U)") \
-                .by_match(SATZ_107, "hgt", "g_zu")
+            p.thus("rgt (rmul X Z) (rmul Y U)").by_match(SATZ_107, "hgt", "g_zu")
         with p.case("e_zu: Z = U"):
-            p.have("g_xu: rgt (rmul X U) (rmul Y U)") \
-                .by_match(SATZ_105A, "hgt")
-            p.thus("rgt (rmul X Z) (rmul Y U)") \
-                .by_rewrite_of("g_xu", ["e_zu"])
+            p.have("g_xu: rgt (rmul X U) (rmul Y U)").by_match(SATZ_105A, "hgt")
+            p.thus("rgt (rmul X Z) (rmul Y U)").by_rewrite_of("g_xu", ["e_zu"])
 
 
 # Satz 109:  rge X Y, rge Z U ==> rge (X*Z) (Y*U).
 @proof
 def SATZ_109(p):
-    p.goal("!X Y Z U. rge X Y ==> rge Z U ==> rge (rmul X Z) (rmul Y U)",
-           types=_R_TYPES)
+    p.goal(
+        "!X Y Z U. rge X Y ==> rge Z U ==> rge (rmul X Z) (rmul Y U)", types=_R_TYPES
+    )
     p.fix("X Y Z U")
     p.assume("hge1: rge X Y", "hge2: rge Z U")
     Y_t = p._parse("Y")
     with p.thus("rge (rmul X Z) (rmul Y U)").by_cases("hge1"):
         with p.case("g1: rgt X Y"):
-            p.have("g_xy_zu: rgt (rmul X Z) (rmul Y U)") \
-                .by_match(SATZ_108B, "g1", "hge2")
-            p.have("orL: rgt (rmul X Z) (rmul Y U) \\/ rmul X Z = rmul Y U") \
-                .by(DISJ1, "g_xy_zu", "rmul X Z = rmul Y U")
+            p.have("g_xy_zu: rgt (rmul X Z) (rmul Y U)").by_match(
+                SATZ_108B, "g1", "hge2"
+            )
+            p.have("orL: rgt (rmul X Z) (rmul Y U) \\/ rmul X Z = rmul Y U").by(
+                DISJ1, "g_xy_zu", "rmul X Z = rmul Y U"
+            )
             p.thus("rge (rmul X Z) (rmul Y U)").by_fold("orL")
         with p.case("e1: X = Y"):
             with p.thus("rge (rmul X Z) (rmul Y U)").by_cases("hge2"):
                 with p.case("g2: rgt Z U"):
-                    p.have("g_xz_yu: rgt (rmul X Z) (rmul Y U)") \
-                        .by_match(SATZ_108A, "hge1", "g2")
-                    p.have("orL: rgt (rmul X Z) (rmul Y U) \\/ rmul X Z = rmul Y U") \
-                        .by(DISJ1, "g_xz_yu", "rmul X Z = rmul Y U")
+                    p.have("g_xz_yu: rgt (rmul X Z) (rmul Y U)").by_match(
+                        SATZ_108A, "hge1", "g2"
+                    )
+                    p.have("orL: rgt (rmul X Z) (rmul Y U) \\/ rmul X Z = rmul Y U").by(
+                        DISJ1, "g_xz_yu", "rmul X Z = rmul Y U"
+                    )
                     p.thus("rge (rmul X Z) (rmul Y U)").by_fold("orL")
                 with p.case("e2: Z = U"):
-                    p.have("eq_xz_yz: rmul X Z = rmul Y Z") \
-                        .by_match(SATZ_105B, "e1")
+                    p.have("eq_xz_yz: rmul X Z = rmul Y Z").by_match(SATZ_105B, "e1")
                     p.have("eq_yz_yu:").by_cong(mk_app(RMUL, Y_t), "e2")
-                    p.have("eq_full: rmul X Z = rmul Y U") \
-                        .by_trans("eq_xz_yz", "eq_yz_yu")
-                    p.have("orR: rgt (rmul X Z) (rmul Y U) \\/ rmul X Z = rmul Y U") \
-                        .by(DISJ2, "rgt (rmul X Z) (rmul Y U)", "eq_full")
+                    p.have("eq_full: rmul X Z = rmul Y U").by_trans(
+                        "eq_xz_yz", "eq_yz_yu"
+                    )
+                    p.have("orR: rgt (rmul X Z) (rmul Y U) \\/ rmul X Z = rmul Y U").by(
+                        DISJ2, "rgt (rmul X Z) (rmul Y U)", "eq_full"
+                    )
                     p.thus("rge (rmul X Z) (rmul Y U)").by_fold("orR")
 
 
@@ -1619,12 +1722,12 @@ def SATZ_110_EXIST(p):
     d_t = p._parse("d")
     # Witness U = Q (a*d) (b*c). SATZ_77_EXIST: feq (c*(a*d)) (d*(b*c)) a b.
     p.have("feq77: feq (c*(a*d)) (d*(b*c)) a b").by_match(SATZ_77_EXIST)
-    p.have("Qprod_eq_a: Q (c*(a*d)) (d*(b*c)) = Q a b") \
-        .by_thm(feq_to_Q_eq(p.fact("feq77")))
+    p.have("Qprod_eq_a: Q (c*(a*d)) (d*(b*c)) = Q a b").by_thm(
+        feq_to_Q_eq(p.fact("feq77"))
+    )
     # rmul (Q c d) (Q (a*d) (b*c)) = Q (c*(a*d)) (d*(b*c)) by RMUL_QQ.
-    p.have("rmul_canon:") \
-        .by_inst(RMUL_QQ, c_t, d_t, p._parse("a*d"), p._parse("b*c"))
-    p.have("sub_y:").by_cong(RMUL, "d_eq")          # RMUL Y = RMUL (Q c d)
+    p.have("rmul_canon:").by_inst(RMUL_QQ, c_t, d_t, p._parse("a*d"), p._parse("b*c"))
+    p.have("sub_y:").by_cong(RMUL, "d_eq")  # RMUL Y = RMUL (Q c d)
     U_witness = mk_app(Q, p._parse("a*d"), p._parse("b*c"))
     p.have("sub_y_at:").by_cong("sub_y", U_witness)
     p.have("X_eq_Qab:").by_thm(SYM(p.fact("b_eq")))
@@ -1638,13 +1741,11 @@ def SATZ_110_EXIST(p):
 
 @proof
 def SATZ_110_UNIQUE(p):
-    p.goal("!X Y V W. rmul Y V = X ==> rmul Y W = X ==> V = W",
-           types=_R_TYPES)
+    p.goal("!X Y V W. rmul Y V = X ==> rmul Y W = X ==> V = W", types=_R_TYPES)
     p.fix("X Y V W")
     p.assume("hv: rmul Y V = X", "hw: rmul Y W = X")
     p.have("hw_sym:").by_thm(SYM(p.fact("hw")))
-    p.have("eq_yvw: rmul Y V = rmul Y W") \
-        .by_trans("hv", "hw_sym")
+    p.have("eq_yvw: rmul Y V = rmul Y W").by_trans("hv", "hw_sym")
     Y_t = p._parse("Y")
     V_t = p._parse("V")
     W_t = p._parse("W")
@@ -1658,9 +1759,12 @@ def SATZ_110_UNIQUE(p):
 
 
 # Definition 27:  X / Y is the unique U with rmul Y U = X.
-RDIV_DEF = define("rdiv", "rat -> rat -> rat",
+RDIV_DEF = define(
+    "rdiv",
+    "rat -> rat -> rat",
     "\\X:rat Y:rat. @U:rat. rmul Y U = X",
-    infix=(60, "left"))
+    infix=(60, "left"),
+)
 RDIV = mk_const("rdiv", [])
 
 
@@ -1670,14 +1774,14 @@ def RDIV_PROP(p):
     p.goal("!X Y. rmul Y (rdiv X Y) = X", types=_R_TYPES)
     p.fix("X Y")
     p.have("ex: ?U:rat. rmul Y U = X").by_match(SATZ_110_EXIST)
-    p.thus("rmul Y (rdiv X Y) = X") \
-        .by_select_def(RDIV_DEF, "X", "Y", from_="ex")
+    p.thus("rmul Y (rdiv X Y) = X").by_select_def(RDIV_DEF, "X", "Y", from_="ex")
 
 
 # ---------------------------------------------------------------------------
 # §5 Part 5.  Sätze 111-115 -- integer rationals (Definition 25),
 #             identification with naturals, Archimedean property.
 # ---------------------------------------------------------------------------
+
 
 # Satz 111B (forward):  Q x 1 = Q y 1 ==> x = y.
 @proof
@@ -1689,8 +1793,7 @@ def SATZ_111B_FWD(p):
     x_t = p._parse("x")
     y_t = p._parse("y")
     p._parse("1")
-    p.have("eq_mul: x * 1 = y * 1") \
-        .by_def(FEQ_DEF, "feq")
+    p.have("eq_mul: x * 1 = y * 1").by_def(FEQ_DEF, "feq")
     mul1_x = SPEC(x_t, MUL_1)
     mul1_y = SPEC(y_t, MUL_1)
     with p.calc("x", thus=True) as c:
@@ -1720,8 +1823,7 @@ def SATZ_111A_FWD(p):
     p._parse("x")
     p._parse("y")
     p._parse("1")
-    p.have("gt_mul: x * 1 > y * 1") \
-        .by_def(FGT_DEF, "fg")
+    p.have("gt_mul: x * 1 > y * 1").by_def(FGT_DEF, "fg")
     p.thus("x > y").by_thm(REWRITE_RULE([MUL_1], p.fact("gt_mul")))
 
 
@@ -1734,12 +1836,12 @@ def SATZ_111A_REV(p):
     x_t = p._parse("x")
     y_t = p._parse("y")
     ONE_t = p._parse("1")
-    p.have("mul1_x:").by_inst(MUL_1, x_t)            # x * 1 = x
-    p.have("mul1_y:").by_inst(MUL_1, y_t)            # y * 1 = y
-    p.have("gt_mul: x * 1 > y * 1") \
-        .by_rewrite_of("h", ["mul1_x", "mul1_y"])
-    p.have("fg: fgt x 1 y 1") \
-        .by_eq_mp(SYM(UNFOLD(FGT_DEF, x_t, ONE_t, y_t, ONE_t)), "gt_mul")
+    p.have("mul1_x:").by_inst(MUL_1, x_t)  # x * 1 = x
+    p.have("mul1_y:").by_inst(MUL_1, y_t)  # y * 1 = y
+    p.have("gt_mul: x * 1 > y * 1").by_rewrite_of("h", ["mul1_x", "mul1_y"])
+    p.have("fg: fgt x 1 y 1").by_eq_mp(
+        SYM(UNFOLD(FGT_DEF, x_t, ONE_t, y_t, ONE_t)), "gt_mul"
+    )
     p.thus("rgt (Q x 1) (Q y 1)").by_match(RGT_INTRO, "fg")
 
 
@@ -1753,8 +1855,7 @@ def SATZ_111C_FWD(p):
     p._parse("x")
     p._parse("y")
     p._parse("1")
-    p.have("lt_mul: x * 1 < y * 1") \
-        .by_def(FLT_DEF, "fl")
+    p.have("lt_mul: x * 1 < y * 1").by_def(FLT_DEF, "fl")
     p.thus("x < y").by_thm(REWRITE_RULE([MUL_1], p.fact("lt_mul")))
 
 
@@ -1769,16 +1870,15 @@ def SATZ_111C_REV(p):
     ONE_t = p._parse("1")
     p.have("mul1_x:").by_inst(MUL_1, x_t)
     p.have("mul1_y:").by_inst(MUL_1, y_t)
-    p.have("lt_mul: x * 1 < y * 1") \
-        .by_rewrite_of("h", ["mul1_x", "mul1_y"])
-    p.have("fl: flt x 1 y 1") \
-        .by_eq_mp(SYM(UNFOLD(FLT_DEF, x_t, ONE_t, y_t, ONE_t)), "lt_mul")
+    p.have("lt_mul: x * 1 < y * 1").by_rewrite_of("h", ["mul1_x", "mul1_y"])
+    p.have("fl: flt x 1 y 1").by_eq_mp(
+        SYM(UNFOLD(FLT_DEF, x_t, ONE_t, y_t, ONE_t)), "lt_mul"
+    )
     p.thus("rlt (Q x 1) (Q y 1)").by_match(RLT_INTRO, "fl")
 
 
 # Definition 25:  IS_INT_RAT X iff X = Q x 1 for some x.
-IS_INT_RAT_DEF = define("IS_INT_RAT", "rat -> bool",
-    "\\X:rat. ?x. X = Q x 1")
+IS_INT_RAT_DEF = define("IS_INT_RAT", "rat -> bool", "\\X:rat. ?x. X = Q x 1")
 IS_INT_RAT = mk_const("IS_INT_RAT", [])
 
 
@@ -1793,8 +1893,7 @@ def SATZ_112A(p):
     # RADD_QQ: radd (Q x 1) (Q y 1) = Q (x*1 + y*1) (1*1).
     p.have("raw:").by_inst(RADD_QQ, x_t, ONE_t, y_t, ONE_t)
     # Rewrite x*1 → x, y*1 → y, 1*1 → 1.
-    p.thus("radd (Q x 1) (Q y 1) = Q (x + y) 1") \
-        .by_rewrite_of("raw", [MUL_1])
+    p.thus("radd (Q x 1) (Q y 1) = Q (x + y) 1").by_rewrite_of("raw", [MUL_1])
 
 
 # Satz 112B:  (Q x 1) * (Q y 1) = Q (x*y) 1.
@@ -1805,9 +1904,8 @@ def SATZ_112B(p):
     x_t = p._parse("x")
     y_t = p._parse("y")
     ONE_t = p._parse("1")
-    p.have("raw:").by_inst(RMUL_QQ, x_t, ONE_t, y_t, ONE_t)   # = Q (x*y) (1*1)
-    p.thus("rmul (Q x 1) (Q y 1) = Q (x * y) 1") \
-        .by_rewrite_of("raw", [MUL_1])
+    p.have("raw:").by_inst(RMUL_QQ, x_t, ONE_t, y_t, ONE_t)  # = Q (x*y) (1*1)
+    p.thus("rmul (Q x 1) (Q y 1) = Q (x * y) 1").by_rewrite_of("raw", [MUL_1])
 
 
 # Multiplicative identity:  !X. rmul (Q 1 1) X = X.
@@ -1824,19 +1922,19 @@ def RMUL_ONE(p):
     Q11 = mk_app(Q, ONE_t, ONE_t)
     p.have("sub_x:").by_cong(mk_app(RMUL, Q11), "b_eq")
     p.have("canon:").by_inst(RMUL_QQ, ONE_t, ONE_t, a_t, b_t)
-    p.have("one_a:").by_inst(ONE_MUL, a_t)              # 1*a = a
-    p.have("one_b:").by_inst(ONE_MUL, b_t)              # 1*b = b
+    p.have("one_a:").by_inst(ONE_MUL, a_t)  # 1*a = a
+    p.have("one_b:").by_inst(ONE_MUL, b_t)  # 1*b = b
     p.have("times_one_a:").by_cong(TIMES, "one_a")
-    p.have("eq_l:").by_cong("times_one_a", b_t)         # (1*a)*b = a*b
-    p.have("b_one_b:").by_thm(SYM(p.fact("one_b")))     # b = 1*b
+    p.have("eq_l:").by_cong("times_one_a", b_t)  # (1*a)*b = a*b
+    p.have("b_one_b:").by_thm(SYM(p.fact("one_b")))  # b = 1*b
     p.have("eq_r:").by_cong(mk_app(TIMES, a_t), "b_one_b")  # a*b = a*(1*b)
     p.have("eq_full:").by_trans("eq_l", "eq_r")
-    feq_th = EQ_MP(SYM(UNFOLD(FEQ_DEF,
-                                mk_mul(ONE_t, a_t),
-                                mk_mul(ONE_t, b_t),
-                                a_t, b_t)), p.fact("eq_full"))
+    feq_th = EQ_MP(
+        SYM(UNFOLD(FEQ_DEF, mk_mul(ONE_t, a_t), mk_mul(ONE_t, b_t), a_t, b_t)),
+        p.fact("eq_full"),
+    )
     p.have("Q_eq:").by_thm(feq_to_Q_eq(feq_th))
-    p.have("X_eq_Qab:").by_thm(SYM(p.fact("b_eq")))     # Q a b = X
+    p.have("X_eq_Qab:").by_thm(SYM(p.fact("b_eq")))  # Q a b = X
     with p.calc("rmul (Q 1 1) X", thus=True) as c:
         c.step("= rmul (Q 1 1) (Q a b)").by_thm("sub_x")
         c.step("= Q (1*a) (1*b)").by_thm("canon")
@@ -1848,6 +1946,7 @@ def RMUL_ONE(p):
 # five clauses; the meat for us is the third (successor avoids the unit) and
 # the fourth (successor is injective) -- both follow from Satz 111B and
 # AXIOM_3 / AXIOM_4 at the natural-number level.
+
 
 @proof
 def SATZ_113_3(p):
@@ -1883,9 +1982,9 @@ def SATZ_114(p):
     # Need Q (y*x) (1*y) = Q x 1, via feq (y*x) (1*y) x 1, i.e. (y*x)*1 = x*(1*y).
     yx = mk_mul(y_t, x_t)
     xy_inner = mk_mul(ONE_t, y_t)
-    p.have("mul1_yx:").by_inst(MUL_1, yx)        # (y*x)*1 = y*x
+    p.have("mul1_yx:").by_inst(MUL_1, yx)  # (y*x)*1 = y*x
     p.have("satz29:").by_inst(SATZ_29, y_t, x_t)  # y*x = x*y
-    p.have("one_y:").by_inst(ONE_MUL, y_t)        # 1*y = y
+    p.have("one_y:").by_inst(ONE_MUL, y_t)  # 1*y = y
     p.have("y_one:").by_thm(SYM(p.fact("one_y")))  # y = 1*y
     p.have("expand:").by_cong(mk_app(TIMES, x_t), "y_one")  # x*y = x*(1*y)
     with p.calc("eq_chain: (y*x)*1") as c:
@@ -1894,8 +1993,7 @@ def SATZ_114(p):
         c.step("= x*(1*y)").by_thm("expand")
     # eq_chain : |- (y*x)*1 = x*(1*y).  FEQ_DEF: feq a b c d = (a*d = c*b).
     # Match a=y*x, b=1*y, c=x, d=1 to fold to feq (y*x) (1*y) x 1.
-    feq_thm = EQ_MP(SYM(UNFOLD(FEQ_DEF, yx, xy_inner, x_t, ONE_t)),
-                    p.fact("eq_chain"))
+    feq_thm = EQ_MP(SYM(UNFOLD(FEQ_DEF, yx, xy_inner, x_t, ONE_t)), p.fact("eq_chain"))
     p.have("Q_eq:").by_thm(feq_to_Q_eq(feq_thm))
     p.thus("rmul (Q y 1) (Q x y) = Q x 1").by_trans("raw", "Q_eq")
 
@@ -1920,61 +2018,66 @@ def SATZ_115(p):
     v_t = p._parse("v")
     ONE_t = p._parse("1")
     # rgt (Z*X) Y via Satz 105A and rmul (Y/X) X = Y.
-    p.fact("Z_eq")    # rgt Z (rdiv Y X) — but it's stored under "Z_eq"? Let me reuse.
+    p.fact("Z_eq")  # rgt Z (rdiv Y X) — but it's stored under "Z_eq"? Let me reuse.
     # Actually p.choose("Z: ...") binds the body, what's the fact name?
     # We named the existential "ex_Z" with body rgt Z (rdiv Y X). After choose("Z: ..."),
     # the body becomes a fact under "Z_eq". So rgt Z (rdiv Y X) is registered as Z_eq.
-    p.have("g_ZW: rgt (rmul Z X) (rmul (rdiv Y X) X)") \
-        .by_match(SATZ_105A, "Z_eq")
-    com = SPECL([YoverX, X_t], SATZ_102)            # (Y/X)*X = X*(Y/X)
-    rdiv_prop = SPECL([Y_t, X_t], RDIV_PROP)         # X*(Y/X) = Y
-    eq_WX_Y = TRANS(com, rdiv_prop)                  # (Y/X)*X = Y
+    p.have("g_ZW: rgt (rmul Z X) (rmul (rdiv Y X) X)").by_match(SATZ_105A, "Z_eq")
+    com = SPECL([YoverX, X_t], SATZ_102)  # (Y/X)*X = X*(Y/X)
+    rdiv_prop = SPECL([Y_t, X_t], RDIV_PROP)  # X*(Y/X) = Y
+    eq_WX_Y = TRANS(com, rdiv_prop)  # (Y/X)*X = Y
     sub = AP_TERM(mk_app(RGT, mk_app(RMUL, Z_t, X_t)), eq_WX_Y)
     p.have("g_ZX_Y: rgt (rmul Z X) Y").by_eq_mp(sub, "g_ZW")
     # v >= 1 (nat).
     p.have("v_ge: v >= 1").by_match(SATZ_24)
-    p.have("v_disj: v > 1 \\/ v = 1") \
-        .by_def(GE_DEF, "v_ge")
+    p.have("v_disj: v > 1 \\/ v = 1").by_def(GE_DEF, "v_ge")
     mk_app(Q, ONE_t, ONE_t)
     Qv1 = mk_app(Q, v_t, ONE_t)
     with p.have("rge_v1: rge (Q v 1) (Q 1 1)").by_cases("v_disj"):
         with p.case("g1: v > 1"):
             p.have("rg: rgt (Q v 1) (Q 1 1)").by_match(SATZ_111A_REV, "g1")
-            p.have("orL: rgt (Q v 1) (Q 1 1) \\/ Q v 1 = Q 1 1") \
-                .by(DISJ1, "rg", "Q v 1 = Q 1 1")
+            p.have("orL: rgt (Q v 1) (Q 1 1) \\/ Q v 1 = Q 1 1").by(
+                DISJ1, "rg", "Q v 1 = Q 1 1"
+            )
             p.thus("rge (Q v 1) (Q 1 1)").by_fold("orL")
         with p.case("e1: v = 1"):
             p.have("eq: Q v 1 = Q 1 1").by_match(SATZ_111B_REV, "e1")
-            p.have("orR: rgt (Q v 1) (Q 1 1) \\/ Q v 1 = Q 1 1") \
-                .by(DISJ2, "rgt (Q v 1) (Q 1 1)", "eq")
+            p.have("orR: rgt (Q v 1) (Q 1 1) \\/ Q v 1 = Q 1 1").by(
+                DISJ2, "rgt (Q v 1) (Q 1 1)", "eq"
+            )
             p.thus("rge (Q v 1) (Q 1 1)").by_fold("orR")
     # rge (Z*X) (Z*X) (reflexivity).
     p.have("refl_ZX:").by_thm(REFL(mk_app(RMUL, Z_t, X_t)))
-    p.have("refl_orR: rgt (rmul Z X) (rmul Z X) \\/ rmul Z X = rmul Z X") \
-        .by(DISJ2, "rgt (rmul Z X) (rmul Z X)", "refl_ZX")
+    p.have("refl_orR: rgt (rmul Z X) (rmul Z X) \\/ rmul Z X = rmul Z X").by(
+        DISJ2, "rgt (rmul Z X) (rmul Z X)", "refl_ZX"
+    )
     p.have("rge_ZX: rge (rmul Z X) (rmul Z X)").by_fold("refl_orR")
     # Multiplication monotonicity (Satz 109): rge (rmul (Q v 1) (Z*X)) (rmul (Q 1 1) (Z*X)).
-    p.have("rge_full: rge (rmul (Q v 1) (rmul Z X)) (rmul (Q 1 1) (rmul Z X))") \
-        .by_match(SATZ_109, "rge_v1", "rge_ZX")
+    p.have(
+        "rge_full: rge (rmul (Q v 1) (rmul Z X)) (rmul (Q 1 1) (rmul Z X))"
+    ).by_match(SATZ_109, "rge_v1", "rge_ZX")
     # rmul (Q 1 1) (Z*X) = Z*X.
     p.have("rm1:").by_inst(RMUL_ONE, mk_app(RMUL, Z_t, X_t))
-    p.have("sub_rm1:") \
-        .by_cong(mk_app(RGE, mk_app(RMUL, Qv1, mk_app(RMUL, Z_t, X_t))), "rm1")
-    p.have("rge_simp: rge (rmul (Q v 1) (rmul Z X)) (rmul Z X)") \
-        .by_eq_mp(p.fact("sub_rm1"), "rge_full")
+    p.have("sub_rm1:").by_cong(
+        mk_app(RGE, mk_app(RMUL, Qv1, mk_app(RMUL, Z_t, X_t))), "rm1"
+    )
+    p.have("rge_simp: rge (rmul (Q v 1) (rmul Z X)) (rmul Z X)").by_eq_mp(
+        p.fact("sub_rm1"), "rge_full"
+    )
     # Combine: rge A B, rgt B Y => rgt A Y, where A = (Q v 1)*(Z*X), B = Z*X.
-    p.have("le_BA: rle (rmul Z X) (rmul (Q v 1) (rmul Z X))") \
-        .by_match(SATZ_84, "rge_simp")
+    p.have("le_BA: rle (rmul Z X) (rmul (Q v 1) (rmul Z X))").by_match(
+        SATZ_84, "rge_simp"
+    )
     p.have("lt_YB: rlt Y (rmul Z X)").by_match(SATZ_82, "g_ZX_Y")
-    p.have("lt_YA: rlt Y (rmul (Q v 1) (rmul Z X))") \
-        .by_match(SATZ_87B, "lt_YB", "le_BA")
-    p.have("gt_AY: rgt (rmul (Q v 1) (rmul Z X)) Y") \
-        .by_match(SATZ_83, "lt_YA")
+    p.have("lt_YA: rlt Y (rmul (Q v 1) (rmul Z X))").by_match(
+        SATZ_87B, "lt_YB", "le_BA"
+    )
+    p.have("gt_AY: rgt (rmul (Q v 1) (rmul Z X)) Y").by_match(SATZ_83, "lt_YA")
     # (Q v 1) * Z = Q z 1 (Satz 114 with x=z, y=v).
-    p.have("qv_z:").by_inst(SATZ_114, z_t, v_t)    # rmul (Q v 1) (Q z v) = Q z 1
+    p.have("qv_z:").by_inst(SATZ_114, z_t, v_t)  # rmul (Q v 1) (Q z v) = Q z 1
     # Bridge rmul (Q v 1) Z = Q z 1 via Z = Q z v.
     p.have("sub_z:").by_cong(mk_app(RMUL, Qv1), "v_eq")
-    p.have("eq_QvZ:").by_trans("sub_z", "qv_z")    # rmul (Q v 1) Z = Q z 1
+    p.have("eq_QvZ:").by_trans("sub_z", "qv_z")  # rmul (Q v 1) Z = Q z 1
     # Apply X on the right: rmul (rmul (Q v 1) Z) X = rmul (Q z 1) X.
     p.have("rmul_eqQvZ:").by_cong(RMUL, "eq_QvZ")
     p.have("sub_x:").by_cong("rmul_eqQvZ", X_t)

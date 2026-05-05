@@ -1,32 +1,79 @@
 import unittest
 import fusion
 from fusion import (
-    Tyvar, Tyapp, Var, Const, Comb, Abs,
-    bool_ty, aty,
+    Tyvar,
+    Tyapp,
+    Var,
+    Const,
+    Comb,
+    Abs,
+    bool_ty,
+    aty,
     mk_type,
-    tyvars, type_subst,
-    types, get_type_arity, new_type,
-    constants, get_const_type, new_constant,
+    tyvars,
+    type_subst,
+    types,
+    get_type_arity,
+    new_type,
+    constants,
+    get_const_type,
+    new_constant,
     mk_comb,
-    type_of, frees, freesin, vfree_in,
-    type_vars_in_term, variant, vsubst, inst,
+    type_of,
+    frees,
+    freesin,
+    vfree_in,
+    type_vars_in_term,
+    variant,
+    vsubst,
+    inst,
     alphaorder,
-    dest_thm, hyp, concl,
-    REFL, TRANS, MK_COMB, ABS, BETA, ASSUME, EQ_MP,
-    DEDUCT_ANTISYM_RULE, INST_TYPE, INST,
-    axioms, new_axiom, definitions, new_basic_definition,
+    dest_thm,
+    hyp,
+    concl,
+    REFL,
+    TRANS,
+    MK_COMB,
+    ABS,
+    BETA,
+    ASSUME,
+    EQ_MP,
+    DEDUCT_ANTISYM_RULE,
+    INST_TYPE,
+    INST,
+    axioms,
+    new_axiom,
+    definitions,
+    new_basic_definition,
     new_basic_type_definition,
 )
 from basics import (
     bty,
-    mk_vartype, dest_type, dest_vartype, is_type, is_vartype,
-    mk_var, mk_const, mk_abs,
-    dest_var, dest_const, dest_comb, dest_abs,
-    is_var, is_const, is_abs, is_comb,
+    mk_vartype,
+    dest_type,
+    dest_vartype,
+    is_type,
+    is_vartype,
+    mk_var,
+    mk_const,
+    mk_abs,
+    dest_var,
+    dest_const,
+    dest_comb,
+    dest_abs,
+    is_var,
+    is_const,
+    is_abs,
+    is_comb,
     freesl,
-    rator, rand, dest_eq,
+    rator,
+    rand,
+    dest_eq,
     aconv,
-    mk_fun_ty, is_eq, mk_eq, equals_thm,
+    mk_fun_ty,
+    is_eq,
+    mk_eq,
+    equals_thm,
 )
 
 
@@ -36,8 +83,8 @@ from basics import (
 # before the per-primitive suites.
 # ---------------------------------------------------------------------------
 
-class TestKernelSanity(unittest.TestCase):
 
+class TestKernelSanity(unittest.TestCase):
     def test_primitives_compose_into_a_derivation(self):
         # Derive   |- (\x. f x) x = f x   by BETA on the trivial redex
         # (the only one this kernel admits), then transport an assumption
@@ -46,8 +93,8 @@ class TestKernelSanity(unittest.TestCase):
         # ASSUME, EQ_MP, term_union, alphaorder.
         f = mk_var("f", mk_fun_ty(bool_ty, bool_ty))
         x = mk_var("x", bool_ty)
-        redex = mk_comb(mk_abs(x, mk_comb(f, x)), x)   # (\x. f x) x
-        beta_th = BETA(redex)                          # |- (\x. f x) x = f x
+        redex = mk_comb(mk_abs(x, mk_comb(f, x)), x)  # (\x. f x) x
+        beta_th = BETA(redex)  # |- (\x. f x) x = f x
         lhs, rhs = dest_eq(concl(beta_th))
         self.assertEqual(lhs, redex)
         self.assertEqual(rhs, mk_comb(f, x))
@@ -100,8 +147,8 @@ class KernelStateTestCase(unittest.TestCase):
 # Types
 # ---------------------------------------------------------------------------
 
-class TestTypes(unittest.TestCase):
 
+class TestTypes(unittest.TestCase):
     def test_bool_ty_is_tyapp(self):
         self.assertIsInstance(bool_ty, Tyapp)
         self.assertEqual(bool_ty.tyop, "bool")
@@ -196,7 +243,6 @@ class TestTypes(unittest.TestCase):
 
 
 class TestTypeRegistry(KernelStateTestCase):
-
     def test_types_contains_builtins(self):
         ts = dict(types())
         self.assertIn("bool", ts)
@@ -231,8 +277,8 @@ class TestTypeRegistry(KernelStateTestCase):
 # Terms
 # ---------------------------------------------------------------------------
 
-class TestTerms(unittest.TestCase):
 
+class TestTerms(unittest.TestCase):
     def setUp(self):
         self.x = mk_var("x", bool_ty)
         self.y = mk_var("y", bool_ty)
@@ -357,7 +403,6 @@ class TestTerms(unittest.TestCase):
 
 
 class TestTermRegistry(KernelStateTestCase):
-
     def test_constants_has_equality(self):
         cs = dict(constants())
         self.assertIn("=", cs)
@@ -384,8 +429,8 @@ class TestTermRegistry(KernelStateTestCase):
 # Free variables and related
 # ---------------------------------------------------------------------------
 
-class TestFreeVars(unittest.TestCase):
 
+class TestFreeVars(unittest.TestCase):
     def setUp(self):
         self.x = mk_var("x", bool_ty)
         self.y = mk_var("y", bool_ty)
@@ -464,8 +509,8 @@ class TestFreeVars(unittest.TestCase):
 # Substitution and instantiation
 # ---------------------------------------------------------------------------
 
-class TestVsubst(unittest.TestCase):
 
+class TestVsubst(unittest.TestCase):
     def setUp(self):
         self.x = mk_var("x", bool_ty)
         self.y = mk_var("y", bool_ty)
@@ -476,7 +521,7 @@ class TestVsubst(unittest.TestCase):
         self.assertIs(subst(self.x), self.x)
 
     def test_simple_substitution(self):
-        subst = vsubst([(self.y, self.x)])   # replace x with y
+        subst = vsubst([(self.y, self.x)])  # replace x with y
         result = subst(self.x)
         self.assertEqual(result, self.y)
 
@@ -487,8 +532,8 @@ class TestVsubst(unittest.TestCase):
         result = subst(ab)
         self.assertIsInstance(result, Abs)
         bv, body = dest_abs(result)
-        self.assertNotEqual(bv, self.y)        # y renamed to avoid capture
-        self.assertEqual(body, self.y)         # x replaced by y in body
+        self.assertNotEqual(bv, self.y)  # y renamed to avoid capture
+        self.assertEqual(body, self.y)  # x replaced by y in body
 
     def test_bound_var_not_substituted(self):
         ab = mk_abs(self.x, self.x)
@@ -511,7 +556,6 @@ class TestVsubst(unittest.TestCase):
 
 
 class TestInst(unittest.TestCase):
-
     def setUp(self):
         self.x_a = mk_var("x", aty)
         self.x_b = mk_var("x", bool_ty)
@@ -526,7 +570,7 @@ class TestInst(unittest.TestCase):
         self.assertEqual(result, self.x_b)
 
     def test_instantiate_in_const(self):
-        c = mk_const("=", [])          # = : A -> A -> bool
+        c = mk_const("=", [])  # = : A -> A -> bool
         fn = inst([(bool_ty, aty)])
         result = fn(c)
         expected_ty = mk_fun_ty(bool_ty, mk_fun_ty(bool_ty, bool_ty))
@@ -542,7 +586,7 @@ class TestInst(unittest.TestCase):
         self.assertEqual(type_of(result), bool_ty)
 
     def test_instantiate_in_abs_no_clash(self):
-        ab = mk_abs(self.x_a, self.x_a)     # \(x:A). x
+        ab = mk_abs(self.x_a, self.x_a)  # \(x:A). x
         fn = inst([(bool_ty, aty)])
         result = fn(ab)
         self.assertIsInstance(result, Abs)
@@ -555,8 +599,8 @@ class TestInst(unittest.TestCase):
 # Alpha order
 # ---------------------------------------------------------------------------
 
-class TestAlphaOrder(unittest.TestCase):
 
+class TestAlphaOrder(unittest.TestCase):
     def setUp(self):
         self.x = mk_var("x", bool_ty)
         self.y = mk_var("y", bool_ty)
@@ -589,8 +633,8 @@ class TestAlphaOrder(unittest.TestCase):
 # dest_eq / is_eq / mk_eq
 # ---------------------------------------------------------------------------
 
-class TestEqSyntax(unittest.TestCase):
 
+class TestEqSyntax(unittest.TestCase):
     def setUp(self):
         self.x = mk_var("x", bool_ty)
         self.y = mk_var("y", bool_ty)
@@ -617,8 +661,8 @@ class TestEqSyntax(unittest.TestCase):
 # Theorem destructors
 # ---------------------------------------------------------------------------
 
-class TestThmDestructors(unittest.TestCase):
 
+class TestThmDestructors(unittest.TestCase):
     def setUp(self):
         self.x = mk_var("x", bool_ty)
         self.y = mk_var("y", bool_ty)
@@ -652,8 +696,8 @@ class TestThmDestructors(unittest.TestCase):
 # REFL
 # ---------------------------------------------------------------------------
 
-class TestREFL(unittest.TestCase):
 
+class TestREFL(unittest.TestCase):
     def test_refl_var(self):
         x = mk_var("x", bool_ty)
         th = REFL(x)
@@ -690,8 +734,8 @@ class TestREFL(unittest.TestCase):
 # TRANS
 # ---------------------------------------------------------------------------
 
-class TestTRANS(unittest.TestCase):
 
+class TestTRANS(unittest.TestCase):
     def setUp(self):
         self.x = mk_var("x", bool_ty)
         self.y = mk_var("y", bool_ty)
@@ -704,8 +748,8 @@ class TestTRANS(unittest.TestCase):
 
     def test_trans_chaining(self):
         # |- x=y and |- y=z  =>  |- x=z
-        th1 = ASSUME(mk_eq(self.x, self.y))   # {x=y} |- x=y
-        th2 = ASSUME(mk_eq(self.y, self.z))   # {y=z} |- y=z
+        th1 = ASSUME(mk_eq(self.x, self.y))  # {x=y} |- x=y
+        th2 = ASSUME(mk_eq(self.y, self.z))  # {y=z} |- y=z
         th = TRANS(th1, th2)
         lhs, rhs = dest_eq(concl(th))
         self.assertEqual(lhs, self.x)
@@ -739,10 +783,10 @@ class TestTRANS(unittest.TestCase):
         g = mk_var("g", f_ty)
         bv1 = mk_var("a", bool_ty)
         bv2 = mk_var("b", bool_ty)
-        abs1 = mk_abs(bv1, bv1)   # \a.a : bool->bool
-        abs2 = mk_abs(bv2, bv2)   # \b.b : bool->bool (alpha-equal)
-        th1 = ASSUME(mk_eq(f, abs1))    # {f=\a.a} |- f=\a.a
-        th2 = ASSUME(mk_eq(abs2, g))    # {\b.b=g} |- \b.b=g
+        abs1 = mk_abs(bv1, bv1)  # \a.a : bool->bool
+        abs2 = mk_abs(bv2, bv2)  # \b.b : bool->bool (alpha-equal)
+        th1 = ASSUME(mk_eq(f, abs1))  # {f=\a.a} |- f=\a.a
+        th2 = ASSUME(mk_eq(abs2, g))  # {\b.b=g} |- \b.b=g
         th = TRANS(th1, th2)
         lhs, rhs = dest_eq(concl(th))
         self.assertEqual(lhs, f)
@@ -753,8 +797,8 @@ class TestTRANS(unittest.TestCase):
 # MK_COMB
 # ---------------------------------------------------------------------------
 
-class TestMK_COMB(unittest.TestCase):
 
+class TestMK_COMB(unittest.TestCase):
     def setUp(self):
         self.bb = mk_fun_ty(bool_ty, bool_ty)
         self.f = mk_var("f", self.bb)
@@ -805,8 +849,8 @@ class TestMK_COMB(unittest.TestCase):
 # ABS
 # ---------------------------------------------------------------------------
 
-class TestABS(unittest.TestCase):
 
+class TestABS(unittest.TestCase):
     def setUp(self):
         self.x = mk_var("x", bool_ty)
         self.y = mk_var("y", bool_ty)
@@ -822,7 +866,7 @@ class TestABS(unittest.TestCase):
     def test_abs_with_body_equation(self):
         # |- x=y  (after ASSUME)  =>  |- (\z.x) = (\z.y)
         z = mk_var("z", bool_ty)
-        th_eq = ASSUME(mk_eq(self.x, self.y))   # {x=y} |- x=y
+        th_eq = ASSUME(mk_eq(self.x, self.y))  # {x=y} |- x=y
         th = ABS(z, th_eq)
         lhs, rhs = dest_eq(concl(th))
         self.assertEqual(lhs, mk_abs(z, self.x))
@@ -836,7 +880,7 @@ class TestABS(unittest.TestCase):
 
     def test_abs_var_free_in_hyp_raises(self):
         # x is free in the hypothesis {x=y}, so ABS(x, ...) must fail
-        th_eq = ASSUME(mk_eq(self.x, self.y))   # hyp contains x
+        th_eq = ASSUME(mk_eq(self.x, self.y))  # hyp contains x
         with self.assertRaises(Exception):
             ABS(self.x, th_eq)
 
@@ -854,8 +898,8 @@ class TestABS(unittest.TestCase):
 # BETA
 # ---------------------------------------------------------------------------
 
-class TestBETA(unittest.TestCase):
 
+class TestBETA(unittest.TestCase):
     def setUp(self):
         self.x = mk_var("x", bool_ty)
         self.y = mk_var("y", bool_ty)
@@ -898,8 +942,8 @@ class TestBETA(unittest.TestCase):
 # ASSUME
 # ---------------------------------------------------------------------------
 
-class TestASSUME(unittest.TestCase):
 
+class TestASSUME(unittest.TestCase):
     def setUp(self):
         self.x = mk_var("x", bool_ty)
 
@@ -929,8 +973,8 @@ class TestASSUME(unittest.TestCase):
 # EQ_MP
 # ---------------------------------------------------------------------------
 
-class TestEQ_MP(unittest.TestCase):
 
+class TestEQ_MP(unittest.TestCase):
     def setUp(self):
         self.p = mk_var("p", bool_ty)
         self.q = mk_var("q", bool_ty)
@@ -960,7 +1004,7 @@ class TestEQ_MP(unittest.TestCase):
 
     def test_eq_mp_lhs_mismatch_raises(self):
         th_eq = ASSUME(mk_eq(self.p, self.q))
-        th_q = ASSUME(self.q)   # lhs of eq is p, but conclusion is q
+        th_q = ASSUME(self.q)  # lhs of eq is p, but conclusion is q
         with self.assertRaises(Exception):
             EQ_MP(th_eq, th_q)
 
@@ -972,13 +1016,13 @@ class TestEQ_MP(unittest.TestCase):
         # EQ_MP should accept alpha-equal lhs
         bv1 = mk_var("a", bool_ty)
         bv2 = mk_var("b", bool_ty)
-        ab1 = mk_abs(bv1, bv1)   # \a.a  : bool->bool
-        ab2 = mk_abs(bv2, bv2)   # \b.b  (alpha-equal)
+        ab1 = mk_abs(bv1, bv1)  # \a.a  : bool->bool
+        ab2 = mk_abs(bv2, bv2)  # \b.b  (alpha-equal)
         # Make bool-typed terms via application
         z = mk_var("z", bool_ty)
         lhs = mk_comb(ab1, z)
         rhs = mk_comb(ab2, z)
-        th_eq = ASSUME(mk_eq(lhs, rhs))   # {lhs=rhs} |- lhs=rhs
+        th_eq = ASSUME(mk_eq(lhs, rhs))  # {lhs=rhs} |- lhs=rhs
         th_lhs = ASSUME(lhs)
         th = EQ_MP(th_eq, th_lhs)
         self.assertEqual(concl(th), rhs)
@@ -988,8 +1032,8 @@ class TestEQ_MP(unittest.TestCase):
 # DEDUCT_ANTISYM_RULE
 # ---------------------------------------------------------------------------
 
-class TestDEDUCT_ANTISYM_RULE(unittest.TestCase):
 
+class TestDEDUCT_ANTISYM_RULE(unittest.TestCase):
     def setUp(self):
         self.p = mk_var("p", bool_ty)
         self.q = mk_var("q", bool_ty)
@@ -1018,13 +1062,13 @@ class TestDEDUCT_ANTISYM_RULE(unittest.TestCase):
     def test_full_cancellation(self):
         # Build  q |- p  and  p |- q  so conclusions cancel completely
         # q |- p:  EQ_MP(ASSUME(q=p), ASSUME(q))
-        th_qp = ASSUME(mk_eq(self.q, self.p))   # {q=p} |- q=p
-        th_q  = ASSUME(self.q)
-        th1   = EQ_MP(th_qp, th_q)             # {q=p, q} |- p
+        th_qp = ASSUME(mk_eq(self.q, self.p))  # {q=p} |- q=p
+        th_q = ASSUME(self.q)
+        th1 = EQ_MP(th_qp, th_q)  # {q=p, q} |- p
 
         th_pq = ASSUME(mk_eq(self.p, self.q))
-        th_p  = ASSUME(self.p)
-        th2   = EQ_MP(th_pq, th_p)             # {p=q, p} |- q
+        th_p = ASSUME(self.p)
+        th2 = EQ_MP(th_pq, th_p)  # {p=q, p} |- q
 
         th = DEDUCT_ANTISYM_RULE(th1, th2)
         # concl(th1)=p removed from hyp(th2); concl(th2)=q removed from hyp(th1)
@@ -1034,7 +1078,7 @@ class TestDEDUCT_ANTISYM_RULE(unittest.TestCase):
 
     def test_conclusion_is_biconditional(self):
         th1 = ASSUME(self.p)
-        th2 = ASSUME(self.p)   # same term both sides
+        th2 = ASSUME(self.p)  # same term both sides
         th = DEDUCT_ANTISYM_RULE(th1, th2)
         lhs, rhs = dest_eq(concl(th))
         self.assertEqual(lhs, rhs)
@@ -1047,8 +1091,8 @@ class TestDEDUCT_ANTISYM_RULE(unittest.TestCase):
 # INST_TYPE
 # ---------------------------------------------------------------------------
 
-class TestINST_TYPE(unittest.TestCase):
 
+class TestINST_TYPE(unittest.TestCase):
     def setUp(self):
         self.x_a = mk_var("x", aty)
         self.x_b = mk_var("x", bool_ty)
@@ -1059,12 +1103,12 @@ class TestINST_TYPE(unittest.TestCase):
         self.assertTrue(equals_thm(th, th2))
 
     def test_instantiate_conclusion(self):
-        th = REFL(self.x_a)   # |- x_A = x_A
+        th = REFL(self.x_a)  # |- x_A = x_A
         th2 = INST_TYPE([(bool_ty, aty)], th)
         self.assertEqual(concl(th2), mk_eq(self.x_b, self.x_b))
 
     def test_instantiate_hypotheses(self):
-        th = ASSUME(mk_eq(self.x_a, self.x_a))   # {x_A=x_A} |- x_A=x_A
+        th = ASSUME(mk_eq(self.x_a, self.x_a))  # {x_A=x_A} |- x_A=x_A
         th2 = INST_TYPE([(bool_ty, aty)], th)
         expected_hyp = mk_eq(self.x_b, self.x_b)
         self.assertIn(expected_hyp, hyp(th2))
@@ -1074,7 +1118,7 @@ class TestINST_TYPE(unittest.TestCase):
         b = mk_vartype("B")
         x_a = self.x_a
         x_b_var = mk_var("y", b)
-        ab = mk_abs(x_a, x_b_var)   # \(x:A). (y:B)  : A->B
+        ab = mk_abs(x_a, x_b_var)  # \(x:A). (y:B)  : A->B
         th = REFL(ab)
         th2 = INST_TYPE([(bool_ty, aty), (bool_ty, b)], th)
         lhs, _ = dest_eq(concl(th2))
@@ -1083,7 +1127,7 @@ class TestINST_TYPE(unittest.TestCase):
         self.assertEqual(body.ty, bool_ty)
 
     def test_no_free_tyvars_unchanged(self):
-        th = REFL(self.x_b)   # |- x_bool = x_bool (no type vars)
+        th = REFL(self.x_b)  # |- x_bool = x_bool (no type vars)
         th2 = INST_TYPE([(aty, bty)], th)
         self.assertTrue(equals_thm(th, th2))
 
@@ -1092,8 +1136,8 @@ class TestINST_TYPE(unittest.TestCase):
 # INST
 # ---------------------------------------------------------------------------
 
-class TestINST(unittest.TestCase):
 
+class TestINST(unittest.TestCase):
     def setUp(self):
         self.x = mk_var("x", bool_ty)
         self.y = mk_var("y", bool_ty)
@@ -1105,20 +1149,20 @@ class TestINST(unittest.TestCase):
         self.assertTrue(equals_thm(th, th2))
 
     def test_instantiate_conclusion(self):
-        th = REFL(self.x)   # |- x=x
-        th2 = INST([(self.y, self.x)], th)   # replace x with y
+        th = REFL(self.x)  # |- x=x
+        th2 = INST([(self.y, self.x)], th)  # replace x with y
         self.assertEqual(concl(th2), mk_eq(self.y, self.y))
         self.assertEqual(hyp(th2), [])
 
     def test_instantiate_hypotheses(self):
-        th = ASSUME(self.x)   # {x} |- x
+        th = ASSUME(self.x)  # {x} |- x
         th2 = INST([(self.y, self.x)], th)
         self.assertEqual(concl(th2), self.y)
         self.assertIn(self.y, hyp(th2))
 
     def test_instantiate_multiple_vars(self):
         eq = mk_eq(self.x, self.y)
-        th = ASSUME(eq)   # {x=y} |- x=y
+        th = ASSUME(eq)  # {x=y} |- x=y
         th2 = INST([(self.z, self.x), (self.x, self.y)], th)
         lhs, rhs = dest_eq(concl(th2))
         self.assertEqual(lhs, self.z)
@@ -1126,14 +1170,14 @@ class TestINST(unittest.TestCase):
 
     def test_inst_does_not_capture(self):
         # |- (\y. x) = (\y. x) ; replace x with y should rename binder
-        ab = mk_abs(self.y, self.x)   # \y. x
+        ab = mk_abs(self.y, self.x)  # \y. x
         th = REFL(ab)
         th2 = INST([(self.y, self.x)], th)
         # lhs should be alpha-renaming of \y. y, i.e., \z. z for some z
         lhs, _ = dest_eq(concl(th2))
         bv, body = dest_abs(lhs)
-        self.assertNotEqual(bv, self.y)   # binder renamed away from y
-        self.assertEqual(body, self.y)    # body is now y
+        self.assertNotEqual(bv, self.y)  # binder renamed away from y
+        self.assertEqual(body, self.y)  # body is now y
 
     def test_wrong_type_raises(self):
         x_a = mk_var("x", aty)
@@ -1145,8 +1189,8 @@ class TestINST(unittest.TestCase):
 # Axioms
 # ---------------------------------------------------------------------------
 
-class TestAxioms(KernelStateTestCase):
 
+class TestAxioms(KernelStateTestCase):
     def setUp(self):
         super().setUp()
         self.p = mk_var("p", bool_ty)
@@ -1175,12 +1219,12 @@ class TestAxioms(KernelStateTestCase):
 # Definitions
 # ---------------------------------------------------------------------------
 
-class TestDefinitions(KernelStateTestCase):
 
+class TestDefinitions(KernelStateTestCase):
     def test_new_basic_definition(self):
         ty = mk_fun_ty(bool_ty, bool_ty)
         x = mk_var("x", bool_ty)
-        rhs = mk_abs(x, x)   # \x. x
+        rhs = mk_abs(x, x)  # \x. x
         defn_tm = mk_eq(mk_var("myid", ty), rhs)
         th = new_basic_definition(defn_tm)
         self.assertEqual(hyp(th), [])
@@ -1211,15 +1255,15 @@ class TestDefinitions(KernelStateTestCase):
     def test_new_basic_definition_bad_form_raises(self):
         x = mk_var("x", bool_ty)
         with self.assertRaises(Exception):
-            new_basic_definition(x)   # not an equation
+            new_basic_definition(x)  # not an equation
 
 
 # ---------------------------------------------------------------------------
 # Type definitions
 # ---------------------------------------------------------------------------
 
-class TestNewBasicTypeDefinition(KernelStateTestCase):
 
+class TestNewBasicTypeDefinition(KernelStateTestCase):
     def _build_existence_thm(self):
         # Build  |- (\b:bool. b=b) w  using new_axiom
         b = mk_var("b", bool_ty)
@@ -1281,7 +1325,7 @@ class TestNewBasicTypeDefinition(KernelStateTestCase):
 
     def test_non_combination_conclusion_raises(self):
         # The existence theorem must be a combination P t
-        ex = new_axiom(mk_var("p", bool_ty))   # concl is a Var, not Comb
+        ex = new_axiom(mk_var("p", bool_ty))  # concl is a Var, not Comb
         with self.assertRaises(Exception):
             new_basic_type_definition("myty9", ("myabs9", "myrep9"), ex)
 

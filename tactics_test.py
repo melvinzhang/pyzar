@@ -30,16 +30,16 @@ def main():
     x = Var("x", bool_ty)
     f = Var("f", mk_fun_ty(bool_ty, mk_fun_ty(bool_ty, bool_ty)))
     fxx = mk_app(f, x, x)
-    bad_rule = ASSUME(mk_eq(x, fxx))   # x = f x x — empty foralls, fires literally
+    bad_rule = ASSUME(mk_eq(x, fxx))  # x = f x x — empty foralls, fires literally
     try:
         REWRITE_CONV([bad_rule], x)
     except HolError as e:
         msg = str(e)
         assert "consecutive passes" in msg, (
-            f"expected blow-up guard message, got: {msg}")
+            f"expected blow-up guard message, got: {msg}"
+        )
     else:
-        raise AssertionError(
-            "expected REWRITE_CONV to abort on self-recursive rule")
+        raise AssertionError("expected REWRITE_CONV to abort on self-recursive rule")
 
     print("tactics.py self-tests passed.")
 

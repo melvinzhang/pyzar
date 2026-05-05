@@ -29,33 +29,92 @@ import dataclasses
 import enum
 
 from fusion import (
-    Var, Comb, Abs, thm,
-    HolError, ASSUME, EQ_MP, INST, type_of, TRANS, MK_COMB, ABS, REFL,
+    Var,
+    Comb,
+    Abs,
+    thm,
+    HolError,
+    ASSUME,
+    EQ_MP,
+    INST,
+    type_of,
+    TRANS,
+    MK_COMB,
+    ABS,
+    REFL,
     DEDUCT_ANTISYM_RULE,
     vfree_in,
 )
 from basics import (
-    aconv, mk_abs, mk_app, rand, rator, mk_eq, mk_fun_ty, dest_eq, dest_binop_any,
+    aconv,
+    mk_abs,
+    mk_app,
+    rand,
+    rator,
+    mk_eq,
+    mk_fun_ty,
+    dest_eq,
+    dest_binop_any,
 )
 from axioms import (
-    T, F, mk_select, mk_forall, mk_not,
-    dest_disj, dest_exists, dest_forall, dest_imp, dest_neg,
-    dest_conj, is_conj, is_disj,
+    T,
+    F,
+    mk_select,
+    mk_forall,
+    mk_not,
+    dest_disj,
+    dest_exists,
+    dest_forall,
+    dest_imp,
+    dest_neg,
+    dest_conj,
+    is_conj,
+    is_disj,
 )
 from tactics import (
-    SPEC, GEN, DISCH, MP, MP_LIST, DISJ_CASES, BETA_NORM, SYM,
-    AP_TERM, AP_THM, PROVE_HYP, CHOOSE_WITNESS, UNFOLD, subst_term,
-    NOT_INTRO, NOT_ELIM, CONTR, EXISTS, DISJ1, DISJ2,
-    CONJ, CONJUNCT1, CONJUNCT2, TRANS_CHAIN,
-    REWRITE_PROVE, REWRITE_CONV, REWRITE_RULE,
+    SPEC,
+    GEN,
+    DISCH,
+    MP,
+    MP_LIST,
+    DISJ_CASES,
+    BETA_NORM,
+    SYM,
+    AP_TERM,
+    AP_THM,
+    PROVE_HYP,
+    CHOOSE_WITNESS,
+    UNFOLD,
+    subst_term,
+    NOT_INTRO,
+    NOT_ELIM,
+    CONTR,
+    EXISTS,
+    DISJ1,
+    DISJ2,
+    CONJ,
+    CONJUNCT1,
+    CONJUNCT2,
+    TRANS_CHAIN,
+    REWRITE_PROVE,
+    REWRITE_CONV,
+    REWRITE_RULE,
     AC_PROVE,
-    _strip_forall, _term_match,
+    _strip_forall,
+    _term_match,
 )
 from parser import (
-    parse, parse_label, parse_label_or_bare, parse_let_spec,
-    parse_pattern_spec, peel_label_prefix,
-    pp, ParseError, has_const,
-    PatName, PatConj,
+    parse,
+    parse_label,
+    parse_label_or_bare,
+    parse_let_spec,
+    parse_pattern_spec,
+    peel_label_prefix,
+    pp,
+    ParseError,
+    has_const,
+    PatName,
+    PatConj,
 )
 
 
@@ -75,14 +134,15 @@ from parser import (
 # call sites).
 # ---------------------------------------------------------------------------
 
+
 @dataclasses.dataclass
 class RelationDef:
     op: str
-    kind: str   # "exists" | "disj"
-    unfold: object   # (a, b) -> |- (op a b) = body
+    kind: str  # "exists" | "disj"
+    unfold: object  # (a, b) -> |- (op a b) = body
 
 
-_RELATIONS = {}   # op_name -> RelationDef
+_RELATIONS = {}  # op_name -> RelationDef
 
 
 def register_relation(rel):
@@ -109,6 +169,7 @@ def register_disj_unfolder(op_name, unfold_fn):
 # call sites no longer need to name a specific contradiction lemma.
 
 _CONTRA_FINDERS = {}
+
 
 def register_contra_finder(rel_a, rel_b, finder):
     """Register ``finder(th_a, th_b) -> |- F`` for facts ``rel_a a b`` /
@@ -142,21 +203,21 @@ def contra_finder(thm):
     vs, body = _strip_forall(thm)
     parts = dest_imp(body._concl)
     if parts is None:
-        raise HolError(
-            f"contra_finder: {pp(thm._concl)} is not an implication")
+        raise HolError(f"contra_finder: {pp(thm._concl)} is not an implication")
     ant1, rest = parts
     parts2 = dest_imp(rest)
     if parts2 is None or not aconv(parts2[1], F):
         raise HolError(
-            f"contra_finder: expected '!vs. A1 ==> A2 ==> F', got "
-            f"{pp(thm._concl)}")
+            f"contra_finder: expected '!vs. A1 ==> A2 ==> F', got {pp(thm._concl)}"
+        )
     ant2 = parts2[0]
 
     def _rel_of(t):
         c = dest_binop_any(t)
         if c is None:
             raise HolError(
-                f"contra_finder: antecedent {pp(t)} is not a binary relation")
+                f"contra_finder: antecedent {pp(t)} is not a binary relation"
+            )
         return c[0]
 
     rel1 = _rel_of(ant1)
@@ -168,11 +229,13 @@ def contra_finder(thm):
         if subst is None:
             raise HolError(
                 f"contra_finder({rel1!r}, {rel2!r}): first fact "
-                f"{pp(th_a._concl)} does not match {pp(ant1)}")
+                f"{pp(th_a._concl)} does not match {pp(ant1)}"
+            )
         if any(v not in subst for v in vs):
             raise HolError(
                 f"contra_finder({rel1!r}, {rel2!r}): forall vars not "
-                f"determined by first fact {pp(th_a._concl)}")
+                f"determined by first fact {pp(th_a._concl)}"
+            )
         specced = thm
         for v in vs:
             specced = SPEC(subst[v], specced)
@@ -190,11 +253,13 @@ def contra_finder(thm):
                 raise HolError(
                     f"contra_finder({rel1!r}, {rel2!r}): equality "
                     f"{pp(th_b._concl)} does not relate "
-                    f"{pp(l_exp)} and {pp(r_exp)}")
+                    f"{pp(l_exp)} and {pp(r_exp)}"
+                )
         else:
             raise HolError(
                 f"contra_finder({rel1!r}, {rel2!r}): second fact "
-                f"{pp(th_b._concl)} does not match expected {pp(ant2_inst)}")
+                f"{pp(th_b._concl)} does not match expected {pp(ant2_inst)}"
+            )
         return MP(MP(specced, th_a), th_b_use)
 
     register_contra_finder(rel1, rel2, adapter)
@@ -211,6 +276,7 @@ def contra_finder(thm):
 # names ``num`` at all.
 # ---------------------------------------------------------------------------
 
+
 class InductionStrategy:
     """How to do induction on a single ``hol_type``.
 
@@ -224,6 +290,7 @@ class InductionStrategy:
                          function that, given the IH theorem, returns
                          the step proof; produces ``|- !var. body``.
     """
+
     __slots__ = ("ty", "base_term", "succ_fn", "induct_prove")
 
     def __init__(self, ty, base_term, succ_fn, induct_prove):
@@ -233,7 +300,8 @@ class InductionStrategy:
         self.induct_prove = induct_prove
 
 
-_INDUCTION_STRATEGIES = {}   # hol_type -> InductionStrategy
+_INDUCTION_STRATEGIES = {}  # hol_type -> InductionStrategy
+
 
 def register_induction(strategy):
     """Plugins call this once at import time to teach ``p.induction(v)``
@@ -275,7 +343,7 @@ def _lookup_relation(term, kind=None):
 # an iff-split pattern, or a disjunction case-split pattern.
 # ---------------------------------------------------------------------------
 
-_PATTERN_HANDLERS = {}   # pattern type -> (p, pat, th) -> None
+_PATTERN_HANDLERS = {}  # pattern type -> (p, pat, th) -> None
 
 
 def register_pattern_handler(pat_type, handler):
@@ -291,8 +359,7 @@ def _apply_pattern(p, pat, th):
     """Dispatch ``pat`` on ``th`` to register the corresponding facts."""
     handler = _PATTERN_HANDLERS.get(type(pat))
     if handler is None:
-        raise HolError(
-            f"assume: no handler for pattern type {type(pat).__name__}")
+        raise HolError(f"assume: no handler for pattern type {type(pat).__name__}")
     handler(p, pat, th)
 
 
@@ -314,8 +381,8 @@ def _handle_conj_pattern(p, pat, th):
         else:
             if not is_conj(cur._concl):
                 raise HolError(
-                    f"assume: pattern expects conjunction, got "
-                    f"{pp(cur._concl)}")
+                    f"assume: pattern expects conjunction, got {pp(cur._concl)}"
+                )
             _apply_pattern(p, sub, CONJUNCT1(cur))
             cur = CONJUNCT2(cur)
 
@@ -343,6 +410,7 @@ def _pattern_primary_label(pat):
 # Frame: a single open scope (root, induction body, base/step, case).
 # ---------------------------------------------------------------------------
 
+
 class LazyLetDef:
     """Local-equation form of a let (Isabelle-style ``define``).
 
@@ -355,14 +423,15 @@ class LazyLetDef:
     INST'd to ``\\args. body`` and the now-trivial substituted equation
     is PROVE_HYP'd, leaving a theorem with no lazy-let baggage.
     """
+
     __slots__ = ("name", "bvars", "body", "carrier", "eq_th")
 
     def __init__(self, name, bvars, body, carrier, eq_th):
         self.name = name
         self.bvars = list(bvars)
         self.body = body
-        self.carrier = carrier   # fresh Var of fun-type t1->...->tn->bty
-        self.eq_th = eq_th       # [eq_term] |- !b1...bn. R b1..bn = body
+        self.carrier = carrier  # fresh Var of fun-type t1->...->tn->bty
+        self.eq_th = eq_th  # [eq_term] |- !b1...bn. R b1..bn = body
 
 
 def _carrier_abs_body(lz):
@@ -402,6 +471,7 @@ class FrameKind(enum.Enum):
     """Discriminator for ``_Frame``. Replaces ad-hoc string tags so
     misspellings fail loudly at the use site instead of silently never
     matching."""
+
     ROOT = "root"
     INDUCTION = "induction"
     IND_BASE = "ind_base"
@@ -421,6 +491,7 @@ class _InductionData:
     ``_InductionCtx.__enter__``; the ``base_th`` / ``step_th`` slots are
     filled by the corresponding sub-frames' ``on_close`` callbacks and
     consumed by ``_InductionCtx.__exit__``."""
+
     var: object
     body: object
     strategy: InductionStrategy
@@ -435,6 +506,7 @@ class _CasesData:
     ``case()`` to find the matching leaf); ``branches`` is appended to
     by each ``case()``'s ``on_close`` and consumed by
     ``_CasesCtx.__exit__``."""
+
     or_concl: object
     branches: list = dataclasses.field(default_factory=list)
 
@@ -449,38 +521,50 @@ class _AssumeHyp:
     when a lazy let goes out of scope; ``_close_frame`` later DISCHes
     them in the original registration order.
     """
+
     label: str
     asm: object
     term_eq_ant: object
 
 
 class _Frame:
-    __slots__ = ("goal", "kind", "vars_added", "hyps_added",
-                 "facts_added", "choose_env", "type_env",
-                 "lazy_lets", "simp_rules", "data", "result")
+    __slots__ = (
+        "goal",
+        "kind",
+        "vars_added",
+        "hyps_added",
+        "facts_added",
+        "choose_env",
+        "type_env",
+        "lazy_lets",
+        "simp_rules",
+        "data",
+        "result",
+    )
 
     def __init__(self, goal=None, kind=FrameKind.ROOT):
         self.goal = goal
         self.kind = kind
-        self.vars_added = []      # for fix(): GEN at close
-        self.hyps_added = []      # list of _AssumeHyp; DISCH'd at close
-        self.facts_added = []     # labels added at this frame; popped on exit
-        self.choose_env = {}      # name -> witness term (parser env entries)
-        self.type_env = {}        # name -> hol_type for higher-order params
-        self.lazy_lets = {}       # name -> LazyLetDef (Isabelle-style local equation)
-        self.simp_rules = []      # list of theorems used as default rewrite rules
-        self.data = None          # _InductionData / _CasesData (kind-specific)
-        self.result = None        # the theorem proving `goal`
+        self.vars_added = []  # for fix(): GEN at close
+        self.hyps_added = []  # list of _AssumeHyp; DISCH'd at close
+        self.facts_added = []  # labels added at this frame; popped on exit
+        self.choose_env = {}  # name -> witness term (parser env entries)
+        self.type_env = {}  # name -> hol_type for higher-order params
+        self.lazy_lets = {}  # name -> LazyLetDef (Isabelle-style local equation)
+        self.simp_rules = []  # list of theorems used as default rewrite rules
+        self.data = None  # _InductionData / _CasesData (kind-specific)
+        self.result = None  # the theorem proving `goal`
 
 
 # ---------------------------------------------------------------------------
 # Proof object: stack of frames + name->thm registry.
 # ---------------------------------------------------------------------------
 
+
 class Proof:
     def __init__(self):
         self._frames = [_Frame(kind=FrameKind.ROOT)]
-        self._facts = {}          # label -> thm
+        self._facts = {}  # label -> thm
         self._anon = 0
 
     @property
@@ -521,8 +605,8 @@ class Proof:
         existing = self._namespace_kind(name)
         if existing is not None:
             raise HolError(
-                f"{registering_as}: name {name!r} clashes with an "
-                f"existing {existing}")
+                f"{registering_as}: name {name!r} clashes with an existing {existing}"
+            )
 
     def _scope_env(self):
         env = {"F": F, "T": T}
@@ -616,18 +700,17 @@ class Proof:
                 spine.append(head.arg)
                 head = head.fun
             spine.reverse()
-            if (isinstance(head, Var) and head in carriers
-                    and head not in blocked):
+            if isinstance(head, Var) and head in carriers and head not in blocked:
                 lz = carriers[head]
                 n = len(lz.bvars)
                 if len(spine) >= n:
-                    arg_eqs = [self._unfold_walk(a, carriers, blocked)
-                               for a in spine]
+                    arg_eqs = [self._unfold_walk(a, carriers, blocked) for a in spine]
                     eq = lz.eq_th
                     for i in range(n):
                         eq = SPEC(rand(arg_eqs[i]._concl), eq)
                     rhs_unfolded = self._unfold_walk(
-                        rand(eq._concl), carriers, blocked | {head})
+                        rand(eq._concl), carriers, blocked | {head}
+                    )
                     eq = TRANS(eq, rhs_unfolded)
                     head_chain = REFL(head)
                     for i in range(n):
@@ -639,8 +722,7 @@ class Proof:
                     return cur
             f_eq = self._unfold_walk(tm.fun, carriers, blocked)
             a_eq = self._unfold_walk(tm.arg, carriers, blocked)
-            if (aconv(rand(f_eq._concl), tm.fun)
-                    and aconv(rand(a_eq._concl), tm.arg)):
+            if aconv(rand(f_eq._concl), tm.fun) and aconv(rand(a_eq._concl), tm.arg):
                 return REFL(tm)
             return MK_COMB(f_eq, a_eq)
         return REFL(tm)
@@ -745,7 +827,8 @@ class Proof:
         raise HolError(
             f"{op}: shape does not match\n"
             f"  expected: {pp(target)}\n"
-            f"  got:      {pp(th._concl)}")
+            f"  got:      {pp(th._concl)}"
+        )
 
     def _apply_chain(self, justification, args, *, simp, op):
         """Drive the ``thm | callable | fact-ref`` dispatch shared by
@@ -774,8 +857,7 @@ class Proof:
         if callable(justification):
             resolved = [self.coerce(a, accept_term=True) for a in args]
             return justification(*resolved)
-        raise HolError(
-            f"{op}: not a theorem or callable: {justification!r}")
+        raise HolError(f"{op}: not a theorem or callable: {justification!r}")
 
     def _close_frame(self, fr, th):
         """Discharge a frame's accumulated bindings into ``th``.
@@ -804,9 +886,8 @@ class Proof:
         for h in reversed(fr.hyps_added):
             th = DISCH(h.asm._concl, th)
             consequent = rand(th._concl)
-            imp_eq_const = rator(rator(th._concl))   # the (==>) const
-            imp_eq = MK_COMB(AP_TERM(imp_eq_const, h.term_eq_ant),
-                             REFL(consequent))
+            imp_eq_const = rator(rator(th._concl))  # the (==>) const
+            imp_eq = MK_COMB(AP_TERM(imp_eq_const, h.term_eq_ant), REFL(consequent))
             th = EQ_MP(imp_eq, th)
         th = self._discharge_lazy_lets(fr, th)
         th = _beta_norm_concl(th)
@@ -912,8 +993,8 @@ class Proof:
             raise HolError(f"unfold_let: no lazy let named {name!r} in scope")
         if len(args) != len(lz.bvars):
             raise HolError(
-                f"unfold_let: {name!r} expects {len(lz.bvars)} args, "
-                f"got {len(args)}")
+                f"unfold_let: {name!r} expects {len(lz.bvars)} args, got {len(args)}"
+            )
         th = lz.eq_th
         for a in args:
             a_t = self._parse(a) if isinstance(a, str) else a
@@ -960,7 +1041,8 @@ class Proof:
         """
         try:
             label, hyp_term = parse_label_or_bare(
-                label_spec, _env_bindings=self._scope_env())
+                label_spec, _env_bindings=self._scope_env()
+            )
         except ParseError as ex:
             raise HolError(f"{op}: cannot parse label spec: {ex}") from ex
         if hyp_term is None:
@@ -969,7 +1051,8 @@ class Proof:
             raise HolError(
                 f"{op}: hypothesis does not match expected\n"
                 f"  expected: {pp(expected)}\n"
-                f"  given:    {pp(hyp_term)}")
+                f"  given:    {pp(hyp_term)}"
+            )
         return label
 
     # ---- facts -----------------------------------------------------------
@@ -984,7 +1067,8 @@ class Proof:
             if label not in self._facts:
                 raise HolError(
                     f"_drop_facts: {label!r} not in fact registry "
-                    "(facts_added must stay a subset of _facts)")
+                    "(facts_added must stay a subset of _facts)"
+                )
             del self._facts[label]
 
     def coerce(self, x, *, accept_term=False):
@@ -1051,7 +1135,8 @@ class Proof:
                 raise HolError(f"fix({nm!r}): goal is not a forall: {pp(g)}")
             if pred.bvar.name != nm:
                 raise HolError(
-                    f"fix: name mismatch -- binder is {pred.bvar.name!r}, given {nm!r}")
+                    f"fix: name mismatch -- binder is {pred.bvar.name!r}, given {nm!r}"
+                )
             self._require_fresh_name(nm, "fix")
             self._cur.goal = pred.body
             self._cur.vars_added.append(pred.bvar)
@@ -1095,18 +1180,17 @@ class Proof:
         except ParseError as ex:
             raise HolError(
                 f"let: expected 'NAME(arg1, arg2, ...) := body' "
-                f"(args may be annotated 'arg:ty'); {ex}") from ex
+                f"(args may be annotated 'arg:ty'); {ex}"
+            ) from ex
 
         seen = set()
         for v in bvars:
             if v.name in seen:
-                raise HolError(
-                    f"let: duplicate arg name {v.name!r} in {spec!r}")
+                raise HolError(f"let: duplicate arg name {v.name!r} in {spec!r}")
             seen.add(v.name)
 
         if has_const(name):
-            raise HolError(
-                f"let: {name!r} clashes with a registered constant")
+            raise HolError(f"let: {name!r} clashes with a registered constant")
 
         self._register_lazy_let(name, bvars, body)
 
@@ -1132,10 +1216,10 @@ class Proof:
         th = self.coerce(ref)
         try:
             pattern, body_term = parse_pattern_spec(
-                spec, _env_bindings=self._scope_env())
+                spec, _env_bindings=self._scope_env()
+            )
         except ParseError as ex:
-            raise HolError(
-                f"split: cannot parse spec {spec!r}: {ex}") from ex
+            raise HolError(f"split: cannot parse spec {spec!r}: {ex}") from ex
         if body_term is not None:
             self._derive_shape_eq(body_term, th._concl, op="split")
         _apply_pattern(self, pattern, th)
@@ -1170,10 +1254,10 @@ class Proof:
         for spec in specs:
             try:
                 pattern, body_term = parse_pattern_spec(
-                    spec, _env_bindings=self._scope_env())
+                    spec, _env_bindings=self._scope_env()
+                )
             except ParseError as ex:
-                raise HolError(
-                    f"assume: cannot parse spec {spec!r}: {ex}") from ex
+                raise HolError(f"assume: cannot parse spec {spec!r}: {ex}") from ex
             g = self._cur.goal
             parts = dest_imp(g)
             if parts is None:
@@ -1213,7 +1297,8 @@ class Proof:
             raise HolError(
                 f"{op}: shape does not match\n"
                 f"  expected: {pp(rhs)}\n"
-                f"  got:      {pp(lhs)}")
+                f"  got:      {pp(lhs)}"
+            )
         return TRANS(lhs_eq, SYM(rhs_eq))
 
     # ---- have / thus -----------------------------------------------------
@@ -1265,10 +1350,8 @@ class Proof:
             var, inner_body, peel = env[var_name], body, False
         strategy = _INDUCTION_STRATEGIES.get(var.ty)
         if strategy is None:
-            raise HolError(
-                f"induction: no strategy registered for type {var.ty!r}")
-        return _InductionCtx(self, var, inner_body, strategy,
-                              peel_forall=peel)
+            raise HolError(f"induction: no strategy registered for type {var.ty!r}")
+        return _InductionCtx(self, var, inner_body, strategy, peel_forall=peel)
 
     def base(self):
         fr = self._cur
@@ -1280,8 +1363,7 @@ class Proof:
         def on_close(th):
             d.base_th = th
 
-        return _SubFrameCtx(self, sub_goal, kind=FrameKind.IND_BASE,
-                             on_close=on_close)
+        return _SubFrameCtx(self, sub_goal, kind=FrameKind.IND_BASE, on_close=on_close)
 
     def step(self, ih_label):
         """Open the inductive-step sub-block.
@@ -1303,9 +1385,13 @@ class Proof:
         def on_close(th):
             d.step_th = th
 
-        return _SubFrameCtx(self, sub_goal, kind=FrameKind.IND_STEP,
-                             on_close=on_close,
-                             extra_facts=[(ih_label, ASSUME(d.body))])
+        return _SubFrameCtx(
+            self,
+            sub_goal,
+            kind=FrameKind.IND_STEP,
+            on_close=on_close,
+            extra_facts=[(ih_label, ASSUME(d.body))],
+        )
 
     def choose(self, name_spec, from_, eq_label=None):
         """Eliminate an existential, bringing a witness into scope.
@@ -1343,7 +1429,8 @@ class Proof:
             if pred is None:
                 raise HolError(
                     f"choose: source {from_!r} is not an existential or order relation: "
-                    f"{pp(cur_th._concl)}")
+                    f"{pp(cur_th._concl)}"
+                )
             v_var = pred.bvar
             w_term = mk_select(v_var, pred.body)
             # SELECT_AX-derive the witness fact directly. The registered
@@ -1366,7 +1453,8 @@ class Proof:
                 raise HolError(
                     "choose: equation spec doesn't match witness body\n"
                     f"  expected: {pp(cur_th._concl)}\n"
-                    f"  given:    {pp(expected)}")
+                    f"  given:    {pp(expected)}"
+                )
 
         # Register the equation as a fact (default label = "{last_name}_eq").
         eq_label = eq_label or f"{names[-1]}_eq"
@@ -1405,8 +1493,7 @@ class Proof:
 
         th = go(target_norm)
         if th is None:
-            raise HolError(
-                f"{op}: no leaf discharged\n  goal: {pp(target)}")
+            raise HolError(f"{op}: no leaf discharged\n  goal: {pp(target)}")
         return self._simp_require(target, th, op=op)
 
     def _close_disj(self, op, match):
@@ -1467,12 +1554,12 @@ class Proof:
         w0, rest = witnesses[0], witnesses[1:]
 
         def inner(body_at_w0):
-            inner_th = self._make_existential_multi(
-                body_at_w0, rest, body_provider)
+            inner_th = self._make_existential_multi(body_at_w0, rest, body_provider)
             if inner_th is None and rest:
                 raise HolError(
                     "by_witness: target has fewer existential levels "
-                    f"than witnesses; stuck at: {pp(body_at_w0)}")
+                    f"than witnesses; stuck at: {pp(body_at_w0)}"
+                )
             return inner_th
 
         return self._make_existential(target, w0, inner)
@@ -1488,8 +1575,7 @@ class Proof:
         ``p.thus(<disj>).by_disj(ref)`` and the ``have eq →
         by_disj`` two-step.
         """
-        user_rules = [self.simp_norm_fact(self.coerce(r))
-                      for r in rules]
+        user_rules = [self.simp_norm_fact(self.coerce(r)) for r in rules]
         rules_thms = user_rules + self._active_simp_rules()
 
         def match(d):
@@ -1521,10 +1607,8 @@ class Proof:
         relation-goal ``have eq → by_witness`` two-step when the goal
         is a single ``a R b`` leaf.
         """
-        witness_t = (self._parse(witness) if isinstance(witness, str)
-                     else witness)
-        rules_thms = ([self.coerce(r) for r in rules]
-                      + self._active_simp_rules())
+        witness_t = self._parse(witness) if isinstance(witness, str) else witness
+        rules_thms = [self.coerce(r) for r in rules] + self._active_simp_rules()
 
         def body_provider(body_at_w):
             try:
@@ -1569,6 +1653,7 @@ class Proof:
         parent = self._cur
         if parent.goal is None:
             raise HolError("cases_on: no current goal")
+
         def on_close(res):
             parent.result = res
 
@@ -1587,7 +1672,8 @@ class Proof:
         if body is None:
             raise HolError(
                 f"suppose: current goal is not a negation: "
-                f"{pp(g) if g is not None else 'None'}")
+                f"{pp(g) if g is not None else 'None'}"
+            )
 
         label = self._parse_label_or_check(label_spec, body, op="suppose")
 
@@ -1595,9 +1681,13 @@ class Proof:
             not_th = NOT_INTRO(DISCH(body, F_th))
             self._cur.result = not_th
 
-        return _SubFrameCtx(self, F, kind=FrameKind.SUPPOSE,
-                             on_close=on_close,
-                             extra_facts=[(label, ASSUME(body))])
+        return _SubFrameCtx(
+            self,
+            F,
+            kind=FrameKind.SUPPOSE,
+            on_close=on_close,
+            extra_facts=[(label, ASSUME(body))],
+        )
 
     def absurd(self):
         """Discharge the current goal as an impossible case by deriving F.
@@ -1632,8 +1722,7 @@ class Proof:
         leaf_v = leaf_pred.bvar
         w_term = mk_select(leaf_v, leaf_pred.body)
         user_pred = dest_exists(user_term)
-        wit_name = (user_pred.bvar.name if user_pred is not None
-                    else leaf_v.name)
+        wit_name = user_pred.bvar.name if user_pred is not None else leaf_v.name
         eq_label = f"{wit_name}_eq"
         witness_th = CHOOSE_WITNESS(leaf_pred, ASSUME(leaf))
         self._require_fresh_name(wit_name, "case")
@@ -1658,14 +1747,19 @@ class Proof:
             raise HolError(
                 "case: branch does not alpha-match any disjunct\n"
                 f"  branch: {pp(user_term)}\n"
-                f"  disj:   {pp(or_concl)}")
+                f"  disj:   {pp(or_concl)}"
+            )
 
         def on_close(th):
             fr.data.branches.append((leaf, th))
 
-        sub_ctx = _SubFrameCtx(self, outer_goal, kind=FrameKind.CASE,
-                                on_close=on_close,
-                                extra_facts=[(label, ASSUME(leaf))])
+        sub_ctx = _SubFrameCtx(
+            self,
+            outer_goal,
+            kind=FrameKind.CASE,
+            on_close=on_close,
+            extra_facts=[(label, ASSUME(leaf))],
+        )
         with sub_ctx as inner_p:
             self._auto_choose_for_case_leaf(leaf, user_term)
             yield inner_p
@@ -1674,6 +1768,7 @@ class Proof:
 # ---------------------------------------------------------------------------
 # Have / Thus: justification dispatchers.
 # ---------------------------------------------------------------------------
+
 
 class _Have:
     __slots__ = ("p", "label", "term", "is_thus")
@@ -1749,7 +1844,8 @@ class _Have:
         across the chain.
         """
         return self._finish(
-            self.p._apply_chain(justification, args, simp=True, op="by"))
+            self.p._apply_chain(justification, args, simp=True, op="by")
+        )
 
     def by_match(self, justification, *args):
         """Backward-chaining variant of ``by``: infer SPEC instantiations
@@ -1777,8 +1873,7 @@ class _Have:
         if isinstance(justification, str):
             justification = p.coerce(justification)
         if not isinstance(justification, thm):
-            raise HolError(
-                f"by_match: not a theorem: {justification!r}")
+            raise HolError(f"by_match: not a theorem: {justification!r}")
         th = p.simp_norm_fact(justification)
         vs, body = _strip_forall(th)
         vars_set = set(vs)
@@ -1794,7 +1889,8 @@ class _Have:
             if parts is None:
                 raise HolError(
                     f"by_match: no antecedent shape of {pp(body._concl)} "
-                    f"matches goal {pp(target)}")
+                    f"matches goal {pp(target)}"
+                )
             pat = parts[1]
             n_stripped += 1
         ants = []
@@ -1809,32 +1905,31 @@ class _Have:
             if isinstance(resolved, thm):
                 if ant_idx >= len(ants):
                     raise HolError(
-                        f"by_match: extra fact arg, no antecedent left: "
-                        f"{a!r}")
+                        f"by_match: extra fact arg, no antecedent left: {a!r}"
+                    )
                 ant_pat = ants[ant_idx]
                 fact_concl = rand(p.simp_normalize(resolved._concl)._concl)
-                if _term_match(ant_pat, fact_concl,
-                               vars_set, subst) is None:
+                if _term_match(ant_pat, fact_concl, vars_set, subst) is None:
                     raise HolError(
                         f"by_match: fact concl {pp(fact_concl)} "
-                        f"does not match antecedent {pp(ant_pat)}")
+                        f"does not match antecedent {pp(ant_pat)}"
+                    )
                 facts.append(resolved)
                 ant_idx += 1
             else:
                 v = next((v for v in vs if v not in subst), None)
                 if v is None:
                     raise HolError(
-                        f"by_match: extra term arg, all forall vars "
-                        f"bound: {a!r}")
+                        f"by_match: extra term arg, all forall vars bound: {a!r}"
+                    )
                 subst[v] = resolved
         unbound = [v.name for v in vs if v not in subst]
         if unbound:
-            raise HolError(
-                f"by_match: forall vars not determined: {unbound}")
+            raise HolError(f"by_match: forall vars not determined: {unbound}")
         if ant_idx < len(ants):
             raise HolError(
-                f"by_match: {len(ants) - ant_idx} antecedent(s) lack a "
-                "fact arg")
+                f"by_match: {len(ants) - ant_idx} antecedent(s) lack a fact arg"
+            )
         for v in vs:
             th = SPEC(subst[v], th)
         for fact_th in facts:
@@ -1853,10 +1948,11 @@ class _Have:
         enclosing frame are appended to the user's list.
         """
         rules_thms = self._resolved(rules) + self.p._active_simp_rules()
-        return self._finish(REWRITE_PROVE(
-            rules_thms, self.term,
-            ac=ac,
-            ac_rules=tuple(self._resolved(ac_rules))))
+        return self._finish(
+            REWRITE_PROVE(
+                rules_thms, self.term, ac=ac, ac_rules=tuple(self._resolved(ac_rules))
+            )
+        )
 
     def by_rewrite_of(self, ref, rules, *, ac=None, beta=False, op="by_rewrite_of"):
         """Rewrite a source fact ``ref`` to the have-term using ``rules``.
@@ -1896,13 +1992,13 @@ class _Have:
         # unfolded) and a rule whose LHS is in the other form silently
         # no-ops -- the bug that bit the SATZ_27 inlining attempt at
         # the choose-witness SELECT term.
-        src_simp = p.simp_normalize(th_src._concl)        # |- src = src_n
-        tgt_simp = p.simp_normalize(self.term)             # |- tgt = tgt_n
+        src_simp = p.simp_normalize(th_src._concl)  # |- src = src_n
+        tgt_simp = p.simp_normalize(self.term)  # |- tgt = tgt_n
         rules_n = [p.simp_norm_fact(r) for r in rules_thms]
         src_n = rand(src_simp._concl)
         tgt_n = rand(tgt_simp._concl)
-        eq_src_rw = REWRITE_CONV(rules_n, src_n, ac=ac)    # |- src_n = X
-        eq_tgt_rw = REWRITE_CONV(rules_n, tgt_n, ac=ac)    # |- tgt_n = Y
+        eq_src_rw = REWRITE_CONV(rules_n, src_n, ac=ac)  # |- src_n = X
+        eq_tgt_rw = REWRITE_CONV(rules_n, tgt_n, ac=ac)  # |- tgt_n = Y
         if beta:
             eq_src_rw = TRANS(eq_src_rw, BETA_NORM(rand(eq_src_rw._concl)))
             eq_tgt_rw = TRANS(eq_tgt_rw, BETA_NORM(rand(eq_tgt_rw._concl)))
@@ -1912,11 +2008,12 @@ class _Have:
             raise HolError(
                 f"{op}: normal forms differ\n"
                 f"  source reduces to: {pp(n_src)}\n"
-                f"  target reduces to: {pp(n_tgt)}")
+                f"  target reduces to: {pp(n_tgt)}"
+            )
         # Chain: src = src_n = X = tgt_n = tgt
-        eq_src_full = TRANS(src_simp, eq_src_rw)            # |- src = X
-        eq_tgt_full = TRANS(tgt_simp, eq_tgt_rw)            # |- tgt = X
-        bridge = TRANS(eq_src_full, SYM(eq_tgt_full))       # |- src = tgt
+        eq_src_full = TRANS(src_simp, eq_src_rw)  # |- src = X
+        eq_tgt_full = TRANS(tgt_simp, eq_tgt_rw)  # |- tgt = X
+        bridge = TRANS(eq_src_full, SYM(eq_tgt_full))  # |- src = tgt
         return self._finish(EQ_MP(bridge, th_src))
 
     def by_unfold(self, src, *defs):
@@ -1939,7 +2036,8 @@ class _Have:
         Like ``cases_on``, accepts extra ``*args`` to ``MP_LIST``-specialize
         a theorem source inline."""
         return self.p._open_cases(
-            ref, self.term, self._finish, args=args, op="by_cases")
+            ref, self.term, self._finish, args=args, op="by_cases"
+        )
 
     def proof(self):
         """Open a sub-frame whose goal is the have-term. The body proves it
@@ -1949,8 +2047,9 @@ class _Have:
 
         This is the declarative analogue of writing an intermediate lemma
         inline — the dream sketch's ``.proof(lambda q: …)`` block."""
-        return _SubFrameCtx(self.p, self.term, kind=FrameKind.HAVE_PROOF,
-                             on_close=self._finish)
+        return _SubFrameCtx(
+            self.p, self.term, kind=FrameKind.HAVE_PROOF, on_close=self._finish
+        )
 
     def by_contradiction(self, label_spec):
         """Classical proof by contradiction.
@@ -1967,21 +2066,25 @@ class _Have:
         Replaces the ``cases_on(EXCLUDED_MIDDLE, target)`` boilerplate
         whose first branch is just ``thus(target).by_thm(p.fact("h"))``.
         """
-        from classical import NOT_NOT_ELIM   # classical depends on proof
+        from classical import NOT_NOT_ELIM  # classical depends on proof
+
         target = self.term
         p = self.p
         not_target = mk_not(target)
 
-        label = p._parse_label_or_check(
-            label_spec, not_target, op="by_contradiction")
+        label = p._parse_label_or_check(label_spec, not_target, op="by_contradiction")
 
         def on_close(F_th):
             nn_th = NOT_INTRO(DISCH(not_target, F_th))
             self._finish(NOT_NOT_ELIM(nn_th))
 
-        return _SubFrameCtx(p, F, kind=FrameKind.SUPPOSE,
-                             on_close=on_close,
-                             extra_facts=[(label, ASSUME(not_target))])
+        return _SubFrameCtx(
+            p,
+            F,
+            kind=FrameKind.SUPPOSE,
+            on_close=on_close,
+            extra_facts=[(label, ASSUME(not_target))],
+        )
 
     def by_eq_mp(self, eq_th, ref):
         """``EQ_MP(eq_th, fact)`` -- rewrite a fact through an equation.
@@ -2004,8 +2107,8 @@ class _Have:
         parts = dest_eq(def_th._concl)
         if parts is None:
             raise HolError(
-                f"by_def: definition is not an equation: "
-                f"{pp(def_th._concl)}")
+                f"by_def: definition is not an equation: {pp(def_th._concl)}"
+            )
         head, rhs = parts
         n = 0
         while isinstance(rhs, Abs):
@@ -2013,22 +2116,24 @@ class _Have:
             rhs = rhs.body
         if n == 0:
             raise HolError(
-                f"by_def: definition RHS is not a lambda: "
-                f"{pp(def_th._concl)}")
+                f"by_def: definition RHS is not a lambda: {pp(def_th._concl)}"
+            )
         concl = p.simp_norm_fact(th_ref)._concl
         peeled = []
         for _ in range(n):
             if not isinstance(concl, Comb):
                 raise HolError(
                     f"by_def: fact {pp(th_ref._concl)} is not applied to "
-                    f"{n} args (definition arity)")
+                    f"{n} args (definition arity)"
+                )
             peeled.append(concl.arg)
             concl = concl.fun
         peeled.reverse()
         if not aconv(concl, head):
             raise HolError(
                 f"by_def: fact head {pp(concl)} does not match "
-                f"definition LHS {pp(head)}")
+                f"definition LHS {pp(head)}"
+            )
         return self._finish(p.simp_eq_mp(UNFOLD(def_th, *peeled), th_ref))
 
     def by_inst(self, lemma, *args):
@@ -2045,8 +2150,8 @@ class _Have:
             resolved = p.coerce(a, accept_term=True)
             if isinstance(resolved, thm):
                 raise HolError(
-                    f"by_inst: arg {a!r} resolved to a theorem; "
-                    "expected a term")
+                    f"by_inst: arg {a!r} resolved to a theorem; expected a term"
+                )
             th = SPEC(resolved, th)
         return self._finish(th)
 
@@ -2055,8 +2160,7 @@ class _Have:
         into ``a=c``. Each ``eq`` is a fact label or theorem of equation
         shape."""
         if len(eqs) < 2:
-            raise HolError(
-                f"by_trans: needs at least 2 equations, got {len(eqs)}")
+            raise HolError(f"by_trans: needs at least 2 equations, got {len(eqs)}")
         return self._finish(TRANS_CHAIN(self._resolved(eqs)))
 
     def by_cong(self, left, right):
@@ -2083,7 +2187,8 @@ class _Have:
             return self._finish(AP_TERM(L, R))
         raise HolError(
             "by_cong: at least one side must be an equation fact "
-            f"(got both terms: {pp(L)} / {pp(R)})")
+            f"(got both terms: {pp(L)} / {pp(R)})"
+        )
 
     def by_iff(self, fwd, rev):
         """For a boolean-equality have-term ``L = R``, combine two
@@ -2097,8 +2202,7 @@ class _Have:
         target = self.term
         eq_parts = dest_eq(target)
         if eq_parts is None:
-            raise HolError(
-                f"by_iff: target is not an equality: {pp(target)}")
+            raise HolError(f"by_iff: target is not an equality: {pp(target)}")
         L, R = eq_parts
         p = self.p
         th_a = p.simp_norm_fact(p.coerce(fwd))
@@ -2120,12 +2224,12 @@ class _Have:
                 f"by_iff: facts do not form L ==> R / R ==> L for goal "
                 f"{pp(target)}\n"
                 f"  fact A: {pp(th_a._concl)}\n"
-                f"  fact B: {pp(th_b._concl)}")
+                f"  fact B: {pp(th_b._concl)}"
+            )
 
-        th_R_from_L = MP(th_lr, ASSUME(L))   # {L} |- R
-        th_L_from_R = MP(th_rl, ASSUME(R))   # {R} |- L
-        return self._finish(
-            DEDUCT_ANTISYM_RULE(th_L_from_R, th_R_from_L))
+        th_R_from_L = MP(th_lr, ASSUME(L))  # {L} |- R
+        th_L_from_R = MP(th_rl, ASSUME(R))  # {R} |- L
+        return self._finish(DEDUCT_ANTISYM_RULE(th_L_from_R, th_R_from_L))
 
     def by_fold(self, ref):
         """Inverse of an unfolder: if the have-term is ``a R b`` for a
@@ -2135,8 +2239,7 @@ class _Have:
         target = self.term
         unfold_eq = _lookup_relation(target)
         if unfold_eq is None:
-            raise HolError(
-                f"by_fold: no unfolder registered for target: {pp(target)}")
+            raise HolError(f"by_fold: no unfolder registered for target: {pp(target)}")
         fact = self.p.coerce(ref)
         return self._finish(EQ_MP(SYM(unfold_eq), fact))
 
@@ -2157,11 +2260,9 @@ class _Have:
         fact_th = p.coerce(ref)
 
         if isinstance(witness, (list, tuple)):
-            witnesses = [p._parse(w) if isinstance(w, str) else w
-                         for w in witness]
+            witnesses = [p._parse(w) if isinstance(w, str) else w for w in witness]
         else:
-            witnesses = [p._parse(witness) if isinstance(witness, str)
-                         else witness]
+            witnesses = [p._parse(witness) if isinstance(witness, str) else witness]
 
         def body_provider(body_at_w):
             return p._simp_require(body_at_w, fact_th, op="by_witness")
@@ -2176,10 +2277,12 @@ class _Have:
         if unfold_eq is not None:
             raise HolError(
                 f"by_witness: unfolded form is not existential: "
-                f"{pp(rand(unfold_eq._concl))}")
+                f"{pp(rand(unfold_eq._concl))}"
+            )
         raise HolError(
             "by_witness: target is not existential or a registered relation: "
-            f"{pp(target)}")
+            f"{pp(target)}"
+        )
 
     def by_exists(self, witnesses, *rules):
         """Introduce a multi-quantifier existential ``?v1 ... vn. body`` (or
@@ -2195,10 +2298,8 @@ class _Have:
         target = self.term
         if not isinstance(witnesses, (list, tuple)):
             witnesses = [witnesses]
-        witnesses_t = [p._parse(w) if isinstance(w, str) else w
-                       for w in witnesses]
-        rules_thms = ([p.coerce(r) for r in rules]
-                      + p._active_simp_rules())
+        witnesses_t = [p._parse(w) if isinstance(w, str) else w for w in witnesses]
+        rules_thms = [p.coerce(r) for r in rules] + p._active_simp_rules()
 
         def prove(tm):
             if is_conj(tm):
@@ -2209,8 +2310,8 @@ class _Have:
         th = p._make_existential_multi(target, witnesses_t, prove)
         if th is None:
             raise HolError(
-                "by_exists: target is not existential or unfoldable: "
-                f"{pp(target)}")
+                f"by_exists: target is not existential or unfoldable: {pp(target)}"
+            )
         return self._finish(th)
 
     def by_select_def(self, def_th, *args, from_):
@@ -2231,16 +2332,15 @@ class _Have:
         def_eq = p.coerce(def_th)
         ex_th = p.coerce(from_)
         spec_args = [p._parse(a) if isinstance(a, str) else a for a in args]
-        unfold_eq = UNFOLD(def_eq, *spec_args)   # |- f a1...ak = @v. P v
+        unfold_eq = UNFOLD(def_eq, *spec_args)  # |- f a1...ak = @v. P v
         pred = dest_exists(ex_th._concl)
         if pred is None:
             raise HolError(
-                "by_select_def: from_ is not existential: "
-                f"{pp(ex_th._concl)}")
-        body_at_sel = CHOOSE_WITNESS(pred, ex_th)   # asl |- P[(@v.Pv)/v]
+                f"by_select_def: from_ is not existential: {pp(ex_th._concl)}"
+            )
+        body_at_sel = CHOOSE_WITNESS(pred, ex_th)  # asl |- P[(@v.Pv)/v]
         folded = REWRITE_RULE([SYM(unfold_eq)], body_at_sel)
-        return self._finish(p._simp_require(
-            self.term, folded, op="by_select_def"))
+        return self._finish(p._simp_require(self.term, folded, op="by_select_def"))
 
     def by_disj(self, ref):
         """Given a fact whose conclusion alpha-matches one of the goal's
@@ -2267,6 +2367,7 @@ class _Have:
 # Absurd: derive F from the current scope and CONTR-wrap to the frame's goal.
 # ---------------------------------------------------------------------------
 
+
 class _Absurd:
     __slots__ = ("p", "target")
 
@@ -2277,7 +2378,8 @@ class _Absurd:
     def _finish(self, F_th):
         if not aconv(F_th._concl, F):
             raise HolError(
-                f"absurd: justification did not produce F: {pp(F_th._concl)}")
+                f"absurd: justification did not produce F: {pp(F_th._concl)}"
+            )
         result = CONTR(self.target, F_th)
         self.p._cur.result = result
         return result
@@ -2287,7 +2389,8 @@ class _Absurd:
 
     def by(self, justification, *args):
         return self._finish(
-            self.p._apply_chain(justification, args, simp=False, op="absurd"))
+            self.p._apply_chain(justification, args, simp=False, op="absurd")
+        )
 
     def by_conj(self, *refs):
         """Discharge F from a fact ``P`` and a fact ``~P`` (in either order).
@@ -2296,7 +2399,8 @@ class _Absurd:
         ``MP(NOT_ELIM(neg), pos)``."""
         if len(refs) != 2:
             raise HolError(
-                f"absurd: by_conj requires exactly two facts, got {len(refs)}")
+                f"absurd: by_conj requires exactly two facts, got {len(refs)}"
+            )
         a, b = (self.p.coerce(r) for r in refs)
         # Try `a` as the negation, then `b`.
         for neg, pos in ((a, b), (b, a)):
@@ -2313,7 +2417,8 @@ class _Absurd:
                 return self._finish(MP(NOT_ELIM(neg), lifted))
         raise HolError(
             "absurd: by_conj could not match P / ~P among "
-            f"{pp(a._concl)} / {pp(b._concl)}")
+            f"{pp(a._concl)} / {pp(b._concl)}"
+        )
 
     def auto(self, *refs):
         """Discharge F by inspecting the conclusions of the supplied facts.
@@ -2325,18 +2430,19 @@ class _Absurd:
         """
         if len(refs) != 2:
             raise HolError(
-                f"absurd: auto() requires exactly two facts, got {len(refs)}")
+                f"absurd: auto() requires exactly two facts, got {len(refs)}"
+            )
         ths = [self.p.coerce(r) for r in refs]
         cs = [dest_binop_any(th._concl) for th in ths]
         if cs[0] is None or cs[1] is None:
             raise HolError(
                 "absurd: auto() cannot classify fact shapes: "
-                f"{pp(ths[0]._concl)} / {pp(ths[1]._concl)}")
+                f"{pp(ths[0]._concl)} / {pp(ths[1]._concl)}"
+            )
         rel0, rel1 = cs[0][0], cs[1][0]
         finder = _CONTRA_FINDERS.get((rel0, rel1))
         if finder is None:
-            raise HolError(
-                f"absurd: auto() has no finder for ({rel0!r}, {rel1!r})")
+            raise HolError(f"absurd: auto() has no finder for ({rel0!r}, {rel1!r})")
         return self._finish(finder(ths[0], ths[1]))
 
     def via(self, forward, case, *, source):
@@ -2370,7 +2476,8 @@ class _Absurd:
         for tm, label in ((src_concl, "source"), (case_concl, "case")):
             if not (isinstance(tm, Comb) and isinstance(tm.fun, Comb)):
                 raise HolError(
-                    f"absurd.via: {label} is not a binary relation: {pp(tm)}")
+                    f"absurd.via: {label} is not a binary relation: {pp(tm)}"
+                )
         src_L, src_R = src_concl.fun.arg, src_concl.arg
         case_op = case_concl.fun.fun
         target_lifted = mk_app(case_op, src_L, src_R)
@@ -2383,22 +2490,24 @@ class _Absurd:
         parts = dest_imp(fwd_body._concl)
         if parts is None:
             raise HolError(
-                f"absurd.via: forward is not an implication: {pp(fwd._concl)}")
+                f"absurd.via: forward is not an implication: {pp(fwd._concl)}"
+            )
         ant_pat, con_pat = parts
         subst = _term_match(ant_pat, case_concl, vars_set, {})
         if subst is None:
             raise HolError(
                 f"absurd.via: forward antecedent {pp(ant_pat)} "
-                f"does not match case {pp(case_concl)}")
+                f"does not match case {pp(case_concl)}"
+            )
         subst = _term_match(con_pat, target_lifted, vars_set, subst)
         if subst is None:
             raise HolError(
                 f"absurd.via: forward consequent {pp(con_pat)} "
-                f"does not match target {pp(target_lifted)}")
+                f"does not match target {pp(target_lifted)}"
+            )
         unbound = [v.name for v in vs if v not in subst]
         if unbound:
-            raise HolError(
-                f"absurd.via: forall vars not determined: {unbound}")
+            raise HolError(f"absurd.via: forall vars not determined: {unbound}")
         specced = fwd
         for v in vs:
             specced = SPEC(subst[v], specced)
@@ -2410,8 +2519,8 @@ class _Absurd:
         finder = _CONTRA_FINDERS.get((cs_src[0], cs_lif[0]))
         if finder is None:
             raise HolError(
-                f"absurd.via: no contra finder for "
-                f"({cs_src[0]!r}, {cs_lif[0]!r})")
+                f"absurd.via: no contra finder for ({cs_src[0]!r}, {cs_lif[0]!r})"
+            )
         return self._finish(finder(src_th, lifted))
 
 
@@ -2425,6 +2534,7 @@ class _Absurd:
 # register their own facts; only the composed equation is registered on
 # context exit.
 # ---------------------------------------------------------------------------
+
 
 class _CalcCtx:
     __slots__ = ("p", "label", "lhs", "thus_mode", "cur_rhs", "chain_th")
@@ -2458,14 +2568,12 @@ class _CalcCtx:
     def step(self, spec):
         s = spec.strip()
         if not s.startswith("="):
-            raise HolError(
-                f"calc.step: expected '= rhs', got {spec!r}")
+            raise HolError(f"calc.step: expected '= rhs', got {spec!r}")
         rhs_str = s[1:].strip()
         try:
             rhs_term = parse(rhs_str, _env_bindings=self.p._scope_env())
         except ParseError as ex:
-            raise HolError(
-                f"calc.step: cannot parse RHS in {spec!r}: {ex}") from ex
+            raise HolError(f"calc.step: cannot parse RHS in {spec!r}: {ex}") from ex
         segment = mk_eq(self.cur_rhs, rhs_term)
         return _CalcStep(self, segment, rhs_term)
 
@@ -2474,11 +2582,11 @@ class _CalcStep(_Have):
     """One segment of a ``calc`` chain. Inherits every ``by_*`` from
     ``_Have``; overrides ``_finish`` to TRANS the segment onto the
     chain and advance ``cur_rhs`` instead of registering a fact."""
+
     __slots__ = ("calc_ctx", "rhs")
 
     def __init__(self, calc_ctx, segment_term, rhs_term):
-        super().__init__(calc_ctx.p, label=None, term=segment_term,
-                         is_thus=False)
+        super().__init__(calc_ctx.p, label=None, term=segment_term, is_thus=False)
         self.calc_ctx = calc_ctx
         self.rhs = rhs_term
 
@@ -2497,6 +2605,7 @@ class _CalcStep(_Have):
 # Sub-frame context manager: pushes a frame with a sub-goal, on exit verifies
 # discharge and reports the result back to the parent via ``on_close``.
 # ---------------------------------------------------------------------------
+
 
 def _exit_frame(p, exc_type, on_close):
     """Common exit shape for proof-frame context managers: on clean exit,
@@ -2545,8 +2654,7 @@ class _SubFrameCtx:
 
     def _on_pop(self, fr):
         if fr.result is None:
-            raise HolError(
-                f"{self.kind}: block did not discharge sub-goal via thus")
+            raise HolError(f"{self.kind}: block did not discharge sub-goal via thus")
         th = self.p._close_frame(fr, fr.result)
         self.p._drop_facts(fr.facts_added)
         self.on_close(th)
@@ -2560,6 +2668,7 @@ class _SubFrameCtx:
 # goal (the outer fix() will GEN it back).
 # ---------------------------------------------------------------------------
 
+
 class _InductionCtx:
     def __init__(self, p, var, body, strategy, peel_forall=False):
         self.p = p
@@ -2570,8 +2679,7 @@ class _InductionCtx:
 
     def __enter__(self):
         fr = _Frame(goal=None, kind=FrameKind.INDUCTION)
-        fr.data = _InductionData(var=self.var, body=self.body,
-                                  strategy=self.strategy)
+        fr.data = _InductionData(var=self.var, body=self.body, strategy=self.strategy)
         self.p._frames.append(fr)
         return self.p
 
@@ -2590,7 +2698,8 @@ class _InductionCtx:
         # has a !var binder, leave it as is; otherwise SPEC var back out so
         # the parent's body-shaped goal matches.
         forall_th = self.strategy.induct_prove(
-            self.var, self.body, d.base_th, lambda IH: d.step_th)
+            self.var, self.body, d.base_th, lambda IH: d.step_th
+        )
         body_th = forall_th if self.peel_forall else SPEC(self.var, forall_th)
         body_th = self.p._close_frame(fr, body_th)
         self.p._drop_facts(fr.facts_added)
@@ -2599,7 +2708,8 @@ class _InductionCtx:
             raise HolError(
                 "induction: produced wrong conclusion\n"
                 f"  goal: {pp(parent.goal) if parent.goal else 'None'}\n"
-                f"  got:  {pp(body_th._concl)}")
+                f"  got:  {pp(body_th._concl)}"
+            )
         parent.result = body_th
 
 
@@ -2607,6 +2717,7 @@ class _InductionCtx:
 # cases_on block: pushes a CASES frame; .case() children supply each
 # branch's proof under an extra hypothesis. On exit, DISJ_CASES composes them.
 # ---------------------------------------------------------------------------
+
 
 def _find_disj_leaf(or_concl, target):
     """Walk a right-associated disjunction; return the leaf alpha-equivalent
@@ -2650,9 +2761,7 @@ def _build_disj_cases(or_th, branches):
     head_term, head_th = branches[0]
     rest_or = or_th._concl.arg
     inner_th = _build_disj_cases(ASSUME(rest_or), branches[1:])
-    return DISJ_CASES(or_th,
-                      DISCH(head_term, head_th),
-                      DISCH(rest_or, inner_th))
+    return DISJ_CASES(or_th, DISCH(head_term, head_th), DISCH(rest_or, inner_th))
 
 
 class _CasesCtx:
@@ -2677,13 +2786,12 @@ class _CasesCtx:
         branches = fr.data.branches
         n = len(branches)
         if n < 2:
-            raise HolError(
-                f"{op}: need at least 2 case() blocks, got {n}")
+            raise HolError(f"{op}: need at least 2 case() blocks, got {n}")
         leaves = _split_disj_n(self.or_th._concl, n)
         if leaves is None:
             raise HolError(
-                f"{op}: cannot split into {n} disjuncts: "
-                f"{pp(self.or_th._concl)}")
+                f"{op}: cannot split into {n} disjuncts: {pp(self.or_th._concl)}"
+            )
         # Match each user-supplied case to a leaf (preserves leaf order).
         slots = [None] * n
         for branch_term, th in branches:
@@ -2695,8 +2803,8 @@ class _CasesCtx:
                     break
             if not placed:
                 raise HolError(
-                    f"{op}: branch does not match any disjunct: "
-                    f"{pp(branch_term)}")
+                    f"{op}: branch does not match any disjunct: {pp(branch_term)}"
+                )
         if any(s is None for s in slots):
             missing = [pp(leaves[i]) for i, s in enumerate(slots) if s is None]
             raise HolError(f"{op}: missing case for {missing}")
@@ -2712,7 +2820,8 @@ class _CasesCtx:
                 raise HolError(
                     f"{op}: produced wrong conclusion\n"
                     f"  target: {pp(self.target)}\n"
-                    f"  got:    {pp(result._concl)}")
+                    f"  got:    {pp(result._concl)}"
+                )
             result = lifted
         self.on_close(result)
 
@@ -2721,18 +2830,20 @@ class _CasesCtx:
 # Decorator: runs the script function and returns the kernel theorem.
 # ---------------------------------------------------------------------------
 
+
 def proof(fn):
     p = Proof()
     fn(p)
     if len(p._frames) != 1:
         raise HolError(
-            f"proof({fn.__name__}): unbalanced frames at end ({len(p._frames)} open)")
+            f"proof({fn.__name__}): unbalanced frames at end ({len(p._frames)} open)"
+        )
     fr = p._frames[0]
     if fr.result is None:
         raise HolError(
-            f"proof({fn.__name__}): no result -- did you forget thus or close a block?")
+            f"proof({fn.__name__}): no result -- did you forget thus or close a block?"
+        )
     return p._close_frame(fr, fr.result)
-
 
 
 # Self-tests live in proof_test.py (H17). Splitting them out also

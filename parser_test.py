@@ -9,14 +9,33 @@ from fusion import (
     mk_comb,
 )
 from basics import (
-    aconv, dest_eq, mk_abs, mk_app, mk_const, mk_eq, mk_fun_ty, mk_var,
+    aconv,
+    dest_eq,
+    mk_abs,
+    mk_app,
+    mk_const,
+    mk_eq,
+    mk_fun_ty,
+    mk_var,
 )
 from axioms import (
-    bool_ty, mk_and, mk_or, mk_imp, mk_not, mk_forall, mk_exists, mk_select,
+    bool_ty,
+    mk_and,
+    mk_or,
+    mk_imp,
+    mk_not,
+    mk_forall,
+    mk_exists,
+    mk_select,
 )
 from num import x as VX, y as VY, z as VZ, mk_suc, num_ty, ONE
 from parser import (
-    DEFAULT_SIG, ParseError, Signature, define, parse, parse_type,
+    DEFAULT_SIG,
+    ParseError,
+    Signature,
+    define,
+    parse,
+    parse_type,
 )
 from fusion import Tyvar
 
@@ -24,6 +43,7 @@ from fusion import Tyvar
 def _binop(name):
     def _b(a, b):
         return mk_app(mk_const(name, []), a, b)
+
     return _b
 
 
@@ -38,67 +58,96 @@ class TestSurface(unittest.TestCase):
     def test_arithmetic_and_application(self):
         self.assertTrue(aconv(parse("1 + 1"), _add(ONE, ONE)))
         self.assertTrue(aconv(parse("SUC 1"), mk_suc(ONE)))
-        self.assertTrue(aconv(
-            parse("(SUC x) * (SUC y) = x * (SUC y) + SUC y"),
-            mk_eq(_mul(mk_suc(VX), mk_suc(VY)),
-                  _add(_mul(VX, mk_suc(VY)), mk_suc(VY)))))
-        self.assertTrue(aconv(parse("x + y * z = z"),
-                              mk_eq(_add(VX, _mul(VY, VZ)), VZ)))
+        self.assertTrue(
+            aconv(
+                parse("(SUC x) * (SUC y) = x * (SUC y) + SUC y"),
+                mk_eq(
+                    _mul(mk_suc(VX), mk_suc(VY)), _add(_mul(VX, mk_suc(VY)), mk_suc(VY))
+                ),
+            )
+        )
+        self.assertTrue(
+            aconv(parse("x + y * z = z"), mk_eq(_add(VX, _mul(VY, VZ)), VZ))
+        )
 
     def test_left_associative_plus(self):
-        self.assertTrue(aconv(parse("x + y + z"),
-                              _add(_add(VX, VY), VZ)))
+        self.assertTrue(aconv(parse("x + y + z"), _add(_add(VX, VY), VZ)))
 
     def test_right_associative_and(self):
         env = {"P": P_ty, "Q": P_ty, "R": P_ty}
-        self.assertTrue(aconv(
-            parse("P x /\\ Q x /\\ R x", **env),
-            mk_and(mk_comb(P, VX),
-                   mk_and(mk_comb(Q, VX), mk_comb(R, VX)))))
+        self.assertTrue(
+            aconv(
+                parse("P x /\\ Q x /\\ R x", **env),
+                mk_and(mk_comb(P, VX), mk_and(mk_comb(Q, VX), mk_comb(R, VX))),
+            )
+        )
 
     def test_quantifiers_and_lambda(self):
-        self.assertTrue(aconv(
-            parse("!x y z. (x + y) + z = x + (y + z)"),
-            mk_forall(VX, mk_forall(VY, mk_forall(VZ,
-                mk_eq(_add(_add(VX, VY), VZ),
-                      _add(VX, _add(VY, VZ))))))))
-        self.assertTrue(aconv(
-            parse("!x y. x > y ==> x + 1 > y + 1"),
-            mk_forall(VX, mk_forall(VY,
-                mk_imp(_gt(VX, VY),
-                       _gt(_add(VX, ONE), _add(VY, ONE)))))))
-        self.assertTrue(aconv(parse("\\x. x + 1"),
-                              mk_abs(VX, _add(VX, ONE))))
-        self.assertTrue(aconv(parse("!x. P x", P=P_ty),
-                              mk_forall(VX, mk_comb(P, VX))))
+        self.assertTrue(
+            aconv(
+                parse("!x y z. (x + y) + z = x + (y + z)"),
+                mk_forall(
+                    VX,
+                    mk_forall(
+                        VY,
+                        mk_forall(
+                            VZ, mk_eq(_add(_add(VX, VY), VZ), _add(VX, _add(VY, VZ)))
+                        ),
+                    ),
+                ),
+            )
+        )
+        self.assertTrue(
+            aconv(
+                parse("!x y. x > y ==> x + 1 > y + 1"),
+                mk_forall(
+                    VX,
+                    mk_forall(
+                        VY, mk_imp(_gt(VX, VY), _gt(_add(VX, ONE), _add(VY, ONE)))
+                    ),
+                ),
+            )
+        )
+        self.assertTrue(aconv(parse("\\x. x + 1"), mk_abs(VX, _add(VX, ONE))))
+        self.assertTrue(aconv(parse("!x. P x", P=P_ty), mk_forall(VX, mk_comb(P, VX))))
         u = mk_var("u", num_ty)
-        self.assertTrue(aconv(
-            parse("!x. ~(x = 1) ==> ?u. x = SUC u"),
-            mk_forall(VX,
-                mk_imp(mk_not(mk_eq(VX, ONE)),
-                       mk_exists(u, mk_eq(VX, mk_suc(u)))))))
+        self.assertTrue(
+            aconv(
+                parse("!x. ~(x = 1) ==> ?u. x = SUC u"),
+                mk_forall(
+                    VX,
+                    mk_imp(mk_not(mk_eq(VX, ONE)), mk_exists(u, mk_eq(VX, mk_suc(u)))),
+                ),
+            )
+        )
 
     def test_binder_type_annotation(self):
         # `bool` is registered as a type so `!p:bool. ...` parses.
         p = mk_var("p", bool_ty)
-        self.assertTrue(aconv(parse("!p:bool. ~~p ==> p"),
-                              mk_forall(p, mk_imp(mk_not(mk_not(p)), p))))
+        self.assertTrue(
+            aconv(
+                parse("!p:bool. ~~p ==> p"), mk_forall(p, mk_imp(mk_not(mk_not(p)), p))
+            )
+        )
 
     def test_binder_full_type_expression(self):
         # Annotation accepts any arrow_type (no need for an env alias).
         Pv = mk_var("P", P_ty)
-        self.assertTrue(aconv(
-            parse("!P:num->bool. P x"),
-            mk_forall(Pv, mk_comb(Pv, VX))))
+        self.assertTrue(
+            aconv(parse("!P:num->bool. P x"), mk_forall(Pv, mk_comb(Pv, VX)))
+        )
         # Parenthesised compound types are accepted (postfix tyapp / nested).
-        self.assertTrue(aconv(
-            parse("!P:(num->bool). P x"),
-            mk_forall(Pv, mk_comb(Pv, VX))))
+        self.assertTrue(
+            aconv(parse("!P:(num->bool). P x"), mk_forall(Pv, mk_comb(Pv, VX)))
+        )
         # Mixed annotated/bare var_decls juxtaposed.
         Qn = mk_var("Q", num_ty)
-        self.assertTrue(aconv(
-            parse("!P:num->bool Q. P Q"),
-            mk_forall(Pv, mk_forall(Qn, mk_comb(Pv, Qn)))))
+        self.assertTrue(
+            aconv(
+                parse("!P:num->bool Q. P Q"),
+                mk_forall(Pv, mk_forall(Qn, mk_comb(Pv, Qn))),
+            )
+        )
 
     def test_non_associative_eq_rejected(self):
         with self.assertRaises(ParseError):
@@ -109,27 +158,36 @@ class TestAntiquotation(unittest.TestCase):
     """`${name}` splices a Python kernel term into the source string."""
 
     def test_basic_splice(self):
-        self.assertTrue(aconv(parse("${a} + ${b}", a=VX, b=VY),
-                              _add(VX, VY)))
+        self.assertTrue(aconv(parse("${a} + ${b}", a=VX, b=VY), _add(VX, VY)))
 
     def test_repeated_antiquote_reuses_term(self):
         self.assertTrue(aconv(parse("${a} + ${a}", a=VX), _add(VX, VX)))
 
     def test_antiquote_inside_binder(self):
         u = mk_var("u", num_ty)
-        self.assertTrue(aconv(
-            parse("\\u. ${a} = SUC u", a=VX),
-            mk_abs(u, mk_eq(VX, mk_suc(u)))))
+        self.assertTrue(
+            aconv(parse("\\u. ${a} = SUC u", a=VX), mk_abs(u, mk_eq(VX, mk_suc(u))))
+        )
 
     def test_satz_9_shape(self):
         u = mk_var("u", num_ty)
         v = mk_var("v", num_ty)
-        self.assertTrue(aconv(
-            parse("${a} = ${b} \\/ (?u. ${a} = ${b} + u) "
-                  "\\/ (?v. ${b} = ${a} + v)", a=VX, b=VY),
-            mk_or(mk_eq(VX, VY),
-                  mk_or(mk_exists(u, mk_eq(VX, _add(VY, u))),
-                        mk_exists(v, mk_eq(VY, _add(VX, v)))))))
+        self.assertTrue(
+            aconv(
+                parse(
+                    "${a} = ${b} \\/ (?u. ${a} = ${b} + u) \\/ (?v. ${b} = ${a} + v)",
+                    a=VX,
+                    b=VY,
+                ),
+                mk_or(
+                    mk_eq(VX, VY),
+                    mk_or(
+                        mk_exists(u, mk_eq(VX, _add(VY, u))),
+                        mk_exists(v, mk_eq(VY, _add(VX, v))),
+                    ),
+                ),
+            )
+        )
 
     def test_missing_binding_errors(self):
         with self.assertRaises(ParseError):
@@ -144,8 +202,7 @@ class TestAntiquotation(unittest.TestCase):
             parse("x + y", f=P_ty)
 
     def test_referenced_bare_binding_ok(self):
-        self.assertTrue(aconv(parse("f 1", f=P_ty),
-                              mk_comb(mk_var("f", P_ty), ONE)))
+        self.assertTrue(aconv(parse("f 1", f=P_ty), mk_comb(mk_var("f", P_ty), ONE)))
 
 
 class TestRuntimeExtension(unittest.TestCase):
@@ -155,8 +212,7 @@ class TestRuntimeExtension(unittest.TestCase):
         DEFAULT_SIG.add_infix("&&", 55, mk_and, assoc="left")
         try:
             got = parse("P x && Q x", P=P_ty, Q=P_ty)
-            self.assertTrue(aconv(
-                got, mk_and(mk_comb(P, VX), mk_comb(Q, VX))))
+            self.assertTrue(aconv(got, mk_and(mk_comb(P, VX), mk_comb(Q, VX))))
         finally:
             del DEFAULT_SIG.infix["&&"]
 
@@ -171,8 +227,7 @@ class TestFreshSignature(unittest.TestCase):
 
     def test_known_operators_parse(self):
         a, b, c = (mk_var(n, num_ty) for n in "abc")
-        self.assertTrue(aconv(parse("a + b = c", sig=self.sig),
-                              mk_eq(_add(a, b), c)))
+        self.assertTrue(aconv(parse("a + b = c", sig=self.sig), mk_eq(_add(a, b), c)))
 
     def test_unknown_infix_rejected(self):
         with self.assertRaises(ParseError):
@@ -199,16 +254,16 @@ class TestDefine(unittest.TestCase):
         sig.add_binder("\\", mk_abs)
         sig.add_type("num", num_ty)
         op = "++"  # parser's OP token only accepts symbolic names
-        op_def = define(op, "num -> num -> num", "\\a b. a + b", sig=sig,
-                        infix=(50, "left"))
+        op_def = define(
+            op, "num -> num -> num", "\\a b. a + b", sig=sig, infix=(50, "left")
+        )
         op_lhs, _ = dest_eq(op_def._concl)
         self.assertIsInstance(op_lhs, Const)
         self.assertEqual(op_lhs.name, op)
         self.assertIn(op, sig.const)
         self.assertIn(op, sig.infix)
         a, b = mk_var("a", num_ty), mk_var("b", num_ty)
-        self.assertTrue(aconv(parse(f"a {op} b", sig=sig),
-                              mk_app(sig.const[op], a, b)))
+        self.assertTrue(aconv(parse(f"a {op} b", sig=sig), mk_app(sig.const[op], a, b)))
 
 
 class TestSigLookup(unittest.TestCase):
@@ -226,8 +281,9 @@ class TestSelectBinder(unittest.TestCase):
         # Multi-var doesn't typecheck since `@v. body` has type `v.ty`,
         # not bool, so it can't compose under another `@`.
         u = mk_var("u", num_ty)
-        self.assertTrue(aconv(parse("@u. x = SUC u"),
-                              mk_select(u, mk_eq(VX, mk_suc(u)))))
+        self.assertTrue(
+            aconv(parse("@u. x = SUC u"), mk_select(u, mk_eq(VX, mk_suc(u))))
+        )
 
 
 class TestParseType(unittest.TestCase):
@@ -244,20 +300,21 @@ class TestParseType(unittest.TestCase):
     def test_arrow_right_associative(self):
         self.assertEqual(
             parse_type("A -> B -> C"),
-            mk_fun_ty(Tyvar("A"), mk_fun_ty(Tyvar("B"), Tyvar("C"))))
+            mk_fun_ty(Tyvar("A"), mk_fun_ty(Tyvar("B"), Tyvar("C"))),
+        )
 
     def test_parens_group(self):
         self.assertEqual(
             parse_type("(A -> B) -> C"),
-            mk_fun_ty(mk_fun_ty(Tyvar("A"), Tyvar("B")), Tyvar("C")))
+            mk_fun_ty(mk_fun_ty(Tyvar("A"), Tyvar("B")), Tyvar("C")),
+        )
 
     def test_mixed_constructor_and_tyvar(self):
         self.assertEqual(
             parse_type("num -> num -> bool"),
-            mk_fun_ty(num_ty, mk_fun_ty(num_ty, bool_ty)))
-        self.assertEqual(
-            parse_type("A -> bool"),
-            mk_fun_ty(Tyvar("A"), bool_ty))
+            mk_fun_ty(num_ty, mk_fun_ty(num_ty, bool_ty)),
+        )
+        self.assertEqual(parse_type("A -> bool"), mk_fun_ty(Tyvar("A"), bool_ty))
 
     def test_unknown_constructor_errors(self):
         with self.assertRaises(ParseError):
@@ -275,6 +332,7 @@ class TestParseType(unittest.TestCase):
         # fresh Tyvar.
         sig = Signature()
         from fusion import new_type, mk_type
+
         try:
             new_type("X", 0)
         except Exception:
@@ -282,8 +340,7 @@ class TestParseType(unittest.TestCase):
         X = mk_type("X", [])
         sig.add_type("X", X)
         self.assertEqual(parse_type("X", sig=sig), X)
-        self.assertEqual(
-            parse_type("X -> X", sig=sig), mk_fun_ty(X, X))
+        self.assertEqual(parse_type("X -> X", sig=sig), mk_fun_ty(X, X))
 
     def test_non_arrow_op_errors(self):
         with self.assertRaises(ParseError):

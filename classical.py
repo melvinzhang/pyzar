@@ -15,16 +15,31 @@ Provides:
 
 from fusion import (
     Var,
-    bool_ty, aty, mk_comb,
-    REFL, TRANS, ASSUME, EQ_MP, INST_TYPE,
+    bool_ty,
+    aty,
+    mk_comb,
+    REFL,
+    TRANS,
+    ASSUME,
+    EQ_MP,
+    INST_TYPE,
 )
 from basics import mk_abs, mk_eq, rand, rator
 from axioms import T, F, SELECT_AX, mk_not, mk_or
 from parser import parse_type
 from tactics import (
-    AP_TERM, BETA_CONV, BETA_RULE, SYM, TRUTH, EQT_INTRO,
-    SPEC, GEN, MP, NOT_ELIM,
-    DISJ2, FUN_EXT,
+    AP_TERM,
+    BETA_CONV,
+    BETA_RULE,
+    SYM,
+    TRUTH,
+    EQT_INTRO,
+    SPEC,
+    GEN,
+    MP,
+    NOT_ELIM,
+    DISJ2,
+    FUN_EXT,
     _select_const,
 )
 from proof import proof
@@ -39,6 +54,7 @@ _pred_ty = parse_type("A -> bool")
 # ---------------------------------------------------------------------------
 # F != T  (i.e. |- ~(F = T)).
 # ---------------------------------------------------------------------------
+
 
 @proof
 def F_NEQ_T(p):
@@ -59,6 +75,7 @@ def F_NEQ_T(p):
 # @U = F and @V = T.  Suppose t held; then U = (\x.T) = V pointwise, so
 # by FUN_EXT @U = @V, hence F = T -- contradicting F_NEQ_T.
 # ---------------------------------------------------------------------------
+
 
 def _pointwise_eq_T(F_lambda, x_var, body, h_t, lam_T):
     lhs_disj = rand(rator(body))
@@ -108,14 +125,18 @@ def EXCLUDED_MIDDLE(p):
     # (substitute ``U := \x. body`` and BETA-normalize) before binding.
     _U_lz = p._lookup_lazy_let("U")
     _V_lz = p._lookup_lazy_let("V")
-    _U_at_F = MP(SPEC(F, SPEC(_U_lz.carrier, _SELECT_AX_BOOL)),
-                  p.fact("U_F"))                      # |- U (@ U)
-    _V_at_T = MP(SPEC(T, SPEC(_V_lz.carrier, _SELECT_AX_BOOL)),
-                  p.fact("V_T"))                      # |- V (@ V)
-    p.have("U_or: ((@x:bool. (x = F) \\/ t) = F) \\/ t")\
-        .by_thm(p.materialize_let(_U_at_F, "U"))
-    p.have("V_or: ((@x:bool. (x = T) \\/ t) = T) \\/ t")\
-        .by_thm(p.materialize_let(_V_at_T, "V"))
+    _U_at_F = MP(
+        SPEC(F, SPEC(_U_lz.carrier, _SELECT_AX_BOOL)), p.fact("U_F")
+    )  # |- U (@ U)
+    _V_at_T = MP(
+        SPEC(T, SPEC(_V_lz.carrier, _SELECT_AX_BOOL)), p.fact("V_T")
+    )  # |- V (@ V)
+    p.have("U_or: ((@x:bool. (x = F) \\/ t) = F) \\/ t").by_thm(
+        p.materialize_let(_U_at_F, "U")
+    )
+    p.have("V_or: ((@x:bool. (x = T) \\/ t) = T) \\/ t").by_thm(
+        p.materialize_let(_V_at_T, "V")
+    )
 
     with p.cases_on("U_or"):
         with p.case("eq_uF: (@x:bool. (x = F) \\/ t) = F"):
@@ -124,8 +145,8 @@ def EXCLUDED_MIDDLE(p):
                     with p.have("nott: ~t").proof():
                         with p.suppose("ht: t"):
                             F_eq_T = _diaconescu_F_eq_T(
-                                _t_bool,
-                                p.fact("eq_uF"), p.fact("eq_vT"), p.fact("ht"))
+                                _t_bool, p.fact("eq_uF"), p.fact("eq_vT"), p.fact("ht")
+                            )
                             p.absurd().by_thm(MP(NOT_ELIM(F_NEQ_T), F_eq_T))
                     p.thus("t \\/ ~t").by_disj("nott")
                 with p.case("ht: t"):
@@ -137,6 +158,7 @@ def EXCLUDED_MIDDLE(p):
 # ---------------------------------------------------------------------------
 # Classical helpers built on EM.
 # ---------------------------------------------------------------------------
+
 
 @proof
 def NOT_NOT_ELIM_AX(p):
@@ -151,7 +173,7 @@ def NOT_NOT_ELIM_AX(p):
 
 
 def NOT_NOT_ELIM(th):
-    """ |- ~~p   =>   |- p """
+    """|- ~~p   =>   |- p"""
     p_t = rand(rand(th._concl))
     return MP(SPEC(p_t, NOT_NOT_ELIM_AX), th)
 
@@ -163,10 +185,10 @@ def NOT_NOT_ELIM(th):
 # ``BETA_RULE`` to normalise the (\\v. body) v redex, then ``MP``.
 # ---------------------------------------------------------------------------
 
+
 @proof
 def NOT_EX_TO_FORALL_NOT_AX(prf):
-    prf.goal("!p. ~(?v:A. p v) ==> !v:A. ~(p v)",
-             types={"p": _pred_ty, "A": aty})
+    prf.goal("!p. ~(?v:A. p v) ==> !v:A. ~(p v)", types={"p": _pred_ty, "A": aty})
     prf.fix("p")
     prf.assume("hne: ~(?v:A. p v)")
     with prf.thus("!v:A. ~(p v)").proof():
@@ -178,8 +200,7 @@ def NOT_EX_TO_FORALL_NOT_AX(prf):
 
 @proof
 def NOT_FORALL_TO_EX_NOT_AX(prf):
-    prf.goal("!p. ~(!v:A. p v) ==> ?v:A. ~(p v)",
-             types={"p": _pred_ty, "A": aty})
+    prf.goal("!p. ~(!v:A. p v) ==> ?v:A. ~(p v)", types={"p": _pred_ty, "A": aty})
     prf.fix("p")
     prf.assume("hnf: ~(!v:A. p v)")
     with prf.thus("?v:A. ~(p v)").proof():
@@ -191,8 +212,7 @@ def NOT_FORALL_TO_EX_NOT_AX(prf):
                     prf.fix("v")
                     with prf.have("nn: ~~(p v)").proof():
                         with prf.suppose("hnpv: ~(p v)"):
-                            prf.have("hex_neg: ?v:A. ~(p v)")\
-                                .by_witness("v", "hnpv")
+                            prf.have("hex_neg: ?v:A. ~(p v)").by_witness("v", "hnpv")
                             prf.absurd().by_conj("hne", "hex_neg")
                     prf.thus("p v").by_thm(NOT_NOT_ELIM(prf.fact("nn")))
                 prf.absurd().by_conj("hnf", "hall")
@@ -206,12 +226,12 @@ def _spec_quant_ax(ax, pred):
 
 
 def NOT_EX_TO_FORALL_NOT(not_th, pred):
-    """ |- ~(?v. body[v])   =>   |- !v. ~body[v]    where pred = \\v. body. """
+    """|- ~(?v. body[v])   =>   |- !v. ~body[v]    where pred = \\v. body."""
     return MP(_spec_quant_ax(NOT_EX_TO_FORALL_NOT_AX, pred), not_th)
 
 
 def NOT_FORALL_TO_EX_NOT(not_th, pred):
-    """ |- ~(!v. body[v])   =>   |- ?v. ~body[v].   Requires EM (classical). """
+    """|- ~(!v. body[v])   =>   |- ?v. ~body[v].   Requires EM (classical)."""
     return MP(_spec_quant_ax(NOT_FORALL_TO_EX_NOT_AX, pred), not_th)
 
 
@@ -219,9 +239,11 @@ def NOT_FORALL_TO_EX_NOT(not_th, pred):
 # Self-tests.
 # ---------------------------------------------------------------------------
 
+
 def _selftest():
     from fusion import concl, hyp
     from basics import aconv
+
     pv = Var("p", bool_ty)
 
     em_p = SPEC(pv, EXCLUDED_MIDDLE)
@@ -239,6 +261,7 @@ def _selftest():
 if __name__ == "__main__":
     _selftest()
     from parser import pp_thm
+
     print(f"EXCLUDED_MIDDLE: {pp_thm(EXCLUDED_MIDDLE)}")
     print(f"F_NEQ_T:         {pp_thm(F_NEQ_T)}")
     print("classical.py self-tests passed.")

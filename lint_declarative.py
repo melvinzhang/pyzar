@@ -32,33 +32,73 @@ import sys
 
 # Kernel inference rules and derived tactics. Calls to any of these from inside
 # an ``@proof`` body are non-declarative.
-NON_DECLARATIVE_NAMES = frozenset({
-    # fusion.py -- primitive inference rules
-    "REFL", "TRANS", "MK_COMB", "ABS", "BETA",
-    "ASSUME", "EQ_MP", "DEDUCT_ANTISYM_RULE",
-    "INST", "INST_TYPE",
-    "new_axiom", "new_basic_definition", "new_basic_type_definition",
-
-    # tactics.py -- derived rules
-    "AP_TERM", "AP_THM",
-    "BETA_CONV", "BETA_NORM", "BETA_RULE", "beta_after",
-    "SYM", "EQT_ELIM", "EQT_INTRO",
-    "SPEC", "SPECL", "GEN", "GENL",
-    "CONJ", "CONJUNCT1", "CONJUNCT2",
-    "DISCH", "DISCHL", "MP", "UNDISCH", "MP_LIST",
-    "CONTR", "NOT_ELIM", "NOT_INTRO",
-    "EQF_INTRO", "EQF_ELIM",
-    "DISJ1", "DISJ2", "DISJ_CASES", "CASE_OR",
-    "MK_EQ", "NE_SYM", "REWRITE_NE",
-    "subst_term",
-    "EXISTS", "EXISTS_AT",
-    "TRANS_CHAIN", "PROVE_HYP",
-    "CHOOSE_WITNESS", "ELIM_EX",
-    "FUN_EXT",
-    "UNFOLD", "unfold_def_at",
-    "REWRITE_CONV", "REWRITE_RULE", "REWRITE_PROVE",
-    "AC_NORM", "AC_PROVE",
-})
+NON_DECLARATIVE_NAMES = frozenset(
+    {
+        # fusion.py -- primitive inference rules
+        "REFL",
+        "TRANS",
+        "MK_COMB",
+        "ABS",
+        "BETA",
+        "ASSUME",
+        "EQ_MP",
+        "DEDUCT_ANTISYM_RULE",
+        "INST",
+        "INST_TYPE",
+        "new_axiom",
+        "new_basic_definition",
+        "new_basic_type_definition",
+        # tactics.py -- derived rules
+        "AP_TERM",
+        "AP_THM",
+        "BETA_CONV",
+        "BETA_NORM",
+        "BETA_RULE",
+        "beta_after",
+        "SYM",
+        "EQT_ELIM",
+        "EQT_INTRO",
+        "SPEC",
+        "SPECL",
+        "GEN",
+        "GENL",
+        "CONJ",
+        "CONJUNCT1",
+        "CONJUNCT2",
+        "DISCH",
+        "DISCHL",
+        "MP",
+        "UNDISCH",
+        "MP_LIST",
+        "CONTR",
+        "NOT_ELIM",
+        "NOT_INTRO",
+        "EQF_INTRO",
+        "EQF_ELIM",
+        "DISJ1",
+        "DISJ2",
+        "DISJ_CASES",
+        "CASE_OR",
+        "MK_EQ",
+        "NE_SYM",
+        "REWRITE_NE",
+        "subst_term",
+        "EXISTS",
+        "EXISTS_AT",
+        "TRANS_CHAIN",
+        "PROVE_HYP",
+        "CHOOSE_WITNESS",
+        "ELIM_EX",
+        "FUN_EXT",
+        "UNFOLD",
+        "unfold_def_at",
+        "REWRITE_CONV",
+        "REWRITE_RULE",
+        "REWRITE_PROVE",
+        "AC_NORM",
+        "AC_PROVE",
+    }
+)
 
 
 def _is_proof_decorator(dec):
@@ -101,10 +141,12 @@ def find_offenders(path):
                 continue
             name = _callable_name(sub.func)
             if name in NON_DECLARATIVE_NAMES:
-                line_text = (lines[sub.lineno - 1]
-                             if 0 <= sub.lineno - 1 < len(lines) else "")
-                out.append((sub.lineno, sub.col_offset + 1, name,
-                            line_text.strip(), fn.name))
+                line_text = (
+                    lines[sub.lineno - 1] if 0 <= sub.lineno - 1 < len(lines) else ""
+                )
+                out.append(
+                    (sub.lineno, sub.col_offset + 1, name, line_text.strip(), fn.name)
+                )
     return out
 
 
@@ -128,8 +170,10 @@ def main(argv):
         print(file=sys.stderr)
         for path, offenders in by_file:
             print(f"  {path}: {len(offenders)}", file=sys.stderr)
-    print(f"\n{grand_total} non-declarative call(s) "
-          f"in {len(by_file)} file(s)", file=sys.stderr)
+    print(
+        f"\n{grand_total} non-declarative call(s) in {len(by_file)} file(s)",
+        file=sys.stderr,
+    )
     return 1 if grand_total else 0
 
 

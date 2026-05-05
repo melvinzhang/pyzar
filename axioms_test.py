@@ -1,18 +1,52 @@
 import unittest
 
 from fusion import (
-    aty, bool_ty,
-    Abs, Var, mk_comb, type_of,
-    concl, hyp, axioms, definitions, get_const_type,
+    aty,
+    bool_ty,
+    Abs,
+    Var,
+    mk_comb,
+    type_of,
+    concl,
+    hyp,
+    axioms,
+    definitions,
+    get_const_type,
 )
 from basics import mk_fun_ty
 from axioms import (
-    mk_and, mk_or, mk_imp, mk_not, mk_forall, mk_exists, mk_select,
-    is_conj, dest_conj, is_disj, dest_disj, is_imp, dest_imp,
-    is_neg, dest_neg, is_forall, dest_forall, is_exists, dest_exists,
-    ETA_AX, SELECT_AX, INFINITY_AX,
-    T_DEF, AND_DEF, IMP_DEF, FORALL_DEF, EXISTS_DEF, OR_DEF, F_DEF, NOT_DEF,
-    ONE_ONE_DEF, ONTO_DEF,
+    mk_and,
+    mk_or,
+    mk_imp,
+    mk_not,
+    mk_forall,
+    mk_exists,
+    mk_select,
+    is_conj,
+    dest_conj,
+    is_disj,
+    dest_disj,
+    is_imp,
+    dest_imp,
+    is_neg,
+    dest_neg,
+    is_forall,
+    dest_forall,
+    is_exists,
+    dest_exists,
+    ETA_AX,
+    SELECT_AX,
+    INFINITY_AX,
+    T_DEF,
+    AND_DEF,
+    IMP_DEF,
+    FORALL_DEF,
+    EXISTS_DEF,
+    OR_DEF,
+    F_DEF,
+    NOT_DEF,
+    ONE_ONE_DEF,
+    ONTO_DEF,
 )
 from parser import parse, pp
 
@@ -62,8 +96,18 @@ class TestDefinitionsRegistered(unittest.TestCase):
 
     def test_all_boolean_definitions_present(self):
         registered = definitions()
-        for d in (T_DEF, AND_DEF, IMP_DEF, FORALL_DEF, EXISTS_DEF,
-                  OR_DEF, F_DEF, NOT_DEF, ONE_ONE_DEF, ONTO_DEF):
+        for d in (
+            T_DEF,
+            AND_DEF,
+            IMP_DEF,
+            FORALL_DEF,
+            EXISTS_DEF,
+            OR_DEF,
+            F_DEF,
+            NOT_DEF,
+            ONE_ONE_DEF,
+            ONTO_DEF,
+        ):
             self.assertIn(d, registered)
 
 
@@ -145,7 +189,7 @@ class TestSurfaceSyntaxRegistered(unittest.TestCase):
             ("p /\\ q", {"p": bool_ty, "q": bool_ty}),
             ("p \\/ q", {"p": bool_ty, "q": bool_ty}),
             ("p ==> q", {"p": bool_ty, "q": bool_ty}),
-            ("~p",      {"p": bool_ty}),
+            ("~p", {"p": bool_ty}),
         ]
         for src, env in cases:
             tm = parse(src, **env)
