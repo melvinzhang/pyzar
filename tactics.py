@@ -623,6 +623,25 @@ def FUN_EXT(th_pointwise):
 # lets, for instance) don't trip them.
 SIMP_ROOT_FIRE_LIMIT = 256       # max root-rule fires per ``_bottom_up`` call
 SIMP_OUTER_PASS_LIMIT = 64       # max outer fixpoint passes per ``REWRITE_CONV``
+SIMP_GROWTH_PASSES = 3           # consecutive >2x-growth passes that signal
+                                 # exponential blow-up (a self-recursive rule
+                                 # whose RHS embeds the LHS under a binder
+                                 # roughly doubles the term per pass; left to
+                                 # SIMP_OUTER_PASS_LIMIT alone the late passes
+                                 # cost O(2^N) and look like a hang). One-shot
+                                 # expansion (e.g. substituting a free var
+                                 # with a large SELECT-bound witness in
+                                 # by_rewrite_of) grows once and then reaches
+                                 # fixpoint, so it does not trip this guard.
+
+
+def _term_size(tm):
+    """Number of nodes in ``tm`` -- one per Var/Const/Comb/Abs."""
+    if isinstance(tm, Comb):
+        return 1 + _term_size(tm.fun) + _term_size(tm.arg)
+    if isinstance(tm, Abs):
+        return 1 + _term_size(tm.body)
+    return 1
 
 
 def BETA_RULE(th):
@@ -796,12 +815,27 @@ def REWRITE_CONV(rules_thms, tm, max_passes=SIMP_OUTER_PASS_LIMIT, *, ac=None):
     if not rules and ac is None:
         return REFL(tm)
     th = REFL(tm)
+    prev_size = _term_size(tm)
+    consec_growth = 0
     for _ in range(max_passes):
         cur = rand(th._concl)
         step = _bottom_up(rules, cur, ac=ac)
         if step is None:
             return th
         th = TRANS(th, step)
+        new_size = _term_size(rand(th._concl))
+        if new_size > 2 * prev_size:
+            consec_growth += 1
+            if consec_growth >= SIMP_GROWTH_PASSES:
+                raise HolError(
+                    f"REWRITE_CONV: term grew for {consec_growth} "
+                    f"consecutive passes (size now {new_size}); rules "
+                    "likely non-terminating under a binder (e.g. an "
+                    "equation whose RHS contains the LHS inside a SELECT "
+                    "term)")
+        else:
+            consec_growth = 0
+        prev_size = new_size
     raise HolError(f"REWRITE_CONV: did not reach fixpoint in {max_passes} passes "
                    "(rules likely non-terminating)")
 
