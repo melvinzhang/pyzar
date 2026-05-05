@@ -777,7 +777,8 @@ def parse_type(s, sig=None):
     return _Builder(sig, {}).visit(tree)
 
 
-def define(name, ty, body, *, sig=None, prec=None, assoc=None, **bindings):
+def define(name, ty, body, *, sig=None,
+           prec=None, assoc=None, prefix=False, **bindings):
     """Introduce a new defined constant.
 
     Parameters:
@@ -790,14 +791,17 @@ def define(name, ty, body, *, sig=None, prec=None, assoc=None, **bindings):
       sig  -- target `Signature`; defaults to `DEFAULT_SIG`.
       prec, assoc -- if given, also register as an infix operator
               (`assoc` in {"left","right","non"}).
+      prefix -- if True, also register as a unary prefix operator
+              (mutually exclusive with `prec`/`assoc`).
       bindings -- forwarded to `parse` (free-variable type pins, type
               aliases, antiquotes); ignored if `body` is already a term.
 
     Side effects (on success):
       * calls `new_basic_definition` to introduce the constant;
       * registers ``name -> mk_const(name, [])`` in `sig.const`;
-      * if `prec`/`assoc`: registers as infix in `sig` (which is also what
-        the printer reads from).
+      * if `prec`/`assoc`: registers as infix in `sig` (which is also
+        what the printer reads from);
+      * if `prefix=True`: registers as prefix in `sig`.
 
     Returns the definition theorem ``|- name = body``.
     """
@@ -811,6 +815,9 @@ def define(name, ty, body, *, sig=None, prec=None, assoc=None, **bindings):
             raise ValueError(
                 f"define({name!r}): bindings given but body is already a term")
         rhs = body
+    if prefix and (prec is not None or assoc is not None):
+        raise ValueError(
+            f"define({name!r}): prefix=True is mutually exclusive with prec/assoc")
     def_th = new_basic_definition(mk_eq(Var(name, ty), rhs))
     const = mk_const(name, [])
     sig.add_const(name, const)
@@ -818,7 +825,11 @@ def define(name, ty, body, *, sig=None, prec=None, assoc=None, **bindings):
         if assoc is None:
             raise ValueError(
                 f"define({name!r}): prec given but assoc missing")
-        def builder(a, b):
+        def infix_builder(a, b):
             return mk_app(const, a, b)
-        sig.add_infix(name, prec, builder, assoc=assoc)
+        sig.add_infix(name, prec, infix_builder, assoc=assoc)
+    if prefix:
+        def prefix_builder(t):
+            return mk_comb(const, t)
+        sig.add_prefix(name, prefix_builder)
     return def_th

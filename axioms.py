@@ -15,7 +15,7 @@ from basics import (
     mk_abs, mk_app, mk_const, mk_eq,
 )
 from parser import (
-    add_type, add_infix, add_binder, add_prefix, binder,
+    add_type, add_infix, add_binder, binder,
     parse, parse_type, define,
 )
 
@@ -78,12 +78,10 @@ F_DEF = define("F", "bool", "!p:bool. p")
 F = mk_const("F", [])
 
 # (~) = \p. p ==> F
-NOT_DEF = define("~", "bool -> bool", "\\p:bool. p ==> F")
+NOT_DEF = define("~", "bool -> bool", "\\p:bool. p ==> F", prefix=True)
 
 def mk_not(t):
     return mk_comb(mk_const("~", []), t)
-
-add_prefix("~", mk_not)
 
 # Bool-specific shape helpers: thin aliases over the kernel ``is_*``/
 # ``dest_*`` connective helpers so tactic call sites can ask

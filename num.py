@@ -23,7 +23,7 @@ from basics import (
 from axioms import (
     SELECT_AX, INFINITY_AX, ONE_ONE_DEF, ONTO_DEF,
     ind_ty,
-    mk_and, mk_imp, mk_forall, mk_exists, mk_not,
+    mk_and, mk_imp, mk_forall, mk_exists,
 )
 from tactics import (
     AP_TERM, AP_THM, BETA_CONV, SYM, SPEC, GEN, GENL,
