@@ -317,7 +317,10 @@ infix_chain: prefix_term (OP rhs_term)*
 
 varlist: var_decl+
 arglist: var_decl ("," var_decl)*
-var_decl: NAME (":" NAME)?
+var_decl: NAME (":" var_type)?
+
+?var_type: atom_type OP var_type           -> arrow_
+         | atom_type
 
 NAME: /[A-Za-z_][A-Za-z0-9_]*/
 NUM:  /[0-9]+/
@@ -389,18 +392,11 @@ class _Builder(Interpreter):
             n = str(vd.children[0])
             ty = None
             if len(vd.children) > 1:
-                # Explicit type annotation `name:ty_name`.  Resolves against
-                # the registered signature first, then env-provided type
-                # aliases (so callers can pass fresh tyvars via `types=`).
-                ty_name = str(vd.children[1])
-                if ty_name in self.sig.type:
-                    ty = self.sig.type[ty_name]
-                else:
-                    binding = self.env.get(ty_name)
-                    if isinstance(binding, (Tyvar, Tyapp)):
-                        ty = binding
-                    else:
-                        raise ParseError(f"unknown type name {ty_name!r}")
+                # Explicit type annotation `name : type-expr`.  The
+                # type sub-tree dispatches through tname_/tapp_/arrow_,
+                # which resolve against the registered signature first
+                # and then env-provided type aliases.
+                ty = self.visit(vd.children[1])
             elif n in self.env:
                 # Inherit type from an env-provided binding so callers can
                 # introduce higher-order binders (e.g. !f. ... where
@@ -514,6 +510,9 @@ class _Builder(Interpreter):
         name = str(tree.children[0])
         if name in self.sig.type:
             return self.sig.type[name]
+        binding = self.env.get(name)
+        if isinstance(binding, (Tyvar, Tyapp)):
+            return binding
         if _is_tyvar_name(name):
             return Tyvar(name)
         try:
@@ -727,7 +726,8 @@ def parse_let_spec(s, sig=None, _env_bindings=None, **bindings):
     """Parse ``"NAME(arg1, arg2, ...) := body"``.
 
     Returns ``(name, [Var, ...], body_term)``. Each arg may carry an
-    optional type annotation ``arg:typename``; type names resolve
+    optional type annotation ``arg : type-expr`` (any arrow_type, with
+    parens around postfix application); names inside the type resolve
     against ``sig.type`` first, then env-provided type aliases, then
     inherited types from env-provided ``Var`` bindings, and finally
     the registry's default-var type. The body is parsed with all args

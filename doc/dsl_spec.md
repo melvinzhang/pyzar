@@ -83,6 +83,13 @@ parser consults it for bare identifiers and binders so `goal("!f. f
 the kernel constructors, e.g. `types={"f": parse_type("ind -> ind")}`
 in place of `mk_fun_ty(ind_ty, ind_ty)`.
 
+Binder annotations accept full type expressions inline (arrows and
+parens, registered constructors, single-uppercase tyvars), so a
+higher-order goal can avoid the `types=` map entirely:
+`goal("!f:ind->ind. f 0 = 0")`. Postfix type application (`num list`)
+must be parenthesised in this position to keep the var_decl grammar
+unambiguous against juxtaposed bvars.
+
 ### `p.fix(names)`
 
 Peel one or more outer foralls. `names` is a string of
@@ -339,6 +346,8 @@ externally.
 `types` supplies types for fresh tyvars or function-typed bvars not
 registered as parser aliases. Values may be built with
 `parser.parse_type` (e.g. `"num -> A -> bool"`) just as for `goal`.
+Inline binder annotations (`p.let("Q(i:num, k:A->bool) := ...")`) are
+the lighter alternative when the type fits on one line.
 
 ### `p.unfold_let(name, *args)` / `p.fold_let(name, *args)`
 

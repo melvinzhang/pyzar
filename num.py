@@ -280,12 +280,9 @@ ONE_DEF = new_basic_definition(
 ONE = mk_const("1", [])
 add_const("1", ONE)
 
-_n_num = Var("n", num_ty)
-SUC_DEF = new_basic_definition(
-    mk_eq(Var("SUC", parse_type("num -> num")),
-          mk_abs(_n_num,
-              mk_comb(mk_num,
-                  mk_comb(IND_SUC, mk_comb(dest_num, _n_num))))))
+SUC_DEF = new_basic_definition(parse(
+    "SUC = (\\n:num. mk_num (IND_SUC (dest_num n)))",
+    SUC=parse_type("num -> num")))
 SUC = mk_const("SUC", [])
 add_const("SUC", SUC)
 

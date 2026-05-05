@@ -84,6 +84,22 @@ class TestSurface(unittest.TestCase):
         self.assertTrue(aconv(parse("!p:bool. ~~p ==> p"),
                               mk_forall(p, mk_imp(mk_not(mk_not(p)), p))))
 
+    def test_binder_full_type_expression(self):
+        # Annotation accepts any arrow_type (no need for an env alias).
+        Pv = mk_var("P", P_ty)
+        self.assertTrue(aconv(
+            parse("!P:num->bool. P x"),
+            mk_forall(Pv, mk_comb(Pv, VX))))
+        # Parenthesised compound types are accepted (postfix tyapp / nested).
+        self.assertTrue(aconv(
+            parse("!P:(num->bool). P x"),
+            mk_forall(Pv, mk_comb(Pv, VX))))
+        # Mixed annotated/bare var_decls juxtaposed.
+        Qn = mk_var("Q", num_ty)
+        self.assertTrue(aconv(
+            parse("!P:num->bool Q. P Q"),
+            mk_forall(Pv, mk_forall(Qn, mk_comb(Pv, Qn)))))
+
     def test_non_associative_eq_rejected(self):
         with self.assertRaises(ParseError):
             parse("x = y = z")
