@@ -490,25 +490,29 @@ def SATZ_55(p):
     p.have("step1_raw: x1*y2 + x1*x2 < y1*x2 + x1*x2") \
         .by_match(SATZ_19C, "k")
     # Reorder: x1*x2 + x1*y2 < x1*x2 + y1*x2.
+    p.have("comm_xy:").by_inst(SATZ_6, mk_mul(x1, y2), mk_mul(x1, x2))
+    p.have("comm_yx:").by_inst(SATZ_6, mk_mul(y1, x2), mk_mul(x1, x2))
     p.have("step1: x1*x2 + x1*y2 < x1*x2 + y1*x2") \
-        .by_rewrite_of("step1_raw",
-                       [SPECL([mk_mul(x1, y2), mk_mul(x1, x2)], SATZ_6),
-                        SPECL([mk_mul(y1, x2), mk_mul(x1, x2)], SATZ_6)])
+        .by_rewrite_of("step1_raw", ["comm_xy", "comm_yx"])
     # Use distributive laws directly to fold:
-    distr_l = SPECL([x1, x2, y2], SATZ_30)            # x1*(x2+y2) = x1*x2 + x1*y2
-    distr_r = SPECL([x1, y1, x2], RIGHT_DISTRIB)       # (x1+y1)*x2 = x1*x2 + y1*x2
+    p.have("distr_l:").by_inst(SATZ_30, x1, x2, y2)            # x1*(x2+y2) = x1*x2 + x1*y2
+    p.have("distr_r:").by_inst(RIGHT_DISTRIB, x1, y1, x2)      # (x1+y1)*x2 = x1*x2 + y1*x2
+    p.have("distr_l_sym:").by_thm(SYM(p.fact("distr_l")))
+    p.have("distr_r_sym:").by_thm(SYM(p.fact("distr_r")))
     p.have("ineq_left: x1*(x2+y2) < (x1+y1)*x2") \
-        .by_rewrite_of("step1", [SYM(distr_l), SYM(distr_r)])
+        .by_rewrite_of("step1", ["distr_l_sym", "distr_r_sym"])
     p.have("h_left: flt x1 x2 (x1+y1) (x2+y2)") \
         .by_unfold("ineq_left", FLT_DEF)
     # Right half: (x1+y1)*y2 < y1*(x2+y2).
     # x1*y2 + y1*y2 < y1*x2 + y1*y2  via SATZ_19C with z = y1*y2.
     p.have("step2: x1*y2 + y1*y2 < y1*x2 + y1*y2") \
         .by_match(SATZ_19C, "k")
-    distr_l2 = SPECL([x1, y1, y2], RIGHT_DISTRIB)      # (x1+y1)*y2 = x1*y2 + y1*y2
-    distr_r2 = SPECL([y1, x2, y2], SATZ_30)            # y1*(x2+y2) = y1*x2 + y1*y2
+    p.have("distr_l2:").by_inst(RIGHT_DISTRIB, x1, y1, y2)     # (x1+y1)*y2 = x1*y2 + y1*y2
+    p.have("distr_r2:").by_inst(SATZ_30, y1, x2, y2)           # y1*(x2+y2) = y1*x2 + y1*y2
+    p.have("distr_l2_sym:").by_thm(SYM(p.fact("distr_l2")))
+    p.have("distr_r2_sym:").by_thm(SYM(p.fact("distr_r2")))
     p.have("ineq_right: (x1+y1)*y2 < y1*(x2+y2)") \
-        .by_rewrite_of("step2", [SYM(distr_l2), SYM(distr_r2)])
+        .by_rewrite_of("step2", ["distr_l2_sym", "distr_r2_sym"])
     p.have("h_right: flt (x1+y1) (x2+y2) y1 y2") \
         .by_unfold("ineq_right", FLT_DEF)
     p.have("conj: flt x1 x2 (x1+y1) (x2+y2) /\\ flt (x1+y1) (x2+y2) y1 y2") \
@@ -548,28 +552,34 @@ def SATZ_56(p):
     p.have("e2: z1*u2 = u1*z2") \
         .by_def(FEQ_DEF, "h2")
     # (x1*y2)*(z2*u2) = (y1*x2)*(z2*u2)  via AP_THM on e1.
-    e1_zu = AP_THM(AP_TERM(TIMES, p.fact("e1")), mk_mul(z2, u2))
+    p.have("times_e1:").by_cong(TIMES, "e1")
+    p.have("e1_zu:").by_cong("times_e1", mk_mul(z2, u2))
     # (z1*u2)*(x2*y2) = (u1*z2)*(x2*y2)  via AP_THM on e2.
-    e2_xy = AP_THM(AP_TERM(TIMES, p.fact("e2")), mk_mul(x2, y2))
+    p.have("times_e2:").by_cong(TIMES, "e2")
+    p.have("e2_xy:").by_cong("times_e2", mk_mul(x2, y2))
     # AC-rebracket: (x1*z2)*(y2*u2) = (y1*u2)*(x2*z2).
     with p.calc("eq_A: (x1*z2)*(y2*u2)") as c:
         c.step("= (x1*y2)*(z2*u2)").by_ac(TIMES, SATZ_31, SATZ_29)
-        c.step("= (y1*x2)*(z2*u2)").by_thm(e1_zu)
+        c.step("= (y1*x2)*(z2*u2)").by_thm("e1_zu")
         c.step("= (y1*u2)*(x2*z2)").by_ac(TIMES, SATZ_31, SATZ_29)
     # (z1*x2)*(y2*u2) = (u1*y2)*(x2*z2).
     with p.calc("eq_B: (z1*x2)*(y2*u2)") as c:
         c.step("= (z1*u2)*(x2*y2)").by_ac(TIMES, SATZ_31, SATZ_29)
-        c.step("= (u1*z2)*(x2*y2)").by_thm(e2_xy)
+        c.step("= (u1*z2)*(x2*y2)").by_thm("e2_xy")
         c.step("= (u1*y2)*(x2*z2)").by_ac(TIMES, SATZ_31, SATZ_29)
     # Sum: (x1*z2)*(y2*u2) + (z1*x2)*(y2*u2) = (y1*u2)*(x2*z2) + (u1*y2)*(x2*z2).
-    sum_eq = MK_COMB(AP_TERM(PLUS, p.fact("eq_A")), p.fact("eq_B"))
+    p.have("plus_eqA:").by_cong(PLUS, "eq_A")
+    p.have("sum_eq:").by_cong("plus_eqA", "eq_B")
     # Refold via RIGHT_DISTRIB:
-    distr_l = SPECL([mk_mul(x1, z2), mk_mul(z1, x2), mk_mul(y2, u2)], RIGHT_DISTRIB)
-    distr_r = SPECL([mk_mul(y1, u2), mk_mul(u1, y2), mk_mul(x2, z2)], RIGHT_DISTRIB)
+    p.have("distr_l:").by_inst(RIGHT_DISTRIB,
+                               mk_mul(x1, z2), mk_mul(z1, x2), mk_mul(y2, u2))
+    p.have("distr_r:").by_inst(RIGHT_DISTRIB,
+                               mk_mul(y1, u2), mk_mul(u1, y2), mk_mul(x2, z2))
+    p.have("distr_r_sym:").by_thm(SYM(p.fact("distr_r")))
     with p.calc("res: (x1*z2 + z1*x2)*(y2*u2)") as c:
-        c.step("= (x1*z2)*(y2*u2) + (z1*x2)*(y2*u2)").by_thm(distr_l)
-        c.step("= (y1*u2)*(x2*z2) + (u1*y2)*(x2*z2)").by_thm(sum_eq)
-        c.step("= (y1*u2 + u1*y2)*(x2*z2)").by_thm(SYM(distr_r))
+        c.step("= (x1*z2)*(y2*u2) + (z1*x2)*(y2*u2)").by_thm("distr_l")
+        c.step("= (y1*u2)*(x2*z2) + (u1*y2)*(x2*z2)").by_thm("sum_eq")
+        c.step("= (y1*u2 + u1*y2)*(x2*z2)").by_thm("distr_r_sym")
     p.thus("feq (x1*z2 + z1*x2) (x2*z2) (y1*u2 + u1*y2) (y2*u2)") \
         .by_unfold("res", FEQ_DEF)
 
@@ -684,15 +694,19 @@ def SATZ_59(p):
 def SATZ_60(p):
     p.goal("!x1 x2 y1 y2. fgt (x1*y2 + y1*x2) (x2*y2) x1 x2")
     p.fix("x1 x2 y1 y2")
-    distr = SPECL([mk_mul(x1, y2), mk_mul(y1, x2), x2], RIGHT_DISTRIB)
+    p.have("distr:").by_inst(RIGHT_DISTRIB,
+                             mk_mul(x1, y2), mk_mul(y1, x2), x2)
     # (x1*y2 + y1*x2)*x2 = (x1*y2)*x2 + (y1*x2)*x2.
-    ac1 = _mul_AC(mk_mul(mk_mul(x1, y2), x2), mk_mul(x1, mk_mul(x2, y2)))
-    eq1 = TRANS(distr, MK_COMB(AP_TERM(PLUS, ac1),
-                                REFL(mk_mul(mk_mul(y1, x2), x2))))
+    p.have("ac1:").by_thm(_mul_AC(mk_mul(mk_mul(x1, y2), x2),
+                                  mk_mul(x1, mk_mul(x2, y2))))
+    p.have("plus_ac1:").by_cong(PLUS, "ac1")
+    p.have("refl_yx:").by_thm(REFL(mk_mul(mk_mul(y1, x2), x2)))
+    p.have("comb:").by_cong("plus_ac1", "refl_yx")
+    p.have("eq1:").by_trans("distr", "comb")
     p.have("gt_a: x1*(x2*y2) + (y1*x2)*x2 > x1*(x2*y2)") \
         .by_match(SATZ_18)
     p.have("gt_b: (x1*y2 + y1*x2)*x2 > x1*(x2*y2)") \
-        .by_rewrite_of("gt_a", [SYM(eq1)])
+        .by_rewrite_of("gt_a", [SYM(p.fact("eq1"))])
     p.thus("fgt (x1*y2 + y1*x2) (x2*y2) x1 x2").by_unfold("gt_b", FGT_DEF)
 
 
@@ -1047,26 +1061,35 @@ def SATZ_67_EXIST(p):
     u_term = rand(p.fact("u_eq")._concl)             # y1*x2 + u
     u_term = rand(u_term)                              # u
     # Goal at u1 := u, u2 := x2*y2: feq (y1*(x2*y2) + u*y2) (y2*(x2*y2)) x1 x2.
-    bridge_R = _mul_AC(mk_mul(x1, mk_mul(y2, mk_mul(x2, y2))),
-                       mk_mul(mk_mul(x1, y2), mk_mul(x2, y2)))
-    sub_eq = AP_THM(AP_TERM(TIMES, p.fact("u_eq")), mk_mul(x2, y2))
-    distr_R = SPECL([mk_mul(y1, x2), u_term, mk_mul(x2, y2)], RIGHT_DISTRIB)
-    M1 = _mul_AC(mk_mul(mk_mul(y1, x2), mk_mul(x2, y2)),
-                 mk_mul(mk_mul(y1, mk_mul(x2, y2)), x2))
-    M2 = _mul_AC(mk_mul(u_term, mk_mul(x2, y2)),
-                 mk_mul(mk_mul(u_term, y2), x2))
-    bridge_LHS_sum = MK_COMB(AP_TERM(PLUS, M1), M2)
-    refold = SPECL([mk_mul(y1, mk_mul(x2, y2)), mk_mul(u_term, y2), x2],
-                    RIGHT_DISTRIB)
-    # Goal unfolds to (y1*(x2*y2) + u*y2)*x2 = x1*(y2*(x2*y2)). Walk through:
-    #   refold (F=E), SYM(bridge_LHS_sum) (E=D), SYM(distr_R) (D=C),
-    #   SYM(sub_eq) (C=B), SYM(bridge_R) (B=A).
+    p.have("bridge_R:") \
+        .by_thm(_mul_AC(mk_mul(x1, mk_mul(y2, mk_mul(x2, y2))),
+                        mk_mul(mk_mul(x1, y2), mk_mul(x2, y2))))
+    p.have("times_u_eq:").by_cong(TIMES, "u_eq")
+    p.have("sub_eq:").by_cong("times_u_eq", mk_mul(x2, y2))
+    p.have("distr_R:") \
+        .by_inst(RIGHT_DISTRIB, mk_mul(y1, x2), u_term, mk_mul(x2, y2))
+    p.have("M1:") \
+        .by_thm(_mul_AC(mk_mul(mk_mul(y1, x2), mk_mul(x2, y2)),
+                        mk_mul(mk_mul(y1, mk_mul(x2, y2)), x2)))
+    p.have("M2:") \
+        .by_thm(_mul_AC(mk_mul(u_term, mk_mul(x2, y2)),
+                        mk_mul(mk_mul(u_term, y2), x2)))
+    p.have("plus_M1:").by_cong(PLUS, "M1")
+    p.have("bridge_LHS_sum:").by_cong("plus_M1", "M2")
+    p.have("refold:") \
+        .by_inst(RIGHT_DISTRIB,
+                 mk_mul(y1, mk_mul(x2, y2)), mk_mul(u_term, y2), x2)
+    p.have("bridge_LHS_sum_sym:").by_thm(SYM(p.fact("bridge_LHS_sum")))
+    p.have("distr_R_sym:").by_thm(SYM(p.fact("distr_R")))
+    p.have("sub_eq_sym:").by_thm(SYM(p.fact("sub_eq")))
+    p.have("bridge_R_sym:").by_thm(SYM(p.fact("bridge_R")))
+    # Goal unfolds to (y1*(x2*y2) + u*y2)*x2 = x1*(y2*(x2*y2)).
     with p.calc("res: (y1*(x2*y2) + u*y2)*x2") as c:
-        c.step("= (y1*(x2*y2))*x2 + (u*y2)*x2").by_thm(refold)
-        c.step("= (y1*x2)*(x2*y2) + u*(x2*y2)").by_thm(SYM(bridge_LHS_sum))
-        c.step("= (y1*x2 + u)*(x2*y2)").by_thm(SYM(distr_R))
-        c.step("= (x1*y2)*(x2*y2)").by_thm(SYM(sub_eq))
-        c.step("= x1*(y2*(x2*y2))").by_thm(SYM(bridge_R))
+        c.step("= (y1*(x2*y2))*x2 + (u*y2)*x2").by_thm("refold")
+        c.step("= (y1*x2)*(x2*y2) + u*(x2*y2)").by_thm("bridge_LHS_sum_sym")
+        c.step("= (y1*x2 + u)*(x2*y2)").by_thm("distr_R_sym")
+        c.step("= (x1*y2)*(x2*y2)").by_thm("sub_eq_sym")
+        c.step("= x1*(y2*(x2*y2))").by_thm("bridge_R_sym")
     p.have("witness_eq: feq (y1*(x2*y2) + u*y2) (y2*(x2*y2)) x1 x2") \
         .by_unfold("res", FEQ_DEF)
     p.have("inner: ?u2. feq (y1*u2 + u*y2) (y2*u2) x1 x2") \

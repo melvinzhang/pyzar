@@ -177,8 +177,13 @@ p.thus("term")                  # discharge the current goal as `term`
 `fr.result` and lifts the supplied theorem to the goal's exact shape
 via `_simp_require`.
 
-`spec` is `"label: term"` or just `"term"` (label auto-generated as
-`_h{n}`).
+`spec` is `"label: term"`, just `"term"` (label auto-generated as
+`_h{n}`), or `"label:"` (trailing colon, no body — *inferred-conclusion*
+form). The trailing-colon variant skips the term-shape check in
+`_finish` and registers the justifier's output at its native conclusion;
+useful for intermediate facts whose shape is uniquely determined by the
+justification (e.g. `by_inst(LEMMA, *terms)` SPECs the lemma — the
+conclusion is fixed by the args, no need to repeat it in the spec).
 
 ### Justification methods on `_Have`
 
@@ -192,6 +197,9 @@ via `_simp_require`.
 | `.by_unfold(src, *defs)`                            | `by_rewrite_of` with `beta=True` — bridge unfolded ↔ defined-symbol forms |
 | `.by_eq_mp(eq_th, ref)`                             | `EQ_MP(eq_th, fact)` modulo simp on the LHS                            |
 | `.by_def(def_th, ref)`                              | unfold `def_th` at `ref`'s head args, then `EQ_MP` — sugar for `by_eq_mp(UNFOLD(def_th, ...), ref)` |
+| `.by_inst(lemma, *terms)`                           | `SPECL(terms, lemma)` — pre-instantiate a lemma at term args; pairs with `have("label:")` so the result's conclusion need not be spelled out |
+| `.by_trans(*eqs)`                                   | `TRANS_CHAIN(eqs)` — compose `a=b`, `b=c`, ... into `a=c`              |
+| `.by_cong(left, right)`                             | single-step congruence: term + fact → `AP_TERM`; fact + term → `AP_THM`; fact + fact → `MK_COMB` |
 | `.by_iff(fwd, rev)`                                 | iff-intro: combine `L ==> R` and `R ==> L` facts into the bool equality `L = R` (order-agnostic) |
 | `.by_fold(ref)`                                     | inverse of an unfolder: fold `ref` back into a registered relation     |
 | `.by_witness(witness, ref)`                         | `EXISTS` for an existential have-term                                  |

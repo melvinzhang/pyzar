@@ -44,9 +44,9 @@ from axioms import (
 )
 from tactics import (
     SPEC, GEN, DISCH, MP, MP_LIST, DISJ_CASES, BETA_NORM, SYM,
-    AP_TERM, PROVE_HYP, CHOOSE_WITNESS, UNFOLD, subst_term,
+    AP_TERM, AP_THM, PROVE_HYP, CHOOSE_WITNESS, UNFOLD, subst_term,
     NOT_INTRO, NOT_ELIM, CONTR, EXISTS, DISJ1, DISJ2,
-    CONJUNCT1, CONJUNCT2,
+    CONJUNCT1, CONJUNCT2, TRANS_CHAIN,
     REWRITE_PROVE, REWRITE_CONV,
     AC_PROVE,
     _strip_forall, _term_match,
@@ -925,13 +925,21 @@ class Proof:
         return SYM(self.unfold_let(name, *args))
 
     def _split_label(self, spec):
-        """Parse ``"label: term"`` or ``"term"``.
+        """Parse ``"label: term"`` or ``"term"`` or ``"label:"``.
 
         Thin wrapper over ``parser.parse_label`` that supplies the
         current scope env. The grammar commits once it sees ``NAME ":"``
         so a body-level ``ParseError`` reports the typo the user
         actually wrote (no misleading whole-spec retry).
+
+        The trailing-colon form ``"label:"`` (no body) is the
+        inferred-conclusion variant: the resulting ``_Have`` has
+        ``term=None``, so ``_finish`` skips the shape check and
+        registers the justifier's output at its native conclusion.
         """
+        peeled = peel_label_prefix(spec)
+        if peeled is not None and not peeled[1].strip():
+            return peeled[0], None
         return parse_label(spec, _env_bindings=self._scope_env())
 
     def _fresh_label(self, prefix="h"):
@@ -1698,13 +1706,18 @@ class _Have:
         # avoids a redundant simp lift through the user's have-term form;
         # ``thus``-registered facts have a frame-bounded lifetime, so the
         # shape change has no downstream consumers.
+        #
+        # When ``self.term is None`` (``have("name:")`` inferred-conclusion
+        # form), skip the shape check and register at the justifier's
+        # native conclusion -- the user has opted out of stating the
+        # intermediate's shape because the kernel rule pins it down.
         if self.is_thus:
             cur = self.p._cur
             if cur.goal is None:
                 raise HolError("thus: no current goal")
             th = self.p._simp_require(cur.goal, th, op="thus")
             cur.result = th
-        else:
+        elif self.term is not None:
             th = self.p._simp_require(self.term, th, op="have")
         label = self.label or self.p._fresh_label("h")
         self.p._register_fact(label, th)
@@ -1713,8 +1726,11 @@ class _Have:
     # ----- justification methods -----
 
     def by_thm(self, th):
-        """Direct: the supplied theorem already proves the have-term."""
-        return self._finish(th)
+        """Direct: the supplied theorem already proves the have-term.
+
+        ``th`` may be a kernel theorem or a fact label string (resolved
+        via ``coerce`` to the registered fact)."""
+        return self._finish(self.p.coerce(th))
 
     def by(self, justification, *args):
         """SPEC/MP chain (if `justification` is a theorem or fact label) or
@@ -2014,6 +2030,60 @@ class _Have:
                 f"by_def: fact head {pp(concl)} does not match "
                 f"definition LHS {pp(head)}")
         return self._finish(p.simp_eq_mp(UNFOLD(def_th, *peeled), th_ref))
+
+    def by_inst(self, lemma, *args):
+        """``SPECL`` ``lemma`` at term args.
+
+        Each ``arg`` is a kernel term or a string parsed as a term in
+        the current scope. ``lemma`` is a fact label or theorem. Sugar
+        for the ``var = SPECL([t1,...,tn], LEMMA)`` cliche; pairs with
+        ``have("label:")`` so the resulting fact's conclusion does not
+        need to be spelled out by the caller."""
+        p = self.p
+        th = p.simp_norm_fact(p.coerce(lemma))
+        for a in args:
+            resolved = p.coerce(a, accept_term=True)
+            if isinstance(resolved, thm):
+                raise HolError(
+                    f"by_inst: arg {a!r} resolved to a theorem; "
+                    "expected a term")
+            th = SPEC(resolved, th)
+        return self._finish(th)
+
+    def by_trans(self, *eqs):
+        """``TRANS_CHAIN`` over ``eqs``: compose ``a=b``, ``b=c``, ...
+        into ``a=c``. Each ``eq`` is a fact label or theorem of equation
+        shape."""
+        if len(eqs) < 2:
+            raise HolError(
+                f"by_trans: needs at least 2 equations, got {len(eqs)}")
+        return self._finish(TRANS_CHAIN(self._resolved(eqs)))
+
+    def by_cong(self, left, right):
+        """Single-step congruence on ``left`` / ``right``.
+
+        Each side is a fact (theorem of equation shape) or a kernel
+        term. Dispatch:
+
+        * term + fact: ``AP_TERM(left, right)`` -- ``f a = f b`` from
+          ``a = b``.
+        * fact + term: ``AP_THM(left, right)`` -- ``g x = h x`` from
+          ``g = h``.
+        * fact + fact: ``MK_COMB(left, right)`` -- ``f a = g b`` from
+          ``f = g`` and ``a = b``.
+        """
+        p = self.p
+        L = p.coerce(left, accept_term=True)
+        R = p.coerce(right, accept_term=True)
+        if isinstance(L, thm) and isinstance(R, thm):
+            return self._finish(MK_COMB(L, R))
+        if isinstance(L, thm):
+            return self._finish(AP_THM(L, R))
+        if isinstance(R, thm):
+            return self._finish(AP_TERM(L, R))
+        raise HolError(
+            "by_cong: at least one side must be an equation fact "
+            f"(got both terms: {pp(L)} / {pp(R)})")
 
     def by_iff(self, fwd, rev):
         """For a boolean-equality have-term ``L = R``, combine two
