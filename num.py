@@ -13,7 +13,7 @@ Mirrors `nums.ml` from HOL Light.
 
 from fusion import (
     Var, Abs, aty, mk_comb,
-    mk_type, new_basic_definition, new_basic_type_definition,
+    mk_type, new_basic_type_definition,
     REFL, TRANS, ASSUME, EQ_MP, INST, INST_TYPE, HolError,
 )
 from basics import (
@@ -46,20 +46,12 @@ from parser import (
 #   IND_SUC := @f. ONE_ONE f /\ ~(ONTO f).
 # ---------------------------------------------------------------------------
 
-_ind_ind = parse_type("ind -> ind")
 _one_one_ind = mk_const("ONE_ONE", [(ind_ty, aty), (ind_ty, bty)])
 _onto_ind    = mk_const("ONTO",    [(ind_ty, aty), (ind_ty, bty)])
 
-_f_ii = Var("f", _ind_ind)
-_INFTY_PRED = mk_abs(_f_ii,
-    mk_and(mk_comb(_one_one_ind, _f_ii),
-           mk_not(mk_comb(_onto_ind, _f_ii))))   # \f. ONE_ONE f /\ ~(ONTO f)
-
-_select_ii = mk_const("@", [(_ind_ind, aty)])
-
-IND_SUC_DEF = new_basic_definition(
-    mk_eq(Var("IND_SUC", _ind_ind),
-          mk_comb(_select_ii, _INFTY_PRED)))     # |- IND_SUC = @(\f. ONE_ONE f /\ ~ONTO f)
+IND_SUC_DEF = _define("IND_SUC", "ind -> ind",
+    "@f:ind -> ind. ${oo} f /\\ ~(${onto} f)",
+    oo=_one_one_ind, onto=_onto_ind)
 IND_SUC = mk_const("IND_SUC", [])
 
 # Register surface syntax as soon as each constant becomes available, so that
@@ -69,7 +61,6 @@ IND_SUC = mk_const("IND_SUC", [])
 # the polymorphic kernel constants directly would force the parser to do
 # type inference, so we expose them at the single instantiation we need.
 add_type("ind", ind_ty)
-add_const("IND_SUC", IND_SUC)
 add_const("ONE_ONE_ind", _one_one_ind)
 add_const("ONTO_ind",    _onto_ind)
 
@@ -133,14 +124,9 @@ def _EXISTS_WITNESS(prf):
 
 
 # Define IND_1 = @z. !x. ~(IND_SUC x = z).
-_select_ind = mk_const("@", [(ind_ty, aty)])
-_witness_pred = mk_abs(_z_ind,
-                   mk_forall(_x_ind,
-                       mk_not(mk_eq(mk_comb(IND_SUC, _x_ind), _z_ind))))
-IND_1_DEF = new_basic_definition(
-    mk_eq(Var("IND_1", ind_ty), mk_comb(_select_ind, _witness_pred)))
+IND_1_DEF = _define("IND_1", ind_ty,
+    "@z:ind. !x:ind. ~(IND_SUC x = z)")
 IND_1 = mk_const("IND_1", [])
-add_const("IND_1", IND_1)
 
 
 @proof
@@ -164,18 +150,10 @@ _i_ind  = Var("i", ind_ty)
 _P_ind_ty = parse_type("ind -> bool")
 _P_ind  = Var("P", _P_ind_ty)
 
-NUM_REP_DEF = new_basic_definition(
-    mk_eq(Var("NUM_REP", _P_ind_ty),
-          mk_abs(_a_ind,
-              mk_forall(_P_ind,
-                  mk_imp(
-                      mk_and(mk_comb(_P_ind, IND_1),
-                             mk_forall(_i_ind,
-                                 mk_imp(mk_comb(_P_ind, _i_ind),
-                                        mk_comb(_P_ind, mk_comb(IND_SUC, _i_ind))))),
-                      mk_comb(_P_ind, _a_ind))))))
+NUM_REP_DEF = _define("NUM_REP", _P_ind_ty,
+    "\\a:ind. !P:ind->bool. "
+    "P IND_1 /\\ (!i:ind. P i ==> P (IND_SUC i)) ==> P a")
 NUM_REP = mk_const("NUM_REP", [])
-add_const("NUM_REP", NUM_REP)
 
 
 def _NUM_REP_unfold(a_term):
@@ -275,16 +253,12 @@ set_default_var_ty(num_ty)
 #   SUC = \n:num. mk_num (IND_SUC (dest_num n)).
 # ---------------------------------------------------------------------------
 
-ONE_DEF = new_basic_definition(
-    mk_eq(Var("1", num_ty), mk_comb(mk_num, IND_1)))
+ONE_DEF = _define("1", num_ty, "mk_num IND_1")
 ONE = mk_const("1", [])
-add_const("1", ONE)
 
-SUC_DEF = new_basic_definition(parse(
-    "SUC = (\\n:num. mk_num (IND_SUC (dest_num n)))",
-    SUC=parse_type("num -> num")))
+SUC_DEF = _define("SUC", "num -> num",
+    "\\n:num. mk_num (IND_SUC (dest_num n))")
 SUC = mk_const("SUC", [])
-add_const("SUC", SUC)
 
 
 def mk_suc(t):

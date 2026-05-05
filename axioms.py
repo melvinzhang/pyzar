@@ -5,10 +5,9 @@ the original HOL Light distribution.
 """
 
 from fusion import (
-    Var,
     aty, bool_ty,
     mk_comb, mk_type,
-    new_axiom, new_basic_definition, new_constant, new_type,
+    new_axiom, new_constant, new_type,
 )
 from basics import (
     bty,
@@ -16,7 +15,8 @@ from basics import (
     mk_abs, mk_app, mk_const, mk_eq,
 )
 from parser import (
-    add_type, add_infix, add_binder, infix, prefix, binder, parse, parse_type,
+    add_type, add_infix, add_binder, add_prefix, binder,
+    parse, parse_type, define,
 )
 
 # Surface syntax for the kernel-level concepts that predate the parser:
@@ -30,79 +30,60 @@ add_binder("\\", mk_abs)
 # Boolean connectives (bool.ml)
 # ---------------------------------------------------------------------------
 
-p = Var("p", bool_ty)
-q = Var("q", bool_ty)
-
 # T = ((\p. p) = (\p. p))
-T_DEF = new_basic_definition(
-    mk_eq(Var("T", bool_ty),
-          mk_eq(mk_abs(p, p), mk_abs(p, p))))
+T_DEF = define("T", "bool", "(\\p:bool. p) = (\\p:bool. p)")
 T = mk_const("T", [])
 
 # (/\) = \p q. (\f. f p q) = (\f. f T T)
 bbb_ty = parse_type("bool -> bool -> bool")
-AND_DEF = new_basic_definition(
-    mk_eq(Var("/\\", bbb_ty),
-          parse("\\p q. (\\f:Bbb. f p q) = (\\f:Bbb. f T T)",
-                p=p, q=q, T=T, Bbb=bbb_ty)))
+AND_DEF = define("/\\", bbb_ty,
+    "\\p:bool q:bool. (\\f:Bbb. f p q) = (\\f:Bbb. f T T)",
+    Bbb=bbb_ty, prec=30, assoc="right")
 
-@infix("/\\", 30, assoc="right")
 def mk_and(a, b):
     return mk_app(mk_const("/\\", []), a, b)
 
-# (==>) = \p q. p /\ q <=> p
-IMP_DEF = new_basic_definition(
-    mk_eq(Var("==>", bbb_ty),
-          mk_abs(p, mk_abs(q, mk_eq(mk_and(p, q), p)))))
+# (==>) = \p q. (p /\ q) = p
+IMP_DEF = define("==>", bbb_ty,
+    "\\p:bool q:bool. (p /\\ q) = p", prec=10, assoc="right")
 
-@infix("==>", 10, assoc="right")
 def mk_imp(a, b):
     return mk_app(mk_const("==>", []), a, b)
 
 # (!) = \P:A->bool. P = \x. T
-FORALL_DEF = new_basic_definition(
-    mk_eq(Var("!", parse_type("(A -> bool) -> bool")),
-          parse("\\P:A->bool. P = \\x:A. T", T=T)))
+FORALL_DEF = define("!", "(A -> bool) -> bool", "\\P:A->bool. P = \\x:A. T")
 
 @binder("!")
 def mk_forall(v, body):
     return mk_comb(mk_const("!", [(v.ty, aty)]), mk_abs(v, body))
 
 # (?) = \P:A->bool. !q. (!x. P x ==> q) ==> q
-EXISTS_DEF = new_basic_definition(
-    mk_eq(Var("?", parse_type("(A -> bool) -> bool")),
-          parse("\\P:A->bool. !q:bool. (!x:A. P x ==> q) ==> q")))
+EXISTS_DEF = define("?", "(A -> bool) -> bool",
+    "\\P:A->bool. !q:bool. (!x:A. P x ==> q) ==> q")
 
 @binder("?")
 def mk_exists(v, body):
     return mk_comb(mk_const("?", [(v.ty, aty)]), mk_abs(v, body))
 
 # (\/) = \p q. !r. (p ==> r) ==> (q ==> r) ==> r
-r_b = Var("r", bool_ty)
-OR_DEF = new_basic_definition(
-    mk_eq(Var("\\/", bbb_ty),
-          mk_abs(p, mk_abs(q,
-              mk_forall(r_b,
-                  mk_imp(mk_imp(p, r_b),
-                         mk_imp(mk_imp(q, r_b), r_b)))))))
+OR_DEF = define("\\/", bbb_ty,
+    "\\p:bool q:bool. !r:bool. (p ==> r) ==> (q ==> r) ==> r",
+    prec=20, assoc="right")
 
-@infix("\\/", 20, assoc="right")
 def mk_or(a, b):
     return mk_app(mk_const("\\/", []), a, b)
 
 # F = !p:bool. p
-F_DEF = new_basic_definition(
-    mk_eq(Var("F", bool_ty), mk_forall(p, p)))
+F_DEF = define("F", "bool", "!p:bool. p")
 F = mk_const("F", [])
 
 # (~) = \p. p ==> F
-NOT_DEF = new_basic_definition(
-    mk_eq(Var("~", parse_type("bool -> bool")),
-          parse("\\p:bool. p ==> F", F=F)))
+NOT_DEF = define("~", "bool -> bool", "\\p:bool. p ==> F")
 
-@prefix("~")
 def mk_not(t):
     return mk_comb(mk_const("~", []), t)
+
+add_prefix("~", mk_not)
 
 # Bool-specific shape helpers: thin aliases over the kernel ``is_*``/
 # ``dest_*`` connective helpers so tactic call sites can ask
@@ -151,14 +132,12 @@ new_type("ind", 0)
 ind_ty = mk_type("ind", [])
 
 # ONE_ONE = \f:A->B. !x1 x2. f x1 = f x2 ==> x1 = x2
-ONE_ONE_DEF = new_basic_definition(parse(
-    "ONE_ONE = (\\f:A->B. !x1:A x2:A. f x1 = f x2 ==> x1 = x2)",
-    ONE_ONE=parse_type("(A -> B) -> bool")))
+ONE_ONE_DEF = define("ONE_ONE", "(A -> B) -> bool",
+    "\\f:A->B. !x1:A x2:A. f x1 = f x2 ==> x1 = x2")
 
 # ONTO = \f:A->B. !y. ?x. y = f x
-ONTO_DEF = new_basic_definition(parse(
-    "ONTO = (\\f:A->B. !y:B. ?x:A. y = f x)",
-    ONTO=parse_type("(A -> B) -> bool")))
+ONTO_DEF = define("ONTO", "(A -> B) -> bool",
+    "\\f:A->B. !y:B. ?x:A. y = f x")
 
 INFINITY_AX = new_axiom(parse(
     "?f:ind->ind. ${oo} f /\\ ~(${onto} f)",

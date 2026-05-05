@@ -777,7 +777,7 @@ def parse_type(s, sig=None):
     return _Builder(sig, {}).visit(tree)
 
 
-def define(name, ty, body, *, sig=None, prec=None, assoc=None):
+def define(name, ty, body, *, sig=None, prec=None, assoc=None, **bindings):
     """Introduce a new defined constant.
 
     Parameters:
@@ -785,10 +785,13 @@ def define(name, ty, body, *, sig=None, prec=None, assoc=None):
       ty   -- the constant's type, either a string (parsed via
               `parse_type(ty, sig=sig)`) or a pre-built `hol_type`.
       body -- the definition's right-hand side, either a string (parsed
-              via `parse(body, sig=sig)`) or a pre-built kernel term.
+              via `parse(body, sig=sig, **bindings)`) or a pre-built
+              kernel term.
       sig  -- target `Signature`; defaults to `DEFAULT_SIG`.
       prec, assoc -- if given, also register as an infix operator
               (`assoc` in {"left","right","non"}).
+      bindings -- forwarded to `parse` (free-variable type pins, type
+              aliases, antiquotes); ignored if `body` is already a term.
 
     Side effects (on success):
       * calls `new_basic_definition` to introduce the constant;
@@ -801,7 +804,13 @@ def define(name, ty, body, *, sig=None, prec=None, assoc=None):
     sig = sig or DEFAULT_SIG
     if isinstance(ty, str):
         ty = parse_type(ty, sig=sig)
-    rhs = parse(body, sig=sig) if isinstance(body, str) else body
+    if isinstance(body, str):
+        rhs = parse(body, sig=sig, **bindings)
+    else:
+        if bindings:
+            raise ValueError(
+                f"define({name!r}): bindings given but body is already a term")
+        rhs = body
     def_th = new_basic_definition(mk_eq(Var(name, ty), rhs))
     const = mk_const(name, [])
     sig.add_const(name, const)
