@@ -292,6 +292,44 @@ Classical contradiction: opens an `F`-frame with `h: ~target` as a
 fact. Body derives `F`; on close, `NOT_NOT_ELIM` lifts `~~target`
 back to `target`.
 
+### `with p.calc(lhs_spec, *, thus=False) as c: ...`
+
+Mizar-style equational chain (`... .= ...`). `lhs_spec` is `"lhs"` or
+`"label: lhs"`; the chain seeds at `lhs` and each step extends it.
+
+Inside the block, each `c.step("= rhs").by_*(...)` proves the segment
+`cur_rhs = rhs` and TRANS-composes it onto the running chain;
+`cur_rhs` advances to `rhs`. Steps don't push a frame and don't
+register their own facts — only the composed equation `lhs =
+final_rhs` is registered on context exit (under the user's label or a
+fresh `_h{n}`).
+
+`_CalcStep` is a `_Have` subclass, so every justification listed in
+§4 is available on a step (`by`, `by_thm`, `by_rewrite`,
+`by_rewrite_of`, `by_match`, `by_ac`, `proof()`, …).
+
+With `thus=True`, the composed equation must alpha-match the current
+goal and discharges it (mirrors `thus` vs. `have`).
+
+```python
+# have-mode: equation registered as a fact for downstream use
+with p.calc("eq_A: (x1*z2)*(y2*u2)") as c:
+    c.step("= (x1*y2)*(z2*u2)").by_ac(TIMES, SATZ_31, SATZ_29)
+    c.step("= (y1*x2)*(z2*u2)").by_thm(e1_zu)
+    c.step("= (y1*u2)*(x2*z2)").by_ac(TIMES, SATZ_31, SATZ_29)
+sum_eq = MK_COMB(AP_TERM(PLUS, p.fact("eq_A")), p.fact("eq_B"))
+
+# thus-mode: composed equation closes the goal
+with p.calc("radd X Y", thus=True) as c:
+    c.step("= Q (a*d + c*b) (b*d)").by_thm(radd_XY_eq_canon_LR)
+    c.step("= Q (c*b + a*d) (d*b)").by_thm(p.fact("Qcomm"))
+    c.step("= radd Y X").by_thm(SYM(radd_YX_eq_canon_RL))
+```
+
+Errors: empty chain, malformed step (no leading `=`), goal mismatch
+in `thus=True` mode, and per-step shape mismatches all raise
+`HolError`.
+
 ---
 
 ## 6. Witnesses
