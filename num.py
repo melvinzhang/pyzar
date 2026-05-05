@@ -794,7 +794,7 @@ def NUM_RECURSION(p):
 # ---------------------------------------------------------------------------
 
 
-def define_recursive(name, fn_ty, x_var, c, h, *, prec=None, assoc="non"):
+def define_recursive(name, fn_ty, x_var, c, h, *, infix=None):
     if not isinstance(h, Abs) or not isinstance(h.body, Abs):
         raise HolError(
             "define_recursive: h must be Abs(k, Abs(a, body))")
@@ -826,7 +826,7 @@ def define_recursive(name, fn_ty, x_var, c, h, *, prec=None, assoc="non"):
 
     # Operator definition: \x y. (@fn. pred_clean fn) y.
     op_rhs = mk_abs(x_var, mk_abs(y_var, mk_comb(sel_at_pc, y_var)))
-    OP_DEF = _define(name, fn_ty, op_rhs, prec=prec, assoc=assoc)
+    OP_DEF = _define(name, fn_ty, op_rhs, infix=infix)
 
     # NUM_RECURSION at this c, h: |- ?fn. fn 1 = c /\ !n. fn (SUC n) = h n (fn n).
     NR_num = INST_TYPE([(num_ty, aty)], NUM_RECURSION)

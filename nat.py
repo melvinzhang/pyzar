@@ -135,7 +135,7 @@ ADD_1, ADD_SUC = define_recursive(
     "+", _nnn, x,
     c = mk_suc(x),
     h = mk_abs(_k, mk_abs(_a, mk_suc(_a))),    # \k a. SUC a
-    prec=50, assoc="left",
+    infix=(50, "left"),
 )
 PLUS = mk_const("+", [])
 
@@ -369,8 +369,8 @@ def SATZ_9(p):
 
 _nnb = parse_type("num -> num -> bool")
 
-GT_DEF = define(">", _nnb, "\\x y. ?u. x = y + u", prec=40, assoc="non")
-LT_DEF = define("<", _nnb, "\\x y. ?v. y = x + v", prec=40, assoc="non")
+GT_DEF = define(">", _nnb, "\\x y. ?u. x = y + u", infix=(40, "non"))
+LT_DEF = define("<", _nnb, "\\x y. ?v. y = x + v", infix=(40, "non"))
 
 GT = mk_const(">", [])
 LT = mk_const("<", [])
@@ -424,8 +424,8 @@ def SATZ_12(p):
 # Definition 4:  x >= y  ≡  x > y \/ x = y.
 # Definition 5:  x <= y  ≡  x < y \/ x = y.
 
-GE_DEF = define(">=", _nnb, "\\x y. x > y \\/ x = y", prec=40, assoc="non")
-LE_DEF = define("<=", _nnb, "\\x y. x < y \\/ x = y", prec=40, assoc="non")
+GE_DEF = define(">=", _nnb, "\\x y. x > y \\/ x = y", infix=(40, "non"))
+LE_DEF = define("<=", _nnb, "\\x y. x < y \\/ x = y", infix=(40, "non"))
 
 GE = mk_const(">=", [])
 LE = mk_const("<=", [])
@@ -912,7 +912,7 @@ MUL_1, MUL_SUC = define_recursive(
     "*", _nnn, x,
     c = x,
     h = mk_abs(_k, mk_abs(_a, mk_add(_a, x))),   # \k a. a + x
-    prec=60, assoc="left",
+    infix=(60, "left"),
 )
 TIMES = mk_const("*", [])
 

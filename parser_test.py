@@ -200,7 +200,7 @@ class TestDefine(unittest.TestCase):
         sig.add_type("num", num_ty)
         op = "++"  # parser's OP token only accepts symbolic names
         op_def = define(op, "num -> num -> num", "\\a b. a + b", sig=sig,
-                        prec=50, assoc="left")
+                        infix=(50, "left"))
         op_lhs, _ = dest_eq(op_def._concl)
         self.assertIsInstance(op_lhs, Const)
         self.assertEqual(op_lhs.name, op)

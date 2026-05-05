@@ -38,14 +38,14 @@ T = mk_const("T", [])
 bbb_ty = parse_type("bool -> bool -> bool")
 AND_DEF = define("/\\", bbb_ty,
     "\\p:bool q:bool. (\\f:Bbb. f p q) = (\\f:Bbb. f T T)",
-    Bbb=bbb_ty, prec=30, assoc="right")
+    Bbb=bbb_ty, infix=(30, "right"))
 
 def mk_and(a, b):
     return mk_app(mk_const("/\\", []), a, b)
 
 # (==>) = \p q. (p /\ q) = p
 IMP_DEF = define("==>", bbb_ty,
-    "\\p:bool q:bool. (p /\\ q) = p", prec=10, assoc="right")
+    "\\p:bool q:bool. (p /\\ q) = p", infix=(10, "right"))
 
 def mk_imp(a, b):
     return mk_app(mk_const("==>", []), a, b)
@@ -68,7 +68,7 @@ def mk_exists(v, body):
 # (\/) = \p q. !r. (p ==> r) ==> (q ==> r) ==> r
 OR_DEF = define("\\/", bbb_ty,
     "\\p:bool q:bool. !r:bool. (p ==> r) ==> (q ==> r) ==> r",
-    prec=20, assoc="right")
+    infix=(20, "right"))
 
 def mk_or(a, b):
     return mk_app(mk_const("\\/", []), a, b)
