@@ -38,7 +38,7 @@ from basics import (
 )
 from axioms import (
     T, F, mk_select, mk_forall, mk_not,
-    dest_conj, dest_disj, dest_exists, dest_forall, dest_imp, dest_neg,
+    dest_disj, dest_exists, dest_forall, dest_imp, dest_neg,
     is_conj, is_disj,
 )
 from tactics import (

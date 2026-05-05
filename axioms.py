@@ -43,9 +43,8 @@ T = mk_const("T", [])
 bbb_ty = parse_type("bool -> bool -> bool")
 AND_DEF = new_basic_definition(
     mk_eq(Var("/\\", bbb_ty),
-          parse("\\p q. (\\f:bool->bool->bool. f p q) "
-                "= (\\f:bool->bool->bool. f T T)",
-                p=p, q=q, T=T)))
+          parse("\\p q. (\\f:Bbb. f p q) = (\\f:Bbb. f T T)",
+                p=p, q=q, T=T, Bbb=bbb_ty)))
 
 @infix("/\\", 30, assoc="right")
 def mk_and(a, b):

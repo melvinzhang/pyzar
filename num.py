@@ -12,7 +12,7 @@ Mirrors `nums.ml` from HOL Light.
 """
 
 from fusion import (
-    Var, Abs, aty, bool_ty, mk_comb,
+    Var, Abs, aty, mk_comb,
     mk_type, new_basic_definition, new_basic_type_definition,
     REFL, TRANS, ASSUME, EQ_MP, INST, INST_TYPE, HolError,
 )

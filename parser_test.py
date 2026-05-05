@@ -18,7 +18,7 @@ from num import x as VX, y as VY, z as VZ, mk_suc, num_ty, ONE
 from parser import (
     DEFAULT_SIG, ParseError, Signature, define, parse, parse_type,
 )
-from fusion import Tyvar, Tyapp
+from fusion import Tyvar
 
 
 def _binop(name):

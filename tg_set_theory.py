@@ -12,18 +12,17 @@ type-checks every axiom statement and rejects any ill-formed term.
 """
 
 from fusion import (
-    Var, mk_type, new_type, new_constant, new_axiom,
+    mk_type, new_type, new_constant, new_axiom,
     ASSUME, EQ_MP, DEDUCT_ANTISYM_RULE,
 )
-from basics import mk_const, mk_abs, mk_app
+from basics import mk_const
 from parser import (
     add_const, add_type, set_default_var_ty, parse, parse_type, define, pp_thm,
 )
 import axioms  # noqa: F401 -- registers !, ?, /\, \/, ==>, ~, @, =, T, F
-from axioms import mk_select, mk_forall, mk_exists, mk_imp
 from tactics import (
-    SPEC, SPECL, GEN, GENL, DISCH, MP, EXISTS, AP_TERM, AP_THM, SYM,
-    BETA_CONV, CHOOSE_WITNESS, CONJ, CONJUNCT1, CONJUNCT2, UNFOLD,
+    SPEC, GEN, DISCH, MP, AP_TERM, AP_THM, SYM,
+    CONJ, CONJUNCT1, CONJUNCT2, UNFOLD,
     DISJ1, DISJ_CASES, REFL,
 )
 from basics import dest_eq, rand
