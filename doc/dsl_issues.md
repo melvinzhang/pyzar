@@ -317,4 +317,109 @@ only inside a proof block, so these helpers can't be expressed with
 them. A "promote a `by_*` chain to a standalone rule" facility, or
 just rewriting the four as `@proof` lemmas, would close the gap.
 
+### No fact-flip helper (`SYM` / `NE_SYM`)
+
+Flipping a named equation requires raw `SYM(p.fact("name"))` — there
+is no `p.sym("name")` or `by_thm(..., flip="name")` surface, and no
+`by_rewrite_of` mode that takes a fact name and applies it
+right-to-left. This is the single most common residual kernel
+pattern in the rat-level proofs: ~30 sites across `rat_int.py`
+(SATZ_81, 84-90, 94, 95, 97A/B, 101, 106A/B, 110, 111, 114,
+RMUL_ONE, ...) and many in `frac.py` (SATZ_55, 56, 60, 61, 67_EXIST,
+...). The disequation form `NE_SYM` (`num.py:169`) has the same gap.
+**Workaround**: a one-line `p.have("name_sym:").by_thm(SYM(p.fact(
+"name")))` per use — verbose enough that authors usually inline the
+raw call instead.
+
+### `simp` / `by_match` take theorems, not `(lemma, args)` pairs
+
+When the user wants a partially-instantiated lemma fed into the simp
+set or as a `by_match` rule, the only surface is to materialize it
+inline as `SPECL([Z_t, Y_t], SATZ_92)`. There is no
+`p.simp_with(LEMMA, [Z_t, Y_t])` / `by_match_with(...)` form.
+Instances: `rat_int.py:1148, 1172, 1619, 1643` (SATZ_98, SATZ_99A,
+SATZ_107, SATZ_108A) all double up
+`p.simp(SPECL([...], SATZ_92), SPECL([...], SATZ_92))` to register
+two pre-specialized commutativities before a `by_rewrite_of` step.
+
+### No congruence combinator under operators
+
+When you have `a = b` and need `f a c = f b c` or `g (h a) = g (h
+b)`, the proof reaches for raw `AP_TERM` / `AP_THM` / `MK_COMB`
+chains — there is no `p.cong(f, "e1", "e2")` or `p.under(f, eq)`
+surface. The fraction-arithmetic proofs are dense with this pattern:
+`frac.py:132` (SATZ_39 `MK_COMB(AP_TERM(TIMES, e1), e2)`),
+`frac.py:211` (SATZ_44), and especially `frac.py:600-715` (SATZ_57,
+SATZ_58, SATZ_59 build long chains of `AP_THM(AP_TERM(...), ...)` to
+lift equations under `+` / `*`). A congruence combinator would cut
+these proofs significantly.
+
+### `TRANS` / `TRANS_CHAIN` aren't usable as glue outside `calc`
+
+`p.calc(...)` emits a final equation theorem, but only by closing
+the frame as a `have` / `thus` registered fact. When the user needs
+an *intermediate* equation theorem to pass into another kernel call
+(e.g., `AP_TERM(...)` or the second arg of `EQ_MP`), they fall back
+to `TRANS` / `TRANS_CHAIN` directly. Instances: `num.py:474, 765`
+(R_UNIQUE_STEP, INDUCTION compose intermediate equations),
+`rat_int.py:2028` (SATZ_115 `eq_WX_Y = TRANS(com, rdiv_prop)`),
+`frac.py:669, 676, 698, 705` (SATZ_59 nests TRANS chains between
+distributivity steps).
+
+### `by_witness` body often needs hand-`CONJ` assembly
+
+`by_witness(["a", "b", ...], body_thm)` accepts a single theorem; if
+the existential body is a conjunction, the body theorem must be
+assembled by hand. There is no spec-string surface like
+`by_witness(["a", "b"], "REFL, REFL, hgt")` or a
+`by_witness_conj(...)` arity. Instances: `rat_int.py:499, 510`
+(RGT_INTRO, RLT_INTRO assemble `CONJ(REFL(Q_ab), CONJ(REFL(Q_cd),
+hgt))` for the `?a b c d. Q a b = X /\ Q c d = Y /\ ...` shape) and
+`num.py:256` (NUM_REP_IND_SUC_CLOSED). This is a special case of
+the missing conjunction-introduction block, but the call site is
+specifically `by_witness`, not a top-level conjunction goal.
+
+### `CHOOSE_WITNESS` has no DSL surface
+
+`p.choose("v", from_=h)` introduces `@v.body` (a SELECT term) into
+scope, but there is no surface that returns the *witness theorem*
+`P (@v.body)` directly for use as an MP argument outside the bound
+scope. NUM_RECURSION (`num.py:820, 831, 837`) calls `CHOOSE_WITNESS`
+three times to thread unique-recursion witnesses through the
+construction. This is independent of the existing "Witnesses from
+`choose` are SELECT terms only" entry — that one is about *which
+term* `choose` selects, this is about getting the witnessing
+*theorem* without binding a name into scope.
+
+### No DSL surface for extensionality (`FUN_EXT` / `GEN`)
+
+To prove `f = g` from `!x. f x = g x` (or, two-level, `!x y. f x y =
+g x y`), the proof reaches for raw `GEN` / `FUN_EXT`. There is no
+`p.fun_ext(...)` or `with p.ext("x"):` block. Instance:
+`rat_int.py:321-325` (RAT_EQ derives `feq a b = feq c d` from a
+pointwise equality by `FUN_EXT(GEN(...))` twice to peel both
+arguments).
+
+### `UNFOLD(DEF, t1, t2, ...)` mid-expression has no DSL form
+
+`p.unfold(DEF, "x")` registers an unfold theorem as a fact in the
+current frame, but when the user needs the unfold *theorem* as a
+direct argument to another kernel call — typically wrapped in `SYM`
+or fed into `EQ_MP` — they fall back to raw `UNFOLD(DEF, t1, t2,
+...)`. Instances: `rat_int.py:266, 415, 1843, 1875, 1933, 1996`
+(RAT_EQ, Q_SURJ, SATZ_111A_REV, SATZ_111C_REV, RMUL_ONE, SATZ_114
+all do `EQ_MP(SYM(UNFOLD(DEF, ...)), ...)` to flip a definitional
+equation in place).
+
+### Bootstrap defs predate the DSL
+
+The classical-logic kernel proofs (`classical.py:63, 118-150`:
+F_NEQ_T, EXCLUDED_MIDDLE) and the early `num.py` definitions before
+induction is registered (`_IND_SUC_PROPS_PAIR`, `_EXISTS_WITNESS`,
+`IND_SUC_NEQ_IND_1`, `NUM_REP_IND_1`, `NUM_REP_IND_SUC_CLOSED`) are
+written below the abstraction layer they would need to use. They
+will always show up in the escape-hatch lint and don't represent a
+missing DSL feature — just the irreducible bottom of the stack.
+The lint flags them for completeness; they are not actionable.
+
 ---
