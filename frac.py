@@ -42,9 +42,9 @@ from nat import (
     SATZ_12,
     EQ_TO_GE,
 )
-from tactics import SYM, CONJ, DISJ1, DISJ2
+from tactics import SYM, SPECL, CONJ, DISJ1, DISJ2
 from parser import define, parse_type, pp_thm
-from proof import proof
+from proof import proof, register_refl_prover
 
 
 # Standard Landau variable names for fraction components, all of type num.
@@ -85,6 +85,12 @@ def SATZ_37(p):
     p.fix("x1 x2")
     p.have("eq: x1*x2 = x1*x2").by_rewrite([])
     p.thus("feq x1 x2 x1 x2").by_unfold("eq", FEQ_DEF)
+
+
+# Reflexivity prover: any ``feq a b a b`` antecedent of a by_match call can
+# be auto-derived from SATZ_37 via ``...``, eliminating the explicit
+# ``p.have("e_id: feq a b a b").by_match(SATZ_37)`` scaffolding.
+register_refl_prover("feq", lambda a, b: SPECL([a, b], SATZ_37))
 
 
 # Satz 38:  feq x1 x2 y1 y2  ==>  feq y1 y2 x1 x2.
@@ -378,8 +384,7 @@ def SATZ_51A(p):
         with p.case("e: feq x1 x2 y1 y2"):
             # Use Satz 45 with z1/z2 = x1/x2 and u1/u2 = z1/z2.
             p.have("e_sym: feq y1 y2 x1 x2").by_match(SATZ_38, "e")
-            p.have("e_id: feq z1 z2 z1 z2").by_match(SATZ_37)
-            p.thus("flt x1 x2 z1 z2").by_match(SATZ_45, "hlt", "e_sym", "e_id")
+            p.thus("flt x1 x2 z1 z2").by_match(SATZ_45, "hlt", "e_sym", ...)
 
 
 @proof
@@ -394,8 +399,7 @@ def SATZ_51B(p):
         with p.case("l: flt y1 y2 z1 z2"):
             p.thus("flt x1 x2 z1 z2").by_match(SATZ_50, "hlt", "l")
         with p.case("e: feq y1 y2 z1 z2"):
-            p.have("e_id: feq x1 x2 x1 x2").by_match(SATZ_37)
-            p.thus("flt x1 x2 z1 z2").by_match(SATZ_45, "hlt", "e_id", "e")
+            p.thus("flt x1 x2 z1 z2").by_match(SATZ_45, "hlt", ..., "e")
 
 
 # Satz 52:  fle x1 x2 y1 y2,  fle y1 y2 z1 z2  ==>  fle x1 x2 z1 z2.
@@ -418,10 +422,9 @@ def SATZ_52(p):
         with p.case("e1: feq x1 x2 y1 y2"):
             with p.thus("fle x1 x2 z1 z2").by_cases("d2"):
                 with p.case("l2: flt y1 y2 z1 z2"):
-                    p.have("e_id: feq z1 z2 z1 z2").by_match(SATZ_37)
                     p.have("e1_sym: feq y1 y2 x1 x2").by_match(SATZ_38, "e1")
                     p.have("lt: flt x1 x2 z1 z2").by_match(
-                        SATZ_45, "l2", "e1_sym", "e_id"
+                        SATZ_45, "l2", "e1_sym", ...
                     )
                     p.have("orL: flt x1 x2 z1 z2 \\/ feq x1 x2 z1 z2").by(
                         DISJ1, "lt", "feq x1 x2 z1 z2"
@@ -703,9 +706,8 @@ def SATZ_62B(p):
     )
     p.fix("x1 x2 y1 y2 z1 z2")
     p.assume("h: feq x1 x2 y1 y2")
-    p.have("e_id: feq z1 z2 z1 z2").by_match(SATZ_37)
     p.thus("feq (x1*z2 + z1*x2) (x2*z2) (y1*z2 + z1*y2) (y2*z2)").by_match(
-        SATZ_56, "h", "e_id"
+        SATZ_56, "h", ...
     )
 
 
@@ -923,11 +925,8 @@ def SATZ_65A(p):
             p.have(
                 "gt_yz_yu: fgt (y1*z2 + z1*y2) (y2*z2) (y1*u2 + u1*y2) (y2*u2)"
             ).by_match(SATZ_44, "gt_zy_uy", "comm_l", "comm_r")
-            p.have(
-                "id_yu: feq (y1*u2 + u1*y2) (y2*u2) (y1*u2 + u1*y2) (y2*u2)"
-            ).by_match(SATZ_37)
             p.thus("fgt (x1*z2 + z1*x2) (x2*z2) (y1*u2 + u1*y2) (y2*u2)").by_match(
-                SATZ_44, "gt_yz_yu", "eq_yz_xz", "id_yu"
+                SATZ_44, "gt_yz_yu", "eq_yz_xz", ...
             )
 
 
@@ -951,16 +950,12 @@ def SATZ_65B(p):
             p.have(
                 "gt_xz_yz: fgt (x1*z2 + z1*x2) (x2*z2) (y1*z2 + z1*y2) (y2*z2)"
             ).by_match(SATZ_61, "hgt")
-            # feq y+z ~ y+u via Satz 56 with feq y~y (37) and feq z~u (e_zu).
-            p.have("id_y: feq y1 y2 y1 y2").by_match(SATZ_37)
+            # feq y+z ~ y+u via Satz 56 with feq y~y (37, auto-derived) and feq z~u (e_zu).
             p.have(
                 "eq_yz_yu: feq (y1*z2 + z1*y2) (y2*z2) (y1*u2 + u1*y2) (y2*u2)"
-            ).by_match(SATZ_56, "id_y", "e_zu")
-            p.have(
-                "id_xz: feq (x1*z2 + z1*x2) (x2*z2) (x1*z2 + z1*x2) (x2*z2)"
-            ).by_match(SATZ_37)
+            ).by_match(SATZ_56, ..., "e_zu")
             p.thus("fgt (x1*z2 + z1*x2) (x2*z2) (y1*u2 + u1*y2) (y2*u2)").by_match(
-                SATZ_44, "gt_xz_yz", "id_xz", "eq_yz_yu"
+                SATZ_44, "gt_xz_yz", ..., "eq_yz_yu"
             )
 
 
@@ -1209,8 +1204,7 @@ def SATZ_72B(p):
     )
     p.fix("x1 x2 y1 y2 z1 z2")
     p.assume("h: feq x1 x2 y1 y2")
-    p.have("id_z: feq z1 z2 z1 z2").by_match(SATZ_37)
-    p.thus("feq (x1*z1) (x2*z2) (y1*z1) (y2*z2)").by_match(SATZ_68, "h", "id_z")
+    p.thus("feq (x1*z1) (x2*z2) (y1*z1) (y2*z2)").by_match(SATZ_68, "h", ...)
 
 
 @proof
@@ -1364,9 +1358,8 @@ def SATZ_75A(p):
             p.have("gt_yz_yu: fgt (y1*z1) (y2*z2) (y1*u1) (y2*u2)").by_match(
                 SATZ_44, "gt_zy_uy", "comm_l", "comm_r"
             )
-            p.have("id_yu: feq (y1*u1) (y2*u2) (y1*u1) (y2*u2)").by_match(SATZ_37)
             p.thus("fgt (x1*z1) (x2*z2) (y1*u1) (y2*u2)").by_match(
-                SATZ_44, "gt_yz_yu", "eq_yz_xz", "id_yu"
+                SATZ_44, "gt_yz_yu", "eq_yz_xz", ...
             )
 
 
@@ -1388,13 +1381,11 @@ def SATZ_75B(p):
             p.have("gt_xz_yz: fgt (x1*z1) (x2*z2) (y1*z1) (y2*z2)").by_match(
                 SATZ_72A, "hgt"
             )
-            p.have("id_y: feq y1 y2 y1 y2").by_match(SATZ_37)
             p.have("eq_yz_yu: feq (y1*z1) (y2*z2) (y1*u1) (y2*u2)").by_match(
-                SATZ_68, "id_y", "e_zu"
+                SATZ_68, ..., "e_zu"
             )
-            p.have("id_xz: feq (x1*z1) (x2*z2) (x1*z1) (x2*z2)").by_match(SATZ_37)
             p.thus("fgt (x1*z1) (x2*z2) (y1*u1) (y2*u2)").by_match(
-                SATZ_44, "gt_xz_yz", "id_xz", "eq_yz_yu"
+                SATZ_44, "gt_xz_yz", ..., "eq_yz_yu"
             )
 
 

@@ -34,8 +34,8 @@ Coverage:
 
 from fusion import (
     Var,
-    REFL,
     EQ_MP,
+    REFL,
 )
 from basics import (
     mk_abs,
@@ -65,7 +65,6 @@ from tactics import (
 from classical import EXCLUDED_MIDDLE, NOT_EX_TO_FORALL_NOT
 from num import (
     num_ty,
-    ONE,
     mk_suc,
     x,
     y,
@@ -80,6 +79,7 @@ from proof import (
     proof,
     register_unfolder,
     register_disj_unfolder,
+    register_refl_prover,
     contra_finder,
 )
 
@@ -135,8 +135,7 @@ def SATZ_3(p):
     with p.induction("x"):
         with p.base():
             p.assume("h: ~(1 = 1)")
-            p.have("imp: (1 = 1) ==> F").by(NOT_ELIM, "h")
-            p.absurd().by(MP, "imp", REFL(ONE))
+            p.absurd().auto("h")
         with p.step("IH"):
             p.assume("h: ~(SUC x = 1)")
             p.disj_witness("x")
@@ -321,7 +320,7 @@ def SATZ_7_RIGHT(p):
     p.goal("!x y. ~(y = y + x)")
     p.fix("x y")
     p.have("ne: ~(y = x + y)").by_match(SATZ_7)
-    p.thus("~(y = y + x)").by_rewrite_of("ne", [SPECL([x, y], SATZ_6)])
+    p.thus("~(y = y + x)").by_rewrite_of("ne", [], ac=(PLUS, SATZ_5, SATZ_6))
 
 
 # ---------------------------------------------------------------------------
@@ -447,9 +446,8 @@ register_unfolder("<", UNFOLD_LT)
 def SATZ_10(p):
     p.goal("!x y. (x = y) \\/ (x > y) \\/ (x < y)")
     p.fix("x y")
-    p.thus("(x = y) \\/ (x > y) \\/ (x < y)").by_unfold(
-        SPECL([x, y], SATZ_9), GT_DEF, LT_DEF
-    )
+    p.have("disj:").by_inst(SATZ_9, "x", "y")
+    p.thus("(x = y) \\/ (x > y) \\/ (x < y)").by_unfold("disj", GT_DEF, LT_DEF)
 
 
 # Theorem 11:  |- !x y. (x > y) ==> (y < x).   Both sides unfold to ?u. x = y + u.
@@ -574,6 +572,13 @@ def GT_TO_GE(th_gt):
 def EQ_TO_GE(th_eq):
     a, b = dest_eq(th_eq._concl)
     return EQ_MP(SYM(UNFOLD_GE(a, b)), DISJ2(mk_gt(a, b), th_eq))
+
+
+# Reflexivity providers for >= / <=, derived from REFL via EQ_TO_*.
+# Lets ``by_match(..., ...)`` auto-discharge a ``t >= t`` / ``t <= t``
+# antecedent without an intermediate fact.
+register_refl_prover(">=", lambda t: EQ_TO_GE(REFL(t)))
+register_refl_prover("<=", lambda t: EQ_TO_LE(REFL(t)))
 
 
 # Theorem 16:   x <= y, y < z  =>  x < z   ;   x < y, y <= z  =>  x < z.
@@ -768,7 +773,7 @@ def SATZ_25(p):
     p.assume("h: y > x")
     p.choose("u: y = x + u", from_="h")
     p.have("u_ge_1: u >= 1").by_match(SATZ_24)
-    p.have("sum_ge: x + u >= x + 1").by_match(SATZ_23, EQ_TO_GE(REFL(x)), "u_ge_1")
+    p.have("sum_ge: x + u >= x + 1").by_match(SATZ_23, ..., "u_ge_1")
     p.thus("y >= x + 1").by_rewrite_of("sum_ge", ["u_eq"])
 
 
@@ -927,9 +932,10 @@ def SATZ_27(p):
     # but then for any n ∈ N we'd have M (n+1), contradicting step_fail.
     # Contrapositive: there is m ∈ M with m + 1 ∉ M.
     with p.have("ex: ?m. M m /\\ ~ M (m + 1)").by_contradiction("hnex"):
-        pred_Q = p._parse("\\x. M x /\\ ~ M (x + 1)")
         p.have("forall_nQ: !x. ~(M x /\\ ~ M (x + 1))").by_thm(
-            NOT_EX_TO_FORALL_NOT(p.fact("hnex"), pred_Q)
+            NOT_EX_TO_FORALL_NOT(
+                p.fact("hnex"), p._parse("\\x. M x /\\ ~ M (x + 1)")
+            )
         )
         with p.have("forall_M: !x. M x").proof():
             with p.induction("x"):

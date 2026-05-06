@@ -31,6 +31,7 @@ import enum
 from fusion import (
     Var,
     Comb,
+    Const,
     Abs,
     thm,
     HolError,
@@ -44,6 +45,7 @@ from fusion import (
     REFL,
     DEDUCT_ANTISYM_RULE,
     vfree_in,
+    vsubst,
 )
 from basics import (
     aconv,
@@ -170,6 +172,50 @@ def register_disj_unfolder(op_name, unfold_fn):
 # call sites no longer need to name a specific contradiction lemma.
 
 _CONTRA_FINDERS = {}
+
+
+# Reflexivity provers: ``op_name -> prover``. Consulted by ``by_match``'s
+# ``...`` auto-derivation and any other DSL primitive that needs to
+# discharge a syntactically reflexive claim. ``=`` is native (REFL);
+# derived relations like ``>=`` / ``<=`` and multi-arg "self-equal"
+# heads like Landau's 4-ary ``feq`` register their own builders via
+# ``register_refl_prover``. The recognised target shape is
+# ``op a1 ... an a1 ... an`` (binary refl ``op t t`` is the n=1 case);
+# the prover is invoked on the shared front-half args.
+_REFL_PROVERS = {"=": lambda t: REFL(t)}
+
+
+def register_refl_prover(op_name, prover):
+    """Register ``prover(*shared_args) -> |- op_name shared shared``
+    for use by reflexive auto-derivation. ``shared_args`` is the
+    front half of the target's argument tuple (length 1 for binary
+    relations, larger for multi-arg self-equal heads)."""
+    _REFL_PROVERS[op_name] = prover
+
+
+def _flatten_app(tm):
+    """Spine-flatten a curried application into ``(head, [arg1, ..., argn])``."""
+    args = []
+    while isinstance(tm, Comb):
+        args.append(tm.arg)
+        tm = tm.fun
+    args.reverse()
+    return tm, args
+
+
+def _try_refl(target):
+    """Return ``|- target`` if ``target`` is ``op a1..an a1..an`` for an op
+    with a registered reflexivity prover, else ``None``."""
+    head, args = _flatten_app(target)
+    if not isinstance(head, Const):
+        return None
+    prover = _REFL_PROVERS.get(head.name)
+    if prover is None or len(args) % 2 != 0:
+        return None
+    half = len(args) // 2
+    if any(not aconv(args[i], args[half + i]) for i in range(half)):
+        return None
+    return prover(*args[:half])
 
 
 def register_contra_finder(rel_a, rel_b, finder):
@@ -1869,7 +1915,13 @@ class _Have:
             .by_match(SATZ_15, "hxy", "hyz")     # y inferred from hxy
 
         whereas ``y`` only reachable through the goal still requires an
-        explicit term."""
+        explicit term.
+
+        Pass ``...`` (Ellipsis) at an antecedent slot whose instantiated
+        shape is reflexive (``t = t``, or any relation registered via
+        ``register_refl_prover``) to have it auto-derived; the slot's
+        forall vars must be pinned down by other args before the
+        substitution is replayed."""
         p = self.p
         if isinstance(justification, str):
             justification = p.coerce(justification)
@@ -1900,8 +1952,16 @@ class _Have:
             a_pat, cur = dest_imp(cur)
             ants.append(a_pat)
         facts = []
+        auto_slots = []  # (facts_idx, ant_pat) for ``...`` placeholders
         ant_idx = 0
         for a in args:
+            if a is Ellipsis:
+                if ant_idx >= len(ants):
+                    raise HolError("by_match: extra ... has no antecedent slot")
+                auto_slots.append((len(facts), ants[ant_idx]))
+                facts.append(None)
+                ant_idx += 1
+                continue
             resolved = p.coerce(a, accept_term=True)
             if isinstance(resolved, thm):
                 if ant_idx >= len(ants):
@@ -1931,6 +1991,17 @@ class _Have:
             raise HolError(
                 f"by_match: {len(ants) - ant_idx} antecedent(s) lack a fact arg"
             )
+        if auto_slots:
+            theta = [(subst[v], v) for v in vs]
+            inst = vsubst(theta)
+            for slot, ant_pat in auto_slots:
+                claim = inst(ant_pat)
+                refl_th = _try_refl(claim)
+                if refl_th is None:
+                    raise HolError(
+                        f"by_match: ... slot is not reflexively trivial: {pp(claim)}"
+                    )
+                facts[slot] = refl_th
         for v in vs:
             th = SPEC(subst[v], th)
         for fact_th in facts:
@@ -2470,14 +2541,28 @@ class _Absurd:
     def auto(self, *refs):
         """Discharge F by inspecting the conclusions of the supplied facts.
 
-        Each fact's conclusion is classified as ``rel a b`` for some binary
-        relation symbol ``rel``; a finder registered via
-        ``register_contra_finder`` for the resulting pair of relations
-        (in either order) produces ``|- F``.
+        One-fact form: the fact is ``~(t = t)`` (a self-contradicting
+        reflexivity); we discharge via ``MP(NOT_ELIM(neg), REFL(t))``.
+
+        Two-fact form: each fact's conclusion is classified as
+        ``rel a b`` for some binary relation symbol ``rel``; a finder
+        registered via ``register_contra_finder`` for the resulting pair
+        of relations (in either order) produces ``|- F``.
         """
+        if len(refs) == 1:
+            (th,) = (self.p.coerce(r) for r in refs)
+            inner = dest_neg(th._concl)
+            if inner is not None:
+                eq_parts = dest_eq(inner)
+                if eq_parts is not None and aconv(eq_parts[0], eq_parts[1]):
+                    return self._finish(MP(NOT_ELIM(th), REFL(eq_parts[0])))
+            raise HolError(
+                "absurd: auto() one-fact form expects ~(t = t), got "
+                f"{pp(th._concl)}"
+            )
         if len(refs) != 2:
             raise HolError(
-                f"absurd: auto() requires exactly two facts, got {len(refs)}"
+                f"absurd: auto() requires one or two facts, got {len(refs)}"
             )
         ths = [self.p.coerce(r) for r in refs]
         cs = [dest_binop_any(th._concl) for th in ths]
