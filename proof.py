@@ -82,6 +82,7 @@ from tactics import (
     SYM,
     AP_TERM,
     AP_THM,
+    FUN_EXT,
     PROVE_HYP,
     CHOOSE_WITNESS,
     UNFOLD,
@@ -2189,6 +2190,35 @@ class _Have:
             "by_cong: at least one side must be an equation fact "
             f"(got both terms: {pp(L)} / {pp(R)})"
         )
+
+    def by_ext(self, ref):
+        """Function extensionality from a pointwise fact.
+
+        The have-term is ``f = g``. ``ref`` is a fact label or theorem
+        of shape ``!x1 ... xn. f t1 ... tn = g t1 ... tn`` whose every
+        outer forall is collapsed into one ``FUN_EXT`` step. The fact
+        must have at least one outer forall; ``n`` is inferred from
+        the leading universal-quantifier prefix."""
+        p = self.p
+        th = p.simp_norm_fact(p.coerce(ref))
+        bvars = []
+        cur = th._concl
+        while True:
+            abs_term = dest_forall(cur)
+            if abs_term is None:
+                break
+            bvars.append(abs_term.bvar)
+            cur = abs_term.body
+        if not bvars:
+            raise HolError(
+                f"by_ext: pointwise fact must be a forall, got {pp(th._concl)}"
+            )
+        out = th
+        for v in bvars:
+            out = SPEC(v, out)
+        for v in reversed(bvars):
+            out = FUN_EXT(GEN(v, out))
+        return self._finish(out)
 
     def by_iff(self, fwd, rev):
         """For a boolean-equality have-term ``L = R``, combine two

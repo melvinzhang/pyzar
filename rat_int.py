@@ -64,7 +64,6 @@ from basics import (
 from tactics import (
     AP_TERM,
     AP_THM,
-    FUN_EXT,
     SYM,
     SPEC,
     SPECL,
@@ -76,7 +75,6 @@ from tactics import (
     REWRITE_RULE,
 )
 from nat import (
-    num_ty,
     ONE,
     mk_mul,
     TIMES,
@@ -261,10 +259,8 @@ def RAT_EQ(p):
     mk_app(Q, c_t, d_t)
 
     # Q a b = mk_rat (feq a b)  via Q_DEF unfolded twice.
-    p_var = Var("p", num_ty)
-    Var("q", num_ty)
-    Q_unfold_ab = UNFOLD(Q_DEF, a_t, b_t)  # |- Q a b = mk_rat (feq a b)
-    Q_unfold_cd = UNFOLD(Q_DEF, c_t, d_t)  # |- Q c d = mk_rat (feq c d)
+    Q_unfold_ab = p.unfold(Q_DEF, "a", "b")  # |- Q a b = mk_rat (feq a b)
+    Q_unfold_cd = p.unfold(Q_DEF, "c", "d")  # |- Q c d = mk_rat (feq c d)
 
     # Forward direction.
     with p.have("fwd: Q a b = Q c d ==> feq a b c d").proof():
@@ -273,20 +269,15 @@ def RAT_EQ(p):
             c.step("= Q a b").by_thm(SYM(Q_unfold_ab))
             c.step("= Q c d").by_thm(p.fact("hQ"))
             c.step("= mk_rat (feq c d)").by_thm(Q_unfold_cd)
-        h_dest = AP_TERM(dest_rat, p.fact("h_mk"))
-        # dest_rat (mk_rat (feq a b)) = feq a b.
-        d_ab = SPECL([a_t, b_t], DEST_RAT_FEQ)
-        d_cd = SPECL([c_t, d_t], DEST_RAT_FEQ)
         with p.calc("feq_eq: feq a b") as c:
-            c.step("= dest_rat (mk_rat (feq a b))").by_thm(SYM(d_ab))
-            c.step("= dest_rat (mk_rat (feq c d))").by_thm(h_dest)
-            c.step("= feq c d").by_thm(d_cd)
-        feq_eq = p.fact("feq_eq")  # |- feq a b = feq c d
+            c.step("= dest_rat (mk_rat (feq a b))").by_thm(
+                SYM(SPECL([a_t, b_t], DEST_RAT_FEQ))
+            )
+            c.step("= dest_rat (mk_rat (feq c d))").by_cong(dest_rat, "h_mk")
+            c.step("= feq c d").by_inst(DEST_RAT_FEQ, "c", "d")
         # Apply at (c, d): feq a b c d = feq c d c d.
-        feq_at_c = AP_THM(feq_eq, c_t)  # |- feq a b c = feq c d c
-        feq_at_cd = AP_THM(feq_at_c, d_t)  # |- feq a b c d = feq c d c d
-        refl_cd = SPECL([c_t, d_t], SATZ_37)  # |- feq c d c d
-        p.have("rcd: feq c d c d").by_thm(refl_cd)
+        feq_at_cd = AP_THM(AP_THM(p.fact("feq_eq"), c_t), d_t)
+        p.have("rcd: feq c d c d").by_inst(SATZ_37, "c", "d")
         p.thus("feq a b c d").by_eq_mp(SYM(feq_at_cd), "rcd")
 
     # Reverse direction.
@@ -296,10 +287,6 @@ def RAT_EQ(p):
         # For each p, q: prove the bool equality via two MPs.
         with p.have("ptw: !p q. feq a b p q = feq c d p q").proof():
             p.fix("p q")
-            p_t = p._parse("p")
-            q_t = p._parse("q")
-            mk_app(FEQ, a_t, b_t, p_t, q_t)
-            mk_app(FEQ, c_t, d_t, p_t, q_t)
             # ==>: feq a b p q ==> feq c d p q via SATZ_38 + SATZ_39.
             with p.have("imp1: feq a b p q ==> feq c d p q").proof():
                 p.assume("hap: feq a b p q")
@@ -310,25 +297,13 @@ def RAT_EQ(p):
                 p.assume("hcp: feq c d p q")
                 p.thus("feq a b p q").by_match(SATZ_39, "hf", "hcp")
             p.thus("feq a b p q = feq c d p q").by_iff("imp1", "imp2")
-        # FUN_EXT twice.
-        # ptw : |- !p q. feq a b p q = feq c d p q.
-        # First strip the outer ! via SPEC then FUN_EXT on q.
-        # Actually: ptw is |- !p. (!q. feq a b p q = feq c d p q).
-        # Inner: SPEC p gives !q. .. ; then FUN_EXT gives feq a b p = feq c d p
-        # (Or: we directly call FUN_EXT on (!q. feq a b p q = feq c d p q) where
-        #  the bound var is q.)
-        # Let me build it manually:
-        spec_p = SPEC(p_var, p.fact("ptw"))  # |- !q. feq a b p q = feq c d p q
-        f_at_p_eq = FUN_EXT(spec_p)  # |- feq a b p = feq c d p
-        # Now we need !p. feq a b p = feq c d p, then FUN_EXT.
-        gen_f_at_p = GEN(p_var, f_at_p_eq)  # |- !p. feq a b p = feq c d p
-        feq_eq = FUN_EXT(gen_f_at_p)  # |- feq a b = feq c d
-        # Apply mk_rat: mk_rat (feq a b) = mk_rat (feq c d).
-        mk_eq_th = AP_TERM(mk_rat, feq_eq)
-        # Bridge with Q_DEF unfolds.
+        p.have("feq_eq: feq a b = feq c d").by_ext("ptw")
+        p.have("mk_eq: mk_rat (feq a b) = mk_rat (feq c d)").by_cong(
+            mk_rat, "feq_eq"
+        )
         with p.calc("Q a b", thus=True) as c:
             c.step("= mk_rat (feq a b)").by_thm(Q_unfold_ab)
-            c.step("= mk_rat (feq c d)").by_thm(mk_eq_th)
+            c.step("= mk_rat (feq c d)").by_thm("mk_eq")
             c.step("= Q c d").by_thm(SYM(Q_unfold_cd))
 
     p.thus("(Q a b = Q c d) = feq a b c d").by_iff("fwd", "rev")
