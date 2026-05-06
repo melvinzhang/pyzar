@@ -15,17 +15,17 @@ Two kinds of non-declarative pattern are flagged:
   a ``@proof`` body. Each escape is one kernel leak that the DSL doesn't yet
   cover.
 
-* ``PROCEDURAL`` -- an assignment ``name = ...`` whose RHS constructs a
-  theorem (via a kernel rule, derived tactic, or a thm-producing
-  ``Proof`` method like ``p.cong`` / ``p.sym`` / ``p.ne_sym`` / ``p.spec``).
-  Such bindings introduce a *named theorem* into the surrounding scope
-  without ever stating its conclusion as a parsed term -- the reader has
-  to mentally evaluate the RHS to know what ``name`` proves. The
-  declarative form is ``p.have("name: <conclusion>").by_*(...)``.
+* ``PROCEDURAL`` -- any assignment ``name = ...`` inside a ``@proof``
+  body (``Assign``, ``AnnAssign``, or ``AugAssign``). In a declarative
+  proof, intermediate facts are stated via
+  ``p.have("name: <conclusion>").by_*(...)`` and any term reuse goes
+  through DSL helpers, not Python locals. A bare assignment introduces a
+  Python-level binding that the reader has to mentally evaluate to
+  understand the proof state.
 
-When a procedural assignment's RHS already contains an escape, only the
-procedural line is reported (the inner escape is considered covered by
-fixing the binding pattern).
+When an assignment's RHS contains a kernel escape, only the assignment
+line is reported (the inner escape is considered covered by fixing the
+binding pattern).
 
 Term-building helpers (``mk_eq``, ``mk_app``, ``mk_abs``, ``mk_comb``,
 ``mk_const``, ``mk_var``, ``mk_forall``, ``mk_exists``, ``mk_select``,
@@ -82,15 +82,6 @@ def _collect_non_declarative_names():
 NON_DECLARATIVE_NAMES = _collect_non_declarative_names()
 
 
-# DSL methods on the ``Proof`` object that *construct* (rather than just look
-# up) a theorem. Used to detect procedural binding patterns where the
-# constructed theorem is captured into a Python local for kernel-style
-# chaining instead of being asserted via a ``have``/``thus`` claim.
-# ``fact`` and ``unfold`` are deliberately excluded: ``fact`` is a lookup,
-# ``unfold`` primarily side-effects (registers a fact in the frame).
-PROC_DSL_METHODS = frozenset({"cong", "sym", "ne_sym", "spec"})
-
-
 def _is_proof_decorator(dec):
     """``@proof`` or ``@contra_finder`` (which stacks atop ``@proof``)."""
     if isinstance(dec, ast.Call):
@@ -119,23 +110,6 @@ def _proof_functions(tree):
                 yield node
 
 
-def _proc_thm_call(rhs):
-    """Return the first thm-producing ``Call`` within ``rhs``, or ``None``.
-
-    A call is thm-producing if its callee leaf name is a kernel/tactic rule
-    (``NON_DECLARATIVE_NAMES``) or a recognized DSL thm-constructor method
-    (``PROC_DSL_METHODS``). The call may appear at any depth of the RHS,
-    so e.g. ``TRANS(p.cong(...), p.spec(...))`` matches the outer ``TRANS``.
-    """
-    for sub in ast.walk(rhs):
-        if not isinstance(sub, ast.Call):
-            continue
-        name = _callable_name(sub.func)
-        if name in NON_DECLARATIVE_NAMES or name in PROC_DSL_METHODS:
-            return sub
-    return None
-
-
 def _assigned_value(stmt):
     """RHS of an Assign / AnnAssign / AugAssign, or ``None`` if no value."""
     if isinstance(stmt, (ast.Assign, ast.AugAssign)):
@@ -145,32 +119,38 @@ def _assigned_value(stmt):
     return None
 
 
+def _assign_target_repr(stmt):
+    """Best-effort source string for the LHS of an assignment."""
+    if isinstance(stmt, ast.Assign):
+        target = stmt.targets[0]
+    else:  # AnnAssign / AugAssign
+        target = stmt.target
+    try:
+        return ast.unparse(target)
+    except Exception:
+        return "?"
+
+
 def find_offenders(path):
     """Return list of ``(lineno, col, name, line_text, fn_name, kind)`` tuples.
 
     ``kind`` is ``"ESCAPE"`` (kernel rule called inside ``@proof``) or
-    ``"PROCEDURAL"`` (assignment binds a constructed theorem to a Python
-    local instead of stating it via ``have``/``thus``). Escapes that fall
-    inside a procedural assignment's RHS are suppressed.
+    ``"PROCEDURAL"`` (any assignment inside ``@proof``). Escapes that
+    fall inside an assignment's RHS are suppressed.
     """
     src = pathlib.Path(path).read_text()
     tree = ast.parse(src, filename=str(path))
     lines = src.splitlines()
     out = []
     for fn in _proof_functions(tree):
-        # Pass 1: procedural assignments. Track Call nodes inside each
-        # procedural RHS so the escape pass can suppress them.
+        # Pass 1: every assignment inside the proof body. Track Call
+        # nodes inside each RHS so the escape pass can suppress them.
         covered = set()
         for sub in ast.walk(fn):
-            rhs = (
-                _assigned_value(sub)
-                if isinstance(sub, (ast.Assign, ast.AnnAssign, ast.AugAssign))
-                else None
-            )
-            if rhs is None:
+            if not isinstance(sub, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
                 continue
-            call = _proc_thm_call(rhs)
-            if call is None:
+            rhs = _assigned_value(sub)
+            if rhs is None:  # bare annotation, no binding produced
                 continue
             line_text = (
                 lines[sub.lineno - 1] if 0 <= sub.lineno - 1 < len(lines) else ""
@@ -179,7 +159,7 @@ def find_offenders(path):
                 (
                     sub.lineno,
                     sub.col_offset + 1,
-                    _callable_name(call.func),
+                    _assign_target_repr(sub),
                     line_text.strip(),
                     fn.name,
                     "PROCEDURAL",
