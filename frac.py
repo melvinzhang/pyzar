@@ -129,10 +129,9 @@ def SATZ_39(p):
     p.have("e1: x1*y2 = y1*x2").by_def(FEQ_DEF, "h1")
     p.have("e2: y1*z2 = z1*y2").by_def(FEQ_DEF, "h2")
     # (x1*y2)*(y1*z2) = (y1*x2)*(z1*y2).
-    prod = MK_COMB(AP_TERM(TIMES, p.fact("e1")), p.fact("e2"))
     with p.calc("can: (x1*z2)*(y1*y2)") as c:
         c.step("= (x1*y2)*(y1*z2)").by_ac(TIMES, SATZ_31, SATZ_29)
-        c.step("= (y1*x2)*(z1*y2)").by_thm(prod)
+        c.step("= (y1*x2)*(z1*y2)").by_cong(TIMES, "e1", "e2")
         c.step("= (z1*x2)*(y1*y2)").by_ac(TIMES, SATZ_31, SATZ_29)
     p.have("res: x1*z2 = z1*x2").by_match(SATZ_33B, "can")
     p.thus("feq x1 x2 z1 z2").by_unfold("res", FEQ_DEF)
@@ -208,10 +207,9 @@ def SATZ_44(p):
     p.have("e1: x1*z2 = z1*x2").by_def(FEQ_DEF, "h1")
     p.have("e2: y1*u2 = u1*y2").by_def(FEQ_DEF, "h2")
     # (y1*u2)*(z1*x2) = (u1*y2)*(x1*z2).
-    e_mul = MK_COMB(AP_TERM(TIMES, p.fact("e2")), SYM(p.fact("e1")))
     with p.calc("eq: (z1*u2)*(y1*x2)") as c:
         c.step("= (y1*u2)*(z1*x2)").by_ac(TIMES, SATZ_31, SATZ_29)
-        c.step("= (u1*y2)*(x1*z2)").by_thm(e_mul)
+        c.step("= (u1*y2)*(x1*z2)").by_cong(TIMES, "e2", SYM(p.fact("e1")))
         c.step("= (u1*z2)*(x1*y2)").by_ac(TIMES, SATZ_31, SATZ_29)
     # (x1*y2)*(u1*z2) > (y1*x2)*(u1*z2)  via Satz 32A.
     p.have("ineq: (x1*y2)*(u1*z2) > (y1*x2)*(u1*z2)").by_match(SATZ_32A, "g")
@@ -618,10 +616,9 @@ def SATZ_58(p):
     m2 = _mul_AC(
         mk_mul(mk_mul(y1, x2), mk_mul(y2, x2)), mk_mul(mk_mul(y1, x2), mk_mul(x2, y2))
     )
-    sum_norm = MK_COMB(AP_TERM(PLUS, m1), m2)
     with p.calc("res: (x1*y2 + y1*x2)*(y2*x2)") as c:
         c.step("= (x1*y2)*(y2*x2) + (y1*x2)*(y2*x2)").by_thm(distr_l)
-        c.step("= (x1*y2)*(x2*y2) + (y1*x2)*(x2*y2)").by_thm(sum_norm)
+        c.step("= (x1*y2)*(x2*y2) + (y1*x2)*(x2*y2)").by_cong(PLUS, m1, m2)
         c.step("= (y1*x2)*(x2*y2) + (x1*y2)*(x2*y2)").by_ac(PLUS, SATZ_5, SATZ_6)
         c.step("= (y1*x2 + x1*y2)*(x2*y2)").by_thm(SYM(distr_r))
     p.thus("feq (x1*y2 + y1*x2) (x2*y2) (y1*x2 + x1*y2) (y2*x2)").by_unfold(
@@ -1252,10 +1249,9 @@ def SATZ_68(p):
     p.have("e1: x1*y2 = y1*x2").by_def(FEQ_DEF, "h1")
     p.have("e2: z1*u2 = u1*z2").by_def(FEQ_DEF, "h2")
     # (x1*y2)*(z1*u2) = (y1*x2)*(u1*z2).
-    prod = MK_COMB(AP_TERM(TIMES, p.fact("e1")), p.fact("e2"))
     with p.calc("eq: (x1*z1)*(y2*u2)") as c:
         c.step("= (x1*y2)*(z1*u2)").by_ac(TIMES, SATZ_31, SATZ_29)
-        c.step("= (y1*x2)*(u1*z2)").by_thm(prod)
+        c.step("= (y1*x2)*(u1*z2)").by_cong(TIMES, "e1", "e2")
         c.step("= (y1*u1)*(x2*z2)").by_ac(TIMES, SATZ_31, SATZ_29)
     p.thus("feq (x1*z1) (x2*z2) (y1*u1) (y2*u2)").by_unfold("eq", FEQ_DEF)
 
@@ -1336,14 +1332,13 @@ def SATZ_71(p):
     M2R = mk_mul(mk_mul(mk_mul(x1, z1), mk_mul(x2, y2)), G_R)
     eq_M1 = _mul_AC(M1L, M1R)
     eq_M2 = _mul_AC(M2L, M2R)
-    bridge = MK_COMB(AP_TERM(PLUS, eq_M1), eq_M2)
     with p.calc("res: (x1*(y1*z2 + z1*y2)) * ((x2*y2)*(x2*z2))") as c:
         c.step(
             "= (x1*(y1*z2))*((x2*y2)*(x2*z2)) + (x1*(z1*y2))*((x2*y2)*(x2*z2))"
         ).by_thm(chunk_L)
         c.step(
             "= ((x1*y1)*(x2*z2))*(x2*(y2*z2)) + ((x1*z1)*(x2*y2))*(x2*(y2*z2))"
-        ).by_thm(bridge)
+        ).by_cong(PLUS, eq_M1, eq_M2)
         c.step("= ((x1*y1)*(x2*z2) + (x1*z1)*(x2*y2)) * (x2*(y2*z2))").by_thm(
             SYM(chunk_R)
         )

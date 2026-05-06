@@ -2164,11 +2164,11 @@ class _Have:
             raise HolError(f"by_trans: needs at least 2 equations, got {len(eqs)}")
         return self._finish(TRANS_CHAIN(self._resolved(eqs)))
 
-    def by_cong(self, left, right):
-        """Single-step congruence on ``left`` / ``right``.
+    def by_cong(self, *args):
+        """Single-step congruence.
 
-        Each side is a fact (theorem of equation shape) or a kernel
-        term. Dispatch:
+        Two-arg form ``by_cong(left, right)`` dispatches on which side
+        is a fact (theorem of equation shape) vs a kernel term:
 
         * term + fact: ``AP_TERM(left, right)`` -- ``f a = f b`` from
           ``a = b``.
@@ -2176,8 +2176,27 @@ class _Have:
           ``g = h``.
         * fact + fact: ``MK_COMB(left, right)`` -- ``f a = g b`` from
           ``f = g`` and ``a = b``.
-        """
+
+        Three-arg form ``by_cong(op, eq1, eq2)`` is the binop shorthand
+        for ``MK_COMB(AP_TERM(op, eq1), eq2)`` -- from ``a = c`` and
+        ``b = d`` derive ``op a b = op c d``. ``op`` is a kernel term
+        (e.g. ``PLUS``, ``TIMES``); ``eq1`` / ``eq2`` are facts."""
         p = self.p
+        if len(args) == 3:
+            op, e1, e2 = args
+            op_t = p.coerce(op, accept_term=True)
+            if isinstance(op_t, thm):
+                raise HolError(
+                    f"by_cong: 3-arg form expects a term head, got fact: {pp(op_t._concl)}"
+                )
+            th1 = p.coerce(e1)
+            th2 = p.coerce(e2)
+            return self._finish(MK_COMB(AP_TERM(op_t, th1), th2))
+        if len(args) != 2:
+            raise HolError(
+                f"by_cong: expected 2 or 3 args, got {len(args)}"
+            )
+        left, right = args
         L = p.coerce(left, accept_term=True)
         R = p.coerce(right, accept_term=True)
         if isinstance(L, thm) and isinstance(R, thm):
