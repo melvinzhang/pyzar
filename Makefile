@@ -80,8 +80,12 @@ update-golden: test-theories
 lint:
 	uv run ruff check
 
-# Flag escape hatches from the proof DSL: direct kernel/tactics calls
-# inside @proof bodies (REFL/TRANS/MK_COMB/SPEC/MP/REWRITE_RULE/...).
+# Flag non-declarative patterns inside @proof bodies. Two kinds:
+#   - ESCAPE: a direct kernel/tactic call (REFL/TRANS/MK_COMB/SPEC/MP/...).
+#   - PROCEDURAL: an assignment ``name = ...`` whose RHS constructs a
+#     theorem; the binding hides the conclusion from the source. Reported
+#     as ``PROC:<rule>``. Inner escapes inside a procedural RHS are
+#     suppressed to avoid double-counting.
 # Exits non-zero if any offender remains; not part of `make test` while
 # the existing escape hatches (e.g. MK_DEST/DEST_MK peels) still need
 # landing.

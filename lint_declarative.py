@@ -7,10 +7,25 @@ A proof is *declarative* if it uses only the ``proof.py`` API exposed on the
 term constructors (``mk_eq``, ``mk_app``, ...) and destructors (``dest_*``,
 ``is_*``, ``rator``, ``rand``, ``aconv``, ``type_of``, ...).
 
-Direct calls to kernel inference rules (``REFL``, ``TRANS``, ``MK_COMB``, ``ABS``,
-``EQ_MP``, ``ASSUME``, ``INST``, ...) and derived tactics (``SPEC``, ``GEN``,
-``MP``, ``DISCH``, ``CONJ``, ``DISJ_CASES``, ``REWRITE_RULE``, ``REWRITE_PROVE``,
-``CHOOSE_WITNESS``, ``EXISTS``, ...) bypass the DSL and are flagged.
+Two kinds of non-declarative pattern are flagged:
+
+* ``ESCAPE`` -- a direct call to a kernel inference rule (``REFL``, ``TRANS``,
+  ``MK_COMB``, ``EQ_MP``, ``INST``, ...) or derived tactic (``SPEC``, ``MP``,
+  ``CONJ``, ``DISJ_CASES``, ``REWRITE_RULE``, ``CHOOSE_WITNESS``, ...) inside
+  a ``@proof`` body. Each escape is one kernel leak that the DSL doesn't yet
+  cover.
+
+* ``PROCEDURAL`` -- an assignment ``name = ...`` whose RHS constructs a
+  theorem (via a kernel rule, derived tactic, or a thm-producing
+  ``Proof`` method like ``p.cong`` / ``p.sym`` / ``p.ne_sym`` / ``p.spec``).
+  Such bindings introduce a *named theorem* into the surrounding scope
+  without ever stating its conclusion as a parsed term -- the reader has
+  to mentally evaluate the RHS to know what ``name`` proves. The
+  declarative form is ``p.have("name: <conclusion>").by_*(...)``.
+
+When a procedural assignment's RHS already contains an escape, only the
+procedural line is reported (the inner escape is considered covered by
+fixing the binding pattern).
 
 Term-building helpers (``mk_eq``, ``mk_app``, ``mk_abs``, ``mk_comb``,
 ``mk_const``, ``mk_var``, ``mk_forall``, ``mk_exists``, ``mk_select``,
@@ -67,6 +82,15 @@ def _collect_non_declarative_names():
 NON_DECLARATIVE_NAMES = _collect_non_declarative_names()
 
 
+# DSL methods on the ``Proof`` object that *construct* (rather than just look
+# up) a theorem. Used to detect procedural binding patterns where the
+# constructed theorem is captured into a Python local for kernel-style
+# chaining instead of being asserted via a ``have``/``thus`` claim.
+# ``fact`` and ``unfold`` are deliberately excluded: ``fact`` is a lookup,
+# ``unfold`` primarily side-effects (registers a fact in the frame).
+PROC_DSL_METHODS = frozenset({"cong", "sym", "ne_sym", "spec"})
+
+
 def _is_proof_decorator(dec):
     """``@proof`` or ``@contra_finder`` (which stacks atop ``@proof``)."""
     if isinstance(dec, ast.Call):
@@ -95,15 +119,76 @@ def _proof_functions(tree):
                 yield node
 
 
+def _proc_thm_call(rhs):
+    """Return the first thm-producing ``Call`` within ``rhs``, or ``None``.
+
+    A call is thm-producing if its callee leaf name is a kernel/tactic rule
+    (``NON_DECLARATIVE_NAMES``) or a recognized DSL thm-constructor method
+    (``PROC_DSL_METHODS``). The call may appear at any depth of the RHS,
+    so e.g. ``TRANS(p.cong(...), p.spec(...))`` matches the outer ``TRANS``.
+    """
+    for sub in ast.walk(rhs):
+        if not isinstance(sub, ast.Call):
+            continue
+        name = _callable_name(sub.func)
+        if name in NON_DECLARATIVE_NAMES or name in PROC_DSL_METHODS:
+            return sub
+    return None
+
+
+def _assigned_value(stmt):
+    """RHS of an Assign / AnnAssign / AugAssign, or ``None`` if no value."""
+    if isinstance(stmt, (ast.Assign, ast.AugAssign)):
+        return stmt.value
+    if isinstance(stmt, ast.AnnAssign):
+        return stmt.value  # may be None for bare annotations
+    return None
+
+
 def find_offenders(path):
-    """Return list of ``(lineno, col, name, line_text, fn_name)`` tuples."""
+    """Return list of ``(lineno, col, name, line_text, fn_name, kind)`` tuples.
+
+    ``kind`` is ``"ESCAPE"`` (kernel rule called inside ``@proof``) or
+    ``"PROCEDURAL"`` (assignment binds a constructed theorem to a Python
+    local instead of stating it via ``have``/``thus``). Escapes that fall
+    inside a procedural assignment's RHS are suppressed.
+    """
     src = pathlib.Path(path).read_text()
     tree = ast.parse(src, filename=str(path))
     lines = src.splitlines()
     out = []
     for fn in _proof_functions(tree):
+        # Pass 1: procedural assignments. Track Call nodes inside each
+        # procedural RHS so the escape pass can suppress them.
+        covered = set()
         for sub in ast.walk(fn):
-            if not isinstance(sub, ast.Call):
+            rhs = _assigned_value(sub) if isinstance(
+                sub, (ast.Assign, ast.AnnAssign, ast.AugAssign)
+            ) else None
+            if rhs is None:
+                continue
+            call = _proc_thm_call(rhs)
+            if call is None:
+                continue
+            line_text = (
+                lines[sub.lineno - 1] if 0 <= sub.lineno - 1 < len(lines) else ""
+            )
+            out.append(
+                (
+                    sub.lineno,
+                    sub.col_offset + 1,
+                    _callable_name(call.func),
+                    line_text.strip(),
+                    fn.name,
+                    "PROCEDURAL",
+                )
+            )
+            for c in ast.walk(rhs):
+                if isinstance(c, ast.Call):
+                    covered.add(id(c))
+        # Pass 2: bare escapes (calls to kernel rules outside a procedural RHS).
+        for sub in ast.walk(fn):
+            if not isinstance(sub, ast.Call) or id(sub) in covered:
                 continue
             name = _callable_name(sub.func)
             if name in NON_DECLARATIVE_NAMES:
@@ -111,8 +196,16 @@ def find_offenders(path):
                     lines[sub.lineno - 1] if 0 <= sub.lineno - 1 < len(lines) else ""
                 )
                 out.append(
-                    (sub.lineno, sub.col_offset + 1, name, line_text.strip(), fn.name)
+                    (
+                        sub.lineno,
+                        sub.col_offset + 1,
+                        name,
+                        line_text.strip(),
+                        fn.name,
+                        "ESCAPE",
+                    )
                 )
+    out.sort(key=lambda r: (r[0], r[1]))
     return out
 
 
@@ -120,7 +213,8 @@ def main(argv):
     if len(argv) < 2:
         print(__doc__, file=sys.stderr)
         return 2
-    grand_total = 0
+    total_escape = 0
+    total_proc = 0
     by_file = []
     for raw in argv[1:]:
         path = pathlib.Path(raw)
@@ -128,16 +222,22 @@ def main(argv):
             print(f"lint_declarative: not a file: {raw}", file=sys.stderr)
             return 2
         offenders = find_offenders(path)
-        by_file.append((path, offenders))
-        grand_total += len(offenders)
-        for ln, col, name, text, fn in offenders:
-            print(f"{path}:{ln}:{col}: [{fn}] {name} -- {text}")
+        n_esc = sum(1 for r in offenders if r[5] == "ESCAPE")
+        n_proc = sum(1 for r in offenders if r[5] == "PROCEDURAL")
+        by_file.append((path, n_esc, n_proc))
+        total_escape += n_esc
+        total_proc += n_proc
+        for ln, col, name, text, fn, kind in offenders:
+            tag = name if kind == "ESCAPE" else f"PROC:{name}"
+            print(f"{path}:{ln}:{col}: [{fn}] {tag} -- {text}")
     if len(by_file) > 1:
         print(file=sys.stderr)
-        for path, offenders in by_file:
-            print(f"  {path}: {len(offenders)}", file=sys.stderr)
+        for path, n_esc, n_proc in by_file:
+            print(f"  {path}: {n_esc} escape, {n_proc} procedural", file=sys.stderr)
+    grand_total = total_escape + total_proc
     print(
-        f"\n{grand_total} non-declarative call(s) in {len(by_file)} file(s)",
+        f"\n{total_escape} escape(s) + {total_proc} procedural line(s) "
+        f"= {grand_total} non-declarative occurrence(s) in {len(by_file)} file(s)",
         file=sys.stderr,
     )
     return 1 if grand_total else 0
