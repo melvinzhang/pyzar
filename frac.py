@@ -100,7 +100,8 @@ def mk_feq(a, b, c, d):
 def SATZ_37(p):
     p.goal("!x1 x2. feq x1 x2 x1 x2")
     p.fix("x1 x2")
-    p.thus("feq x1 x2 x1 x2").by_unfold(REFL(mk_mul(x1, x2)), FEQ_DEF)
+    p.have("eq: x1*x2 = x1*x2").by_rewrite([])
+    p.thus("feq x1 x2 x1 x2").by_unfold("eq", FEQ_DEF)
 
 
 # Satz 38:  feq x1 x2 y1 y2  ==>  feq y1 y2 x1 x2.
@@ -163,8 +164,9 @@ FLT = mk_const("flt", [])
 def SATZ_41(p):
     p.goal("!x1 x2 y1 y2. feq x1 x2 y1 y2 \\/ fgt x1 x2 y1 y2 \\/ flt x1 x2 y1 y2")
     p.fix("x1 x2 y1 y2")
+    p.have("tri:").by_inst(SATZ_10, "x1*y2", "y1*x2")
     p.thus("feq x1 x2 y1 y2 \\/ fgt x1 x2 y1 y2 \\/ flt x1 x2 y1 y2").by_unfold(
-        SPECL([mk_mul(x1, y2), mk_mul(y1, x2)], SATZ_10), FEQ_DEF, FGT_DEF, FLT_DEF
+        "tri", FEQ_DEF, FGT_DEF, FLT_DEF
     )
 
 
@@ -209,7 +211,7 @@ def SATZ_44(p):
     # (y1*u2)*(z1*x2) = (u1*y2)*(x1*z2).
     with p.calc("eq: (z1*u2)*(y1*x2)") as c:
         c.step("= (y1*u2)*(z1*x2)").by_ac(TIMES, SATZ_31, SATZ_29)
-        c.step("= (u1*y2)*(x1*z2)").by_cong(TIMES, "e2", SYM(p.fact("e1")))
+        c.step("= (u1*y2)*(x1*z2)").by_rewrite(["e1", "e2"])
         c.step("= (u1*z2)*(x1*y2)").by_ac(TIMES, SATZ_31, SATZ_29)
     # (x1*y2)*(u1*z2) > (y1*x2)*(u1*z2)  via Satz 32A.
     p.have("ineq: (x1*y2)*(u1*z2) > (y1*x2)*(u1*z2)").by_match(SATZ_32A, "g")
@@ -217,9 +219,9 @@ def SATZ_44(p):
     p.have("ineq2: (u1*z2)*(x1*y2) > (u1*z2)*(y1*x2)").by_rewrite_of(
         "ineq", [], ac=(TIMES, SATZ_31, SATZ_29)
     )
-    # Splice eq into ineq2 LHS.
+    # Splice eq into ineq2 LHS (by_rewrite_of normalises both sides under eq).
     p.have("final_ineq: (z1*u2)*(y1*x2) > (u1*z2)*(y1*x2)").by_rewrite_of(
-        "ineq2", [SYM(p.fact("eq"))]
+        "ineq2", ["eq"]
     )
     # Cancel y1*x2.
     p.have("res: z1*u2 > u1*z2").by_match(SATZ_33A, "final_ineq")
@@ -459,7 +461,7 @@ def SATZ_53(p):
     p.have("eq: (x1+x1)*x2 = x1*x2 + x1*x2").by_match(RIGHT_DISTRIB)
     # x1*x2 + x1*x2 > x1*x2.
     p.have("gt0: x1*x2 + x1*x2 > x1*x2").by_match(SATZ_18)
-    p.have("res: (x1+x1)*x2 > x1*x2").by_rewrite_of("gt0", [SYM(p.fact("eq"))])
+    p.have("res: (x1+x1)*x2 > x1*x2").by_rewrite_of("gt0", ["eq"])
     p.thus("fgt (x1 + x1) x2 x1 x2").by_unfold("res", FGT_DEF)
 
 
@@ -472,7 +474,7 @@ def SATZ_54(p):
     p.have("eq: x1*(x2+x2) = x1*x2 + x1*x2").by_match(SATZ_30)
     p.have("gt0: x1*x2 + x1*x2 > x1*x2").by_match(SATZ_18)
     p.have("lt: x1*x2 < x1*x2 + x1*x2").by_match(SATZ_11, "gt0")
-    p.have("res: x1*x2 < x1*(x2+x2)").by_rewrite_of("lt", [SYM(p.fact("eq"))])
+    p.have("res: x1*x2 < x1*(x2+x2)").by_rewrite_of("lt", ["eq"])
     p.thus("flt x1 (x2 + x2) x1 x2").by_unfold("res", FLT_DEF)
 
 
@@ -494,13 +496,12 @@ def SATZ_55(p):
     p.have("step1: x1*x2 + x1*y2 < x1*x2 + y1*x2").by_rewrite_of(
         "step1_raw", ["comm_xy", "comm_yx"]
     )
-    # Use distributive laws directly to fold:
+    # Use distributive laws directly to fold (by_rewrite_of normalises both
+    # source and target under the rules, so equalities apply in either direction).
     p.have("distr_l:").by_inst(SATZ_30, x1, x2, y2)  # x1*(x2+y2) = x1*x2 + x1*y2
     p.have("distr_r:").by_inst(RIGHT_DISTRIB, x1, y1, x2)  # (x1+y1)*x2 = x1*x2 + y1*x2
-    p.have("distr_l_sym:").by_thm(SYM(p.fact("distr_l")))
-    p.have("distr_r_sym:").by_thm(SYM(p.fact("distr_r")))
     p.have("ineq_left: x1*(x2+y2) < (x1+y1)*x2").by_rewrite_of(
-        "step1", ["distr_l_sym", "distr_r_sym"]
+        "step1", ["distr_l", "distr_r"]
     )
     p.have("h_left: flt x1 x2 (x1+y1) (x2+y2)").by_unfold("ineq_left", FLT_DEF)
     # Right half: (x1+y1)*y2 < y1*(x2+y2).
@@ -508,10 +509,8 @@ def SATZ_55(p):
     p.have("step2: x1*y2 + y1*y2 < y1*x2 + y1*y2").by_match(SATZ_19C, "k")
     p.have("distr_l2:").by_inst(RIGHT_DISTRIB, x1, y1, y2)  # (x1+y1)*y2 = x1*y2 + y1*y2
     p.have("distr_r2:").by_inst(SATZ_30, y1, x2, y2)  # y1*(x2+y2) = y1*x2 + y1*y2
-    p.have("distr_l2_sym:").by_thm(SYM(p.fact("distr_l2")))
-    p.have("distr_r2_sym:").by_thm(SYM(p.fact("distr_r2")))
     p.have("ineq_right: (x1+y1)*y2 < y1*(x2+y2)").by_rewrite_of(
-        "step2", ["distr_l2_sym", "distr_r2_sym"]
+        "step2", ["distr_l2", "distr_r2"]
     )
     p.have("h_right: flt (x1+y1) (x2+y2) y1 y2").by_unfold("ineq_right", FLT_DEF)
     p.have("conj: flt x1 x2 (x1+y1) (x2+y2) /\\ flt (x1+y1) (x2+y2) y1 y2").by(
@@ -577,11 +576,10 @@ def SATZ_56(p):
     p.have("distr_r:").by_inst(
         RIGHT_DISTRIB, mk_mul(y1, u2), mk_mul(u1, y2), mk_mul(x2, z2)
     )
-    p.have("distr_r_sym:").by_thm(SYM(p.fact("distr_r")))
     with p.calc("res: (x1*z2 + z1*x2)*(y2*u2)") as c:
         c.step("= (x1*z2)*(y2*u2) + (z1*x2)*(y2*u2)").by_thm("distr_l")
         c.step("= (y1*u2)*(x2*z2) + (u1*y2)*(x2*z2)").by_thm("sum_eq")
-        c.step("= (y1*u2 + u1*y2)*(x2*z2)").by_thm("distr_r_sym")
+        c.step("= (y1*u2 + u1*y2)*(x2*z2)").by_rewrite(["distr_r"])
     p.thus("feq (x1*z2 + z1*x2) (x2*z2) (y1*u2 + u1*y2) (y2*u2)").by_unfold(
         "res", FEQ_DEF
     )
@@ -593,9 +591,8 @@ def SATZ_57(p):
     p.goal("!x1 x2 x. feq (x1*x + x2*x) (x*x) (x1+x2) x")
     p.fix("x1 x2 x")
     # Goal unfolds to: (x1*x + x2*x)*x = (x1+x2)*(x*x).
-    rd = SPECL([x1, x2, _xnat], RIGHT_DISTRIB)  # (x1+x2)*x = x1*x + x2*x
     with p.calc("res: (x1*x + x2*x)*x") as c:
-        c.step("= ((x1+x2)*x)*x").by_thm(AP_THM(AP_TERM(TIMES, SYM(rd)), _xnat))
+        c.step("= ((x1+x2)*x)*x").by_rewrite([RIGHT_DISTRIB])
         c.step("= (x1+x2)*(x*x)").by_ac(TIMES, SATZ_31, SATZ_29)
     p.thus("feq (x1*x + x2*x) (x*x) (x1+x2) x").by_unfold("res", FEQ_DEF)
 
@@ -620,7 +617,7 @@ def SATZ_58(p):
         c.step("= (x1*y2)*(y2*x2) + (y1*x2)*(y2*x2)").by_thm("distr_l")
         c.step("= (x1*y2)*(x2*y2) + (y1*x2)*(x2*y2)").by_cong(PLUS, m1, m2)
         c.step("= (y1*x2)*(x2*y2) + (x1*y2)*(x2*y2)").by_ac(PLUS, SATZ_5, SATZ_6)
-        c.step("= (y1*x2 + x1*y2)*(x2*y2)").by_thm(SYM(p.fact("distr_r")))
+        c.step("= (y1*x2 + x1*y2)*(x2*y2)").by_rewrite(["distr_r"])
     p.thus("feq (x1*y2 + y1*x2) (x2*y2) (y1*x2 + x1*y2) (y2*x2)").by_unfold(
         "res", FEQ_DEF
     )
@@ -667,18 +664,10 @@ def SATZ_59(p):
 def SATZ_60(p):
     p.goal("!x1 x2 y1 y2. fgt (x1*y2 + y1*x2) (x2*y2) x1 x2")
     p.fix("x1 x2 y1 y2")
-    p.have("distr:").by_inst(RIGHT_DISTRIB, mk_mul(x1, y2), mk_mul(y1, x2), x2)
-    # (x1*y2 + y1*x2)*x2 = (x1*y2)*x2 + (y1*x2)*x2.
-    p.have("ac1:").by_thm(
-        _mul_AC(mk_mul(mk_mul(x1, y2), x2), mk_mul(x1, mk_mul(x2, y2)))
-    )
-    p.have("plus_ac1:").by_cong(PLUS, "ac1")
-    p.have("refl_yx:").by_thm(REFL(mk_mul(mk_mul(y1, x2), x2)))
-    p.have("comb:").by_cong("plus_ac1", "refl_yx")
-    p.have("eq1:").by_trans("distr", "comb")
+    # (x1*y2 + y1*x2)*x2 distributes + AC-normalises to x1*(x2*y2) + (y1*x2)*x2.
     p.have("gt_a: x1*(x2*y2) + (y1*x2)*x2 > x1*(x2*y2)").by_match(SATZ_18)
     p.have("gt_b: (x1*y2 + y1*x2)*x2 > x1*(x2*y2)").by_rewrite_of(
-        "gt_a", [SYM(p.fact("eq1"))]
+        "gt_a", [SATZ_30, RIGHT_DISTRIB], ac=(TIMES, SATZ_31, SATZ_29)
     )
     p.thus("fgt (x1*y2 + y1*x2) (x2*y2) x1 x2").by_unfold("gt_b", FGT_DEF)
 
@@ -696,13 +685,12 @@ def SATZ_61(p):
     p.have("g0: x1*y2 > y1*x2").by_def(FGT_DEF, "h")
     # Multiply by z2 (Satz 32A): (x1*y2)*z2 > (y1*x2)*z2.
     p.have("g1: (x1*y2)*z2 > (y1*x2)*z2").by_match(SATZ_32A, "g0")
-    # AC bridges:  (x1*y2)*z2 = (x1*z2)*y2;  (y1*x2)*z2 = (y1*z2)*x2.
-    ac_a = _mul_AC(mk_mul(mk_mul(x1, y2), z2), mk_mul(mk_mul(x1, z2), y2))
-    ac_b = _mul_AC(mk_mul(mk_mul(y1, x2), z2), mk_mul(mk_mul(y1, z2), x2))
-    p.have("g2: (x1*z2)*y2 > (y1*z2)*x2").by_rewrite_of("g1", [ac_a, ac_b])
-    # Equality (z1*x2)*y2 = (z1*y2)*x2.
-    eq_z = _mul_AC(mk_mul(mk_mul(z1, x2), y2), mk_mul(mk_mul(z1, y2), x2))
-    p.have("ge_z: (z1*x2)*y2 >= (z1*y2)*x2").by(EQ_TO_GE, eq_z)
+    # *-AC bridges both monomials to the (x1*z2)*y2 / (y1*z2)*x2 forms.
+    p.have("g2: (x1*z2)*y2 > (y1*z2)*x2").by_rewrite_of(
+        "g1", [], ac=(TIMES, SATZ_31, SATZ_29)
+    )
+    p.have("eq_z: (z1*x2)*y2 = (z1*y2)*x2").by_ac(TIMES, SATZ_31, SATZ_29)
+    p.have("ge_z: (z1*x2)*y2 >= (z1*y2)*x2").by(EQ_TO_GE, "eq_z")
     # Combine: (x1*z2)*y2 + (z1*x2)*y2 > (y1*z2)*x2 + (z1*y2)*x2  via SATZ_22B.
     p.have("g3: (x1*z2)*y2 + (z1*x2)*y2 > (y1*z2)*x2 + (z1*y2)*x2").by_match(
         SATZ_22B, "g2", "ge_z"
@@ -711,7 +699,7 @@ def SATZ_61(p):
     p.have("distr_l:").by_inst(RIGHT_DISTRIB, "x1*z2", "z1*x2", "y2")
     p.have("distr_r:").by_inst(RIGHT_DISTRIB, "y1*z2", "z1*y2", "x2")
     p.have("g4: (x1*z2 + z1*x2)*y2 > (y1*z2 + z1*y2)*x2").by_rewrite_of(
-        "g3", [SYM(p.fact("distr_l")), SYM(p.fact("distr_r"))]
+        "g3", ["distr_l", "distr_r"]
     )
     # Multiply by z2: ((x1*z2 + z1*x2)*y2)*z2 > ((y1*z2 + z1*y2)*x2)*z2.
     p.have("g5: ((x1*z2 + z1*x2)*y2)*z2 > ((y1*z2 + z1*y2)*x2)*z2").by_match(
@@ -1116,17 +1104,13 @@ def SATZ_67_EXIST(p):
     p.have("refold:").by_inst(
         RIGHT_DISTRIB, mk_mul(y1, mk_mul(x2, y2)), mk_mul(u_term, y2), x2
     )
-    p.have("bridge_LHS_sum_sym:").by_thm(SYM(p.fact("bridge_LHS_sum")))
-    p.have("distr_R_sym:").by_thm(SYM(p.fact("distr_R")))
-    p.have("sub_eq_sym:").by_thm(SYM(p.fact("sub_eq")))
-    p.have("bridge_R_sym:").by_thm(SYM(p.fact("bridge_R")))
     # Goal unfolds to (y1*(x2*y2) + u*y2)*x2 = x1*(y2*(x2*y2)).
     with p.calc("res: (y1*(x2*y2) + u*y2)*x2") as c:
         c.step("= (y1*(x2*y2))*x2 + (u*y2)*x2").by_thm("refold")
-        c.step("= (y1*x2)*(x2*y2) + u*(x2*y2)").by_thm("bridge_LHS_sum_sym")
-        c.step("= (y1*x2 + u)*(x2*y2)").by_thm("distr_R_sym")
-        c.step("= (x1*y2)*(x2*y2)").by_thm("sub_eq_sym")
-        c.step("= x1*(y2*(x2*y2))").by_thm("bridge_R_sym")
+        c.step("= (y1*x2)*(x2*y2) + u*(x2*y2)").by_rewrite(["bridge_LHS_sum"])
+        c.step("= (y1*x2 + u)*(x2*y2)").by_rewrite(["distr_R"])
+        c.step("= (x1*y2)*(x2*y2)").by_rewrite(["sub_eq"])
+        c.step("= x1*(y2*(x2*y2))").by_rewrite(["bridge_R"])
     p.have("witness_eq: feq (y1*(x2*y2) + u*y2) (y2*(x2*y2)) x1 x2").by_unfold(
         "res", FEQ_DEF
     )
@@ -1208,10 +1192,8 @@ def SATZ_68(p):
 def SATZ_69(p):
     p.goal("!x1 x2 y1 y2. feq (x1*y1) (x2*y2) (y1*x1) (y2*x2)")
     p.fix("x1 x2 y1 y2")
-    eq = _mul_AC(
-        mk_mul(mk_mul(x1, y1), mk_mul(y2, x2)), mk_mul(mk_mul(y1, x1), mk_mul(x2, y2))
-    )
-    p.thus("feq (x1*y1) (x2*y2) (y1*x1) (y2*x2)").by_unfold(eq, FEQ_DEF)
+    p.have("eq: (x1*y1)*(y2*x2) = (y1*x1)*(x2*y2)").by_ac(TIMES, SATZ_31, SATZ_29)
+    p.thus("feq (x1*y1) (x2*y2) (y1*x1) (y2*x2)").by_unfold("eq", FEQ_DEF)
 
 
 # Satz 70 (associativity of fraction product):
@@ -1222,12 +1204,11 @@ def SATZ_70(p):
         "!x1 x2 y1 y2 z1 z2. feq ((x1*y1)*z1) ((x2*y2)*z2) (x1*(y1*z1)) (x2*(y2*z2))"
     )
     p.fix("x1 x2 y1 y2 z1 z2")
-    eq = _mul_AC(
-        mk_mul(mk_mul(mk_mul(x1, y1), z1), mk_mul(x2, mk_mul(y2, z2))),
-        mk_mul(mk_mul(x1, mk_mul(y1, z1)), mk_mul(mk_mul(x2, y2), z2)),
-    )
+    p.have(
+        "eq: ((x1*y1)*z1)*(x2*(y2*z2)) = (x1*(y1*z1))*((x2*y2)*z2)"
+    ).by_ac(TIMES, SATZ_31, SATZ_29)
     p.thus("feq ((x1*y1)*z1) ((x2*y2)*z2) (x1*(y1*z1)) (x2*(y2*z2))").by_unfold(
-        eq, FEQ_DEF
+        "eq", FEQ_DEF
     )
 
 
@@ -1239,6 +1220,8 @@ def SATZ_70(p):
 # Goal unfolds to:
 #   (x1*(y1*z2 + z1*y2)) * ((x2*y2)*(x2*z2))
 #     = ((x1*y1)*(x2*z2) + (x1*z1)*(x2*y2)) * (x2*(y2*z2)).
+# SATZ_30 + RIGHT_DISTRIB distribute both sides to two-monomial sums; *-AC
+# normalises the corresponding monomial pairs to the same canonical product.
 @proof
 def SATZ_71(p):
     p.goal(
@@ -1247,40 +1230,10 @@ def SATZ_71(p):
         "((x1*y1)*(x2*z2) + (x1*z1)*(x2*y2)) ((x2*y2)*(x2*z2))"
     )
     p.fix("x1 x2 y1 y2 z1 z2")
-    # Distribute LHS via SATZ_30 and RIGHT_DISTRIB:
-    # x1*(y1*z2 + z1*y2) = x1*(y1*z2) + x1*(z1*y2)
-    # multiply by ((x2*y2)*(x2*z2)) and RIGHT_DISTRIB:
-    # (x1*(y1*z2) + x1*(z1*y2)) * F  =  (x1*(y1*z2))*F + (x1*(z1*y2))*F
-    F_L = mk_mul(mk_mul(x2, y2), mk_mul(x2, z2))
-    inner_L = SPECL([x1, mk_mul(y1, z2), mk_mul(z1, y2)], SATZ_30)
-    chunk_L = TRANS(
-        AP_THM(AP_TERM(TIMES, inner_L), F_L),
-        SPECL(
-            [mk_mul(x1, mk_mul(y1, z2)), mk_mul(x1, mk_mul(z1, y2)), F_L], RIGHT_DISTRIB
-        ),
-    )
-    # |- (x1*(y1*z2 + z1*y2))*F = (x1*(y1*z2))*F + (x1*(z1*y2))*F
-    # Distribute RHS: ((x1*y1)*(x2*z2) + (x1*z1)*(x2*y2)) * G  =  ...
-    G_R = mk_mul(x2, mk_mul(y2, z2))
-    p.have("chunk_R:").by_inst(RIGHT_DISTRIB, "(x1*y1)*(x2*z2)", "(x1*z1)*(x2*y2)", G_R)
-    # |- ((x1*y1)*(x2*z2) + (x1*z1)*(x2*y2))*G = ((x1*y1)*(x2*z2))*G + ((x1*z1)*(x2*y2))*G
-    # Bridge each pair via *-AC:
-    M1L = mk_mul(mk_mul(x1, mk_mul(y1, z2)), F_L)
-    M1R = mk_mul(mk_mul(mk_mul(x1, y1), mk_mul(x2, z2)), G_R)
-    M2L = mk_mul(mk_mul(x1, mk_mul(z1, y2)), F_L)
-    M2R = mk_mul(mk_mul(mk_mul(x1, z1), mk_mul(x2, y2)), G_R)
-    eq_M1 = _mul_AC(M1L, M1R)
-    eq_M2 = _mul_AC(M2L, M2R)
-    with p.calc("res: (x1*(y1*z2 + z1*y2)) * ((x2*y2)*(x2*z2))") as c:
-        c.step(
-            "= (x1*(y1*z2))*((x2*y2)*(x2*z2)) + (x1*(z1*y2))*((x2*y2)*(x2*z2))"
-        ).by_thm(chunk_L)
-        c.step(
-            "= ((x1*y1)*(x2*z2))*(x2*(y2*z2)) + ((x1*z1)*(x2*y2))*(x2*(y2*z2))"
-        ).by_cong(PLUS, eq_M1, eq_M2)
-        c.step("= ((x1*y1)*(x2*z2) + (x1*z1)*(x2*y2)) * (x2*(y2*z2))").by_thm(
-            SYM(p.fact("chunk_R"))
-        )
+    p.have(
+        "res: (x1*(y1*z2 + z1*y2)) * ((x2*y2)*(x2*z2)) = "
+        "((x1*y1)*(x2*z2) + (x1*z1)*(x2*y2)) * (x2*(y2*z2))"
+    ).by_rewrite([SATZ_30, RIGHT_DISTRIB], ac=(TIMES, SATZ_31, SATZ_29))
     p.thus(
         "feq (x1*(y1*z2 + z1*y2)) (x2*(y2*z2)) "
         "((x1*y1)*(x2*z2) + (x1*z1)*(x2*y2)) ((x2*y2)*(x2*z2))"
@@ -1297,14 +1250,10 @@ def SATZ_72A(p):
     p.assume("h: fgt x1 x2 y1 y2")
     p.have("g0: x1*y2 > y1*x2").by_def(FGT_DEF, "h")
     p.have("g1: (x1*y2)*(z1*z2) > (y1*x2)*(z1*z2)").by_match(SATZ_32A, "g0")
-    # AC: (x1*y2)*(z1*z2) = (x1*z1)*(y2*z2);  (y1*x2)*(z1*z2) = (y1*z1)*(x2*z2).
-    ac_l = _mul_AC(
-        mk_mul(mk_mul(x1, y2), mk_mul(z1, z2)), mk_mul(mk_mul(x1, z1), mk_mul(y2, z2))
+    # *-AC bridges both monomials in one shot.
+    p.have("g2: (x1*z1)*(y2*z2) > (y1*z1)*(x2*z2)").by_rewrite_of(
+        "g1", [], ac=(TIMES, SATZ_31, SATZ_29)
     )
-    ac_r = _mul_AC(
-        mk_mul(mk_mul(y1, x2), mk_mul(z1, z2)), mk_mul(mk_mul(y1, z1), mk_mul(x2, z2))
-    )
-    p.have("g2: (x1*z1)*(y2*z2) > (y1*z1)*(x2*z2)").by_rewrite_of("g1", [ac_l, ac_r])
     p.thus("fgt (x1*z1) (x2*z2) (y1*z1) (y2*z2)").by_unfold("g2", FGT_DEF)
 
 
@@ -1566,10 +1515,10 @@ def SATZ_77_EXIST(p):
     p.goal("!x1 x2 y1 y2. feq (y1*(x1*y2)) (y2*(x2*y1)) x1 x2")
     p.fix("x1 x2 y1 y2")
     # Goal unfolds to (y1*(x1*y2)) * x2 = x1 * (y2*(x2*y1)).
-    eq = _mul_AC(
-        mk_mul(mk_mul(y1, mk_mul(x1, y2)), x2), mk_mul(x1, mk_mul(y2, mk_mul(x2, y1)))
-    )
-    p.thus("feq (y1*(x1*y2)) (y2*(x2*y1)) x1 x2").by_unfold(eq, FEQ_DEF)
+    p.have(
+        "eq: (y1*(x1*y2))*x2 = x1*(y2*(x2*y1))"
+    ).by_ac(TIMES, SATZ_31, SATZ_29)
+    p.thus("feq (y1*(x1*y2)) (y2*(x2*y1)) x1 x2").by_unfold("eq", FEQ_DEF)
 
 
 @proof
