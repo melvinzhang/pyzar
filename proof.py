@@ -2557,13 +2557,10 @@ class _Absurd:
                 if eq_parts is not None and aconv(eq_parts[0], eq_parts[1]):
                     return self._finish(MP(NOT_ELIM(th), REFL(eq_parts[0])))
             raise HolError(
-                "absurd: auto() one-fact form expects ~(t = t), got "
-                f"{pp(th._concl)}"
+                f"absurd: auto() one-fact form expects ~(t = t), got {pp(th._concl)}"
             )
         if len(refs) != 2:
-            raise HolError(
-                f"absurd: auto() requires one or two facts, got {len(refs)}"
-            )
+            raise HolError(f"absurd: auto() requires one or two facts, got {len(refs)}")
         ths = [self.p.coerce(r) for r in refs]
         cs = [dest_binop_any(th._concl) for th in ths]
         if cs[0] is None or cs[1] is None:

@@ -933,9 +933,7 @@ def SATZ_27(p):
     # Contrapositive: there is m ∈ M with m + 1 ∉ M.
     with p.have("ex: ?m. M m /\\ ~ M (m + 1)").by_contradiction("hnex"):
         p.have("forall_nQ: !x. ~(M x /\\ ~ M (x + 1))").by_thm(
-            NOT_EX_TO_FORALL_NOT(
-                p.fact("hnex"), p._parse("\\x. M x /\\ ~ M (x + 1)")
-            )
+            NOT_EX_TO_FORALL_NOT(p.fact("hnex"), p._parse("\\x. M x /\\ ~ M (x + 1)"))
         )
         with p.have("forall_M: !x. M x").proof():
             with p.induction("x"):

@@ -673,9 +673,7 @@ def SATZ_86(p):
     )
     p.have("feq_eq: feq c d e1 f1").by_thm(Q_eq_to_feq(p.fact("Qcd_eq_Qe1f1")))
     p.have("feq_e1f1_cd: feq e1 f1 c d").by_match(SATZ_38, "feq_eq")
-    p.have("flt_cd_gh: flt c d g1 h1n").by_match(
-        SATZ_45, "hlt2", "feq_e1f1_cd", ...
-    )
+    p.have("flt_cd_gh: flt c d g1 h1n").by_match(SATZ_45, "hlt2", "feq_e1f1_cd", ...)
     p.have("flt_ab_gh: flt a b g1 h1n").by_match(SATZ_50, "hlt1", "flt_cd_gh")
     p.have("rl: rlt (Q a b) (Q g1 h1n)").by_match(RLT_INTRO, "flt_ab_gh")
     p.thus("rlt X Z").by_rewrite_of("rl", [])

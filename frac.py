@@ -423,9 +423,7 @@ def SATZ_52(p):
             with p.thus("fle x1 x2 z1 z2").by_cases("d2"):
                 with p.case("l2: flt y1 y2 z1 z2"):
                     p.have("e1_sym: feq y1 y2 x1 x2").by_match(SATZ_38, "e1")
-                    p.have("lt: flt x1 x2 z1 z2").by_match(
-                        SATZ_45, "l2", "e1_sym", ...
-                    )
+                    p.have("lt: flt x1 x2 z1 z2").by_match(SATZ_45, "l2", "e1_sym", ...)
                     p.have("orL: flt x1 x2 z1 z2 \\/ feq x1 x2 z1 z2").by(
                         DISJ1, "lt", "feq x1 x2 z1 z2"
                     )
@@ -615,21 +613,19 @@ def SATZ_59(p):
         "(x1*(y2*z2) + (y1*z2 + z1*y2)*x2) (x2*(y2*z2))"
     )
     p.fix("x1 x2 y1 y2 z1 z2")
-    p.have(
-        "eq_A: ((x1*y2)*z2)*(x2*(y2*z2)) = (x1*(y2*z2))*((x2*y2)*z2)"
-    ).by_ac(TIMES, SATZ_31, SATZ_29)
-    p.have(
-        "eq_B: ((y1*x2)*z2)*(x2*(y2*z2)) = ((y1*z2)*x2)*((x2*y2)*z2)"
-    ).by_ac(TIMES, SATZ_31, SATZ_29)
-    p.have(
-        "eq_C: (z1*(x2*y2))*(x2*(y2*z2)) = ((z1*y2)*x2)*((x2*y2)*z2)"
-    ).by_ac(TIMES, SATZ_31, SATZ_29)
+    p.have("eq_A: ((x1*y2)*z2)*(x2*(y2*z2)) = (x1*(y2*z2))*((x2*y2)*z2)").by_ac(
+        TIMES, SATZ_31, SATZ_29
+    )
+    p.have("eq_B: ((y1*x2)*z2)*(x2*(y2*z2)) = ((y1*z2)*x2)*((x2*y2)*z2)").by_ac(
+        TIMES, SATZ_31, SATZ_29
+    )
+    p.have("eq_C: (z1*(x2*y2))*(x2*(y2*z2)) = ((z1*y2)*x2)*((x2*y2)*z2)").by_ac(
+        TIMES, SATZ_31, SATZ_29
+    )
     p.have(
         "res: ((x1*y2 + y1*x2)*z2 + z1*(x2*y2)) * (x2*(y2*z2)) = "
         "(x1*(y2*z2) + (y1*z2 + z1*y2)*x2) * ((x2*y2)*z2)"
-    ).by_rewrite(
-        [RIGHT_DISTRIB, "eq_A", "eq_B", "eq_C"], ac=(PLUS, SATZ_5, SATZ_6)
-    )
+    ).by_rewrite([RIGHT_DISTRIB, "eq_A", "eq_B", "eq_C"], ac=(PLUS, SATZ_5, SATZ_6))
     p.thus(
         "feq ((x1*y2 + y1*x2)*z2 + z1*(x2*y2)) ((x2*y2)*z2) "
         "(x1*(y2*z2) + (y1*z2 + z1*y2)*x2) (x2*(y2*z2))"
@@ -1034,9 +1030,7 @@ def SATZ_67_EXIST(p):
     p.have("g: x1*y2 > y1*x2").by_def(FGT_DEF, "h")
     p.choose("u: x1*y2 = y1*x2 + u", from_="g")
     # Goal at u1 := u, u2 := x2*y2: feq (y1*(x2*y2) + u*y2) (y2*(x2*y2)) x1 x2.
-    p.have("bridge_R: x1*(y2*(x2*y2)) = (x1*y2)*(x2*y2)").by_ac(
-        TIMES, SATZ_31, SATZ_29
-    )
+    p.have("bridge_R: x1*(y2*(x2*y2)) = (x1*y2)*(x2*y2)").by_ac(TIMES, SATZ_31, SATZ_29)
     p.have("times_u_eq:").by_cong(TIMES, "u_eq")
     p.have("sub_eq:").by_cong("times_u_eq", mk_mul(x2, y2))
     p.have("distr_R:").by_inst(RIGHT_DISTRIB, "y1*x2", "u", "x2*y2")
@@ -1144,9 +1138,9 @@ def SATZ_70(p):
         "!x1 x2 y1 y2 z1 z2. feq ((x1*y1)*z1) ((x2*y2)*z2) (x1*(y1*z1)) (x2*(y2*z2))"
     )
     p.fix("x1 x2 y1 y2 z1 z2")
-    p.have(
-        "eq: ((x1*y1)*z1)*(x2*(y2*z2)) = (x1*(y1*z1))*((x2*y2)*z2)"
-    ).by_ac(TIMES, SATZ_31, SATZ_29)
+    p.have("eq: ((x1*y1)*z1)*(x2*(y2*z2)) = (x1*(y1*z1))*((x2*y2)*z2)").by_ac(
+        TIMES, SATZ_31, SATZ_29
+    )
     p.thus("feq ((x1*y1)*z1) ((x2*y2)*z2) (x1*(y1*z1)) (x2*(y2*z2))").by_unfold(
         "eq", FEQ_DEF
     )
@@ -1451,9 +1445,7 @@ def SATZ_77_EXIST(p):
     p.goal("!x1 x2 y1 y2. feq (y1*(x1*y2)) (y2*(x2*y1)) x1 x2")
     p.fix("x1 x2 y1 y2")
     # Goal unfolds to (y1*(x1*y2)) * x2 = x1 * (y2*(x2*y1)).
-    p.have(
-        "eq: (y1*(x1*y2))*x2 = x1*(y2*(x2*y1))"
-    ).by_ac(TIMES, SATZ_31, SATZ_29)
+    p.have("eq: (y1*(x1*y2))*x2 = x1*(y2*(x2*y1))").by_ac(TIMES, SATZ_31, SATZ_29)
     p.thus("feq (y1*(x1*y2)) (y2*(x2*y1)) x1 x2").by_unfold("eq", FEQ_DEF)
 
 
