@@ -126,7 +126,7 @@ from parser import (
     add_const,
     add_type,
 )
-from proof import proof, register_unfolder, register_disj_unfolder
+from proof import proof, register_unfolder, register_disj_unfolder, register_refl_prover
 
 
 # ---------------------------------------------------------------------------
@@ -603,6 +603,17 @@ RLE = mk_const("rle", [])
 
 register_disj_unfolder("rge", lambda a, b: UNFOLD(RGE_DEF, a, b))
 register_disj_unfolder("rle", lambda a, b: UNFOLD(RLE_DEF, a, b))
+
+
+# rge t t / rle t t are reflexive via the X = Y disjunct of their disj-unfold.
+register_refl_prover(
+    "rge",
+    lambda t: EQ_MP(SYM(UNFOLD(RGE_DEF, t, t)), DISJ2(mk_app(RGT, t, t), REFL(t))),
+)
+register_refl_prover(
+    "rle",
+    lambda t: EQ_MP(SYM(UNFOLD(RLE_DEF, t, t)), DISJ2(mk_app(RLT, t, t), REFL(t))),
+)
 
 
 # Satz 84:  rge X Y ==> rle Y X.
@@ -1902,16 +1913,11 @@ def SATZ_115(p):
                 DISJ2, "rgt (Q v 1) (Q 1 1)", "eq"
             )
             p.thus("rge (Q v 1) (Q 1 1)").by_fold("orR")
-    # rge (Z*X) (Z*X) (reflexivity).
-    p.have("refl_ZX:").by_thm(REFL(mk_app(RMUL, Z_t, X_t)))
-    p.have("refl_orR: rgt (rmul Z X) (rmul Z X) \\/ rmul Z X = rmul Z X").by(
-        DISJ2, "rgt (rmul Z X) (rmul Z X)", "refl_ZX"
-    )
-    p.have("rge_ZX: rge (rmul Z X) (rmul Z X)").by_fold("refl_orR")
     # Multiplication monotonicity (Satz 109): rge (rmul (Q v 1) (Z*X)) (rmul (Q 1 1) (Z*X)).
+    # The rge (Z*X) (Z*X) antecedent is auto-derived via the refl prover.
     p.have(
         "rge_full: rge (rmul (Q v 1) (rmul Z X)) (rmul (Q 1 1) (rmul Z X))"
-    ).by_match(SATZ_109, "rge_v1", "rge_ZX")
+    ).by_match(SATZ_109, "rge_v1", ...)
     # rmul (Q 1 1) (Z*X) = Z*X.
     p.have("rm1:").by_inst(RMUL_ONE, mk_app(RMUL, Z_t, X_t))
     p.have("sub_rm1:").by_cong(
