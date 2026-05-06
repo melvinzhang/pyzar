@@ -15,20 +15,13 @@ on natural numbers (matching Landau's surface syntax exactly).
 Each Satz is checked by running ``uv run frac.py``.
 """
 
-from fusion import (
-    Var,
-    REFL,
-    TRANS,
-    MK_COMB,
-)
-from basics import mk_app, mk_const, mk_eq, rand
+from fusion import Var
+from basics import mk_app, mk_const
 from nat import (
     num_ty,
-    mk_add,
     mk_mul,
     PLUS,
     TIMES,
-    x as _xnat,
     SATZ_5,
     SATZ_6,
     SATZ_10,
@@ -49,17 +42,7 @@ from nat import (
     SATZ_12,
     EQ_TO_GE,
 )
-from tactics import (
-    AP_TERM,
-    AP_THM,
-    SYM,
-    SPECL,
-    CONJ,
-    DISJ1,
-    DISJ2,
-    AC_PROVE,
-    TRANS_CHAIN,
-)
+from tactics import SYM, CONJ, DISJ1, DISJ2
 from parser import define, parse_type, pp_thm
 from proof import proof
 
@@ -533,11 +516,6 @@ def SATZ_55(p):
 # ---------------------------------------------------------------------------
 
 
-# Helper: mul_eq_AC produces an AC-bridge equation over * via AC_PROVE.
-def _mul_AC(lhs, rhs):
-    return AC_PROVE(TIMES, SATZ_31, SATZ_29, mk_eq(lhs, rhs))
-
-
 # Satz 56:  feq x1 x2 y1 y2 /\ feq z1 z2 u1 u2  ==>
 #           feq (x1*z2 + z1*x2) (x2*z2) (y1*u2 + u1*y2) (y2*u2).
 @proof
@@ -607,15 +585,11 @@ def SATZ_58(p):
     p.have("distr_l:").by_inst(RIGHT_DISTRIB, "x1*y2", "y1*x2", "y2*x2")
     p.have("distr_r:").by_inst(RIGHT_DISTRIB, "y1*x2", "x1*y2", "x2*y2")
     # Bridge each monomial via *-AC, then swap summands via +-AC.
-    m1 = _mul_AC(
-        mk_mul(mk_mul(x1, y2), mk_mul(y2, x2)), mk_mul(mk_mul(x1, y2), mk_mul(x2, y2))
-    )
-    m2 = _mul_AC(
-        mk_mul(mk_mul(y1, x2), mk_mul(y2, x2)), mk_mul(mk_mul(y1, x2), mk_mul(x2, y2))
-    )
+    p.have("m1: (x1*y2)*(y2*x2) = (x1*y2)*(x2*y2)").by_ac(TIMES, SATZ_31, SATZ_29)
+    p.have("m2: (y1*x2)*(y2*x2) = (y1*x2)*(x2*y2)").by_ac(TIMES, SATZ_31, SATZ_29)
     with p.calc("res: (x1*y2 + y1*x2)*(y2*x2)") as c:
         c.step("= (x1*y2)*(y2*x2) + (y1*x2)*(y2*x2)").by_thm("distr_l")
-        c.step("= (x1*y2)*(x2*y2) + (y1*x2)*(x2*y2)").by_cong(PLUS, m1, m2)
+        c.step("= (x1*y2)*(x2*y2) + (y1*x2)*(x2*y2)").by_cong(PLUS, "m1", "m2")
         c.step("= (y1*x2)*(x2*y2) + (x1*y2)*(x2*y2)").by_ac(PLUS, SATZ_5, SATZ_6)
         c.step("= (y1*x2 + x1*y2)*(x2*y2)").by_rewrite(["distr_r"])
     p.thus("feq (x1*y2 + y1*x2) (x2*y2) (y1*x2 + x1*y2) (y2*x2)").by_unfold(
@@ -706,10 +680,8 @@ def SATZ_61(p):
         SATZ_32A, "g4"
     )
     # AC re-bracket: (X*y2)*z2 = X*(y2*z2);  (Y*x2)*z2 = Y*(x2*z2).
-    XL = mk_add(mk_mul(x1, z2), mk_mul(z1, x2))
-    YR = mk_add(mk_mul(y1, z2), mk_mul(z1, y2))
-    p.have("bra_l:").by_inst(SATZ_31, XL, y2, z2)
-    p.have("bra_r:").by_inst(SATZ_31, YR, x2, z2)
+    p.have("bra_l:").by_inst(SATZ_31, "x1*z2 + z1*x2", "y2", "z2")
+    p.have("bra_r:").by_inst(SATZ_31, "y1*z2 + z1*y2", "x2", "z2")
     p.have("g6: (x1*z2 + z1*x2)*(y2*z2) > (y1*z2 + z1*y2)*(x2*z2)").by_rewrite_of(
         "g5", ["bra_l", "bra_r"]
     )
@@ -814,11 +786,6 @@ def SATZ_64(p):
 # contradict the unequal cases.
 
 
-def _sum_terms(a1, a2, c1, c2):
-    """Unfolded numerator/denominator of a1/a2 + c1/c2."""
-    return (mk_add(mk_mul(a1, c2), mk_mul(c1, a2)), mk_mul(a2, c2))
-
-
 @proof
 def SATZ_63A(p):
     p.goal(
@@ -828,8 +795,6 @@ def SATZ_63A(p):
     )
     p.fix("x1 x2 y1 y2 z1 z2")
     p.assume("h_a: fgt (x1*z2 + z1*x2) (x2*z2) (y1*z2 + z1*y2) (y2*z2)")
-    s1n, s1d = _sum_terms(x1, x2, z1, z2)
-    s2n, s2d = _sum_terms(y1, y2, z1, z2)
     p.have("h_a_n: (x1*z2 + z1*x2)*(y2*z2) > (y1*z2 + z1*y2)*(x2*z2)").by_def(
         FGT_DEF, "h_a"
     )
@@ -863,8 +828,6 @@ def SATZ_63B(p):
     )
     p.fix("x1 x2 y1 y2 z1 z2")
     p.assume("h_a: feq (x1*z2 + z1*x2) (x2*z2) (y1*z2 + z1*y2) (y2*z2)")
-    s1n, s1d = _sum_terms(x1, x2, z1, z2)
-    s2n, s2d = _sum_terms(y1, y2, z1, z2)
     p.have("h_a_n: (x1*z2 + z1*x2)*(y2*z2) = (y1*z2 + z1*y2)*(x2*z2)").by_def(
         FEQ_DEF, "h_a"
     )
@@ -898,8 +861,6 @@ def SATZ_63C(p):
     )
     p.fix("x1 x2 y1 y2 z1 z2")
     p.assume("h_a: flt (x1*z2 + z1*x2) (x2*z2) (y1*z2 + z1*y2) (y2*z2)")
-    s1n, s1d = _sum_terms(x1, x2, z1, z2)
-    s2n, s2d = _sum_terms(y1, y2, z1, z2)
     p.have("h_a_n: (x1*z2 + z1*x2)*(y2*z2) < (y1*z2 + z1*y2)*(x2*z2)").by_def(
         FLT_DEF, "h_a"
     )
@@ -1077,33 +1038,17 @@ def SATZ_67_EXIST(p):
     p.assume("h: fgt x1 x2 y1 y2")
     p.have("g: x1*y2 > y1*x2").by_def(FGT_DEF, "h")
     p.choose("u: x1*y2 = y1*x2 + u", from_="g")
-    # ``u`` in proof scope is a (@u. ...) select-term; extract it from u_eq.
-    u_term = rand(p.fact("u_eq")._concl)  # y1*x2 + u
-    u_term = rand(u_term)  # u
     # Goal at u1 := u, u2 := x2*y2: feq (y1*(x2*y2) + u*y2) (y2*(x2*y2)) x1 x2.
-    p.have("bridge_R:").by_thm(
-        _mul_AC(
-            mk_mul(x1, mk_mul(y2, mk_mul(x2, y2))),
-            mk_mul(mk_mul(x1, y2), mk_mul(x2, y2)),
-        )
+    p.have("bridge_R: x1*(y2*(x2*y2)) = (x1*y2)*(x2*y2)").by_ac(
+        TIMES, SATZ_31, SATZ_29
     )
     p.have("times_u_eq:").by_cong(TIMES, "u_eq")
     p.have("sub_eq:").by_cong("times_u_eq", mk_mul(x2, y2))
-    p.have("distr_R:").by_inst(RIGHT_DISTRIB, mk_mul(y1, x2), u_term, mk_mul(x2, y2))
-    p.have("M1:").by_thm(
-        _mul_AC(
-            mk_mul(mk_mul(y1, x2), mk_mul(x2, y2)),
-            mk_mul(mk_mul(y1, mk_mul(x2, y2)), x2),
-        )
-    )
-    p.have("M2:").by_thm(
-        _mul_AC(mk_mul(u_term, mk_mul(x2, y2)), mk_mul(mk_mul(u_term, y2), x2))
-    )
-    p.have("plus_M1:").by_cong(PLUS, "M1")
-    p.have("bridge_LHS_sum:").by_cong("plus_M1", "M2")
-    p.have("refold:").by_inst(
-        RIGHT_DISTRIB, mk_mul(y1, mk_mul(x2, y2)), mk_mul(u_term, y2), x2
-    )
+    p.have("distr_R:").by_inst(RIGHT_DISTRIB, "y1*x2", "u", "x2*y2")
+    p.have("M1: (y1*x2)*(x2*y2) = (y1*(x2*y2))*x2").by_ac(TIMES, SATZ_31, SATZ_29)
+    p.have("M2: u*(x2*y2) = (u*y2)*x2").by_ac(TIMES, SATZ_31, SATZ_29)
+    p.have("bridge_LHS_sum:").by_cong(PLUS, "M1", "M2")
+    p.have("refold:").by_inst(RIGHT_DISTRIB, "y1*(x2*y2)", "u*y2", "x2")
     # Goal unfolds to (y1*(x2*y2) + u*y2)*x2 = x1*(y2*(x2*y2)).
     with p.calc("res: (y1*(x2*y2) + u*y2)*x2") as c:
         c.step("= (y1*(x2*y2))*x2 + (u*y2)*x2").by_thm("refold")
