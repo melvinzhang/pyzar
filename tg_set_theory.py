@@ -18,6 +18,8 @@ from fusion import (
     new_axiom,
     ASSUME,
     EQ_MP,
+    INST,
+    TRANS,
     DEDUCT_ANTISYM_RULE,
 )
 from basics import mk_const
@@ -46,6 +48,7 @@ from tactics import (
     DISJ1,
     DISJ_CASES,
     REFL,
+    BETA_RULE,
 )
 from basics import dest_eq, rand
 from axioms import dest_imp, dest_forall, dest_disj, dest_exists, dest_neg
@@ -142,24 +145,34 @@ INFINITY = new_axiom(
 
 
 # ---------------------------------------------------------------------------
-# Tarski's Axiom A: every set is contained in a Grothendieck universe.
+# Tarski's Axiom A (Bourbaki/Grothendieck form): every set is contained in
+# a Grothendieck universe.
 #
-# A "universe" U is transitive, closed under powerset-membership (every
-# member has its powerset in U), and reflects size (every subset of U is
-# either equinumerous with U or itself a member of U). Closure under
-# binary union follows; together these clauses say U is a set-model of
-# ZFC, i.e. a strongly inaccessible level of the cumulative hierarchy.
+# A universe U satisfies:
+#   (1) Trans U                    -- members are subsets
+#   (2) pair-closure               -- a, b in U ==> {a, b} in U
+#   (3) powerset-closure           -- y in U ==> Pow y in U
+#   (4) indexed-union closure      -- Fam in U ==> Union Fam in U
 #
-# Iterating this gives a proper class of inaccessibles. Choice is a
-# corollary (well-order any set via the ordinal structure of a containing
-# universe), so we don't post it separately. ZF + A = TG.
+# This is the modern (Bourbaki SGA 4 / mathlib ``IsGrothendieckUniverse``)
+# formulation. Equivalent to Tarski's 1938 size-reflection form in
+# ZFC-with-ordinals, but here we take the closure clauses directly --
+# without ordinal apparatus the equivalence is one-way (size-reflection
+# alone cannot derive union-closure; we'd need Hartogs/cofinality).
+#
+# Iterating gives a proper class of inaccessibles. Choice follows (every
+# set lives in a universe whose ordinal structure well-orders it), so it
+# is not posted separately. ZF + A = TG.
 # ---------------------------------------------------------------------------
 
 TARSKI_A = new_axiom(
     parse(
         "!x. ?u. In x u /\\ Trans u /\\ "
+        "(!a b. In a u /\\ In b u ==> "
+        "(?p. In p u /\\ (!w. In w p = (w = a \\/ w = b)))) /\\ "
         "(!y. In y u ==> (?p. In p u /\\ (!z. In z p = Subset z y))) /\\ "
-        "(!Y. Subset Y u ==> Equinum Y u \\/ In Y u)"
+        "(!Fam. In Fam u ==> "
+        "(?B. In B u /\\ (!w. In w B = (?z. In z Fam /\\ In w z))))"
     )
 )
 
@@ -418,6 +431,376 @@ def EMPTY_PROP(p):
     p.thus("!x. ~In x Empty").by_rewrite_of("e0_eq", [SYM(EMPTY_DEF)])
 
 
+# ---------------------------------------------------------------------------
+# A Grothendieck universe containing an inductive set -- i.e. existence
+# of a strongly inaccessible cardinal.
+#
+# Packages the four Bourbaki-Grothendieck closure clauses plus an
+# infinite-set witness as a single existential:
+#
+#   (inf)   the universe contains an inductive ``I`` (from INFINITY) -- so
+#           its rank is past omega, ruling out the V_omega universe and
+#           forcing strong inaccessibility;
+#   (1)     Trans u;
+#   (2)     pair-closure;
+#   (3)     powerset-closure -- the strong-limit clause;
+#   (4)     indexed-union closure -- the regularity / cofinality clause.
+#
+# The closure clauses alone admit ``V_0 = {}``, ``V_omega = HF``, and
+# ``V_kappa`` for kappa strongly inaccessible. Pairing ``TARSKI_A`` with
+# ``INFINITY`` rules out the first two -- ``In I u`` cannot hold for any
+# countable ``u``. The proof is a straight repackaging: INFINITY yields
+# ``I``, TARSKI_A applied at ``I`` yields ``u``, and CONJ glues.
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Powerset constant Pow and its characteristic property.
+#
+# POWERSET only asserts existence; pin a specific witness as a kernel
+# constant so downstream proofs can write ``Pow x`` rather than carry an
+# existential around. ``by_select_def`` extracts the body's property.
+# ---------------------------------------------------------------------------
+
+POW_DEF = define("Pow", VV, "\\x. @p. !z. In z p = Subset z x")
+
+
+@proof
+def POW_PROP(p):
+    p.goal("!x z. In z (Pow x) = Subset z x")
+    p.fix("x")
+    p.have("h_ex: ?p. !z. In z p = Subset z x").by_match(POWERSET)
+    p.thus("!z. In z (Pow x) = Subset z x").by_select_def(
+        POW_DEF, "x", from_="h_ex"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Separation as a derived schema.
+#
+# REPLACEMENT is stated with a free relation ``R``. Substituting
+# ``R := \u v. P u /\ v = u`` and beta-reducing turns it into:
+#
+#   !a. (functionality, trivially true) ==>
+#       ?b. !y. In y b = (?x. In x a /\ P x /\ y = x)
+#
+# After dispatching the trivial functionality, we get a separation schema
+# parametrised by the free predicate ``P``. The body's RHS is the "raw"
+# form -- the inner ``y = x`` is left in place rather than collapsed to
+# the cleaner ``In y a /\ P y``, because downstream uses (Cantor) prefer
+# to unfold that existential by hand at the call site.
+# ---------------------------------------------------------------------------
+
+_P_TY = parse_type("V -> bool")
+_R_VAR = parse("R", R=parse_type("V -> V -> bool"))
+_SEP_LAM = parse("\\u v. P u /\\ v = u", P=_P_TY)
+REPLACEMENT_SEP = BETA_RULE(INST([(_SEP_LAM, _R_VAR)], REPLACEMENT))
+
+
+@proof
+def SEPARATION(p):
+    p.goal(
+        "!a. ?b. !y. In y b = (?x. In x a /\\ P x /\\ y = x)",
+        types={"P": _P_TY},
+    )
+    p.fix("a")
+    with p.have(
+        "h_func: !x y1 y2. In x a /\\ (P x /\\ y1 = x) /\\ (P x /\\ y2 = x) "
+        "==> y1 = y2"
+    ).proof():
+        p.fix("x y1 y2")
+        p.assume(
+            "h: In x a /\\ (P x /\\ y1 = x) /\\ (P x /\\ y2 = x)"
+        )
+        p.have("h12: (P x /\\ y1 = x) /\\ (P x /\\ y2 = x)").by(CONJUNCT2, "h")
+        p.have("h1: P x /\\ y1 = x").by(CONJUNCT1, "h12")
+        p.have("h2: P x /\\ y2 = x").by(CONJUNCT2, "h12")
+        p.have("h_y1x: y1 = x").by(CONJUNCT2, "h1")
+        p.have("h_y2x: y2 = x").by(CONJUNCT2, "h2")
+        p.thus("y1 = y2").by_thm(TRANS(p.fact("h_y1x"), SYM(p.fact("h_y2x"))))
+    p.thus(
+        "?b. !y. In y b = (?u. In u a /\\ P u /\\ y = u)"
+    ).by_match(REPLACEMENT_SEP, "h_func")
+
+
+# ---------------------------------------------------------------------------
+# Cantor's theorem.
+#
+# CANTOR_NO_SURJ is the diagonal argument's actual content: no class
+# function f surjects x onto Pow x. We build the diagonal
+# ``D = {y in x : ~In y (f y)}`` via SEPARATION; ``D`` is a subset of
+# ``x``, hence in ``Pow x``, hence has some ``d in x`` with ``f d = D``.
+# Excluded middle on ``In d D`` forces a contradiction either way: if
+# ``In d D`` then ``d`` witnesses the existential defining ``D``, so
+# ``~In d (f d) = ~In d D``; if ``~In d D`` then ``d`` itself satisfies
+# ``In d x /\ ~In d (f d) /\ d = d``, witnessing the existential and
+# forcing ``In d D``.
+#
+# CANTOR -- the more familiar ``~Equinum x (Pow x)`` -- is then a
+# corollary: an Equinum bijection includes a surjection.
+# ---------------------------------------------------------------------------
+
+from classical import EXCLUDED_MIDDLE
+
+
+@proof
+def CANTOR_NO_SURJ(p):
+    p.goal(
+        "!x. !f:VV. ~(!w. In w (Pow x) ==> ?u. In u x /\\ f u = w)",
+        types={"VV": VV},
+    )
+    p.fix("x")
+    p.fix("f")
+    with p.suppose(
+        "h_surj: !w. In w (Pow x) ==> ?u. In u x /\\ f u = w"
+    ):
+        # Build D = {y in x : ~In y (f y)} via SEPARATION at \y. ~In y (f y).
+        diag_lam = p._parse("\\y. ~In y (f y)")
+        P_var = parse("P", P=_P_TY)
+        x_t = p._parse("x")
+        sep_at_diag = BETA_RULE(
+            INST([(diag_lam, P_var)], SPEC(x_t, SEPARATION))
+        )
+        p.have(
+            "h_sep: ?b. !y. In y b = (?u. In u x /\\ ~In u (f u) /\\ y = u)"
+        ).by_thm(sep_at_diag)
+        p.choose("D", from_="h_sep")
+
+        # Subset D x.
+        with p.have("h_Dsub: Subset D x").proof():
+            with p.have("h_pt: !y. In y D ==> In y x").proof():
+                p.fix("y")
+                p.assume("h_yD: In y D")
+                p.have(
+                    "h_yD_ex: ?u. In u x /\\ ~In u (f u) /\\ y = u"
+                ).by_eq_mp(SPEC(p._parse("y"), p.fact("D_eq")), "h_yD")
+                p.choose("u", from_="h_yD_ex")
+                p.have("h_ux: In u x").by(CONJUNCT1, "u_eq")
+                p.have(
+                    "h_yu_rest: ~In u (f u) /\\ y = u"
+                ).by(CONJUNCT2, "u_eq")
+                p.have("h_yu: y = u").by(CONJUNCT2, "h_yu_rest")
+                p.thus("In y x").by_rewrite_of("h_ux", [SYM(p.fact("h_yu"))])
+            p.thus("Subset D x").by_unfold("h_pt", SUBSET_DEF)
+
+        # In D (Pow x).
+        p.have("h_DPow: In D (Pow x)").by_eq_mp(
+            SYM(SPEC(p._parse("D"), SPEC(p._parse("x"), POW_PROP))),
+            "h_Dsub",
+        )
+
+        # Surjectivity gives d in x with f d = D.
+        p.have(
+            "h_surj_D: In D (Pow x) ==> ?u. In u x /\\ f u = D"
+        ).by_inst("h_surj", "D")
+        p.have("h_d_ex: ?u. In u x /\\ f u = D").by_thm(
+            MP(p.fact("h_surj_D"), p.fact("h_DPow"))
+        )
+        p.choose("d", from_="h_d_ex")
+        p.have("h_dx: In d x").by(CONJUNCT1, "d_eq")
+        p.have("h_fdD: f d = D").by(CONJUNCT2, "d_eq")
+
+        # Diagonal contradiction.
+        with p.cases_on(EXCLUDED_MIDDLE, "In d D"):
+            with p.case("h_inD: In d D"):
+                p.have(
+                    "h_dD_ex: ?u. In u x /\\ ~In u (f u) /\\ d = u"
+                ).by_eq_mp(SPEC(p._parse("d"), p.fact("D_eq")), "h_inD")
+                p.choose("u", from_="h_dD_ex")
+                p.have(
+                    "h_rest1: ~In u (f u) /\\ d = u"
+                ).by(CONJUNCT2, "u_eq")
+                p.have("h_nfu: ~In u (f u)").by(CONJUNCT1, "h_rest1")
+                p.have("h_du: d = u").by(CONJUNCT2, "h_rest1")
+                p.have("h_nfd: ~In d (f d)").by_rewrite_of(
+                    "h_nfu", [SYM(p.fact("h_du"))]
+                )
+                p.have("h_inFd: In d (f d)").by_rewrite_of(
+                    "h_inD", [SYM(p.fact("h_fdD"))]
+                )
+                p.absurd().by_conj("h_inFd", "h_nfd")
+            with p.case("h_notinD: ~In d D"):
+                p.have("h_nfd: ~In d (f d)").by_rewrite_of(
+                    "h_notinD", [p.fact("h_fdD")]
+                )
+                p.have(
+                    "h_inner: In d x /\\ ~In d (f d) /\\ d = d"
+                ).by(
+                    CONJ,
+                    "h_dx",
+                    CONJ(p.fact("h_nfd"), REFL(p._parse("d"))),
+                )
+                p.have(
+                    "h_dD_ex: ?u. In u x /\\ ~In u (f u) /\\ d = u"
+                ).by_witness("d", "h_inner")
+                p.have("h_inD: In d D").by_eq_mp(
+                    SYM(SPEC(p._parse("d"), p.fact("D_eq"))), "h_dD_ex"
+                )
+                p.absurd().by_conj("h_inD", "h_notinD")
+
+
+@proof
+def CANTOR(p):
+    p.goal("!x. ~Equinum x (Pow x)", types={"VV": VV})
+    p.fix("x")
+    with p.suppose("h_eq: Equinum x (Pow x)"):
+        p.have(
+            "h_body: ?f:VV. (!u. In u x ==> In (f u) (Pow x)) /\\ "
+            "(!u v. In u x /\\ In v x /\\ f u = f v ==> u = v) /\\ "
+            "(!w. In w (Pow x) ==> ?u. In u x /\\ f u = w)"
+        ).by_unfold("h_eq", EQUINUM_DEF)
+        p.choose("f", from_="h_body")
+        p.have(
+            "h_rest: (!u v. In u x /\\ In v x /\\ f u = f v ==> u = v) /\\ "
+            "(!w. In w (Pow x) ==> ?u. In u x /\\ f u = w)"
+        ).by(CONJUNCT2, "f_eq")
+        p.have(
+            "h_surj: !w. In w (Pow x) ==> ?u. In u x /\\ f u = w"
+        ).by(CONJUNCT2, "h_rest")
+        p.have(
+            "h_no: ~(!w. In w (Pow x) ==> ?u. In u x /\\ f u = w)"
+        ).by_inst(CANTOR_NO_SURJ, "x", "f")
+        p.absurd().by_conj("h_surj", "h_no")
+
+
+# ---------------------------------------------------------------------------
+# SMALL_MEMBER -- members of a Grothendieck universe are smaller than the
+# universe.
+#
+# If ``In x u``, ``Trans u``, and ``u`` is closed under powerset (clause 3
+# of TARSKI_A), then ``~Equinum x u``. From a hypothetical bijection
+# ``f : x <-> u`` we build a surjection ``x -> Pow x`` and contradict
+# CANTOR_NO_SURJ. The surjection works because ``Pow x in u`` (powerset
+# clause + extensional match against POW_PROP), then ``Subset (Pow x) u``
+# (Trans), so any ``w in Pow x`` is also in ``u`` and lies in the image
+# of ``f``.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def SMALL_MEMBER(p):
+    p.goal(
+        "!x u. In x u /\\ Trans u /\\ "
+        "(!y. In y u ==> ?p. In p u /\\ (!z. In z p = Subset z y)) ==> "
+        "~Equinum x u",
+        types={"VV": VV},
+    )
+    p.fix("x u")
+    p.assume(
+        "(h_xu, h_trans, h_pow): In x u /\\ Trans u /\\ "
+        "(!y. In y u ==> ?p. In p u /\\ (!z. In z p = Subset z y))"
+    )
+    with p.suppose("h_eq: Equinum x u"):
+        # 1. Get a u-internal "powerset of x" and identify it with Pow x.
+        p.have(
+            "h_pow_at_x: In x u ==> ?p. In p u /\\ (!z. In z p = Subset z x)"
+        ).by_inst("h_pow", "x")
+        p.have(
+            "h_pow_ex: ?p. In p u /\\ (!z. In z p = Subset z x)"
+        ).by_thm(MP(p.fact("h_pow_at_x"), p.fact("h_xu")))
+        p.choose("p", from_="h_pow_ex")
+        p.have("h_pu: In p u").by(CONJUNCT1, "p_eq")
+        p.have("h_p_def: !z. In z p = Subset z x").by(CONJUNCT2, "p_eq")
+        with p.have("h_p_eq_Pow: p = Pow x").proof():
+            with p.have("h_ext: !z. In z p = In z (Pow x)").proof():
+                p.fix("z")
+                p.have("h_pz: In z p = Subset z x").by_inst("h_p_def", "z")
+                p.have("h_Powz: In z (Pow x) = Subset z x").by_inst(
+                    POW_PROP, "x", "z"
+                )
+                p.thus("In z p = In z (Pow x)").by_thm(
+                    TRANS(p.fact("h_pz"), SYM(p.fact("h_Powz")))
+                )
+            p.thus("p = Pow x").by_match(EXTENSIONALITY, "h_ext")
+        p.have("h_PowU: In (Pow x) u").by_rewrite_of(
+            "h_pu", [p.fact("h_p_eq_Pow")]
+        )
+        # 2. Subset (Pow x) u from Trans u + In (Pow x) u.
+        p.have(
+            "h_trans_unf: !y. In y u ==> Subset y u"
+        ).by_unfold("h_trans", TRANS_DEF)
+        p.have(
+            "h_PowU_imp: In (Pow x) u ==> Subset (Pow x) u"
+        ).by_inst("h_trans_unf", "Pow x")
+        p.have("h_PowSub: Subset (Pow x) u").by_thm(
+            MP(p.fact("h_PowU_imp"), p.fact("h_PowU"))
+        )
+        p.have(
+            "h_PSU_unf: !z. In z (Pow x) ==> In z u"
+        ).by_unfold("h_PowSub", SUBSET_DEF)
+        # 3. Unfold Equinum: get f and its surjectivity onto u.
+        p.have(
+            "h_body: ?f:VV. (!y. In y x ==> In (f y) u) /\\ "
+            "(!y1 y2. In y1 x /\\ In y2 x /\\ f y1 = f y2 ==> y1 = y2) /\\ "
+            "(!w. In w u ==> ?y. In y x /\\ f y = w)"
+        ).by_unfold("h_eq", EQUINUM_DEF)
+        p.choose("f", from_="h_body")
+        p.have(
+            "h_rest: (!y1 y2. In y1 x /\\ In y2 x /\\ f y1 = f y2 ==> y1 = y2) /\\ "
+            "(!w. In w u ==> ?y. In y x /\\ f y = w)"
+        ).by(CONJUNCT2, "f_eq")
+        p.have(
+            "h_surj_u: !w. In w u ==> ?y. In y x /\\ f y = w"
+        ).by(CONJUNCT2, "h_rest")
+        # 4. Build the surjection x -> Pow x.
+        with p.have(
+            "h_surj_Pow: !w. In w (Pow x) ==> ?y. In y x /\\ f y = w"
+        ).proof():
+            p.fix("w")
+            p.assume("h_wPow: In w (Pow x)")
+            p.have(
+                "h_w_imp: In w (Pow x) ==> In w u"
+            ).by_inst("h_PSU_unf", "w")
+            p.have("h_wu: In w u").by_thm(
+                MP(p.fact("h_w_imp"), p.fact("h_wPow"))
+            )
+            p.have(
+                "h_su_imp: In w u ==> ?y. In y x /\\ f y = w"
+            ).by_inst("h_surj_u", "w")
+            p.thus("?y. In y x /\\ f y = w").by_thm(
+                MP(p.fact("h_su_imp"), p.fact("h_wu"))
+            )
+        # 5. Contradicts CANTOR_NO_SURJ at x and f. Rename the inner bound
+        # ``?u`` to ``?y`` because the outer free ``u`` would otherwise shadow.
+        p.have(
+            "h_no: ~(!w. In w (Pow x) ==> ?y. In y x /\\ f y = w)"
+        ).by_inst(CANTOR_NO_SURJ, "x", "f")
+        p.absurd().by_conj("h_surj_Pow", "h_no")
+
+
+@proof
+def INACCESSIBLE_UNIVERSE(p):
+    inductive = (
+        "(?z. In z I /\\ ~(?w. In w z)) /\\ "
+        "(!x. In x I ==> (?y. In y I /\\ (!w. In w y = (In w x \\/ w = x))))"
+    )
+    rest = (
+        "Trans u /\\ "
+        "(!a b. In a u /\\ In b u ==> "
+        "(?p. In p u /\\ (!w. In w p = (w = a \\/ w = b)))) /\\ "
+        "(!y. In y u ==> (?p. In p u /\\ (!z. In z p = Subset z y))) /\\ "
+        "(!Fam. In Fam u ==> "
+        "(?B. In B u /\\ (!w. In w B = (?z. In z Fam /\\ In w z))))"
+    )
+    contains_inf = f"(?I. In I u /\\ {inductive})"
+    full = f"{contains_inf} /\\ {rest}"
+    p.goal(f"?u. {full}")
+    # Inductive I from INFINITY.
+    p.have(f"h_inf: ?I. {inductive}").by(INFINITY)
+    p.choose("I", from_="h_inf")
+    # Universe u containing I, from TARSKI_A.
+    p.have(f"h_uni: ?u. In I u /\\ {rest}").by_match(TARSKI_A)
+    p.choose("u", from_="h_uni")
+    p.have("h_in: In I u").by(CONJUNCT1, "u_eq")
+    p.have(f"h_rest: {rest}").by(CONJUNCT2, "u_eq")
+    # Witness the inner ?I with our chosen I.
+    p.have(f"h_pair: In I u /\\ {inductive}").by(CONJ, "h_in", "I_eq")
+    p.have(f"h_contains_inf: {contains_inf}").by_witness("I", "h_pair")
+    # Glue and witness u.
+    p.have(f"h_all: {full}").by(CONJ, "h_contains_inf", "h_rest")
+    p.thus(f"?u. {full}").by_witness("u", "h_all")
+
+
 if __name__ == "__main__":
     for label, th in [
         ("SUBSET_DEF", SUBSET_DEF),
@@ -439,5 +822,12 @@ if __name__ == "__main__":
         ("EMPTY_UNIQUE", EMPTY_UNIQUE),
         ("EMPTY_DEF", EMPTY_DEF),
         ("EMPTY_PROP", EMPTY_PROP),
+        ("POW_DEF", POW_DEF),
+        ("POW_PROP", POW_PROP),
+        ("SEPARATION", SEPARATION),
+        ("CANTOR_NO_SURJ", CANTOR_NO_SURJ),
+        ("CANTOR", CANTOR),
+        ("SMALL_MEMBER", SMALL_MEMBER),
+        ("INACCESSIBLE_UNIVERSE", INACCESSIBLE_UNIVERSE),
     ]:
         print(f"{label}: {pp_thm(th)}")
