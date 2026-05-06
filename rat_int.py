@@ -369,14 +369,13 @@ def IS_RAT_DEST(p):
     a_var = Var("a", rat_ty)
     md_X = INST([(X_t, a_var)], MK_RAT_DEST)
     # |- mk_rat (dest_rat X) = X.
-    # dest_rat applied to both sides:
-    dest_md = AP_TERM(dest_rat, md_X)
+    p.have("dest_md:").by_cong(dest_rat, md_X)
     # |- dest_rat (mk_rat (dest_rat X)) = dest_rat X.
     # RAT_DEST_MK at r := dest_rat X:
     dr_X = mk_comb(dest_rat, X_t)
     iso_inst = INST([(dr_X, _r_n2b)], RAT_DEST_MK)
     # |- IS_RAT (dest_rat X) = (dest_rat (mk_rat (dest_rat X)) = dest_rat X).
-    p.thus("IS_RAT (dest_rat X)").by_eq_mp(SYM(iso_inst), dest_md)
+    p.thus("IS_RAT (dest_rat X)").by_eq_mp(SYM(iso_inst), "dest_md")
 
 
 @proof
@@ -387,20 +386,16 @@ def Q_SURJ(p):
     p.have("isr: IS_RAT (dest_rat X)").by_match(IS_RAT_DEST)
     # Unfold: ?pa pb. dest_rat X = feq pa pb.
     dr_X = mk_comb(dest_rat, X_t)
-    unfold_th = UNFOLD(
-        IS_RAT_DEF, dr_X
-    )  # |- IS_RAT (dest_rat X) = ?pa pb. dest_rat X = feq pa pb
-    p.have("ex: ?pa pb. dest_rat X = feq pa pb").by_eq_mp(unfold_th, "isr")
+    p.have("ex: ?pa pb. dest_rat X = feq pa pb").by_eq_mp(
+        p.unfold(IS_RAT_DEF, dr_X), "isr"
+    )
     p.choose("pa pb: dest_rat X = feq pa pb", from_="ex")
-    pb_eq = p.fact("pb_eq")
-    mk_eq_th = AP_TERM(mk_rat, pb_eq)  # mk_rat (dest_rat X) = mk_rat (feq pa pb)
     a_var = Var("a", rat_ty)
     md_X = INST([(X_t, a_var)], MK_RAT_DEST)  # mk_rat (dest_rat X) = X
-    Q_unfold = UNFOLD(Q_DEF, p._parse("pa"), p._parse("pb"))
     with p.calc("Xpapb: X") as c:
         c.step("= mk_rat (dest_rat X)").by_thm(SYM(md_X))
-        c.step("= mk_rat (feq pa pb)").by_thm(mk_eq_th)
-        c.step("= Q pa pb").by_thm(SYM(Q_unfold))
+        c.step("= mk_rat (feq pa pb)").by_cong(mk_rat, "pb_eq")
+        c.step("= Q pa pb").by_thm(SYM(p.unfold(Q_DEF, "pa", "pb")))
     p.thus("?a b. X = Q a b").by_witness(["pa", "pb"], "Xpapb")
 
 
@@ -1769,12 +1764,12 @@ def SATZ_111B_FWD(p):
     y_t = p._parse("y")
     p._parse("1")
     p.have("eq_mul: x * 1 = y * 1").by_def(FEQ_DEF, "feq")
-    mul1_x = SPEC(x_t, MUL_1)
-    mul1_y = SPEC(y_t, MUL_1)
+    p.have("mul1_x:").by_inst(MUL_1, "x")
+    p.have("mul1_y:").by_inst(MUL_1, "y")
     with p.calc("x", thus=True) as c:
-        c.step("= x*1").by_thm(SYM(mul1_x))
+        c.step("= x*1").by_thm(SYM(p.fact("mul1_x")))
         c.step("= y*1").by_thm(p.fact("eq_mul"))
-        c.step("= y").by_thm(mul1_y)
+        c.step("= y").by_thm("mul1_y")
 
 
 # Satz 111B (reverse):  x = y ==> Q x 1 = Q y 1.
@@ -1783,9 +1778,8 @@ def SATZ_111B_REV(p):
     p.goal("!x y. x = y ==> Q x 1 = Q y 1")
     p.fix("x y")
     p.assume("h: x = y")
-    sub_l = AP_TERM(Q, p.fact("h"))
-    sub_l_at = AP_THM(sub_l, p._parse("1"))
-    p.thus("Q x 1 = Q y 1").by_thm(sub_l_at)
+    p.have("sub_l: Q x = Q y").by_cong(Q, "h")
+    p.thus("Q x 1 = Q y 1").by_cong("sub_l", "1")
 
 
 # Satz 111A (forward):  rgt (Q x 1) (Q y 1) ==> x > y.
@@ -1904,11 +1898,11 @@ def RMUL_ONE(p):
     p.have("b_one_b:").by_thm(SYM(p.fact("one_b")))  # b = 1*b
     p.have("eq_r:").by_cong(mk_app(TIMES, a_t), "b_one_b")  # a*b = a*(1*b)
     p.have("eq_full:").by_trans("eq_l", "eq_r")
-    feq_th = EQ_MP(
-        SYM(UNFOLD(FEQ_DEF, mk_mul(ONE_t, a_t), mk_mul(ONE_t, b_t), a_t, b_t)),
-        p.fact("eq_full"),
+    p.have("feq_th:").by_eq_mp(
+        SYM(p.unfold(FEQ_DEF, mk_mul(ONE_t, a_t), mk_mul(ONE_t, b_t), a_t, b_t)),
+        "eq_full",
     )
-    p.have("Q_eq:").by_thm(feq_to_Q_eq(feq_th))
+    p.have("Q_eq:").by_thm(feq_to_Q_eq(p.fact("feq_th")))
     p.have("X_eq_Qab:").by_thm(SYM(p.fact("b_eq")))  # Q a b = X
     with p.calc("rmul (Q 1 1) X", thus=True) as c:
         c.step("= rmul (Q 1 1) (Q a b)").by_thm("sub_x")
@@ -1968,8 +1962,10 @@ def SATZ_114(p):
         c.step("= x*(1*y)").by_thm("expand")
     # eq_chain : |- (y*x)*1 = x*(1*y).  FEQ_DEF: feq a b c d = (a*d = c*b).
     # Match a=y*x, b=1*y, c=x, d=1 to fold to feq (y*x) (1*y) x 1.
-    feq_thm = EQ_MP(SYM(UNFOLD(FEQ_DEF, yx, xy_inner, x_t, ONE_t)), p.fact("eq_chain"))
-    p.have("Q_eq:").by_thm(feq_to_Q_eq(feq_thm))
+    p.have("feq_thm:").by_eq_mp(
+        SYM(p.unfold(FEQ_DEF, yx, xy_inner, x_t, ONE_t)), "eq_chain"
+    )
+    p.have("Q_eq:").by_thm(feq_to_Q_eq(p.fact("feq_thm")))
     p.thus("rmul (Q y 1) (Q x y) = Q x 1").by_trans("raw", "Q_eq")
 
 
@@ -2002,8 +1998,8 @@ def SATZ_115(p):
         p.have("com:").by_inst(SATZ_102, YoverX, X_t),
         p.have("rdiv_prop:").by_inst(RDIV_PROP, Y_t, X_t),
     )
-    sub = AP_TERM(mk_app(RGT, mk_app(RMUL, Z_t, X_t)), p.fact("eq_WX_Y"))
-    p.have("g_ZX_Y: rgt (rmul Z X) Y").by_eq_mp(sub, "g_ZW")
+    p.have("sub:").by_cong(mk_app(RGT, mk_app(RMUL, Z_t, X_t)), "eq_WX_Y")
+    p.have("g_ZX_Y: rgt (rmul Z X) Y").by_eq_mp("sub", "g_ZW")
     # v >= 1 (nat).
     p.have("v_ge: v >= 1").by_match(SATZ_24)
     p.have("v_disj: v > 1 \\/ v = 1").by_def(GE_DEF, "v_ge")
