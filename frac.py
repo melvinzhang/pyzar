@@ -631,8 +631,8 @@ def SATZ_58(p):
 #       =
 #   (x1*(y2*z2) + (y1*z2 + z1*y2)*x2) * ((x2*y2)*z2),
 # distributes to a sum of three monomials on each side, with each pair
-# AC-equivalent under multiplication. We bridge each monomial via _mul_AC and
-# stitch the three together with addition's MK_COMB.
+# AC-equivalent under multiplication. Three AC bridges align the monomials;
+# RIGHT_DISTRIB then drives both sides to the same fully-distributed form.
 @proof
 def SATZ_59(p):
     p.goal(
@@ -641,79 +641,25 @@ def SATZ_59(p):
         "(x1*(y2*z2) + (y1*z2 + z1*y2)*x2) (x2*(y2*z2))"
     )
     p.fix("x1 x2 y1 y2 z1 z2")
-    # Three monomial pairs:
-    A = mk_mul(mk_mul(mk_mul(x1, y2), z2), mk_mul(x2, mk_mul(y2, z2)))
-    B = mk_mul(mk_mul(mk_mul(y1, x2), z2), mk_mul(x2, mk_mul(y2, z2)))
-    C = mk_mul(mk_mul(z1, mk_mul(x2, y2)), mk_mul(x2, mk_mul(y2, z2)))
-    Ap = mk_mul(mk_mul(x1, mk_mul(y2, z2)), mk_mul(mk_mul(x2, y2), z2))
-    Bp = mk_mul(mk_mul(mk_mul(y1, z2), x2), mk_mul(mk_mul(x2, y2), z2))
-    Cp = mk_mul(mk_mul(mk_mul(z1, y2), x2), mk_mul(mk_mul(x2, y2), z2))
-    eq_A = _mul_AC(A, Ap)
-    eq_B = _mul_AC(B, Bp)
-    eq_C = _mul_AC(C, Cp)
-
-    # LHS distribution: ((x1*y2+y1*x2)*z2 + z1*(x2*y2)) * (x2*(y2*z2)) = A+B+C.
-    L_factor = mk_mul(x2, mk_mul(y2, z2))
-    distr1 = SPECL(
-        [
-            mk_mul(mk_add(mk_mul(x1, y2), mk_mul(y1, x2)), z2),
-            mk_mul(z1, mk_mul(x2, y2)),
-            L_factor,
-        ],
-        RIGHT_DISTRIB,
+    p.have(
+        "eq_A: ((x1*y2)*z2)*(x2*(y2*z2)) = (x1*(y2*z2))*((x2*y2)*z2)"
+    ).by_ac(TIMES, SATZ_31, SATZ_29)
+    p.have(
+        "eq_B: ((y1*x2)*z2)*(x2*(y2*z2)) = ((y1*z2)*x2)*((x2*y2)*z2)"
+    ).by_ac(TIMES, SATZ_31, SATZ_29)
+    p.have(
+        "eq_C: (z1*(x2*y2))*(x2*(y2*z2)) = ((z1*y2)*x2)*((x2*y2)*z2)"
+    ).by_ac(TIMES, SATZ_31, SATZ_29)
+    p.have(
+        "res: ((x1*y2 + y1*x2)*z2 + z1*(x2*y2)) * (x2*(y2*z2)) = "
+        "(x1*(y2*z2) + (y1*z2 + z1*y2)*x2) * ((x2*y2)*z2)"
+    ).by_rewrite(
+        [RIGHT_DISTRIB, "eq_A", "eq_B", "eq_C"], ac=(PLUS, SATZ_5, SATZ_6)
     )
-    inner_L = SPECL([mk_mul(x1, y2), mk_mul(y1, x2), z2], RIGHT_DISTRIB)
-    chunk_L = TRANS(
-        AP_THM(AP_TERM(TIMES, inner_L), L_factor),
-        SPECL(
-            [mk_mul(mk_mul(x1, y2), z2), mk_mul(mk_mul(y1, x2), z2), L_factor],
-            RIGHT_DISTRIB,
-        ),
-    )
-    L_distrib = TRANS(
-        distr1,
-        MK_COMB(
-            AP_TERM(PLUS, chunk_L), REFL(mk_mul(mk_mul(z1, mk_mul(x2, y2)), L_factor))
-        ),
-    )
-    # |- LHS = (A + B) + C.
-    L_assoc = SPECL([A, B, C], SATZ_5)
-    L_full = TRANS(L_distrib, L_assoc)
-    # |- LHS = A + (B + C).
-
-    # RHS distribution: (x1*(y2*z2) + (y1*z2+z1*y2)*x2) * ((x2*y2)*z2) = A' + (B' + C').
-    R_factor = mk_mul(mk_mul(x2, y2), z2)
-    distr_R1 = SPECL(
-        [
-            mk_mul(x1, mk_mul(y2, z2)),
-            mk_mul(mk_add(mk_mul(y1, z2), mk_mul(z1, y2)), x2),
-            R_factor,
-        ],
-        RIGHT_DISTRIB,
-    )
-    inner_R = SPECL([mk_mul(y1, z2), mk_mul(z1, y2), x2], RIGHT_DISTRIB)
-    chunk_R = TRANS(
-        AP_THM(AP_TERM(TIMES, inner_R), R_factor),
-        SPECL(
-            [mk_mul(mk_mul(y1, z2), x2), mk_mul(mk_mul(z1, y2), x2), R_factor],
-            RIGHT_DISTRIB,
-        ),
-    )
-    R_distrib = TRANS(
-        distr_R1,
-        MK_COMB(
-            AP_TERM(PLUS, REFL(mk_mul(mk_mul(x1, mk_mul(y2, z2)), R_factor))), chunk_R
-        ),
-    )
-    # |- RHS = A' + (B' + C').
-
-    bridge = MK_COMB(AP_TERM(PLUS, eq_A), MK_COMB(AP_TERM(PLUS, eq_B), eq_C))
-    # |- A + (B + C) = A' + (B' + C').
-    res = TRANS_CHAIN([L_full, bridge, SYM(R_distrib)])
     p.thus(
         "feq ((x1*y2 + y1*x2)*z2 + z1*(x2*y2)) ((x2*y2)*z2) "
         "(x1*(y2*z2) + (y1*z2 + z1*y2)*x2) (x2*(y2*z2))"
-    ).by_unfold(res, FEQ_DEF)
+    ).by_unfold("res", FEQ_DEF)
 
 
 # Satz 60:  x1/x2 + y1/y2 > x1/x2.
