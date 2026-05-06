@@ -2193,9 +2193,7 @@ class _Have:
             th2 = p.coerce(e2)
             return self._finish(MK_COMB(AP_TERM(op_t, th1), th2))
         if len(args) != 2:
-            raise HolError(
-                f"by_cong: expected 2 or 3 args, got {len(args)}"
-            )
+            raise HolError(f"by_cong: expected 2 or 3 args, got {len(args)}")
         left, right = args
         L = p.coerce(left, accept_term=True)
         R = p.coerce(right, accept_term=True)

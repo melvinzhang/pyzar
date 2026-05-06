@@ -1316,9 +1316,7 @@ def SATZ_71(p):
     # |- (x1*(y1*z2 + z1*y2))*F = (x1*(y1*z2))*F + (x1*(z1*y2))*F
     # Distribute RHS: ((x1*y1)*(x2*z2) + (x1*z1)*(x2*y2)) * G  =  ...
     G_R = mk_mul(x2, mk_mul(y2, z2))
-    p.have("chunk_R:").by_inst(
-        RIGHT_DISTRIB, "(x1*y1)*(x2*z2)", "(x1*z1)*(x2*y2)", G_R
-    )
+    p.have("chunk_R:").by_inst(RIGHT_DISTRIB, "(x1*y1)*(x2*z2)", "(x1*z1)*(x2*y2)", G_R)
     # |- ((x1*y1)*(x2*z2) + (x1*z1)*(x2*y2))*G = ((x1*y1)*(x2*z2))*G + ((x1*z1)*(x2*y2))*G
     # Bridge each pair via *-AC:
     M1L = mk_mul(mk_mul(x1, mk_mul(y1, z2)), F_L)

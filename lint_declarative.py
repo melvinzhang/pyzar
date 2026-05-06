@@ -162,9 +162,11 @@ def find_offenders(path):
         # procedural RHS so the escape pass can suppress them.
         covered = set()
         for sub in ast.walk(fn):
-            rhs = _assigned_value(sub) if isinstance(
-                sub, (ast.Assign, ast.AnnAssign, ast.AugAssign)
-            ) else None
+            rhs = (
+                _assigned_value(sub)
+                if isinstance(sub, (ast.Assign, ast.AnnAssign, ast.AugAssign))
+                else None
+            )
             if rhs is None:
                 continue
             call = _proc_thm_call(rhs)
