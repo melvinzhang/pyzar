@@ -1998,10 +1998,11 @@ def SATZ_115(p):
     # We named the existential "ex_Z" with body rgt Z (rdiv Y X). After choose("Z: ..."),
     # the body becomes a fact under "Z_eq". So rgt Z (rdiv Y X) is registered as Z_eq.
     p.have("g_ZW: rgt (rmul Z X) (rmul (rdiv Y X) X)").by_match(SATZ_105A, "Z_eq")
-    com = SPECL([YoverX, X_t], SATZ_102)  # (Y/X)*X = X*(Y/X)
-    rdiv_prop = SPECL([Y_t, X_t], RDIV_PROP)  # X*(Y/X) = Y
-    eq_WX_Y = TRANS(com, rdiv_prop)  # (Y/X)*X = Y
-    sub = AP_TERM(mk_app(RGT, mk_app(RMUL, Z_t, X_t)), eq_WX_Y)
+    p.have("eq_WX_Y: rmul (rdiv Y X) X = Y").by_trans(
+        p.have("com:").by_inst(SATZ_102, YoverX, X_t),
+        p.have("rdiv_prop:").by_inst(RDIV_PROP, Y_t, X_t),
+    )
+    sub = AP_TERM(mk_app(RGT, mk_app(RMUL, Z_t, X_t)), p.fact("eq_WX_Y"))
     p.have("g_ZX_Y: rgt (rmul Z X) Y").by_eq_mp(sub, "g_ZW")
     # v >= 1 (nat).
     p.have("v_ge: v >= 1").by_match(SATZ_24)
