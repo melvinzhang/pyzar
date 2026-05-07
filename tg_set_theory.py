@@ -52,7 +52,7 @@ from tactics import (
 )
 from basics import dest_eq, rand
 from axioms import dest_imp, dest_forall, dest_disj, dest_exists, dest_neg
-from classical import NOT_EX_TO_FORALL_NOT
+from classical import NOT_EX_TO_FORALL_NOT, EXCLUDED_MIDDLE
 from proof import proof
 
 
@@ -470,9 +470,7 @@ def POW_PROP(p):
     p.goal("!x z. In z (Pow x) = Subset z x")
     p.fix("x")
     p.have("h_ex: ?p. !z. In z p = Subset z x").by_match(POWERSET)
-    p.thus("!z. In z (Pow x) = Subset z x").by_select_def(
-        POW_DEF, "x", from_="h_ex"
-    )
+    p.thus("!z. In z (Pow x) = Subset z x").by_select_def(POW_DEF, "x", from_="h_ex")
 
 
 # ---------------------------------------------------------------------------
@@ -505,22 +503,19 @@ def SEPARATION(p):
     )
     p.fix("a")
     with p.have(
-        "h_func: !x y1 y2. In x a /\\ (P x /\\ y1 = x) /\\ (P x /\\ y2 = x) "
-        "==> y1 = y2"
+        "h_func: !x y1 y2. In x a /\\ (P x /\\ y1 = x) /\\ (P x /\\ y2 = x) ==> y1 = y2"
     ).proof():
         p.fix("x y1 y2")
-        p.assume(
-            "h: In x a /\\ (P x /\\ y1 = x) /\\ (P x /\\ y2 = x)"
-        )
+        p.assume("h: In x a /\\ (P x /\\ y1 = x) /\\ (P x /\\ y2 = x)")
         p.have("h12: (P x /\\ y1 = x) /\\ (P x /\\ y2 = x)").by(CONJUNCT2, "h")
         p.have("h1: P x /\\ y1 = x").by(CONJUNCT1, "h12")
         p.have("h2: P x /\\ y2 = x").by(CONJUNCT2, "h12")
         p.have("h_y1x: y1 = x").by(CONJUNCT2, "h1")
         p.have("h_y2x: y2 = x").by(CONJUNCT2, "h2")
         p.thus("y1 = y2").by_thm(TRANS(p.fact("h_y1x"), SYM(p.fact("h_y2x"))))
-    p.thus(
-        "?b. !y. In y b = (?u. In u a /\\ P u /\\ y = u)"
-    ).by_match(REPLACEMENT_SEP, "h_func")
+    p.thus("?b. !y. In y b = (?u. In u a /\\ P u /\\ y = u)").by_match(
+        REPLACEMENT_SEP, "h_func"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -540,8 +535,6 @@ def SEPARATION(p):
 # corollary: an Equinum bijection includes a surjection.
 # ---------------------------------------------------------------------------
 
-from classical import EXCLUDED_MIDDLE
-
 
 @proof
 def CANTOR_NO_SURJ(p):
@@ -551,19 +544,15 @@ def CANTOR_NO_SURJ(p):
     )
     p.fix("x")
     p.fix("f")
-    with p.suppose(
-        "h_surj: !w. In w (Pow x) ==> ?u. In u x /\\ f u = w"
-    ):
+    with p.suppose("h_surj: !w. In w (Pow x) ==> ?u. In u x /\\ f u = w"):
         # Build D = {y in x : ~In y (f y)} via SEPARATION at \y. ~In y (f y).
         diag_lam = p._parse("\\y. ~In y (f y)")
         P_var = parse("P", P=_P_TY)
         x_t = p._parse("x")
-        sep_at_diag = BETA_RULE(
-            INST([(diag_lam, P_var)], SPEC(x_t, SEPARATION))
+        sep_at_diag = BETA_RULE(INST([(diag_lam, P_var)], SPEC(x_t, SEPARATION)))
+        p.have("h_sep: ?b. !y. In y b = (?u. In u x /\\ ~In u (f u) /\\ y = u)").by_thm(
+            sep_at_diag
         )
-        p.have(
-            "h_sep: ?b. !y. In y b = (?u. In u x /\\ ~In u (f u) /\\ y = u)"
-        ).by_thm(sep_at_diag)
         p.choose("D", from_="h_sep")
 
         # Subset D x.
@@ -571,14 +560,12 @@ def CANTOR_NO_SURJ(p):
             with p.have("h_pt: !y. In y D ==> In y x").proof():
                 p.fix("y")
                 p.assume("h_yD: In y D")
-                p.have(
-                    "h_yD_ex: ?u. In u x /\\ ~In u (f u) /\\ y = u"
-                ).by_eq_mp(SPEC(p._parse("y"), p.fact("D_eq")), "h_yD")
+                p.have("h_yD_ex: ?u. In u x /\\ ~In u (f u) /\\ y = u").by_eq_mp(
+                    SPEC(p._parse("y"), p.fact("D_eq")), "h_yD"
+                )
                 p.choose("u", from_="h_yD_ex")
                 p.have("h_ux: In u x").by(CONJUNCT1, "u_eq")
-                p.have(
-                    "h_yu_rest: ~In u (f u) /\\ y = u"
-                ).by(CONJUNCT2, "u_eq")
+                p.have("h_yu_rest: ~In u (f u) /\\ y = u").by(CONJUNCT2, "u_eq")
                 p.have("h_yu: y = u").by(CONJUNCT2, "h_yu_rest")
                 p.thus("In y x").by_rewrite_of("h_ux", [SYM(p.fact("h_yu"))])
             p.thus("Subset D x").by_unfold("h_pt", SUBSET_DEF)
@@ -590,9 +577,9 @@ def CANTOR_NO_SURJ(p):
         )
 
         # Surjectivity gives d in x with f d = D.
-        p.have(
-            "h_surj_D: In D (Pow x) ==> ?u. In u x /\\ f u = D"
-        ).by_inst("h_surj", "D")
+        p.have("h_surj_D: In D (Pow x) ==> ?u. In u x /\\ f u = D").by_inst(
+            "h_surj", "D"
+        )
         p.have("h_d_ex: ?u. In u x /\\ f u = D").by_thm(
             MP(p.fact("h_surj_D"), p.fact("h_DPow"))
         )
@@ -603,13 +590,11 @@ def CANTOR_NO_SURJ(p):
         # Diagonal contradiction.
         with p.cases_on(EXCLUDED_MIDDLE, "In d D"):
             with p.case("h_inD: In d D"):
-                p.have(
-                    "h_dD_ex: ?u. In u x /\\ ~In u (f u) /\\ d = u"
-                ).by_eq_mp(SPEC(p._parse("d"), p.fact("D_eq")), "h_inD")
+                p.have("h_dD_ex: ?u. In u x /\\ ~In u (f u) /\\ d = u").by_eq_mp(
+                    SPEC(p._parse("d"), p.fact("D_eq")), "h_inD"
+                )
                 p.choose("u", from_="h_dD_ex")
-                p.have(
-                    "h_rest1: ~In u (f u) /\\ d = u"
-                ).by(CONJUNCT2, "u_eq")
+                p.have("h_rest1: ~In u (f u) /\\ d = u").by(CONJUNCT2, "u_eq")
                 p.have("h_nfu: ~In u (f u)").by(CONJUNCT1, "h_rest1")
                 p.have("h_du: d = u").by(CONJUNCT2, "h_rest1")
                 p.have("h_nfd: ~In d (f d)").by_rewrite_of(
@@ -623,16 +608,14 @@ def CANTOR_NO_SURJ(p):
                 p.have("h_nfd: ~In d (f d)").by_rewrite_of(
                     "h_notinD", [p.fact("h_fdD")]
                 )
-                p.have(
-                    "h_inner: In d x /\\ ~In d (f d) /\\ d = d"
-                ).by(
+                p.have("h_inner: In d x /\\ ~In d (f d) /\\ d = d").by(
                     CONJ,
                     "h_dx",
                     CONJ(p.fact("h_nfd"), REFL(p._parse("d"))),
                 )
-                p.have(
-                    "h_dD_ex: ?u. In u x /\\ ~In u (f u) /\\ d = u"
-                ).by_witness("d", "h_inner")
+                p.have("h_dD_ex: ?u. In u x /\\ ~In u (f u) /\\ d = u").by_witness(
+                    "d", "h_inner"
+                )
                 p.have("h_inD: In d D").by_eq_mp(
                     SYM(SPEC(p._parse("d"), p.fact("D_eq"))), "h_dD_ex"
                 )
@@ -654,12 +637,12 @@ def CANTOR(p):
             "h_rest: (!u v. In u x /\\ In v x /\\ f u = f v ==> u = v) /\\ "
             "(!w. In w (Pow x) ==> ?u. In u x /\\ f u = w)"
         ).by(CONJUNCT2, "f_eq")
-        p.have(
-            "h_surj: !w. In w (Pow x) ==> ?u. In u x /\\ f u = w"
-        ).by(CONJUNCT2, "h_rest")
-        p.have(
-            "h_no: ~(!w. In w (Pow x) ==> ?u. In u x /\\ f u = w)"
-        ).by_inst(CANTOR_NO_SURJ, "x", "f")
+        p.have("h_surj: !w. In w (Pow x) ==> ?u. In u x /\\ f u = w").by(
+            CONJUNCT2, "h_rest"
+        )
+        p.have("h_no: ~(!w. In w (Pow x) ==> ?u. In u x /\\ f u = w)").by_inst(
+            CANTOR_NO_SURJ, "x", "f"
+        )
         p.absurd().by_conj("h_surj", "h_no")
 
 
@@ -695,9 +678,9 @@ def SMALL_MEMBER(p):
         p.have(
             "h_pow_at_x: In x u ==> ?p. In p u /\\ (!z. In z p = Subset z x)"
         ).by_inst("h_pow", "x")
-        p.have(
-            "h_pow_ex: ?p. In p u /\\ (!z. In z p = Subset z x)"
-        ).by_thm(MP(p.fact("h_pow_at_x"), p.fact("h_xu")))
+        p.have("h_pow_ex: ?p. In p u /\\ (!z. In z p = Subset z x)").by_thm(
+            MP(p.fact("h_pow_at_x"), p.fact("h_xu"))
+        )
         p.choose("p", from_="h_pow_ex")
         p.have("h_pu: In p u").by(CONJUNCT1, "p_eq")
         p.have("h_p_def: !z. In z p = Subset z x").by(CONJUNCT2, "p_eq")
@@ -705,29 +688,23 @@ def SMALL_MEMBER(p):
             with p.have("h_ext: !z. In z p = In z (Pow x)").proof():
                 p.fix("z")
                 p.have("h_pz: In z p = Subset z x").by_inst("h_p_def", "z")
-                p.have("h_Powz: In z (Pow x) = Subset z x").by_inst(
-                    POW_PROP, "x", "z"
-                )
+                p.have("h_Powz: In z (Pow x) = Subset z x").by_inst(POW_PROP, "x", "z")
                 p.thus("In z p = In z (Pow x)").by_thm(
                     TRANS(p.fact("h_pz"), SYM(p.fact("h_Powz")))
                 )
             p.thus("p = Pow x").by_match(EXTENSIONALITY, "h_ext")
-        p.have("h_PowU: In (Pow x) u").by_rewrite_of(
-            "h_pu", [p.fact("h_p_eq_Pow")]
-        )
+        p.have("h_PowU: In (Pow x) u").by_rewrite_of("h_pu", [p.fact("h_p_eq_Pow")])
         # 2. Subset (Pow x) u from Trans u + In (Pow x) u.
-        p.have(
-            "h_trans_unf: !y. In y u ==> Subset y u"
-        ).by_unfold("h_trans", TRANS_DEF)
-        p.have(
-            "h_PowU_imp: In (Pow x) u ==> Subset (Pow x) u"
-        ).by_inst("h_trans_unf", "Pow x")
+        p.have("h_trans_unf: !y. In y u ==> Subset y u").by_unfold("h_trans", TRANS_DEF)
+        p.have("h_PowU_imp: In (Pow x) u ==> Subset (Pow x) u").by_inst(
+            "h_trans_unf", "Pow x"
+        )
         p.have("h_PowSub: Subset (Pow x) u").by_thm(
             MP(p.fact("h_PowU_imp"), p.fact("h_PowU"))
         )
-        p.have(
-            "h_PSU_unf: !z. In z (Pow x) ==> In z u"
-        ).by_unfold("h_PowSub", SUBSET_DEF)
+        p.have("h_PSU_unf: !z. In z (Pow x) ==> In z u").by_unfold(
+            "h_PowSub", SUBSET_DEF
+        )
         # 3. Unfold Equinum: get f and its surjectivity onto u.
         p.have(
             "h_body: ?f:VV. (!y. In y x ==> In (f y) u) /\\ "
@@ -739,32 +716,26 @@ def SMALL_MEMBER(p):
             "h_rest: (!y1 y2. In y1 x /\\ In y2 x /\\ f y1 = f y2 ==> y1 = y2) /\\ "
             "(!w. In w u ==> ?y. In y x /\\ f y = w)"
         ).by(CONJUNCT2, "f_eq")
-        p.have(
-            "h_surj_u: !w. In w u ==> ?y. In y x /\\ f y = w"
-        ).by(CONJUNCT2, "h_rest")
+        p.have("h_surj_u: !w. In w u ==> ?y. In y x /\\ f y = w").by(
+            CONJUNCT2, "h_rest"
+        )
         # 4. Build the surjection x -> Pow x.
-        with p.have(
-            "h_surj_Pow: !w. In w (Pow x) ==> ?y. In y x /\\ f y = w"
-        ).proof():
+        with p.have("h_surj_Pow: !w. In w (Pow x) ==> ?y. In y x /\\ f y = w").proof():
             p.fix("w")
             p.assume("h_wPow: In w (Pow x)")
-            p.have(
-                "h_w_imp: In w (Pow x) ==> In w u"
-            ).by_inst("h_PSU_unf", "w")
-            p.have("h_wu: In w u").by_thm(
-                MP(p.fact("h_w_imp"), p.fact("h_wPow"))
+            p.have("h_w_imp: In w (Pow x) ==> In w u").by_inst("h_PSU_unf", "w")
+            p.have("h_wu: In w u").by_thm(MP(p.fact("h_w_imp"), p.fact("h_wPow")))
+            p.have("h_su_imp: In w u ==> ?y. In y x /\\ f y = w").by_inst(
+                "h_surj_u", "w"
             )
-            p.have(
-                "h_su_imp: In w u ==> ?y. In y x /\\ f y = w"
-            ).by_inst("h_surj_u", "w")
             p.thus("?y. In y x /\\ f y = w").by_thm(
                 MP(p.fact("h_su_imp"), p.fact("h_wu"))
             )
         # 5. Contradicts CANTOR_NO_SURJ at x and f. Rename the inner bound
         # ``?u`` to ``?y`` because the outer free ``u`` would otherwise shadow.
-        p.have(
-            "h_no: ~(!w. In w (Pow x) ==> ?y. In y x /\\ f y = w)"
-        ).by_inst(CANTOR_NO_SURJ, "x", "f")
+        p.have("h_no: ~(!w. In w (Pow x) ==> ?y. In y x /\\ f y = w)").by_inst(
+            CANTOR_NO_SURJ, "x", "f"
+        )
         p.absurd().by_conj("h_surj_Pow", "h_no")
 
 
