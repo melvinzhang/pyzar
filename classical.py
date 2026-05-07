@@ -186,6 +186,20 @@ def NOT_NOT_ELIM(th):
     return MP(SPEC(p_t, NOT_NOT_ELIM_AX), th)
 
 
+# Rewrite-friendly form: |- !q. ~~q = q.  Used by ``by_rewrite`` to
+# normalise nested negations during arithmetic-on-bool reasoning.
+@proof
+def NOT_NOT_EQ(p):
+    p.goal("!q:bool. ~~q = q")
+    p.fix("q")
+    p.have("fwd: ~~q ==> q").by_thm(SPEC(Var("q", bool_ty), NOT_NOT_ELIM_AX))
+    with p.have("rev: q ==> ~~q").proof():
+        p.assume("hq: q")
+        with p.suppose("hnq: ~q"):
+            p.absurd().by_conj("hnq", "hq")
+    p.thus("~~q = q").by_iff("fwd", "rev")
+
+
 # ---------------------------------------------------------------------------
 # Polymorphic universal forms of the quantifier-negation rules.  Each takes a
 # generic predicate ``p : A -> bool`` and discharges a quantifier flip.  Call

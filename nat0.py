@@ -68,7 +68,7 @@ from parser import (
 )
 from tactics import unfold_def_at, REWRITE_RULE
 from axioms import SELECT_AX, mk_and, mk_forall
-from proof import proof
+from proof import proof, register_induction, InductionStrategy
 
 
 # ---------------------------------------------------------------------------
@@ -371,6 +371,32 @@ def _prove_induction_0_thm():
 
 
 INDUCTION_0 = _prove_induction_0_thm()
+
+
+# ---------------------------------------------------------------------------
+# INDUCT_PROVE_0 -- high-level induction template for nat0 (mirrors
+# num.py's ``INDUCT_PROVE``). Used both directly and as the ``induct_prove``
+# callback of the InductionStrategy registration below.
+# ---------------------------------------------------------------------------
+
+
+def INDUCT_PROVE_0(var, body, base, step_fn):
+    pred = mk_abs(var, body)
+    IH = ASSUME(body)
+    step_inner = step_fn(IH)
+    step = GEN(var, DISCH(body, step_inner))
+    return INDUCT_0(pred, base, step)
+
+
+# Teach ``p.induction("n")`` how to handle a nat0 variable.
+register_induction(
+    InductionStrategy(
+        ty=nat0_ty,
+        base_term=ZERO,
+        succ_fn=mk_suc0,
+        induct_prove=INDUCT_PROVE_0,
+    )
+)
 
 
 # ---------------------------------------------------------------------------
