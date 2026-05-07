@@ -1868,36 +1868,24 @@ def SATZ_114(p):
 def SATZ_115(p):
     p.goal("!X Y. ?z. rgt (rmul (Q z 1) X) Y", types=_R_TYPES)
     p.fix("X Y")
-    X_t = p._parse("X")
-    Y_t = p._parse("Y")
-    YoverX = mk_app(RDIV, Y_t, X_t)
     # By rat-level Satz 89, ?Z. rgt Z (Y/X).
     p.have("ex_Z: ?Z. rgt Z (rdiv Y X)").by_match(SATZ_89)
     p.choose("Z: rgt Z (rdiv Y X)", from_="ex_Z")
-    Z_t = p._parse("Z")
     # Reps z, v of Z.
     p.have("eZ: ?a b. Z = Q a b").by_match(Q_SURJ)
     p.choose("z v: Z = Q z v", from_="eZ")
-    z_t = p._parse("z")
-    v_t = p._parse("v")
-    ONE_t = p._parse("1")
-    # rgt (Z*X) Y via Satz 105A and rmul (Y/X) X = Y.
-    p.fact("Z_eq")  # rgt Z (rdiv Y X) — but it's stored under "Z_eq"? Let me reuse.
-    # Actually p.choose("Z: ...") binds the body, what's the fact name?
-    # We named the existential "ex_Z" with body rgt Z (rdiv Y X). After choose("Z: ..."),
-    # the body becomes a fact under "Z_eq". So rgt Z (rdiv Y X) is registered as Z_eq.
+    # rgt (Z*X) Y via Satz 105A and rmul (Y/X) X = Y.  The choose above
+    # registered the body fact under ``Z_eq``.
     p.have("g_ZW: rgt (rmul Z X) (rmul (rdiv Y X) X)").by_match(SATZ_105A, "Z_eq")
     p.have("eq_WX_Y: rmul (rdiv Y X) X = Y").by_trans(
-        p.have("com:").by_inst(SATZ_102, YoverX, X_t),
-        p.have("rdiv_prop:").by_inst(RDIV_PROP, Y_t, X_t),
+        p.have("com:").by_inst(SATZ_102, "rdiv Y X", "X"),
+        p.have("rdiv_prop:").by_inst(RDIV_PROP, "Y", "X"),
     )
-    p.have("sub:").by_cong(mk_app(RGT, mk_app(RMUL, Z_t, X_t)), "eq_WX_Y")
+    p.have("sub:").by_cong("rgt (rmul Z X)", "eq_WX_Y")
     p.have("g_ZX_Y: rgt (rmul Z X) Y").by_eq_mp("sub", "g_ZW")
     # v >= 1 (nat).
     p.have("v_ge: v >= 1").by_match(SATZ_24)
     p.have("v_disj: v > 1 \\/ v = 1").by_def(GE_DEF, "v_ge")
-    mk_app(Q, ONE_t, ONE_t)
-    Qv1 = mk_app(Q, v_t, ONE_t)
     with p.have("rge_v1: rge (Q v 1) (Q 1 1)").by_cases("v_disj"):
         with p.case("g1: v > 1"):
             p.have("rg: rgt (Q v 1) (Q 1 1)").by_match(SATZ_111A_REV, "g1")
@@ -1917,12 +1905,10 @@ def SATZ_115(p):
         "rge_full: rge (rmul (Q v 1) (rmul Z X)) (rmul (Q 1 1) (rmul Z X))"
     ).by_match(SATZ_109, "rge_v1", ...)
     # rmul (Q 1 1) (Z*X) = Z*X.
-    p.have("rm1:").by_inst(RMUL_ONE, mk_app(RMUL, Z_t, X_t))
-    p.have("sub_rm1:").by_cong(
-        mk_app(RGE, mk_app(RMUL, Qv1, mk_app(RMUL, Z_t, X_t))), "rm1"
-    )
+    p.have("rm1:").by_inst(RMUL_ONE, "rmul Z X")
+    p.have("sub_rm1:").by_cong("rge (rmul (Q v 1) (rmul Z X))", "rm1")
     p.have("rge_simp: rge (rmul (Q v 1) (rmul Z X)) (rmul Z X)").by_eq_mp(
-        p.fact("sub_rm1"), "rge_full"
+        "sub_rm1", "rge_full"
     )
     # Combine: rge A B, rgt B Y => rgt A Y, where A = (Q v 1)*(Z*X), B = Z*X.
     p.have("le_BA: rle (rmul Z X) (rmul (Q v 1) (rmul Z X))").by_match(
@@ -1934,20 +1920,20 @@ def SATZ_115(p):
     )
     p.have("gt_AY: rgt (rmul (Q v 1) (rmul Z X)) Y").by_match(SATZ_83, "lt_YA")
     # (Q v 1) * Z = Q z 1 (Satz 114 with x=z, y=v).
-    p.have("qv_z:").by_inst(SATZ_114, z_t, v_t)  # rmul (Q v 1) (Q z v) = Q z 1
+    p.have("qv_z:").by_inst(SATZ_114, "z", "v")  # rmul (Q v 1) (Q z v) = Q z 1
     # Bridge rmul (Q v 1) Z = Q z 1 via Z = Q z v.
-    p.have("sub_z:").by_cong(mk_app(RMUL, Qv1), "v_eq")
+    p.have("sub_z:").by_cong("rmul (Q v 1)", "v_eq")
     p.have("eq_QvZ:").by_trans("sub_z", "qv_z")  # rmul (Q v 1) Z = Q z 1
     # Apply X on the right: rmul (rmul (Q v 1) Z) X = rmul (Q z 1) X.
-    p.have("rmul_eqQvZ:").by_cong(RMUL, "eq_QvZ")
-    p.have("sub_x:").by_cong("rmul_eqQvZ", X_t)
+    p.have("rmul_eqQvZ:").by_cong("rmul", "eq_QvZ")
+    p.have("sub_x:").by_cong("rmul_eqQvZ", "X")
     # Bridge: associativity rmul (Q v 1) (rmul Z X) = rmul (rmul (Q v 1) Z) X (SYM SATZ_103).
-    p.have("assoc:").by_inst(SATZ_103, Qv1, Z_t, X_t)
+    p.have("assoc:").by_inst(SATZ_103, "Q v 1", "Z", "X")
     p.have("assoc_sym:").by_thm(SYM(p.fact("assoc")))
     p.have("eq_full:").by_trans("assoc_sym", "sub_x")
-    p.have("sub_g:").by_cong(RGT, "eq_full")
-    p.have("sub_g_at:").by_cong("sub_g", Y_t)
-    p.have("gt_zX_Y: rgt (rmul (Q z 1) X) Y").by_eq_mp(p.fact("sub_g_at"), "gt_AY")
+    p.have("sub_g:").by_cong("rgt", "eq_full")
+    p.have("sub_g_at:").by_cong("sub_g", "Y")
+    p.have("gt_zX_Y: rgt (rmul (Q z 1) X) Y").by_eq_mp("sub_g_at", "gt_AY")
     p.thus("?z. rgt (rmul (Q z 1) X) Y").by_witness("z", "gt_zX_Y")
 
 
