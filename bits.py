@@ -39,6 +39,8 @@ from nat0_order import (
     NAT0_LT_SUC0,
     NAT0_LT_TRANS,
     NAT0_LT_SUC0_MONO,
+    NAT0_LT_0_SUC0,
+    NAT0_LT_SUC0_INSERT,
 )
 
 
@@ -687,6 +689,288 @@ def BIT_EXTENSIONALITY(p):
                 )
 
 
+# ---------------------------------------------------------------------------
+# 6. ``set_bit i n``  --  bit-i flipped to 1, defined recursively in ``i``
+#    using only ``ODD`` / ``HALF`` / ``double`` / ``SUC0`` / ``COND`` (no
+#    addition required).
+#
+#   set_bit 0 n         = SUC0 (double (HALF n))                    -- low bit forced 1
+#   set_bit (SUC0 i) n  = COND (ODD n)
+#                              (SUC0 (double (set_bit i (HALF n))))
+#                              (double (set_bit i (HALF n)))
+#
+# Verify by hand:
+#   set_bit 0 4 = SUC0 (double (HALF 4)) = SUC0 (double 2) = SUC0 4 = 5  (bit 0 added: 100 -> 101)
+#   set_bit 1 5 = COND T (SUC0 (double (set_bit 0 (HALF 5)))) ...
+#               = SUC0 (double (set_bit 0 2)) = SUC0 (double 3) = SUC0 6 = 7  (101 -> 111)
+# ---------------------------------------------------------------------------
+
+_a_n0_fn = Var("a", parse_type("nat0 -> nat0"))
+_set_bit_base = mk_abs(_n, mk_suc0(mk_app(double, mk_app(HALF, _n))))
+_h_set_bit = mk_abs(
+    _i,
+    mk_abs(
+        _a_n0_fn,
+        mk_abs(
+            _n,
+            mk_cond(
+                mk_app(ODD, _n),
+                mk_suc0(mk_app(double, mk_app(_a_n0_fn, mk_app(HALF, _n)))),
+                mk_app(double, mk_app(_a_n0_fn, mk_app(HALF, _n))),
+            ),
+        ),
+    ),
+)
+SET_BIT_BASE, SET_BIT_STEP = define_unary_0(
+    "set_bit",
+    parse_type("nat0 -> nat0 -> nat0"),
+    _set_bit_base,
+    _h_set_bit,
+    result_ty=parse_type("nat0 -> nat0"),
+)
+set_bit = mk_const("set_bit", [])
+
+
+# Pointwise forms (analogous to BIT_STEP_AT):
+#   |- !n. set_bit 0 n = SUC0 (double (HALF n))
+#   |- !i n. set_bit (SUC0 i) n
+#         = COND_nat0 (ODD n) (SUC0 (double (set_bit i (HALF n))))
+#                             (double (set_bit i (HALF n)))
+def _prove_set_bit_at():
+    from basics import rand
+    from tactics import AP_THM, BETA_CONV, TRANS, GEN, GENL, SPEC
+
+    base_at_n = AP_THM(SET_BIT_BASE, _n)  # |- set_bit 0 n = (\n'. ...) n
+    base_beta = BETA_CONV(rand(base_at_n._concl))
+    base_pointwise = GEN(_n, TRANS(base_at_n, base_beta))
+
+    step_at_i = SPEC(_i, SET_BIT_STEP)  # |- set_bit (SUC0 i) = (\n'. ...)
+    step_at_in = AP_THM(step_at_i, _n)
+    step_beta = BETA_CONV(rand(step_at_in._concl))
+    step_pointwise = GENL([_i, _n], TRANS(step_at_in, step_beta))
+
+    return base_pointwise, step_pointwise
+
+
+SET_BIT_BASE_AT, SET_BIT_STEP_AT = _prove_set_bit_at()
+
+
+# ---------------------------------------------------------------------------
+# Lemma:  |- !i n. bit i (set_bit i n) = T.
+#
+# Induction on i.  Base: bit 0 (SUC0 (double (HALF n))) = ODD (SUC0 (double X))
+# = T (ODD_SUC0_DOUBLE).  Step: case-split on ODD n; in either branch peel
+# BIT_STEP_AT, SET_BIT_STEP_AT, the chosen COND branch and HALF_{SUC0_,}DOUBLE
+# to land at bit i (set_bit i (HALF n)), closed by the IH instantiated at
+# HALF n.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def BIT_AT_SET_BIT_SAME(p):
+    from tactics import EQT_INTRO, EQF_INTRO
+
+    p.goal("!i n. bit i (set_bit i n) = T")
+    with p.induction("i"):
+        with p.base():
+            p.fix("n")
+            p.thus("bit 0 (set_bit 0 n) = T").by_rewrite(
+                [BIT_BASE, SET_BIT_BASE_AT, ODD_SUC0_DOUBLE]
+            )
+        with p.step("IH"):
+            p.fix("n")
+            p.have("ih_at: bit i (set_bit i (HALF n)) = T").by("IH", "HALF n")
+            with p.cases_on(EXCLUDED_MIDDLE, "ODD n"):
+                with p.case("hO: ODD n"):
+                    p.have("hO_eq: ODD n = T").by(EQT_INTRO, "hO")
+                    p.thus("bit (SUC0 i) (set_bit (SUC0 i) n) = T").by_rewrite(
+                        [
+                            BIT_STEP_AT, SET_BIT_STEP_AT,
+                            "hO_eq", COND_T_NAT0,
+                            HALF_SUC0_DOUBLE, "ih_at",
+                        ]
+                    )
+                with p.case("hF: ~(ODD n)"):
+                    p.have("hF_eq: ODD n = F").by(EQF_INTRO, "hF")
+                    p.thus("bit (SUC0 i) (set_bit (SUC0 i) n) = T").by_rewrite(
+                        [
+                            BIT_STEP_AT, SET_BIT_STEP_AT,
+                            "hF_eq", COND_F_NAT0,
+                            HALF_DOUBLE, "ih_at",
+                        ]
+                    )
+
+
+# ---------------------------------------------------------------------------
+# Lemma:  |- !i j n. ~(i = j) ==> bit j (set_bit i n) = bit j n.
+#
+# Outer induction on i, inner on j (mirroring BIT_AT_POW2_DIFF).
+#   i=0, j=0       : vacuous (~(0 = 0) absurd).
+#   i=0, j=Sj'     : bit (Sj') (SUC0 (double (HALF n)))
+#                  = bit j' (HALF (SUC0 (double (HALF n))))   [BIT_STEP_AT]
+#                  = bit j' (HALF n)                          [HALF_SUC0_DOUBLE]
+#                  = bit (Sj') n                              [SYM BIT_STEP_AT]
+#   i=Si', j=0     : bit 0 (set_bit (Si') n) = ODD (set_bit ...).
+#                    Case-split on ODD n; SET_BIT_STEP_AT + chosen COND branch
+#                    + ODD_{SUC0_,}DOUBLE collapses ODD (set_bit ...) to ODD n,
+#                    matching the RHS bit 0 n = ODD n.
+#   i=Si', j=Sj'   : peel BIT_STEP_AT on both sides, case-split ODD n,
+#                    SET_BIT_STEP_AT + COND branch + HALF_{SUC0_,}DOUBLE lands
+#                    at bit j' (set_bit i' (HALF n)) = bit j' (HALF n), closed
+#                    by IH_i at j', HALF n with ~(i' = j') (derived from the
+#                    SUC0-injectivity contrapositive of ~(Si' = Sj')).
+# ---------------------------------------------------------------------------
+
+
+@proof
+def BIT_AT_SET_BIT_DIFF(p):
+    from tactics import EQT_INTRO, EQF_INTRO
+
+    p.goal("!i j n. ~(i = j) ==> bit j (set_bit i n) = bit j n")
+    SUC0_c = mk_const("SUC0", [])
+    with p.induction("i"):
+        with p.base():
+            with p.induction("j"):
+                with p.base():
+                    p.fix("n")
+                    p.assume("h: ~(0 = 0)")
+                    p.absurd().auto("h")
+                with p.step("IH_j_unused"):
+                    p.fix("n")
+                    p.assume("h: ~(0 = SUC0 j)")
+                    p.thus("bit (SUC0 j) (set_bit 0 n) = bit (SUC0 j) n").by_rewrite(
+                        [BIT_STEP_AT, SET_BIT_BASE_AT, HALF_SUC0_DOUBLE]
+                    )
+        with p.step("IH_i"):
+            with p.induction("j"):
+                with p.base():
+                    p.fix("n")
+                    p.assume("h: ~(SUC0 i = 0)")
+                    with p.cases_on(EXCLUDED_MIDDLE, "ODD n"):
+                        with p.case("hO: ODD n"):
+                            p.have("hO_eq: ODD n = T").by(EQT_INTRO, "hO")
+                            p.thus(
+                                "bit 0 (set_bit (SUC0 i) n) = bit 0 n"
+                            ).by_rewrite(
+                                [
+                                    BIT_BASE, SET_BIT_STEP_AT,
+                                    "hO_eq", COND_T_NAT0, ODD_SUC0_DOUBLE,
+                                ]
+                            )
+                        with p.case("hF: ~(ODD n)"):
+                            p.have("hF_eq: ODD n = F").by(EQF_INTRO, "hF")
+                            p.thus(
+                                "bit 0 (set_bit (SUC0 i) n) = bit 0 n"
+                            ).by_rewrite(
+                                [
+                                    BIT_BASE, SET_BIT_STEP_AT,
+                                    "hF_eq", COND_F_NAT0, ODD_DOUBLE,
+                                ]
+                            )
+                with p.step("IH_j_unused"):
+                    p.fix("n")
+                    p.assume("h: ~(SUC0 i = SUC0 j)")
+                    with p.have("hij: ~(i = j)").proof():
+                        with p.suppose("heq: i = j"):
+                            p.have("seq: SUC0 i = SUC0 j").by_cong(SUC0_c, "heq")
+                            p.absurd().by_conj("h", "seq")
+                    p.have(
+                        "rec: bit j (set_bit i (HALF n)) = bit j (HALF n)"
+                    ).by("IH_i", "j", "HALF n", "hij")
+                    with p.cases_on(EXCLUDED_MIDDLE, "ODD n"):
+                        with p.case("hO: ODD n"):
+                            p.have("hO_eq: ODD n = T").by(EQT_INTRO, "hO")
+                            p.thus(
+                                "bit (SUC0 j) (set_bit (SUC0 i) n) = bit (SUC0 j) n"
+                            ).by_rewrite(
+                                [
+                                    BIT_STEP_AT, SET_BIT_STEP_AT,
+                                    "hO_eq", COND_T_NAT0,
+                                    HALF_SUC0_DOUBLE, "rec",
+                                ]
+                            )
+                        with p.case("hF: ~(ODD n)"):
+                            p.have("hF_eq: ODD n = F").by(EQF_INTRO, "hF")
+                            p.thus(
+                                "bit (SUC0 j) (set_bit (SUC0 i) n) = bit (SUC0 j) n"
+                            ).by_rewrite(
+                                [
+                                    BIT_STEP_AT, SET_BIT_STEP_AT,
+                                    "hF_eq", COND_F_NAT0,
+                                    HALF_DOUBLE, "rec",
+                                ]
+                            )
+
+
+# ---------------------------------------------------------------------------
+# Bit-monotonicity:  |- !n i. bit i n ==> nat0_lt i n.
+#
+# Strong induction on n, then case-split on i.
+#   i = 0 : bit 0 n = ODD n; assumed true means RECONSTRUCT collapses
+#           n = SUC0 (double (HALF n)), and NAT0_LT_0_SUC0 closes the goal.
+#   i = SUC0 i' : bit (SUC0 i') n = bit i' (HALF n); the latter implies
+#           HALF n != 0 (else bit i' 0 = F), hence n != 0, so HALF_LT_NZ
+#           gives nat0_lt (HALF n) n. Strong-IH at HALF n yields
+#           nat0_lt i' (HALF n); NAT0_LT_SUC0_INSERT chains the two to
+#           nat0_lt (SUC0 i') n.
+#
+# (The i-induction's IH is unused -- it's a Peano case-split disguised as
+# induction, mirroring the BIT_AT_POW2_DIFF idiom.)
+# ---------------------------------------------------------------------------
+
+
+@proof
+def BIT_LT(p):
+    from fusion import EQ_MP as _EQ_MP
+    from tactics import EQT_INTRO, SYM
+
+    p.goal("!n i. bit i n ==> nat0_lt i n")
+    with p.strong_induction("n", "IH"):
+        with p.induction("i"):
+            with p.base():
+                p.assume("hb: bit 0 n")
+                p.have("hodd: ODD n").by_rewrite_of("hb", [BIT_BASE])
+                p.have("hodd_eq: ODD n = T").by(EQT_INTRO, "hodd")
+                p.have(
+                    "recon: n = COND_nat0 (ODD n) "
+                    "(SUC0 (double (HALF n))) (double (HALF n))"
+                ).by(RECONSTRUCT, "n")
+                p.have("n_eq: n = SUC0 (double (HALF n))").by_rewrite_of(
+                    "recon", ["hodd_eq", COND_T_NAT0]
+                )
+                p.have(
+                    "lt: nat0_lt 0 (SUC0 (double (HALF n)))"
+                ).by(NAT0_LT_0_SUC0, "double (HALF n)")
+                p.thus("nat0_lt 0 n").by_rewrite_of("lt", [SYM(p.fact("n_eq"))])
+            with p.step("IH_i_unused"):
+                p.assume("hb: bit (SUC0 i) n")
+                p.have("hb_half: bit i (HALF n)").by_rewrite_of("hb", [BIT_STEP_AT])
+                with p.have("hh_nz: ~(HALF n = 0)").proof():
+                    with p.suppose("hh_z: HALF n = 0"):
+                        p.have("bit_at_0: bit i 0 = F").by(BIT_AT_ZERO, "i")
+                        p.have("hb_at_0: bit i 0").by_rewrite_of(
+                            "hb_half", ["hh_z"]
+                        )
+                        p.absurd().by_thm(
+                            _EQ_MP(p.fact("bit_at_0"), p.fact("hb_at_0"))
+                        )
+                with p.have("hn_nz: ~(n = 0)").proof():
+                    with p.suppose("hn_z: n = 0"):
+                        p.have("hh_z: HALF n = 0").by_rewrite_of(
+                            HALF_BASE, ["hn_z"]
+                        )
+                        p.absurd().by_conj("hh_nz", "hh_z")
+                p.have("half_lt: nat0_lt (HALF n) n").by(HALF_LT_NZ, "n", "hn_nz")
+                p.have("i_lt_half: nat0_lt i (HALF n)").by(
+                    "IH", "HALF n", "half_lt", "i", "hb_half"
+                )
+                p.thus("nat0_lt (SUC0 i) n").by(
+                    NAT0_LT_SUC0_INSERT,
+                    "i", "HALF n", "n",
+                    "i_lt_half", "half_lt",
+                )
+
+
 if __name__ == "__main__":
     from parser import pp_thm
 
@@ -730,3 +1014,14 @@ if __name__ == "__main__":
     print("  ZERO_BITS       :", pp_thm(ZERO_BITS))
     print("Step 17 OK -- BIT_EXTENSIONALITY proved.")
     print("  BIT_EXTENSIONALITY:", pp_thm(BIT_EXTENSIONALITY))
+    print("Step 18 OK -- set_bit defined.")
+    print("  SET_BIT_BASE    :", pp_thm(SET_BIT_BASE))
+    print("  SET_BIT_STEP    :", pp_thm(SET_BIT_STEP))
+    print("  SET_BIT_BASE_AT :", pp_thm(SET_BIT_BASE_AT))
+    print("  SET_BIT_STEP_AT :", pp_thm(SET_BIT_STEP_AT))
+    print("Step 19 OK -- BIT_AT_SET_BIT_SAME proved.")
+    print("  BIT_AT_SET_BIT_SAME:", pp_thm(BIT_AT_SET_BIT_SAME))
+    print("Step 20 OK -- BIT_AT_SET_BIT_DIFF proved.")
+    print("  BIT_AT_SET_BIT_DIFF:", pp_thm(BIT_AT_SET_BIT_DIFF))
+    print("Step 21 OK -- BIT_LT proved.")
+    print("  BIT_LT          :", pp_thm(BIT_LT))

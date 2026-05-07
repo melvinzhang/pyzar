@@ -412,6 +412,79 @@ def NAT0_LT_SUC0_MONO(p):
     p.thus("nat0_lt (SUC0 n) (SUC0 m)").by_eq_mp(SYM(sn_sm_eq), h_via_rep)
 
 
+# NAT0_LT_0_SUC0 :  |- !m. nat0_lt 0 (SUC0 m).
+#
+# Induction on m.  Base: nat0_lt 0 (SUC0 0) by NAT0_LT_SUC0 at 0.  Step: chain
+# IH (nat0_lt 0 (SUC0 m)) with NAT0_LT_SUC0 at SUC0 m (giving
+# nat0_lt (SUC0 m) (SUC0 (SUC0 m))) through NAT0_LT_TRANS.
+@proof
+def NAT0_LT_0_SUC0(p):
+    p.goal("!m. nat0_lt 0 (SUC0 m)", types={"m": nat0_ty})
+    p.fix("m")
+    with p.induction("m"):
+        with p.base():
+            p.thus("nat0_lt 0 (SUC0 0)").by(NAT0_LT_SUC0, "0")
+        with p.step("IH"):
+            p.have(
+                "step_lt: nat0_lt (SUC0 m) (SUC0 (SUC0 m))"
+            ).by(NAT0_LT_SUC0, "SUC0 m")
+            p.thus("nat0_lt 0 (SUC0 (SUC0 m))").by(
+                NAT0_LT_TRANS,
+                "0", "SUC0 m", "SUC0 (SUC0 m)",
+                "IH", "step_lt",
+            )
+
+
+# NAT0_LT_SUC0_INSERT :
+#   |- !a b c. nat0_lt a b ==> nat0_lt b c ==> nat0_lt (SUC0 a) c.
+#
+# In num, "a < b" is "a + 1 ≤ b".  Combining with "b < c" via SATZ_16A gives
+# "a + 1 < c"; ADD_1 rewrites a + 1 to SUC a, and REP_SUC0 folds back into
+# nat0.
+@proof
+def NAT0_LT_SUC0_INSERT(p):
+    from nat import SATZ_25, SATZ_13, SATZ_16A, SATZ_12, ADD_1
+
+    p.goal(
+        "!a b c. nat0_lt a b ==> nat0_lt b c ==> nat0_lt (SUC0 a) c",
+        types={"a": nat0_ty, "b": nat0_ty, "c": nat0_ty},
+    )
+    p.fix("a b c")
+    p.assume("hab: nat0_lt a b", "hbc: nat0_lt b c")
+    a_t, b_t, c_t = p._parse("a"), p._parse("b"), p._parse("c")
+    SUC0_c = mk_const("SUC0", [])
+    rep_a = mk_app(rep_nat0, a_t)
+    rep_b = mk_app(rep_nat0, b_t)
+    rep_c = mk_app(rep_nat0, c_t)
+    plus_c = mk_const("+", [])
+    one_t = mk_const("1", [])
+    a_plus_1 = mk_app(plus_c, rep_a, one_t)
+
+    ab_eq = SPECL([a_t, b_t], LT_NAT0)
+    bc_eq = SPECL([b_t, c_t], LT_NAT0)
+    sa_c_eq = SPECL([mk_app(SUC0_c, a_t), c_t], LT_NAT0)
+
+    hab_num = EQ_MP(ab_eq, p.fact("hab"))  # |- rep_a < rep_b
+    hbc_num = EQ_MP(bc_eq, p.fact("hbc"))  # |- rep_b < rep_c
+
+    # rep_b > rep_a, hence rep_b >= rep_a + 1 (Landau Theorem 25).
+    b_gt_a = MP(SPECL([rep_a, rep_b], SATZ_12), hab_num)
+    b_ge = MP(SPECL([rep_a, rep_b], SATZ_25), b_gt_a)
+    # Reorient via SATZ_13: rep_a + 1 <= rep_b.
+    a1_le_b = MP(SPECL([rep_b, a_plus_1], SATZ_13), b_ge)
+    # SATZ_16A then chains with hbc_num to give rep_a + 1 < rep_c.
+    a1_lt_c = MP(
+        MP(SPECL([a_plus_1, rep_b, rep_c], SATZ_16A), a1_le_b),
+        hbc_num,
+    )
+    # rep_a + 1 = SUC rep_a; rep_nat0 (SUC0 a) = SUC rep_a.
+    add1_eq = SPEC(rep_a, ADD_1)  # |- rep_a + 1 = SUC rep_a
+    suc_a_lt_c = REWRITE_RULE([add1_eq], a1_lt_c)
+    rep_suc0_eq = SPEC(a_t, REP_SUC0)
+    sa_lt_c = REWRITE_RULE([SYM(rep_suc0_eq)], suc_a_lt_c)
+    p.thus("nat0_lt (SUC0 a) c").by_eq_mp(SYM(sa_c_eq), sa_lt_c)
+
+
 if __name__ == "__main__":
     from parser import pp_thm
 
@@ -425,3 +498,5 @@ if __name__ == "__main__":
     print("  NAT0_LT_SUC0       :", pp_thm(NAT0_LT_SUC0))
     print("  NAT0_LT_TRANS      :", pp_thm(NAT0_LT_TRANS))
     print("  NAT0_LT_SUC0_MONO  :", pp_thm(NAT0_LT_SUC0_MONO))
+    print("  NAT0_LT_0_SUC0     :", pp_thm(NAT0_LT_0_SUC0))
+    print("  NAT0_LT_SUC0_INSERT:", pp_thm(NAT0_LT_SUC0_INSERT))
