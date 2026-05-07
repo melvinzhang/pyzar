@@ -2029,7 +2029,8 @@ class _Have:
         """REWRITE_PROVE with the given rules, plus any active simp set.
 
         Each rule may be a Theorem or a string label naming a fact in scope.
-        Pass ``ac=(op, assoc, comm)`` to fall back to AC reasoning when the
+        Pass ``ac=(op, assoc, comm)`` -- or a sequence of such triples
+        for multi-operator AC -- to fall back to AC reasoning when the
         rewritten normal forms don't already match. ``ac_rules`` is an
         optional second-pass canonicalisation rule list applied after the
         main rewrite (e.g. ``SUC x → x + 1``-style normalization to expose
@@ -2060,11 +2061,15 @@ class _Have:
         * inequation rewriting where source and target are both
           ``~(L = R)`` and the rules act under the equation.
 
-        Pass ``ac=(op, assoc, comm)`` to AC-normalize every ``op``-node
-        encountered during traversal -- e.g. ``ac=(TIMES, SATZ_31, SATZ_29)``
-        replaces a hand-built list of ``SPECL([z, y], SATZ_29)``-style
-        commutativity rewrites that would otherwise be needed to align
-        the source's and target's product orderings.
+        Pass ``ac=(op, assoc, comm)`` -- or a sequence of such triples
+        for multi-operator AC -- to AC-normalize every matching op-node
+        encountered during traversal. For example,
+        ``ac=(TIMES, SATZ_31, SATZ_29)`` replaces a hand-built list of
+        ``SPECL([z, y], SATZ_29)``-style commutativity rewrites that
+        would otherwise be needed to align the source's and target's
+        product orderings; with multiple triples the same call
+        simultaneously canonicalizes both addition and multiplication
+        nodes.
 
         With ``beta=True``, BETA-normalize both rewritten ends before
         the aconv check -- needed when ``rules`` unfold a definition

@@ -853,6 +853,68 @@ def _try_rules_at(rules, tm):
     return None
 
 
+def _ac_leaves(op_const, tm):
+    """Collect tm's leaves modulo associativity of ``op_const`` — i.e. the
+    multiset of subterms that appear at the leaves of any AC-flat tree
+    rooted at this node. Uses both children, so the result is invariant
+    under right-association."""
+    leaves = []
+    stack = [tm]
+    while stack:
+        t = stack.pop()
+        if _is_op_app(op_const, t):
+            stack.append(t.arg)
+            stack.append(t.fun.arg)
+        else:
+            leaves.append(t)
+    return leaves
+
+
+def _try_rules_ac_at(rules, tm, triples):
+    """Ground-pattern AC match: for each rule with no pattern variables and
+    an ``op``-headed LHS, check whether the LHS's leaves form a sub-multiset
+    of ``tm``'s leaves (under any registered AC op). On success, build the
+    kernel proof |- tm = (rule.rhs) * (residual) by AC-bridging ``tm`` to
+    ``op(lhs, residual)``, applying the rule under congruence, and chaining.
+    Returns the rewrite step or None."""
+    if not triples:
+        return None
+    for vs, lhs, rhs, body in rules:
+        if vs:
+            continue
+        for op_const, assoc_thm, comm_thm in triples:
+            if not (_is_op_app(op_const, lhs) and _is_op_app(op_const, tm)):
+                continue
+            if type_of(lhs) != type_of(tm):
+                continue
+            lhs_leaves = _ac_leaves(op_const, lhs)
+            tm_leaves = _ac_leaves(op_const, tm)
+            if len(lhs_leaves) > len(tm_leaves):
+                continue
+            residual = list(tm_leaves)
+            ok = True
+            for leaf in lhs_leaves:
+                for i, r in enumerate(residual):
+                    if aconv(r, leaf):
+                        residual.pop(i)
+                        break
+                else:
+                    ok = False
+                    break
+            if not ok:
+                continue
+            if not residual:
+                # Same multiset: rebracket tm to lhs, apply rule.
+                bridge = AC_PROVE(op_const, assoc_thm, comm_thm, mk_eq(tm, lhs))
+                return TRANS(bridge, body)
+            residual_tree = _build_right_assoc(op_const, residual)
+            bridged = mk_app(op_const, lhs, residual_tree)
+            bridge = AC_PROVE(op_const, assoc_thm, comm_thm, mk_eq(tm, bridged))
+            cong = AP_THM(AP_TERM(op_const, body), residual_tree)
+            return TRANS(bridge, cong)
+    return None
+
+
 def _bottom_up(rules, tm, under_binder=False, ac=None):
     """One bottom-up pass: rewrite children once, then iterate rules at the root
     (without descending into the new RHS — that's what the outer fixpoint loop
@@ -863,11 +925,17 @@ def _bottom_up(rules, tm, under_binder=False, ac=None):
     have RHS terms that re-introduce their own LHS under a binder, which
     would loop.  Closed rewrite rules are safe.
 
-    When ``ac=(op, assoc, comm)`` is supplied, every visit to a node whose
-    head is ``op`` AC-normalizes that node before/after root-rule firing.
-    This makes commutativity-like rules (which would loop as free rewrites)
-    implicit at the matching op symbol, so e.g. ``SATZ_30: x*(y+z) = x*y+x*z``
-    fires under ``ac=(*, ...)`` even when the source shape is ``(y+z)*x``."""
+    When ``ac`` is supplied as ``(op, assoc, comm)`` -- or, for
+    multi-operator AC, a sequence of such triples -- every visit to a
+    node whose head matches one of the registered ops AC-normalizes
+    that node before/after root-rule firing. This makes
+    commutativity-like rules (which would loop as free rewrites)
+    implicit at the matching op symbols, so e.g.
+    ``SATZ_30: x*(y+z) = x*y+x*z`` fires under ``ac=(*, ...)`` even when
+    the source shape is ``(y+z)*x``; with multiple triples the same
+    descent simultaneously canonicalizes ``radd``- and ``rmul``-headed
+    nodes."""
+    triples = _normalize_ac(ac)
     active = [r for r in rules if not r[3]._asl] if under_binder else rules
 
     if isinstance(tm, Comb):
@@ -901,20 +969,39 @@ def _bottom_up(rules, tm, under_binder=False, ac=None):
         inner = REFL(tm)
         inner_changed = False
 
-    op_const = ac[0] if ac is not None else None
-
     for _ in range(SIMP_ROOT_FIRE_LIMIT):
         cur = rand(inner._concl)
-        if op_const is not None and _is_op_app(op_const, cur):
-            ac_step = AC_NORM(op_const, ac[1], ac[2], cur)
-            ac_lhs, ac_rhs = dest_eq(ac_step._concl)
-            if not aconv(ac_lhs, ac_rhs):
-                inner = TRANS(inner, ac_step)
-                inner_changed = True
-                cur = ac_rhs
+        # Rule-first: try rules on the current shape before AC-normalizing.
+        # AC-norm permutes operands of the matching head, which can bury a
+        # cross-operator shape (e.g. ``(a+b)*c`` for ``RIGHT_DISTRIB``)
+        # under TIMES-AC; firing the rule first preserves it. Then try
+        # ground-pattern AC matching, which lets a rule whose LHS is a
+        # ``op``-tree of ground leaves fire on any ``op``-tree containing
+        # those leaves modulo AC. If both fail, AC-norm and retry — that
+        # handles ``SATZ_30`` against ``(y+z)*x``.
         root_step = _try_rules_at(active, cur)
         if root_step is None:
-            break
+            root_step = _try_rules_ac_at(active, cur, triples)
+        if root_step is None:
+            ac_progressed = False
+            for op_const, assoc_thm, comm_thm in triples:
+                if not _is_op_app(op_const, cur):
+                    continue
+                ac_step = AC_NORM(op_const, assoc_thm, comm_thm, cur)
+                ac_lhs, ac_rhs = dest_eq(ac_step._concl)
+                if not aconv(ac_lhs, ac_rhs):
+                    inner = TRANS(inner, ac_step)
+                    inner_changed = True
+                    cur = ac_rhs
+                    ac_progressed = True
+                break
+            if not ac_progressed:
+                break
+            root_step = _try_rules_at(active, cur)
+            if root_step is None:
+                root_step = _try_rules_ac_at(active, cur, triples)
+            if root_step is None:
+                break
         inner = TRANS(inner, root_step)
         inner_changed = True
     else:
@@ -931,10 +1018,11 @@ def REWRITE_CONV(rules_thms, tm, max_passes=SIMP_OUTER_PASS_LIMIT, *, ac=None):
     Raises HolError if no fixpoint reached after max_passes outer passes
     (likely a non-terminating rule set).
 
-    Pass ``ac=(op, assoc, comm)`` to AC-normalize every op-application
+    Pass ``ac=(op, assoc, comm)`` -- or a sequence of such triples for
+    multi-operator AC -- to AC-normalize every matching op-application
     visited during traversal; see ``_bottom_up`` for the rationale."""
     rules = [r for r in (_prepare_rule(t) for t in rules_thms) if r is not None]
-    if not rules and ac is None:
+    if not rules and not _normalize_ac(ac):
         return REFL(tm)
     th = REFL(tm)
     prev_size = _term_size(tm)
@@ -976,11 +1064,13 @@ def REWRITE_PROVE(rules_thms, target_eq, *, ac=None, ac_rules=()):
     """Prove target_eq (= mk_eq(lhs, rhs)) by reducing both sides to a
     common normal form under ``rules_thms``.
 
-    If ``ac`` is given as the triple ``(op, assoc, comm)``, the bottom-up
-    rewriter AC-normalizes every ``op``-application it visits so rules
-    whose source shape is one of the AC-equivalent forms still fire (e.g.
-    ``SATZ_30: x*(y+z) = x*y+x*z`` against ``(y+z)*x``); any residual gap
-    between the normal forms is then closed by a top-level AC step.
+    If ``ac`` is given as the triple ``(op, assoc, comm)`` -- or a
+    sequence of such triples for multi-operator AC -- the bottom-up
+    rewriter AC-normalizes every matching op-application it visits so
+    rules whose source shape is one of the AC-equivalent forms still
+    fire (e.g. ``SATZ_30: x*(y+z) = x*y+x*z`` against ``(y+z)*x``); any
+    residual gap between the normal forms is then closed by a top-level
+    AC step on whichever registered op heads the remaining mismatch.
     ``ac_rules`` is an optional second-pass rule list applied after the
     main rewrite (e.g. to canonicalise ``SUC x`` into ``x + 1`` form
     before AC matching)."""
@@ -993,15 +1083,23 @@ def REWRITE_PROVE(rules_thms, target_eq, *, ac=None, ac_rules=()):
     nl, nr = rand(eq_l._concl), rand(eq_r._concl)
     if aconv(nl, nr):
         return TRANS(eq_l, SYM(eq_r))
-    if ac is None:
+    triples = _normalize_ac(ac)
+    if not triples:
         raise HolError(
             "REWRITE_PROVE: normal forms differ\n"
             f"  LHS reduces to: {nl}\n"
             f"  RHS reduces to: {nr}"
         )
-    op_const, assoc_thm, comm_thm = ac
-    eq_ac = AC_PROVE(op_const, assoc_thm, comm_thm, mk_eq(nl, nr))
-    return TRANS(eq_l, TRANS(eq_ac, SYM(eq_r)))
+    for op_const, assoc_thm, comm_thm in triples:
+        if _is_op_app(op_const, nl) and _is_op_app(op_const, nr):
+            eq_ac = AC_PROVE(op_const, assoc_thm, comm_thm, mk_eq(nl, nr))
+            return TRANS(eq_l, TRANS(eq_ac, SYM(eq_r)))
+    raise HolError(
+        "REWRITE_PROVE: normal forms differ and no registered AC operator "
+        "heads both sides\n"
+        f"  LHS reduces to: {nl}\n"
+        f"  RHS reduces to: {nr}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1026,6 +1124,18 @@ def _term_key(tm):
 def _is_op_app(op_const, tm):
     """True iff tm = op a b for the given op_const."""
     return isinstance(tm, Comb) and isinstance(tm.fun, Comb) and tm.fun.fun == op_const
+
+
+def _normalize_ac(ac):
+    """Normalize the user-facing ``ac=`` argument to a tuple of
+    ``(op_const, assoc_thm, comm_thm)`` triples. Accepts ``None``, a
+    single triple (the legacy single-operator form), or a sequence of
+    triples. Returns ``()`` for ``None``."""
+    if ac is None:
+        return ()
+    if isinstance(ac, tuple) and len(ac) == 3 and isinstance(ac[0], Const):
+        return (ac,)
+    return tuple(ac)
 
 
 def _right_assoc_conv(op_const, assoc_thm, tm):

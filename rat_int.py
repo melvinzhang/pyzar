@@ -413,7 +413,7 @@ def SATZ_79(p):
     p.goal("!X Y. X = Y ==> Y = X", types=_R_TYPES)
     p.fix("X Y")
     p.assume("h: X = Y")
-    p.thus("Y = X").by_sym("h")
+    p.thus("Y = X").by_thm("h")
 
 
 @proof
@@ -535,7 +535,7 @@ def SATZ_81(p):
             with p.calc("X_eq_Y: X") as c:
                 c.step("= Q a b").by_thm(p.fact("b_eq"))
                 c.step("= Q c d").by_thm(Qab_eq_Qcd)
-                c.step("= Y").by_sym("d_eq")
+                c.step("= Y").by_thm("d_eq")
             p.thus("X = Y \\/ rgt X Y \\/ rlt X Y").by(
                 DISJ1, "X_eq_Y", "rgt X Y \\/ rlt X Y"
             )
@@ -628,7 +628,7 @@ def SATZ_84(p):
             p.have("orL: rlt Y X \\/ Y = X").by(DISJ1, "l", "Y = X")
             p.thus("rle Y X").by_fold("orL")
         with p.case("e: X = Y"):
-            p.have("eYX: Y = X").by_sym("e")
+            p.have("eYX: Y = X").by_thm("e")
             p.have("orR: rlt Y X \\/ Y = X").by(DISJ2, "rlt Y X", "eYX")
             p.thus("rle Y X").by_fold("orR")
 
@@ -645,7 +645,7 @@ def SATZ_85(p):
             p.have("orL: rgt Y X \\/ Y = X").by(DISJ1, "g", "Y = X")
             p.thus("rge Y X").by_fold("orL")
         with p.case("e: X = Y"):
-            p.have("eYX: Y = X").by_sym("e")
+            p.have("eYX: Y = X").by_thm("e")
             p.have("orR: rgt Y X \\/ Y = X").by(DISJ2, "rgt Y X", "eYX")
             p.thus("rge Y X").by_fold("orR")
 
@@ -839,7 +839,7 @@ def RADD_QQ(p):
     )
     with p.calc("radd (Q a b) (Q c d)", thus=True) as cc:
         cc.step("= Q (a1*d1 + c1*b1) (b1*d1)").by_thm("hradd")
-        cc.step("= Q (a*d + c*b) (b*d)").by_sym("Qsum")
+        cc.step("= Q (a*d + c*b) (b*d)").by_thm("Qsum")
 
 
 # Helpers for lifting binary operations / relations on rat to representatives.
@@ -1050,7 +1050,7 @@ def SATZ_97B(p):
     with p.calc("X", thus=True) as c:
         c.step("= Q a b").by_thm(p.fact("b_eq"))
         c.step("= Q c d").by_thm(p.fact("Q_eq"))
-        c.step("= Y").by_sym("d_eq")
+        c.step("= Y").by_thm("d_eq")
 
 
 # Satz 97C:  X + Z < Y + Z  ==>  X < Y.
@@ -1072,13 +1072,11 @@ def SATZ_98(p):
     )
     p.fix("X Y Z U")
     p.assume("hXY: rgt X Y", "hZU: rgt Z U")
-    Z_t = p._parse("Z")
-    Y_t = p._parse("Y")
-    U_t = p._parse("U")
     p.have("g1: rgt (radd X Z) (radd Y Z)").by_match(SATZ_95, "hXY")
     p.have("g2: rgt (radd Z Y) (radd U Y)").by_match(SATZ_95, "hZU")
-    p.simp(SPECL([Z_t, Y_t], SATZ_92), SPECL([U_t, Y_t], SATZ_92))
-    p.have("g2b: rgt (radd Y Z) (radd Y U)").by_rewrite_of("g2", [])
+    p.have("g2b: rgt (radd Y Z) (radd Y U)").by_rewrite_of(
+        "g2", [], ac=(RADD, SATZ_93, SATZ_92)
+    )
     p.have("l1: rlt (radd Y Z) (radd X Z)").by_match(SATZ_82, "g1")
     p.have("l2: rlt (radd Y U) (radd Y Z)").by_match(SATZ_82, "g2b")
     p.have("l_chain: rlt (radd Y U) (radd X Z)").by_match(SATZ_86, "l2", "l1")
@@ -1093,16 +1091,14 @@ def SATZ_99A(p):
     )
     p.fix("X Y Z U")
     p.assume("hge: rge X Y", "hgt: rgt Z U")
-    Y_t = p._parse("Y")
-    Z_t = p._parse("Z")
-    U_t = p._parse("U")
     with p.thus("rgt (radd X Z) (radd Y U)").by_cases("hge"):
         with p.case("g_xy: rgt X Y"):
             p.thus("rgt (radd X Z) (radd Y U)").by_match(SATZ_98, "g_xy", "hgt")
         with p.case("e_xy: X = Y"):
             p.have("g_zy: rgt (radd Z Y) (radd U Y)").by_match(SATZ_95, "hgt")
-            p.simp(SPECL([Z_t, Y_t], SATZ_92), SPECL([U_t, Y_t], SATZ_92))
-            p.have("g_yzy: rgt (radd Y Z) (radd Y U)").by_rewrite_of("g_zy", [])
+            p.have("g_yzy: rgt (radd Y Z) (radd Y U)").by_rewrite_of(
+                "g_zy", [], ac=(RADD, SATZ_93, SATZ_92)
+            )
             p.have("eq_xz_yz: radd X Z = radd Y Z").by_match(SATZ_96B, "e_xy")
             p.thus("rgt (radd X Z) (radd Y U)").by_rewrite_of("g_yzy", ["eq_xz_yz"])
 
@@ -1194,7 +1190,7 @@ def SATZ_101_EXIST(p):
     # radd Y (Q u v) = radd (Q c d) (Q u v).
     p.have("sub_y:").by_cong(RADD, "d_eq")  # RADD Y = RADD (Q c d)
     p.have("sub_y_at:").by_cong("sub_y", mk_app(Q, u_t, v_t))
-    p.have("X_eq_Qab:").by_sym("b_eq")
+    p.have("X_eq_Qab: Q a b = X").by_thm("b_eq")
     with p.calc("rad_eq_X: radd Y (Q u v)") as c:
         c.step("= radd (Q c d) (Q u v)").by_thm("sub_y_at")
         c.step("= Q (c*v + u*d) (d*v)").by_thm("radd_canon")
@@ -1208,7 +1204,7 @@ def SATZ_101_UNIQUE(p):
     p.goal("!X Y V W. radd Y V = X ==> radd Y W = X ==> V = W", types={**_R_TYPES})
     p.fix("X Y V W")
     p.assume("hv: radd Y V = X", "hw: radd Y W = X")
-    p.have("hw_sym:").by_sym("hw")
+    p.have("hw_sym: X = radd Y W").by_thm("hw")
     p.have("eq_yvw: radd Y V = radd Y W").by_trans("hv", "hw_sym")
     Y_t = p._parse("Y")
     V_t = p._parse("V")
@@ -1218,7 +1214,7 @@ def SATZ_101_UNIQUE(p):
     with p.calc("eq_vw_swap: radd V Y") as c:
         c.step("= radd Y V").by_thm("eq_vy_yv")
         c.step("= radd Y W").by_thm("eq_yvw")
-        c.step("= radd W Y").by_sym("eq_wy_yw")
+        c.step("= radd W Y").by_thm("eq_wy_yw")
     p.thus("V = W").by_match(SATZ_97B, "eq_vw_swap")
 
 
@@ -1289,7 +1285,7 @@ def RMUL_QQ(p):
     )
     with p.calc("rmul (Q a b) (Q c d)", thus=True) as cc:
         cc.step("= Q (a1*c1) (b1*d1)").by_thm("hrmul")
-        cc.step("= Q (a*c) (b*d)").by_sym("Qprod")
+        cc.step("= Q (a*c) (b*d)").by_thm("Qprod")
 
 
 # Satz 102 (commutativity of rat multiplication):  X * Y = Y * X.
@@ -1467,7 +1463,7 @@ def SATZ_106B(p):
     with p.calc("X", thus=True) as c:
         c.step("= Q a b").by_thm(p.fact("b_eq"))
         c.step("= Q c d").by_thm(p.fact("Q_eq"))
-        c.step("= Y").by_sym("d_eq")
+        c.step("= Y").by_thm("d_eq")
 
 
 # Satz 106C:  rlt (X*Z) (Y*Z) ==> rlt X Y.
@@ -1489,13 +1485,11 @@ def SATZ_107(p):
     )
     p.fix("X Y Z U")
     p.assume("hXY: rgt X Y", "hZU: rgt Z U")
-    Z_t = p._parse("Z")
-    Y_t = p._parse("Y")
-    U_t = p._parse("U")
     p.have("g1: rgt (rmul X Z) (rmul Y Z)").by_match(SATZ_105A, "hXY")
     p.have("g2: rgt (rmul Z Y) (rmul U Y)").by_match(SATZ_105A, "hZU")
-    p.simp(SPECL([Z_t, Y_t], SATZ_102), SPECL([U_t, Y_t], SATZ_102))
-    p.have("g2b: rgt (rmul Y Z) (rmul Y U)").by_rewrite_of("g2", [])
+    p.have("g2b: rgt (rmul Y Z) (rmul Y U)").by_rewrite_of(
+        "g2", [], ac=(RMUL, SATZ_103, SATZ_102)
+    )
     p.have("l1: rlt (rmul Y Z) (rmul X Z)").by_match(SATZ_82, "g1")
     p.have("l2: rlt (rmul Y U) (rmul Y Z)").by_match(SATZ_82, "g2b")
     p.have("l_chain: rlt (rmul Y U) (rmul X Z)").by_match(SATZ_86, "l2", "l1")
@@ -1510,16 +1504,14 @@ def SATZ_108A(p):
     )
     p.fix("X Y Z U")
     p.assume("hge: rge X Y", "hgt: rgt Z U")
-    Y_t = p._parse("Y")
-    Z_t = p._parse("Z")
-    U_t = p._parse("U")
     with p.thus("rgt (rmul X Z) (rmul Y U)").by_cases("hge"):
         with p.case("g_xy: rgt X Y"):
             p.thus("rgt (rmul X Z) (rmul Y U)").by_match(SATZ_107, "g_xy", "hgt")
         with p.case("e_xy: X = Y"):
             p.have("g_zy: rgt (rmul Z Y) (rmul U Y)").by_match(SATZ_105A, "hgt")
-            p.simp(SPECL([Z_t, Y_t], SATZ_102), SPECL([U_t, Y_t], SATZ_102))
-            p.have("g_yzy: rgt (rmul Y Z) (rmul Y U)").by_rewrite_of("g_zy", [])
+            p.have("g_yzy: rgt (rmul Y Z) (rmul Y U)").by_rewrite_of(
+                "g_zy", [], ac=(RMUL, SATZ_103, SATZ_102)
+            )
             p.have("eq_xz_yz: rmul X Z = rmul Y Z").by_match(SATZ_105B, "e_xy")
             p.thus("rgt (rmul X Z) (rmul Y U)").by_rewrite_of("g_yzy", ["eq_xz_yz"])
 
@@ -1601,7 +1593,7 @@ def SATZ_110_EXIST(p):
     p.have("sub_y:").by_cong(RMUL, "d_eq")  # RMUL Y = RMUL (Q c d)
     U_witness = mk_app(Q, p._parse("a*d"), p._parse("b*c"))
     p.have("sub_y_at:").by_cong("sub_y", U_witness)
-    p.have("X_eq_Qab:").by_sym("b_eq")
+    p.have("X_eq_Qab: Q a b = X").by_thm("b_eq")
     with p.calc("rmul_eq_X: rmul Y (Q (a*d) (b*c))") as c:
         c.step("= rmul (Q c d) (Q (a*d) (b*c))").by_thm("sub_y_at")
         c.step("= Q (c*(a*d)) (d*(b*c))").by_thm("rmul_canon")
@@ -1615,7 +1607,7 @@ def SATZ_110_UNIQUE(p):
     p.goal("!X Y V W. rmul Y V = X ==> rmul Y W = X ==> V = W", types=_R_TYPES)
     p.fix("X Y V W")
     p.assume("hv: rmul Y V = X", "hw: rmul Y W = X")
-    p.have("hw_sym:").by_sym("hw")
+    p.have("hw_sym: X = rmul Y W").by_thm("hw")
     p.have("eq_yvw: rmul Y V = rmul Y W").by_trans("hv", "hw_sym")
     Y_t = p._parse("Y")
     V_t = p._parse("V")
@@ -1625,7 +1617,7 @@ def SATZ_110_UNIQUE(p):
     with p.calc("eq_vw_swap: rmul V Y") as c:
         c.step("= rmul Y V").by_thm("eq_vy_yv")
         c.step("= rmul Y W").by_thm("eq_yvw")
-        c.step("= rmul W Y").by_sym("eq_wy_yw")
+        c.step("= rmul W Y").by_thm("eq_wy_yw")
     p.thus("V = W").by_match(SATZ_106B, "eq_vw_swap")
 
 
@@ -1665,7 +1657,7 @@ def SATZ_111B_FWD(p):
     p.have("mul1_x:").by_inst(MUL_1, "x")
     p.have("mul1_y:").by_inst(MUL_1, "y")
     with p.calc("x", thus=True) as c:
-        c.step("= x*1").by_sym("mul1_x")
+        c.step("= x*1").by_thm("mul1_x")
         c.step("= y*1").by_thm(p.fact("eq_mul"))
         c.step("= y").by_thm("mul1_y")
 
@@ -1786,7 +1778,7 @@ def RMUL_ONE(p):
     p.have("one_b:").by_inst(ONE_MUL, b_t)  # 1*b = b
     p.have("times_one_a:").by_cong(TIMES, "one_a")
     p.have("eq_l:").by_cong("times_one_a", b_t)  # (1*a)*b = a*b
-    p.have("b_one_b:").by_sym("one_b")  # b = 1*b
+    p.have("b_one_b: b = 1*b").by_thm("one_b")
     p.have("eq_r:").by_cong(mk_app(TIMES, a_t), "b_one_b")  # a*b = a*(1*b)
     p.have("eq_full:").by_trans("eq_l", "eq_r")
     p.have("feq_th:").by_eq_mp(
@@ -1794,7 +1786,7 @@ def RMUL_ONE(p):
         "eq_full",
     )
     p.have("Q_eq:").by_thm(feq_to_Q_eq(p.fact("feq_th")))
-    p.have("X_eq_Qab:").by_sym("b_eq")  # Q a b = X
+    p.have("X_eq_Qab: Q a b = X").by_thm("b_eq")
     with p.calc("rmul (Q 1 1) X", thus=True) as c:
         c.step("= rmul (Q 1 1) (Q a b)").by_thm("sub_x")
         c.step("= Q (1*a) (1*b)").by_thm("canon")
@@ -1845,7 +1837,7 @@ def SATZ_114(p):
     p.have("mul1_yx:").by_inst(MUL_1, yx)  # (y*x)*1 = y*x
     p.have("satz29:").by_inst(SATZ_29, y_t, x_t)  # y*x = x*y
     p.have("one_y:").by_inst(ONE_MUL, y_t)  # 1*y = y
-    p.have("y_one:").by_sym("one_y")  # y = 1*y
+    p.have("y_one: y = 1*y").by_thm("one_y")
     p.have("expand:").by_cong(mk_app(TIMES, x_t), "y_one")  # x*y = x*(1*y)
     with p.calc("eq_chain: (y*x)*1") as c:
         c.step("= y*x").by_thm("mul1_yx")
