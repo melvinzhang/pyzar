@@ -1206,15 +1206,9 @@ def SATZ_101_UNIQUE(p):
     p.assume("hv: radd Y V = X", "hw: radd Y W = X")
     p.have("hw_sym: X = radd Y W").by_thm("hw")
     p.have("eq_yvw: radd Y V = radd Y W").by_trans("hv", "hw_sym")
-    Y_t = p._parse("Y")
-    V_t = p._parse("V")
-    W_t = p._parse("W")
-    p.have("eq_vy_yv:").by_inst(SATZ_92, V_t, Y_t)  # V+Y = Y+V
-    p.have("eq_wy_yw:").by_inst(SATZ_92, W_t, Y_t)  # W+Y = Y+W
-    with p.calc("eq_vw_swap: radd V Y") as c:
-        c.step("= radd Y V").by_thm("eq_vy_yv")
-        c.step("= radd Y W").by_thm("eq_yvw")
-        c.step("= radd W Y").by_thm("eq_wy_yw")
+    p.have("eq_vw_swap: radd V Y = radd W Y").by_rewrite_of(
+        "eq_yvw", [], ac=(RADD, SATZ_93, SATZ_92)
+    )
     p.thus("V = W").by_match(SATZ_97B, "eq_vw_swap")
 
 
@@ -1609,15 +1603,9 @@ def SATZ_110_UNIQUE(p):
     p.assume("hv: rmul Y V = X", "hw: rmul Y W = X")
     p.have("hw_sym: X = rmul Y W").by_thm("hw")
     p.have("eq_yvw: rmul Y V = rmul Y W").by_trans("hv", "hw_sym")
-    Y_t = p._parse("Y")
-    V_t = p._parse("V")
-    W_t = p._parse("W")
-    p.have("eq_vy_yv:").by_inst(SATZ_102, V_t, Y_t)
-    p.have("eq_wy_yw:").by_inst(SATZ_102, W_t, Y_t)
-    with p.calc("eq_vw_swap: rmul V Y") as c:
-        c.step("= rmul Y V").by_thm("eq_vy_yv")
-        c.step("= rmul Y W").by_thm("eq_yvw")
-        c.step("= rmul W Y").by_thm("eq_wy_yw")
+    p.have("eq_vw_swap: rmul V Y = rmul W Y").by_rewrite_of(
+        "eq_yvw", [], ac=(RMUL, SATZ_103, SATZ_102)
+    )
     p.thus("V = W").by_match(SATZ_106B, "eq_vw_swap")
 
 

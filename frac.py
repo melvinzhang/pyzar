@@ -19,7 +19,6 @@ from fusion import Var
 from basics import mk_app, mk_const
 from nat import (
     num_ty,
-    mk_mul,
     PLUS,
     TIMES,
     SATZ_5,
@@ -468,29 +467,18 @@ def SATZ_55(p):
     p.fix("x1 x2 y1 y2")
     p.assume("h: flt x1 x2 y1 y2")
     p.have("k: x1*y2 < y1*x2").by_def(FLT_DEF, "h")
-    # x1*x2 + x1*y2 < x1*x2 + y1*x2  via SATZ_19C with z = x1*x2 on the left.
-    p.have("step1_raw: x1*y2 + x1*x2 < y1*x2 + x1*x2").by_match(SATZ_19C, "k")
-    # Reorder: x1*x2 + x1*y2 < x1*x2 + y1*x2.
-    p.have("comm_xy:").by_inst(SATZ_6, mk_mul(x1, y2), mk_mul(x1, x2))
-    p.have("comm_yx:").by_inst(SATZ_6, mk_mul(y1, x2), mk_mul(x1, x2))
-    p.have("step1: x1*x2 + x1*y2 < x1*x2 + y1*x2").by_rewrite_of(
-        "step1_raw", ["comm_xy", "comm_yx"]
-    )
-    # Use distributive laws directly to fold (by_rewrite_of normalises both
-    # source and target under the rules, so equalities apply in either direction).
-    p.have("distr_l:").by_inst(SATZ_30, x1, x2, y2)  # x1*(x2+y2) = x1*x2 + x1*y2
-    p.have("distr_r:").by_inst(RIGHT_DISTRIB, x1, y1, x2)  # (x1+y1)*x2 = x1*x2 + y1*x2
+    # Left half: x1*y2 + x1*x2 < y1*x2 + x1*x2  (SATZ_19C with z = x1*x2),
+    # which equals x1*(x2+y2) < (x1+y1)*x2 modulo PLUS-AC + distrib.
+    p.have("step1: x1*y2 + x1*x2 < y1*x2 + x1*x2").by_match(SATZ_19C, "k")
     p.have("ineq_left: x1*(x2+y2) < (x1+y1)*x2").by_rewrite_of(
-        "step1", ["distr_l", "distr_r"]
+        "step1", [SATZ_30, RIGHT_DISTRIB], ac=(PLUS, SATZ_5, SATZ_6)
     )
     p.have("h_left: flt x1 x2 (x1+y1) (x2+y2)").by_unfold("ineq_left", FLT_DEF)
-    # Right half: (x1+y1)*y2 < y1*(x2+y2).
-    # x1*y2 + y1*y2 < y1*x2 + y1*y2  via SATZ_19C with z = y1*y2.
+    # Right half: x1*y2 + y1*y2 < y1*x2 + y1*y2  (SATZ_19C with z = y1*y2),
+    # which equals (x1+y1)*y2 < y1*(x2+y2) under distrib.
     p.have("step2: x1*y2 + y1*y2 < y1*x2 + y1*y2").by_match(SATZ_19C, "k")
-    p.have("distr_l2:").by_inst(RIGHT_DISTRIB, x1, y1, y2)  # (x1+y1)*y2 = x1*y2 + y1*y2
-    p.have("distr_r2:").by_inst(SATZ_30, y1, x2, y2)  # y1*(x2+y2) = y1*x2 + y1*y2
     p.have("ineq_right: (x1+y1)*y2 < y1*(x2+y2)").by_rewrite_of(
-        "step2", ["distr_l2", "distr_r2"]
+        "step2", [SATZ_30, RIGHT_DISTRIB]
     )
     p.have("h_right: flt (x1+y1) (x2+y2) y1 y2").by_unfold("ineq_right", FLT_DEF)
     p.have("conj: flt x1 x2 (x1+y1) (x2+y2) /\\ flt (x1+y1) (x2+y2) y1 y2").by(
@@ -632,15 +620,12 @@ def SATZ_61(p):
     p.have("g4: (x1*z2 + z1*x2)*y2 > (y1*z2 + z1*y2)*x2").by_rewrite_of(
         "g3", ["distr_l", "distr_r"]
     )
-    # Multiply by z2: ((x1*z2 + z1*x2)*y2)*z2 > ((y1*z2 + z1*y2)*x2)*z2.
+    # Multiply by z2 and re-bracket via TIMES-AC.
     p.have("g5: ((x1*z2 + z1*x2)*y2)*z2 > ((y1*z2 + z1*y2)*x2)*z2").by_match(
         SATZ_32A, "g4"
     )
-    # AC re-bracket: (X*y2)*z2 = X*(y2*z2);  (Y*x2)*z2 = Y*(x2*z2).
-    p.have("bra_l:").by_inst(SATZ_31, "x1*z2 + z1*x2", "y2", "z2")
-    p.have("bra_r:").by_inst(SATZ_31, "y1*z2 + z1*y2", "x2", "z2")
     p.have("g6: (x1*z2 + z1*x2)*(y2*z2) > (y1*z2 + z1*y2)*(x2*z2)").by_rewrite_of(
-        "g5", ["bra_l", "bra_r"]
+        "g5", [], ac=(TIMES, SATZ_31, SATZ_29)
     )
     p.thus("fgt (x1*z2 + z1*x2) (x2*z2) (y1*z2 + z1*y2) (y2*z2)").by_unfold(
         "g6", FGT_DEF
