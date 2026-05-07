@@ -1874,6 +1874,11 @@ class _Have:
         via ``coerce`` to the registered fact)."""
         return self._finish(self.p.coerce(th))
 
+    def by_sym(self, ref):
+        """Flip an equation: from a fact ``a = b`` derive ``b = a`` via
+        ``SYM``. ``ref`` is a fact label or kernel theorem."""
+        return self._finish(SYM(self.p.coerce(ref)))
+
     def by(self, justification, *args):
         """SPEC/MP chain (if `justification` is a theorem or fact label) or
         a callable.
