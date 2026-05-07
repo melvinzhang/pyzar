@@ -46,6 +46,7 @@ from fusion import (
     DEDUCT_ANTISYM_RULE,
     vfree_in,
     vsubst,
+    variant,
 )
 from basics import (
     aconv,
@@ -64,6 +65,7 @@ from axioms import (
     F,
     mk_select,
     mk_forall,
+    mk_imp,
     mk_not,
     dest_disj,
     dest_exists,
@@ -356,6 +358,36 @@ def register_induction(strategy):
     how to handle a new type. Re-registering the same type overrides
     (so test code can install fakes)."""
     _INDUCTION_STRATEGIES[strategy.ty] = strategy
+
+
+class StrongInductionStrategy:
+    """Strong / well-founded induction on a single ``hol_type``.
+
+    * ``ty``  : the type whose vars this strategy applies to.
+    * ``lt``  : the strict-less-than constant of type ``ty -> ty -> bool``.
+    * ``thm`` : ``|- !P. (!n. (!k. lt k n ==> P k) ==> P n) ==> !n. P n``.
+
+    Unlike Peano induction, strong induction has a single case: the body
+    ``P n`` is proved given the IH ``!k. lt k n ==> P k``. The DSL
+    surface ``p.strong_induction(var, ih_label)`` opens one sub-frame
+    accordingly; there is no ``base()`` / ``step()`` split.
+    """
+
+    __slots__ = ("ty", "lt", "thm")
+
+    def __init__(self, ty, lt, thm):
+        self.ty = ty
+        self.lt = lt
+        self.thm = thm
+
+
+_STRONG_INDUCTION_STRATEGIES = {}  # hol_type -> StrongInductionStrategy
+
+
+def register_strong_induction(strategy):
+    """Plugins call this once at import time to teach
+    ``p.strong_induction(v, ih_label)`` how to handle a new type."""
+    _STRONG_INDUCTION_STRATEGIES[strategy.ty] = strategy
 
 
 def _lookup_relation(term, kind=None):
@@ -1416,6 +1448,37 @@ class Proof:
         if strategy is None:
             raise HolError(f"induction: no strategy registered for type {var.ty!r}")
         return _InductionCtx(self, var, inner_body, strategy, peel_forall=peel)
+
+    def strong_induction(self, var_name, ih_label):
+        """Strong / well-founded induction on ``var_name``.
+
+        Auto-peels ``!var_name. body`` from the current goal (or uses the
+        env-bound var if no leading binder). Opens a single sub-frame
+        whose goal is ``body`` and whose IH (registered under
+        ``ih_label``) is ``!k. lt k var ==> body[var:=k]`` for the
+        strategy's ``lt``.
+        """
+        body = self._cur.goal
+        if body is None:
+            raise HolError("strong_induction: no current goal")
+        pred = dest_forall(body)
+        if pred is not None and pred.bvar.name == var_name:
+            var, inner_body, peel = pred.bvar, pred.body, True
+        else:
+            env = self._scope_env()
+            if var_name not in env:
+                raise HolError(
+                    f"strong_induction: unknown variable {var_name!r}"
+                )
+            var, inner_body, peel = env[var_name], body, False
+        strategy = _STRONG_INDUCTION_STRATEGIES.get(var.ty)
+        if strategy is None:
+            raise HolError(
+                f"strong_induction: no strategy registered for type {var.ty!r}"
+            )
+        return _StrongInductionCtx(
+            self, var, inner_body, strategy, ih_label, peel_forall=peel
+        )
 
     def base(self):
         fr = self._cur
@@ -2862,6 +2925,80 @@ class _InductionCtx:
                 f"  got:  {pp(body_th._concl)}"
             )
         parent.result = body_th
+
+
+# ---------------------------------------------------------------------------
+# Strong-induction block: pushes a single sub-frame whose goal is the
+# induction body and whose registered IH is
+# ``!k. lt k var ==> body[var:=k]``. On exit, the inner theorem is
+# DISCH'd over the IH, GEN'd over var, and run through the strategy's
+# strong-induction theorem (instantiated at ``P = \var. body`` and
+# beta-normalized to align with the GEN'd shape).
+# ---------------------------------------------------------------------------
+
+
+class _StrongInductionCtx:
+    def __init__(self, p, var, body, strategy, ih_label, peel_forall=False):
+        self.p = p
+        self.var = var
+        self.body = body
+        self.strategy = strategy
+        self.ih_label = ih_label
+        self.peel_forall = peel_forall
+        # Build IH term: !k. lt k var ==> body[var := k], with k chosen
+        # fresh w.r.t. the body so substitution doesn't capture.
+        k = variant([body], Var("k", var.ty))
+        body_at_k = subst_term(var, k, body)
+        self.ih_term = mk_forall(
+            k, mk_imp(mk_app(strategy.lt, k, var), body_at_k)
+        )
+
+    def __enter__(self):
+        # Goal of the sub-frame is the body (var free); the IH is registered
+        # as a fact, dropped on exit.
+        carriers = self.p._lazy_let_carriers()
+        goal = self.body
+        if carriers:
+            eq = self.p.simp_normalize(goal, carriers)
+            if not aconv(rand(eq._concl), goal):
+                goal = rand(eq._concl)
+        fr = _Frame(goal=goal, kind=FrameKind.SUPPOSE)
+        self.p._frames.append(fr)
+        self.p._register_fact(self.ih_label, ASSUME(self.ih_term))
+        return self.p
+
+    def __exit__(self, exc_type, *_):
+        return _exit_frame(self.p, exc_type, self._on_pop)
+
+    def _on_pop(self, fr):
+        if fr.result is None:
+            raise HolError(
+                "strong_induction: block did not discharge sub-goal via thus"
+            )
+        # Order matters: discharge the user's `assume` hyps and `fix`-vars
+        # via _close_frame *before* DISCH'ing the IH and GEN'ing over the
+        # induction var. Otherwise GEN's ABS step fails when the var is
+        # still free in an undischarged assume hyp.
+        body_th = self.p._close_frame(fr, fr.result)  # |- body, hyps clean except IH
+        impl_th = DISCH(self.ih_term, body_th)  # |- ih_term ==> body
+        all_th = GEN(self.var, impl_th)
+        # |- !var. (!k. lt k var ==> body[var:=k]) ==> body
+        P = mk_abs(self.var, self.body)
+        spec_th = SPEC(P, self.strategy.thm)
+        # spec_th carries beta-redexes from substituting P; normalize so
+        # the implication's antecedent matches all_th.
+        normed_th = EQ_MP(BETA_NORM(spec_th._concl), spec_th)
+        forall_th = MP(normed_th, all_th)  # |- !var. body
+        body_th_final = forall_th if self.peel_forall else SPEC(self.var, forall_th)
+        self.p._drop_facts(fr.facts_added)
+        parent = self.p._cur
+        if parent.goal is None or not aconv(parent.goal, body_th_final._concl):
+            raise HolError(
+                "strong_induction: produced wrong conclusion\n"
+                f"  goal: {pp(parent.goal) if parent.goal else 'None'}\n"
+                f"  got:  {pp(body_th_final._concl)}"
+            )
+        parent.result = body_th_final
 
 
 # ---------------------------------------------------------------------------

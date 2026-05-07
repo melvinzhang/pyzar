@@ -30,8 +30,16 @@ from nat0 import (
     define_unary_0,
     define_recursive_0,
 )
-from classical import COND, mk_cond, COND_T, COND_F, NOT_NOT_EQ
+from classical import COND, mk_cond, COND_T, COND_F, NOT_NOT_EQ, EXCLUDED_MIDDLE
 from proof import proof
+# Importing ``nat0_order`` registers the ``nat0`` strong-induction strategy
+# with the proof DSL (so ``p.strong_induction("n", "IH")`` works below).
+from nat0_order import (
+    nat0_lt,  # noqa: F401  -- referenced by the parser via type alias.
+    NAT0_LT_SUC0,
+    NAT0_LT_TRANS,
+    NAT0_LT_SUC0_MONO,
+)
 
 
 # Bits work entirely on ``nat0``, so default free vars to that type for the
@@ -433,6 +441,252 @@ def RECONSTRUCT(p):
                     ).by_thm(TRANS(suc0_ih, SYM(rhs_eq)))
 
 
+# ---------------------------------------------------------------------------
+# Lemma:  |- !j i. ~(i = j) ==> bit i (pow2 j) = F.
+#
+# The companion to BIT_AT_POW2_SAME; together they characterise
+# bit i (pow2 j) entirely. Double induction, outer on j, inner on i.
+#
+#   j=0, i=0      vacuous (~(0 = 0) is impossible).
+#   j=0, i=Si'    bit (Si') (pow2 0) reduces to bit i' 0 = F.
+#   j=Sj', i=0    bit 0 (pow2 (Sj')) = ODD (double (pow2 j')) = F.
+#   j=Sj', i=Si'  bit (Si') (pow2 (Sj')) = bit i' (pow2 j'); from
+#                 ~(Si' = Sj') derive ~(i' = j') by congruence-and-
+#                 contradiction, then close via the outer IH at i'.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def BIT_AT_POW2_DIFF(p):
+    p.goal("!j i. ~(i = j) ==> bit i (pow2 j) = F")
+    SUC0_c = mk_const("SUC0", [])
+    with p.induction("j"):
+        with p.base():
+            with p.induction("i"):
+                with p.base():
+                    p.assume("h: ~(0 = 0)")
+                    p.absurd().auto("h")
+                with p.step("IH_i_unused"):
+                    p.assume("h: ~(SUC0 i = 0)")
+                    p.thus("bit (SUC0 i) (pow2 0) = F").by_rewrite(
+                        [
+                            BIT_STEP_AT, POW2_BASE, HALF_STEP, ODD_BASE,
+                            COND_F_NAT0, HALF_BASE, BIT_AT_ZERO,
+                        ]
+                    )
+        with p.step("IH_j"):
+            with p.induction("i"):
+                with p.base():
+                    p.assume("h: ~(0 = SUC0 j)")
+                    p.thus("bit 0 (pow2 (SUC0 j)) = F").by_rewrite(
+                        [BIT_BASE, POW2_STEP, ODD_DOUBLE]
+                    )
+                with p.step("IH_i_unused"):
+                    p.assume("h: ~(SUC0 i = SUC0 j)")
+                    with p.have("hij: ~(i = j)").proof():
+                        with p.suppose("heq: i = j"):
+                            p.have("seq: SUC0 i = SUC0 j").by_cong(SUC0_c, "heq")
+                            p.absurd().by_conj("h", "seq")
+                    p.have("bf: bit i (pow2 j) = F").by("IH_j", "i", "hij")
+                    p.thus("bit (SUC0 i) (pow2 (SUC0 j)) = F").by_rewrite(
+                        [BIT_STEP_AT, POW2_STEP, HALF_DOUBLE, "bf"]
+                    )
+
+
+# ---------------------------------------------------------------------------
+# Lemma:  |- !n. nat0_lt (HALF (SUC0 n)) (SUC0 n).
+#
+# Halving any successor strictly decreases the value. Peano induction on n
+# with a case-split on ODD n inside the step:
+#   ODD n = T  : HALF (SUC0 (SUC0 n)) collapses to HALF (SUC0 n) (the
+#                COND-F branch since ODD (SUC0 n) = ~ODD n = F);
+#                HALF (SUC0 n) < SUC0 n by IH, then bumped to
+#                SUC0 (SUC0 n) via NAT0_LT_SUC0 + transitivity.
+#   ODD n = F  : HALF (SUC0 (SUC0 n)) collapses to SUC0 (HALF (SUC0 n));
+#                conclude via NAT0_LT_SUC0_MONO from IH.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def HALF_LT_SUC0(p):
+    from tactics import EQT_INTRO, EQF_INTRO
+
+    p.goal("!n. nat0_lt (HALF (SUC0 n)) (SUC0 n)")
+    p.fix("n")
+    with p.induction("n"):
+        with p.base():
+            p.have("lt0: nat0_lt 0 (SUC0 0)").by(NAT0_LT_SUC0, "0")
+            p.thus("nat0_lt (HALF (SUC0 0)) (SUC0 0)").by_rewrite_of(
+                "lt0",
+                [HALF_STEP, ODD_BASE, COND_F_NAT0, HALF_BASE],
+            )
+        with p.step("IH"):
+            with p.cases_on(EXCLUDED_MIDDLE, "ODD n"):
+                with p.case("hO: ODD n"):
+                    p.have("hO_eq: ODD n = T").by(EQT_INTRO, "hO")
+                    p.have("succ_lt: nat0_lt (SUC0 n) (SUC0 (SUC0 n))").by(
+                        NAT0_LT_SUC0, "SUC0 n"
+                    )
+                    p.have(
+                        "trans_lt: nat0_lt (HALF (SUC0 n)) (SUC0 (SUC0 n))"
+                    ).by(
+                        NAT0_LT_TRANS,
+                        "HALF (SUC0 n)", "SUC0 n", "SUC0 (SUC0 n)",
+                        "IH", "succ_lt",
+                    )
+                    p.thus(
+                        "nat0_lt (HALF (SUC0 (SUC0 n))) (SUC0 (SUC0 n))"
+                    ).by_rewrite_of(
+                        "trans_lt",
+                        [HALF_STEP, ODD_STEP, "hO_eq", _NOT_T_EQ_F, COND_F_NAT0],
+                    )
+                with p.case("hNO: ~(ODD n)"):
+                    p.have("hNO_eq: ODD n = F").by(EQF_INTRO, "hNO")
+                    p.have(
+                        "mono_lt: nat0_lt (SUC0 (HALF (SUC0 n))) (SUC0 (SUC0 n))"
+                    ).by(
+                        NAT0_LT_SUC0_MONO,
+                        "HALF (SUC0 n)", "SUC0 n", "IH",
+                    )
+                    p.thus(
+                        "nat0_lt (HALF (SUC0 (SUC0 n))) (SUC0 (SUC0 n))"
+                    ).by_rewrite_of(
+                        "mono_lt",
+                        [HALF_STEP, ODD_STEP, "hNO_eq", _NOT_F_EQ_T, COND_T_NAT0],
+                    )
+
+
+# ---------------------------------------------------------------------------
+# Lemma:  |- !n. ~(n = 0) ==> nat0_lt (HALF n) n.
+#
+# Lifts HALF_LT_SUC0 to arbitrary nonzero n by Peano case analysis: n = 0
+# is vacuous (the hypothesis is contradictory); n = SUC0 n' is direct.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def HALF_LT_NZ(p):
+    p.goal("!n. ~(n = 0) ==> nat0_lt (HALF n) n")
+    p.fix("n")
+    with p.induction("n"):
+        with p.base():
+            p.assume("h: ~(0 = 0)")
+            p.absurd().auto("h")
+        with p.step("_unused"):
+            p.assume("h: ~(SUC0 n = 0)")
+            p.thus("nat0_lt (HALF (SUC0 n)) (SUC0 n)").by(HALF_LT_SUC0, "n")
+
+
+# ---------------------------------------------------------------------------
+# Lemma:  |- !n. (!i. bit i n = F) ==> n = 0.
+#
+# An nat0 with all bits clear is zero. Strong induction on n: if n != 0,
+# HALF n < n and all bits of HALF n are F (peel via BIT_STEP_AT), so
+# the IH gives HALF n = 0; ODD n = F from the bit-at-0 fact; and
+# RECONSTRUCT collapses n to double 0 = 0. The n = 0 case is immediate.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def ZERO_BITS(p):
+    p.goal("!n. (!i. bit i n = F) ==> n = 0")
+    with p.strong_induction("n", "IH"):
+        p.assume("h: !i. bit i n = F")
+        with p.cases_on(EXCLUDED_MIDDLE, "n = 0"):
+            with p.case("hz: n = 0"):
+                p.thus("n = 0").by_thm(p.fact("hz"))
+            with p.case("hnz: ~(n = 0)"):
+                p.have("hlt: nat0_lt (HALF n) n").by(HALF_LT_NZ, "n", "hnz")
+                with p.have("hh: !i. bit i (HALF n) = F").proof():
+                    p.fix("i")
+                    p.have("hSi: bit (SUC0 i) n = F").by("h", "SUC0 i")
+                    p.thus("bit i (HALF n) = F").by_rewrite_of(
+                        "hSi", [BIT_STEP_AT]
+                    )
+                p.have("hhalfz: HALF n = 0").by("IH", "HALF n", "hlt", "hh")
+                p.have("h0: bit 0 n = F").by("h", "0")
+                p.have("hodd: ODD n = F").by_rewrite_of("h0", [BIT_BASE])
+                p.have(
+                    "recon: n = COND_nat0 (ODD n) "
+                    "(SUC0 (double (HALF n))) (double (HALF n))"
+                ).by(RECONSTRUCT, "n")
+                p.have(
+                    "rhs_zero: COND_nat0 (ODD n) "
+                    "(SUC0 (double (HALF n))) (double (HALF n)) = 0"
+                ).by_rewrite(["hodd", COND_F_NAT0, "hhalfz", DOUBLE_BASE])
+                p.thus("n = 0").by_trans("recon", "rhs_zero")
+
+
+# ---------------------------------------------------------------------------
+# BIT_EXTENSIONALITY -- |- !n m. (!i. bit i n = bit i m) ==> n = m.
+#
+# Strong induction on n with m universally quantified inside the body.
+# Two cases:
+#   n = 0    : the hypothesis says all bits of m are F; ZERO_BITS finishes.
+#   n != 0   : HALF n < n, so the IH applies at HALF n with m' := HALF m.
+#              The bit-equality lifted to HALF (peeling BIT_STEP_AT) gives
+#              HALF n = HALF m; bit-at-0 gives ODD n = ODD m; RECONSTRUCT
+#              both sides finishes via congruence on the COND.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def BIT_EXTENSIONALITY(p):
+    from tactics import SYM, TRANS
+
+    p.goal("!n m. (!i. bit i n = bit i m) ==> n = m")
+    with p.strong_induction("n", "IH"):
+        p.fix("m")
+        p.assume("h: !i. bit i n = bit i m")
+        with p.cases_on(EXCLUDED_MIDDLE, "n = 0"):
+            with p.case("hz: n = 0"):
+                with p.have("hm_zero: !i. bit i m = F").proof():
+                    p.fix("i")
+                    p.have("hi: bit i n = bit i m").by("h", "i")
+                    p.thus("bit i m = F").by_rewrite(
+                        [SYM(p.fact("hi")), "hz", BIT_AT_ZERO]
+                    )
+                p.have("hm0: m = 0").by(ZERO_BITS, "m", "hm_zero")
+                p.thus("n = m").by_thm(
+                    TRANS(p.fact("hz"), SYM(p.fact("hm0")))
+                )
+            with p.case("hnz: ~(n = 0)"):
+                p.have("hlt: nat0_lt (HALF n) n").by(HALF_LT_NZ, "n", "hnz")
+                with p.have("hh: !i. bit i (HALF n) = bit i (HALF m)").proof():
+                    p.fix("i")
+                    p.have("h_si: bit (SUC0 i) n = bit (SUC0 i) m").by(
+                        "h", "SUC0 i"
+                    )
+                    p.thus("bit i (HALF n) = bit i (HALF m)").by_rewrite_of(
+                        "h_si", [BIT_STEP_AT]
+                    )
+                p.have("hh_eq: HALF n = HALF m").by(
+                    "IH", "HALF n", "hlt", "HALF m", "hh"
+                )
+                p.have("h0: bit 0 n = bit 0 m").by("h", "0")
+                p.have("hodd: ODD n = ODD m").by_rewrite_of("h0", [BIT_BASE])
+                p.have(
+                    "recon_n: n = COND_nat0 (ODD n) "
+                    "(SUC0 (double (HALF n))) (double (HALF n))"
+                ).by(RECONSTRUCT, "n")
+                p.have(
+                    "recon_m: m = COND_nat0 (ODD m) "
+                    "(SUC0 (double (HALF m))) (double (HALF m))"
+                ).by(RECONSTRUCT, "m")
+                p.have(
+                    "rhs_eq: COND_nat0 (ODD n) "
+                    "(SUC0 (double (HALF n))) (double (HALF n)) "
+                    "= COND_nat0 (ODD m) "
+                    "(SUC0 (double (HALF m))) (double (HALF m))"
+                ).by_rewrite(["hodd", "hh_eq"])
+                p.thus("n = m").by_thm(
+                    TRANS(
+                        TRANS(p.fact("recon_n"), p.fact("rhs_eq")),
+                        SYM(p.fact("recon_m")),
+                    )
+                )
+
+
 if __name__ == "__main__":
     from parser import pp_thm
 
@@ -466,3 +720,13 @@ if __name__ == "__main__":
     print("  BIT_AT_POW2_SAME:", pp_thm(BIT_AT_POW2_SAME))
     print("Step 12 OK -- RECONSTRUCT proved.")
     print("  RECONSTRUCT  :", pp_thm(RECONSTRUCT))
+    print("Step 13 OK -- BIT_AT_POW2_DIFF proved.")
+    print("  BIT_AT_POW2_DIFF:", pp_thm(BIT_AT_POW2_DIFF))
+    print("Step 14 OK -- HALF_LT_SUC0 proved.")
+    print("  HALF_LT_SUC0    :", pp_thm(HALF_LT_SUC0))
+    print("Step 15 OK -- HALF_LT_NZ proved.")
+    print("  HALF_LT_NZ      :", pp_thm(HALF_LT_NZ))
+    print("Step 16 OK -- ZERO_BITS proved.")
+    print("  ZERO_BITS       :", pp_thm(ZERO_BITS))
+    print("Step 17 OK -- BIT_EXTENSIONALITY proved.")
+    print("  BIT_EXTENSIONALITY:", pp_thm(BIT_EXTENSIONALITY))
