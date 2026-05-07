@@ -11,6 +11,8 @@ Provides:
   * ``NOT_NOT_ELIM``          |- ~~p  =>  |- p
   * ``NOT_EX_TO_FORALL_NOT``  |- ~(?v. body)  =>  |- !v. ~body
   * ``NOT_FORALL_TO_EX_NOT``  |- ~(!v. body)  =>  |- ?v. ~body   (classical)
+  * ``COND``                  if-then-else (polymorphic, SELECT-defined)
+  * ``COND_T`` / ``COND_F``   |- COND T x y = x ; |- COND F x y = y
 """
 
 from fusion import (
@@ -24,9 +26,9 @@ from fusion import (
     EQ_MP,
     INST_TYPE,
 )
-from basics import mk_abs, mk_eq, rand, rator
-from axioms import T, F, SELECT_AX, mk_not, mk_or
-from parser import parse_type
+from basics import mk_abs, mk_app, mk_const, mk_eq, rand, rator
+from axioms import T, F, SELECT_AX, mk_not, mk_or, mk_and, mk_imp
+from parser import parse_type, define
 from tactics import (
     AP_TERM,
     BETA_CONV,
@@ -36,10 +38,16 @@ from tactics import (
     EQT_INTRO,
     SPEC,
     GEN,
+    GENL,
+    CONJ,
+    CONJUNCT1,
+    CONJUNCT2,
+    DISCH,
     MP,
     NOT_ELIM,
     DISJ2,
     FUN_EXT,
+    CONTR,
     _select_const,
 )
 from proof import proof
@@ -236,6 +244,159 @@ def NOT_FORALL_TO_EX_NOT(not_th, pred):
 
 
 # ---------------------------------------------------------------------------
+# COND -- polymorphic if-then-else.
+#
+#   COND b x y := @z:A. ((b = T) ==> z = x) /\ ((b = F) ==> z = y).
+#
+# At b = T the predicate has unique witness z = x (second conjunct vacuous
+# since T = F is false). At b = F it has unique witness z = y. The two
+# evaluation lemmas COND_T / COND_F discharge the SELECT.
+# ---------------------------------------------------------------------------
+
+_A_ty = aty
+_a_A = Var("a", _A_ty)
+_b_A = Var("b", _A_ty)
+_b_bool = Var("b", bool_ty)
+_x_A = Var("x", _A_ty)
+_y_A = Var("y", _A_ty)
+_z_A = Var("z", _A_ty)
+
+COND_DEF = define(
+    "COND",
+    parse_type("bool -> A -> A -> A"),
+    "\\b:bool. \\x:A. \\y:A. @z:A. ((b = T) ==> (z = x)) /\\ ((b = F) ==> (z = y))",
+)
+COND = mk_const("COND", [])
+
+
+def mk_cond(b, x, y):
+    """Build ``COND b x y`` with COND specialised at ``type_of(x)``."""
+    from fusion import type_of
+
+    xty = type_of(x)
+    cond_inst = mk_const("COND", [(xty, aty)])
+    return mk_app(cond_inst, b, x, y)
+
+
+# Helper: |- T = F ==> p   for any boolean p. Used to discharge the vacuous
+# branch in COND_T / COND_F.
+def _T_eq_F_imp(p_term):
+    th_TeqF = ASSUME(mk_eq(T, F))
+    th_F = EQ_MP(th_TeqF, TRUTH)  # |- F   (under T = F)
+    th_p = CONTR(p_term, th_F)
+    return DISCH(mk_eq(T, F), th_p)
+
+
+def _F_eq_T_imp(p_term):
+    th_FeqT = ASSUME(mk_eq(F, T))
+    th_F = EQ_MP(SYM(th_FeqT), TRUTH)
+    th_p = CONTR(p_term, th_F)
+    return DISCH(mk_eq(F, T), th_p)
+
+
+def _prove_COND_T():
+    # Goal: !x y. COND T x y = x.
+    # Strategy: COND T x y = (\b x y. @z. ...) T x y; beta to get @z. ((T = T) ==> z = x) /\ ((T = F) ==> z = y).
+    # Witness z := x: ((T = T) ==> x = x) /\ ((T = F) ==> x = y) holds.
+    # SELECT_AX gives ((T = T) ==> sel = x) /\ ((T = F) ==> sel = y) at sel := @z. ...
+    # First conjunct + REFL T + MP gives sel = x.
+    # COND_DEF rewrite: COND T x y = sel. Combine to get COND T x y = x.
+
+    # Beta-reduce COND T x y three times.
+    cond_T_x_y = mk_app(COND, T, _x_A, _y_A)
+    # COND = \b x y. @z. ...
+    # COND_DEF: |- COND = (\b x y. @z. ...)
+    cond_unfold = AP_TERM(_x_A.ty if False else None, COND_DEF) if False else None  # placeholder
+
+    # Actually: from COND_DEF |- COND = body, AP_THM at T:
+    cond_T_eq = AP_THM(COND_DEF, T)  # |- COND T = (\x y. ...) T -- wait, COND_DEF's RHS is \b x y. ..., so AP_THM at T beta is needed.
+    # AP_THM: |- (COND) T = (\b x y. ...) T
+    cond_T_beta = BETA_CONV(rand(cond_T_eq._concl))  # |- (\b x y. ...) T = \x y. (...with b:=T)
+    cond_T = TRANS(cond_T_eq, cond_T_beta)  # |- COND T = \x y. (...with b:=T)
+
+    cond_T_x_eq = AP_THM(cond_T, _x_A)
+    cond_T_x_beta = BETA_CONV(rand(cond_T_x_eq._concl))
+    cond_T_x = TRANS(cond_T_x_eq, cond_T_x_beta)  # |- COND T x = \y. (...)
+
+    cond_T_x_y_eq = AP_THM(cond_T_x, _y_A)
+    cond_T_x_y_beta = BETA_CONV(rand(cond_T_x_y_eq._concl))
+    cond_full = TRANS(cond_T_x_y_eq, cond_T_x_y_beta)
+    # |- COND T x y = @z. ((T = T) ==> z = x) /\ ((T = F) ==> z = y)
+
+    sel_term = rand(cond_full._concl)  # the @z. ... = Comb(@, Abs(z, body))
+    pred = sel_term.arg  # \z. body
+
+    # Prove witness at z := x:
+    # ((T = T) ==> x = x) /\ ((T = F) ==> x = y)
+    refl_T = REFL(T)  # |- T = T
+    refl_x = REFL(_x_A)  # |- x = x
+    first_at_x = DISCH(mk_eq(T, T), refl_x)  # |- (T = T) ==> x = x
+    second_at_x = _T_eq_F_imp(mk_eq(_x_A, _y_A))  # |- (T = F) ==> x = y
+    pred_at_x = CONJ(first_at_x, second_at_x)  # |- pred-body[z:=x]
+
+    # Want |- pred x  (i.e., (\z. body) x). Use SYM(BETA).
+    pred_at_x_unbeta = EQ_MP(SYM(BETA_CONV(mk_app(pred, _x_A))), pred_at_x)
+    # |- pred x
+
+    # SELECT_AX: |- !P x. P x ==> P (@P). At our pred, x:
+    sel_inst = INST_TYPE([(_A_ty, aty)], SELECT_AX)
+    sel_imp = SPEC(_x_A, SPEC(pred, sel_inst))  # |- pred x ==> pred (@pred)
+    pred_at_sel = MP(sel_imp, pred_at_x_unbeta)  # |- pred (@pred)
+
+    # Beta-reduce pred (@pred) to ((T=T) ==> sel = x) /\ ((T=F) ==> sel = y)
+    pred_at_sel_body = EQ_MP(BETA_CONV(mk_app(pred, sel_term)), pred_at_sel)
+    # First conjunct: (T = T) ==> sel = x
+    first_imp = CONJUNCT1(pred_at_sel_body)
+    sel_eq_x = MP(first_imp, refl_T)  # |- sel = x
+
+    # Combine: COND T x y = sel = x.
+    cond_T_x_y_eq_x = TRANS(cond_full, sel_eq_x)
+    return GENL([_x_A, _y_A], cond_T_x_y_eq_x)
+
+
+def _prove_COND_F():
+    cond_F_eq = AP_THM(COND_DEF, F)
+    cond_F_beta = BETA_CONV(rand(cond_F_eq._concl))
+    cond_F = TRANS(cond_F_eq, cond_F_beta)
+    cond_F_x_eq = AP_THM(cond_F, _x_A)
+    cond_F_x_beta = BETA_CONV(rand(cond_F_x_eq._concl))
+    cond_F_x = TRANS(cond_F_x_eq, cond_F_x_beta)
+    cond_F_x_y_eq = AP_THM(cond_F_x, _y_A)
+    cond_F_x_y_beta = BETA_CONV(rand(cond_F_x_y_eq._concl))
+    cond_full = TRANS(cond_F_x_y_eq, cond_F_x_y_beta)
+    # |- COND F x y = @z. ((F = T) ==> z = x) /\ ((F = F) ==> z = y)
+
+    sel_term = rand(cond_full._concl)
+    pred = sel_term.arg
+
+    refl_F = REFL(F)  # |- F = F
+    refl_y = REFL(_y_A)
+    first_at_y = _F_eq_T_imp(mk_eq(_y_A, _x_A))  # |- (F = T) ==> y = x
+    second_at_y = DISCH(mk_eq(F, F), refl_y)  # |- (F = F) ==> y = y
+    pred_at_y = CONJ(first_at_y, second_at_y)
+    pred_at_y_unbeta = EQ_MP(SYM(BETA_CONV(mk_app(pred, _y_A))), pred_at_y)
+
+    sel_inst = INST_TYPE([(_A_ty, aty)], SELECT_AX)
+    sel_imp = SPEC(_y_A, SPEC(pred, sel_inst))
+    pred_at_sel = MP(sel_imp, pred_at_y_unbeta)
+    pred_at_sel_body = EQ_MP(BETA_CONV(mk_app(pred, sel_term)), pred_at_sel)
+
+    second_imp = CONJUNCT2(pred_at_sel_body)
+    sel_eq_y = MP(second_imp, refl_F)
+
+    cond_F_x_y_eq_y = TRANS(cond_full, sel_eq_y)
+    return GENL([_x_A, _y_A], cond_F_x_y_eq_y)
+
+
+# AP_THM is needed below; import lazily to avoid reordering the long
+# import block at the top.
+from tactics import AP_THM
+
+COND_T = _prove_COND_T()
+COND_F = _prove_COND_F()
+
+
+# ---------------------------------------------------------------------------
 # Self-tests.
 # ---------------------------------------------------------------------------
 
@@ -264,4 +425,7 @@ if __name__ == "__main__":
 
     print(f"EXCLUDED_MIDDLE: {pp_thm(EXCLUDED_MIDDLE)}")
     print(f"F_NEQ_T:         {pp_thm(F_NEQ_T)}")
+    print(f"COND_DEF:        {pp_thm(COND_DEF)}")
+    print(f"COND_T:          {pp_thm(COND_T)}")
+    print(f"COND_F:          {pp_thm(COND_F)}")
     print("classical.py self-tests passed.")
