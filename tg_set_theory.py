@@ -19,7 +19,6 @@ from fusion import (
     ASSUME,
     EQ_MP,
     INST,
-    TRANS,
     DEDUCT_ANTISYM_RULE,
 )
 from basics import mk_const
@@ -512,7 +511,7 @@ def SEPARATION(p):
         p.have("h2: P x /\\ y2 = x").by(CONJUNCT2, "h12")
         p.have("h_y1x: y1 = x").by(CONJUNCT2, "h1")
         p.have("h_y2x: y2 = x").by(CONJUNCT2, "h2")
-        p.thus("y1 = y2").by_thm(TRANS(p.fact("h_y1x"), SYM(p.fact("h_y2x"))))
+        p.thus("y1 = y2").by_trans("h_y1x", "h_y2x")
     p.thus("?b. !y. In y b = (?u. In u a /\\ P u /\\ y = u)").by_match(
         REPLACEMENT_SEP, "h_func"
     )
@@ -689,9 +688,7 @@ def SMALL_MEMBER(p):
                 p.fix("z")
                 p.have("h_pz: In z p = Subset z x").by_inst("h_p_def", "z")
                 p.have("h_Powz: In z (Pow x) = Subset z x").by_inst(POW_PROP, "x", "z")
-                p.thus("In z p = In z (Pow x)").by_thm(
-                    TRANS(p.fact("h_pz"), SYM(p.fact("h_Powz")))
-                )
+                p.thus("In z p = In z (Pow x)").by_trans("h_pz", "h_Powz")
             p.thus("p = Pow x").by_match(EXTENSIONALITY, "h_ext")
         p.have("h_PowU: In (Pow x) u").by_rewrite_of("h_pu", [p.fact("h_p_eq_Pow")])
         # 2. Subset (Pow x) u from Trans u + In (Pow x) u.

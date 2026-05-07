@@ -227,7 +227,7 @@ def NUM_REP_IND_1(p):
         p.fix("P")
         p.assume("hyp: P IND_1 /\\ (!i:ind. P i ==> P (IND_SUC i))")
         p.thus("P IND_1").by(CONJUNCT1, "hyp")
-    p.thus("NUM_REP IND_1").by_eq_mp(SYM(p.fact("eq")), "inner")
+    p.thus("NUM_REP IND_1").by_eq_mp("eq", "inner")
 
 
 @proof
@@ -256,7 +256,7 @@ def NUM_REP_IND_SUC_CLOSED(p):
         p.have("Pi: P i").by("h_NRi_at_P", CONJ(p.fact("h_base"), p.fact("h_step")))
         p.have("step_i: P i ==> P (IND_SUC i)").by(SPEC, "i", "h_step")
         p.thus("P (IND_SUC i)").by("step_i", "Pi")
-    p.thus("NUM_REP (IND_SUC i)").by_eq_mp(SYM(p.fact("eq_si")), "inner")
+    p.thus("NUM_REP (IND_SUC i)").by_eq_mp("eq_si", "inner")
 
 
 _EXISTS_NUM_REP = EXISTS(
@@ -348,7 +348,7 @@ def NUM_REP_dest_num(p):
     p.have(
         "dm_inst: NUM_REP (dest_num a) = (dest_num (mk_num (dest_num a)) = dest_num a)"
     ).by_thm(INST([(mk_comb(dest_num, a_kvar), Var("r", ind_ty))], DEST_MK))
-    p.thus("NUM_REP (dest_num a)").by_eq_mp(SYM(p.fact("dm_inst")), "md_dest")
+    p.thus("NUM_REP (dest_num a)").by_eq_mp("dm_inst", "md_dest")
 
 
 # ---------------------------------------------------------------------------

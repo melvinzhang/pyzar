@@ -55,6 +55,7 @@ from basics import (
     rand,
     freesl,
     aconv,
+    alphaorder,
 )
 from axioms import (
     T,
@@ -514,8 +515,48 @@ def DISCHL(hyps, th):
 
 
 def TRANS_CHAIN(thms):
+    """Chain TRANS over a list of equations.
+
+    Sym-tolerant: at each step, if the running RHS doesn't align with the
+    next link's LHS, try ``SYM(next)``. The head can also be flipped if
+    that's the only way the first link connects. Falls back to the literal
+    chain (letting ``TRANS`` raise) if no orientation works, so the kernel
+    error message points at the original input.
+    """
     if not thms:
         raise HolError("TRANS_CHAIN: empty list")
+    if len(thms) == 1:
+        return thms[0]
+
+    def _greedy(head):
+        result = head
+        for t in thms[1:]:
+            try:
+                _, rr = dest_eq(result._concl)
+                tl, tr = dest_eq(t._concl)
+            except HolError:
+                return None
+            if alphaorder(rr, tl) == 0:
+                result = TRANS(result, t)
+            elif alphaorder(rr, tr) == 0:
+                result = TRANS(result, SYM(t))
+            else:
+                return None
+        return result
+
+    chained = _greedy(thms[0])
+    if chained is not None:
+        return chained
+    try:
+        flipped_head = SYM(thms[0])
+    except HolError:
+        flipped_head = None
+    if flipped_head is not None:
+        chained = _greedy(flipped_head)
+        if chained is not None:
+            return chained
+    # No orientation worked; replay literally so TRANS raises with the
+    # original mismatch.
     result = thms[0]
     for t in thms[1:]:
         result = TRANS(result, t)

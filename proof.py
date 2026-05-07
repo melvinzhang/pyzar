@@ -56,6 +56,7 @@ from basics import (
     mk_eq,
     mk_fun_ty,
     dest_eq,
+    is_eq,
     dest_binop_any,
 )
 from axioms import (
@@ -853,24 +854,40 @@ class Proof:
 
         Aligns the equation's LHS with the fact's conclusion via simp on
         the active simp set, so callers can mix folded/unfolded forms
-        across an EQ_MP boundary."""
+        across an EQ_MP boundary. Sym-tolerant: if the fact aligns with
+        the RHS instead of the LHS, flip the equation rather than asking
+        the caller to pre-flip it."""
         try:
-            lhs, _ = dest_eq(eq_th._concl)
+            lhs, rhs = dest_eq(eq_th._concl)
         except HolError:
             return EQ_MP(eq_th, fact_th)
         lifted = self.simp_match(lhs, fact_th)
         if lifted is not None:
-            fact_th = lifted
+            return EQ_MP(eq_th, lifted)
+        lifted_rhs = self.simp_match(rhs, fact_th)
+        if lifted_rhs is not None:
+            return EQ_MP(SYM(eq_th), lifted_rhs)
         return EQ_MP(eq_th, fact_th)
 
     def _simp_require(self, target, th, op):
         """Return ``th`` lifted to shape ``target`` via ``simp_match``, or
-        raise ``HolError`` with a uniform shape-mismatch message."""
+        raise ``HolError`` with a uniform shape-mismatch message.
+
+        Sym-tolerant: if ``target`` and ``th._concl`` are both equations
+        and direct/simp matching fails, retry against ``SYM(th)`` so
+        consumers never have to pre-flip an equation fact."""
         if aconv(target, th._concl):
             return th
         lifted = self.simp_match(target, th)
         if lifted is not None:
             return lifted
+        if is_eq(target) and is_eq(th._concl):
+            flipped = SYM(th)
+            if aconv(target, flipped._concl):
+                return flipped
+            lifted = self.simp_match(target, flipped)
+            if lifted is not None:
+                return lifted
         raise HolError(
             f"{op}: shape does not match\n"
             f"  expected: {pp(target)}\n"

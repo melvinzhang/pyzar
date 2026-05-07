@@ -668,9 +668,7 @@ def SATZ_86(p):
     p.split("t2", "(hZ, hlt2)")
     p.simp("hX", "hZ")
     # Y = Q c d = Q e1 f1 ; so Q c d = Q e1 f1, hence feq c d e1 f1.
-    p.have("Qcd_eq_Qe1f1: Q c d = Q e1 f1").by_thm(
-        TRANS(SYM(p.fact("hY1")), p.fact("hY2"))
-    )
+    p.have("Qcd_eq_Qe1f1: Q c d = Q e1 f1").by_trans("hY1", "hY2")
     p.have("feq_eq: feq c d e1 f1").by_thm(Q_eq_to_feq(p.fact("Qcd_eq_Qe1f1")))
     p.have("feq_e1f1_cd: feq e1 f1 c d").by_match(SATZ_38, "feq_eq")
     p.have("flt_cd_gh: flt c d g1 h1n").by_match(SATZ_45, "hlt2", "feq_e1f1_cd", ...)
@@ -1927,10 +1925,9 @@ def SATZ_115(p):
     # Apply X on the right: rmul (rmul (Q v 1) Z) X = rmul (Q z 1) X.
     p.have("rmul_eqQvZ:").by_cong("rmul", "eq_QvZ")
     p.have("sub_x:").by_cong("rmul_eqQvZ", "X")
-    # Bridge: associativity rmul (Q v 1) (rmul Z X) = rmul (rmul (Q v 1) Z) X (SYM SATZ_103).
+    # Bridge: associativity rmul (Q v 1) (rmul Z X) = rmul (rmul (Q v 1) Z) X.
     p.have("assoc:").by_inst(SATZ_103, "Q v 1", "Z", "X")
-    p.have("assoc_sym:").by_sym("assoc")
-    p.have("eq_full:").by_trans("assoc_sym", "sub_x")
+    p.have("eq_full:").by_trans("assoc", "sub_x")
     p.have("sub_g:").by_cong("rgt", "eq_full")
     p.have("sub_g_at:").by_cong("sub_g", "Y")
     p.have("gt_zX_Y: rgt (rmul (Q z 1) X) Y").by_eq_mp("sub_g_at", "gt_AY")
