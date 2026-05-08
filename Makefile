@@ -3,6 +3,8 @@ PY := uv run python
 
 LANDAU_GOLDEN := landau.golden
 LANDAU_OUT    := landau.out
+GODEL_GOLDEN  := godel.golden
+GODEL_OUT     := godel.out
 
 .PHONY: test test-kernel test-tactics test-parser test-axioms test-proof \
         test-theories test-golden update-golden lint flag-escapes \
@@ -39,9 +41,14 @@ test-proof:
 
 # L6 -- theories: classical logic, then the Landau development bottom-up
 # (num builds the natural numbers; nat proves Landau's Sätze on them; frac
-# builds rationals on top of nat; rat_int adds the integer-rational subset).
-# Captures the printed `SATZ_N: |- ...` lines from nat.py + frac.py +
-# rat_int.py into $(LANDAU_OUT) for the golden check below.
+# builds rationals on top of nat; rat_int adds the integer-rational subset),
+# then the Goedel-incompleteness stack (nat0 carves out a copy of num with
+# 0/SUC0 primitives; nat0_order/bits/hf_sets build hereditarily-finite sets;
+# q_syntax/q_proof/q_repr/q_logic/godel_first encode Robinson Q and lay out
+# the diagonal lemma + first incompleteness theorem).
+# Captures the printed `SATZ_N: |- ...` / `LEMMA: |- ...` lines from
+# nat.py + frac.py + rat_int.py into $(LANDAU_OUT), and the same pattern
+# from the godel stack into $(GODEL_OUT), for the golden checks below.
 test-theories:
 	$(PY) classical.py
 	$(PY) tg_set_theory.py
@@ -53,6 +60,19 @@ test-theories:
 	  $(PY) rat_int.py | tee -a $$raw; \
 	  grep -E '^[[:space:]]*[A-Z][A-Z0-9_]*[[:space:]]*:.*\|-' $$raw > $(LANDAU_OUT); \
 	  rm -f $$raw
+	@set -o pipefail; \
+	  raw=$$(mktemp); \
+	  $(PY) nat0.py | tee -a $$raw; \
+	  $(PY) nat0_order.py | tee -a $$raw; \
+	  $(PY) bits.py | tee -a $$raw; \
+	  $(PY) hf_sets.py | tee -a $$raw; \
+	  $(PY) q_syntax.py | tee -a $$raw; \
+	  $(PY) q_proof.py | tee -a $$raw; \
+	  $(PY) q_repr.py | tee -a $$raw; \
+	  $(PY) q_logic.py | tee -a $$raw; \
+	  $(PY) godel_first.py | tee -a $$raw; \
+	  grep -E '^[[:space:]]*[A-Z][A-Z0-9_]*[[:space:]]*:.*\|-' $$raw > $(GODEL_OUT); \
+	  rm -f $$raw
 
 # L7 -- golden: every theorem's pp(concl) matches the checked-in
 # `landau.golden`.  The kernel certifies inferences but cannot tell whether
@@ -61,20 +81,33 @@ test-theories:
 # reviewed transcription audit; regenerate via `make update-golden` when a
 # statement change is intentional.
 test-golden: test-theories
-	@if diff -u $(LANDAU_GOLDEN) $(LANDAU_OUT); then \
+	@status=0; \
+	if diff -u $(LANDAU_GOLDEN) $(LANDAU_OUT); then \
 	  echo "Landau golden OK ($$(wc -l < $(LANDAU_GOLDEN)) theorems)."; \
 	else \
 	  echo ""; \
 	  echo "Landau golden mismatch -- inspect the diff above."; \
+	  status=1; \
+	fi; \
+	if diff -u $(GODEL_GOLDEN) $(GODEL_OUT); then \
+	  echo "Goedel golden OK ($$(wc -l < $(GODEL_GOLDEN)) theorems)."; \
+	else \
+	  echo ""; \
+	  echo "Goedel golden mismatch -- inspect the diff above."; \
+	  status=1; \
+	fi; \
+	if [ $$status -ne 0 ]; then \
 	  echo "If the new statements are intentional, run: make update-golden"; \
 	  exit 1; \
 	fi
 
-# Regenerate the golden snapshot after an intentional statement change.
-# Requires test-theories to have produced a fresh $(LANDAU_OUT).
+# Regenerate the golden snapshots after an intentional statement change.
+# Requires test-theories to have produced fresh $(LANDAU_OUT)/$(GODEL_OUT).
 update-golden: test-theories
 	@cp $(LANDAU_OUT) $(LANDAU_GOLDEN)
 	@echo "Updated $(LANDAU_GOLDEN) ($$(wc -l < $(LANDAU_GOLDEN)) theorems)."
+	@cp $(GODEL_OUT) $(GODEL_GOLDEN)
+	@echo "Updated $(GODEL_GOLDEN) ($$(wc -l < $(GODEL_GOLDEN)) theorems)."
 
 # Style lint via ruff (unused imports, formatting drift, etc.).
 lint:
@@ -97,4 +130,4 @@ format:
 	uv run ruff format
 
 clean:
-	rm -f $(LANDAU_OUT)
+	rm -f $(LANDAU_OUT) $(GODEL_OUT)
