@@ -526,6 +526,639 @@ def NAT0_LT_SUC0_INSERT(p):
     p.thus("nat0_lt (SUC0 a) c").by_eq_mp(SYM(sa_c_eq), sa_lt_c)
 
 
+# ---------------------------------------------------------------------------
+# Step 4.  Predecessor / case-on-SUC0 helpers, used by NUM_RECURSION_LT.
+# ---------------------------------------------------------------------------
+#
+# NAT0_NOT_LT_ZERO :  |- !k. ~(nat0_lt k 0).
+#   Unfolds to ``rep_nat0 k < rep_nat0 0 = 1``; but rep_nat0 lands in num
+#   (1, 2, 3, ...) so rep_nat0 k >= 1, hence not < 1. Use SATZ_24
+#   (``!x:num. x >= 1``) and contradiction via SATZ_25 / NOT_LT_AND_GE.
+
+
+@proof
+def NAT0_NOT_LT_ZERO(p):
+    from nat import SATZ_24, _CONTRA_LT_GE
+    from nat0 import ZERO_DEF
+    from num import ONE
+
+    p.goal("!k. ~(nat0_lt k 0)", types={"k": nat0_ty})
+    p.fix("k")
+    with p.suppose("h: nat0_lt k 0"):
+        k_t = p._parse("k")
+        rep_k = mk_app(rep_nat0, k_t)
+        # Unfold nat0_lt and rep_nat0 0.
+        lt_eq = SPECL([k_t, mk_const("0", [])], LT_NAT0)
+        h_num = EQ_MP(lt_eq, p.fact("h"))  # |- rep_k < rep_nat0 0
+        # rep_nat0 0 = 1 via ZERO_DEF + REP_ABS.
+        rep0_eq = TRANS(AP_TERM(rep_nat0, ZERO_DEF), SPEC(ONE, REP_ABS))
+        # |- rep_nat0 0 = 1
+        h_lt_one = REWRITE_RULE([rep0_eq], h_num)  # |- rep_k < 1
+        # rep_k >= 1 by SATZ_24.
+        ge_one = SPEC(rep_k, SATZ_24)  # |- rep_k >= 1
+        # _CONTRA_LT_GE : !a b. a < b ==> b >= a ==> F.
+        contra = MP(
+            MP(SPECL([rep_k, ONE], _CONTRA_LT_GE), h_lt_one),
+            ge_one,
+        )
+        p.absurd().by_thm(contra)
+
+
+# NAT0_NEQ_ZERO_PRED : |- !d. ~(d = 0) ==> ?d'. d = SUC0 d'.
+#   Direct nat0 induction.
+
+@proof
+def NAT0_NEQ_ZERO_PRED(p):
+    from fusion import REFL
+    from nat0 import mk_suc0
+    p.goal(
+        "!d. ~(d = 0) ==> ?dp:nat0. d = SUC0 dp",
+        types={"d": nat0_ty},
+    )
+    p.fix("d")
+    with p.induction("d"):
+        with p.base():
+            p.assume("h: ~(0 = 0)")
+            p.have("h_eq: 0 = 0").by_thm(REFL(mk_const("0", [])))
+            p.absurd().by_conj("h", "h_eq")
+        with p.step("IH_unused"):
+            p.assume("h: ~(SUC0 d = 0)")
+            d_t = p._parse("d")
+            p.thus("?dp:nat0. SUC0 d = SUC0 dp").by_witness(
+                "d", REFL(mk_suc0(d_t))
+            )
+
+
+# NAT0_LT_SUC0_CASES :  |- !k d. nat0_lt k (SUC0 d) ==> k = d \/ nat0_lt k d.
+#   In num: rep_nat0 k < SUC (rep_nat0 d) iff rep_nat0 k <= rep_nat0 d
+#   (Landau SATZ_25/SATZ_22), and ``<= y`` splits as ``< y`` or ``= y``;
+#   the equality lifts back to ``k = d`` via ABS_REP_NAT0.
+
+@proof
+def NAT0_LT_SUC0_CASES(p):
+    from nat import SATZ_10, SATZ_25, SATZ_13, SATZ_22A, SATZ_22B, ADD_1
+    from classical import EXCLUDED_MIDDLE
+    from nat0 import SUC0_DEF, mk_suc0
+    from num import mk_suc
+
+    p.goal(
+        "!k d. nat0_lt k (SUC0 d) ==> k = d \\/ nat0_lt k d",
+        types={"k": nat0_ty, "d": nat0_ty},
+    )
+    p.fix("k d")
+    p.assume("h: nat0_lt k (SUC0 d)")
+    k_t, d_t = p._parse("k"), p._parse("d")
+    rep_k = mk_app(rep_nat0, k_t)
+    rep_d = mk_app(rep_nat0, d_t)
+    # rep_k < SUC rep_d.
+    lt_eq = SPECL([k_t, mk_suc0(d_t)], LT_NAT0)
+    h_num = EQ_MP(lt_eq, p.fact("h"))  # |- rep_k < rep_nat0 (SUC0 d)
+    rep_suc0_d = SPEC(d_t, REP_SUC0)
+    h_lt_suc = REWRITE_RULE([rep_suc0_d], h_num)  # |- rep_k < SUC rep_d
+    # SUC rep_d = rep_d + 1 by ADD_1 (sym).
+    add1_d = SPEC(rep_d, ADD_1)  # |- rep_d + 1 = SUC rep_d
+    # rep_k < rep_d + 1.
+    h_lt_p1 = REWRITE_RULE([SYM(add1_d)], h_lt_suc)
+    # SATZ_10 : !x y. (x = y) \/ (x > y) \/ (x < y).
+    tri = SPECL([rep_k, rep_d], SATZ_10)
+    p.have(
+        "tri: (rep_nat0 k = rep_nat0 d) \\/ (rep_nat0 k > rep_nat0 d) "
+        "\\/ (rep_nat0 k < rep_nat0 d)"
+    ).by_thm(tri)
+    with p.cases_on("tri"):
+        with p.case("heq: rep_nat0 k = rep_nat0 d"):
+            # k = abs_nat0 (rep_nat0 k) = abs_nat0 (rep_nat0 d) = d.
+            a_var = Var("a", nat0_ty)
+            abs_k = INST([(k_t, a_var)], ABS_REP_NAT0)
+            abs_d = INST([(d_t, a_var)], ABS_REP_NAT0)
+            abs_eq = AP_TERM(abs_nat0, p.fact("heq"))
+            # |- abs_nat0 (rep_nat0 k) = abs_nat0 (rep_nat0 d)
+            k_eq_d = TRANS(SYM(abs_k), TRANS(abs_eq, abs_d))
+            p.have("kd: k = d").by_thm(k_eq_d)
+            p.thus("k = d \\/ nat0_lt k d").by_disj("kd")
+        with p.case(
+            "rest: (rep_nat0 k > rep_nat0 d) \\/ (rep_nat0 k < rep_nat0 d)"
+        ):
+            with p.cases_on("rest"):
+                with p.case("hgt: rep_nat0 k > rep_nat0 d"):
+                    # Contradicts h_lt_suc: rep_k < SUC rep_d.
+                    # SATZ_25: a > b ==> a >= b + 1.
+                    ge_th = MP(SPECL([rep_d, rep_k], SATZ_25), p.fact("hgt"))
+                    # ge_th : rep_k >= rep_d + 1 = SUC rep_d.
+                    ge_suc = REWRITE_RULE([add1_d], ge_th)
+                    # Contradiction: h_lt_suc says rep_k < SUC rep_d.
+                    from nat import _CONTRA_LT_GE
+                    contra = MP(
+                        MP(
+                            SPECL([rep_k, mk_suc(rep_d)], _CONTRA_LT_GE),
+                            h_lt_suc,
+                        ),
+                        ge_suc,
+                    )
+                    p.absurd().by_thm(contra)
+                with p.case("hlt: rep_nat0 k < rep_nat0 d"):
+                    kd_eq = SPECL([k_t, d_t], LT_NAT0)
+                    p.have("klt: nat0_lt k d").by_eq_mp(
+                        SYM(kd_eq), p.fact("hlt")
+                    )
+                    p.thus("k = d \\/ nat0_lt k d").by_disj("klt")
+
+
+# ---------------------------------------------------------------------------
+# Step 5.  NUM_RECURSION_LT -- polymorphic well-founded-recursion existence.
+#
+#   |- !F:(nat0 -> A) -> nat0 -> A.
+#        (!f g n. (!k. nat0_lt k n ==> f k = g k) ==> F f n = F g n)
+#        ==>
+#        ?h:nat0 -> A. !n. h n = F h n.
+#
+# Strategy: depth-bounded recursion built on NUM_RECURSION_0.
+#
+#   1. Specialise NUM_RECURSION_0 at the value type ``nat0 -> A`` to get an
+#      H : nat0 -> nat0 -> A satisfying
+#          H 0       = (\n. ARB_A)
+#          H (SUC0 d) = (\n. F (H d) n).
+#   2. Define h := \n. H (SUC0 n) n.
+#   3. Stabilization lemma (proved here by STRONG_INDUCTION_0 on k):
+#          !d k. nat0_lt k d ==> H d k = h k.
+#      Step at k: pick d > k. Then d = SUC0 d' (NAT0_NEQ_ZERO_PRED), and
+#      k = d' or k <_0 d' (NAT0_LT_SUC0_CASES). Either way, every j < k
+#      has j <_0 d' too, so by IH H d' j = h j and H k j = h j; combined
+#      with MONO_F these give H (SUC0 d') k = F (H d') k = F (H k) k = h k.
+#   4. !n. h n = F h n: apply stabilization at d := SUC0 n (every k < n
+#      satisfies k <_0 SUC0 n).
+# ---------------------------------------------------------------------------
+
+
+def _build_mono_term(F_var, f_var, g_var, n_var, k_var, nat0_lt_const):
+    """Build the MONO_F predicate:
+         !f g n. (!k. nat0_lt k n ==> f k = g k) ==> F f n = F g n.
+    Returns a HOL term (no theorem)."""
+    inner = mk_forall(
+        k_var,
+        mk_imp(
+            mk_app(nat0_lt_const, k_var, n_var),
+            mk_eq(mk_app(f_var, k_var), mk_app(g_var, k_var)),
+        ),
+    )
+    body = mk_imp(
+        inner,
+        mk_eq(
+            mk_app(F_var, f_var, n_var),
+            mk_app(F_var, g_var, n_var),
+        ),
+    )
+    return mk_forall(f_var, mk_forall(g_var, mk_forall(n_var, body)))
+
+
+def _prove_num_recursion_lt():
+    from nat0 import (
+        ZERO,
+        SUC0_DEF,
+        mk_suc0,
+        NUM_RECURSION_0,
+    )
+    from axioms import T, mk_select
+
+    A = aty
+    F_ty = parse_type("(nat0 -> A) -> nat0 -> A")
+    nat0_to_A = parse_type("nat0 -> A")
+
+    F_var = Var("F", F_ty)
+    f_var = Var("f", nat0_to_A)
+    g_var = Var("g", nat0_to_A)
+    n_var = Var("n", nat0_ty)
+    k_var = Var("k", nat0_ty)
+    d_var = Var("d", nat0_ty)
+    j_var = Var("j", nat0_ty)
+    arb_A = mk_select(Var("v", A), T)  # ARB := @v:A. T
+
+    SUC0_c = mk_const("SUC0", [])
+
+    # MONO_F as a term.
+    mono_term = _build_mono_term(F_var, f_var, g_var, n_var, k_var, nat0_lt)
+
+    # Step 1. Use NUM_RECURSION_0 at A := nat0_to_A.
+    NR0_at = INST_TYPE([(nat0_to_A, aty)], NUM_RECURSION_0)
+    # |- !c h. ?fn:nat0 -> nat0_to_A. fn 0 = c /\ !n. fn (SUC0 n) = h n (fn n)
+
+    c_const = mk_abs(n_var, arb_A)  # \n. ARB_A
+    # h_step (d:nat0) (prev:nat0_to_A) := \n. F prev n
+    prev_var = Var("prev", nat0_to_A)
+    h_step = mk_abs(
+        d_var,
+        mk_abs(
+            prev_var,
+            mk_abs(n_var, mk_app(F_var, prev_var, n_var)),
+        ),
+    )
+
+    NR0_spec = SPEC(h_step, SPEC(c_const, NR0_at))
+    # NR0_spec : ?fn. fn 0 = c_const /\ !d. fn (SUC0 d) = h_step d (fn d)
+
+    pred_H = NR0_spec._concl.arg  # \fn. fn 0 = c_const /\ !d. ...
+    H_props_raw = CHOOSE_WITNESS(pred_H, NR0_spec)
+    # H_props_raw : H 0 = c_const /\ !d. H (SUC0 d) = h_step d (H d)
+    # where H = @fn. ...
+    H_term = mk_app(
+        mk_const("@", [(nat0_to_A, aty)]) if False
+        else mk_const("@", [(parse_type("nat0 -> nat0 -> A"), aty)]),
+        pred_H,
+    )
+
+    H_base_raw = CONJUNCT1(H_props_raw)  # H 0 = (\n. ARB)
+    H_step_raw = CONJUNCT2(H_props_raw)  # !d. H (SUC0 d) = h_step d (H d)
+
+    # Beta-reduce h_step to clean form: H (SUC0 d) = \n. F (H d) n.
+    H_step_at_d_raw = SPEC(d_var, H_step_raw)  # H (SUC0 d) = h_step d (H d)
+    # Beta both layers.
+    rhs_raw = rand(H_step_at_d_raw._concl)  # h_step d (H d)
+    # h_step d = \prev. \n. F prev n  (by beta)
+    h_step_at_d = BETA_CONV(mk_app(h_step, d_var))
+    # |- h_step d = (\prev. \n. F prev n)
+    inner_app = AP_THM(h_step_at_d, mk_app(H_term, d_var))
+    # |- h_step d (H d) = (\prev. \n. F prev n) (H d)
+    inner_beta = BETA_CONV(rand(inner_app._concl))
+    # |- (\prev. \n. F prev n) (H d) = (\n. F (H d) n)
+    rhs_clean = TRANS(inner_app, inner_beta)
+    # |- h_step d (H d) = (\n. F (H d) n)
+    H_step_clean_at_d = TRANS(H_step_at_d_raw, rhs_clean)
+    # |- H (SUC0 d) = (\n. F (H d) n)
+    H_step_clean = GEN(d_var, H_step_clean_at_d)
+
+    # Pointwise H (SUC0 d) n = F (H d) n.
+    H_step_at = AP_THM(SPEC(d_var, H_step_clean), n_var)
+    H_step_at = TRANS(H_step_at, BETA_CONV(rand(H_step_at._concl)))
+    # |- H (SUC0 d) n = F (H d) n
+    H_step_pt = GEN(d_var, GEN(n_var, H_step_at))
+
+    # Step 2. Define h := \n. H (SUC0 n) n.
+    h_term = mk_abs(n_var, mk_app(H_term, mk_suc0(n_var), n_var))
+
+    # Pointwise h n = H (SUC0 n) n.
+    h_at_n = BETA_CONV(mk_app(h_term, n_var))  # |- h n = H (SUC0 n) n
+    h_at = GEN(n_var, h_at_n)
+
+    # Step 3. Stabilization lemma:
+    #   !d. nat0_lt k d ==> H d k = h k.
+    # We prove the form !k. !d. nat0_lt k d ==> H d k = h k by strong induction on k.
+
+    # Build the stab predicate: \k. !d. nat0_lt k d ==> H d k = h k.
+    stab_body = mk_forall(
+        d_var,
+        mk_imp(
+            mk_app(nat0_lt, k_var, d_var),
+            mk_eq(
+                mk_app(H_term, d_var, k_var),
+                mk_app(h_term, k_var),
+            ),
+        ),
+    )
+    stab_pred = mk_abs(k_var, stab_body)
+
+    # Stabilization is provable from MONO_F + NAT0_NEQ_ZERO_PRED + NAT0_LT_SUC0_CASES
+    # + STRONG_INDUCTION_0. The proof below uses ASSUME(MONO_F) and
+    # closes by GENERALIZE / DISCH at the end. Working under ASSUME(MONO_F):
+    mono_assume = ASSUME(mono_term)
+
+    # ----- Strong induction on k -----
+    # Specialise STRONG_INDUCTION_0 at stab_pred:
+    SI = SPEC(stab_pred, STRONG_INDUCTION_0)
+    # Form: (!k. (!j. nat0_lt j k ==> stab_pred j) ==> stab_pred k) ==> !k. stab_pred k.
+    # Beta-reduce SI's hypothesis and conclusion to working form.
+    # Hypothesis we must prove: !k. (!j. nat0_lt j k ==> stab_body[k:=j]) ==> stab_body.
+    # We work entirely under ASSUME(MONO_F) and produce stab : |- !k. !d. ...
+
+    # The induction step: take k with IH "!j. nat0_lt j k ==> !d. nat0_lt j d ==> H d j = h j".
+    # Show: !d. nat0_lt k d ==> H d k = h k.
+
+    # IH_term: !j. nat0_lt j k ==> stab_body[k:=j]
+    IH_term = mk_forall(
+        j_var,
+        mk_imp(
+            mk_app(nat0_lt, j_var, k_var),
+            mk_forall(
+                d_var,
+                mk_imp(
+                    mk_app(nat0_lt, j_var, d_var),
+                    mk_eq(
+                        mk_app(H_term, d_var, j_var),
+                        mk_app(h_term, j_var),
+                    ),
+                ),
+            ),
+        ),
+    )
+    IH_assume = ASSUME(IH_term)
+
+    # Take d with nat0_lt k d.
+    kd_lt_term = mk_app(nat0_lt, k_var, d_var)
+    kd_lt_assume = ASSUME(kd_lt_term)  # |- nat0_lt k d
+
+    # Step 3a. Show d ≠ 0. By NAT0_NOT_LT_ZERO at k: ~(nat0_lt k 0). If d=0, kd_lt_assume contradicts.
+    # We prove ~(d = 0) by suppose-contradiction.
+    d_eq_0_term = mk_eq(d_var, ZERO)
+    d_eq_0_assume = ASSUME(d_eq_0_term)
+    # Substitute d := 0 into kd_lt_assume.
+    kd_lt_at_0 = REWRITE_RULE([d_eq_0_assume], kd_lt_assume)
+    # |- nat0_lt k 0 (under d_eq_0_assume)
+    not_lt_0_at_k = SPEC(k_var, NAT0_NOT_LT_ZERO)  # |- ~(nat0_lt k 0)
+    contra_d_zero = MP(NOT_ELIM(not_lt_0_at_k), kd_lt_at_0)  # F (under hyps)
+    # Discharge d_eq_0_assume to get ~(d = 0).
+    d_neq_0 = NOT_INTRO(DISCH(d_eq_0_term, contra_d_zero))
+    # |- ~(d = 0) (under {kd_lt_assume})
+
+    # Step 3b. Get d' s.t. d = SUC0 d'.
+    pred_d = MP(SPEC(d_var, NAT0_NEQ_ZERO_PRED), d_neq_0)
+    # |- ?dp:nat0. d = SUC0 dp
+    dp_pred = pred_d._concl.arg  # \dp. d = SUC0 dp
+    pred_chosen = CHOOSE_WITNESS(dp_pred, pred_d)
+    # |- d = SUC0 dp_w  (under hyps; dp_w := @dp. d = SUC0 dp)
+    dp_w = rand(pred_chosen._concl)  # SUC0 dp_w; rand again to get dp_w
+    dp_w = rand(dp_w)
+    # Now pred_chosen : |- d = SUC0 dp_w.
+
+    # Step 3c. nat0_lt k (SUC0 dp_w) (transport kd_lt_assume).
+    k_lt_S_dp = REWRITE_RULE([pred_chosen], kd_lt_assume)
+    # |- nat0_lt k (SUC0 dp_w)
+
+    # Step 3d. By NAT0_LT_SUC0_CASES: k = dp_w \/ nat0_lt k dp_w.
+    cases = MP(SPECL([k_var, dp_w], NAT0_LT_SUC0_CASES), k_lt_S_dp)
+    # |- k = dp_w \/ nat0_lt k dp_w
+
+    # Step 3e. Establish j_lt_dp : !j. nat0_lt j k ==> nat0_lt j dp_w.
+    # In case k = dp_w: j < k = dp_w, so j < dp_w. Done by REWRITE.
+    # In case nat0_lt k dp_w: j < k < dp_w, so j < dp_w by NAT0_LT_TRANS.
+    # We use DISJ_CASES_TAC equivalent.
+    j_lt_k_term = mk_app(nat0_lt, j_var, k_var)
+    j_lt_k_assume = ASSUME(j_lt_k_term)  # |- nat0_lt j k
+
+    # Branch 1: k = dp_w.
+    k_eq_dp_term = mk_eq(k_var, dp_w)
+    k_eq_dp_assume = ASSUME(k_eq_dp_term)
+    j_lt_dp_via_eq = REWRITE_RULE([k_eq_dp_assume], j_lt_k_assume)
+    # |- nat0_lt j dp_w (under {j_lt_k, k = dp_w})
+    branch1 = DISCH(k_eq_dp_term, j_lt_dp_via_eq)
+    # |- (k = dp_w) ==> nat0_lt j dp_w
+
+    # Branch 2: nat0_lt k dp_w.
+    k_lt_dp_term = mk_app(nat0_lt, k_var, dp_w)
+    k_lt_dp_assume = ASSUME(k_lt_dp_term)
+    j_lt_dp_via_trans = MP(
+        MP(
+            SPECL([j_var, k_var, dp_w], NAT0_LT_TRANS),
+            j_lt_k_assume,
+        ),
+        k_lt_dp_assume,
+    )
+    branch2 = DISCH(k_lt_dp_term, j_lt_dp_via_trans)
+
+    # Combine via DISJ_CASES.
+    from tactics import DISJ_CASES
+    j_lt_dp = DISJ_CASES(cases, branch1, branch2)
+    # |- nat0_lt j dp_w (under {j_lt_k, kd_lt, mono})
+    j_lt_dp_dischk = DISCH(j_lt_k_term, j_lt_dp)
+    # |- nat0_lt j k ==> nat0_lt j dp_w (under {kd_lt, mono})
+
+    # Step 3f. Use IH at j to get H dp_w j = h j and H k j = h j.
+    # IH at j: nat0_lt j k ==> !d. nat0_lt j d ==> H d j = h j.
+    IH_at_j = SPEC(j_var, IH_assume)
+    # |- nat0_lt j k ==> !d. nat0_lt j d ==> H d j = h j
+
+    # Under j_lt_k_assume:
+    IH_inner_at_j = MP(IH_at_j, j_lt_k_assume)
+    # |- !d. nat0_lt j d ==> H d j = h j
+
+    H_dp_j = MP(SPEC(dp_w, IH_inner_at_j), j_lt_dp)
+    # |- H dp_w j = h j  (under {j_lt_k, kd_lt, mono, ...})
+
+    H_k_j = MP(SPEC(k_var, IH_inner_at_j), j_lt_k_assume)
+    # |- H k j = h j
+
+    # H dp_w j = H k j (under same hyps).
+    H_eq_at_j = TRANS(H_dp_j, SYM(H_k_j))
+    # |- H dp_w j = H k j
+
+    # Discharge j_lt_k to get !j. nat0_lt j k ==> H dp_w j = H k j.
+    H_eq_dischk = DISCH(j_lt_k_term, H_eq_at_j)
+    H_eq_forall = GEN(j_var, H_eq_dischk)
+    # |- !j. nat0_lt j k ==> H dp_w j = H k j  (under {kd_lt, mono})
+
+    # Step 3g. Apply MONO_F at f := H dp_w, g := H k, n := k.
+    H_dp_curried = mk_app(H_term, dp_w)
+    H_k_curried = mk_app(H_term, k_var)
+
+    # mono_assume specialised: F (H dp_w) k = F (H k) k.
+    mono_at = SPEC(k_var, SPEC(H_k_curried, SPEC(H_dp_curried, mono_assume)))
+    # |- (!j. nat0_lt j k ==> H dp_w j = H k j) ==> F (H dp_w) k = F (H k) k
+
+    # Need to rename bound j inside. The SPEC may have introduced k as a bound name, let's check.
+    # mono_assume : !f g n. (!k. nat0_lt k n ==> f k = g k) ==> F f n = F g n.
+    # SPEC(H_dp_curried, mono_assume): !g n. (!k. nat0_lt k n ==> H dp_w k = g k) ==> ...
+    # Hmm: this might rename inner k automatically; let me trust the kernel.
+
+    F_eq = MP(mono_at, H_eq_forall)
+    # |- F (H dp_w) k = F (H k) k
+
+    # Step 3h. H d k = F (H dp_w) k via H_step_pt at d := dp_w + pred_chosen.
+    H_step_at_dp = SPEC(k_var, SPEC(dp_w, H_step_pt))
+    # |- H (SUC0 dp_w) k = F (H dp_w) k
+    H_step_at_d_via_eq = REWRITE_RULE([SYM(pred_chosen)], H_step_at_dp)
+    # |- H d k = F (H dp_w) k
+
+    # h k = H (SUC0 k) k = F (H k) k.
+    h_at_k = SPEC(k_var, h_at)  # |- h k = H (SUC0 k) k
+    H_step_at_k_eq = SPEC(k_var, SPEC(k_var, H_step_pt))
+    # |- H (SUC0 k) k = F (H k) k
+    h_eq_F_H_k = TRANS(h_at_k, H_step_at_k_eq)
+    # |- h k = F (H k) k
+
+    # Combine: H d k = F (H dp_w) k = F (H k) k = h k.
+    final = TRANS(TRANS(H_step_at_d_via_eq, F_eq), SYM(h_eq_F_H_k))
+    # |- H d k = h k  (under {kd_lt, mono, IH})
+
+    # Discharge kd_lt then GEN d.
+    final_dischd = DISCH(kd_lt_term, final)
+    # |- nat0_lt k d ==> H d k = h k  (under {mono, IH})
+    final_forall_d = GEN(d_var, final_dischd)
+    # |- !d. nat0_lt k d ==> H d k = h k
+
+    # Need to rebuild as stab_pred at k. stab_pred k = beta-reduced form.
+    stab_at_k_eq = BETA_CONV(mk_app(stab_pred, k_var))
+    # |- stab_pred k = (!d. nat0_lt k d ==> H d k = h k)
+    stab_at_k_th = EQ_MP(SYM(stab_at_k_eq), final_forall_d)
+
+    # Discharge IH_assume.
+    IH_dischk_at_k = DISCH(IH_term, stab_at_k_th)
+    # |- (!j. nat0_lt j k ==> stab_pred j) ==> stab_pred k -- but the LHS is in
+    # terms of stab_body, not stab_pred j (beta). We need to rewrite IH to use stab_pred j.
+
+    # Actually IH_assume's body uses j_lt_k_term but inner forall uses stab_body[k:=j], which
+    # is what stab_pred j beta-reduces to. So we need to either accept this or convert.
+    # Build the canonical IH form: !j. nat0_lt j k ==> stab_pred j.
+    stab_at_j_eq = BETA_CONV(mk_app(stab_pred, j_var))
+    # |- stab_pred j = (!d. nat0_lt j d ==> H d j = h j)
+    canonical_IH = mk_forall(
+        j_var,
+        mk_imp(
+            mk_app(nat0_lt, j_var, k_var),
+            mk_app(stab_pred, j_var),
+        ),
+    )
+    canonical_IH_assume = ASSUME(canonical_IH)
+    # Convert canonical_IH to IH_term via stab_at_j_eq under each j.
+    IH_inst_j = MP(SPEC(j_var, canonical_IH_assume), ASSUME(j_lt_k_term))
+    # IH_inst_j : stab_pred j (under j_lt_k)
+    IH_inst_j_unbeta = EQ_MP(stab_at_j_eq, IH_inst_j)
+    # IH_inst_j_unbeta : !d. nat0_lt j d ==> H d j = h j (under {j_lt_k, canonical_IH})
+    IH_dischj_at_j = DISCH(j_lt_k_term, IH_inst_j_unbeta)
+    IH_forallj_canonical_form = GEN(j_var, IH_dischj_at_j)
+    # |- !j. nat0_lt j k ==> (!d. nat0_lt j d ==> H d j = h j)  (under canonical_IH)
+    # That's IH_term under canonical_IH; use this to discharge IH_assume in IH_dischk_at_k.
+
+    # IH_dischk_at_k says: IH_term ==> stab_pred k.
+    # Now derive stab_pred k under canonical_IH by MP.
+    stab_at_k_under_canonical = MP(IH_dischk_at_k, IH_forallj_canonical_form)
+    # |- stab_pred k (under canonical_IH + kd-related; but kd-related discharged already)
+
+    # Now discharge canonical_IH and GEN k to satisfy the strong induction premise.
+    si_premise_at_k = DISCH(canonical_IH, stab_at_k_under_canonical)
+    # |- (!j. nat0_lt j k ==> stab_pred j) ==> stab_pred k
+    si_premise = GEN(k_var, si_premise_at_k)
+    # |- !k. (!j. nat0_lt j k ==> stab_pred j) ==> stab_pred k
+
+    # Apply STRONG_INDUCTION_0.
+    stab_concl = MP(SI, si_premise)
+    # |- !k. stab_pred k
+
+    # Unbeta to canonical form.
+    stab_at_n = SPEC(n_var, stab_concl)  # stab_pred n
+    stab_n_unbeta = EQ_MP(BETA_CONV(mk_app(stab_pred, n_var)), stab_at_n)
+    # |- !d. nat0_lt n d ==> H d n = h n
+    stab = GEN(n_var, stab_n_unbeta)
+    # |- !n. !d. nat0_lt n d ==> H d n = h n
+    # (under {mono})
+
+    # Step 4. Recursion equation: !n. h n = F h n.
+    # h n = H (SUC0 n) n by h_at; = F (H n) n by H_step_pt.
+    # Need F (H n) n = F h n by mono with H n j = h j for j < n.
+    # Use stab specialized at d := n: nat0_lt k n ==> H n k = h k.
+
+    H_n_eq_h_at_k = MP(
+        SPEC(n_var, SPEC(k_var, stab)),  # nat0_lt k n ==> H n k = h k
+        ASSUME(mk_app(nat0_lt, k_var, n_var)),
+    )
+    # |- H n k = h k (under {nat0_lt k n, mono})
+    H_n_eq_h_dischk = DISCH(mk_app(nat0_lt, k_var, n_var), H_n_eq_h_at_k)
+    H_n_eq_h_forall = GEN(k_var, H_n_eq_h_dischk)
+
+    # mono at f := H n, g := h, n := n: gives F (H n) n = F h n.
+    H_n_curried = mk_app(H_term, n_var)
+    h_curried = h_term
+    mono_at_step = SPEC(n_var, SPEC(h_curried, SPEC(H_n_curried, mono_assume)))
+    F_step_eq = MP(mono_at_step, H_n_eq_h_forall)
+    # |- F (H n) n = F h n
+
+    # Chain: h n = H (SUC0 n) n = F (H n) n = F h n.
+    h_at_n_th = SPEC(n_var, h_at)  # h n = H (SUC0 n) n
+    H_step_at_n_n = SPEC(n_var, SPEC(n_var, H_step_pt))  # H (SUC0 n) n = F (H n) n
+    rec_eq = TRANS(TRANS(h_at_n_th, H_step_at_n_n), F_step_eq)
+    # |- h n = F h n
+    rec_eq_forall = GEN(n_var, rec_eq)
+    # |- !n. h n = F h n
+
+    # Witness h for ?h. !n. h n = F h n.
+    exist_pred = mk_abs(
+        Var("hh", nat0_to_A),
+        mk_forall(
+            n_var,
+            mk_eq(
+                mk_app(Var("hh", nat0_to_A), n_var),
+                mk_app(F_var, Var("hh", nat0_to_A), n_var),
+            ),
+        ),
+    )
+    exist_th = EXISTS(exist_pred, h_term, rec_eq_forall)
+    # |- ?h. !n. h n = F h n  (under {mono})
+
+    # Discharge mono_assume + GEN F.
+    final_th = DISCH(mono_term, exist_th)
+    return GEN(F_var, final_th)
+
+
+NUM_RECURSION_LT = _prove_num_recursion_lt()
+
+
+# ---------------------------------------------------------------------------
+# Step 6.  define_wf_lt -- declare a recursive function on ``nat0`` whose
+# recursion is well-founded on ``nat0_lt`` (i.e. recursive calls go to
+# strictly-smaller arguments).
+#
+# Caller provides the body F : (nat0 -> A) -> nat0 -> A and a proof that
+# F's value at ``n`` only depends on f's values at ``k <_0 n`` (the
+# monotonicity / well-foundedness side condition). The helper then:
+#
+#   1. SPECs NUM_RECURSION_LT at A and F, MPs through the mono proof to
+#      get ``?h. !n. h n = F h n``.
+#   2. Pulls ``h`` out via CHOOSE_WITNESS as a SELECT term.
+#   3. Calls ``parser.define`` to bind the new constant to that SELECT term.
+#   4. Rewrites the recursion equation through the new definition.
+#
+# Returns (NAME_DEF, REC) where:
+#   NAME_DEF : |- name = (@h. !n. h n = F h n)         (definitional)
+#   REC      : |- !n. name n = F name n                (recursion equation)
+# ---------------------------------------------------------------------------
+
+
+def _check_nat0_to_A(fn_ty):
+    from fusion import Tyapp
+    ok = (
+        isinstance(fn_ty, Tyapp)
+        and fn_ty.tyop == "fun"
+        and fn_ty.args[0] == nat0_ty
+    )
+    if not ok:
+        raise HolError(
+            f"define_wf_lt: fn_ty must be 'nat0 -> A', got {fn_ty}"
+        )
+    return fn_ty.args[1]
+
+
+def define_wf_lt(name, fn_ty, F_term, mono_th, *, infix=None):
+    """Declare ``name : nat0 -> A`` by well-founded recursion on nat0_lt.
+
+    Args:
+      name   -- string, the new constant.
+      fn_ty  -- HOL type, must be ``nat0 -> A`` for some A.
+      F_term -- term of type ``(nat0 -> A) -> nat0 -> A``: the body. The
+                recursion equation will read ``name n = F_term name n``.
+      mono_th -- theorem of shape
+                  |- !f g n. (!k. nat0_lt k n ==> f k = g k)
+                              ==> F_term f n = F_term g n.
+      infix  -- forwarded to ``parser.define``.
+
+    Returns: ``(NAME_DEF, REC_TH)``.
+    """
+    A_ty = _check_nat0_to_A(fn_ty)
+
+    NR_at_A = INST_TYPE([(A_ty, aty)], NUM_RECURSION_LT)
+    NR_at_F = SPEC(F_term, NR_at_A)
+    exist_th = MP(NR_at_F, mono_th)
+    # exist_th : |- ?hh. !n. hh n = F_term hh n
+
+    pred_h = exist_th._concl.arg  # \hh. !n. hh n = F_term hh n
+    h_props = CHOOSE_WITNESS(pred_h, exist_th)
+    # h_props : |- !n. (h_w n) = F_term h_w n   where h_w = @hh. pred_h hh
+
+    h_witness = mk_app(mk_const("@", [(fn_ty, aty)]), pred_h)
+    NAME_DEF = define(name, fn_ty, h_witness, infix=infix)
+    # NAME_DEF : |- name = h_witness
+
+    REC_TH = REWRITE_RULE([SYM(NAME_DEF)], h_props)
+    # REC_TH : |- !n. name n = F_term name n
+    return NAME_DEF, REC_TH
+
+
 if __name__ == "__main__":
     from parser import pp_thm
 
@@ -543,3 +1176,9 @@ if __name__ == "__main__":
     print("  NAT0_LT_SUC0_MONO  :", pp_thm(NAT0_LT_SUC0_MONO))
     print("  NAT0_LT_0_SUC0     :", pp_thm(NAT0_LT_0_SUC0))
     print("  NAT0_LT_SUC0_INSERT:", pp_thm(NAT0_LT_SUC0_INSERT))
+    print("Step 4 OK -- predecessor / case-split helpers.")
+    print("  NAT0_NOT_LT_ZERO   :", pp_thm(NAT0_NOT_LT_ZERO))
+    print("  NAT0_NEQ_ZERO_PRED :", pp_thm(NAT0_NEQ_ZERO_PRED))
+    print("  NAT0_LT_SUC0_CASES :", pp_thm(NAT0_LT_SUC0_CASES))
+    print("Step 5 OK -- NUM_RECURSION_LT (well-founded recursion existence).")
+    print("  NUM_RECURSION_LT   :", pp_thm(NUM_RECURSION_LT))
