@@ -322,7 +322,7 @@ def NOT_INTRO(th_imp_F):
 
 
 def EQF_INTRO(th_not):
-    """|- ~p   =>   |- p = F"""
+    """|- ~p   =>   |- F = p"""
     p_t = rand(th_not._concl)
     th_p = ASSUME(p_t)
     th_F = MP(NOT_ELIM(th_not), th_p)

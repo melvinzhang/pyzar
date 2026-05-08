@@ -472,21 +472,6 @@ register_pattern_handler(PatName, _handle_name_pattern)
 register_pattern_handler(PatConj, _handle_conj_pattern)
 
 
-def _pattern_primary_label(pat):
-    """First named label found in ``pat`` (left-to-right). Used as the
-    informational label on the ``_AssumeHyp`` record; ``DISCH`` at frame
-    close uses ``asm._concl``, not the label, so any name suffices."""
-    if isinstance(pat, PatName):
-        return pat.label
-    if isinstance(pat, PatConj):
-        for sub in pat.parts:
-            lbl = _pattern_primary_label(sub)
-            if lbl is not None:
-                return lbl
-        return None
-    return None
-
-
 # ---------------------------------------------------------------------------
 # Frame: a single open scope (root, induction body, base/step, case).
 # ---------------------------------------------------------------------------
@@ -593,27 +578,23 @@ class _CasesData:
 
 
 @dataclasses.dataclass
-class _AssumeHyp:
-    """Per-frame entry recorded by ``Proof.assume``: the user-visible
-    label, the kernel ``ASSUME`` theorem, and a shape equation bridging
-    the user's surface term to the goal's antecedent.
-
-    ``_discharge_lazy_lets`` mutates ``asm`` and ``term_eq_ant`` in place
-    when a lazy let goes out of scope; ``_close_frame`` later DISCHes
-    them in the original registration order.
+class _Binding:
+    """A frame-scoped binding from ``fix`` (kind="var") or ``assume``
+    (kind="hyp"). Stored in interleave order so ``_close_frame`` can
+    replay GEN/DISCH in the natural reverse order, preserving goals
+    shaped like ``!a. h1 ==> !b. h2 ==> body``.
     """
-
-    label: str
-    asm: object
-    term_eq_ant: object
+    kind: str  # "var" | "hyp"
+    var: object = None  # for "var"
+    asm: object = None  # for "hyp": the saved ASSUME thm
+    term_eq_ant: object = None  # for "hyp": surface-form shape equation
 
 
 class _Frame:
     __slots__ = (
         "goal",
         "kind",
-        "vars_added",
-        "hyps_added",
+        "bindings",
         "facts_added",
         "choose_env",
         "type_env",
@@ -626,8 +607,7 @@ class _Frame:
     def __init__(self, goal=None, kind=FrameKind.ROOT):
         self.goal = goal
         self.kind = kind
-        self.vars_added = []  # for fix(): GEN at close
-        self.hyps_added = []  # list of _AssumeHyp; DISCH'd at close
+        self.bindings = []  # list of _Binding (interleaved fix/assume order)
         self.facts_added = []  # labels added at this frame; popped on exit
         self.choose_env = {}  # name -> witness term (parser env entries)
         self.type_env = {}  # name -> hol_type for higher-order params
@@ -635,6 +615,14 @@ class _Frame:
         self.simp_rules = []  # list of theorems used as default rewrite rules
         self.data = None  # _InductionData / _CasesData (kind-specific)
         self.result = None  # the theorem proving `goal`
+
+    @property
+    def vars_added(self):
+        return [b.var for b in self.bindings if b.kind == "var"]
+
+    @property
+    def hyps_added(self):
+        return [b for b in self.bindings if b.kind == "hyp"]
 
 
 # ---------------------------------------------------------------------------
@@ -960,38 +948,54 @@ class Proof:
     def _close_frame(self, fr, th):
         """Discharge a frame's accumulated bindings into ``th``.
 
+        Bindings (``fix`` and ``assume``) are stored in interleaved
+        registration order on ``fr.bindings``; ``_close_frame`` replays
+        them in reverse, alternating ``GEN`` (for ``fix``) and
+        ``DISCH`` + shape-rewrite (for ``assume``). This preserves the
+        natural goal shape, so a goal like
+        ``!a. h1 ==> !b. h2 ==> body`` closes via
+        ``fix("a"); assume("h1"); fix("b"); assume("h2"); thus(...)``
+        without forcing the user to flatten foralls outside.
+
         For each saved hyp, ``DISCH(asm._concl, th)`` produces
         ``... |- term ==> consequent`` (with ``term`` being the user's
         surface form). The accompanying ``term_eq_ant`` (``|- term =
         ant``) is lifted to an implication equation
         ``|- (term ==> consequent) = (ant ==> consequent)`` via
         ``MK_COMB(AP_TERM(==>, term_eq_ant), REFL(consequent))``, then
-        ``EQ_MP`` rewrites the antecedent to the goal's kernel form. So
-        the user always sees their surface form via ``p.fact(label)``,
-        and the closed theorem matches the original goal exactly.
+        ``EQ_MP`` rewrites the antecedent to the goal's kernel form,
+        so the closed theorem matches the original goal exactly.
 
-        ``hyps_added`` stores the registered ``ASSUME`` theorems and
-        their shape equations; ``_discharge_lazy_lets`` INSTs both in
-        lockstep with ``th``, so ``DISCH`` / lazy-let-discharge order
-        does not affect correctness. ``GEN`` still has to come last
-        (its ``ABS`` step fails if a fix-var is free in any remaining
-        hyp).
+        Lazy lets are discharged first (before any binding replay):
+        ``_discharge_lazy_lets`` INSTs the saved ASSUMEs in lockstep,
+        so each binding's ``asm._concl`` already matches ``th._asl``
+        by the time DISCH runs.
 
-        Induction's frame has empty ``hyps_added`` / ``vars_added``
-        (the ``GEN`` happens earlier via ``INDUCT_PROVE``), so for
-        that caller this collapses to ``_discharge_lazy_lets``.
+        ``GEN``'s ``ABS`` step fails if its var is free in any
+        remaining hyp; that invariant holds here because a hyp added
+        before a ``fix("v")`` cannot mention ``v`` (v wasn't in scope
+        at the assume site), so reverse iteration discharges any
+        ``v``-mentioning hyp before its GEN.
+
+        Induction's frame has empty ``bindings`` (the ``GEN`` happens
+        earlier via ``INDUCT_PROVE``), so for that caller this
+        collapses to ``_discharge_lazy_lets``.
         """
-        for h in reversed(fr.hyps_added):
-            th = DISCH(h.asm._concl, th)
-            consequent = rand(th._concl)
-            imp_eq_const = rator(rator(th._concl))  # the (==>) const
-            imp_eq = MK_COMB(AP_TERM(imp_eq_const, h.term_eq_ant), REFL(consequent))
-            th = EQ_MP(imp_eq, th)
         th = self._discharge_lazy_lets(fr, th)
         th = _beta_norm_concl(th)
-        for v in reversed(fr.vars_added):
-            th = GEN(v, th)
-        return th
+        for b in reversed(fr.bindings):
+            if b.kind == "var":
+                th = GEN(b.var, th)
+            else:  # "hyp"
+                th = DISCH(b.asm._concl, th)
+                consequent = rand(th._concl)
+                imp_eq_const = rator(rator(th._concl))  # the (==>) const
+                imp_eq = MK_COMB(
+                    AP_TERM(imp_eq_const, b.term_eq_ant),
+                    REFL(consequent),
+                )
+                th = EQ_MP(imp_eq, th)
+        return _beta_norm_concl(th)
 
     def _discharge_lazy_lets(self, frame, th):
         """Discharge each lazy-let hypothesis on ``th`` from ``frame``.
@@ -1237,7 +1241,7 @@ class Proof:
                 )
             self._require_fresh_name(nm, "fix")
             self._cur.goal = pred.body
-            self._cur.vars_added.append(pred.bvar)
+            self._cur.bindings.append(_Binding(kind="var", var=pred.bvar))
 
     def let(self, spec, types=None):
         """Register a local abbreviation in the current frame
@@ -1374,8 +1378,9 @@ class Proof:
             self._cur.goal = cons
             asm_th = ASSUME(term)
             term_eq_ant = self._derive_shape_eq(term, ant, op="assume")
-            primary = _pattern_primary_label(pattern) or self._fresh_label("h")
-            self._cur.hyps_added.append(_AssumeHyp(primary, asm_th, term_eq_ant))
+            self._cur.bindings.append(
+                _Binding(kind="hyp", asm=asm_th, term_eq_ant=term_eq_ant)
+            )
             _apply_pattern(self, pattern, asm_th)
 
     def _derive_shape_eq(self, lhs, rhs, op="_derive_shape_eq"):

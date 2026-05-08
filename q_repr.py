@@ -1330,13 +1330,14 @@ def MEM_L_APPEND_PRESERVES(p):
               !p2 f. (mem_l p1 f \\/ mem_l p2 f)
                      ==> mem_l (append_l p1 p2) f."""
     p.goal(
-        "!p1 h1 p2 f. Proof_Q p1 h1 ==> "
-        "(mem_l p1 f \\/ mem_l p2 f) "
+        "!p1. !h1. Proof_Q p1 h1 ==> "
+        "!p2 f. (mem_l p1 f \\/ mem_l p2 f) "
         "==> mem_l (append_l p1 p2) f"
     )
     with p.strong_induction("p1", "IH"):
-        p.fix("h1 p2 f")
+        p.fix("h1")
         p.assume("pq: Proof_Q p1 h1")
+        p.fix("p2 f")
         p.assume("hd: mem_l p1 f \\/ mem_l p2 f")
 
         # Unfold pq to extract p1 = cons_l hd_v tl, hd_v = h1, etc.
@@ -1453,8 +1454,8 @@ def MEM_L_APPEND_PRESERVES(p):
                                     "mem_l (append_l tl p2) f"
                                 ).by(
                                     "IH", "tl", "lt_tl_p1",
-                                    "h_inner", "p2", "f",
-                                    "h_inner_eq", "ih_disj",
+                                    "h_inner", "h_inner_eq",
+                                    "p2", "f", "ih_disj",
                                 )
                                 p.have(
                                     "right_disj: f = hd_v "
@@ -1519,8 +1520,8 @@ def MEM_L_APPEND_PRESERVES(p):
                             "mem_app_tl: mem_l (append_l tl p2) f"
                         ).by(
                             "IH", "tl", "lt_tl_p1",
-                            "h_inner", "p2", "f",
-                            "h_inner_eq", "ih_disj",
+                            "h_inner", "h_inner_eq",
+                            "p2", "f", "ih_disj",
                         )
                         p.have(
                             "right_disj: f = hd_v "
@@ -1708,12 +1709,14 @@ def PROOF_Q_APPEND(p):
     """|- !p1 h1 p2 h2. Proof_Q p1 h1 ==> Proof_Q p2 h2
                        ==> Proof_Q (append_l p1 p2) h1."""
     p.goal(
-        "!p1 h1 p2 h2. Proof_Q p1 h1 ==> Proof_Q p2 h2 "
+        "!p1. !h1. Proof_Q p1 h1 ==> "
+        "!p2 h2. Proof_Q p2 h2 "
         "==> Proof_Q (append_l p1 p2) h1"
     )
     with p.strong_induction("p1", "IH"):
-        p.fix("h1 p2 h2")
+        p.fix("h1")
         p.assume("pq1: Proof_Q p1 h1")
+        p.fix("p2 h2")
         p.assume("pq2: Proof_Q p2 h2")
 
         rec_pq1 = SPECL(
@@ -1848,8 +1851,8 @@ def PROOF_Q_APPEND(p):
                         "mem_l (append_l tl p2) f"
                     ).by(
                         MEM_L_APPEND_PRESERVES,
-                        "tl", "h_inner", "p2", "f",
-                        "h_inner_eq", "ih_disj",
+                        "tl", "h_inner", "h_inner_eq",
+                        "p2", "f", "ih_disj",
                     )
 
                 p.have(
@@ -1861,8 +1864,8 @@ def PROOF_Q_APPEND(p):
                 p.have(
                     "pq_app: Proof_Q (append_l tl p2) h_inner"
                 ).by("IH", "tl", "lt_tl_p1",
-                     "h_inner", "p2", "h2",
-                     "h_inner_eq", "pq2")
+                     "h_inner", "h_inner_eq",
+                     "p2", "h2", "pq2")
 
                 p.have(
                     "ex_app: ?h_inner. Proof_Q (append_l tl p2) h_inner"
@@ -2444,16 +2447,16 @@ def MP_HAS_PROOF(p):
     p.have(
         "mem_app_imp: mem_l (append_l p2 p1) (Imp_f f g)"
     ).by(MEM_L_APPEND_PRESERVES,
-         "p2", "Imp_f f g", "p1", "Imp_f f g",
-         "pq2", "disj_imp")
+         "p2", "Imp_f f g", "pq2",
+         "p1", "Imp_f f g", "disj_imp")
     p.have(
         "disj_f: mem_l p2 f \\/ mem_l p1 f"
     ).by_disj("mem_p1_f")
     p.have(
         "mem_app_f: mem_l (append_l p2 p1) f"
     ).by(MEM_L_APPEND_PRESERVES,
-         "p2", "Imp_f f g", "p1", "f",
-         "pq2", "disj_f")
+         "p2", "Imp_f f g", "pq2",
+         "p1", "f", "disj_f")
 
     # is_mp f (Imp_f f g) g  =  (Imp_f f g = Imp_f f g).
     is_mp_at = SPECL(
@@ -2518,8 +2521,8 @@ def MP_HAS_PROOF(p):
     # PROOF_Q_APPEND with witness Imp_f f g.
     p.have(
         "pq_app: Proof_Q (append_l p2 p1) (Imp_f f g)"
-    ).by(PROOF_Q_APPEND, "p2", "Imp_f f g", "p1", "f",
-         "pq2", "pq1")
+    ).by(PROOF_Q_APPEND, "p2", "Imp_f f g", "pq2",
+         "p1", "f", "pq1")
     p.have(
         "tail_ex: ?h_inner. Proof_Q (append_l p2 p1) h_inner"
     ).by_witness("Imp_f f g", "pq_app")
