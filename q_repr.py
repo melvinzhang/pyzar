@@ -139,7 +139,7 @@ from axioms import dest_exists
 from tactics import (
     CHOOSE_WITNESS, AP_TERM, OR_CONG, REWRITE_RULE,
 )
-from fusion import vsubst, aty, DEDUCT_ANTISYM_RULE
+from fusion import vsubst, aty, DEDUCT_ANTISYM_RULE, new_constant
 from q_proof import (
     var_x,
     Prov_Q, PROV_Q_AT, PROV_Q_AXIOM, PROV_Q_MP, PROV_Q_GEN,
@@ -2542,6 +2542,215 @@ def PROV_Q_IFF_PROOF_Q(p):
 
 
 # ---------------------------------------------------------------------------
+# Stage 3C (a) -- representability of ``substitute`` (AXIOMATIZED).
+#
+# Headline theorem (``SUBSTITUTE_REPRESENTS``):
+#   |- !F t v. Prov_Q (
+#         substitute (substitute (substitute (substitute
+#             substitute_internal (numeral F) var_x)
+#             (numeral t) var_y)
+#             (numeral v) var_z)
+#             (numeral (substitute F t v)) var_w).
+#
+# ``substitute_internal`` is a Q-formula in four free variables -- ``var_x``
+# (F-slot), ``var_y`` (t-slot), ``var_z`` (v-slot), ``var_w`` (result-slot)
+# -- expressing the relation "substitute(F, t, v) = r".
+#
+# The standard textbook proof requires:
+#   * a finite-sequence coding device inside Q (Goedel's beta function
+#     via Chinese remainder, or Cantor pairing via division/mod);
+#   * external structural induction on F using the Stage-1 SUBSTITUTE_AT_*
+#     equations.
+#
+# Why a single fixed Sigma_1 formula is required, not a HOL-recursive
+# family: the diagonal lemma (Stage 3D) forms the Goedel sentence by
+# substituting a numeric godelnum into a *single fixed* internal-provability
+# formula. Without ``substitute_internal`` as one fixed Q-formula, no
+# ``D(x, y)`` represents the diagonal function and the fixed-point
+# construction collapses (analysis recorded for posterity, do not
+# re-explore).
+#
+# AXIOMATIZED for now: ``substitute_internal`` is declared opaque
+# (``new_constant``, no defining body) and ``SUBSTITUTE_REPRESENTS`` is
+# closed via ``p.sorry()`` -- which posts ``new_axiom`` of the conclusion
+# and prints a sorry-warning at proof end. The opaque declaration prevents
+# downstream code from accidentally unfolding the placeholder and deriving
+# inconsistencies from a degenerate body.
+#
+# To discharge later: build (Cantor pairing or beta) sequence coding,
+# prove the substitute trace as a Sigma_1 predicate, then external
+# induction on F (~1500 lines of new infrastructure including the arith.
+# representability prerequisites for ``add``, ``times``, ``mod``).
+# ---------------------------------------------------------------------------
+
+
+VAR_Z_DEF = define("var_z", parse_type("nat0"),
+                   "Var_t (SUC0 (SUC0 0))")
+var_z = mk_const("var_z", [])
+
+VAR_W_DEF = define("var_w", parse_type("nat0"),
+                   "Var_t (SUC0 (SUC0 (SUC0 0)))")
+var_w = mk_const("var_w", [])
+
+
+# Opaque: no defining body. Stage 3C will replace this with a definition
+# of the actual Sigma_1 substitute-trace formula.
+new_constant("substitute_internal", nat0_ty)
+substitute_internal = mk_const("substitute_internal", [])
+
+
+@proof
+def SUBSTITUTE_REPRESENTS(p):
+    """|- !F t v. Prov_Q (
+              substitute (substitute (substitute (substitute
+                  substitute_internal (numeral F) var_x)
+                  (numeral t) var_y)
+                  (numeral v) var_z)
+                  (numeral (substitute F t v)) var_w).
+
+    Stage 3C(a) representability of ``substitute``. AXIOMATIZED via
+    ``p.sorry()``; see Stage 3C section comment for the deferred
+    construction (Cantor pairing or beta function + induction on F).
+    """
+    p.goal(
+        "!F t v. Prov_Q ("
+        "substitute (substitute (substitute (substitute "
+        "  substitute_internal (numeral F) var_x) "
+        "  (numeral t) var_y) "
+        "  (numeral v) var_z) "
+        "  (numeral (substitute F t v)) var_w)"
+    )
+    p.sorry()
+
+
+# ---------------------------------------------------------------------------
+# Stage 3D (a) -- representability of provability (AXIOMATIZED).
+#
+# Headline theorem (``PROV_Q_REPRESENTS``):
+#   |- !n. Prov_Q n <=>
+#          Prov_Q (substitute Prov_Q_internal (numeral n) var_x).
+#
+# ``Prov_Q_internal`` is a Q-formula with ``var_x`` as its sole free
+# variable, expressing the relation "Prov_Q holds at var_x".
+#
+# The standard textbook construction (BBJ Ch. 17, Smullyan Ch. 4) goes
+# bottom-up:
+#
+#   * ``mem_l_internal``    -- representability of HOL ``mem_l``
+#   * ``valid_step_internal`` -- representability of HOL ``valid_step``
+#                                (built from ``mem_l_internal``,
+#                                ``is_axiom_internal``,
+#                                ``is_mp_internal``,
+#                                ``is_gen_internal``)
+#   * ``Proof_Q_internal``  -- representability of HOL ``Proof_Q``
+#                                (recursive over the proof list;
+#                                requires sequence coding via beta or
+#                                Cantor pairing inside Q)
+#   * ``Prov_Q_internal``   -- existential closure
+#                                ?_internal var_y. Proof_Q_internal,
+#                                where ``?_internal`` is encoded in Q
+#                                as ``Not_f (Forall_f (var_y_idx)
+#                                (Not_f ...))`` since Q's only native
+#                                quantifier is ``Forall_f``.
+#
+# Forward direction (HOL ``Prov_Q n`` ==> Q proves
+# ``Prov_Q_internal``-substituted): Sigma_1 completeness for Q (any true
+# Sigma_1 sentence is Q-provable). Computed externally via
+# ``PROV_Q_IFF_PROOF_Q`` to extract a witness ``p``, then witnessed
+# internally.
+#
+# Backward direction (Q proves ==> HOL): Sigma_1 soundness for Q,
+# which lives in Stage 6 via the HF model construction.
+#
+# AXIOMATIZED for now: ``Prov_Q_internal`` is declared opaque
+# (``new_constant``, no defining body) and the headline theorem +
+# diagonal-lemma side conditions (``is_form``, ``free_in``) are closed
+# via ``p.sorry()``. The opaque declaration prevents accidental
+# unfolding.
+#
+# Side conditions posted with the headline:
+#   * ``IS_FORM_PROV_Q_INTERNAL``  : |- is_form Prov_Q_internal.
+#   * ``FREE_IN_PROV_Q_INTERNAL``  : |- !v. free_in Prov_Q_internal v
+#                                          <=> v = var_x.
+# Both are required by the diagonal lemma (Stage 4): ``phi(x)`` must be
+# a well-formed Q-formula whose only free variable is ``var_x``.
+#
+# Also defines ``substitute_2`` as a HOL helper for the diagonal lemma:
+#   substitute_2 F a b vx vy := substitute (substitute F a vx) b vy.
+# ---------------------------------------------------------------------------
+
+
+# substitute_2 helper -- compose two substitutes; used by Stage 4 to
+# express "phi(x, y) with both x and y substituted by numerals".
+_F_s2 = Var("F", nat0_ty)
+_a_s2 = Var("a", nat0_ty)
+_b_s2 = Var("b", nat0_ty)
+_vx_s2 = Var("vx", nat0_ty)
+_vy_s2 = Var("vy", nat0_ty)
+
+
+SUBSTITUTE_2_DEF = define(
+    "substitute_2",
+    parse_type("nat0 -> nat0 -> nat0 -> nat0 -> nat0 -> nat0"),
+    mk_abs(_F_s2, mk_abs(_a_s2, mk_abs(_b_s2,
+        mk_abs(_vx_s2, mk_abs(_vy_s2,
+            mk_app(substitute,
+                   mk_app(substitute, _F_s2, _a_s2, _vx_s2),
+                   _b_s2, _vy_s2)))))),
+)
+substitute_2 = mk_const("substitute_2", [])
+
+
+# Opaque: no defining body. Stage 3D will replace this with the
+# bottom-up construction (Proof_Q_internal then existential closure).
+new_constant("Prov_Q_internal", nat0_ty)
+Prov_Q_internal = mk_const("Prov_Q_internal", [])
+
+
+@proof
+def PROV_Q_REPRESENTS(p):
+    """|- !n. Prov_Q n <=>
+              Prov_Q (substitute Prov_Q_internal (numeral n) var_x).
+
+    Stage 3D(a) representability of ``Prov_Q``. AXIOMATIZED via
+    ``p.sorry()``; see Stage 3D section comment for the deferred
+    construction (Proof_Q_internal + Sigma_1 completeness/soundness).
+    """
+    p.goal(
+        "!n. Prov_Q n = "
+        "Prov_Q (substitute Prov_Q_internal (numeral n) var_x)"
+    )
+    p.sorry()
+
+
+@proof
+def IS_FORM_PROV_Q_INTERNAL(p):
+    """|- is_form Prov_Q_internal.
+
+    Side condition for the diagonal lemma. AXIOMATIZED via
+    ``p.sorry()``; in the full construction, follows from the bottom-up
+    build of ``Prov_Q_internal`` from ``Proof_Q_internal`` and the
+    closure of ``is_form`` under the Q-formula constructors.
+    """
+    p.goal("is_form Prov_Q_internal")
+    p.sorry()
+
+
+@proof
+def FREE_IN_PROV_Q_INTERNAL(p):
+    """|- !v. free_in Prov_Q_internal v <=> v = var_x.
+
+    Side condition for the diagonal lemma. AXIOMATIZED via
+    ``p.sorry()``; ``var_x`` is the F-slot in the substitute-via-numeral
+    representation pattern.
+    """
+    p.goal(
+        "!v. free_in Prov_Q_internal v = (v = var_x)",
+    )
+    p.sorry()
+
+
+# ---------------------------------------------------------------------------
 # Roadmap -- Stage 3B and 3C.
 # ---------------------------------------------------------------------------
 #
@@ -2584,15 +2793,18 @@ def PROV_Q_IFF_PROOF_Q(p):
 #     ``MEM_L_APPEND_PRESERVES``, ``VALID_STEP_PRESERVES``, and
 #     ``PROOF_Q_APPEND`` to combine the two given proof lists).
 #
-#   * Representability of ``substitute``: Sigma_1 formula
+#   * Representability of ``substitute``: Sigma_1 formula        [SORRY]
 #     ``substitute_internal`` such that
 #         |- !F t v. Prov_Q (substitute_internal_eq F t v
 #                                                  (numeral
 #                                                   (substitute F t v))).
-#     Standard induction on F; ~200 lines with the recursion equations
-#     from Stage 1.
+#     ``SUBSTITUTE_REPRESENTS`` posted via ``p.sorry()`` against an
+#     opaque ``substitute_internal``; see Stage 3C(a) section for the
+#     full deferred construction (Cantor pairing or Goedel beta + 7-case
+#     induction on F, prerequisites: arithmetic representability of
+#     ``add``/``times``/``mod`` in Q).
 #
-# Stage 3C (representability of provability):
+# Stage 3D (representability of provability):                       [SORRY]
 #
 #   * Define ``Proof_Q_internal``: a Q-formula in two free variables
 #     ``var_x``, ``var_y`` such that ``substitute_2 Proof_Q_internal
@@ -2604,13 +2816,21 @@ def PROV_Q_IFF_PROOF_Q(p):
 #   * Define ``Prov_Q_internal n := ?_internal var_y. Proof_Q_internal``
 #     where ``?_internal`` is encoded as ``~!y. ~``.
 #
-#   * Headline theorem:
+#   * Headline theorem (``PROV_Q_REPRESENTS``):
 #         |- !n. Prov_Q n <=>
-#                 Prov_Q (godelnum (Prov_Q_internal (numeral n))).
+#                 Prov_Q (substitute Prov_Q_internal (numeral n) var_x).
 #     Forward: Prov_Q n => ?p. Proof_Q p n => Q proves the Sigma_1
 #     statement Proof_Q_internal(numeral p, numeral n) by Sigma_1
 #     completeness => Q proves Prov_Q_internal(numeral n) by EXISTS.
 #     Backward: Sigma_1 soundness (proved in Stage 6 from the HF model).
+#
+#   Posted via ``p.sorry()`` in Stage 3D(a) above against an opaque
+#   ``Prov_Q_internal``; ``substitute_2`` defined as a HOL helper for
+#   Stage 4 (diagonal lemma); diagonal-lemma side conditions
+#   ``IS_FORM_PROV_Q_INTERNAL`` and ``FREE_IN_PROV_Q_INTERNAL`` also
+#   sorry'd. Full discharge needs ``substitute_internal`` first
+#   (Stage 3C), plus Sigma_1 completeness for Q and the HF-model
+#   Sigma_1 soundness (Stage 6).
 
 
 if __name__ == "__main__":
@@ -2670,3 +2890,14 @@ if __name__ == "__main__":
     print()
     print("Stage 3B (j) -- equivalence Prov_Q <=> ?p. Proof_Q.")
     print("    PROV_Q_IFF_PROOF_Q :", pp_thm(PROV_Q_IFF_PROOF_Q))
+    print()
+    print("Stage 3C (a) -- representability of substitute (SORRY).")
+    print("    VAR_Z_DEF              :", pp_thm(VAR_Z_DEF))
+    print("    VAR_W_DEF              :", pp_thm(VAR_W_DEF))
+    print("    SUBSTITUTE_REPRESENTS  :", pp_thm(SUBSTITUTE_REPRESENTS))
+    print()
+    print("Stage 3D (a) -- representability of provability (SORRY).")
+    print("    SUBSTITUTE_2_DEF        :", pp_thm(SUBSTITUTE_2_DEF))
+    print("    PROV_Q_REPRESENTS       :", pp_thm(PROV_Q_REPRESENTS))
+    print("    IS_FORM_PROV_Q_INTERNAL :", pp_thm(IS_FORM_PROV_Q_INTERNAL))
+    print("    FREE_IN_PROV_Q_INTERNAL :", pp_thm(FREE_IN_PROV_Q_INTERNAL))
