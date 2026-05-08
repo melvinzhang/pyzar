@@ -64,7 +64,7 @@ from fusion import Var, ASSUME, DEDUCT_ANTISYM_RULE, REFL, vsubst
 from basics import mk_const, mk_app, mk_eq, mk_abs, dest_eq, is_eq, rator, rand
 from parser import define, parse_type
 from axioms import (
-    F, mk_and, mk_exists, mk_or, mk_select,
+    F, mk_and, mk_exists, mk_not, mk_or, mk_select,
     dest_conj, dest_forall, dest_imp, dest_exists, dest_disj,
 )
 from nat0 import nat0_ty
@@ -79,10 +79,12 @@ from hf_sets import (  # noqa: F401  -- parser aliases for Pair_ord
 from nat0 import AXIOM_3_0, AXIOM_4_0
 from nat0_order import NAT0_LT_TRANS, define_wf_lt
 from proof import proof
+from fusion import ABS
 from tactics import (
     SPEC, SPECL, GEN, GENL, SYM, EQ_MP, MP, CONJ, CONJUNCT1, CONJUNCT2,
     EXISTS, CHOOSE_WITNESS, REWRITE_RULE, REWRITE_CONV, EQF_INTRO, NOT_ELIM,
-    DISCH, CONTR, TRANS, AP_TERM, BETA_NORM, or_chain_collapse,
+    DISCH, CONTR, TRANS, AP_TERM, AP_THM, BETA_CONV, BETA_NORM,
+    or_chain_collapse,
 )
 
 
@@ -1148,6 +1150,163 @@ def mono_iff_binary_right_step(ctor, size_lemma_r, hyp_th):
 
 
 # ---------------------------------------------------------------------------
+# Pointwise MONO helpers for function-valued recursion (free_in, substitute).
+#
+# When the recursion target type is ``A = nat0 -> bool`` (or any function
+# type), the body is ``\v. <bool disjunction over n with f x v references>``.
+# The MONO obligation
+#   |- (!k. nat0_lt k n ==> f k = g k) ==> F f n = F g n
+# is a function-equality. We prove it pointwise: for an arbitrary ``v``,
+# build per-disjunct iffs at the bool level using the helpers below, chain
+# via ``or_chain_collapse``, generalize with ``GEN(v)``, lift via
+# ``FUN_EXT`` to the function equality, then ``by_unfold`` through the
+# helper-constant DEF to bridge to ``F f n = F g n``.
+#
+# Each helper takes the same ``hyp_th`` (function-eq form) and an extra
+# ``v_term`` to apply at the bool-result level via ``AP_THM``.
+# ---------------------------------------------------------------------------
+
+
+def mono_iff_unary_pw_step(ctor, size_lemma, hyp_th, v_term):
+    """For ``f, g : nat0 -> nat0 -> bool`` and a fixed ``v``, prove
+    ``(?x. n = ctor x /\\ f x v) = (?x. n = ctor x /\\ g x v)``.
+    """
+    n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
+    x_var = Var("x", k_ty)
+    n_eq_ctor_x = mk_eq(n_t, mk_app(ctor, x_var))
+    body_l = mk_and(n_eq_ctor_x, mk_app(f_t, x_var, v_term))
+    body_r = mk_and(n_eq_ctor_x, mk_app(g_t, x_var, v_term))
+    pred_l = mk_abs(x_var, body_l)
+    pred_r = mk_abs(x_var, body_r)
+    LHS = mk_exists(x_var, body_l)
+    RHS = mk_exists(x_var, body_r)
+
+    chosen_l = CHOOSE_WITNESS(pred_l, ASSUME(LHS))
+    n_eq_l = CONJUNCT1(chosen_l)
+    fxv_th = CONJUNCT2(chosen_l)
+    w_t = rand(rand(n_eq_l._concl))
+    sl_at_w = SPEC(w_t, size_lemma)
+    lt_w_n = REWRITE_RULE([SYM(n_eq_l)], sl_at_w)
+    fw_eq_gw = MP(SPEC(w_t, hyp_th), lt_w_n)
+    fw_v_eq_gw_v = AP_THM(fw_eq_gw, v_term)
+    gxv_th = EQ_MP(fw_v_eq_gw_v, fxv_th)
+    R_th = EXISTS(pred_r, w_t, CONJ(n_eq_l, gxv_th))
+
+    chosen_r = CHOOSE_WITNESS(pred_r, ASSUME(RHS))
+    n_eq_r = CONJUNCT1(chosen_r)
+    gxv2_th = CONJUNCT2(chosen_r)
+    w2_t = rand(rand(n_eq_r._concl))
+    sl_at_w2 = SPEC(w2_t, size_lemma)
+    lt_w2_n = REWRITE_RULE([SYM(n_eq_r)], sl_at_w2)
+    fw2_eq_gw2 = MP(SPEC(w2_t, hyp_th), lt_w2_n)
+    fw2_v_eq_gw2_v = AP_THM(fw2_eq_gw2, v_term)
+    fxv2_th = EQ_MP(SYM(fw2_v_eq_gw2_v), gxv2_th)
+    L_th = EXISTS(pred_l, w2_t, CONJ(n_eq_r, fxv2_th))
+
+    return DEDUCT_ANTISYM_RULE(L_th, R_th)
+
+
+def _mono_iff_binary_pw_step(ctor, size_lemma_l, size_lemma_r,
+                             hyp_th, v_term, rest_builder, recurses_l):
+    """Generic binary pointwise step.
+
+    ``rest_builder(fn_t, a, b, v)`` returns the term plugged in as the
+    second conjunct of the disjunct (after ``n = ctor a b /\\ ...``).
+    ``recurses_l`` says whether the helper should derive ``f a = g a`` (in
+    addition to ``f b = g b``); set ``False`` for right-only cases.
+    """
+    n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
+    a_var = Var("a", k_ty)
+    b_var = Var("b", k_ty)
+
+    def _bodies(fn):
+        ctor_ab = mk_app(ctor, a_var, b_var)
+        return mk_and(
+            mk_eq(n_t, ctor_ab),
+            rest_builder(fn, a_var, b_var, v_term),
+        )
+
+    body_inner_l = _bodies(f_t)
+    body_inner_r = _bodies(g_t)
+    LHS = mk_exists(a_var, mk_exists(b_var, body_inner_l))
+    RHS = mk_exists(a_var, mk_exists(b_var, body_inner_r))
+
+    def _direction(src, target_inner_body, swap_fg):
+        h_top = ASSUME(src)
+        outer_pred = dest_exists(src)
+        chosen_outer = CHOOSE_WITNESS(outer_pred, h_top)
+        new_inner_pred = dest_exists(chosen_outer._concl)
+        chosen_inner = CHOOSE_WITNESS(new_inner_pred, chosen_outer)
+        n_eq_th = CONJUNCT1(chosen_inner)
+        rest = CONJUNCT2(chosen_inner)
+        ctor_app = rand(n_eq_th._concl)
+        w_b = rand(ctor_app)
+        w_a = rand(rator(ctor_app))
+        rewrites = []
+        if recurses_l:
+            sl_a = SPEC(w_b, SPEC(w_a, size_lemma_l))
+            lt_a_n = REWRITE_RULE([SYM(n_eq_th)], sl_a)
+            eq_a = MP(SPEC(w_a, hyp_th), lt_a_n)
+            eq_a_v = AP_THM(eq_a, v_term)
+            rewrites.append(eq_a_v)
+        sl_b = SPEC(w_b, SPEC(w_a, size_lemma_r))
+        lt_b_n = REWRITE_RULE([SYM(n_eq_th)], sl_b)
+        eq_b = MP(SPEC(w_b, hyp_th), lt_b_n)
+        eq_b_v = AP_THM(eq_b, v_term)
+        rewrites.append(eq_b_v)
+        if swap_fg:
+            rewrites = [SYM(r) for r in rewrites]
+        rest_out = REWRITE_RULE(rewrites, rest)
+        new_body = CONJ(n_eq_th, rest_out)
+        target_fn = g_t if not swap_fg else f_t
+        target_outer_pred_body = mk_abs(
+            a_var, mk_exists(b_var, target_inner_body)
+        )
+        inner_pred_aw = mk_abs(
+            b_var,
+            mk_and(
+                mk_eq(n_t, mk_app(ctor, w_a, b_var)),
+                rest_builder(target_fn, w_a, b_var, v_term),
+            ),
+        )
+        inner_th = EXISTS(inner_pred_aw, w_b, new_body)
+        outer_th = EXISTS(target_outer_pred_body, w_a, inner_th)
+        return outer_th
+
+    R_th = _direction(LHS, body_inner_r, swap_fg=False)
+    L_th = _direction(RHS, body_inner_l, swap_fg=True)
+    return DEDUCT_ANTISYM_RULE(L_th, R_th)
+
+
+def mono_iff_binary_disj_pw_step(ctor, size_lemma_l, size_lemma_r,
+                                 hyp_th, v_term):
+    """``(?a b. n = ctor a b /\\ (f a v \\/ f b v))
+        = (?a b. n = ctor a b /\\ (g a v \\/ g b v))``."""
+    return _mono_iff_binary_pw_step(
+        ctor, size_lemma_l, size_lemma_r, hyp_th, v_term,
+        rest_builder=lambda fn, a, b, v: mk_or(
+            mk_app(fn, a, v), mk_app(fn, b, v)
+        ),
+        recurses_l=True,
+    )
+
+
+def mono_iff_forall_pw_step(size_lemma_r, hyp_th, v_term):
+    """``(?a b. n = Forall_f a b /\\ ~(v = a) /\\ f b v)
+        = (?a b. n = Forall_f a b /\\ ~(v = a) /\\ g b v)``.
+
+    The ``a`` slot is the bound-variable index of the encoded universal;
+    only the body slot ``b`` recurses through ``f``."""
+    return _mono_iff_binary_pw_step(
+        Forall_f, None, size_lemma_r, hyp_th, v_term,
+        rest_builder=lambda fn, a, b, v: mk_and(
+            mk_not(mk_eq(v, a)), mk_app(fn, b, v)
+        ),
+        recurses_l=False,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Constructor recursion-equation derivation.
 #
 # Given a recursive predicate F : nat0 -> bool defined via define_wf_lt
@@ -1309,13 +1468,12 @@ def _disjunct_eq_match_unary(disj, target_app, target_arg, inj_lemma):
     # head_th : {disj} |- target_app = C x. We have target_app = C target_arg by REFL of target_app.
     # Actually target_app is literally `C target_arg` (same term), so no rewrite needed.
     targ_eq_x = MP(inj_at, head_th)   # {disj} |- target_arg = x
-    # Now rest_th is R(x); want R(target_arg). Use AP_TERM(R, SYM targ_eq_x).
-    R_const = rator(rest_th._concl)
-    rest_eq = AP_TERM(R_const, SYM(targ_eq_x))  # {disj} |- R x = R target_arg
-    rest_at_target = EQ_MP(rest_eq, rest_th)    # {disj} |- R(target_arg)
-    # Reverse: {R(target_arg)} |- ?x. target_app = C x /\ R(x). Witness x:=target_arg.
-    body_at_target = mk_and(REFL(target_app)._concl, ASSUME(mk_app(R_const, target_arg))._concl)
-    body_th_at_target = CONJ(REFL(target_app), ASSUME(mk_app(R_const, target_arg)))
+    # Substitute x → target_arg in the rest. Use REWRITE_RULE so this
+    # works whether ``rest_th`` is ``f x`` (single app) or a wider shape
+    # like ``f x v`` (function-valued recursion at a fixed point).
+    rest_at_target = REWRITE_RULE([SYM(targ_eq_x)], rest_th)
+    rest_target_term = rest_at_target._concl
+    body_th_at_target = CONJ(REFL(target_app), ASSUME(rest_target_term))
     rev = EXISTS(ex_pred, target_arg, body_th_at_target)
     return DEDUCT_ANTISYM_RULE(rev, rest_at_target)
 
@@ -1448,6 +1606,65 @@ def derive_rec_eq(REC, target_ctor_name, var_names):
     body_eq = or_chain_collapse(per_eqs)        # |- body_at = collapsed_rhs
     final = TRANS(rec_at, body_eq)              # |- F target_app = collapsed_rhs
     return GENL(target_args, final)
+
+
+def derive_rec_eq_pw(REC, target_ctor_name, var_names):
+    """Pointwise constructor recursion for function-valued recursion.
+
+    Given REC : ``|- !n. fn n = (\\v. body[fn, n, v])`` from
+    ``define_wf_lt`` (where the body is a disjunction whose disjuncts
+    follow the q-syntax shapes parameterised by ``v``), produce
+        ``|- !v1...vk v. fn (C v1...vk) v = <matching-disjunct collapsed>``.
+
+    Same dispatch logic as ``derive_rec_eq``: match the body's disjunct
+    against the target via INJ, collapse the rest via disjointness for
+    non-matching disjuncts. The only delta is the AP_THM(v) +
+    BETA_CONV step that lifts the function-equality REC to a bool eq
+    before the disjunction is processed.
+    """
+    if target_ctor_name not in _CTORS:
+        raise ValueError(f"derive_rec_eq_pw: unknown ctor {target_ctor_name!r}")
+    target_decl = _CTORS[target_ctor_name]
+    target_arity = len(target_decl[3])
+    if len(var_names) != target_arity:
+        raise ValueError(
+            f"derive_rec_eq_pw: {target_ctor_name} has arity {target_arity}, "
+            f"got {len(var_names)} var names"
+        )
+    target_args = [Var(name, nat0_ty) for name in var_names]
+    target_app = _ctor_app(target_decl, target_args)
+    rec_at = SPEC(target_app, REC)
+    # rec_at : |- fn target_app = (\v. body[fn, target_app, v])
+    body_abs = rand(rec_at._concl)
+    v_bvar = body_abs.bvar
+    rec_at_v = AP_THM(rec_at, v_bvar)
+    rhs_redex = rand(rec_at_v._concl)
+    rhs_beta = BETA_CONV(rhs_redex)
+    rec_normalized = TRANS(rec_at_v, rhs_beta)
+    # rec_normalized : |- fn target_app v_bvar = body[fn, target_app, v_bvar]
+
+    body_at = rand(rec_normalized._concl)
+    disjuncts = _split_n_disj(body_at)
+    target_inj = _CTOR_INJ.get(target_ctor_name)
+    per_eqs = []
+    for disj in disjuncts:
+        head_name = _disjunct_ctor_name(disj)
+        if head_name == target_ctor_name:
+            if target_arity == 1:
+                eq = _disjunct_eq_match_unary(
+                    disj, target_app, target_args[0], target_inj
+                )
+            else:
+                eq = _disjunct_eq_match_binary(
+                    disj, target_app, target_args, target_inj
+                )
+        else:
+            neq_dir = _ctor_neq_lemma(target_ctor_name, head_name)
+            eq = _disjunct_eq_F_via_neq(disj, neq_dir, target_args)
+        per_eqs.append(eq)
+    body_eq = or_chain_collapse(per_eqs)
+    final = TRANS(rec_normalized, body_eq)
+    return GENL(target_args + [v_bvar], final)
 
 
 # ---------------------------------------------------------------------------
@@ -1675,7 +1892,168 @@ IS_FORM_AT_FORALL = derive_rec_eq(IS_FORM_REC, "Forall_f", ["v", "phi"])
 
 
 # ---------------------------------------------------------------------------
-# Stage 1 (b)/(c) -- free_in, substitute: TODO.
+# Stage 1 (c): free_in -- "variable index v occurs free in encoded n".
+#
+# Body shape (eight disjuncts; Zero_t falls through to ``F`` because no
+# disjunct head matches it):
+#   F free_in n  :=  \v.
+#        ?x. n = Succ_t x /\ free_in x v
+#     \/ ?x. n = Var_t x /\ v = x
+#     \/ ?a b. n = Plus_t a b /\ (free_in a v \/ free_in b v)
+#     \/ ?a b. n = Times_t a b /\ (free_in a v \/ free_in b v)
+#     \/ ?a b. n = Eq_f a b /\ (free_in a v \/ free_in b v)
+#     \/ ?x. n = Not_f x /\ free_in x v
+#     \/ ?a b. n = Imp_f a b /\ (free_in a v \/ free_in b v)
+#     \/ ?a b. n = Forall_f a b /\ ~(v = a) /\ free_in b v
+#
+# free_in : nat0 -> (nat0 -> bool); the recursion target type is
+# ``A = nat0 -> bool`` so MONO is a function-equality. We prove the body
+# pointwise via ``mono_iff_*_pw_step`` helpers (above), GEN over v, and
+# FUN_EXT to reach the function form, then ``by_unfold`` through the
+# helper-constant DEF.
+# ---------------------------------------------------------------------------
+
+
+_v_n0 = Var("v", nat0_ty)
+_pred2_ty = parse_type("nat0 -> nat0 -> bool")
+_F_pred2_ty = parse_type("(nat0 -> nat0 -> bool) -> nat0 -> nat0 -> bool")
+_f_pred2 = Var("f", _pred2_ty)
+
+
+def _free_in_body(f_t, n_t, v_t):
+    """Bool body of ``_free_in_F`` at the v-applied level."""
+    def _bin_disj(ctor):
+        return mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
+            mk_eq(n_t, mk_app(ctor, _a_n0, _b_n0)),
+            mk_or(mk_app(f_t, _a_n0, v_t), mk_app(f_t, _b_n0, v_t)),
+        )))
+
+    return mk_or(
+        mk_exists(_x_n0, mk_and(
+            mk_eq(n_t, mk_app(Succ_t, _x_n0)),
+            mk_app(f_t, _x_n0, v_t),
+        )),
+        mk_or(
+            mk_exists(_x_n0, mk_and(
+                mk_eq(n_t, mk_app(Var_t, _x_n0)),
+                mk_eq(v_t, _x_n0),
+            )),
+            mk_or(
+                _bin_disj(Plus_t),
+                mk_or(
+                    _bin_disj(Times_t),
+                    mk_or(
+                        _bin_disj(Eq_f),
+                        mk_or(
+                            mk_exists(_x_n0, mk_and(
+                                mk_eq(n_t, mk_app(Not_f, _x_n0)),
+                                mk_app(f_t, _x_n0, v_t),
+                            )),
+                            mk_or(
+                                _bin_disj(Imp_f),
+                                mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
+                                    mk_eq(n_t, mk_app(Forall_f, _a_n0, _b_n0)),
+                                    mk_and(
+                                        mk_not(mk_eq(v_t, _a_n0)),
+                                        mk_app(f_t, _b_n0, v_t),
+                                    ),
+                                ))),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
+_FREE_IN_F_DEF = define(
+    "_free_in_F",
+    _F_pred2_ty,
+    mk_abs(_f_pred2, mk_abs(_n_var_top,
+        mk_abs(_v_n0, _free_in_body(_f_pred2, _n_var_top, _v_n0)))),
+)
+_FREE_IN_F = mk_const("_free_in_F", [])
+
+
+@proof
+def FREE_IN_MONO(p):
+    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
+                  ==> _free_in_F f n = _free_in_F g n.
+
+    Function-valued MONO. We prove a pointwise body-equation, GEN/FUN_EXT
+    to lift to the lambda equality, then ``by_unfold`` to bridge to the
+    helper constant on each side.
+    """
+    p.goal(
+        "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> "
+        "_free_in_F f n = _free_in_F g n",
+        types={"f": _pred2_ty, "g": _pred2_ty,
+               "n": nat0_ty, "k": nat0_ty},
+    )
+    p.fix("f g n")
+    p.assume("h: !k. nat0_lt k n ==> f k = g k")
+
+    h_th = p.fact("h")
+
+    eq_succ = mono_iff_unary_pw_step(
+        Succ_t, NAT0_LT_SUCC_T, h_th, _v_n0
+    )
+    eq_var = REFL(p._parse("?x. n = Var_t x /\\ v = x"))
+    eq_plus = mono_iff_binary_disj_pw_step(
+        Plus_t, NAT0_LT_PLUS_T_L, NAT0_LT_PLUS_T_R, h_th, _v_n0
+    )
+    eq_times = mono_iff_binary_disj_pw_step(
+        Times_t, NAT0_LT_TIMES_T_L, NAT0_LT_TIMES_T_R, h_th, _v_n0
+    )
+    eq_eq = mono_iff_binary_disj_pw_step(
+        Eq_f, NAT0_LT_EQ_F_L, NAT0_LT_EQ_F_R, h_th, _v_n0
+    )
+    eq_not = mono_iff_unary_pw_step(
+        Not_f, NAT0_LT_NOT_F, h_th, _v_n0
+    )
+    eq_imp = mono_iff_binary_disj_pw_step(
+        Imp_f, NAT0_LT_IMP_F_L, NAT0_LT_IMP_F_R, h_th, _v_n0
+    )
+    eq_forall = mono_iff_forall_pw_step(
+        NAT0_LT_FORALL_F_R, h_th, _v_n0
+    )
+    body_eq = or_chain_collapse([
+        eq_succ, eq_var, eq_plus, eq_times,
+        eq_eq, eq_not, eq_imp, eq_forall,
+    ])
+    # body_eq : {h_concl} |- body[f, n, v] = body[g, n, v].
+
+    abs_eq = ABS(_v_n0, body_eq)
+    # abs_eq : {h_concl} |- (\v. body[f, n, v]) = (\v. body[g, n, v]).
+
+    p.thus(
+        "_free_in_F f n = _free_in_F g n"
+    ).by_unfold(abs_eq, _FREE_IN_F_DEF)
+
+
+FREE_IN_DEF, _FREE_IN_REC_RAW = define_wf_lt(
+    "free_in",
+    _pred2_ty,
+    _FREE_IN_F,
+    FREE_IN_MONO,
+)
+FREE_IN_REC = _unfold_rec_via_F_def(_FREE_IN_REC_RAW, _FREE_IN_F_DEF)
+
+
+# Constructor recursion equations (pointwise).
+FREE_IN_AT_SUCC = derive_rec_eq_pw(FREE_IN_REC, "Succ_t", ["t"])
+FREE_IN_AT_VAR = derive_rec_eq_pw(FREE_IN_REC, "Var_t", ["w"])
+FREE_IN_AT_PLUS = derive_rec_eq_pw(FREE_IN_REC, "Plus_t", ["t1", "t2"])
+FREE_IN_AT_TIMES = derive_rec_eq_pw(FREE_IN_REC, "Times_t", ["t1", "t2"])
+FREE_IN_AT_EQ = derive_rec_eq_pw(FREE_IN_REC, "Eq_f", ["t1", "t2"])
+FREE_IN_AT_NOT = derive_rec_eq_pw(FREE_IN_REC, "Not_f", ["phi"])
+FREE_IN_AT_IMP = derive_rec_eq_pw(FREE_IN_REC, "Imp_f", ["phi1", "phi2"])
+FREE_IN_AT_FORALL = derive_rec_eq_pw(FREE_IN_REC, "Forall_f", ["w", "phi"])
+
+
+# ---------------------------------------------------------------------------
+# Stage 1 (c) -- substitute: TODO.
 # ---------------------------------------------------------------------------
 
 
@@ -1827,4 +2205,17 @@ if __name__ == "__main__":
     print("    IS_FORM_AT_IMP    :", pp_thm(IS_FORM_AT_IMP))
     print("    IS_FORM_AT_FORALL :", pp_thm(IS_FORM_AT_FORALL))
     print()
-    print("Stage 1 (b)/(c) -- free_in, substitute: TODO.")
+    print("Stage 1 (c) -- free_in predicate.")
+    print("    FREE_IN_MONO   :", pp_thm(FREE_IN_MONO))
+    print("    FREE_IN_DEF    :", pp_thm(FREE_IN_DEF))
+    print("    FREE_IN_REC    :", pp_thm(FREE_IN_REC))
+    print("    FREE_IN_AT_SUCC   :", pp_thm(FREE_IN_AT_SUCC))
+    print("    FREE_IN_AT_VAR    :", pp_thm(FREE_IN_AT_VAR))
+    print("    FREE_IN_AT_PLUS   :", pp_thm(FREE_IN_AT_PLUS))
+    print("    FREE_IN_AT_TIMES  :", pp_thm(FREE_IN_AT_TIMES))
+    print("    FREE_IN_AT_EQ     :", pp_thm(FREE_IN_AT_EQ))
+    print("    FREE_IN_AT_NOT    :", pp_thm(FREE_IN_AT_NOT))
+    print("    FREE_IN_AT_IMP    :", pp_thm(FREE_IN_AT_IMP))
+    print("    FREE_IN_AT_FORALL :", pp_thm(FREE_IN_AT_FORALL))
+    print()
+    print("Stage 1 (c) -- substitute: TODO.")
