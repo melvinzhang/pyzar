@@ -1,11 +1,33 @@
+# ---------------------------------------------------------------------------
+# Stage 1 -- syntax of Q encoded as HF.
+# ---------------------------------------------------------------------------
+#
+# Q's signature: 0, S, +, *, =, plus first-order connectives and
+# quantifiers. We pick an inductive grammar:
+#
+#   Term  ::=  Zero | Succ Term | Var num | Plus Term Term | Times Term Term
+#   Form  ::=  Eq Term Term | Not Form | Imp Form Form | Forall num Form
+#
+# (And, Or, Exists, Iff are sugar.) Each constructor has an arity; encode
+# a node ``Constructor(arg1, ..., argk)`` as the HF set
+#
+#   { 0 |-> tag, 1 |-> arg1, ..., k |-> argk }
+#
+# i.e. an ordered tuple stored as the HF set of (index, value) pairs.
+# Tags are small naturals: Zero = 0, Succ = 1, Var = 2, Plus = 3, etc.
+#
+# Goedel numbering is then literally ``rep_hf`` from ``hf_sets.py``.
+# ``godelnum : term + form -> num`` is a one-line composition of the
+# encoding above with ``rep_hf``.
+#
+# Standard lemmas (all by structural induction or by the unique-readability
+# theorem for HF tuples):
+#
+#   |- !t1 t2. godelnum t1 = godelnum t2 ==> t1 = t2          (injectivity)
+#   |- decidable: "is this num the godelnum of a well-formed term/form?"
+#   |- substitute(x, t, F) is primitive recursive on godelnums
+
 r"""Syntax of Robinson's Q encoded as nat0 (Stage 1 of ``godel_first.py``).
-
-Per the implementation roadmap in ``godel_first.py``:
-
-    1. ``q_syntax.py`` -- term and formula datatypes (encoded as nat0
-       via the Kuratowski ordered-pair primitive ``Pair_ord``); Goedel
-       numbering; substitution; unique readability; free-variable
-       analysis. ~300 lines.
 
 ------------------------------------------------------------------
 Encoding (option 2: flat pairing)
