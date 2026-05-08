@@ -33,19 +33,6 @@ Every `Proof` maintains a stack of `_Frame`s. The bottom is `ROOT`
 (`FrameKind.ROOT`); structured blocks push and pop frames. Each frame
 carries:
 
-| Field            | Purpose                                                   |
-|------------------|-----------------------------------------------------------|
-| `goal`           | term to discharge — set by `p.goal(...)`, peeled by `fix`/`assume`/block openers |
-| `vars_added`     | foralls introduced by `fix`; `GEN`'d on close             |
-| `hyps_added`     | hypotheses introduced by `assume`; `DISCH`'d on close     |
-| `facts_added`    | fact labels registered in this frame; dropped on exit     |
-| `choose_env`     | witness names bound in this frame (`name → term`)         |
-| `type_env`       | parser hints for higher-order or non-default-typed names  |
-| `lazy_lets`      | local definitions (`define`/`let`); discharged on close   |
-| `simp_rules`     | frame-local default rewrite rules                         |
-| `data`           | kind-specific (`_InductionData`, `_CasesData`)            |
-| `result`         | the discharging theorem; set by closing tactic            |
-
 Frame kinds: `ROOT`, `INDUCTION`, `IND_BASE`, `IND_STEP`, `CASES`,
 `CASE`, `HAVE_PROOF`, `SUPPOSE`. Each block opener pushes the
 corresponding kind.
@@ -191,15 +178,17 @@ conclusion is fixed by the args, no need to repeat it in the spec).
 |-----------------------------------------------------|------------------------------------------------------------------------|
 | `.by_thm(th)`                                       | direct: `th` already proves the term                                   |
 | `.by(just, *args)`                                  | SPEC/MP chain (term arg → `SPEC`, fact arg → `MP`); or callable; simp-aware |
-| `.by_match(just, *args)`                            | backward-chaining: foralls inferred by first-order matching against goal + facts |
+| `.by_match(just, *args)`                            | backward-chaining: foralls inferred by first-order matching against goal + facts; `...` (Ellipsis) at an antecedent slot auto-derives a reflexive claim via `register_refl_prover` |
 | `.by_rewrite(rules, *, ac=None, ac_rules=())`       | `REWRITE_PROVE(rules + active simp set, term, ac=ac)`                  |
 | `.by_rewrite_of(ref, rules, *, ac=None, beta=False, op=...)` | rewrite source `ref` to the have-term via shared normal form    |
 | `.by_unfold(src, *defs)`                            | `by_rewrite_of` with `beta=True` — bridge unfolded ↔ defined-symbol forms |
-| `.by_eq_mp(eq_th, ref)`                             | `EQ_MP(eq_th, fact)` modulo simp on the LHS                            |
+| `.by_eq_mp(eq_th, ref)`                             | `EQ_MP(eq_th, fact)` modulo simp on the LHS; sym-tolerant — flips `eq_th` if the fact aligns with the RHS |
 | `.by_def(def_th, ref)`                              | unfold `def_th` at `ref`'s head args, then `EQ_MP` — sugar for `by_eq_mp(UNFOLD(def_th, ...), ref)` |
 | `.by_inst(lemma, *terms)`                           | `SPECL(terms, lemma)` — pre-instantiate a lemma at term args; pairs with `have("label:")` so the result's conclusion need not be spelled out |
-| `.by_trans(*eqs)`                                   | `TRANS_CHAIN(eqs)` — compose `a=b`, `b=c`, ... into `a=c`              |
+| `.by_trans(*eqs)`                                   | `TRANS_CHAIN(eqs)` — compose `a=b`, `b=c`, ... into `a=c`; greedily orients each link, so equations in either direction work |
 | `.by_cong(left, right)`                             | single-step congruence: term + fact → `AP_TERM`; fact + term → `AP_THM`; fact + fact → `MK_COMB` |
+| `.by_cong(op, eq1, eq2)`                            | binop shorthand: from `a=c` and `b=d` derive `op a b = op c d` (i.e. `MK_COMB(AP_TERM(op, eq1), eq2)`) |
+| `.by_ext(ref)`                                      | function extensionality: `ref` is `!x1...xn. f t1...tn = g t1...tn`; collapses every outer forall via SPEC + `FUN_EXT(GEN ...)` to yield `f = g` |
 | `.by_iff(fwd, rev)`                                 | iff-intro: combine `L ==> R` and `R ==> L` facts into the bool equality `L = R` (order-agnostic) |
 | `.by_fold(ref)`                                     | inverse of an unfolder: fold `ref` back into a registered relation     |
 | `.by_witness(witness, ref)`                         | `EXISTS` for an existential have-term                                  |
@@ -226,6 +215,22 @@ After producing a theorem `th`, `_Have._finish(th)`:
 * Otherwise: `simp_require(self.term, th)`, register at have-term
   shape.
 * Register under `self.label` (or a fresh `_h{n}`).
+
+`_simp_require` is sym-tolerant: when both target and produced theorem
+are equations, it retries against `SYM(th)` if direct/simp matching
+fails. Every consumer that funnels through `_simp_require` (`by_thm`,
+`by_witness`, `thus`/`have` finalization, `calc` steps, …) inherits
+this — equation facts can be supplied in either direction without an
+explicit `SYM`.
+
+### `p.sorry()`
+
+Cheat-close the current frame by posting `new_axiom(goal)`. Stub for
+incremental development: closes the frame so surrounding structure can
+be exercised while flagging the unproved subgoal. Each call adds a
+fresh axiom to the kernel's axiom list; `@proof` warns at proof end
+naming each sorried goal. Use it where any other frame-closing call
+(`p.thus(...).by_*`, `p.absurd().by(...)`, …) would go.
 
 ---
 
@@ -257,6 +262,25 @@ with p.step("IH"):                # IH label is required, no default
 ```
 
 `base()` errors outside `induction()`; same for `step()`.
+
+### `with p.strong_induction(var_name, ih_label): ...`
+
+Strong / well-founded induction on `var_name`. Auto-peels `!var_name.
+body` from the goal (or uses the env-bound var if no leading binder).
+Opens a single sub-frame whose goal is `body` and whose IH (registered
+under the required `ih_label`) is `!k. lt k var ==> body[var:=k]`.
+Unlike Peano induction there is no `base()` / `step()` split — one
+sub-frame, one `thus`. The strategy is looked up by `var.ty` in
+`_STRONG_INDUCTION_STRATEGIES`; plugins register one via
+`register_strong_induction(StrongInductionStrategy(ty, lt, thm))` where
+`thm` is `|- !P. (!n. (!k. lt k n ==> P k) ==> P n) ==> !n. P n`.
+`nat0_order.py` ships the nat0 strategy.
+
+```python
+with p.strong_induction("n", "IH"):
+    # goal: body[n]; IH: !k. k < n ==> body[k]
+    p.thus(body)...
+```
 
 ### `with p.cases_on(ref, *args): ...`
 
@@ -445,7 +469,7 @@ frame's result. Methods:
 | `.by_thm(th)`                             | `th` already proves `F`                                            |
 | `.by(just, *args)`                        | SPEC/MP chain (non-simp); or callable                              |
 | `.by_conj(ref_a, ref_b)`                  | match `P` against `~P` (either order); `MP(NOT_ELIM, P)`           |
-| `.auto(ref_a, ref_b)`                     | look up a contradiction finder for `(rel(a), rel(b))` in `_CONTRA_FINDERS` |
+| `.auto(ref)` / `.auto(ref_a, ref_b)`      | one-fact: discharge `~(t = t)` via `MP(NOT_ELIM, REFL(t))`. Two-fact: look up a contradiction finder for `(rel(a), rel(b))` in `_CONTRA_FINDERS` |
 | `.via(forward, case, *, source)`          | lift `case` through `forward` (an implication) into a fact contradicting `source` via `auto` |
 
 ---
@@ -480,6 +504,23 @@ antecedents like `a = b`, put the rigid relation first.
 
 `induct_prove(var, body, base_th, step_fn) -> |- !var. body` is the
 kernel principle; `step_fn(IH) -> step_th`.
+
+### Strong-induction strategies — `register_strong_induction(StrongInductionStrategy(ty, lt, thm))`
+
+`thm` is `|- !P. (!n. (!k. lt k n ==> P k) ==> P n) ==> !n. P n`;
+consumed by `p.strong_induction(var, ih_label)`. One strategy per
+`hol_type`.
+
+### Reflexivity provers — `register_refl_prover(op_name, prover)`
+
+`prover(*shared_args) -> |- op_name shared shared`. Consulted by
+`by_match`'s `...` (Ellipsis) auto-derivation and any other primitive
+needing to discharge a syntactically reflexive claim. The recognised
+target shape is `op a1 ... an a1 ... an` (binary `op t t` is the
+`n=1` case); the prover is invoked on the shared front-half args.
+`=` is native (`REFL`); derived relations like `>=` / `<=` and
+multi-arg "self-equal" heads (e.g. Landau's 4-ary `feq`) register
+their own builders.
 
 ### Assume patterns — `register_pattern_handler(pat_type, handler)`
 
