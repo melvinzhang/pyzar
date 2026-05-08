@@ -1778,6 +1778,12 @@ class Proof:
         ``cases_on(SATZ_10, "x", "y")`` is equivalent to
         ``cases_on(SPECL([x, y], SATZ_10))``, and ``cases_on("h", x_term)``
         works when ``"h"`` is a registered fact label.
+
+        N-way disjunctions split flatly: a right-associated chain
+        ``A1 \\/ A2 \\/ ... \\/ An`` is consumed by N sibling
+        ``with p.case("hi: Ai")`` blocks (no nested ``cases_on`` needed).
+        Branch order is alpha-matched against the disjunct order, so the
+        case bodies may appear in any order.
         """
         parent = self._cur
         if parent.goal is None:

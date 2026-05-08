@@ -60,9 +60,13 @@ output IS its own Goedel number).
 # Imports.
 # ---------------------------------------------------------------------------
 
-from fusion import Var
-from basics import mk_const
+from fusion import Var, ASSUME, DEDUCT_ANTISYM_RULE, REFL, vsubst
+from basics import mk_const, mk_app, mk_eq, mk_abs, dest_eq, is_eq, rator, rand
 from parser import define, parse_type
+from axioms import (
+    F, mk_and, mk_exists, mk_or, mk_select,
+    dest_conj, dest_forall, dest_imp, dest_exists, dest_disj,
+)
 from nat0 import nat0_ty
 from hf_sets import (  # noqa: F401  -- parser aliases for Pair_ord
     Pair_ord,
@@ -75,6 +79,11 @@ from hf_sets import (  # noqa: F401  -- parser aliases for Pair_ord
 from nat0 import AXIOM_3_0, AXIOM_4_0
 from nat0_order import NAT0_LT_TRANS
 from proof import proof
+from tactics import (
+    SPEC, SPECL, GENL, SYM, EQ_MP, MP, CONJ, CONJUNCT1, CONJUNCT2,
+    EXISTS, CHOOSE_WITNESS, REWRITE_RULE, EQF_INTRO, NOT_ELIM,
+    DISCH, CONTR, TRANS, AP_TERM, or_chain_collapse,
+)
 
 
 _n_n0 = Var("n", nat0_ty)
@@ -887,11 +896,542 @@ for _i in range(len(_CTOR_NAMES)):
 
 
 # ---------------------------------------------------------------------------
-# Stage 1 (b)/(c) work to follow:
-#   * is_term, is_form, substitute, free_in via define_wf_lt with
-#     NUM_RECURSION_LT-based MONO proofs. Each ~30 (body) + ~80-120
-#     (MONO) + ~20 (define_wf_lt + REC) lines, plus ~5 lines per
-#     constructor-specific recursion equation.  Total ~600 lines.
+# MONO helpers: per-disjunct iffs for define_wf_lt bodies.
+#
+# A predicate body for is_term / is_form / free_in / ... is a disjunction
+# whose disjuncts have one of two recursive shapes:
+#
+#   unary:   ?x.   n = C x     /\ f x
+#   binary:  ?a b. n = C a b   /\ f a /\ f b
+#
+# Each shape's f-version equals its g-version when ``f`` and ``g`` agree
+# on every k strictly less than n (under nat0_lt). The two helpers below
+# produce that per-disjunct iff as a kernel theorem; the outer MONO
+# equality is then ``OR_CONG``-chained over the per-disjunct results
+# (plus REFL for non-recursive disjuncts), instead of a single 200-line
+# nested case-analysis.
+#
+# The shape of a helper call is:
+#   step = mono_iff_unary_step(C, NAT0_LT_C, p.fact("h"))
+#   p.have("e: ...").by_thm(step)
+# inside an outer @proof whose hypothesis is
+#   h : |- !k. nat0_lt k n ==> f k = g k.
+# ---------------------------------------------------------------------------
+
+
+def _extract_nfg(hyp_th):
+    """Pull n, f, g out of |- !k. nat0_lt k n ==> f k = g k."""
+    forall_pred = dest_forall(hyp_th._concl)
+    if forall_pred is None:
+        raise ValueError(
+            f"_extract_nfg: hyp_th not !k. ...; got {hyp_th._concl}"
+        )
+    imp_parts = dest_imp(forall_pred.body)
+    if imp_parts is None:
+        raise ValueError(
+            f"_extract_nfg: hyp body not implication; got {forall_pred.body}"
+        )
+    ant, conseq = imp_parts
+    n_t = rand(ant)  # nat0_lt k n
+    fk, gk = dest_eq(conseq)
+    return n_t, rator(fk), rator(gk), forall_pred.bvar.ty
+
+
+def mono_iff_unary_step(ctor, size_lemma, hyp_th):
+    """Per-disjunct iff for a unary recursive case.
+
+    Args:
+      ctor       : term, type ``nat0 -> nat0`` (e.g. ``Succ_t``).
+      size_lemma : ``|- !x. nat0_lt x (ctor x)``.
+      hyp_th     : ``|- !k. nat0_lt k n ==> f k = g k`` (the MONO hypothesis).
+
+    Returns:
+      ``|- (?x. n = ctor x /\\ f x) = (?x. n = ctor x /\\ g x)``
+    where n, f, g are read from ``hyp_th``.
+    """
+    n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
+    x_var = Var("x", k_ty)
+    n_eq_ctor_x = mk_eq(n_t, mk_app(ctor, x_var))
+    body_l = mk_and(n_eq_ctor_x, mk_app(f_t, x_var))
+    body_r = mk_and(n_eq_ctor_x, mk_app(g_t, x_var))
+    pred_l = mk_abs(x_var, body_l)
+    pred_r = mk_abs(x_var, body_r)
+    LHS = mk_exists(x_var, body_l)
+    RHS = mk_exists(x_var, body_r)
+
+    # Forward: {LHS} |- RHS.
+    chosen_l = CHOOSE_WITNESS(pred_l, ASSUME(LHS))  # {LHS} |- n = ctor w /\ f w
+    n_eq_l = CONJUNCT1(chosen_l)
+    fw_th = CONJUNCT2(chosen_l)
+    w_t = rand(n_eq_l._concl)  # ctor w; we just need w
+    # Strip the ctor to get w itself (= rand of ctor w).
+    w_t = rand(w_t)
+    sl_at_w = SPEC(w_t, size_lemma)              # |- nat0_lt w (ctor w)
+    lt_w_n = REWRITE_RULE([SYM(n_eq_l)], sl_at_w)  # {LHS} |- nat0_lt w n
+    fw_eq_gw = MP(SPEC(w_t, hyp_th), lt_w_n)       # {LHS} |- f w = g w
+    gw_th = EQ_MP(fw_eq_gw, fw_th)                 # {LHS} |- g w
+    R_th = EXISTS(pred_r, w_t, CONJ(n_eq_l, gw_th))  # {LHS} |- RHS
+
+    # Reverse: {RHS} |- LHS.  Same shape, swap f <-> g via SYM.
+    chosen_r = CHOOSE_WITNESS(pred_r, ASSUME(RHS))
+    n_eq_r = CONJUNCT1(chosen_r)
+    gw2_th = CONJUNCT2(chosen_r)
+    w2_t = rand(rand(n_eq_r._concl))
+    sl_at_w2 = SPEC(w2_t, size_lemma)
+    lt_w2_n = REWRITE_RULE([SYM(n_eq_r)], sl_at_w2)
+    fw2_eq_gw2 = MP(SPEC(w2_t, hyp_th), lt_w2_n)
+    fw2_th = EQ_MP(SYM(fw2_eq_gw2), gw2_th)
+    L_th = EXISTS(pred_l, w2_t, CONJ(n_eq_r, fw2_th))
+
+    return DEDUCT_ANTISYM_RULE(L_th, R_th)
+
+
+def mono_iff_binary_step(ctor, size_lemma_l, size_lemma_r, hyp_th):
+    """Per-disjunct iff for a binary recursive case.
+
+    Args:
+      ctor          : term, type ``nat0 -> nat0 -> nat0`` (e.g. ``Plus_t``).
+      size_lemma_l  : ``|- !a b. nat0_lt a (ctor a b)``.
+      size_lemma_r  : ``|- !a b. nat0_lt b (ctor a b)``.
+      hyp_th        : ``|- !k. nat0_lt k n ==> f k = g k``.
+
+    Returns:
+      ``|- (?a b. n = ctor a b /\\ f a /\\ f b)
+            = (?a b. n = ctor a b /\\ g a /\\ g b)``
+    where n, f, g are read from ``hyp_th``.
+    """
+    n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
+    a_var = Var("a", k_ty)
+    b_var = Var("b", k_ty)
+
+    def _bodies(fn):
+        ctor_ab = mk_app(ctor, a_var, b_var)
+        return mk_and(
+            mk_eq(n_t, ctor_ab),
+            mk_and(mk_app(fn, a_var), mk_app(fn, b_var)),
+        )
+
+    body_inner_l = _bodies(f_t)
+    body_inner_r = _bodies(g_t)
+    LHS = mk_exists(a_var, mk_exists(b_var, body_inner_l))
+    RHS = mk_exists(a_var, mk_exists(b_var, body_inner_r))
+
+    def _direction(src, target_inner_body, swap_fg):
+        """Prove {src} |- ?a b. target_inner_body, where target_inner_body
+        is body_inner_r when src=LHS (fwd) or body_inner_l when src=RHS (rev).
+        ``swap_fg=True`` flips f<->g via SYM on the per-arg eq."""
+        h_top = ASSUME(src)
+        # Outer choose: bind a := w_a.
+        outer_pred = dest_exists(src)
+        chosen_outer = CHOOSE_WITNESS(outer_pred, h_top)  # |- ?b. body[w_a, b]
+        # Inner choose: bind b := w_b. The new inner pred's `a` slot
+        # has already been substituted to the outer SELECT, so re-read
+        # it from chosen_outer's concl.
+        new_inner_pred = dest_exists(chosen_outer._concl)
+        chosen_inner = CHOOSE_WITNESS(new_inner_pred, chosen_outer)
+        # chosen_inner : {src} |- (n = ctor w_a w_b) /\ (h_a /\ h_b)
+        n_eq_th = CONJUNCT1(chosen_inner)
+        rest = CONJUNCT2(chosen_inner)
+        ha_th = CONJUNCT1(rest)
+        hb_th = CONJUNCT2(rest)
+        ctor_app = rand(n_eq_th._concl)
+        w_b = rand(ctor_app)
+        w_a = rand(rator(ctor_app))
+        # Size lemmas at (w_a, w_b).
+        sl_a = SPEC(w_b, SPEC(w_a, size_lemma_l))
+        sl_b = SPEC(w_b, SPEC(w_a, size_lemma_r))
+        lt_a_n = REWRITE_RULE([SYM(n_eq_th)], sl_a)
+        lt_b_n = REWRITE_RULE([SYM(n_eq_th)], sl_b)
+        eq_a = MP(SPEC(w_a, hyp_th), lt_a_n)
+        eq_b = MP(SPEC(w_b, hyp_th), lt_b_n)
+        if swap_fg:
+            ha_out = EQ_MP(SYM(eq_a), ha_th)
+            hb_out = EQ_MP(SYM(eq_b), hb_th)
+        else:
+            ha_out = EQ_MP(eq_a, ha_th)
+            hb_out = EQ_MP(eq_b, hb_th)
+        new_body = CONJ(n_eq_th, CONJ(ha_out, hb_out))
+        # Re-existentialise: inner pred is target body with a := w_a (so b
+        # is the only remaining bvar); outer pred is the result of inner
+        # quantification with a still free, which we then bind to w_a.
+        # Build via INST'd term shapes:
+        target_inner_pred_body = mk_abs(b_var, target_inner_body)
+        target_outer_pred_body = mk_abs(
+            a_var, mk_exists(b_var, target_inner_body)
+        )
+        # EXISTS at b := w_b: substitutes b in target_inner_pred_body.
+        # But we need substitution of a := w_a too; do it by picking the
+        # right pred shape. EXISTS only substitutes the bvar of the
+        # supplied Abs, so use a transient pred with `a := w_a`.
+        inner_pred_aw = mk_abs(
+            b_var,
+            mk_and(
+                mk_eq(n_t, mk_app(ctor, w_a, b_var)),
+                mk_and(
+                    mk_app(g_t if not swap_fg else f_t, w_a),
+                    mk_app(g_t if not swap_fg else f_t, b_var),
+                ),
+            ),
+        )
+        inner_th = EXISTS(inner_pred_aw, w_b, new_body)
+        outer_th = EXISTS(target_outer_pred_body, w_a, inner_th)
+        return outer_th
+
+    R_th = _direction(LHS, body_inner_r, swap_fg=False)
+    L_th = _direction(RHS, body_inner_l, swap_fg=True)
+    return DEDUCT_ANTISYM_RULE(L_th, R_th)
+# ---------------------------------------------------------------------------
+# Constructor recursion-equation derivation.
+#
+# Given a recursive predicate F : nat0 -> bool defined via define_wf_lt
+# with REC of shape ``|- !n. F n = body[F, n]``, where each body disjunct
+# has one of the q-syntax shapes:
+#
+#   (n = K)                                  -- nullary base (e.g. Zero_t)
+#   (?x. n = C x /\ F x)                     -- unary recursive
+#   (?x. n = C x)                            -- unary non-recursive (Var_t)
+#   (?a b. n = C a b /\ F a /\ F b)          -- binary recursive
+#
+# ``derive_rec_eq(REC, target_ctor_name, var_names)`` produces the
+# constructor recursion equation
+#   |- !v1...vk. F (target_C v1...vk) = <recursive call(s)>.
+#
+# It walks the body, classifies each disjunct by its head constructor,
+# applies the appropriate disjointness lemma to non-matching disjuncts
+# (collapsing them to F via EQF_INTRO), and uses the matching ctor's
+# _INJ to extract a one-point form for the matching disjunct. The
+# results are glued via ``or_chain_collapse`` (drops F-disjuncts).
+# ---------------------------------------------------------------------------
+
+
+# Lookup tables: NEQ_ZERO and INJ lemmas indexed by constructor name.
+_CTOR_NEQ_ZERO = {
+    "Succ_t": SUCC_T_NEQ_ZERO, "Var_t": VAR_T_NEQ_ZERO,
+    "Plus_t": PLUS_T_NEQ_ZERO, "Times_t": TIMES_T_NEQ_ZERO,
+    "Eq_f": EQ_F_NEQ_ZERO, "Not_f": NOT_F_NEQ_ZERO,
+    "Imp_f": IMP_F_NEQ_ZERO, "Forall_f": FORALL_F_NEQ_ZERO,
+}
+_CTOR_INJ = {
+    "Succ_t": SUCC_T_INJ, "Var_t": VAR_T_INJ, "Not_f": NOT_F_INJ,
+    "Plus_t": PLUS_T_INJ, "Times_t": TIMES_T_INJ,
+    "Eq_f": EQ_F_INJ, "Imp_f": IMP_F_INJ, "Forall_f": FORALL_F_INJ,
+}
+
+
+def _split_n_disj(tm):
+    """Split a right-associated disjunction into its leaf list."""
+    leaves = []
+    while True:
+        parts = dest_disj(tm)
+        if parts is None:
+            leaves.append(tm)
+            return leaves
+        leaves.append(parts[0])
+        tm = parts[1]
+
+
+def _disjunct_ctor_name(disj):
+    """Identify the head constructor named in a body disjunct.
+
+    Recognises:
+      - ``n = Zero_t`` -> "Zero_t"
+      - ``?args. n = C args (/\\ ...)`` -> name of C (looked up in _CTORS).
+    Returns the ctor name, plus the tail of the dest_exists chain (the
+    inner conjunction body or the bare equation).
+    """
+    cur = disj
+    while True:
+        ex_pred = dest_exists(cur)
+        if ex_pred is None:
+            break
+        cur = ex_pred.body
+    # cur is now `n = C args` or `n = C args /\ ...`.
+    eq_tm = dest_conj(cur)[0] if not is_eq(cur) else cur
+    rhs = dest_eq(eq_tm)[1]
+    # Walk left through Comb chains until we hit the constant.
+    head = rhs
+    while not isinstance(head, type(mk_const("0", []))):
+        if hasattr(head, "fun"):
+            head = head.fun
+        else:
+            break
+    if not hasattr(head, "name"):
+        raise ValueError(
+            f"_disjunct_ctor_name: cannot pin down constructor in {disj}"
+        )
+    return head.name
+
+
+def _disjunct_eq_F_via_neq(disj, neq_lemma_dir, target_args):
+    """Prove ``|- disj = F`` for a non-matching disjunct.
+
+    ``disj`` is one of:
+      ``e1 = K``                                  (no quantifiers, K nullary)
+      ``?x. e1 = D x (/\\ R(x))``                 (unary D ≠ target)
+      ``?a b. e1 = D a b /\\ R(a, b)``            (binary D ≠ target)
+    Witnesses for D's args are extracted from the post-CHOOSE_WITNESS
+    body so any outer-bound substitution is already applied (avoids
+    free-var capture across nested existentials).
+    """
+    if is_eq(disj):
+        neq_specd = _spec_neq_at(neq_lemma_dir, target_args, [])
+        # EQF_INTRO produces |- F = p; flip via SYM for our |- disj = F shape.
+        return SYM(EQF_INTRO(neq_specd))
+    # Existential: peel binders, extract D's args from the head equation.
+    th = ASSUME(disj)
+    while dest_exists(th._concl) is not None:
+        th = CHOOSE_WITNESS(dest_exists(th._concl), th)
+    head_eq_th = th if is_eq(th._concl) else CONJUNCT1(th)
+    head_app = dest_eq(head_eq_th._concl)[1]
+    other_args = _spine_args(head_app)
+    neq_specd = _spec_neq_at(neq_lemma_dir, target_args, other_args)
+    F_th = MP(NOT_ELIM(neq_specd), head_eq_th)   # {disj} |- F
+    rev = CONTR(disj, ASSUME(F))                  # {F} |- disj
+    # DEDUCT_ANTISYM_RULE(t1, t2) yields t1._concl = t2._concl.
+    return DEDUCT_ANTISYM_RULE(rev, F_th)
+
+
+def _spine_args(app):
+    """For ``app = C a1 a2 ... ak`` return ``[a1, ..., ak]``."""
+    args = []
+    cur = app
+    while not isinstance(cur, type(mk_const("0", []))):
+        if hasattr(cur, "fun"):
+            args.insert(0, cur.arg)
+            cur = cur.fun
+        else:
+            break
+    return args
+
+
+def _disjunct_eq_match_unary(disj, target_app, target_arg, inj_lemma):
+    """Matching unary disjunct: prove ``|- disj = F target_arg`` (or the
+    body in the no-recursion case).
+
+    ``disj`` is ``?x. target_app = C x /\\ R(x)`` or ``?x. target_app = C x``
+    where ``C`` is target_app's head.  ``inj_lemma`` is the constructor's
+    _INJ (``!a b. C a = C b ==> a = b``).  ``target_arg`` is the single
+    argument of target_app.
+
+    Returns equation whose RHS is ``R(target_arg)`` (or T if no body).
+    """
+    ex_pred = dest_exists(disj)
+    if ex_pred is None:
+        raise ValueError("_disjunct_eq_match_unary: not existential")
+    body = ex_pred.body
+    conj = dest_conj(body)
+    if conj is None:
+        # No-recursion variant: ``?x. target_app = C x``. Witness x:=target_arg
+        # via REFL; result is T.
+        from tactics import EQT_INTRO
+        rev = EXISTS(ex_pred, target_arg, REFL(target_app))  # |- ?x. ...
+        return EQT_INTRO(rev)
+    head_eq, rest = conj
+    # rest = R(x); we want to show this equals R(target_arg).
+    # Forward: {disj} |- R(target_arg).
+    chosen = CHOOSE_WITNESS(ex_pred, ASSUME(disj))  # {disj} |- target_app = C x /\ R(x)
+    head_th = CONJUNCT1(chosen)   # {disj} |- target_app = C x
+    rest_th = CONJUNCT2(chosen)   # {disj} |- R(x)
+    # SYM head_th: |- C x = target_app. But target_app = C target_arg.
+    # Use inj_lemma: C target_arg = C x ==> target_arg = x. From head_th
+    # rewritten: C target_arg = C x. So target_arg = x.
+    # Determine the witness term used by CHOOSE.
+    sel_x = rand(head_th._concl)  # = C x
+    x_val = rand(sel_x)           # = x (the SELECT term)
+    inj_at = SPECL([target_arg, x_val], inj_lemma)  # |- C target_arg = C x ==> target_arg = x
+    # head_th : {disj} |- target_app = C x. We have target_app = C target_arg by REFL of target_app.
+    # Actually target_app is literally `C target_arg` (same term), so no rewrite needed.
+    targ_eq_x = MP(inj_at, head_th)   # {disj} |- target_arg = x
+    # Now rest_th is R(x); want R(target_arg). Use AP_TERM(R, SYM targ_eq_x).
+    R_const = rator(rest_th._concl)
+    rest_eq = AP_TERM(R_const, SYM(targ_eq_x))  # {disj} |- R x = R target_arg
+    rest_at_target = EQ_MP(rest_eq, rest_th)    # {disj} |- R(target_arg)
+    # Reverse: {R(target_arg)} |- ?x. target_app = C x /\ R(x). Witness x:=target_arg.
+    body_at_target = mk_and(REFL(target_app)._concl, ASSUME(mk_app(R_const, target_arg))._concl)
+    body_th_at_target = CONJ(REFL(target_app), ASSUME(mk_app(R_const, target_arg)))
+    rev = EXISTS(ex_pred, target_arg, body_th_at_target)
+    return DEDUCT_ANTISYM_RULE(rev, rest_at_target)
+
+
+def _disjunct_eq_match_binary(disj, target_app, target_args, inj_lemma):
+    """Matching binary disjunct: prove ``|- disj = R(target_args)``.
+
+    ``disj`` is ``?a b. target_app = C a b /\\ R(a, b)`` (body is a single
+    /\\, R may itself be a conjunction). ``inj_lemma`` is the binary
+    _INJ: ``!a1 a2 b1 b2. C a1 b1 = C a2 b2 ==> (a1 = a2 /\\ b1 = b2)``.
+    """
+    a_t, b_t = target_args
+    out_a_pred = dest_exists(disj)
+    in_b_pred = dest_exists(out_a_pred.body)
+    # Forward: {disj} |- rest[a_t/a, b_t/b].
+    chosen_a = CHOOSE_WITNESS(out_a_pred, ASSUME(disj))
+    new_inner_pred = dest_exists(chosen_a._concl)
+    chosen_ab = CHOOSE_WITNESS(new_inner_pred, chosen_a)
+    head_th = CONJUNCT1(chosen_ab)
+    rest_th = CONJUNCT2(chosen_ab)
+    ctor_app = rand(head_th._concl)
+    wb = rand(ctor_app)
+    wa = rand(rator(ctor_app))
+    inj_at = SPECL([a_t, b_t, wa, wb], inj_lemma)
+    pair = MP(inj_at, head_th)              # {disj} |- a_t = wa /\ b_t = wb
+    eq_a = CONJUNCT1(pair)
+    eq_b = CONJUNCT2(pair)
+    rest_at_target = REWRITE_RULE([SYM(eq_a), SYM(eq_b)], rest_th)
+    rest_target_term = rest_at_target._concl
+    # Reverse: build target body `?a. ?b. body` by EXISTS at b:=b_t then a:=a_t.
+    # EXISTS only substitutes its predicate's bvar; the inner pred still
+    # references `a` (the outer bvar) free, so substitute a:=a_t first.
+    in_b_pred_at_a = mk_abs(
+        in_b_pred.bvar,
+        vsubst([(a_t, out_a_pred.bvar)])(in_b_pred.body),
+    )
+    inner_at_target = CONJ(REFL(target_app), ASSUME(rest_target_term))
+    inner_th = EXISTS(in_b_pred_at_a, b_t, inner_at_target)
+    outer_th = EXISTS(out_a_pred, a_t, inner_th)
+    return DEDUCT_ANTISYM_RULE(outer_th, rest_at_target)
+
+
+def _ctor_neq_lemma(ctor_a_name, ctor_b_name):
+    """Look up ``|- !args1 args2. ~(ctor_a args1 = ctor_b args2)`` from
+    the precomputed registry (``CTOR_DISJOINTNESS`` + ``_NEQ_ZERO`` family)."""
+    if ctor_a_name == "Zero_t":
+        # ~(Zero_t = ctor_b args). Symmetric to ctor_b's NEQ_ZERO.
+        return ("rev", _CTOR_NEQ_ZERO[ctor_b_name])
+    if ctor_b_name == "Zero_t":
+        return ("fwd", _CTOR_NEQ_ZERO[ctor_a_name])
+    if (ctor_a_name, ctor_b_name) in CTOR_DISJOINTNESS:
+        return ("fwd", CTOR_DISJOINTNESS[(ctor_a_name, ctor_b_name)])
+    if (ctor_b_name, ctor_a_name) in CTOR_DISJOINTNESS:
+        return ("rev", CTOR_DISJOINTNESS[(ctor_b_name, ctor_a_name)])
+    raise ValueError(f"_ctor_neq_lemma: no disjointness for {ctor_a_name} vs {ctor_b_name}")
+
+
+def _spec_neq_at(neq_lemma_dir, ctor_a_args, ctor_b_args):
+    """Specialise the disjointness lemma at concrete args.
+
+    ``neq_lemma_dir = ("fwd"|"rev", thm)``. ``"fwd"`` means the lemma
+    has shape ``!aArgs bArgs. ~(A aArgs = B bArgs)``; ``"rev"`` means
+    args are swapped (we'll SYM the conclusion).  Returns
+    ``|- ~(A ctor_a_args = B ctor_b_args)``.
+    """
+    direction, lemma = neq_lemma_dir
+    if direction == "fwd":
+        return SPECL(ctor_a_args + ctor_b_args, lemma)
+    # rev: lemma is ~(B b = A a); we want ~(A a = B b). Use NE_SYM-style.
+    swapped = SPECL(ctor_b_args + ctor_a_args, lemma)
+    # ~(B b = A a) -> ~(A a = B b).
+    from tactics import NE_SYM
+    return NE_SYM(swapped)
+
+
+def _ctor_app(ctor_decl, args):
+    """Build the term ``C a1 ... ak`` for a constructor entry."""
+    name = ctor_decl[0]
+    return mk_app(mk_const(name, []), *args)
+
+
+def derive_rec_eq(REC, target_ctor_name, var_names):
+    """Constructor recursion equation, auto-generated.
+
+    Args:
+      REC : ``|- !n. F n = body[F, n]`` from ``define_wf_lt``.
+      target_ctor_name : name in ``_CTORS`` (e.g. ``"Succ_t"``).
+      var_names : list of strings naming the constructor's args
+                  (length must match the constructor's arity).
+
+    Returns:
+      ``|- !v1...vk. F (target_C v1...vk) = <body of matching disjunct,
+                                              with v1..vk substituted>``,
+      with all non-matching disjuncts collapsed to F via the relevant
+      ``_NEQ_*`` / ``CTOR_DISJOINTNESS`` lemmas.
+    """
+    if target_ctor_name not in _CTORS:
+        raise ValueError(f"derive_rec_eq: unknown ctor {target_ctor_name!r}")
+    target_decl = _CTORS[target_ctor_name]
+    target_arity = len(target_decl[3])
+    if len(var_names) != target_arity:
+        raise ValueError(
+            f"derive_rec_eq: {target_ctor_name} has arity {target_arity}, "
+            f"got {len(var_names)} var names"
+        )
+    target_args = [Var(name, nat0_ty) for name in var_names]
+    target_app = _ctor_app(target_decl, target_args)
+    rec_at = SPEC(target_app, REC)             # |- F target_app = body[F, target_app]
+    body_at = rand(rec_at._concl)
+    disjuncts = _split_n_disj(body_at)
+
+    # For each disjunct, classify and produce the |- disjunct = ... eq.
+    target_inj = _CTOR_INJ.get(target_ctor_name)
+    per_eqs = []
+    for disj in disjuncts:
+        head_name = _disjunct_ctor_name(disj)
+        if head_name == target_ctor_name:
+            if target_arity == 1:
+                eq = _disjunct_eq_match_unary(disj, target_app, target_args[0], target_inj)
+            else:
+                eq = _disjunct_eq_match_binary(disj, target_app, target_args, target_inj)
+        else:
+            # Non-matching: collapse to F via disjointness lemma. Witnesses
+            # are extracted post-CHOOSE_WITNESS inside the helper to keep
+            # nested existentials' substitutions in lockstep.
+            neq_dir = _ctor_neq_lemma(target_ctor_name, head_name)
+            eq = _disjunct_eq_F_via_neq(disj, neq_dir, target_args)
+        per_eqs.append(eq)
+
+    body_eq = or_chain_collapse(per_eqs)        # |- body_at = collapsed_rhs
+    final = TRANS(rec_at, body_eq)              # |- F target_app = collapsed_rhs
+    return GENL(target_args, final)
+
+
+# ---------------------------------------------------------------------------
+# Stage 1 (b)/(c) work to follow.
+#
+# Each of ``is_term``, ``is_form``, ``free_in``, ``substitute`` is
+# defined by ``define_wf_lt`` against a body that disjuncts over the
+# constructor patterns of its target type.  The supporting helpers
+# above are now in place; the per-function steps are:
+#
+#   1. Build the body F : (nat0 -> A) -> nat0 -> A as a HOL lambda
+#      whose disjuncts have the q-syntax shapes
+#         (n = K)                              -- nullary base
+#         (?x. n = C x /\ <recursive call>)    -- unary recursive
+#         (?x. n = C x)                        -- unary non-recursive
+#         (?a b. n = C a b /\ <recursive>)     -- binary recursive
+#      (~30 lines of mk_abs/mk_app glue per function).
+#
+#   2. Prove MONO:
+#         |- !f g n. (!k. nat0_lt k n ==> f k = g k) ==> F f n = F g n.
+#      Per-disjunct iffs come from ``mono_iff_unary_step`` /
+#      ``mono_iff_binary_step``; non-recursive disjuncts are REFL.
+#      Combine with ``OR_CONG`` (tactics.py).  ~25 lines per function.
+#
+#   3. ``define_wf_lt(name, ty, F_body, MONO)`` returns ``(NAME_DEF, REC)``.
+#      ~5 lines per function.
+#
+#   4. Constructor recursion equations: one ``derive_rec_eq(REC, ctor,
+#      var_names)`` call each.  No further proof obligations -- the
+#      helper looks up disjointness / injectivity from ``_CTORS`` and
+#      collapses F-disjuncts via ``or_chain_collapse``.
+#      One line per equation; ~5-9 equations per function.
+#
+# Side helpers used at every step:
+#   * ``OR_F_LEFT`` / ``OR_F_RIGHT``   -- F-disjunct elimination.
+#   * ``or_chain_collapse``            -- chain per-disjunct eqs.
+#   * ``mono_iff_unary_step``          -- per-disjunct MONO iff (1 arg).
+#   * ``mono_iff_binary_step``         -- per-disjunct MONO iff (2 args).
+#   * ``derive_rec_eq``                -- whole constructor rec eq.
+#   * ``p.sorry()``                    -- stub to land partial proofs.
+#
+# Estimated total once these helpers are exercised:
+#   is_term  ~ 80 lines  (5 disjuncts: 1 nullary + 1 unary-rec + 1 unary
+#                         + 2 binary-rec; 5 rec eqs).
+#   is_form  ~ 80 lines  (4 disjuncts; depends on is_term for Eq_f).
+#   free_in  ~ 100 lines (2-arg recursion; ``A = nat0 -> bool``;
+#                         MONO needs FUN_EXT lift via ``by_ext``;
+#                         9 rec eqs).
+#   substitute ~ 150 lines (3-arg curried; ``A = nat0 -> nat0 -> nat0``;
+#                           non-bool result so no F-elim; bound-var case
+#                           for Forall_f).
 # ---------------------------------------------------------------------------
 
 
@@ -970,5 +1510,58 @@ if __name__ == "__main__":
           pp_thm(CTOR_DISJOINTNESS[('Plus_t', 'Times_t')]))
     print("    EQ_F_NEQ_FORALL_F :",
           pp_thm(CTOR_DISJOINTNESS[('Eq_f', 'Forall_f')]))
+    print()
+    print("Stage 1 -- MONO helpers (per-disjunct iffs).")
+    # Smoke test: build a fake hypothesis ASSUME(!k. nat0_lt k n ==> f k = g k)
+    # and exercise both helpers against the q_syntax constructors.
+    from axioms import mk_forall, mk_imp
+    from basics import mk_app as _mk_app
+    _f_smoke = Var("f", parse_type("nat0 -> bool"))
+    _g_smoke = Var("g", parse_type("nat0 -> bool"))
+    _n_smoke = Var("n", nat0_ty)
+    _k_smoke = Var("k", nat0_ty)
+    _nat0_lt_const = mk_const("nat0_lt", [])
+    _smoke_hyp = ASSUME(mk_forall(_k_smoke, mk_imp(
+        _mk_app(_nat0_lt_const, _k_smoke, _n_smoke),
+        mk_eq(_mk_app(_f_smoke, _k_smoke), _mk_app(_g_smoke, _k_smoke)),
+    )))
+    _IFF_SUCC_T = mono_iff_unary_step(Succ_t, NAT0_LT_SUCC_T, _smoke_hyp)
+    _IFF_PLUS_T = mono_iff_binary_step(
+        Plus_t, NAT0_LT_PLUS_T_L, NAT0_LT_PLUS_T_R, _smoke_hyp,
+    )
+    print("  unary  (Succ_t):", pp_thm(_IFF_SUCC_T))
+    print("  binary (Plus_t):", pp_thm(_IFF_PLUS_T))
+    print()
+    print("Stage 1 -- derive_rec_eq smoke test (synthetic recursive body).")
+    # Synthetic predicate F : nat0 -> bool with body matching is_term shape.
+    _F_pred = Var("F", parse_type("nat0 -> bool"))
+    _n_var = Var("n", nat0_ty)
+    _t_smoke = Var("t", nat0_ty)
+    _v_smoke = Var("v", nat0_ty)
+    _a_smoke = Var("a", nat0_ty)
+    _b_smoke = Var("b", nat0_ty)
+    _body = mk_or(
+        mk_eq(_n_var, Zero_t),
+        mk_or(
+            mk_exists(_t_smoke, mk_and(
+                mk_eq(_n_var, _mk_app(Succ_t, _t_smoke)),
+                _mk_app(_F_pred, _t_smoke),
+            )),
+            mk_or(
+                mk_exists(_v_smoke, mk_eq(_n_var, _mk_app(Var_t, _v_smoke))),
+                mk_exists(_a_smoke, mk_exists(_b_smoke, mk_and(
+                    mk_eq(_n_var, _mk_app(Plus_t, _a_smoke, _b_smoke)),
+                    mk_and(_mk_app(_F_pred, _a_smoke), _mk_app(_F_pred, _b_smoke)),
+                ))),
+            ),
+        ),
+    )
+    _fake_REC = ASSUME(mk_forall(_n_var, mk_eq(_mk_app(_F_pred, _n_var), _body)))
+    _REC_SUCC = derive_rec_eq(_fake_REC, "Succ_t", ["t"])
+    _REC_VAR  = derive_rec_eq(_fake_REC, "Var_t", ["v"])
+    _REC_PLUS = derive_rec_eq(_fake_REC, "Plus_t", ["a", "b"])
+    print("  REC at Succ_t :", pp_thm(_REC_SUCC))
+    print("  REC at Var_t  :", pp_thm(_REC_VAR))
+    print("  REC at Plus_t :", pp_thm(_REC_PLUS))
     print()
     print("Stage 1 (b)+(c) -- is_term, is_form, substitute, free_in: TODO.")

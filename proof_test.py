@@ -626,6 +626,65 @@ def main():
     else:
         raise AssertionError("expected HolError: calc final RHS doesn't match goal")
 
+    # ---- cases_on: N-way disjunction splits flatly --------------------
+    @proof
+    def FIVE_WAY(p):
+        p.goal(
+            "!a:bool. !b:bool. !c:bool. !d:bool. !e:bool. !r:bool. "
+            "(a \\/ b \\/ c \\/ d \\/ e) ==> "
+            "(a ==> r) ==> (b ==> r) ==> (c ==> r) ==> (d ==> r) "
+            "==> (e ==> r) ==> r"
+        )
+        p.fix("a b c d e r")
+        p.assume("h: a \\/ b \\/ c \\/ d \\/ e")
+        p.assume(
+            "ar: a ==> r", "br: b ==> r", "cr: c ==> r",
+            "dr: d ==> r", "er: e ==> r",
+        )
+        with p.cases_on("h"):
+            with p.case("ha: a"):
+                p.thus("r").by_match("ar", "ha")
+            with p.case("hb: b"):
+                p.thus("r").by_match("br", "hb")
+            with p.case("hc: c"):
+                p.thus("r").by_match("cr", "hc")
+            with p.case("hd: d"):
+                p.thus("r").by_match("dr", "hd")
+            with p.case("he: e"):
+                p.thus("r").by_match("er", "he")
+    # Just check the proof closed with the expected outer shape.
+    assert FIVE_WAY._asl == []
+    assert "(a \\/ (b \\/ (c \\/ (d \\/ e))))" in pp(FIVE_WAY._concl), \
+        f"unexpected shape: {pp(FIVE_WAY._concl)}"
+
+    # Branch order can differ from disjunct order (alpha-matched).
+    @proof
+    def FIVE_WAY_REORDERED(p):
+        p.goal(
+            "!a:bool. !b:bool. !c:bool. !d:bool. !e:bool. !r:bool. "
+            "(a \\/ b \\/ c \\/ d \\/ e) ==> "
+            "(a ==> r) ==> (b ==> r) ==> (c ==> r) ==> (d ==> r) "
+            "==> (e ==> r) ==> r"
+        )
+        p.fix("a b c d e r")
+        p.assume("h: a \\/ b \\/ c \\/ d \\/ e")
+        p.assume(
+            "ar: a ==> r", "br: b ==> r", "cr: c ==> r",
+            "dr: d ==> r", "er: e ==> r",
+        )
+        with p.cases_on("h"):
+            with p.case("hc: c"):
+                p.thus("r").by_match("cr", "hc")
+            with p.case("ha: a"):
+                p.thus("r").by_match("ar", "ha")
+            with p.case("he: e"):
+                p.thus("r").by_match("er", "he")
+            with p.case("hb: b"):
+                p.thus("r").by_match("br", "hb")
+            with p.case("hd: d"):
+                p.thus("r").by_match("dr", "hd")
+    assert aconv(FIVE_WAY._concl, FIVE_WAY_REORDERED._concl)
+
     # ---- sorry: cheat-close, frame discharge, axiom registration -------
     import io
     import contextlib

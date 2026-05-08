@@ -2,8 +2,11 @@
 
 from fusion import Var, bool_ty, ASSUME, concl, HolError
 from basics import aconv, mk_eq, mk_app, mk_fun_ty
-from axioms import T, mk_or
-from tactics import SYM, EQT_INTRO, EQT_ELIM, TRUTH, REWRITE_CONV, OR_CONG
+from axioms import T, F, mk_or
+from tactics import (
+    SYM, EQT_INTRO, EQT_ELIM, TRUTH, REWRITE_CONV, OR_CONG,
+    OR_F_LEFT, OR_F_RIGHT, or_chain_collapse,
+)
 
 
 def main():
@@ -29,6 +32,43 @@ def main():
     th_or = OR_CONG(th_ac, th_bd)
     assert aconv(concl(th_or), mk_eq(mk_or(a, b), mk_or(c, d)))
     assert set(th_or._asl) == {mk_eq(a, c), mk_eq(b, d)}
+
+    # OR_F_LEFT / OR_F_RIGHT shape.
+    pv = Var("p", bool_ty)
+    assert aconv(concl(OR_F_LEFT), concl(OR_F_LEFT))  # trivially holds
+    # (Better: just check pp.)
+    from parser import pp_thm
+    assert pp_thm(OR_F_LEFT) == "|- (!p. ((F \\/ p) = p))"
+    assert pp_thm(OR_F_RIGHT) == "|- (!p. ((p \\/ F) = p))"
+
+    # or_chain_collapse: 4-disjunct body, only middle survives.
+    d1, d2, d3, d4 = (Var(n, bool_ty) for n in ("d1", "d2", "d3", "d4"))
+    e2 = Var("e2", bool_ty)
+    eq1 = ASSUME(mk_eq(d1, F))    # |- d1 = F
+    eq2 = ASSUME(mk_eq(d2, e2))   # |- d2 = e2
+    eq3 = ASSUME(mk_eq(d3, F))    # |- d3 = F
+    eq4 = ASSUME(mk_eq(d4, F))    # |- d4 = F
+    out = or_chain_collapse([eq1, eq2, eq3, eq4])
+    expected_lhs = mk_or(d1, mk_or(d2, mk_or(d3, d4)))
+    # After OR_F_LEFT/RIGHT: F \/ e2 \/ F \/ F → e2.
+    assert aconv(concl(out), mk_eq(expected_lhs, e2)), (
+        f"or_chain_collapse: got {pp_thm(out)}"
+    )
+
+    # All-F: collapses to F.
+    eq2_F = ASSUME(mk_eq(d2, F))
+    out_all_F = or_chain_collapse([eq1, eq2_F, eq3, eq4])
+    assert aconv(concl(out_all_F), mk_eq(expected_lhs, F)), (
+        f"or_chain_collapse all-F: got {pp_thm(out_all_F)}"
+    )
+
+    # Empty list raises.
+    try:
+        or_chain_collapse([])
+    except HolError:
+        pass
+    else:
+        raise AssertionError("expected HolError on empty list")
 
     # REWRITE_CONV blow-up guard: a self-recursive rule whose RHS contains
     # two copies of the LHS doubles term size per pass. The fail-fast guard
