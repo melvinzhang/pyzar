@@ -718,6 +718,111 @@ theta_of_phi = mk_const("theta_of_phi", [])
 
 
 # ---------------------------------------------------------------------------
+# Stage 4 (b.3) -- HOL-level substitute / free_in / is_form lemmas.
+#
+# Five stubs the diagonal-lemma proof needs at the HOL level (not at
+# the Prov_Q level). All derivable from the SUBSTITUTE_AT_* and
+# FREE_IN_AT_* recursion equations in q_syntax by structural induction
+# on F (or by direct calculation for the concrete inequalities).
+# ---------------------------------------------------------------------------
+
+
+@proof
+def VAR_X_NEQ_SUC0_0(p):
+    """|- ~(var_x = SUC0 0).
+
+    Concrete inequality. ``var_x = Var_t 0`` is a Pair_ord-encoded
+    nat0 (tag-prefixed); ``SUC0 0 = 1`` is a small numeral. Disjoint
+    by tag analysis through the Pair_ord encoding.
+
+    Used as the side condition for SUBSTITUTE_AT_EXISTS_MISS when
+    pushing substitution through ``theta_of_phi``'s outer
+    ``Exists_f (SUC0 0) ...``. STUB.
+    """
+    p.goal("~(var_x = SUC0 0)")
+    p.sorry()
+
+
+@proof
+def VAR_Y_NEQ_VAR_X(p):
+    """|- ~(var_y = var_x).
+
+    Concrete inequality between two Q-variable godelnums. From
+    VAR_T_INJ + ~(0 = SUC0 0) (= NAT0_NEQ_SUC0_0, derivable via NAT0
+    constructor disjointness).
+
+    Used to ensure capture-avoidance when substituting var_y for var_x
+    inside phi during the theta_of_phi construction. STUB.
+    """
+    p.goal("~(var_y = var_x)")
+    p.sorry()
+
+
+@proof
+def SUBSTITUTE_PRESERVES_IS_FORM(p):
+    """|- !F t v. is_form F /\\ is_term t ==> is_form (substitute F t v).
+
+    Substitution into a well-formed Q-formula (replacing a variable
+    index by a well-formed Q-term) yields a well-formed Q-formula.
+    Strong induction on F using SUBSTITUTE_AT_* equations and the
+    is_form constructor closure lemmas (IS_FORM_AT_EQ / NOT / IMP /
+    FORALL). STUB.
+
+    Used to derive ``is_form (diag (theta_of_phi phi))`` for the
+    well-formedness conjunct of DIAGONAL_LEMMA's conclusion.
+    """
+    p.goal(
+        "!F t v. is_form F /\\ is_term t "
+        "==> is_form (substitute F t v)",
+        types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def SUBSTITUTE_FREE_NO_OP(p):
+    """|- !F t v. ~(free_in F v) ==> substitute F t v = F.
+
+    Substituting a variable index that doesn't occur free is a no-op.
+    Strong induction on F using SUBSTITUTE_AT_* and FREE_IN_AT_*
+    equations. STUB.
+
+    Used to compute psi's shape: phi_y := substitute phi var_y var_x
+    has var_x not free (since phi has only var_x free, and that var_x
+    got replaced by var_y), so substituting again at var_x is no-op.
+    """
+    p.goal(
+        "!F t v. ~(free_in F v) ==> substitute F t v = F",
+        types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def FREE_IN_SUBSTITUTE_AT_DIFFERENT_VAR(p):
+    """|- !F t v w. ~(v = w) /\\ ~(free_in F v) /\\ ~(free_in t v)
+                    ==> ~(free_in (substitute F t w) v).
+
+    Free-variable analysis under substitution: if ``v`` is not free in
+    ``F`` and not free in the replacement term ``t``, and ``v`` is
+    distinct from the variable index ``w`` being substituted, then
+    ``v`` is not free in the substituted result. Strong induction on
+    F. STUB.
+
+    Used in the diagonal lemma's forward direction to discharge the
+    ``~(free_in (phi[numeral psi / var_x]) (SUC0 0))`` side condition
+    of PROV_Q_EXISTS_ELIM.
+    """
+    p.goal(
+        "!F t v w. ~(v = w) /\\ ~(free_in F v) /\\ ~(free_in t v) "
+        "==> ~(free_in (substitute F t w) v)",
+        types={"F": nat0_ty, "t": nat0_ty,
+               "v": nat0_ty, "w": nat0_ty},
+    )
+    p.sorry()
+
+
+# ---------------------------------------------------------------------------
 # Stage 4 (c) -- the diagonal lemma (AXIOMATIZED).
 #
 # Headline:
@@ -818,6 +923,18 @@ if __name__ == "__main__":
     print()
     print("Stage 4 (b.2) -- theta-of-phi construction.")
     print("    THETA_OF_PHI_DEF :", pp_thm(THETA_OF_PHI_DEF))
+    print()
+    print("Stage 4 (b.3) -- HOL-level subst/free_in/is_form lemmas (STUB).")
+    print("    VAR_X_NEQ_SUC0_0                  :",
+          pp_thm(VAR_X_NEQ_SUC0_0))
+    print("    VAR_Y_NEQ_VAR_X                   :",
+          pp_thm(VAR_Y_NEQ_VAR_X))
+    print("    SUBSTITUTE_PRESERVES_IS_FORM      :",
+          pp_thm(SUBSTITUTE_PRESERVES_IS_FORM))
+    print("    SUBSTITUTE_FREE_NO_OP             :",
+          pp_thm(SUBSTITUTE_FREE_NO_OP))
+    print("    FREE_IN_SUBSTITUTE_AT_DIFFERENT_VAR :",
+          pp_thm(FREE_IN_SUBSTITUTE_AT_DIFFERENT_VAR))
     print()
     print("Stage 4 (c) -- diagonal lemma (SORRY: Prov_Q part).")
     print("    DIAGONAL_LEMMA :", pp_thm(DIAGONAL_LEMMA))
