@@ -330,3 +330,468 @@ Sigma_1 soundness of Q outright, since HF *is* the standard model.)
 #     that can be merged as a unit. They are imported again only if
 #     someone wants ``godel_second.py`` (which would also pull in the
 #     PA extension above).
+
+
+# ===========================================================================
+# Stage 4 -- the diagonal lemma.
+# ===========================================================================
+#
+# Lemma (Goedel-Carnap). For every Q-formula ``phi`` with ``var_x`` as its
+# only free variable there exists a Q-sentence ``psi`` such that
+#
+#     |- Prov_Q (Iff_f psi (substitute phi (numeral psi) var_x)).
+#
+# Construction (BBJ Ch. 17, Smullyan Ch. 4):
+#
+#   diag : nat0 -> nat0
+#     diag(n) := substitute n (numeral n) var_x.
+#
+#   D(x, y) : Q-formula representing diag as a binary relation.
+#     D(x, y) := substitute_2 substitute_internal x x var_x var_y
+#                ``y = substitute(x, x, var_x) = diag(x)`` evaluated in
+#                Q via ``substitute_internal``.
+#                (specialised: F-slot=t-slot=x, v-slot=var_x,
+#                 result-slot=y)
+#
+#   theta(x) := Exists_f var_y (And_f D(x, y) phi(y))
+#                ``x's diagonal-substitute satisfies phi``.
+#
+#   m   := godelnum(theta) = theta itself (formulas ARE nat0s).
+#   psi := substitute theta (numeral m) var_x.
+#
+# Then godelnum(psi) = diag(m), so when we substitute psi's numeric code
+# back, the internal D evaluates to the right value, and Q derives
+#     psi  <=>  phi(numeral psi).
+#
+# AXIOMATIZED for now via ``p.sorry()``: the proof requires substantial
+# substitution-pushing in Q (~200-400 lines) and consumes the Stage 3C
+# ``SUBSTITUTE_REPRESENTS`` axiom. Posted as ``DIAGONAL_LEMMA`` against
+# the Stage-3D side conditions ``IS_FORM_PROV_Q_INTERNAL`` /
+# ``FREE_IN_PROV_Q_INTERNAL`` so Stage 5 can apply it directly to
+# ``phi := Not_f Prov_Q_internal``.
+# ===========================================================================
+
+
+from fusion import Var
+from basics import mk_const, mk_app, mk_abs
+from parser import define, parse_type
+from nat0 import nat0_ty
+from proof import proof
+from tactics import SPECL, MP
+from q_syntax import (
+    Not_f, Imp_f, Forall_f,
+    SUBSTITUTE_AT_NOT, SUBSTITUTE_AT_IMP,
+    SUBSTITUTE_AT_FORALL_MISS,
+)
+from q_proof import var_x, var_y, VAR_X_DEF, VAR_Y_DEF
+from q_repr import (
+    numeral, substitute,
+)
+
+
+# ---------------------------------------------------------------------------
+# Stage 4 (a) -- derived Q-formula connectives on godelnums.
+#
+# Q's primitive connectives are ``Imp_f`` and ``Not_f`` (plus ``Eq_f``,
+# ``Forall_f`` for atom / quantifier). The remaining connectives are
+# defined as HOL functions building the corresponding nat0 godelnums:
+#
+#   And_f a b    := Not_f (Imp_f a (Not_f b))
+#   Or_f a b     := Imp_f (Not_f a) b
+#   Iff_f a b    := And_f (Imp_f a b) (Imp_f b a)
+#   Exists_f v f := Not_f (Forall_f v (Not_f f))
+# ---------------------------------------------------------------------------
+
+
+_a_n0 = Var("a", nat0_ty)
+_b_n0 = Var("b", nat0_ty)
+_v_n0 = Var("v", nat0_ty)
+_f_n0 = Var("f", nat0_ty)
+
+
+AND_F_DEF = define(
+    "And_f",
+    parse_type("nat0 -> nat0 -> nat0"),
+    mk_abs(_a_n0, mk_abs(_b_n0,
+        mk_app(Not_f, mk_app(Imp_f, _a_n0,
+                             mk_app(Not_f, _b_n0))))),
+)
+And_f = mk_const("And_f", [])
+
+
+OR_F_DEF = define(
+    "Or_f",
+    parse_type("nat0 -> nat0 -> nat0"),
+    mk_abs(_a_n0, mk_abs(_b_n0,
+        mk_app(Imp_f, mk_app(Not_f, _a_n0), _b_n0))),
+)
+Or_f = mk_const("Or_f", [])
+
+
+IFF_F_DEF = define(
+    "Iff_f",
+    parse_type("nat0 -> nat0 -> nat0"),
+    mk_abs(_a_n0, mk_abs(_b_n0,
+        mk_app(And_f,
+               mk_app(Imp_f, _a_n0, _b_n0),
+               mk_app(Imp_f, _b_n0, _a_n0)))),
+)
+Iff_f = mk_const("Iff_f", [])
+
+
+EXISTS_F_DEF = define(
+    "Exists_f",
+    parse_type("nat0 -> nat0 -> nat0"),
+    mk_abs(_v_n0, mk_abs(_f_n0,
+        mk_app(Not_f,
+               mk_app(Forall_f, _v_n0,
+                      mk_app(Not_f, _f_n0))))),
+)
+Exists_f = mk_const("Exists_f", [])
+
+
+# Pointwise-applied form of each connective definition: useful as a
+# rewrite rule (REWRITE_PROVE doesn't beta-reduce, so the bare DEF
+# theorems don't fire under an applied And_f / Or_f / Iff_f).
+from tactics import AP_THM, BETA_CONV, TRANS as _TRANS_, GENL
+from basics import rand
+
+
+def _at2(def_th, x, y):
+    th_x = AP_THM(def_th, x)
+    th_x = _TRANS_(th_x, BETA_CONV(rand(th_x._concl)))
+    th_xy = AP_THM(th_x, y)
+    th_xy = _TRANS_(th_xy, BETA_CONV(rand(th_xy._concl)))
+    return GENL([x, y], th_xy)
+
+
+# |- !a b. And_f a b = Not_f (Imp_f a (Not_f b)).
+AND_F_AT = _at2(AND_F_DEF, _a_n0, _b_n0)
+# |- !a b. Or_f a b = Imp_f (Not_f a) b.
+OR_F_AT = _at2(OR_F_DEF, _a_n0, _b_n0)
+# |- !a b. Iff_f a b = And_f (Imp_f a b) (Imp_f b a).
+IFF_F_AT = _at2(IFF_F_DEF, _a_n0, _b_n0)
+# |- !v f. Exists_f v f = Not_f (Forall_f v (Not_f f)).
+EXISTS_F_AT = _at2(EXISTS_F_DEF, _v_n0, _f_n0)
+
+
+# ---------------------------------------------------------------------------
+# Stage 4 (a.1) -- substitution-pushing lemmas for derived connectives.
+#
+# substitute distributes over And_f / Or_f / Iff_f unconditionally and
+# over Exists_f under the side condition ``~(v = bvar)`` (mirroring
+# Forall_f). Each is a one-line ``by_rewrite`` chain through the
+# connective's defining equation + the primitive substitute equations
+# from q_syntax.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def SUBSTITUTE_AT_AND(p):
+    """|- !a b t v. substitute (And_f a b) t v
+                   = And_f (substitute a t v) (substitute b t v)."""
+    p.goal(
+        "!a b t v. substitute (And_f a b) t v = "
+        "And_f (substitute a t v) (substitute b t v)"
+    )
+    p.fix("a b t v")
+    p.thus(
+        "substitute (And_f a b) t v = "
+        "And_f (substitute a t v) (substitute b t v)"
+    ).by_rewrite([AND_F_AT, SUBSTITUTE_AT_NOT, SUBSTITUTE_AT_IMP])
+
+
+@proof
+def SUBSTITUTE_AT_OR(p):
+    """|- !a b t v. substitute (Or_f a b) t v
+                   = Or_f (substitute a t v) (substitute b t v)."""
+    p.goal(
+        "!a b t v. substitute (Or_f a b) t v = "
+        "Or_f (substitute a t v) (substitute b t v)"
+    )
+    p.fix("a b t v")
+    p.thus(
+        "substitute (Or_f a b) t v = "
+        "Or_f (substitute a t v) (substitute b t v)"
+    ).by_rewrite([OR_F_AT, SUBSTITUTE_AT_NOT, SUBSTITUTE_AT_IMP])
+
+
+@proof
+def SUBSTITUTE_AT_IFF(p):
+    """|- !a b t v. substitute (Iff_f a b) t v
+                   = Iff_f (substitute a t v) (substitute b t v)."""
+    p.goal(
+        "!a b t v. substitute (Iff_f a b) t v = "
+        "Iff_f (substitute a t v) (substitute b t v)"
+    )
+    p.fix("a b t v")
+    p.thus(
+        "substitute (Iff_f a b) t v = "
+        "Iff_f (substitute a t v) (substitute b t v)"
+    ).by_rewrite([
+        IFF_F_AT, AND_F_AT, SUBSTITUTE_AT_NOT, SUBSTITUTE_AT_IMP,
+    ])
+
+
+@proof
+def SUBSTITUTE_AT_EXISTS_MISS(p):
+    """|- !w body t v. ~(v = w) ==>
+            substitute (Exists_f w body) t v
+            = Exists_f w (substitute body t v).
+
+    Capture-avoidance side condition: the bound variable index ``w`` of
+    the existential must not be the variable being substituted.
+    """
+    p.goal(
+        "!w body t v. ~(v = w) ==> "
+        "substitute (Exists_f w body) t v = "
+        "Exists_f w (substitute body t v)"
+    )
+    p.fix("w body t v")
+    p.assume("hne: ~(v = w)")
+    forall_miss_at = SPECL(
+        [p._parse("w"), p._parse("Not_f body"),
+         p._parse("t"), p._parse("v")],
+        SUBSTITUTE_AT_FORALL_MISS,
+    )
+    forall_miss_app = MP(forall_miss_at, p.fact("hne"))
+    p.thus(
+        "substitute (Exists_f w body) t v = "
+        "Exists_f w (substitute body t v)"
+    ).by_rewrite([EXISTS_F_AT, SUBSTITUTE_AT_NOT, forall_miss_app])
+
+
+# ---------------------------------------------------------------------------
+# Stage 4 (b) -- the diagonal substitution function.
+#
+#   diag(n) := substitute n (numeral n) var_x
+#
+# ``diag`` is a HOL function on godelnums. Its representability inside
+# Q follows from ``SUBSTITUTE_REPRESENTS`` specialised with F=t=n,
+# v=var_x: each instance ``diag(n) = k`` is Q-provable via the
+# ``substitute_internal`` formula at numeral arguments.
+# ---------------------------------------------------------------------------
+
+
+_n_diag = Var("n", nat0_ty)
+
+
+DIAG_DEF = define(
+    "diag",
+    parse_type("nat0 -> nat0"),
+    mk_abs(_n_diag,
+        mk_app(substitute, _n_diag,
+               mk_app(numeral, _n_diag), var_x)),
+)
+diag = mk_const("diag", [])
+
+
+# ---------------------------------------------------------------------------
+# Stage 4 (b.1) -- diag_internal: representing diag inside Q (AXIOMATIZED).
+#
+# ``diag_internal`` is a Q-formula in two free variables (``var_x`` for
+# the input, ``var_y`` for the output) expressing the relation
+# ``var_y = diag(var_x)``. Three axioms (all sorry'd):
+#
+#   * ``DIAG_REPRESENTS``     : !n. Prov_Q (substitute_2 diag_internal
+#                                              (numeral n)
+#                                              (numeral (diag n))
+#                                              var_x var_y).
+#   * ``IS_FORM_DIAG_INTERNAL``  : is_form diag_internal.
+#   * ``FREE_IN_DIAG_INTERNAL``  : !v. free_in diag_internal v
+#                                       <=> (v = var_x \/ v = var_y).
+#
+# Justification: ``diag(n) = substitute n (numeral n) var_x`` is the
+# composition of two primitive recursive functions (substitute and
+# numeral), each representable in Q via Sigma_1 formulas. The combined
+# representation factors through ``substitute_internal`` (Stage 3C(a))
+# and ``numeral_internal`` (deferred). We axiomatize ``diag_internal``
+# directly to bypass the intermediate ``numeral_internal`` step.
+# ---------------------------------------------------------------------------
+
+
+from fusion import new_constant
+
+
+new_constant("diag_internal", nat0_ty)
+diag_internal = mk_const("diag_internal", [])
+
+
+@proof
+def DIAG_REPRESENTS(p):
+    """|- !n. Prov_Q (substitute_2 diag_internal
+                       (numeral n) (numeral (diag n)) var_x var_y).
+
+    Stage 4(b.1) representability of diag. AXIOMATIZED via
+    ``p.sorry()``.
+    """
+    p.goal(
+        "!n. Prov_Q (substitute_2 diag_internal "
+        "             (numeral n) (numeral (diag n)) var_x var_y)"
+    )
+    p.sorry()
+
+
+@proof
+def IS_FORM_DIAG_INTERNAL(p):
+    """|- is_form diag_internal. AXIOMATIZED."""
+    p.goal("is_form diag_internal")
+    p.sorry()
+
+
+@proof
+def FREE_IN_DIAG_INTERNAL(p):
+    """|- !v. free_in diag_internal v <=> (v = var_x \\/ v = var_y).
+    AXIOMATIZED."""
+    p.goal(
+        "!v. free_in diag_internal v = (v = var_x \\/ v = var_y)"
+    )
+    p.sorry()
+
+
+# ---------------------------------------------------------------------------
+# Stage 4 (b.2) -- theta-of-phi: the parametric self-referential carrier.
+#
+# Given ``phi`` with only ``var_x`` free, the diagonal construction
+# builds
+#
+#   theta(phi) := Exists_f (SUC0 0)
+#                          (And_f diag_internal
+#                                 (substitute phi var_y var_x)).
+#
+# The bound index ``SUC0 0`` matches the index encoded by ``var_y =
+# Var_t (SUC0 0)``: substituting ``var_y`` for ``var_x`` in phi puts
+# var_y free in the body, then ``Exists_f (SUC0 0) ...`` binds it.
+#
+# Reading: "there exists y such that y = diag(x) and phi(y)". When ``x``
+# is set to ``numeral m`` for ``m = theta(phi)``, the formula says
+# "phi(numeral (diag m))" -- which is "phi(numeral psi)" since
+# ``psi = diag m``.
+# ---------------------------------------------------------------------------
+
+
+_phi_n0 = Var("phi", nat0_ty)
+
+
+from nat0 import ZERO, mk_suc0
+
+
+# theta_of_phi(phi) := Exists_f (SUC0 0)
+#                                (And_f diag_internal
+#                                       (substitute phi var_y var_x))
+THETA_OF_PHI_DEF = define(
+    "theta_of_phi",
+    parse_type("nat0 -> nat0"),
+    mk_abs(_phi_n0,
+        mk_app(Exists_f,
+               mk_suc0(ZERO),
+               mk_app(And_f,
+                      diag_internal,
+                      mk_app(substitute, _phi_n0, var_y, var_x)))),
+)
+theta_of_phi = mk_const("theta_of_phi", [])
+
+
+# ---------------------------------------------------------------------------
+# Stage 4 (c) -- the diagonal lemma (AXIOMATIZED).
+#
+# Headline:
+#   |- !phi. is_form phi
+#         /\ (!v. free_in phi v ==> v = var_x)
+#         ==> ?psi. is_form psi
+#                 /\ Prov_Q (Iff_f psi
+#                            (substitute phi (numeral psi) var_x)).
+#
+# Proof sketch (deferred via p.sorry()):
+#   * Build D(var_x, var_y) := substitute_2 substitute_internal var_x
+#                              var_x var_x var_y
+#     (specialising substitute_internal to F=t=var_x, output=var_y).
+#   * theta := Exists_f var_y (And_f D phi_at_y).
+#   * Set m := theta; psi := substitute theta (numeral m) var_x.
+#   * From SUBSTITUTE_REPRESENTS at F=t=m, derive Q proves D(numeral m,
+#     numeral (diag m)).
+#   * Hence Q proves theta(numeral m) <=> phi(numeral (diag m)) =
+#     phi(numeral psi). Since psi = theta(numeral m), this is the
+#     diagonal equivalence.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def DIAGONAL_LEMMA(p):
+    """|- !phi. is_form phi
+              /\\ (!v. free_in phi v ==> v = var_x)
+              ==> is_form (diag (theta_of_phi phi))
+                /\\ Prov_Q (Iff_f (diag (theta_of_phi phi))
+                                  (substitute phi
+                                              (numeral
+                                                (diag (theta_of_phi phi)))
+                                              var_x)).
+
+    Stage 4 diagonal lemma -- existence form with explicit witness.
+    The Goedel-Carnap construction is:
+
+        psi := diag (theta_of_phi phi)
+             = substitute (theta_of_phi phi)
+                          (numeral (theta_of_phi phi))
+                          var_x.
+
+    The conjunction asserts both the well-formedness of psi and the
+    Q-internal diagonal equivalence.
+
+    AXIOMATIZED via ``p.sorry()`` for the Prov_Q part; the
+    well-formedness conjunct ultimately follows from
+    ``IS_FORM_DIAG_INTERNAL`` plus closure of ``is_form`` under
+    Exists_f / And_f / substitute (lemmas not yet proved).
+
+    The Prov_Q part is the heart of the diagonal lemma; its proof
+    requires:
+      * substitution-pushing through theta_of_phi to compute psi's
+        shape (Stage 4(a.1) lemmas + a substitute-idempotence lemma);
+      * DIAG_REPRESENTS at n = theta_of_phi phi to assert
+        Q proves diag_internal[var_x:=numeral m, var_y:=numeral psi];
+      * Q-internal propositional reasoning (iff-introduction,
+        existential introduction/elimination) to derive the headline
+        equivalence.
+
+    The original existential form ``?psi. ...`` follows by EXISTS at
+    psi := diag (theta_of_phi phi).
+    """
+    p.goal(
+        "!phi. (is_form phi /\\ (!v. free_in phi v ==> v = var_x)) ==> "
+        "is_form (diag (theta_of_phi phi)) /\\ "
+        "Prov_Q (Iff_f (diag (theta_of_phi phi)) "
+        "              (substitute phi "
+        "                          (numeral (diag (theta_of_phi phi))) "
+        "                          var_x))"
+    )
+    p.sorry()
+
+
+if __name__ == "__main__":
+    from parser import pp_thm
+
+    print("Stage 4 (a) -- derived Q-formula connectives.")
+    print("    AND_F_DEF    :", pp_thm(AND_F_DEF))
+    print("    OR_F_DEF     :", pp_thm(OR_F_DEF))
+    print("    IFF_F_DEF    :", pp_thm(IFF_F_DEF))
+    print("    EXISTS_F_DEF :", pp_thm(EXISTS_F_DEF))
+    print()
+    print("Stage 4 (a.1) -- substitution-pushing for connectives.")
+    print("    SUBSTITUTE_AT_AND          :", pp_thm(SUBSTITUTE_AT_AND))
+    print("    SUBSTITUTE_AT_OR           :", pp_thm(SUBSTITUTE_AT_OR))
+    print("    SUBSTITUTE_AT_IFF          :", pp_thm(SUBSTITUTE_AT_IFF))
+    print("    SUBSTITUTE_AT_EXISTS_MISS  :", pp_thm(SUBSTITUTE_AT_EXISTS_MISS))
+    print()
+    print("Stage 4 (b) -- diagonal substitution function.")
+    print("    DIAG_DEF     :", pp_thm(DIAG_DEF))
+    print()
+    print("Stage 4 (b.1) -- diag_internal axioms (SORRY).")
+    print("    DIAG_REPRESENTS         :", pp_thm(DIAG_REPRESENTS))
+    print("    IS_FORM_DIAG_INTERNAL   :", pp_thm(IS_FORM_DIAG_INTERNAL))
+    print("    FREE_IN_DIAG_INTERNAL   :", pp_thm(FREE_IN_DIAG_INTERNAL))
+    print()
+    print("Stage 4 (b.2) -- theta-of-phi construction.")
+    print("    THETA_OF_PHI_DEF :", pp_thm(THETA_OF_PHI_DEF))
+    print()
+    print("Stage 4 (c) -- diagonal lemma (SORRY: Prov_Q part).")
+    print("    DIAGONAL_LEMMA :", pp_thm(DIAGONAL_LEMMA))
