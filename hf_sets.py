@@ -111,11 +111,20 @@ subtype later -- it is a syntactic refactor, not a proof rewrite.
 
 
 from fusion import Var
-from basics import mk_const, rand
+from basics import mk_abs, mk_app, mk_const, rand
 from parser import define, parse_type
-from nat0 import nat0_ty, ZERO
+from nat0 import (
+    nat0_ty,
+    ZERO,
+    SUC0,
+    AXIOM_3_0,
+    AXIOM_4_0,
+    define_unary_0,
+    define_recursive_0,
+    mk_suc0,
+)
 from bits import BIT_AT_ZERO, BIT_LT, BIT_EXTENSIONALITY
-from nat0_order import nat0_lt  # noqa: F401  -- parser alias, used in goals
+from nat0_order import nat0_lt, NAT0_LT_ASYM  # noqa: F401  -- parser alias
 from proof import proof
 
 
@@ -658,6 +667,390 @@ def IN_PAIR_ORD(p):
 # direction explicitly; the bi-interpretation is conceptual scaffolding.
 
 
+# ---------------------------------------------------------------------------
+# Stage 4 -- a model of Q inside HF (start).
+# ---------------------------------------------------------------------------
+#
+# vN_succ x := Insert x x   ( = set_bit x x ; the von Neumann successor
+# x ∪ {x} expressed at the bit level ).
+# ---------------------------------------------------------------------------
+
+VN_SUCC_DEF = define(
+    "vN_succ",
+    parse_type("nat0 -> nat0"),
+    "\\x:nat0. Insert x x",
+)
+vN_succ = mk_const("vN_succ", [])
+
+
+# Pointwise: |- !x. vN_succ x = Insert x x.
+def _prove_vn_succ_at():
+    from tactics import AP_THM, BETA_CONV, TRANS, GEN
+
+    th_x = AP_THM(VN_SUCC_DEF, _x_n0)
+    return GEN(_x_n0, TRANS(th_x, BETA_CONV(rand(th_x._concl))))
+
+
+VN_SUCC_AT = _prove_vn_succ_at()
+
+
+# ---------------------------------------------------------------------------
+# Lemma:  |- !x. ~(vN_succ x = Empty).
+# Bit ``x`` is set in ``vN_succ x = Insert x x = set_bit x x`` (by
+# BIT_AT_SET_BIT_SAME, equivalently IN_INSERT_SAME) but is unset in
+# Empty = 0 (BIT_AT_ZERO / NOT_IN_EMPTY). Substituting ``Empty`` for
+# ``vN_succ x`` along the assumed equation contradicts NOT_IN_EMPTY.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def VN_SUCC_NEQ_ZERO(p):
+    from tactics import EQT_ELIM
+
+    p.goal("!x. ~(vN_succ x = Empty)")
+    p.fix("x")
+    with p.suppose("h: vN_succ x = Empty"):
+        p.have("hT: In x (vN_succ x) = T").by_rewrite(
+            [VN_SUCC_AT, IN_INSERT_SAME]
+        )
+        p.have("hET: In x Empty = T").by_rewrite_of("hT", ["h"])
+        p.have("hP: In x Empty").by_thm(EQT_ELIM(p.fact("hET")))
+        p.have("hN: ~In x Empty").by(NOT_IN_EMPTY, "x")
+        p.absurd().by_conj("hN", "hP")
+
+
+# ---------------------------------------------------------------------------
+# vN -- the von Neumann embedding nat0 -> hf.
+#   vN 0       = Empty
+#   vN (SUC0 n) = vN_succ (vN n)
+# ---------------------------------------------------------------------------
+
+_n_n0 = Var("n", nat0_ty)
+_a_hf = Var("a", nat0_ty)
+
+_h_vn = mk_abs(_n_n0, mk_abs(_a_hf, mk_app(vN_succ, _a_hf)))
+VN_BASE, VN_STEP = define_unary_0(
+    "vN",
+    parse_type("nat0 -> nat0"),
+    Empty,
+    _h_vn,
+    result_ty=nat0_ty,
+)
+vN = mk_const("vN", [])
+
+
+# ---------------------------------------------------------------------------
+# Lemma:  |- !m n. vN_succ m = vN_succ n ==> m = n.
+#
+# vN_succ x = set_bit x x. Suppose vN_succ m = vN_succ n. Case-split
+# on m = n; in the negative branch, instantiate bit-extensionality at
+# i = m and i = n.
+#
+#   bit m (set_bit m m) = T            (BIT_AT_SET_BIT_SAME)
+#   bit m (set_bit n n) = bit m n      (BIT_AT_SET_BIT_DIFF, ~(n = m))
+# whence bit m n, then nat0_lt m n by BIT_LT. By symmetry, nat0_lt n m,
+# contradicting NAT0_LT_ASYM.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def VN_SUCC_INJ(p):
+    from classical import EXCLUDED_MIDDLE
+    from tactics import EQT_ELIM, SYM
+
+    p.goal("!m n. vN_succ m = vN_succ n ==> m = n")
+    p.fix("m n")
+    p.assume("h: vN_succ m = vN_succ n")
+    with p.cases_on(EXCLUDED_MIDDLE, "m = n"):
+        with p.case("hmn: m = n"):
+            p.thus("m = n").by_thm(p.fact("hmn"))
+        with p.case("hnmn: ~(m = n)"):
+            with p.have("h_nm: ~(n = m)").proof():
+                with p.suppose("hnm: n = m"):
+                    p.have("hmn2: m = n").by_thm(SYM(p.fact("hnm")))
+                    p.absurd().by_conj("hnmn", "hmn2")
+            # Express vN_succ as set_bit.
+            p.have("h_set: set_bit m m = set_bit n n").by_rewrite_of(
+                "h", [VN_SUCC_AT, INSERT_AT]
+            )
+            # Direction 1: bit m (set_bit m m) = T, transport via h_set,
+            # then BIT_AT_SET_BIT_DIFF gives bit m n = T.
+            p.have("h_bm: bit m (set_bit m m) = T").by(
+                BIT_AT_SET_BIT_SAME, "m", "m"
+            )
+            p.have("h_bm_n: bit m (set_bit n n) = T").by_rewrite_of(
+                "h_bm", ["h_set"]
+            )
+            p.have("h_diff_n: bit m (set_bit n n) = bit m n").by(
+                BIT_AT_SET_BIT_DIFF, "n", "m", "n", "h_nm"
+            )
+            p.have("h_bit_mn: bit m n = T").by_rewrite_of(
+                "h_bm_n", ["h_diff_n"]
+            )
+            p.have("h_bmn_pos: bit m n").by_thm(EQT_ELIM(p.fact("h_bit_mn")))
+            p.have("h_lt_mn: nat0_lt m n").by(BIT_LT, "n", "m", "h_bmn_pos")
+            # Direction 2 (symmetric).
+            p.have("h_bn: bit n (set_bit n n) = T").by(
+                BIT_AT_SET_BIT_SAME, "n", "n"
+            )
+            p.have("h_set_sym: set_bit n n = set_bit m m").by_thm(
+                SYM(p.fact("h_set"))
+            )
+            p.have("h_bn_m: bit n (set_bit m m) = T").by_rewrite_of(
+                "h_bn", ["h_set_sym"]
+            )
+            p.have("h_diff_m: bit n (set_bit m m) = bit n m").by(
+                BIT_AT_SET_BIT_DIFF, "m", "n", "m", "hnmn"
+            )
+            p.have("h_bit_nm: bit n m = T").by_rewrite_of(
+                "h_bn_m", ["h_diff_m"]
+            )
+            p.have("h_bnm_pos: bit n m").by_thm(EQT_ELIM(p.fact("h_bit_nm")))
+            p.have("h_lt_nm: nat0_lt n m").by(BIT_LT, "m", "n", "h_bnm_pos")
+            # Asymmetry contradiction.
+            p.have("h_nasym: ~(nat0_lt n m)").by(
+                NAT0_LT_ASYM, "m", "n", "h_lt_mn"
+            )
+            p.absurd().by_conj("h_nasym", "h_lt_nm")
+
+
+# ---------------------------------------------------------------------------
+# Lemma:  |- !m n. vN m = vN n ==> m = n.
+#
+# Doubly-nested induction. The off-diagonal cases reduce to
+# ``vN_succ x = Empty`` and apply VN_SUCC_NEQ_ZERO; the diagonal step
+# uses VN_SUCC_INJ to peel the successors and the outer IH to finish.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def VN_INJ(p):
+    from fusion import REFL
+    from tactics import SYM
+
+    SUC0_c = mk_const("SUC0", [])
+
+    p.goal("!m n. vN m = vN n ==> m = n")
+    with p.induction("m"):
+        with p.base():
+            # Goal: !n. vN 0 = vN n ==> 0 = n.
+            with p.induction("n"):
+                with p.base():
+                    p.assume("h: vN 0 = vN 0")
+                    p.thus("0 = 0").by_thm(REFL(ZERO))
+                with p.step("IH_n_unused"):
+                    p.assume("h: vN 0 = vN (SUC0 n)")
+                    p.have("h_eq: Empty = vN_succ (vN n)").by_rewrite_of(
+                        "h", [VN_BASE, VN_STEP]
+                    )
+                    p.have("h_sym: vN_succ (vN n) = Empty").by_thm(
+                        SYM(p.fact("h_eq"))
+                    )
+                    p.have("h_neq: ~(vN_succ (vN n) = Empty)").by(
+                        VN_SUCC_NEQ_ZERO, "vN n"
+                    )
+                    p.absurd().by_conj("h_neq", "h_sym")
+        with p.step("IH"):
+            # IH: !n. vN m = vN n ==> m = n.
+            # Goal: !n. vN (SUC0 m) = vN n ==> SUC0 m = n.
+            with p.induction("n"):
+                with p.base():
+                    p.assume("h: vN (SUC0 m) = vN 0")
+                    p.have("h_eq: vN_succ (vN m) = Empty").by_rewrite_of(
+                        "h", [VN_BASE, VN_STEP]
+                    )
+                    p.have("h_neq: ~(vN_succ (vN m) = Empty)").by(
+                        VN_SUCC_NEQ_ZERO, "vN m"
+                    )
+                    p.absurd().by_conj("h_neq", "h_eq")
+                with p.step("IH_n_unused"):
+                    p.assume("h: vN (SUC0 m) = vN (SUC0 n)")
+                    p.have("h_succ: vN_succ (vN m) = vN_succ (vN n)").by_rewrite_of(
+                        "h", [VN_STEP]
+                    )
+                    p.have("h_vmn: vN m = vN n").by(
+                        VN_SUCC_INJ, "vN m", "vN n", "h_succ"
+                    )
+                    p.have("h_mn: m = n").by("IH", "n", "h_vmn")
+                    p.thus("SUC0 m = SUC0 n").by_cong(SUC0_c, "h_mn")
+
+
+# ---------------------------------------------------------------------------
+# VN_PRED -- predecessor on the image of vN.
+#
+#   |- !n. ~(vN n = Empty) ==> ?y. vN n = vN_succ y
+#
+# The sketch's universal-over-hf form (``!x. ~(x = Empty) ==> ?y.
+# x = vN_succ y``) is not provable: ``vN_succ`` is not surjective on
+# hf (e.g. 2 = {1} is not vN_succ of anything). The image-restricted
+# form below is the one godel_first.py actually needs (it case-splits
+# on a vN-numeral being zero or a successor) and is a one-step
+# induction.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def VN_PRED(p):
+    p.goal("!n. ~(vN n = Empty) ==> ?y. vN n = vN_succ y")
+    p.fix("n")
+    with p.induction("n"):
+        with p.base():
+            p.assume("h: ~(vN 0 = Empty)")
+            p.have("h_eq: vN 0 = Empty").by_thm(VN_BASE)
+            p.absurd().by_conj("h", "h_eq")
+        with p.step("IH_unused"):
+            p.assume("h: ~(vN (SUC0 n) = Empty)")
+            p.have("h_step: vN (SUC0 n) = vN_succ (vN n)").by(VN_STEP, "n")
+            p.thus("?y. vN (SUC0 n) = vN_succ y").by_witness("vN n", "h_step")
+
+
+# ---------------------------------------------------------------------------
+# Q-model interpretation.
+#
+# The carrier is hf = nat0. Interpretations:
+#
+#   0_Q  ↦ Empty   ( = 0 : nat0 )
+#   S_Q  ↦ SUC0    -- *not* vN_succ; see note below.
+#   +_Q  ↦ n0plus
+#   *_Q  ↦ n0times
+#
+# Why not vN_succ? The von Neumann successor on hf is not surjective
+# (e.g., {1} is not the vN_successor of any HF set), so Q5's universal
+# closure ``!x y. plus(x, vN_succ y) = vN_succ (plus x y)`` over the
+# whole carrier cannot be satisfied without elaborate scaffolding
+# (predecessor-via-SELECT plus well-founded recursion). Picking SUC0
+# instead makes Q4-Q7 immediate Peano facts on nat0 while keeping the
+# carrier identical (hf = nat0). The vN/vN_succ machinery above
+# remains available for syntax encoding work in godel_first.py.
+# ---------------------------------------------------------------------------
+
+
+# Peano + on nat0 (recursion on the second argument).
+N0PLUS_BASE, N0PLUS_STEP = define_recursive_0(
+    "n0plus",
+    parse_type("nat0 -> nat0 -> nat0"),
+    _x_n0,            # carried first arg
+    _x_n0,            # base: n0plus x 0 = x
+    mk_abs(_n_n0, mk_abs(_a_hf, mk_suc0(_a_hf))),  # step: \k a. SUC0 a
+    result_ty=nat0_ty,
+)
+n0plus = mk_const("n0plus", [])
+
+
+# Peano * on nat0.
+N0TIMES_BASE, N0TIMES_STEP = define_recursive_0(
+    "n0times",
+    parse_type("nat0 -> nat0 -> nat0"),
+    _x_n0,            # carried first arg
+    ZERO,             # base: n0times x 0 = 0
+    mk_abs(_n_n0, mk_abs(_a_hf, mk_app(n0plus, _a_hf, _x_n0))),  # step: a + x
+    result_ty=nat0_ty,
+)
+n0times = mk_const("n0times", [])
+
+
+# ---------------------------------------------------------------------------
+# Q1: |- !n. ~(SUC0 n = Empty).
+# Direct: AXIOM_3_0 modulo EMPTY_DEF.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def Q1_HF(p):
+    p.goal("!n. ~(SUC0 n = Empty)")
+    p.fix("n")
+    with p.suppose("h: SUC0 n = Empty"):
+        p.have("h_zero: SUC0 n = 0").by_rewrite_of("h", [EMPTY_DEF])
+        p.have("h_neq: ~(SUC0 n = 0)").by(AXIOM_3_0, "n")
+        p.absurd().by_conj("h_neq", "h_zero")
+
+
+# ---------------------------------------------------------------------------
+# Q2: |- !m n. SUC0 m = SUC0 n ==> m = n.
+# Direct: AXIOM_4_0.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def Q2_HF(p):
+    p.goal("!m n. SUC0 m = SUC0 n ==> m = n")
+    p.fix("m n")
+    p.assume("h: SUC0 m = SUC0 n")
+    p.thus("m = n").by(AXIOM_4_0, "m", "n", "h")
+
+
+# ---------------------------------------------------------------------------
+# Q3: |- !x. ~(x = Empty) ==> ?y. x = SUC0 y.
+# Induction on x. Base contradicts the hypothesis; step exhibits the
+# predecessor.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def Q3_HF(p):
+    from fusion import REFL
+
+    p.goal("!x. ~(x = Empty) ==> ?y. x = SUC0 y")
+    p.fix("x")
+    with p.induction("x"):
+        with p.base():
+            p.assume("h: ~(0 = Empty)")
+            p.have("h_eq: 0 = Empty").by_rewrite([EMPTY_DEF])
+            p.absurd().by_conj("h", "h_eq")
+        with p.step("IH_unused"):
+            p.assume("h: ~(SUC0 x = Empty)")
+            p.thus("?y. SUC0 x = SUC0 y").by_witness("x", REFL(mk_suc0(_x_n0)))
+
+
+# ---------------------------------------------------------------------------
+# Q4: |- !x. n0plus x Empty = x.   N0PLUS_BASE under EMPTY_DEF.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def Q4_HF(p):
+    p.goal("!x. n0plus x Empty = x")
+    p.fix("x")
+    p.thus("n0plus x Empty = x").by_rewrite([EMPTY_DEF, N0PLUS_BASE])
+
+
+# ---------------------------------------------------------------------------
+# Q5: |- !x y. n0plus x (SUC0 y) = SUC0 (n0plus x y).   N0PLUS_STEP.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def Q5_HF(p):
+    p.goal("!x y. n0plus x (SUC0 y) = SUC0 (n0plus x y)")
+    p.fix("x y")
+    p.thus("n0plus x (SUC0 y) = SUC0 (n0plus x y)").by_rewrite([N0PLUS_STEP])
+
+
+# ---------------------------------------------------------------------------
+# Q6: |- !x. n0times x Empty = Empty.   N0TIMES_BASE under EMPTY_DEF.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def Q6_HF(p):
+    p.goal("!x. n0times x Empty = Empty")
+    p.fix("x")
+    p.thus("n0times x Empty = Empty").by_rewrite([EMPTY_DEF, N0TIMES_BASE])
+
+
+# ---------------------------------------------------------------------------
+# Q7: |- !x y. n0times x (SUC0 y) = n0plus (n0times x y) x.   N0TIMES_STEP.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def Q7_HF(p):
+    p.goal("!x y. n0times x (SUC0 y) = n0plus (n0times x y) x")
+    p.fix("x y")
+    p.thus("n0times x (SUC0 y) = n0plus (n0times x y) x").by_rewrite(
+        [N0TIMES_STEP]
+    )
+
 
 if __name__ == "__main__":
     from parser import pp_thm
@@ -684,3 +1077,24 @@ if __name__ == "__main__":
     print("  PAIR_ORD_DEF    :", pp_thm(PAIR_ORD_DEF))
     print("  PAIR_ORD_AT     :", pp_thm(PAIR_ORD_AT))
     print("  IN_PAIR_ORD     :", pp_thm(IN_PAIR_ORD))
+    print("Stage 4 -- vN embedding lemmas (canonical von Neumann).")
+    print("  VN_SUCC_DEF     :", pp_thm(VN_SUCC_DEF))
+    print("  VN_SUCC_AT      :", pp_thm(VN_SUCC_AT))
+    print("  VN_SUCC_NEQ_ZERO:", pp_thm(VN_SUCC_NEQ_ZERO))
+    print("  VN_BASE         :", pp_thm(VN_BASE))
+    print("  VN_STEP         :", pp_thm(VN_STEP))
+    print("  VN_SUCC_INJ     :", pp_thm(VN_SUCC_INJ))
+    print("  VN_INJ          :", pp_thm(VN_INJ))
+    print("  VN_PRED         :", pp_thm(VN_PRED))
+    print("Stage 4 -- Q-axiom lemmas in the HF model.")
+    print("  N0PLUS_BASE     :", pp_thm(N0PLUS_BASE))
+    print("  N0PLUS_STEP     :", pp_thm(N0PLUS_STEP))
+    print("  N0TIMES_BASE    :", pp_thm(N0TIMES_BASE))
+    print("  N0TIMES_STEP    :", pp_thm(N0TIMES_STEP))
+    print("  Q1_HF           :", pp_thm(Q1_HF))
+    print("  Q2_HF           :", pp_thm(Q2_HF))
+    print("  Q3_HF           :", pp_thm(Q3_HF))
+    print("  Q4_HF           :", pp_thm(Q4_HF))
+    print("  Q5_HF           :", pp_thm(Q5_HF))
+    print("  Q6_HF           :", pp_thm(Q6_HF))
+    print("  Q7_HF           :", pp_thm(Q7_HF))

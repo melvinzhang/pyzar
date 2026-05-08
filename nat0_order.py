@@ -376,6 +376,47 @@ def NAT0_LT_TRANS(p):
     p.thus("nat0_lt a c").by_eq_mp(SYM(ac_eq), hac_num)
 
 
+# NAT0_LT_NOT_REFL :  |- !n. ~(nat0_lt n n).
+#
+# Lift the num irreflexivity ``~(x < x)`` (extracted from SATZ_9_EXCL_13
+# at y := x via REFL) through ``LT_NAT0``.
+@proof
+def NAT0_LT_NOT_REFL(p):
+    from nat import _SATZ_9_EXCL_13
+
+    p.goal("!n. ~(nat0_lt n n)", types={"n": nat0_ty})
+    p.fix("n")
+    with p.suppose("h: nat0_lt n n"):
+        n_t = p._parse("n")
+        rep_n = mk_app(rep_nat0, n_t)
+        nn_eq = SPECL([n_t, n_t], LT_NAT0)
+        h_num = EQ_MP(nn_eq, p.fact("h"))  # |- rep_n < rep_n
+        # x < y unfolds to ?v. y = x + v.
+        ex_eq = UNFOLD(LT_DEF, rep_n, rep_n)  # |- (rep_n < rep_n) = (?v. rep_n = rep_n + v)
+        ex_th = EQ_MP(ex_eq, h_num)  # |- ?v. rep_n = rep_n + v
+        # _SATZ_9_EXCL_13 : !x y. ~(x = y /\ ?v. y = x + v).
+        excl = SPECL([rep_n, rep_n], _SATZ_9_EXCL_13)
+        # Build (rep_n = rep_n /\ ?v. rep_n = rep_n + v).
+        conj_th = CONJ(REFL(rep_n), ex_th)
+        p.absurd().by_thm(MP(NOT_ELIM(excl), conj_th))
+
+
+# NAT0_LT_ASYM :  |- !m n. nat0_lt m n ==> ~(nat0_lt n m).
+#
+# By NAT0_LT_TRANS + NAT0_LT_NOT_REFL: m < n /\ n < m gives m < m.
+@proof
+def NAT0_LT_ASYM(p):
+    p.goal("!m n. nat0_lt m n ==> ~(nat0_lt n m)", types={"m": nat0_ty, "n": nat0_ty})
+    p.fix("m n")
+    p.assume("hmn: nat0_lt m n")
+    with p.suppose("hnm: nat0_lt n m"):
+        p.have("hmm: nat0_lt m m").by(
+            NAT0_LT_TRANS, "m", "n", "m", "hmn", "hnm"
+        )
+        p.have("nrefl: ~(nat0_lt m m)").by(NAT0_LT_NOT_REFL, "m")
+        p.absurd().by_conj("nrefl", "hmm")
+
+
 # NAT0_LT_SUC0_MONO :  |- !n m. nat0_lt n m ==> nat0_lt (SUC0 n) (SUC0 m).
 #
 # Witness: rep_nat0 n < rep_nat0 m  ==>  SUC (rep_nat0 n) < SUC (rep_nat0 m).
@@ -497,6 +538,8 @@ if __name__ == "__main__":
     print("  REP_SUC0           :", pp_thm(REP_SUC0))
     print("  NAT0_LT_SUC0       :", pp_thm(NAT0_LT_SUC0))
     print("  NAT0_LT_TRANS      :", pp_thm(NAT0_LT_TRANS))
+    print("  NAT0_LT_NOT_REFL   :", pp_thm(NAT0_LT_NOT_REFL))
+    print("  NAT0_LT_ASYM       :", pp_thm(NAT0_LT_ASYM))
     print("  NAT0_LT_SUC0_MONO  :", pp_thm(NAT0_LT_SUC0_MONO))
     print("  NAT0_LT_0_SUC0     :", pp_thm(NAT0_LT_0_SUC0))
     print("  NAT0_LT_SUC0_INSERT:", pp_thm(NAT0_LT_SUC0_INSERT))
