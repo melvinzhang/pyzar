@@ -2053,7 +2053,106 @@ FREE_IN_AT_FORALL = derive_rec_eq_pw(FREE_IN_REC, "Forall_f", ["w", "phi"])
 
 
 # ---------------------------------------------------------------------------
-# Stage 1 (c) -- substitute: TODO.
+# Stage 1 (c): substitute -- replace variable index ``v`` by encoded term
+# ``new_t`` inside encoded ``n``.  TODO -- design plan only; implementation
+# pending.
+#
+# Result type is ``nat0`` (an encoded term), not bool, so the
+# disjunction-collapse machinery used for is_term / is_form / free_in does
+# not apply.  Plan: encode the body as a SELECT over a disjunction of
+# constructor cases.  Each disjunct fixes the result ``r`` to the
+# constructor-specific value; the ``@r`` picks the unique value when
+# exactly one disjunct fires (which is the case for any well-formed n).
+#
+# Body shape:
+#   F substitute n  :=  \new_t v.
+#       @r.
+#            (n = Zero_t /\ r = Zero_t)
+#         \/ (?x. n = Succ_t x /\ r = Succ_t (sub x new_t v))
+#         \/ (?x. n = Var_t x
+#                 /\ ((v = x  /\ r = new_t)
+#                  \/ (~(v = x) /\ r = Var_t x)))
+#         \/ (?a b. n = Plus_t a b
+#                 /\ r = Plus_t (sub a new_t v) (sub b new_t v))
+#         \/ (?a b. n = Times_t a b
+#                 /\ r = Times_t (sub a new_t v) (sub b new_t v))
+#         \/ (?a b. n = Eq_f a b
+#                 /\ r = Eq_f (sub a new_t v) (sub b new_t v))
+#         \/ (?x. n = Not_f x /\ r = Not_f (sub x new_t v))
+#         \/ (?a b. n = Imp_f a b
+#                 /\ r = Imp_f (sub a new_t v) (sub b new_t v))
+#         \/ (?a b. n = Forall_f a b
+#                 /\ ((v = a   /\ r = Forall_f a b)
+#                  \/ (~(v = a) /\ r = Forall_f a (sub b new_t v))))
+#   where ``sub k new_t v`` is shorthand for the recursive call ``f k new_t v``.
+#
+# A : ``nat0 -> nat0 -> nat0`` (curry new_t and v under the recursion target).
+#
+# ----- New helper-library work needed -----
+#
+# (1) MONO helpers for the SELECT/value-shape disjuncts.  Each takes the
+#     usual ``hyp_th : !k. nat0_lt k n ==> f k = g k`` plus extra applied
+#     args ``[new_t, v]`` and returns the per-disjunct iff with the f→g
+#     substitution carried into the value builder:
+#
+#       mono_iff_value_unary_pw_step(ctor, size_lemma, hyp_th, args, value_fn)
+#         |- (?x. n = ctor x /\ r = value_fn(f x args)) =
+#            (?x. n = ctor x /\ r = value_fn(g x args))
+#
+#       mono_iff_value_binary_pw_step(ctor, sl_l, sl_r, hyp_th, args, value_fn)
+#         |- (?a b. n = ctor a b /\ r = value_fn(f a args, f b args)) =
+#            (?a b. n = ctor a b /\ r = value_fn(g a args, g b args))
+#
+#       mono_iff_forall_value_pw_step(size_lemma_r, hyp_th, args, value_fn)
+#         |- (?a b. n = Forall_f a b /\
+#                   ((v = a /\ r = Forall_f a b) \/
+#                    (~(v = a) /\ r = value_fn(f b args)))) =
+#            (?a b. ... value_fn(g b args) ...)
+#         (One f-call only on b; the ``v = a`` branch has no f-reference.)
+#
+#     Each follows the same skeleton as the existing pw helpers but uses
+#     ``AP_TERM`` over the value-builder (instead of EQ_MP on a bool eq) to
+#     thread ``f x = g x`` through the value expression.
+#
+# (2) ``derive_rec_eq_select(REC, ctor_name, var_names)`` -- the rec-eq
+#     deriver for SELECT-shaped bodies.  Given
+#       REC : |- !n. fn n = (\new_t v. @r. body[fn, n, new_t, v, r])
+#     produce
+#       |- !v1...vk new_t v.
+#            fn (C v1...vk) new_t v = R(v1, ..., vk, new_t, v)
+#     where R is the matching disjunct's value expression.  Steps:
+#       a. SPEC at n=target_app, AP_THM new_t and v, BETA_CONV twice.
+#       b. Disjunct dispatch:
+#          - matching disjunct (head = target_ctor): collapse to ``r = R``
+#            using INJ (existing _disjunct_eq_match_* helpers handle this
+#            because their REWRITE_RULE-based rest substitution is rest-
+#            shape-agnostic; the rest is now ``r = K(args)``).
+#          - non-matching disjuncts: head_eq is contradictory by
+#            disjointness, so disjunct = F (existing
+#            _disjunct_eq_F_via_neq handles this -- rest is ignored).
+#       c. or_chain_collapse over the F-eliminated chain reduces the
+#          disjunction to a single ``r = R(target_args, new_t, v)`` (after
+#          AND_T elimination on the matching disjunct's ``target_app =
+#          target_app`` head).
+#       d. SELECT collapse: ``(@r. r = K) = K`` -- a one-shot lemma using
+#          SELECT_AX at predicate ``\r. r = K`` with witness K.  Apply via
+#          AP_TERM on ``@`` to bridge from ``@r. (\r. r = K) r`` (which
+#          beta-reduces to ``@r. r = K``) to ``K``.
+#     Special-case: the Var_t and Forall_f matching disjuncts have a
+#     nested ``(cond /\ r = ...) \/ (~cond /\ r = ...)`` rest.  After INJ
+#     reduces witnesses to target_args, the rest is
+#     ``(cond /\ r = then_val) \/ (~cond /\ r = else_val)`` which is
+#     equivalent to ``r = (if cond then then_val else else_val)``.  Need a
+#     small rewriting lemma (or a dedicated post-processing step) to
+#     normalize the matched disjunct's body into a single ``r = ...``
+#     form before the SELECT collapse fires.
+#
+# (3) MONO proof itself in declarative DSL: same shape as FREE_IN_MONO but
+#     with the new value-shape pw helpers and TWO ABS layers (over new_t
+#     and v) before by_unfold through _SUBSTITUTE_F_DEF.
+#
+# Estimated total: ~400 lines (200 helpers + 50 body + 30 MONO + 9 rec
+# eqs + ~100 lines of boilerplate / comments).
 # ---------------------------------------------------------------------------
 
 
