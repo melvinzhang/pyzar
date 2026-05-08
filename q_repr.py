@@ -875,19 +875,7 @@ def PROOF_Q_AT_CONS(p):
                     p.have("pq_at_t: Proof_Q t h_inner").by_rewrite_of(
                         "h_inner_eq", [SYM(p.fact("eq_t"))]
                     )
-                    # Build the existential and disj manually (the
-                    # ``disj_witness`` machinery here mismatches because
-                    # ``h_inner`` resolves through the case's choose_env
-                    # to a SELECT term whose body REWRITE_PROVE struggles
-                    # to align).
-                    h_inner_term = p._parse("h_inner")
-                    t_term = p._parse("t")
-                    inner_pred = mk_abs(
-                        _h_inner_pq, mk_app(Proof_Q, t_term, _h_inner_pq))
-                    exists_th = EXISTS(inner_pred, h_inner_term, p.fact("pq_at_t"))
-                    p.thus(
-                        "t = nil_l \\/ ?h_inner. Proof_Q t h_inner"
-                    ).by_thm(DISJ2(p._parse("t = nil_l"), exists_th))
+                    p.disj_witness("h_inner", "pq_at_t")
         p.thus(target_str).by_thm(
             CONJ(p.fact("h_eq_n"),
                  CONJ(p.fact("valid_th"), p.fact("disj_th")))

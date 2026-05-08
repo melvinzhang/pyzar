@@ -1724,10 +1724,13 @@ class Proof:
 
         For each leaf that is ``?w. body[w]`` (directly, or via a
         registered unfolder for an order-style relation like ``a < b``),
-        attempts to prove ``body[witness/w]`` via ``REWRITE_PROVE(rules,
-        body_at_w, ac=ac)``. The first leaf that succeeds is wrapped via
-        ``EXISTS`` (folding any unfolder back), then ``DISJ1``/``DISJ2``-
-        chained into the full disjunction.
+        attempts to prove ``body[witness/w]`` first by alpha-matching
+        (modulo simp) against any user-supplied ``rule``'s conclusion
+        and using that fact directly, then falling back to
+        ``REWRITE_PROVE(rules, body_at_w, ac=ac)`` for equation bodies.
+        The first leaf that succeeds is wrapped via ``EXISTS`` (folding
+        any unfolder back), then ``DISJ1``/``DISJ2``-chained into the
+        full disjunction.
 
         ``witness`` is parsed in the current scope (so ``case``-bound
         names are available) or accepted as a kernel term. Each ``rule``
@@ -1737,9 +1740,16 @@ class Proof:
         is a single ``a R b`` leaf.
         """
         witness_t = self._parse(witness) if isinstance(witness, str) else witness
-        rules_thms = [self.coerce(r) for r in rules] + self._active_simp_rules()
+        user_rules = [self.coerce(r) for r in rules]
+        rules_thms = user_rules + self._active_simp_rules()
 
         def body_provider(body_at_w):
+            for r_th in user_rules:
+                if aconv(body_at_w, r_th._concl):
+                    return r_th
+                aligned = self.simp_match(body_at_w, r_th)
+                if aligned is not None:
+                    return aligned
             try:
                 return REWRITE_PROVE(rules_thms, body_at_w, ac=ac)
             except HolError:

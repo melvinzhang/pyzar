@@ -396,9 +396,13 @@ ac=ac)`. With no rules, collapses to `REFL` for tautological leaves.
 
 Close a disjunction goal by witnessing an existential leaf. For each
 leaf that is `?w. body[w]` (directly or via a registered unfolder),
-attempt `REWRITE_PROVE(rules + active simp set, body[witness/w])`.
-First success is `EXISTS`-wrapped, unfolder folded back, and
-`DISJ1`/`DISJ2`-chained into the full disjunction.
+the substituted body `body[witness/w]` is discharged by trying each
+`rule` first via `aconv` and `simp_match` against its conclusion (so
+non-equation bodies that exactly match a supplied fact are accepted
+as-is), then falling back to
+`REWRITE_PROVE(rules + active simp set, body[witness/w])` for
+equation bodies. First success is `EXISTS`-wrapped, unfolder folded
+back, and `DISJ1`/`DISJ2`-chained into the full disjunction.
 
 ---
 
