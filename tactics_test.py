@@ -2,8 +2,8 @@
 
 from fusion import Var, bool_ty, ASSUME, concl, HolError
 from basics import aconv, mk_eq, mk_app, mk_fun_ty
-from axioms import T
-from tactics import SYM, EQT_INTRO, EQT_ELIM, TRUTH, REWRITE_CONV
+from axioms import T, mk_or
+from tactics import SYM, EQT_INTRO, EQT_ELIM, TRUTH, REWRITE_CONV, OR_CONG
 
 
 def main():
@@ -21,6 +21,14 @@ def main():
     th_p = ASSUME(pv)
     th_back = EQT_ELIM(EQT_INTRO(th_p))
     assert aconv(concl(th_back), pv)
+
+    # OR_CONG : a = c, b = d  ==>  (a \/ b) = (c \/ d)
+    a, b, c, d = (Var(n, bool_ty) for n in "abcd")
+    th_ac = ASSUME(mk_eq(a, c))
+    th_bd = ASSUME(mk_eq(b, d))
+    th_or = OR_CONG(th_ac, th_bd)
+    assert aconv(concl(th_or), mk_eq(mk_or(a, b), mk_or(c, d)))
+    assert set(th_or._asl) == {mk_eq(a, c), mk_eq(b, d)}
 
     # REWRITE_CONV blow-up guard: a self-recursive rule whose RHS contains
     # two copies of the LHS doubles term size per pass. The fail-fast guard

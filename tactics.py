@@ -377,6 +377,11 @@ def DISJ_CASES(th_or, th_p_imp, th_q_imp):
     return MP(MP(th_spec, th_p_imp), th_q_imp)
 
 
+def OR_CONG(eq_l, eq_r):
+    """|- a = c,  |- b = d   =>   |- (a \\/ b) = (c \\/ d)"""
+    return MK_COMB(AP_TERM(mk_const("\\/", []), eq_l), eq_r)
+
+
 # Tiny rewriting helpers.
 
 NOT_CONST = mk_const("~", [])
