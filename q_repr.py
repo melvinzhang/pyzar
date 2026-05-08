@@ -129,12 +129,19 @@ from q_syntax import (
     IS_TERM_REC, IS_TERM_AT_SUCC,
     mono_iff_eq_or_pw_step,
     _unfold_rec_via_F_def,
+    _extract_nfg,
 )
+from axioms import dest_exists
+from tactics import (
+    CHOOSE_WITNESS, AP_TERM, OR_CONG, REWRITE_RULE,
+)
+from fusion import vsubst, aty, DEDUCT_ANTISYM_RULE
 from q_proof import (
     var_x,
     Prov_Q,
     nil_l, cons_l, NIL_L_DEF, CONS_L_AT, CONS_L_INJ, CONS_L_NEQ_NIL,
     NAT0_LT_CONS_L_TAIL,
+    is_axiom, is_mp, is_gen,
 )
 
 
@@ -530,6 +537,423 @@ def MEM_L_AT_CONS(p):
 
 
 # ---------------------------------------------------------------------------
+# Stage 3B (b) -- ``valid_step``: per-step proof checker.
+#
+#   valid_step t h  :<=>  is_axiom h
+#                          \/ (?f1 f2. mem_l f1 t /\ mem_l f2 t /\
+#                                       is_mp f1 f2 h)
+#                          \/ (?f1. mem_l f1 t /\ is_gen f1 h)
+#
+# t is the tail (the formulas listed before h in the proof); h is
+# justified as an axiom, by MP from two earlier formulas, or by Gen
+# from one. Non-recursive in the sequence type, so plain ``define``.
+# ---------------------------------------------------------------------------
+
+
+_t_n0_vs = Var("t", nat0_ty)
+_h_n0_vs = Var("h", nat0_ty)
+_f1_n0_vs = Var("f1", nat0_ty)
+_f2_n0_vs = Var("f2", nat0_ty)
+
+
+_valid_step_body = mk_or(
+    mk_app(is_axiom, _h_n0_vs),
+    mk_or(
+        mk_exists(_f1_n0_vs, mk_exists(_f2_n0_vs, mk_and(
+            mk_app(mem_l, _t_n0_vs, _f1_n0_vs),
+            mk_and(
+                mk_app(mem_l, _t_n0_vs, _f2_n0_vs),
+                mk_app(is_mp, _f1_n0_vs, _f2_n0_vs, _h_n0_vs),
+            ),
+        ))),
+        mk_exists(_f1_n0_vs, mk_and(
+            mk_app(mem_l, _t_n0_vs, _f1_n0_vs),
+            mk_app(is_gen, _f1_n0_vs, _h_n0_vs),
+        )),
+    ),
+)
+
+
+VALID_STEP_DEF = define(
+    "valid_step",
+    parse_type("nat0 -> nat0 -> bool"),
+    mk_abs(_t_n0_vs, mk_abs(_h_n0_vs, _valid_step_body)),
+)
+valid_step = mk_const("valid_step", [])
+
+
+# Pointwise:
+#   |- !t h. valid_step t h =
+#            (is_axiom h
+#             \/ (?f1 f2. mem_l t f1 /\ mem_l t f2 /\ is_mp f1 f2 h)
+#             \/ (?f1. mem_l t f1 /\ is_gen f1 h)).
+VALID_STEP_AT = _at2(VALID_STEP_DEF, _t_n0_vs, _h_n0_vs)
+
+
+# ---------------------------------------------------------------------------
+# Stage 3B (c) -- list-based provability ``Proof_Q``.
+#
+#   Proof_Q p n  :<=>
+#       ?h t. p = cons_l h t /\ h = n /\ valid_step t h /\
+#             (t = nil_l \/ ?h_inner. Proof_Q t h_inner).
+#
+# A non-empty list ``p`` whose head ``h`` equals ``n``, every prefix is
+# justified by ``valid_step`` against its tail, and (via the inner
+# disjunction) the tail itself extends to a valid proof or is empty.
+# When ``p = nil_l`` the body is F (no h, t with nil_l = cons_l h t,
+# CONS_L_NEQ_NIL).
+#
+# Recursion target type is ``nat0 -> bool`` (Proof_Q : nat0 -> nat0 ->
+# bool, recursing on the proof list). MONO obligation: pointwise body
+# equation under fixed n, then ``ABS`` over n and ``by_unfold`` through
+# the helper-constant DEF. The recursive call ``f t h_inner`` is buried
+# under an inner ``?h_inner.`` existential under the disjunction; we
+# rebuild that existential's iff by ``AP_THM`` + ``ABS`` + ``AP_TERM``
+# at the existential constant ``?``.
+# ---------------------------------------------------------------------------
+
+
+_h_n0_pq = Var("h", nat0_ty)
+_t_n0_pq = Var("t", nat0_ty)
+_h_inner_pq = Var("h_inner", nat0_ty)
+_n_n0_pq = Var("n", nat0_ty)
+
+
+def _proof_q_body(f_t, p_t, n_t):
+    """Bool body of ``_proof_q_F`` at the n-applied level."""
+    return mk_exists(_h_n0_pq, mk_exists(_t_n0_pq, mk_and(
+        mk_eq(p_t, mk_app(cons_l, _h_n0_pq, _t_n0_pq)),
+        mk_and(
+            mk_eq(_h_n0_pq, n_t),
+            mk_and(
+                mk_app(valid_step, _t_n0_pq, _h_n0_pq),
+                mk_or(
+                    mk_eq(_t_n0_pq, nil_l),
+                    mk_exists(_h_inner_pq,
+                              mk_app(f_t, _t_n0_pq, _h_inner_pq)),
+                ),
+            ),
+        ),
+    )))
+
+
+_PROOF_Q_F_DEF = define(
+    "_proof_q_F",
+    _F_pred2_ty,
+    mk_abs(_f_pred2, mk_abs(_p_n0_var,
+        mk_abs(_n_n0_pq,
+               _proof_q_body(_f_pred2, _p_n0_var, _n_n0_pq)))),
+)
+_PROOF_Q_F = mk_const("_proof_q_F", [])
+
+
+def _proof_q_mono_body_iff(hyp_th, n_term):
+    """|- (?h t. p = cons_l h t /\\ h = n /\\ valid_step t h /\\
+                  (t = nil_l \\/ ?h_inner. f t h_inner))
+        = (same with g)
+    given ``hyp_th : |- !k. nat0_lt k p ==> f k = g k``.
+    """
+    p_t, f_t, g_t, _ = _extract_nfg(hyp_th)
+
+    def _bodies(fn):
+        return mk_and(
+            mk_eq(p_t, mk_app(cons_l, _h_n0_pq, _t_n0_pq)),
+            mk_and(
+                mk_eq(_h_n0_pq, n_term),
+                mk_and(
+                    mk_app(valid_step, _t_n0_pq, _h_n0_pq),
+                    mk_or(
+                        mk_eq(_t_n0_pq, nil_l),
+                        mk_exists(_h_inner_pq,
+                                  mk_app(fn, _t_n0_pq, _h_inner_pq)),
+                    ),
+                ),
+            ),
+        )
+
+    body_inner_l = _bodies(f_t)
+    body_inner_r = _bodies(g_t)
+    LHS = mk_exists(_h_n0_pq, mk_exists(_t_n0_pq, body_inner_l))
+    RHS = mk_exists(_h_n0_pq, mk_exists(_t_n0_pq, body_inner_r))
+
+    exists_const_n0 = mk_const("?", [(nat0_ty, aty)])
+
+    def _direction(src, target_inner_body, swap_fg):
+        h_top = ASSUME(src)
+        outer_pred = dest_exists(src)
+        chosen_outer = CHOOSE_WITNESS(outer_pred, h_top)
+        new_inner_pred = dest_exists(chosen_outer._concl)
+        chosen_inner = CHOOSE_WITNESS(new_inner_pred, chosen_outer)
+
+        n_eq_th = CONJUNCT1(chosen_inner)
+        rest1 = CONJUNCT2(chosen_inner)
+        h_eq_n_th = CONJUNCT1(rest1)
+        rest2 = CONJUNCT2(rest1)
+        valid_th = CONJUNCT1(rest2)
+        disj_th = CONJUNCT2(rest2)
+
+        ctor_app = rand(n_eq_th._concl)
+        wt = rand(ctor_app)
+        wh = rand(rator(ctor_app))
+
+        sl_t = SPEC(wt, SPEC(wh, NAT0_LT_CONS_L_TAIL))
+        lt_t_p = REWRITE_RULE([SYM(n_eq_th)], sl_t)
+        funcs_eq = MP(SPEC(wt, hyp_th), lt_t_p)
+        funcs_eq_dir = SYM(funcs_eq) if swap_fg else funcs_eq
+
+        funcs_at_h = AP_THM(funcs_eq_dir, _h_inner_pq)
+        abs_eq = ABS(_h_inner_pq, funcs_at_h)
+        inner_exists_eq = AP_TERM(exists_const_n0, abs_eq)
+
+        wt_eq_nil = mk_eq(wt, nil_l)
+        disj_eq = OR_CONG(REFL(wt_eq_nil), inner_exists_eq)
+        new_disj_th = EQ_MP(disj_eq, disj_th)
+
+        new_body = CONJ(n_eq_th,
+            CONJ(h_eq_n_th, CONJ(valid_th, new_disj_th)))
+
+        inner_pred_at_wh = mk_abs(
+            _t_n0_pq, vsubst([(wh, _h_n0_pq)])(target_inner_body))
+        inner_th = EXISTS(inner_pred_at_wh, wt, new_body)
+        outer_pred_body = mk_abs(
+            _h_n0_pq, mk_exists(_t_n0_pq, target_inner_body))
+        outer_th = EXISTS(outer_pred_body, wh, inner_th)
+        return outer_th
+
+    R_th = _direction(LHS, body_inner_r, swap_fg=False)
+    L_th = _direction(RHS, body_inner_l, swap_fg=True)
+    return DEDUCT_ANTISYM_RULE(L_th, R_th)
+
+
+@proof
+def PROOF_Q_MONO(p):
+    """|- !f g p. (!k. nat0_lt k p ==> f k = g k)
+                  ==> _proof_q_F f p = _proof_q_F g p."""
+    p.goal(
+        "!f g p. (!k. nat0_lt k p ==> f k = g k) ==> "
+        "_proof_q_F f p = _proof_q_F g p",
+        types={"f": _pred2_ty, "g": _pred2_ty,
+               "p": nat0_ty, "k": nat0_ty},
+    )
+    p.fix("f g p")
+    p.assume("hyp: !k. nat0_lt k p ==> f k = g k")
+
+    body_eq = _proof_q_mono_body_iff(p.fact("hyp"), _n_n0_pq)
+    abs_eq = ABS(_n_n0_pq, body_eq)
+    p.thus(
+        "_proof_q_F f p = _proof_q_F g p"
+    ).by_unfold(abs_eq, _PROOF_Q_F_DEF)
+
+
+PROOF_Q_DEF, _PROOF_Q_REC_RAW = define_wf_lt(
+    "Proof_Q",
+    _pred2_ty,
+    _PROOF_Q_F,
+    PROOF_Q_MONO,
+)
+Proof_Q = mk_const("Proof_Q", [])
+
+
+# |- !p. Proof_Q p =
+#         (\n. ?h t. p = cons_l h t /\ h = n /\ valid_step t h
+#                    /\ (t = nil_l \/ ?h_inner. Proof_Q t h_inner)).
+PROOF_Q_REC = _unfold_rec_via_F_def(_PROOF_Q_REC_RAW, _PROOF_Q_F_DEF)
+
+
+# Pointwise unfold:
+#   |- !p n. Proof_Q p n =
+#            (?h t. p = cons_l h t /\ h = n /\ valid_step t h
+#                   /\ (t = nil_l \/ ?h_inner. Proof_Q t h_inner)).
+def _proof_q_rec_pw():
+    spec_p = SPEC(_p_n0_var, PROOF_Q_REC)
+    ap_n = AP_THM(spec_p, _n_n0_pq)
+    rhs = rand(ap_n._concl)
+    beta_n = BETA_CONV(rhs)
+    pw = TRANS(ap_n, beta_n)
+    return GENL([_p_n0_var, _n_n0_pq], pw)
+
+
+PROOF_Q_REC_PW = _proof_q_rec_pw()
+
+
+# Constructor equations.
+_PROOF_Q_RHS_NIL_STR = (
+    "?h t. nil_l = cons_l h t /\\ h = n /\\ valid_step t h /\\ "
+    "(t = nil_l \\/ ?h_inner. Proof_Q t h_inner)"
+)
+
+
+@proof
+def PROOF_Q_AT_NIL(p):
+    """|- !n. Proof_Q nil_l n = F."""
+    p.goal("!n. Proof_Q nil_l n = F")
+    p.fix("n")
+
+    rec_at = SPECL([p._parse("nil_l"), p._parse("n")], PROOF_Q_REC_PW)
+
+    with p.have(f"rhs_neg: ~({_PROOF_Q_RHS_NIL_STR})").proof():
+        with p.suppose(f"hex: {_PROOF_Q_RHS_NIL_STR}"):
+            p.choose("h", "hex", eq_label="ex_t")
+            p.choose("t", "ex_t", eq_label="conj_ht")
+            p.split("conj_ht", "(eq_nil, _rest)")
+            p.have(
+                "eq_swap: cons_l h t = nil_l"
+            ).by_thm(SYM(p.fact("eq_nil")))
+            p.have("neq: ~(cons_l h t = nil_l)").by(CONS_L_NEQ_NIL, "h", "t")
+            p.absurd().by_conj("neq", "eq_swap")
+
+    p.have(f"rhs_F: ({_PROOF_Q_RHS_NIL_STR}) = F").by_thm(
+        EQF_INTRO(p.fact("rhs_neg"))
+    )
+    p.thus("Proof_Q nil_l n = F").by_thm(
+        TRANS(rec_at, p.fact("rhs_F"))
+    )
+
+
+@proof
+def PROOF_Q_AT_CONS(p):
+    """|- !h t n. Proof_Q (cons_l h t) n =
+                  (h = n /\\ valid_step t h
+                   /\\ (t = nil_l \\/ ?h_inner. Proof_Q t h_inner))."""
+    p.goal(
+        "!h t n. Proof_Q (cons_l h t) n = "
+        "(h = n /\\ valid_step t h "
+        "/\\ (t = nil_l \\/ ?h_inner. Proof_Q t h_inner))"
+    )
+    p.fix("h t n")
+
+    rec_at = SPECL(
+        [p._parse("cons_l h t"), p._parse("n")], PROOF_Q_REC_PW
+    )
+    rhs_str = (
+        "?h1 t1. cons_l h t = cons_l h1 t1 /\\ h1 = n /\\ "
+        "valid_step t1 h1 /\\ "
+        "(t1 = nil_l \\/ ?h_inner. Proof_Q t1 h_inner)"
+    )
+    target_str = (
+        "h = n /\\ valid_step t h /\\ "
+        "(t = nil_l \\/ ?h_inner. Proof_Q t h_inner)"
+    )
+
+    # Forward: RHS ==> target.
+    #
+    # The disjunction inner-existential (?h_inner. Proof_Q t1 h_inner)
+    # cannot be rewritten via ``by_rewrite_of`` on the whole disjunction
+    # because the eq_t rule has non-empty asl (chained from ``hex``)
+    # and the rewrite engine filters such rules under binders. Split
+    # the disjunction by cases instead -- each case's rewrite happens
+    # at the top level after CHOOSE.
+    with p.have(f"fwd: ({rhs_str}) ==> ({target_str})").proof():
+        p.assume(f"hex: {rhs_str}")
+        p.choose("h1", "hex", eq_label="ex_t")
+        p.choose("t1", "ex_t", eq_label="conj")
+        p.split("conj", "(eq_cons, h1_eq_n, valid_t1, disj_t1)")
+        p.have("inj: h = h1 /\\ t = t1").by(
+            CONS_L_INJ, "h", "t", "h1", "t1", "eq_cons"
+        )
+        p.split("inj", "(eq_h, eq_t)")
+        p.have("h_eq_n: h = n").by_rewrite_of(
+            "h1_eq_n", [SYM(p.fact("eq_h"))]
+        )
+        p.have("valid_th: valid_step t h").by_rewrite_of(
+            "valid_t1", [SYM(p.fact("eq_h")), SYM(p.fact("eq_t"))]
+        )
+        with p.have(
+            "disj_th: t = nil_l \\/ ?h_inner. Proof_Q t h_inner"
+        ).proof():
+            with p.cases_on("disj_t1"):
+                with p.case("nil_c: t1 = nil_l"):
+                    p.have("t_eq_nil: t = nil_l").by_rewrite_of(
+                        "nil_c", [SYM(p.fact("eq_t"))]
+                    )
+                    p.thus(
+                        "t = nil_l \\/ ?h_inner. Proof_Q t h_inner"
+                    ).by_disj("t_eq_nil")
+                with p.case("ex_c: ?h_inner. Proof_Q t1 h_inner"):
+                    # case auto-introduces ``h_inner`` witness with eq
+                    # fact ``h_inner_eq: Proof_Q t1 h_inner``.
+                    p.have("pq_at_t: Proof_Q t h_inner").by_rewrite_of(
+                        "h_inner_eq", [SYM(p.fact("eq_t"))]
+                    )
+                    # Build the existential and disj manually (the
+                    # ``disj_witness`` machinery here mismatches because
+                    # ``h_inner`` resolves through the case's choose_env
+                    # to a SELECT term whose body REWRITE_PROVE struggles
+                    # to align).
+                    h_inner_term = p._parse("h_inner")
+                    t_term = p._parse("t")
+                    inner_pred = mk_abs(
+                        _h_inner_pq, mk_app(Proof_Q, t_term, _h_inner_pq))
+                    exists_th = EXISTS(inner_pred, h_inner_term, p.fact("pq_at_t"))
+                    p.thus(
+                        "t = nil_l \\/ ?h_inner. Proof_Q t h_inner"
+                    ).by_thm(DISJ2(p._parse("t = nil_l"), exists_th))
+        p.thus(target_str).by_thm(
+            CONJ(p.fact("h_eq_n"),
+                 CONJ(p.fact("valid_th"), p.fact("disj_th")))
+        )
+
+    # Backward: target ==> RHS.
+    with p.have(f"rev: ({target_str}) ==> ({rhs_str})").proof():
+        p.assume(f"htgt: {target_str}")
+        p.split("htgt", "(h_eq_n, valid_th, disj_th)")
+
+        h_t = p._parse("h")
+        t_t = p._parse("t")
+        n_t = p._parse("n")
+        h1_var = Var("h1", nat0_ty)
+        t1_var = Var("t1", nat0_ty)
+        cons_h_t = mk_app(cons_l, h_t, t_t)
+
+        body_th = CONJ(REFL(cons_h_t),
+            CONJ(p.fact("h_eq_n"),
+                CONJ(p.fact("valid_th"), p.fact("disj_th"))))
+
+        inner_body_t1 = mk_and(
+            mk_eq(cons_h_t, mk_app(cons_l, h_t, t1_var)),
+            mk_and(
+                mk_eq(h_t, n_t),
+                mk_and(
+                    mk_app(valid_step, t1_var, h_t),
+                    mk_or(
+                        mk_eq(t1_var, nil_l),
+                        mk_exists(_h_inner_pq,
+                                  mk_app(Proof_Q, t1_var, _h_inner_pq)),
+                    ),
+                ),
+            ),
+        )
+        inner_pred = mk_abs(t1_var, inner_body_t1)
+        inner_th = EXISTS(inner_pred, t_t, body_th)
+
+        outer_inner_body = mk_and(
+            mk_eq(cons_h_t, mk_app(cons_l, h1_var, t1_var)),
+            mk_and(
+                mk_eq(h1_var, n_t),
+                mk_and(
+                    mk_app(valid_step, t1_var, h1_var),
+                    mk_or(
+                        mk_eq(t1_var, nil_l),
+                        mk_exists(_h_inner_pq,
+                                  mk_app(Proof_Q, t1_var, _h_inner_pq)),
+                    ),
+                ),
+            ),
+        )
+        outer_pred = mk_abs(h1_var,
+            mk_exists(t1_var, outer_inner_body))
+        outer_th = EXISTS(outer_pred, h_t, inner_th)
+        p.thus(rhs_str).by_thm(outer_th)
+
+    p.have(f"iff: ({rhs_str}) = ({target_str})").by_iff("fwd", "rev")
+    p.thus(
+        "Proof_Q (cons_l h t) n = "
+        "(h = n /\\ valid_step t h "
+        "/\\ (t = nil_l \\/ ?h_inner. Proof_Q t h_inner))"
+    ).by_thm(TRANS(rec_at, p.fact("iff")))
+
+
+# ---------------------------------------------------------------------------
 # Roadmap -- Stage 3B and 3C.
 # ---------------------------------------------------------------------------
 #
@@ -542,15 +966,19 @@ def MEM_L_AT_CONS(p):
 #     ``MEM_L_AT_NIL`` discharged via ``CONS_L_NEQ_NIL``;
 #     ``MEM_L_AT_CONS`` via ``CONS_L_INJ``.
 #
-#   * Define ``Proof_Q : nat0 -> nat0 -> bool`` via ``define_wf_lt``:
-#         Proof_Q p n :<=>
-#             p = nil_l
-#               ? F      -- empty proofs prove nothing
-#               : ?h t. p = cons_l h t /\ h = n /\ Proof_Q t h
-#                       /\ valid_step t h
-#     where ``valid_step t h`` says ``h`` is an axiom, follows by MP
-#     from earlier members of ``t``, or follows by Gen from a member
-#     of ``t``.
+#   * Define ``valid_step``                                          [DONE]
+#     non-recursive disjunction over is_axiom, an MP existential,
+#     and a Gen existential (each consuming ``mem_l t _``).
+#
+#   * Define ``Proof_Q : nat0 -> nat0 -> bool`` via ``define_wf_lt``  [DONE]
+#     with body
+#       ?h t. p = cons_l h t /\ h = n /\ valid_step t h
+#             /\ (t = nil_l \/ ?h'. Proof_Q t h').
+#     ``PROOF_Q_AT_NIL`` discharges via ``CONS_L_NEQ_NIL``;
+#     ``PROOF_Q_AT_CONS`` via ``CONS_L_INJ`` + cases-split on the
+#     inner disjunction (the rewrite under the inner ``?h_inner``
+#     binder doesn't fire on hyp-laden rules, so each disjunct case
+#     handles its rewrite at the top level).
 #
 #   * Prove the equivalence with the impredicative ``Prov_Q``:
 #         |- !n. Prov_Q n <=> ?p. Proof_Q p n.
@@ -611,3 +1039,14 @@ if __name__ == "__main__":
     print("    MEM_L_REC_PW    :", pp_thm(MEM_L_REC_PW))
     print("    MEM_L_AT_NIL    :", pp_thm(MEM_L_AT_NIL))
     print("    MEM_L_AT_CONS   :", pp_thm(MEM_L_AT_CONS))
+    print()
+    print("Stage 3B (b) -- valid_step.")
+    print("    VALID_STEP_DEF :", pp_thm(VALID_STEP_DEF))
+    print("    VALID_STEP_AT  :", pp_thm(VALID_STEP_AT))
+    print()
+    print("Stage 3B (c) -- list-based Proof_Q.")
+    print("    PROOF_Q_DEF      :", pp_thm(PROOF_Q_DEF))
+    print("    PROOF_Q_REC      :", pp_thm(PROOF_Q_REC))
+    print("    PROOF_Q_REC_PW   :", pp_thm(PROOF_Q_REC_PW))
+    print("    PROOF_Q_AT_NIL   :", pp_thm(PROOF_Q_AT_NIL))
+    print("    PROOF_Q_AT_CONS  :", pp_thm(PROOF_Q_AT_CONS))
