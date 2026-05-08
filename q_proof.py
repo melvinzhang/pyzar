@@ -18,19 +18,62 @@
 #
 # Rules: modus ponens; generalization.
 #
-# This file implements Stage 2A:
+# Stage 2A (foundations):
 #   * List encoding on nat0 (proofs are lists of formula godelnums).
 #   * The seven Q axioms as concrete encoded nat0 terms.
 #   * ``is_q_axiom``: decidable recogniser for the seven Q axioms.
 #
-# Stage 2B (deferred):
-#   * Logical-axiom schema recogniser (~80 lines: pattern match on
-#     each propositional / quantifier / equality schema).
-#   * ``is_axiom = is_q_axiom \/ is_logical_axiom``.
-#   * Modus-ponens / generalization checkers on godelnums.
-#   * ``Proof_Q(p, n)`` via well-founded recursion on list length.
-#   * ``Prov_Q(n) := ?p. Proof_Q(p, n)``.
-#   * Closure rules: |- Prov_Q F /\ Prov_Q (F -> G) ==> Prov_Q G, etc.
+# Stage 2B (proof system):
+#   * ``is_mp``, ``is_gen``: modus-ponens / generalisation predicates
+#     on godelnums.
+#   * Seven logical-axiom schemas as sigma_1 predicates: ``is_K``,
+#     ``is_S``, ``is_N`` (Mendelson propositional); ``is_UI``,
+#     ``is_Vac`` (quantifier; ``is_Vac`` carries a ``free_in`` side
+#     condition); ``is_Refl``, ``is_Subst`` (equality). The
+#     quantifier and equality schemas reuse ``substitute`` and
+#     ``free_in`` from ``q_syntax``.
+#   * ``is_logical_axiom`` (disjunction over the seven schemas) and
+#     ``is_axiom = is_q_axiom \/ is_logical_axiom``.
+#   * ``NAT0_LT_CONS_L_HEAD`` / ``NAT0_LT_CONS_L_TAIL``: list size
+#     lemmas needed for any future well-founded recursion on lists.
+#   * ``Prov_Q``: provability predicate, defined as the impredicative
+#     intersection of all sets closed under the inference rules:
+#         Prov_Q n  :<=>  !P:nat0->bool.
+#                          ( (!m. is_axiom m ==> P m)
+#                          /\ (!f g. P f /\ P (Imp_f f g) ==> P g)
+#                          /\ (!f x. P f ==> P (Forall_f x f)) )
+#                          ==> P n.
+#   * Closure rules:
+#         |- !n. is_axiom n ==> Prov_Q n.                  (PROV_Q_AXIOM)
+#         |- !f g. Prov_Q f /\ Prov_Q (Imp_f f g)
+#                  ==> Prov_Q g.                           (PROV_Q_MP)
+#         |- !f x. Prov_Q f ==> Prov_Q (Forall_f x f).     (PROV_Q_GEN)
+#
+# Design note -- why ``Prov_Q`` via impredicative intersection rather
+# than the textbook ``?p. Proof_Q(p, n)``:
+#
+# The ``godel_first.py`` blueprint specifies ``Prov_Q(n) :<=> ?p.
+# Proof_Q(p, n)`` where ``Proof_Q`` is the list-based proof checker.
+# In HOL the two definitions are provably equivalent (Knaster-Tarski:
+# the impredicative intersection is the least fixed point of the
+# closure operator, which agrees with the inductively generated set
+# of provable godelnums). We pick the impredicative form here because:
+#
+#   (1) The closure rules (axiom inclusion, MP, generalisation) drop
+#       out by direct specialisation -- no recursion, no MONO.
+#   (2) A list-based ``Proof_Q`` would require ``mem_l`` (list
+#       membership) defined via ``define_wf_lt``, which carries a
+#       non-trivial MONO obligation under existential binders -- the
+#       per-(h, t) iff has to use ``NAT0_LT_CONS_L_TAIL`` to discharge
+#       the recursive call after CHOOSE'ing the cons witness.
+#   (3) Stage 4 (diagonal lemma) and Stage 5 (the main incompleteness
+#       theorem) only consume the closure rules and ``PROV_Q_AT``; they
+#       never inspect an explicit proof witness.
+#
+# A list-based ``Proof_Q`` *is* needed in Stage 3 for representability
+# -- the diagonal lemma's ``Prov_Q_internal`` formula must internalise
+# explicit proofs into Q's own language. We build it there against
+# this ``Prov_Q``, not as a defining predicate.
 
 # ---------------------------------------------------------------------------
 # Imports.
@@ -46,7 +89,7 @@ from hf_sets import (
 )
 from proof import proof
 from tactics import (
-    SPECL, GEN, GENL, SYM, MP, CONJUNCT1, CONJUNCT2,
+    SPECL, GEN, GENL, SYM, MP, CONJ, CONJUNCT1, CONJUNCT2,
     AP_THM, BETA_CONV, TRANS, DISJ1, DISJ2, EQ_MP,
 )
 from basics import mk_abs, rand
@@ -340,54 +383,496 @@ IS_Q_AXIOM_HOLDS = {
 
 
 # ---------------------------------------------------------------------------
-# Stage 2B (deferred) -- sketch.
-# ---------------------------------------------------------------------------
+# Stage 2B (a) -- modus ponens / generalisation predicates.
 #
-# Logical-axiom recogniser. Standard Hilbert axiomatization (Mendelson):
+#   is_mp f1 f2 g    :<=>  f2 = Imp_f f1 g
+#                          ("g follows from f1 and f1 -> g by MP")
+#   is_gen f g       :<=>  ?x. g = Forall_f x f
+#                          ("g is the generalisation of f over some x")
+#
+# Both are simple equational predicates on godelnums; no recursion. We
+# define them as plain HOL functions and immediately derive pointwise
+# unfolds for downstream proof-checker reasoning.
+# ---------------------------------------------------------------------------
+
+
+_f1_n0 = Var("f1", nat0_ty)
+_f2_n0 = Var("f2", nat0_ty)
+_g_n0 = Var("g", nat0_ty)
+_f_n0 = Var("f", nat0_ty)
+_x_n0 = Var("x", nat0_ty)
+
+
+IS_MP_DEF = define(
+    "is_mp",
+    parse_type("nat0 -> nat0 -> nat0 -> bool"),
+    "\\f1:nat0. \\f2:nat0. \\g:nat0. f2 = Imp_f f1 g",
+)
+is_mp = mk_const("is_mp", [])
+
+
+def _at3(def_th, x, y, z):
+    th = AP_THM(def_th, x)
+    th = TRANS(th, BETA_CONV(rand(th._concl)))
+    th = AP_THM(th, y)
+    th = TRANS(th, BETA_CONV(rand(th._concl)))
+    th = AP_THM(th, z)
+    th = TRANS(th, BETA_CONV(rand(th._concl)))
+    return GENL([x, y, z], th)
+
+
+# |- !f1 f2 g. is_mp f1 f2 g = (f2 = Imp_f f1 g).
+IS_MP_AT = _at3(IS_MP_DEF, _f1_n0, _f2_n0, _g_n0)
+
+
+from axioms import mk_exists
+
+
+_is_gen_body = mk_exists(_x_n0, mk_eq(_g_n0, mk_app(Forall_f, _x_n0, _f_n0)))
+
+IS_GEN_DEF = define(
+    "is_gen",
+    parse_type("nat0 -> nat0 -> bool"),
+    mk_abs(_f_n0, mk_abs(_g_n0, _is_gen_body)),
+)
+is_gen = mk_const("is_gen", [])
+
+
+# |- !f g. is_gen f g = (?x. g = Forall_f x f).
+IS_GEN_AT = _at2(IS_GEN_DEF, _f_n0, _g_n0)
+
+
+# ---------------------------------------------------------------------------
+# Stage 2B (b) -- logical-axiom schema recognisers.
+#
+# Standard Hilbert axiomatisation (Mendelson, "Introduction to
+# Mathematical Logic", §2.4, restricted to the connectives we have):
 #
 #   K-schema:  A -> (B -> A)
 #   S-schema:  (A -> (B -> C)) -> ((A -> B) -> (A -> C))
-#   N-schema:  (~B -> ~A) -> (A -> B)            (classical negation)
-#   Q-axiom:   !x. F -> F[t/x]                   (universal instantiation)
-#   Q-vacuous: F -> !x. F                         (when x not free in F)
-#   E1:        t = t                              (reflexivity)
-#   E2:        t1 = t2 -> phi[t1] -> phi[t2]      (substitution)
+#   N-schema:  (~B -> ~A) -> (A -> B)               (classical)
+#   UI:        !x. F -> F[t/x]                       (universal inst.)
+#   Vac:       F -> !x. F                            (vacuous gen.; x not free in F)
+#   Refl:      t = t                                  (equality reflexivity)
+#   Subst:     t1 = t2 -> F[t1/x] -> F[t2/x]          (equality substitution)
 #
-# Each schema becomes an existential predicate on a candidate godelnum.
-# E.g.:
+# Each schema is encoded as an existential predicate on a godelnum.
+# All are sigma-1 (existential over wf-encoded objects + decidable
+# checks), hence decidable and representable.
+# ---------------------------------------------------------------------------
+
+
+is_term = mk_const("is_term", [])
+is_form = mk_const("is_form", [])
+free_in = mk_const("free_in", [])
+substitute = mk_const("substitute", [])
+
+
+# Helpers used in several schemas.
+_A_n0 = Var("A", nat0_ty)
+_B_n0 = Var("B", nat0_ty)
+_C_n0 = Var("C", nat0_ty)
+_F_n0 = Var("F", nat0_ty)
+_t_pf_n0 = Var("t", nat0_ty)
+_t1_pf_n0 = Var("t1", nat0_ty)
+_t2_pf_n0 = Var("t2", nat0_ty)
+_x_pf_n0 = Var("x", nat0_ty)
+
+
+def _and_chain(props):
+    from axioms import mk_and
+    out = props[-1]
+    for p_ in reversed(props[:-1]):
+        out = mk_and(p_, out)
+    return out
+
+
+def _exists_chain(vars_, body):
+    out = body
+    for v in reversed(vars_):
+        out = mk_exists(v, out)
+    return out
+
+
+def _isf(t):
+    return mk_app(is_form, t)
+
+
+def _ist(t):
+    return mk_app(is_term, t)
+
+
+# is_K(n) :<=> ?A B. is_form A /\ is_form B /\ n = A -> (B -> A).
+_is_K_body = _exists_chain([_A_n0, _B_n0], _and_chain([
+    _isf(_A_n0),
+    _isf(_B_n0),
+    mk_eq(_n_n0, mk_app(Imp_f, _A_n0,
+                         mk_app(Imp_f, _B_n0, _A_n0))),
+]))
+IS_K_DEF = define("is_K", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_K_body))
+is_K = mk_const("is_K", [])
+IS_K_AT = _at1(IS_K_DEF, _n_n0)
+
+
+# is_S(n) :<=> ?A B C. is_form A /\ is_form B /\ is_form C /\
+#                       n = (A -> (B -> C)) -> ((A -> B) -> (A -> C)).
+_is_S_body = _exists_chain([_A_n0, _B_n0, _C_n0], _and_chain([
+    _isf(_A_n0),
+    _isf(_B_n0),
+    _isf(_C_n0),
+    mk_eq(_n_n0, mk_app(Imp_f,
+        mk_app(Imp_f, _A_n0, mk_app(Imp_f, _B_n0, _C_n0)),
+        mk_app(Imp_f,
+            mk_app(Imp_f, _A_n0, _B_n0),
+            mk_app(Imp_f, _A_n0, _C_n0)))),
+]))
+IS_S_DEF = define("is_S", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_S_body))
+is_S = mk_const("is_S", [])
+IS_S_AT = _at1(IS_S_DEF, _n_n0)
+
+
+# is_N(n) :<=> ?A B. is_form A /\ is_form B /\
+#                     n = (~B -> ~A) -> (A -> B).
+_is_N_body = _exists_chain([_A_n0, _B_n0], _and_chain([
+    _isf(_A_n0),
+    _isf(_B_n0),
+    mk_eq(_n_n0, mk_app(Imp_f,
+        mk_app(Imp_f, mk_app(Not_f, _B_n0), mk_app(Not_f, _A_n0)),
+        mk_app(Imp_f, _A_n0, _B_n0))),
+]))
+IS_N_DEF = define("is_N", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_N_body))
+is_N = mk_const("is_N", [])
+IS_N_AT = _at1(IS_N_DEF, _n_n0)
+
+
+# is_UI(n) :<=> ?x F t. is_form F /\ is_term t /\
+#                       n = Imp_f (Forall_f x F) (substitute F t x).
+_is_UI_body = _exists_chain([_x_pf_n0, _F_n0, _t_pf_n0], _and_chain([
+    _isf(_F_n0),
+    _ist(_t_pf_n0),
+    mk_eq(_n_n0, mk_app(Imp_f,
+        mk_app(Forall_f, _x_pf_n0, _F_n0),
+        mk_app(substitute, _F_n0, _t_pf_n0, _x_pf_n0))),
+]))
+IS_UI_DEF = define("is_UI", parse_type("nat0 -> bool"),
+                   mk_abs(_n_n0, _is_UI_body))
+is_UI = mk_const("is_UI", [])
+IS_UI_AT = _at1(IS_UI_DEF, _n_n0)
+
+
+# is_Vac(n) :<=> ?x F. is_form F /\ ~(free_in F x) /\
+#                      n = Imp_f F (Forall_f x F).
+from axioms import mk_not as _mk_not
+_is_Vac_body = _exists_chain([_x_pf_n0, _F_n0], _and_chain([
+    _isf(_F_n0),
+    _mk_not(mk_app(free_in, _F_n0, _x_pf_n0)),
+    mk_eq(_n_n0, mk_app(Imp_f, _F_n0,
+                         mk_app(Forall_f, _x_pf_n0, _F_n0))),
+]))
+IS_VAC_DEF = define("is_Vac", parse_type("nat0 -> bool"),
+                    mk_abs(_n_n0, _is_Vac_body))
+is_Vac = mk_const("is_Vac", [])
+IS_VAC_AT = _at1(IS_VAC_DEF, _n_n0)
+
+
+# is_Refl(n) :<=> ?t. is_term t /\ n = Eq_f t t.
+_is_Refl_body = _exists_chain([_t_pf_n0], _and_chain([
+    _ist(_t_pf_n0),
+    mk_eq(_n_n0, mk_app(Eq_f, _t_pf_n0, _t_pf_n0)),
+]))
+IS_REFL_DEF = define("is_Refl", parse_type("nat0 -> bool"),
+                     mk_abs(_n_n0, _is_Refl_body))
+is_Refl = mk_const("is_Refl", [])
+IS_REFL_AT = _at1(IS_REFL_DEF, _n_n0)
+
+
+# is_Subst(n) :<=> ?x F t1 t2. is_form F /\ is_term t1 /\ is_term t2 /\
+#                              n = Imp_f (Eq_f t1 t2)
+#                                        (Imp_f (substitute F t1 x)
+#                                               (substitute F t2 x)).
+_is_Subst_body = _exists_chain([_x_pf_n0, _F_n0, _t1_pf_n0, _t2_pf_n0],
+    _and_chain([
+        _isf(_F_n0),
+        _ist(_t1_pf_n0),
+        _ist(_t2_pf_n0),
+        mk_eq(_n_n0, mk_app(Imp_f,
+            mk_app(Eq_f, _t1_pf_n0, _t2_pf_n0),
+            mk_app(Imp_f,
+                mk_app(substitute, _F_n0, _t1_pf_n0, _x_pf_n0),
+                mk_app(substitute, _F_n0, _t2_pf_n0, _x_pf_n0)))),
+    ]))
+IS_SUBST_DEF = define("is_Subst", parse_type("nat0 -> bool"),
+                      mk_abs(_n_n0, _is_Subst_body))
+is_Subst = mk_const("is_Subst", [])
+IS_SUBST_AT = _at1(IS_SUBST_DEF, _n_n0)
+
+
+# ---------------------------------------------------------------------------
+# Stage 2B (c) -- is_logical_axiom and is_axiom.
 #
-#   is_K(n)  :<=>  ?A B. is_form A /\ is_form B /\
-#                        n = Imp_f A (Imp_f B A)
+#   is_logical_axiom(n)  :<=>  is_K n \/ is_S n \/ is_N n \/
+#                              is_UI n \/ is_Vac n \/
+#                              is_Refl n \/ is_Subst n.
 #
-# These are all sigma-1, hence decidable and representable.
+#   is_axiom(n)          :<=>  is_q_axiom n \/ is_logical_axiom n.
+# ---------------------------------------------------------------------------
+
+
+_is_logical_body = _disj_chain([
+    mk_app(is_K, _n_n0),
+    mk_app(is_S, _n_n0),
+    mk_app(is_N, _n_n0),
+    mk_app(is_UI, _n_n0),
+    mk_app(is_Vac, _n_n0),
+    mk_app(is_Refl, _n_n0),
+    mk_app(is_Subst, _n_n0),
+])
+IS_LOGICAL_AXIOM_DEF = define(
+    "is_logical_axiom",
+    parse_type("nat0 -> bool"),
+    mk_abs(_n_n0, _is_logical_body),
+)
+is_logical_axiom = mk_const("is_logical_axiom", [])
+IS_LOGICAL_AXIOM_AT = _at1(IS_LOGICAL_AXIOM_DEF, _n_n0)
+
+
+_is_axiom_body = mk_or(mk_app(is_q_axiom, _n_n0),
+                       mk_app(is_logical_axiom, _n_n0))
+IS_AXIOM_DEF = define(
+    "is_axiom",
+    parse_type("nat0 -> bool"),
+    mk_abs(_n_n0, _is_axiom_body),
+)
+is_axiom = mk_const("is_axiom", [])
+IS_AXIOM_AT = _at1(IS_AXIOM_DEF, _n_n0)
+
+
+# ---------------------------------------------------------------------------
+# Stage 2B (d) -- list size lemmas (head and tail strictly smaller than cons).
 #
-# Modus ponens / generalisation:
+#   |- !h t. nat0_lt h (cons_l h t).
+#   |- !h t. nat0_lt t (cons_l h t).
 #
-#   is_mp(F1, F2, G)  :<=>  F2 = Imp_f F1 G
-#   is_gen(F, G)      :<=>  ?x. G = Forall_f x F
+# Each is a two-layer descent through PAIR_ORD chained via NAT0_LT_TRANS.
+# Same pattern as the constructor size lemmas in q_syntax.py.
+# ---------------------------------------------------------------------------
+
+
+from hf_sets import NAT0_LT_PAIR_ORD_L, NAT0_LT_PAIR_ORD_R
+from nat0_order import NAT0_LT_TRANS
+
+
+@proof
+def NAT0_LT_CONS_L_HEAD(p):
+    """|- !h t. nat0_lt h (cons_l h t)."""
+    p.goal("!h t. nat0_lt h (cons_l h t)")
+    p.fix("h t")
+    cons_at_ht = SPECL([p._parse("h"), p._parse("t")], CONS_L_AT)
+    p.have("h1: nat0_lt h (Pair_ord h t)").by(
+        NAT0_LT_PAIR_ORD_L, "h", "t"
+    )
+    p.have(
+        "h2: nat0_lt (Pair_ord h t) (Pair_ord (SUC0 0) (Pair_ord h t))"
+    ).by(NAT0_LT_PAIR_ORD_R, "SUC0 0", "Pair_ord h t")
+    p.have(
+        "h3: nat0_lt h (Pair_ord (SUC0 0) (Pair_ord h t))"
+    ).by(NAT0_LT_TRANS, "h", "Pair_ord h t",
+         "Pair_ord (SUC0 0) (Pair_ord h t)", "h1", "h2")
+    p.thus("nat0_lt h (cons_l h t)").by_rewrite_of("h3", [SYM(cons_at_ht)])
+
+
+@proof
+def NAT0_LT_CONS_L_TAIL(p):
+    """|- !h t. nat0_lt t (cons_l h t)."""
+    p.goal("!h t. nat0_lt t (cons_l h t)")
+    p.fix("h t")
+    cons_at_ht = SPECL([p._parse("h"), p._parse("t")], CONS_L_AT)
+    p.have("h1: nat0_lt t (Pair_ord h t)").by(
+        NAT0_LT_PAIR_ORD_R, "h", "t"
+    )
+    p.have(
+        "h2: nat0_lt (Pair_ord h t) (Pair_ord (SUC0 0) (Pair_ord h t))"
+    ).by(NAT0_LT_PAIR_ORD_R, "SUC0 0", "Pair_ord h t")
+    p.have(
+        "h3: nat0_lt t (Pair_ord (SUC0 0) (Pair_ord h t))"
+    ).by(NAT0_LT_TRANS, "t", "Pair_ord h t",
+         "Pair_ord (SUC0 0) (Pair_ord h t)", "h1", "h2")
+    p.thus("nat0_lt t (cons_l h t)").by_rewrite_of("h3", [SYM(cons_at_ht)])
+
+
+# ---------------------------------------------------------------------------
+# Stage 2B (e) -- Prov_Q via impredicative intersection.
 #
-# Proof_Q encoding:
+#   Prov_Q n  :<=>  !P. (!m. is_axiom m ==> P m)
+#                       /\ (!f g. P f /\ P (Imp_f f g) ==> P g)
+#                       /\ (!f x. P f ==> P (Forall_f x f))
+#                       ==> P n.
 #
-#   Proof_Q(p, target)  :<=>
-#     ?lst. p = lst /\ lst is non-empty /\
-#           head(lst) = target /\
-#           every prefix is a valid step:
-#             at each i in 0..len(lst)-1, lst[i] is either an axiom
-#             or follows from earlier lines by MP or Gen.
+# n is provable iff n lies in every set P that contains all axioms and
+# is closed under modus ponens and generalisation. This is the standard
+# "least closed" definition, equivalent in HOL to ``?proof. Proof_Q
+# proof n``.
 #
-# Implementation via well-founded recursion on list length (list length
-# = sum of nat0_lt-decreasing tail). The MONO-style obligation is
-# straightforward: the body inspects only finitely many earlier list
-# entries, each strictly smaller in the tail-of-list well-founded order.
+# The advantage over a list-based Proof_Q encoding: the three closure
+# rules (axiom inclusion, MP, generalisation) drop out by direct
+# specialisation -- no well-founded recursion on lists, no mem_l, no
+# complex MONO obligation.
 #
-# Prov_Q(n)  :<=>  ?p. Proof_Q(p, n).
+# A list-based Proof_Q witness predicate is needed for *representability*
+# in Stage 3 (the diagonal lemma must speak about explicit proofs inside
+# Q's own language). It is implemented there, against this Prov_Q.
+# ---------------------------------------------------------------------------
+
+
+from axioms import mk_forall, mk_imp, mk_and
+
+
+_P_pred = Var("P", parse_type("nat0 -> bool"))
+_m_n0 = Var("m", nat0_ty)
+
+
+def _admissible_clauses(P_term):
+    """Build (axiom-clause /\\ MP-clause /\\ Gen-clause) at predicate ``P_term``."""
+    axiom_clause = mk_forall(_m_n0,
+        mk_imp(mk_app(is_axiom, _m_n0), mk_app(P_term, _m_n0)))
+    mp_clause = mk_forall(_f_n0, mk_forall(_g_n0,
+        mk_imp(
+            mk_and(mk_app(P_term, _f_n0),
+                   mk_app(P_term, mk_app(Imp_f, _f_n0, _g_n0))),
+            mk_app(P_term, _g_n0))))
+    gen_clause = mk_forall(_f_n0, mk_forall(_x_n0,
+        mk_imp(mk_app(P_term, _f_n0),
+               mk_app(P_term, mk_app(Forall_f, _x_n0, _f_n0)))))
+    return mk_and(axiom_clause, mk_and(mp_clause, gen_clause))
+
+
+_prov_q_body = mk_forall(_P_pred,
+    mk_imp(_admissible_clauses(_P_pred), mk_app(_P_pred, _n_n0)))
+
+
+PROV_Q_DEF = define(
+    "Prov_Q",
+    parse_type("nat0 -> bool"),
+    mk_abs(_n_n0, _prov_q_body),
+)
+Prov_Q = mk_const("Prov_Q", [])
+PROV_Q_AT = _at1(PROV_Q_DEF, _n_n0)
+
+
+# ---------------------------------------------------------------------------
+# Stage 2B (f) -- closure rules.
 #
-# Closure rules (HOL theorems):
-#   |- Prov_Q F /\ Prov_Q (Imp_f F G)  ==>  Prov_Q G
-#   |- Prov_Q F  ==>  Prov_Q (Forall_f x F)
+#   (1) |- !n. is_axiom n ==> Prov_Q n.
+#   (2) |- !f g. Prov_Q f /\ Prov_Q (Imp_f f g) ==> Prov_Q g.
+#   (3) |- !f x. Prov_Q f ==> Prov_Q (Forall_f x f).
 #
-# Both are "extend the list" arguments: take the witnessing proof of the
-# antecedent, append one MP/Gen line. ~30 lines each.
+# Each is a direct consequence of the impredicative-intersection
+# definition: instantiate the universally quantified P, peel off the
+# corresponding clause from the admissibility hypothesis, and apply.
+# ---------------------------------------------------------------------------
+
+
+_pred_bool_ty = parse_type("nat0 -> bool")
+
+
+@proof
+def PROV_Q_AXIOM(p):
+    """|- !n. is_axiom n ==> Prov_Q n."""
+    p.goal("!n. is_axiom n ==> Prov_Q n")
+    p.fix("n")
+    p.assume("ax: is_axiom n")
+
+    # Prove the unfolded body, then EQ_MP through SYM(PROV_Q_AT @ n).
+    body_str = (
+        "!P:nat0->bool. ((!m. is_axiom m ==> P m) /\\ "
+        "((!f g. (P f /\\ P (Imp_f f g)) ==> P g) /\\ "
+        "(!f x. P f ==> P (Forall_f x f)))) ==> P n"
+    )
+    with p.have(f"body: {body_str}").proof():
+        p.fix("P")
+        p.assume("(adm_ax, _adm_mp, _adm_gen): "
+                 "(!m. is_axiom m ==> P m) /\\ "
+                 "((!f g. (P f /\\ P (Imp_f f g)) ==> P g) /\\ "
+                 "(!f x. P f ==> P (Forall_f x f)))")
+        p.thus("P n").by("adm_ax", "n", "ax")
+
+    pq_at_n = SPECL([p._parse("n")], PROV_Q_AT)
+    p.thus("Prov_Q n").by_eq_mp(SYM(pq_at_n), "body")
+
+
+@proof
+def PROV_Q_MP(p):
+    """|- !f g. Prov_Q f /\\ Prov_Q (Imp_f f g) ==> Prov_Q g."""
+    p.goal("!f g. (Prov_Q f /\\ Prov_Q (Imp_f f g)) ==> Prov_Q g")
+    p.fix("f g")
+    p.assume("(pf, pfg): Prov_Q f /\\ Prov_Q (Imp_f f g)")
+
+    body_str = (
+        "!P:nat0->bool. ((!m. is_axiom m ==> P m) /\\ "
+        "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
+        "(!a x. P a ==> P (Forall_f x a)))) ==> P g"
+    )
+    with p.have(f"body: {body_str}").proof():
+        p.fix("P")
+        p.assume("(_adm_ax, (adm_mp, _adm_gen)): "
+                 "(!m. is_axiom m ==> P m) /\\ "
+                 "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
+                 "(!a x. P a ==> P (Forall_f x a)))")
+
+        # P f and P (Imp_f f g) follow by specialising pf, pfg at P.
+        adm_concl = ("(!m. is_axiom m ==> P m) /\\ "
+                     "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
+                     "(!a x. P a ==> P (Forall_f x a)))")
+        # Unfold Prov_Q at f, Imp_f f g.
+        pq_at_f = SPECL([p._parse("f")], PROV_Q_AT)
+        pq_at_fg = SPECL([p._parse("Imp_f f g")], PROV_Q_AT)
+        p.have("body_f: !P. " + adm_concl + " ==> P f").by_eq_mp(pq_at_f, "pf")
+        p.have(
+            "body_fg: !P. " + adm_concl + " ==> P (Imp_f f g)"
+        ).by_eq_mp(pq_at_fg, "pfg")
+        p.have("Pf: P f").by("body_f", "P",
+            CONJ(p.fact("_adm_ax"),
+                 CONJ(p.fact("adm_mp"), p.fact("_adm_gen"))))
+        p.have("Pfg: P (Imp_f f g)").by("body_fg", "P",
+            CONJ(p.fact("_adm_ax"),
+                 CONJ(p.fact("adm_mp"), p.fact("_adm_gen"))))
+        p.thus("P g").by("adm_mp", "f", "g", CONJ(p.fact("Pf"), p.fact("Pfg")))
+
+    pq_at_g = SPECL([p._parse("g")], PROV_Q_AT)
+    p.thus("Prov_Q g").by_eq_mp(SYM(pq_at_g), "body")
+
+
+@proof
+def PROV_Q_GEN(p):
+    """|- !f x. Prov_Q f ==> Prov_Q (Forall_f x f)."""
+    p.goal("!f x. Prov_Q f ==> Prov_Q (Forall_f x f)")
+    p.fix("f x")
+    p.assume("pf: Prov_Q f")
+
+    body_str = (
+        "!P:nat0->bool. ((!m. is_axiom m ==> P m) /\\ "
+        "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
+        "(!a y. P a ==> P (Forall_f y a)))) ==> P (Forall_f x f)"
+    )
+    with p.have(f"body: {body_str}").proof():
+        p.fix("P")
+        p.assume("(_adm_ax, (_adm_mp, adm_gen)): "
+                 "(!m. is_axiom m ==> P m) /\\ "
+                 "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
+                 "(!a y. P a ==> P (Forall_f y a)))")
+
+        adm_concl = ("(!m. is_axiom m ==> P m) /\\ "
+                     "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
+                     "(!a y. P a ==> P (Forall_f y a)))")
+        pq_at_f = SPECL([p._parse("f")], PROV_Q_AT)
+        p.have("body_f: !P. " + adm_concl + " ==> P f").by_eq_mp(pq_at_f, "pf")
+        p.have("Pf: P f").by("body_f", "P",
+            CONJ(p.fact("_adm_ax"),
+                 CONJ(p.fact("_adm_mp"), p.fact("adm_gen"))))
+        p.thus("P (Forall_f x f)").by("adm_gen", "f", "x", "Pf")
+
+    pq_at_fx = SPECL([p._parse("Forall_f x f")], PROV_Q_AT)
+    p.thus("Prov_Q (Forall_f x f)").by_eq_mp(SYM(pq_at_fx), "body")
 
 
 if __name__ == "__main__":
@@ -413,3 +898,33 @@ if __name__ == "__main__":
     print("    Each axiom is recognised:")
     for name, _, _ in Q_AXIOMS:
         print(f"      is_q_axiom {name:<10}:", pp_thm(IS_Q_AXIOM_HOLDS[name]))
+    print()
+    print("Stage 2B (a) -- modus ponens / generalisation predicates.")
+    print("    IS_MP_AT       :", pp_thm(IS_MP_AT))
+    print("    IS_GEN_AT      :", pp_thm(IS_GEN_AT))
+    print()
+    print("Stage 2B (b) -- logical-axiom schemas.")
+    print("    IS_K_AT        :", pp_thm(IS_K_AT))
+    print("    IS_S_AT        :", pp_thm(IS_S_AT))
+    print("    IS_N_AT        :", pp_thm(IS_N_AT))
+    print("    IS_UI_AT       :", pp_thm(IS_UI_AT))
+    print("    IS_VAC_AT      :", pp_thm(IS_VAC_AT))
+    print("    IS_REFL_AT     :", pp_thm(IS_REFL_AT))
+    print("    IS_SUBST_AT    :", pp_thm(IS_SUBST_AT))
+    print()
+    print("Stage 2B (c) -- is_logical_axiom and is_axiom.")
+    print("    IS_LOGICAL_AXIOM_AT :", pp_thm(IS_LOGICAL_AXIOM_AT))
+    print("    IS_AXIOM_AT         :", pp_thm(IS_AXIOM_AT))
+    print()
+    print("Stage 2B (d) -- list size lemmas.")
+    print("    NAT0_LT_CONS_L_HEAD :", pp_thm(NAT0_LT_CONS_L_HEAD))
+    print("    NAT0_LT_CONS_L_TAIL :", pp_thm(NAT0_LT_CONS_L_TAIL))
+    print()
+    print("Stage 2B (e) -- Prov_Q.")
+    print("    PROV_Q_DEF     :", pp_thm(PROV_Q_DEF))
+    print("    PROV_Q_AT      :", pp_thm(PROV_Q_AT))
+    print()
+    print("Stage 2B (f) -- closure rules.")
+    print("    PROV_Q_AXIOM   :", pp_thm(PROV_Q_AXIOM))
+    print("    PROV_Q_MP      :", pp_thm(PROV_Q_MP))
+    print("    PROV_Q_GEN     :", pp_thm(PROV_Q_GEN))
