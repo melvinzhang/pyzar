@@ -116,10 +116,12 @@ from nat0 import nat0_ty, define_unary_0
 from nat0_order import define_wf_lt
 from proof import proof
 from tactics import (
-    SPEC, SPECL, GEN, GENL, SYM, AP_THM, BETA_CONV, TRANS, DISJ1, DISJ2, REFL,
-    EQ_MP, MP, CONJ, CONJUNCT1, CONJUNCT2, EXISTS, FUN_EXT, NOT_INTRO, DISCH,
-    NOT_ELIM, EQF_INTRO, EQF_ELIM, CONTR,
+    SPEC, SPECL, GEN, GENL, SYM, AP_THM, BETA_CONV, BETA_NORM, TRANS,
+    DISJ1, DISJ2, REFL, EQ_MP, MP, CONJ, CONJUNCT1, CONJUNCT2, EXISTS,
+    FUN_EXT, NOT_INTRO, DISCH, NOT_ELIM, EQF_INTRO, EQF_ELIM, CONTR,
+    DISJ_CASES,
 )
+from axioms import F
 from fusion import ASSUME, ABS
 from basics import mk_eq
 
@@ -130,7 +132,9 @@ from q_syntax import (
     mono_iff_eq_or_pw_step,
     _unfold_rec_via_F_def,
     _extract_nfg,
+    _mono_iff_value_binary_pw_step,
 )
+from axioms import mk_select
 from axioms import dest_exists
 from tactics import (
     CHOOSE_WITNESS, AP_TERM, OR_CONG, REWRITE_RULE,
@@ -138,11 +142,13 @@ from tactics import (
 from fusion import vsubst, aty, DEDUCT_ANTISYM_RULE
 from q_proof import (
     var_x,
-    Prov_Q,
+    Prov_Q, PROV_Q_AT, PROV_Q_AXIOM, PROV_Q_MP, PROV_Q_GEN,
     nil_l, cons_l, NIL_L_DEF, CONS_L_AT, CONS_L_INJ, CONS_L_NEQ_NIL,
     NAT0_LT_CONS_L_TAIL,
     is_axiom, is_mp, is_gen,
+    IS_MP_AT, IS_GEN_AT,
 )
+from q_syntax import Imp_f, Forall_f
 
 
 # ---------------------------------------------------------------------------
@@ -942,6 +948,1688 @@ def PROOF_Q_AT_CONS(p):
 
 
 # ---------------------------------------------------------------------------
+# Stage 3B (d) -- list concatenation ``append_l``.
+#
+#   append_l nil_l           q  =  q.
+#   append_l (cons_l h t)    q  =  cons_l h (append_l t q).
+#
+# Recursion is on the first argument; the recursion target type is
+# ``nat0 -> nat0`` (the post-q-curried function). Body is a SELECT over
+# the result variable ``r``:
+#
+#   F f p  :=  \q. @r. (p = nil_l /\ r = q)
+#                       \/ (?h t. p = cons_l h t
+#                                  /\ r = cons_l h (f t q)).
+#
+# The MONO obligation reuses ``_mono_iff_value_binary_pw_step`` from
+# ``q_syntax`` for the cons disjunct (only the tail recurses, so
+# ``recurses_l=False``, with size lemma ``NAT0_LT_CONS_L_TAIL``); the
+# nil disjunct is non-recursive and falls through ``REFL``.
+#
+# Used in Stage 3B (e) to combine two proof-list witnesses (one ending
+# at ``f``, one ending at ``Imp_f f g``) into a single longer list that
+# witnesses ``Proof_Q``-derivability of ``g``: the ``Prov_Q ==> ?p.
+# Proof_Q p n`` direction needs to verify the MP closure clause, which
+# is precisely this combine step.
+# ---------------------------------------------------------------------------
+
+
+_pred_app_ty = parse_type("nat0 -> nat0 -> nat0")
+_F_pred_app_ty = parse_type(
+    "(nat0 -> nat0 -> nat0) -> nat0 -> nat0 -> nat0"
+)
+_f_pred_app = Var("f", _pred_app_ty)
+_p_n0_app = Var("p", nat0_ty)
+_q_n0_app = Var("q", nat0_ty)
+_r_n0_app = Var("r", nat0_ty)
+_h_n0_app = Var("h", nat0_ty)
+_t_n0_app = Var("t", nat0_ty)
+
+
+def _append_l_inner_body(f_t, p_t, q_t, r_t):
+    """Bool body inside the ``@r`` SELECT."""
+    return mk_or(
+        mk_and(mk_eq(p_t, nil_l), mk_eq(r_t, q_t)),
+        mk_exists(_h_n0_app, mk_exists(_t_n0_app, mk_and(
+            mk_eq(p_t, mk_app(cons_l, _h_n0_app, _t_n0_app)),
+            mk_eq(r_t, mk_app(cons_l, _h_n0_app,
+                              mk_app(f_t, _t_n0_app, q_t))),
+        ))),
+    )
+
+
+_APPEND_L_F_DEF = define(
+    "_append_l_F",
+    _F_pred_app_ty,
+    mk_abs(_f_pred_app, mk_abs(_p_n0_app, mk_abs(_q_n0_app,
+        mk_select(_r_n0_app,
+                  _append_l_inner_body(_f_pred_app, _p_n0_app,
+                                       _q_n0_app, _r_n0_app))))),
+)
+_APPEND_L_F = mk_const("_append_l_F", [])
+
+
+@proof
+def APPEND_L_MONO(p):
+    """|- !f g p. (!k. nat0_lt k p ==> f k = g k)
+                  ==> _append_l_F f p = _append_l_F g p.
+
+    Two-disjunct body iff under the SELECT: nil disjunct is non-recursive
+    (``REFL``); cons disjunct is binary-pw with ``recurses_l=False`` and
+    ``rest_builder = (\\fn h t [q]. r = cons_l h (fn t q))``. ``OR_CONG``
+    combines, then ``ABS r``, ``AP_TERM @``, ``ABS q``, ``by_unfold``."""
+    p.goal(
+        "!f g p. (!k. nat0_lt k p ==> f k = g k) ==> "
+        "_append_l_F f p = _append_l_F g p",
+        types={"f": _pred_app_ty, "g": _pred_app_ty,
+               "p": nat0_ty, "k": nat0_ty},
+    )
+    p.fix("f g p")
+    p.assume("h: !k. nat0_lt k p ==> f k = g k")
+
+    h_th = p.fact("h")
+
+    # Nil disjunct: no recursion.
+    p_t = p._parse("p")
+    nil_disj_eq = REFL(mk_and(mk_eq(p_t, nil_l),
+                              mk_eq(_r_n0_app, _q_n0_app)))
+
+    # Cons disjunct via the value-binary helper, recurses_l=False.
+    cons_disj_eq = _mono_iff_value_binary_pw_step(
+        cons_l, None, NAT0_LT_CONS_L_TAIL, h_th, [_q_n0_app],
+        rest_builder=lambda fn, hh, tt, ags: mk_eq(
+            _r_n0_app,
+            mk_app(cons_l, hh, mk_app(fn, tt, *ags)),
+        ),
+        recurses_l=False,
+    )
+
+    body_eq = OR_CONG(nil_disj_eq, cons_disj_eq)
+    # body_eq : {h_concl} |- body[f, p, q, r] = body[g, p, q, r]
+
+    abs_r_eq = ABS(_r_n0_app, body_eq)
+    sel_const = mk_const("@", [(nat0_ty, aty)])
+    select_eq = AP_TERM(sel_const, abs_r_eq)
+    abs_q_eq = ABS(_q_n0_app, select_eq)
+
+    p.thus(
+        "_append_l_F f p = _append_l_F g p"
+    ).by_unfold(abs_q_eq, _APPEND_L_F_DEF)
+
+
+APPEND_L_DEF, _APPEND_L_REC_RAW = define_wf_lt(
+    "append_l",
+    _pred_app_ty,
+    _APPEND_L_F,
+    APPEND_L_MONO,
+)
+append_l = mk_const("append_l", [])
+
+
+# |- !p. append_l p =
+#         (\q. @r. (p = nil_l /\ r = q)
+#                  \/ (?h t. p = cons_l h t
+#                            /\ r = cons_l h (append_l t q))).
+APPEND_L_REC = _unfold_rec_via_F_def(_APPEND_L_REC_RAW, _APPEND_L_F_DEF)
+
+
+# Constructor recursion equations.
+
+
+def _append_l_nil_body_iff(q_t):
+    """|- (nil_l = nil_l /\\ r = q) \\/
+          (?h t. nil_l = cons_l h t /\\ r = cons_l h (append_l t q))
+        = (r = q).
+
+    Built at kernel level: nil disjunct collapses (REFL nil_l makes the
+    left conjunct T); cons disjunct is F (CONS_L_NEQ_NIL); OR_CONG
+    chains them. Cleaner than going through the DSL because ``r`` is a
+    free variable, not a fix-bound one.
+    """
+    r_t = _r_n0_app
+    h_var = _h_n0_app
+    t_var = _t_n0_app
+    refl_nil = REFL(nil_l)
+    nil_left = mk_eq(nil_l, nil_l)
+    rq = mk_eq(r_t, q_t)
+    nil_disj = mk_and(nil_left, rq)
+
+    # nil_disj_iff : |- (nil_l = nil_l /\ r = q) = (r = q).
+    fwd_n = DISCH(nil_disj, CONJUNCT2(ASSUME(nil_disj)))
+    rev_n = DISCH(rq, CONJ(refl_nil, ASSUME(rq)))
+    nil_disj_iff = DEDUCT_ANTISYM_RULE(
+        MP(rev_n, ASSUME(rq)),
+        MP(fwd_n, ASSUME(nil_disj)),
+    )
+
+    # cons_disj_iff : |- (?h t. nil_l = cons_l h t /\ ...) = F.
+    cons_inner_body = mk_and(
+        mk_eq(nil_l, mk_app(cons_l, h_var, t_var)),
+        mk_eq(r_t, mk_app(cons_l, h_var,
+                           mk_app(append_l, t_var, q_t))),
+    )
+    cons_disj = mk_exists(h_var, mk_exists(t_var, cons_inner_body))
+
+    # ~cons_disj.
+    cons_assume = ASSUME(cons_disj)
+    outer_pred = dest_exists(cons_disj)
+    chosen_outer = CHOOSE_WITNESS(outer_pred, cons_assume)
+    inner_pred = dest_exists(chosen_outer._concl)
+    chosen_inner = CHOOSE_WITNESS(inner_pred, chosen_outer)
+    eq_nil_th = CONJUNCT1(chosen_inner)
+    # eq_nil_th : {cons_disj} |- nil_l = cons_l <wh> <wt>
+    ctor_app = rand(eq_nil_th._concl)
+    wt = rand(ctor_app)
+    wh = rand(rator(ctor_app))
+    swap_th = SYM(eq_nil_th)
+    # swap_th : {cons_disj} |- cons_l wh wt = nil_l
+    neq_th = SPEC(wt, SPEC(wh, CONS_L_NEQ_NIL))
+    # neq_th : |- ~(cons_l wh wt = nil_l)
+    F_th = MP(NOT_ELIM(neq_th), swap_th)
+    # F_th : {cons_disj} |- F
+    not_cons_disj = NOT_INTRO(DISCH(cons_disj, F_th))
+    cons_disj_iff = SYM(EQF_INTRO(not_cons_disj))
+    # cons_disj_iff : |- cons_disj = F  (EQF_INTRO returns F = p, hence SYM).
+
+    # Combine: (nil_disj \/ cons_disj) = ((r = q) \/ F).
+    or_iff = OR_CONG(nil_disj_iff, cons_disj_iff)
+    # ((r = q) \/ F) = (r = q) via _build_or_F_right or manual.
+    rq_or_F = mk_or(rq, F)
+    fwd_o = DISJ_CASES_to_rq = ASSUME(rq_or_F)
+    # Manual: (X \/ F) = X.
+    fwd_orF_imp = DISCH(rq_or_F, _disj_or_F_right(rq))
+    rev_orF_imp = DISCH(rq, DISJ1(ASSUME(rq), F))
+    orF_iff = DEDUCT_ANTISYM_RULE(
+        MP(rev_orF_imp, ASSUME(rq)),
+        MP(fwd_orF_imp, ASSUME(rq_or_F)),
+    )
+    return TRANS(or_iff, orF_iff)
+
+
+def _disj_or_F_right(rq):
+    """{rq \\/ F} |- rq."""
+    rq_or_F = mk_or(rq, F)
+    th_l = DISCH(rq, ASSUME(rq))                    # |- rq ==> rq
+    th_r = DISCH(F, CONTR(rq, ASSUME(F)))           # |- F ==> rq
+    return DISJ_CASES(ASSUME(rq_or_F), th_l, th_r)
+
+
+@proof
+def APPEND_L_AT_NIL(p):
+    """|- !q. append_l nil_l q = q."""
+    p.goal("!q. append_l nil_l q = q")
+    p.fix("q")
+
+    q_t = p._parse("q")
+    rec_at_nil = SPEC(p._parse("nil_l"), APPEND_L_REC)
+    ap_q = AP_THM(rec_at_nil, q_t)
+    body_at = TRANS(ap_q, BETA_CONV(rand(ap_q._concl)))
+    # body_at : |- append_l nil_l q = (@r. body[nil_l, q, r])
+
+    body_iff = _append_l_nil_body_iff(q_t)
+    abs_eq = ABS(_r_n0_app, body_iff)
+    sel_const = mk_const("@", [(nat0_ty, aty)])
+    sel_eq = AP_TERM(sel_const, abs_eq)
+
+    from q_syntax import _select_collapse_eq
+    collapse = _select_collapse_eq(q_t, _r_n0_app)
+    full_eq = TRANS(body_at, TRANS(sel_eq, collapse))
+    p.thus("append_l nil_l q = q").by_thm(full_eq)
+
+
+def _append_l_cons_body_iff(h_t, t_t, q_t):
+    """|- (cons_l h t = nil_l /\\ r = q) \\/
+          (?h1 t1. cons_l h t = cons_l h1 t1
+                    /\\ r = cons_l h1 (append_l t1 q))
+        = (r = cons_l h (append_l t q)).
+
+    Nil disjunct: F (CONS_L_NEQ_NIL). Cons disjunct: collapses to
+    ``r = cons_l h (append_l t q)`` by injectivity.
+    """
+    r_t = _r_n0_app
+    h1_var = Var("h1", nat0_ty)
+    t1_var = Var("t1", nat0_ty)
+    cons_h_t = mk_app(cons_l, h_t, t_t)
+    target_K = mk_app(cons_l, h_t, mk_app(append_l, t_t, q_t))
+    target_eq = mk_eq(r_t, target_K)
+
+    nil_disj = mk_and(mk_eq(cons_h_t, nil_l), mk_eq(r_t, q_t))
+
+    # nil_disj_iff : |- nil_disj = F.
+    nil_assume = ASSUME(nil_disj)
+    eq_nil_th = CONJUNCT1(nil_assume)
+    neq_cht = SPEC(t_t, SPEC(h_t, CONS_L_NEQ_NIL))
+    F_from_nil = MP(NOT_ELIM(neq_cht), eq_nil_th)
+    not_nil_disj = NOT_INTRO(DISCH(nil_disj, F_from_nil))
+    nil_disj_iff = SYM(EQF_INTRO(not_nil_disj))
+
+    # cons_disj_iff : |- cons_disj = target_eq.
+    cons_inner_body = mk_and(
+        mk_eq(cons_h_t, mk_app(cons_l, h1_var, t1_var)),
+        mk_eq(r_t, mk_app(cons_l, h1_var,
+                           mk_app(append_l, t1_var, q_t))),
+    )
+    cons_disj = mk_exists(h1_var, mk_exists(t1_var, cons_inner_body))
+
+    # Forward: {cons_disj} |- target_eq.
+    cons_assume = ASSUME(cons_disj)
+    outer_pred = dest_exists(cons_disj)
+    chosen_outer = CHOOSE_WITNESS(outer_pred, cons_assume)
+    inner_pred = dest_exists(chosen_outer._concl)
+    chosen_inner = CHOOSE_WITNESS(inner_pred, chosen_outer)
+    eq_cons_th = CONJUNCT1(chosen_inner)
+    eqr_th = CONJUNCT2(chosen_inner)
+    # Witnesses: wh1, wt1 from eq_cons_th's RHS.
+    rhs_ctor = rand(eq_cons_th._concl)
+    wt1 = rand(rhs_ctor)
+    wh1 = rand(rator(rhs_ctor))
+    inj_th = MP(SPECL([h_t, t_t, wh1, wt1], CONS_L_INJ), eq_cons_th)
+    eq_h_th = CONJUNCT1(inj_th)
+    eq_t_th = CONJUNCT2(inj_th)
+    # Rewrite eqr_th: r = cons_l wh1 (append_l wt1 q) using SYM(eq_h_th),
+    # SYM(eq_t_th) to get r = cons_l h (append_l t q).
+    fwd_th = REWRITE_RULE(
+        [SYM(eq_h_th), SYM(eq_t_th)], eqr_th
+    )
+    # fwd_th has assumption cons_disj (via chosen_inner chain).
+
+    # Reverse: {target_eq} |- cons_disj. Witness h1 := h, t1 := t.
+    target_assume = ASSUME(target_eq)
+    body_at_h_t = CONJ(REFL(cons_h_t), target_assume)
+    inner_pred_t1 = mk_abs(
+        t1_var,
+        mk_and(
+            mk_eq(cons_h_t, mk_app(cons_l, h_t, t1_var)),
+            mk_eq(r_t, mk_app(cons_l, h_t,
+                               mk_app(append_l, t1_var, q_t))),
+        ),
+    )
+    inner_th = EXISTS(inner_pred_t1, t_t, body_at_h_t)
+    outer_pred_h1 = mk_abs(
+        h1_var, mk_exists(t1_var, cons_inner_body)
+    )
+    rev_th = EXISTS(outer_pred_h1, h_t, inner_th)
+    # rev_th : {target_eq} |- cons_disj.
+
+    cons_disj_iff = DEDUCT_ANTISYM_RULE(rev_th, fwd_th)
+    # cons_disj_iff : |- cons_disj = target_eq.
+
+    # OR_CONG(nil_disj_iff, cons_disj_iff) gives:
+    #   (nil_disj \/ cons_disj) = (F \/ target_eq).
+    or_iff = OR_CONG(nil_disj_iff, cons_disj_iff)
+
+    # (F \/ X) = X.
+    F_or_X = mk_or(F, target_eq)
+    th_l = DISCH(F, CONTR(target_eq, ASSUME(F)))
+    th_r = DISCH(target_eq, ASSUME(target_eq))
+    fwd_FX = DISJ_CASES(ASSUME(F_or_X), th_l, th_r)
+    fwd_FX_imp = DISCH(F_or_X, fwd_FX)
+    rev_FX_imp = DISCH(
+        target_eq, DISJ2(F, ASSUME(target_eq))
+    )
+    F_or_iff = DEDUCT_ANTISYM_RULE(
+        MP(rev_FX_imp, ASSUME(target_eq)),
+        MP(fwd_FX_imp, ASSUME(F_or_X)),
+    )
+    # F_or_iff : |- (F \/ target_eq) = target_eq.
+    return TRANS(or_iff, F_or_iff)
+
+
+@proof
+def APPEND_L_AT_CONS(p):
+    """|- !h t q. append_l (cons_l h t) q = cons_l h (append_l t q)."""
+    p.goal("!h t q. append_l (cons_l h t) q = cons_l h (append_l t q)")
+    p.fix("h t q")
+
+    h_t = p._parse("h")
+    t_t = p._parse("t")
+    q_t = p._parse("q")
+    rec_at_cons = SPEC(mk_app(cons_l, h_t, t_t), APPEND_L_REC)
+    ap_q = AP_THM(rec_at_cons, q_t)
+    body_at = TRANS(ap_q, BETA_CONV(rand(ap_q._concl)))
+
+    body_iff = _append_l_cons_body_iff(h_t, t_t, q_t)
+    abs_eq = ABS(_r_n0_app, body_iff)
+    sel_const = mk_const("@", [(nat0_ty, aty)])
+    sel_eq = AP_TERM(sel_const, abs_eq)
+
+    from q_syntax import _select_collapse_eq
+    target_K = mk_app(cons_l, h_t, mk_app(append_l, t_t, q_t))
+    collapse = _select_collapse_eq(target_K, _r_n0_app)
+    full_eq = TRANS(body_at, TRANS(sel_eq, collapse))
+    p.thus(
+        "append_l (cons_l h t) q = cons_l h (append_l t q)"
+    ).by_thm(full_eq)
+
+
+# ---------------------------------------------------------------------------
+# Stage 3B (e) -- membership preservation under append.
+#
+#   |- !p1 h1. Proof_Q p1 h1 ==>
+#       !p2 f. (mem_l p1 f \/ mem_l p2 f) ==> mem_l (append_l p1 p2) f.
+#
+# In words: if ``p1`` is a Q-proof (so it has the cons-of-nil-terminated
+# shape recursively) then every element of ``p1`` and of ``p2`` is an
+# element of the concatenation. Strong induction on ``p1``: PROOF_Q_AT
+# unpacks ``p1 = cons_l hd tl``; the recursion either bottoms out at
+# ``tl = nil_l`` (where ``append_l nil_l p2 = p2`` directly) or proceeds
+# with ``Proof_Q tl h_inner`` (where the IH applies at ``tl`` and the
+# disjunction is preserved through the cons-front element).
+#
+# Encoding via a disjunction in the consequent dodges the OR-associativity
+# obligation we'd otherwise meet trying to prove the iff form
+# ``mem_l (append_l p1 p2) f = mem_l p1 f \/ mem_l p2 f``: the implication
+# is what's actually needed at the use site (validity-step preservation
+# in the MP closure), and there is no second direction to prove.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def MEM_L_APPEND_PRESERVES(p):
+    """|- !p1 h1. Proof_Q p1 h1 ==>
+              !p2 f. (mem_l p1 f \\/ mem_l p2 f)
+                     ==> mem_l (append_l p1 p2) f."""
+    p.goal(
+        "!p1 h1 p2 f. Proof_Q p1 h1 ==> "
+        "(mem_l p1 f \\/ mem_l p2 f) "
+        "==> mem_l (append_l p1 p2) f"
+    )
+    with p.strong_induction("p1", "IH"):
+        p.fix("h1 p2 f")
+        p.assume("pq: Proof_Q p1 h1")
+        p.assume("hd: mem_l p1 f \\/ mem_l p2 f")
+
+        # Unfold pq to extract p1 = cons_l hd_v tl, hd_v = h1, etc.
+        rec_pq = SPECL(
+            [p._parse("p1"), p._parse("h1")], PROOF_Q_REC_PW
+        )
+        body_str = (
+            "?h t. p1 = cons_l h t /\\ h = h1 /\\ valid_step t h "
+            "/\\ (t = nil_l \\/ ?h_inner. Proof_Q t h_inner)"
+        )
+        p.have(f"body: {body_str}").by_eq_mp(rec_pq, "pq")
+        p.choose("hd_v", "body", eq_label="ex_t")
+        p.choose("tl", "ex_t", eq_label="conj")
+        p.split("conj",
+                "(p_eq_cons, _hd_eq_h1, _valid, tail_disj)")
+
+        # nat0_lt tl p1 (for the IH).
+        lt_t_cons = SPECL(
+            [p._parse("hd_v"), p._parse("tl")], NAT0_LT_CONS_L_TAIL
+        )
+        p.have("lt_tl_p1: nat0_lt tl p1").by_rewrite_of(
+            lt_t_cons, [SYM(p.fact("p_eq_cons"))]
+        )
+
+        # Compute append_l p1 p2 = cons_l hd_v (append_l tl p2).
+        ap_at = SPECL(
+            [p._parse("hd_v"), p._parse("tl"), p._parse("p2")],
+            APPEND_L_AT_CONS,
+        )
+        # ap_at : append_l (cons_l hd_v tl) p2 = cons_l hd_v (append_l tl p2).
+        p.have(
+            "app_eq: append_l p1 p2 "
+            "= cons_l hd_v (append_l tl p2)"
+        ).by_rewrite_of(ap_at, [SYM(p.fact("p_eq_cons"))])
+
+        # mem_l (cons_l hd_v (append_l tl p2)) f =
+        #   (f = hd_v \/ mem_l (append_l tl p2) f).
+        mem_cons_app = SPECL(
+            [p._parse("hd_v"), p._parse("append_l tl p2"),
+             p._parse("f")],
+            MEM_L_AT_CONS,
+        )
+        # mem_l p1 f = (f = hd_v \/ mem_l tl f).
+        mem_p1 = SPECL(
+            [p._parse("hd_v"), p._parse("tl"), p._parse("f")],
+            MEM_L_AT_CONS,
+        )
+        p.have(
+            "mem_at_p1: mem_l p1 f = (f = hd_v \\/ mem_l tl f)"
+        ).by_rewrite_of(mem_p1, [SYM(p.fact("p_eq_cons"))])
+
+        # Step into cases on hd: f in p1 or f in p2.
+        with p.cases_on("hd"):
+            with p.case("from1: mem_l p1 f"):
+                # from1 unfolds to f = hd_v \/ mem_l tl f.
+                p.have(
+                    "disj_p1: f = hd_v \\/ mem_l tl f"
+                ).by_eq_mp(p.fact("mem_at_p1"), "from1")
+
+                with p.cases_on("disj_p1"):
+                    with p.case("ck_hd: f = hd_v"):
+                        # mem_l (append_l p1 p2) f via head: cons_l hd_v _.
+                        # Build mem_l (cons_l hd_v (append_l tl p2)) f
+                        # via DISJ1 (f = hd_v) then EQ_MP SYM(mem_cons_app).
+                        p.have(
+                            "left_disj: f = hd_v "
+                            "\\/ mem_l (append_l tl p2) f"
+                        ).by_disj("ck_hd")
+                        p.have(
+                            "mem_app_cons: "
+                            "mem_l (cons_l hd_v (append_l tl p2)) f"
+                        ).by_eq_mp(SYM(mem_cons_app), "left_disj")
+                        p.thus(
+                            "mem_l (append_l p1 p2) f"
+                        ).by_rewrite_of(
+                            "mem_app_cons", [SYM(p.fact("app_eq"))]
+                        )
+                    with p.case("mem_in_tl: mem_l tl f"):
+                        # tl is nil or has Proof_Q; in nil case mem_l = F.
+                        with p.cases_on("tail_disj"):
+                            with p.case("tnil: tl = nil_l"):
+                                p.have(
+                                    "mem_nil: mem_l nil_l f"
+                                ).by_rewrite_of(
+                                    "mem_in_tl", [p.fact("tnil")]
+                                )
+                                mem_nil_at = SPEC(
+                                    p._parse("f"), MEM_L_AT_NIL
+                                )
+                                p.have("F_th: F").by_eq_mp(
+                                    mem_nil_at, "mem_nil"
+                                )
+                                p.thus(
+                                    "mem_l (append_l p1 p2) f"
+                                ).by_thm(CONTR(
+                                    p._parse(
+                                        "mem_l (append_l p1 p2) f"
+                                    ),
+                                    p.fact("F_th"),
+                                ))
+                            with p.case(
+                                "tex: ?h_inner. "
+                                "Proof_Q tl h_inner"
+                            ):
+                                # h_inner_eq: Proof_Q tl h_inner.
+                                # Apply IH at tl with disjunct
+                                # (mem_l tl f \/ mem_l p2 f).
+                                p.have(
+                                    "ih_disj: mem_l tl f "
+                                    "\\/ mem_l p2 f"
+                                ).by_disj("mem_in_tl")
+                                p.have(
+                                    "mem_app_tl: "
+                                    "mem_l (append_l tl p2) f"
+                                ).by(
+                                    "IH", "tl", "lt_tl_p1",
+                                    "h_inner", "p2", "f",
+                                    "h_inner_eq", "ih_disj",
+                                )
+                                p.have(
+                                    "right_disj: f = hd_v "
+                                    "\\/ mem_l (append_l tl p2) f"
+                                ).by_disj("mem_app_tl")
+                                p.have(
+                                    "mem_app_cons: "
+                                    "mem_l (cons_l hd_v "
+                                    "(append_l tl p2)) f"
+                                ).by_eq_mp(
+                                    SYM(mem_cons_app),
+                                    "right_disj",
+                                )
+                                p.thus(
+                                    "mem_l (append_l p1 p2) f"
+                                ).by_rewrite_of(
+                                    "mem_app_cons",
+                                    [SYM(p.fact("app_eq"))],
+                                )
+            with p.case("from2: mem_l p2 f"):
+                # mem_l (append_l tl p2) f from mem_l p2 f.
+                with p.cases_on("tail_disj"):
+                    with p.case("tnil: tl = nil_l"):
+                        # append_l nil_l p2 = p2.
+                        ap_nil = SPEC(p._parse("p2"), APPEND_L_AT_NIL)
+                        # ap_nil : append_l nil_l p2 = p2
+                        p.have(
+                            "app_tl_eq_p2: append_l tl p2 = p2"
+                        ).by_rewrite_of(ap_nil, [SYM(p.fact("tnil"))])
+                        # Lift app_tl_eq_p2 through mem_l to get
+                        # mem_l (append_l tl p2) f = mem_l p2 f, then
+                        # EQ_MP (sym-tolerant) lands on the LHS.
+                        mem_app_eq_th = AP_THM(
+                            AP_TERM(mem_l, p.fact("app_tl_eq_p2")),
+                            p._parse("f"),
+                        )
+                        p.have(
+                            "mem_app_tl: mem_l (append_l tl p2) f"
+                        ).by_eq_mp(mem_app_eq_th, "from2")
+                        p.have(
+                            "right_disj: f = hd_v "
+                            "\\/ mem_l (append_l tl p2) f"
+                        ).by_disj("mem_app_tl")
+                        p.have(
+                            "mem_app_cons: "
+                            "mem_l (cons_l hd_v "
+                            "(append_l tl p2)) f"
+                        ).by_eq_mp(SYM(mem_cons_app), "right_disj")
+                        p.thus(
+                            "mem_l (append_l p1 p2) f"
+                        ).by_rewrite_of(
+                            "mem_app_cons",
+                            [SYM(p.fact("app_eq"))],
+                        )
+                    with p.case(
+                        "tex: ?h_inner. Proof_Q tl h_inner"
+                    ):
+                        p.have(
+                            "ih_disj: mem_l tl f \\/ mem_l p2 f"
+                        ).by_disj("from2")
+                        p.have(
+                            "mem_app_tl: mem_l (append_l tl p2) f"
+                        ).by(
+                            "IH", "tl", "lt_tl_p1",
+                            "h_inner", "p2", "f",
+                            "h_inner_eq", "ih_disj",
+                        )
+                        p.have(
+                            "right_disj: f = hd_v "
+                            "\\/ mem_l (append_l tl p2) f"
+                        ).by_disj("mem_app_tl")
+                        p.have(
+                            "mem_app_cons: "
+                            "mem_l (cons_l hd_v "
+                            "(append_l tl p2)) f"
+                        ).by_eq_mp(SYM(mem_cons_app), "right_disj")
+                        p.thus(
+                            "mem_l (append_l p1 p2) f"
+                        ).by_rewrite_of(
+                            "mem_app_cons",
+                            [SYM(p.fact("app_eq"))],
+                        )
+
+
+# ---------------------------------------------------------------------------
+# Stage 3B (f) -- ``valid_step`` preservation under membership extension.
+#
+#   |- !q1 q2 hd. (!f. mem_l q1 f ==> mem_l q2 f)
+#                 ==> valid_step q1 hd ==> valid_step q2 hd.
+#
+# Direct case-split on the disjunction inside ``valid_step``: the
+# axiom case is unaffected by the change of step list; the MP and Gen
+# cases consume ``mem_l q1 _`` premises which lift to ``mem_l q2 _``
+# via the supplied preservation hypothesis.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def VALID_STEP_PRESERVES(p):
+    """|- !q1 q2 hd. (!f. mem_l q1 f ==> mem_l q2 f)
+                     ==> valid_step q1 hd ==> valid_step q2 hd."""
+    p.goal(
+        "!q1 q2 hd. (!f. mem_l q1 f ==> mem_l q2 f) "
+        "==> valid_step q1 hd ==> valid_step q2 hd"
+    )
+    p.fix("q1 q2 hd")
+    p.assume("preserve: !f. mem_l q1 f ==> mem_l q2 f")
+    p.assume("v1: valid_step q1 hd")
+
+    valid_at_1 = SPECL(
+        [p._parse("q1"), p._parse("hd")], VALID_STEP_AT
+    )
+    valid_at_2 = SPECL(
+        [p._parse("q2"), p._parse("hd")], VALID_STEP_AT
+    )
+
+    vd1_str = (
+        "is_axiom hd "
+        "\\/ (?f1 f2. mem_l q1 f1 /\\ mem_l q1 f2 "
+        "/\\ is_mp f1 f2 hd) "
+        "\\/ (?f1. mem_l q1 f1 /\\ is_gen f1 hd)"
+    )
+    vd2_str = (
+        "is_axiom hd "
+        "\\/ (?f1 f2. mem_l q2 f1 /\\ mem_l q2 f2 "
+        "/\\ is_mp f1 f2 hd) "
+        "\\/ (?f1. mem_l q2 f1 /\\ is_gen f1 hd)"
+    )
+    p.have(f"v1d: {vd1_str}").by_eq_mp(valid_at_1, "v1")
+
+    with p.cases_on("v1d"):
+        with p.case("ax_c: is_axiom hd"):
+            p.have(f"v2d: {vd2_str}").by_disj("ax_c")
+            p.thus("valid_step q2 hd").by_eq_mp(
+                SYM(valid_at_2), "v2d"
+            )
+        with p.case(
+            "mp_c: ?f1 f2. mem_l q1 f1 /\\ mem_l q1 f2 "
+            "/\\ is_mp f1 f2 hd"
+        ):
+            p.choose("f2", "f1_eq", eq_label="conj_mp")
+            p.split("conj_mp", "(mem_q1_f1, mem_q1_f2, mp_th)")
+            p.have(
+                "mem_q2_f1: mem_l q2 f1"
+            ).by("preserve", "f1", "mem_q1_f1")
+            p.have(
+                "mem_q2_f2: mem_l q2 f2"
+            ).by("preserve", "f2", "mem_q1_f2")
+            # Build the existential manually. The in-scope ``f1``/``f2``
+            # are SELECT-derived witness terms (from the case auto-intro);
+            # we abstract over fresh kernel ``Var``s and EXISTS-substitute
+            # the SELECT terms back at the witness slot.
+            body_conj_mp = CONJ(
+                p.fact("mem_q2_f1"),
+                CONJ(p.fact("mem_q2_f2"), p.fact("mp_th")),
+            )
+            in_f1 = p._parse("f1")
+            in_f2 = p._parse("f2")
+            f1_v = Var("F1_b", nat0_ty)
+            f2_v = Var("F2_b", nat0_ty)
+            q2_t = p._parse("q2")
+            hd_t = p._parse("hd")
+            # Inner pred (only f2 abstracted, f1 still = in_f1).
+            inner_body_for_f2 = mk_and(
+                mk_app(mem_l, q2_t, in_f1),
+                mk_and(
+                    mk_app(mem_l, q2_t, f2_v),
+                    mk_app(is_mp, in_f1, f2_v, hd_t),
+                ),
+            )
+            inner_pred_f2 = mk_abs(f2_v, inner_body_for_f2)
+            inner_th_mp = EXISTS(
+                inner_pred_f2, in_f2, body_conj_mp
+            )
+            # Outer pred (over fresh f1).
+            outer_body_for_f1_f2 = mk_and(
+                mk_app(mem_l, q2_t, f1_v),
+                mk_and(
+                    mk_app(mem_l, q2_t, f2_v),
+                    mk_app(is_mp, f1_v, f2_v, hd_t),
+                ),
+            )
+            outer_pred_f1 = mk_abs(
+                f1_v, mk_exists(f2_v, outer_body_for_f1_f2)
+            )
+            new_mp_th = EXISTS(
+                outer_pred_f1, in_f1, inner_th_mp
+            )
+            p.have(
+                "new_mp: ?f1 f2. mem_l q2 f1 /\\ mem_l q2 f2 "
+                "/\\ is_mp f1 f2 hd"
+            ).by_thm(new_mp_th)
+            p.have(f"v2d: {vd2_str}").by_disj("new_mp")
+            p.thus("valid_step q2 hd").by_eq_mp(
+                SYM(valid_at_2), "v2d"
+            )
+        with p.case(
+            "gen_c: ?f1. mem_l q1 f1 /\\ is_gen f1 hd"
+        ):
+            p.split("f1_eq", "(mem_q1_f1, gen_th)")
+            p.have(
+                "mem_q2_f1: mem_l q2 f1"
+            ).by("preserve", "f1", "mem_q1_f1")
+            body_conj_gen = CONJ(
+                p.fact("mem_q2_f1"), p.fact("gen_th")
+            )
+            in_f1 = p._parse("f1")
+            f1_v = Var("F1_b", nat0_ty)
+            q2_t = p._parse("q2")
+            hd_t = p._parse("hd")
+            gen_inner_body = mk_and(
+                mk_app(mem_l, q2_t, f1_v),
+                mk_app(is_gen, f1_v, hd_t),
+            )
+            gen_pred = mk_abs(f1_v, gen_inner_body)
+            new_gen_th = EXISTS(
+                gen_pred, in_f1, body_conj_gen
+            )
+            p.have(
+                "new_gen: ?f1. mem_l q2 f1 /\\ is_gen f1 hd"
+            ).by_thm(new_gen_th)
+            p.have(f"v2d: {vd2_str}").by_disj("new_gen")
+            p.thus("valid_step q2 hd").by_eq_mp(
+                SYM(valid_at_2), "v2d"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Stage 3B (g) -- ``Proof_Q`` is preserved under list concatenation.
+#
+#   |- !p1 h1. Proof_Q p1 h1 ==>
+#       !p2 h2. Proof_Q p2 h2 ==> Proof_Q (append_l p1 p2) h1.
+#
+# Strong induction on ``p1``. Unpack ``Proof_Q p1 h1`` to
+# ``p1 = cons_l hd tl`` and case-split on the inner tail disjunct:
+#
+#   * ``tl = nil_l``: ``append_l p1 p2 = cons_l hd p2``. The membership
+#     premise is vacuous (``mem_l nil_l _ = F``) so ``valid_step nil_l hd
+#     ==> valid_step p2 hd`` discharges trivially via
+#     ``VALID_STEP_PRESERVES``. Tail-of-tail disjunct uses ``Proof_Q p2 h2``.
+#
+#   * ``Proof_Q tl h_inner``: IH at ``tl`` gives
+#     ``Proof_Q (append_l tl p2) h_inner``; ``MEM_L_APPEND_PRESERVES`` (with
+#     ``mem_l tl f \\/ mem_l p2 f`` ⇒ ``mem_l (append_l tl p2) f``) lifts
+#     ``valid_step tl hd`` into ``valid_step (append_l tl p2) hd``.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def PROOF_Q_APPEND(p):
+    """|- !p1 h1 p2 h2. Proof_Q p1 h1 ==> Proof_Q p2 h2
+                       ==> Proof_Q (append_l p1 p2) h1."""
+    p.goal(
+        "!p1 h1 p2 h2. Proof_Q p1 h1 ==> Proof_Q p2 h2 "
+        "==> Proof_Q (append_l p1 p2) h1"
+    )
+    with p.strong_induction("p1", "IH"):
+        p.fix("h1 p2 h2")
+        p.assume("pq1: Proof_Q p1 h1")
+        p.assume("pq2: Proof_Q p2 h2")
+
+        rec_pq1 = SPECL(
+            [p._parse("p1"), p._parse("h1")], PROOF_Q_REC_PW
+        )
+        body_str = (
+            "?h t. p1 = cons_l h t /\\ h = h1 /\\ valid_step t h "
+            "/\\ (t = nil_l \\/ ?h_inner. Proof_Q t h_inner)"
+        )
+        p.have(f"body: {body_str}").by_eq_mp(rec_pq1, "pq1")
+        p.choose("hd", "body", eq_label="ex_t")
+        p.choose("tl", "ex_t", eq_label="conj")
+        p.split("conj",
+                "(p_eq_cons, hd_eq_h1, valid_th, tail_disj)")
+
+        lt_t_cons = SPECL(
+            [p._parse("hd"), p._parse("tl")], NAT0_LT_CONS_L_TAIL
+        )
+        p.have("lt_tl_p1: nat0_lt tl p1").by_rewrite_of(
+            lt_t_cons, [SYM(p.fact("p_eq_cons"))]
+        )
+
+        ap_at = SPECL(
+            [p._parse("hd"), p._parse("tl"), p._parse("p2")],
+            APPEND_L_AT_CONS,
+        )
+        p.have(
+            "app_eq: append_l p1 p2 "
+            "= cons_l hd (append_l tl p2)"
+        ).by_rewrite_of(ap_at, [SYM(p.fact("p_eq_cons"))])
+
+        target_eq = SPECL(
+            [p._parse("hd"), p._parse("append_l tl p2"),
+             p._parse("h1")],
+            PROOF_Q_AT_CONS,
+        )
+
+        with p.cases_on("tail_disj"):
+            with p.case("tnil: tl = nil_l"):
+                ap_nil = SPEC(p._parse("p2"), APPEND_L_AT_NIL)
+                p.have(
+                    "app_tl_eq_p2: append_l tl p2 = p2"
+                ).by_rewrite_of(ap_nil, [SYM(p.fact("tnil"))])
+
+                with p.have(
+                    "preserve: !f. mem_l tl f ==> mem_l p2 f"
+                ).proof():
+                    p.fix("f")
+                    p.assume("mem_tl: mem_l tl f")
+                    p.have(
+                        "mem_nil: mem_l nil_l f"
+                    ).by_rewrite_of("mem_tl", [p.fact("tnil")])
+                    mem_nil_at = SPEC(p._parse("f"), MEM_L_AT_NIL)
+                    p.have("F_th: F").by_eq_mp(
+                        mem_nil_at, "mem_nil"
+                    )
+                    p.thus("mem_l p2 f").by_thm(
+                        CONTR(
+                            p._parse("mem_l p2 f"),
+                            p.fact("F_th"),
+                        )
+                    )
+
+                p.have(
+                    "valid_p2: valid_step p2 hd"
+                ).by(VALID_STEP_PRESERVES,
+                     "tl", "p2", "hd",
+                     "preserve", "valid_th")
+                # Lift via SYM(app_tl_eq_p2). Since RHS p2 not LHS
+                # append_l tl p2, use AP_TERM/AP_THM bridge + by_eq_mp.
+                vs_eq = AP_THM(
+                    AP_TERM(valid_step,
+                            p.fact("app_tl_eq_p2")),
+                    p._parse("hd"),
+                )
+                # vs_eq : valid_step (append_l tl p2) hd = valid_step p2 hd.
+                p.have(
+                    "valid_app: valid_step (append_l tl p2) hd"
+                ).by_eq_mp(vs_eq, "valid_p2")
+
+                # Proof_Q p2 h2 lifts to Proof_Q (append_l tl p2) h2.
+                pq_eq = AP_THM(
+                    AP_TERM(Proof_Q,
+                            p.fact("app_tl_eq_p2")),
+                    p._parse("h2"),
+                )
+                p.have(
+                    "pq_app: Proof_Q (append_l tl p2) h2"
+                ).by_eq_mp(pq_eq, "pq2")
+                p.have(
+                    "ex_app: ?h_inner. Proof_Q (append_l tl p2) h_inner"
+                ).by_witness("h2", "pq_app")
+                p.have(
+                    "tail_app_disj: "
+                    "(append_l tl p2) = nil_l "
+                    "\\/ ?h_inner. Proof_Q (append_l tl p2) h_inner"
+                ).by_disj("ex_app")
+
+                p.have(
+                    "target_body: hd = h1 /\\ "
+                    "valid_step (append_l tl p2) hd /\\ "
+                    "((append_l tl p2) = nil_l "
+                    "\\/ ?h_inner. Proof_Q (append_l tl p2) h_inner)"
+                ).by_thm(CONJ(
+                    p.fact("hd_eq_h1"),
+                    CONJ(p.fact("valid_app"),
+                         p.fact("tail_app_disj")),
+                ))
+                p.have(
+                    "pq_cons: Proof_Q "
+                    "(cons_l hd (append_l tl p2)) h1"
+                ).by_eq_mp(SYM(target_eq), "target_body")
+                p.thus(
+                    "Proof_Q (append_l p1 p2) h1"
+                ).by_rewrite_of(
+                    "pq_cons", [SYM(p.fact("app_eq"))]
+                )
+
+            with p.case(
+                "tex: ?h_inner. Proof_Q tl h_inner"
+            ):
+                with p.have(
+                    "preserve: !f. mem_l tl f "
+                    "==> mem_l (append_l tl p2) f"
+                ).proof():
+                    p.fix("f")
+                    p.assume("mem_tl: mem_l tl f")
+                    p.have(
+                        "ih_disj: mem_l tl f \\/ mem_l p2 f"
+                    ).by_disj("mem_tl")
+                    p.thus(
+                        "mem_l (append_l tl p2) f"
+                    ).by(
+                        MEM_L_APPEND_PRESERVES,
+                        "tl", "h_inner", "p2", "f",
+                        "h_inner_eq", "ih_disj",
+                    )
+
+                p.have(
+                    "valid_app: valid_step (append_l tl p2) hd"
+                ).by(VALID_STEP_PRESERVES,
+                     "tl", "append_l tl p2", "hd",
+                     "preserve", "valid_th")
+
+                p.have(
+                    "pq_app: Proof_Q (append_l tl p2) h_inner"
+                ).by("IH", "tl", "lt_tl_p1",
+                     "h_inner", "p2", "h2",
+                     "h_inner_eq", "pq2")
+
+                p.have(
+                    "ex_app: ?h_inner. Proof_Q (append_l tl p2) h_inner"
+                ).by_witness("h_inner", "pq_app")
+                p.have(
+                    "tail_app_disj: "
+                    "(append_l tl p2) = nil_l "
+                    "\\/ ?h_inner. Proof_Q (append_l tl p2) h_inner"
+                ).by_disj("ex_app")
+
+                p.have(
+                    "target_body: hd = h1 /\\ "
+                    "valid_step (append_l tl p2) hd /\\ "
+                    "((append_l tl p2) = nil_l "
+                    "\\/ ?h_inner. Proof_Q (append_l tl p2) h_inner)"
+                ).by_thm(CONJ(
+                    p.fact("hd_eq_h1"),
+                    CONJ(p.fact("valid_app"),
+                         p.fact("tail_app_disj")),
+                ))
+                p.have(
+                    "pq_cons: Proof_Q "
+                    "(cons_l hd (append_l tl p2)) h1"
+                ).by_eq_mp(SYM(target_eq), "target_body")
+                p.thus(
+                    "Proof_Q (append_l p1 p2) h1"
+                ).by_rewrite_of(
+                    "pq_cons", [SYM(p.fact("app_eq"))]
+                )
+
+
+# ---------------------------------------------------------------------------
+# Stage 3B (d) -- forward direction of the Prov_Q / Proof_Q equivalence.
+#
+#   |- !p f. mem_l p f ==> (?h. Proof_Q p h) ==> Prov_Q f.
+#
+# By strong induction on the proof list ``p``: if ``p`` is non-empty (it
+# must be, since ``Proof_Q nil_l _ = F``), unfold ``Proof_Q p h_top`` to
+# get ``p = cons_l hd tl``, ``hd = h_top``, ``valid_step tl hd`` and
+# either ``tl = nil_l`` or ``?h'. Proof_Q tl h'`` (a smaller proof). The
+# membership claim is split: ``f = hd`` (then ``f`` is justified by
+# ``valid_step tl hd``: axiom / MP / Gen) or ``mem_l tl f`` (then IH on
+# ``tl < p`` recovers ``Prov_Q f``).
+#
+# Each MP / Gen sub-case requires that the cited members of ``tl`` be
+# provable, which is exactly what the IH delivers when ``tl`` itself
+# has a proof; if ``tl = nil_l`` the membership claim contradicts
+# ``MEM_L_AT_NIL``.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def PROV_Q_OF_PROOF_Q(p):
+    """|- !p f. mem_l p f ==> (?h. Proof_Q p h) ==> Prov_Q f."""
+    p.goal("!p. !f. mem_l p f ==> (?h. Proof_Q p h) ==> Prov_Q f")
+    with p.strong_induction("p", "IH"):
+        p.fix("f")
+        p.assume("mem_pf: mem_l p f")
+        p.assume("hex: ?h. Proof_Q p h")
+
+        p.choose("h_top", "hex", eq_label="pq")
+        # pq : Proof_Q p h_top.
+
+        # Unfold Proof_Q at p, h_top.
+        rec_pq = SPECL(
+            [p._parse("p"), p._parse("h_top")], PROOF_Q_REC_PW
+        )
+        body_str = (
+            "?h t. p = cons_l h t /\\ h = h_top /\\ valid_step t h "
+            "/\\ (t = nil_l \\/ ?h_inner. Proof_Q t h_inner)"
+        )
+        p.have(f"body: {body_str}").by_eq_mp(rec_pq, "pq")
+
+        p.choose("hd", "body", eq_label="ex_t")
+        p.choose("tl", "ex_t", eq_label="conj")
+        p.split("conj",
+                "(p_eq_cons, hd_eq_top, valid_th, tail_disj)")
+        # p_eq_cons  : p = cons_l hd tl
+        # hd_eq_top  : hd = h_top
+        # valid_th   : valid_step tl hd
+        # tail_disj  : tl = nil_l \/ ?h_inner. Proof_Q tl h_inner
+
+        # nat0_lt tl p (for the IH).
+        lt_t_cons = SPECL(
+            [p._parse("hd"), p._parse("tl")], NAT0_LT_CONS_L_TAIL
+        )
+        # |- nat0_lt tl (cons_l hd tl)
+        p.have("lt_tl_p: nat0_lt tl p").by_rewrite_of(
+            lt_t_cons, [SYM(p.fact("p_eq_cons"))]
+        )
+
+        # mem_l p f at the cons-form.
+        p.have("mem_at_cons: mem_l (cons_l hd tl) f").by_rewrite_of(
+            "mem_pf", [p.fact("p_eq_cons")]
+        )
+        mem_at_cons_eq = SPECL(
+            [p._parse("hd"), p._parse("tl"), p._parse("f")],
+            MEM_L_AT_CONS,
+        )
+        p.have("mem_disj: f = hd \\/ mem_l tl f").by_eq_mp(
+            mem_at_cons_eq, "mem_at_cons"
+        )
+
+        # Helper closures: derive ?h. Proof_Q tl h from tail_disj's
+        # right disjunct, or derive Prov_Q f vacuously from
+        # ``mem_l nil_l _ = F`` when ``tl = nil_l``.
+        with p.cases_on("mem_disj"):
+            with p.case("eq_case: f = hd"):
+                # Justify Prov_Q hd via valid_step tl hd.
+                valid_at = SPECL(
+                    [p._parse("tl"), p._parse("hd")], VALID_STEP_AT
+                )
+                vd_str = (
+                    "is_axiom hd "
+                    "\\/ (?f1 f2. mem_l tl f1 /\\ mem_l tl f2 "
+                    "/\\ is_mp f1 f2 hd) "
+                    "\\/ (?f1. mem_l tl f1 /\\ is_gen f1 hd)"
+                )
+                p.have(f"vd: {vd_str}").by_eq_mp(valid_at, "valid_th")
+
+                with p.cases_on("vd"):
+                    with p.case("ax_case: is_axiom hd"):
+                        p.have("prov_hd: Prov_Q hd").by(
+                            PROV_Q_AXIOM, "hd", "ax_case"
+                        )
+                        p.thus("Prov_Q f").by_rewrite_of(
+                            "prov_hd", [SYM(p.fact("eq_case"))]
+                        )
+
+                    with p.case(
+                        "mp_case: ?f1 f2. mem_l tl f1 /\\ mem_l tl f2 "
+                        "/\\ is_mp f1 f2 hd"
+                    ):
+                        # Auto-introduces ``f1`` with f1_eq:
+                        #   ?f2. mem_l tl f1 /\ mem_l tl f2
+                        #         /\ is_mp f1 f2 hd
+                        p.choose("f2", "f1_eq", eq_label="conj_mp")
+                        p.split(
+                            "conj_mp", "(mem_f1, mem_f2, mp_th)"
+                        )
+                        is_mp_at = SPECL(
+                            [p._parse("f1"), p._parse("f2"),
+                             p._parse("hd")],
+                            IS_MP_AT,
+                        )
+                        p.have(
+                            "f2_eq_imp: f2 = Imp_f f1 hd"
+                        ).by_eq_mp(is_mp_at, "mp_th")
+
+                        with p.cases_on("tail_disj"):
+                            with p.case("tnil: tl = nil_l"):
+                                p.have(
+                                    "mem_nil_f1: mem_l nil_l f1"
+                                ).by_rewrite_of(
+                                    "mem_f1", [p.fact("tnil")]
+                                )
+                                mem_nil_at = SPEC(
+                                    p._parse("f1"), MEM_L_AT_NIL
+                                )
+                                p.have("mem_F: F").by_eq_mp(
+                                    mem_nil_at, "mem_nil_f1"
+                                )
+                                p.thus("Prov_Q f").by_thm(
+                                    CONTR(
+                                        p._parse("Prov_Q f"),
+                                        p.fact("mem_F"),
+                                    )
+                                )
+                            with p.case(
+                                "texists: ?h_inner. Proof_Q tl h_inner"
+                            ):
+                                # Auto-intro: h_inner_eq: Proof_Q tl h_inner.
+                                p.have(
+                                    "tlex: ?h. Proof_Q tl h"
+                                ).by_witness(
+                                    "h_inner", "h_inner_eq"
+                                )
+                                p.have("prov_f1: Prov_Q f1").by(
+                                    "IH", "tl", "lt_tl_p",
+                                    "f1", "mem_f1", "tlex",
+                                )
+                                p.have("prov_f2: Prov_Q f2").by(
+                                    "IH", "tl", "lt_tl_p",
+                                    "f2", "mem_f2", "tlex",
+                                )
+                                p.have(
+                                    "prov_imp: Prov_Q (Imp_f f1 hd)"
+                                ).by_rewrite_of(
+                                    "prov_f2", [p.fact("f2_eq_imp")]
+                                )
+                                p.have("prov_hd: Prov_Q hd").by(
+                                    PROV_Q_MP, "f1", "hd",
+                                    CONJ(
+                                        p.fact("prov_f1"),
+                                        p.fact("prov_imp"),
+                                    ),
+                                )
+                                p.thus("Prov_Q f").by_rewrite_of(
+                                    "prov_hd",
+                                    [SYM(p.fact("eq_case"))],
+                                )
+
+                    with p.case(
+                        "gen_case: ?f1. mem_l tl f1 /\\ is_gen f1 hd"
+                    ):
+                        # Auto-intro: f1_eq: mem_l tl f1 /\ is_gen f1 hd.
+                        p.split("f1_eq", "(mem_f1, gen_th)")
+                        is_gen_at = SPECL(
+                            [p._parse("f1"), p._parse("hd")],
+                            IS_GEN_AT,
+                        )
+                        p.have(
+                            "gen_unfold: ?x. hd = Forall_f x f1"
+                        ).by_eq_mp(is_gen_at, "gen_th")
+                        p.choose(
+                            "x_var", "gen_unfold",
+                            eq_label="hd_eq_forall",
+                        )
+                        # hd_eq_forall: hd = Forall_f x_var f1.
+
+                        with p.cases_on("tail_disj"):
+                            with p.case("tnil: tl = nil_l"):
+                                p.have(
+                                    "mem_nil_f1: mem_l nil_l f1"
+                                ).by_rewrite_of(
+                                    "mem_f1", [p.fact("tnil")]
+                                )
+                                mem_nil_at = SPEC(
+                                    p._parse("f1"), MEM_L_AT_NIL
+                                )
+                                p.have("mem_F: F").by_eq_mp(
+                                    mem_nil_at, "mem_nil_f1"
+                                )
+                                p.thus("Prov_Q f").by_thm(
+                                    CONTR(
+                                        p._parse("Prov_Q f"),
+                                        p.fact("mem_F"),
+                                    )
+                                )
+                            with p.case(
+                                "texists: ?h_inner. Proof_Q tl h_inner"
+                            ):
+                                p.have(
+                                    "tlex: ?h. Proof_Q tl h"
+                                ).by_witness(
+                                    "h_inner", "h_inner_eq"
+                                )
+                                p.have("prov_f1: Prov_Q f1").by(
+                                    "IH", "tl", "lt_tl_p",
+                                    "f1", "mem_f1", "tlex",
+                                )
+                                p.have(
+                                    "prov_forall: Prov_Q "
+                                    "(Forall_f x_var f1)"
+                                ).by(
+                                    PROV_Q_GEN, "f1", "x_var",
+                                    "prov_f1",
+                                )
+                                p.have("prov_hd: Prov_Q hd").by_rewrite_of(
+                                    "prov_forall",
+                                    [SYM(p.fact("hd_eq_forall"))],
+                                )
+                                p.thus("Prov_Q f").by_rewrite_of(
+                                    "prov_hd",
+                                    [SYM(p.fact("eq_case"))],
+                                )
+
+            with p.case("mem_tl: mem_l tl f"):
+                with p.cases_on("tail_disj"):
+                    with p.case("tnil: tl = nil_l"):
+                        p.have(
+                            "mem_nil_f: mem_l nil_l f"
+                        ).by_rewrite_of(
+                            "mem_tl", [p.fact("tnil")]
+                        )
+                        mem_nil_at = SPEC(
+                            p._parse("f"), MEM_L_AT_NIL
+                        )
+                        p.have("mem_F: F").by_eq_mp(
+                            mem_nil_at, "mem_nil_f"
+                        )
+                        p.thus("Prov_Q f").by_thm(
+                            CONTR(
+                                p._parse("Prov_Q f"),
+                                p.fact("mem_F"),
+                            )
+                        )
+                    with p.case(
+                        "texists: ?h_inner. Proof_Q tl h_inner"
+                    ):
+                        p.have(
+                            "tlex: ?h. Proof_Q tl h"
+                        ).by_witness("h_inner", "h_inner_eq")
+                        p.thus("Prov_Q f").by(
+                            "IH", "tl", "lt_tl_p",
+                            "f", "mem_tl", "tlex",
+                        )
+
+
+# Corollary: ``Proof_Q p n ==> Prov_Q n`` (specialise the membership
+# lemma at ``f := n``; ``n`` is the head of ``p`` so ``mem_l p n`` is
+# the left disjunct of ``MEM_L_AT_CONS``).
+@proof
+def PROOF_Q_PROVES(p):
+    """|- !p n. Proof_Q p n ==> Prov_Q n."""
+    p.goal("!p n. Proof_Q p n ==> Prov_Q n")
+    p.fix("p n")
+    p.assume("pq: Proof_Q p n")
+
+    # Unfold to extract p = cons_l hd tl.
+    rec_pq = SPECL([p._parse("p"), p._parse("n")], PROOF_Q_REC_PW)
+    body_str = (
+        "?h t. p = cons_l h t /\\ h = n /\\ valid_step t h "
+        "/\\ (t = nil_l \\/ ?h_inner. Proof_Q t h_inner)"
+    )
+    p.have(f"body: {body_str}").by_eq_mp(rec_pq, "pq")
+    p.choose("hd", "body", eq_label="ex_t")
+    p.choose("tl", "ex_t", eq_label="conj")
+    p.split("conj",
+            "(p_eq_cons, hd_eq_n, _valid, _tail_disj)")
+
+    # mem_l (cons_l hd tl) hd via the left disjunct.
+    mem_at_cons_eq = SPECL(
+        [p._parse("hd"), p._parse("tl"), p._parse("hd")],
+        MEM_L_AT_CONS,
+    )
+    p.have("mem_disj: hd = hd \\/ mem_l tl hd").by_disj(REFL(p._parse("hd")))
+    p.have("mem_at_cons: mem_l (cons_l hd tl) hd").by_eq_mp(
+        SYM(mem_at_cons_eq), "mem_disj"
+    )
+    p.have("mem_p_hd: mem_l p hd").by_rewrite_of(
+        "mem_at_cons", [SYM(p.fact("p_eq_cons"))]
+    )
+
+    p.have("hex: ?h. Proof_Q p h").by_witness("n", "pq")
+
+    p.have("prov_hd: Prov_Q hd").by(
+        PROV_Q_OF_PROOF_Q, "p", "hd", "mem_p_hd", "hex"
+    )
+    p.thus("Prov_Q n").by_rewrite_of("prov_hd", [p.fact("hd_eq_n")])
+
+
+# ---------------------------------------------------------------------------
+# Stage 3B (h) -- ``Proof_Q p h ==> mem_l p h`` (head is its own member).
+# ---------------------------------------------------------------------------
+
+
+@proof
+def PROOF_Q_HEAD_MEM(p):
+    """|- !p1 h1. Proof_Q p1 h1 ==> mem_l p1 h1."""
+    p.goal("!p1 h1. Proof_Q p1 h1 ==> mem_l p1 h1")
+    p.fix("p1 h1")
+    p.assume("pq: Proof_Q p1 h1")
+    rec_pq = SPECL(
+        [p._parse("p1"), p._parse("h1")], PROOF_Q_REC_PW
+    )
+    body_str = (
+        "?h t. p1 = cons_l h t /\\ h = h1 /\\ valid_step t h "
+        "/\\ (t = nil_l \\/ ?h_inner. Proof_Q t h_inner)"
+    )
+    p.have(f"body: {body_str}").by_eq_mp(rec_pq, "pq")
+    p.choose("hd", "body", eq_label="ex_t")
+    p.choose("tl", "ex_t", eq_label="conj")
+    p.split("conj", "(p_eq_cons, hd_eq_h1, _v, _td)")
+
+    mem_at_cons = SPECL(
+        [p._parse("hd"), p._parse("tl"), p._parse("hd")],
+        MEM_L_AT_CONS,
+    )
+    p.have("hd_disj: hd = hd \\/ mem_l tl hd").by_disj(
+        REFL(p._parse("hd"))
+    )
+    p.have(
+        "mem_at: mem_l (cons_l hd tl) hd"
+    ).by_eq_mp(SYM(mem_at_cons), "hd_disj")
+    p.have("mem_p_hd: mem_l p1 hd").by_rewrite_of(
+        "mem_at", [SYM(p.fact("p_eq_cons"))]
+    )
+    p.thus("mem_l p1 h1").by_rewrite_of(
+        "mem_p_hd", [p.fact("hd_eq_h1")]
+    )
+
+
+# ---------------------------------------------------------------------------
+# Stage 3B (i) -- the three admissibility clauses for the
+# impredicative ``Prov_Q``, lifted to ``\n. ?p. Proof_Q p n``.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def AXIOM_HAS_PROOF(p):
+    """|- !m. is_axiom m ==> ?p. Proof_Q p m.
+
+    Witness: ``cons_l m nil_l``. Validity: ``valid_step nil_l m``
+    follows directly from ``is_axiom m`` via the axiom disjunct;
+    tail disjunct collapses to ``nil_l = nil_l``.
+    """
+    p.goal("!m. is_axiom m ==> ?p. Proof_Q p m")
+    p.fix("m")
+    p.assume("ax: is_axiom m")
+
+    valid_at = SPECL(
+        [nil_l, p._parse("m")], VALID_STEP_AT
+    )
+    vd_str = (
+        "is_axiom m \\/ "
+        "(?f1 f2. mem_l nil_l f1 /\\ mem_l nil_l f2 "
+        "/\\ is_mp f1 f2 m) \\/ "
+        "(?f1. mem_l nil_l f1 /\\ is_gen f1 m)"
+    )
+    p.have(f"vd: {vd_str}").by_disj("ax")
+    p.have(
+        "valid_th: valid_step nil_l m"
+    ).by_eq_mp(SYM(valid_at), "vd")
+    p.have(
+        "tail_disj: nil_l = nil_l "
+        "\\/ ?h_inner. Proof_Q nil_l h_inner"
+    ).by_disj(REFL(nil_l))
+
+    target_eq = SPECL(
+        [p._parse("m"), nil_l, p._parse("m")],
+        PROOF_Q_AT_CONS,
+    )
+    p.have(
+        "target_body: m = m /\\ valid_step nil_l m "
+        "/\\ (nil_l = nil_l "
+        "\\/ ?h_inner. Proof_Q nil_l h_inner)"
+    ).by_thm(CONJ(
+        REFL(p._parse("m")),
+        CONJ(p.fact("valid_th"), p.fact("tail_disj")),
+    ))
+    p.have(
+        "pq_witness: Proof_Q (cons_l m nil_l) m"
+    ).by_eq_mp(SYM(target_eq), "target_body")
+    p.thus("?p. Proof_Q p m").by_witness(
+        "cons_l m nil_l", "pq_witness"
+    )
+
+
+@proof
+def GEN_HAS_PROOF(p):
+    """|- !f x. (?p1. Proof_Q p1 f) ==>
+                ?p. Proof_Q p (Forall_f x f).
+
+    Witness: ``cons_l (Forall_f x f) p1``. Validity: Gen disjunct of
+    ``valid_step p1 (Forall_f x f)`` with member ``f`` (head of ``p1``)
+    and ``is_gen f (Forall_f x f)`` (witness ``x`` for the inner
+    existential). Tail disjunct: right with witness ``f`` (since
+    ``Proof_Q p1 f``).
+    """
+    p.goal(
+        "!f x. (?p1. Proof_Q p1 f) ==> "
+        "?p. Proof_Q p (Forall_f x f)"
+    )
+    p.fix("f x")
+    p.assume("pq_ex: ?p1. Proof_Q p1 f")
+    p.choose("p1", "pq_ex", eq_label="pq1")
+
+    p.have("mem_p1_f: mem_l p1 f").by(
+        PROOF_Q_HEAD_MEM, "p1", "f", "pq1"
+    )
+
+    # is_gen f (Forall_f x f): ?y. Forall_f x f = Forall_f y f, witness y := x.
+    is_gen_at = SPECL(
+        [p._parse("f"), p._parse("Forall_f x f")], IS_GEN_AT
+    )
+    # is_gen_at : is_gen f (Forall_f x f) = (?y. Forall_f x f = Forall_f y f).
+    p.have(
+        "exists_y: ?y. Forall_f x f = Forall_f y f"
+    ).by_witness("x", REFL(p._parse("Forall_f x f")))
+    p.have(
+        "gen_th: is_gen f (Forall_f x f)"
+    ).by_eq_mp(SYM(is_gen_at), "exists_y")
+
+    # valid_step p1 (Forall_f x f) via Gen disjunct.
+    valid_at = SPECL(
+        [p._parse("p1"), p._parse("Forall_f x f")], VALID_STEP_AT
+    )
+    # Build inner gen existential: ?f1. mem_l p1 f1 /\ is_gen f1 (Forall_f x f).
+    in_f = p._parse("f")
+    f1_v = Var("F1_b", nat0_ty)
+    p1_t = p._parse("p1")
+    fa_t = p._parse("Forall_f x f")
+    gen_inner_body = mk_and(
+        mk_app(mem_l, p1_t, f1_v),
+        mk_app(is_gen, f1_v, fa_t),
+    )
+    gen_pred = mk_abs(f1_v, gen_inner_body)
+    gen_existential = EXISTS(
+        gen_pred, in_f,
+        CONJ(p.fact("mem_p1_f"), p.fact("gen_th")),
+    )
+    p.have(
+        "gen_ex: ?f1. mem_l p1 f1 /\\ "
+        "is_gen f1 (Forall_f x f)"
+    ).by_thm(gen_existential)
+    vd_str = (
+        "is_axiom (Forall_f x f) \\/ "
+        "(?f1 f2. mem_l p1 f1 /\\ mem_l p1 f2 "
+        "/\\ is_mp f1 f2 (Forall_f x f)) \\/ "
+        "(?f1. mem_l p1 f1 /\\ is_gen f1 (Forall_f x f))"
+    )
+    p.have(f"vd: {vd_str}").by_disj("gen_ex")
+    p.have(
+        "valid_th: valid_step p1 (Forall_f x f)"
+    ).by_eq_mp(SYM(valid_at), "vd")
+
+    # Tail disjunct: ?h_inner. Proof_Q p1 h_inner with witness f.
+    p.have(
+        "tail_ex: ?h_inner. Proof_Q p1 h_inner"
+    ).by_witness("f", "pq1")
+    p.have(
+        "tail_disj: p1 = nil_l "
+        "\\/ ?h_inner. Proof_Q p1 h_inner"
+    ).by_disj("tail_ex")
+
+    target_eq = SPECL(
+        [p._parse("Forall_f x f"), p1_t,
+         p._parse("Forall_f x f")],
+        PROOF_Q_AT_CONS,
+    )
+    p.have(
+        "target_body: Forall_f x f = Forall_f x f "
+        "/\\ valid_step p1 (Forall_f x f) "
+        "/\\ (p1 = nil_l "
+        "\\/ ?h_inner. Proof_Q p1 h_inner)"
+    ).by_thm(CONJ(
+        REFL(fa_t),
+        CONJ(p.fact("valid_th"), p.fact("tail_disj")),
+    ))
+    p.have(
+        "pq_witness: Proof_Q "
+        "(cons_l (Forall_f x f) p1) (Forall_f x f)"
+    ).by_eq_mp(SYM(target_eq), "target_body")
+    p.thus(
+        "?p. Proof_Q p (Forall_f x f)"
+    ).by_witness("cons_l (Forall_f x f) p1", "pq_witness")
+
+
+@proof
+def MP_HAS_PROOF(p):
+    """|- !f g. (?p1. Proof_Q p1 f) /\\ (?p2. Proof_Q p2 (Imp_f f g))
+                 ==> ?p. Proof_Q p g.
+
+    Witness: ``cons_l g (append_l p2 p1)``. Validity: MP disjunct
+    with ``f1 := f``, ``f2 := Imp_f f g`` -- both members of
+    ``append_l p2 p1`` via ``MEM_L_APPEND_PRESERVES`` (lifting
+    ``mem_l p2 (Imp_f f g)`` and ``mem_l p1 f``). Tail disjunct:
+    ``Proof_Q (append_l p2 p1) (Imp_f f g)`` from ``PROOF_Q_APPEND``.
+    """
+    p.goal(
+        "!f g. (?p1. Proof_Q p1 f) /\\ "
+        "(?p2. Proof_Q p2 (Imp_f f g)) "
+        "==> ?p. Proof_Q p g"
+    )
+    p.fix("f g")
+    p.assume(
+        "(pq1_ex, pq2_ex): "
+        "(?p1. Proof_Q p1 f) /\\ (?p2. Proof_Q p2 (Imp_f f g))"
+    )
+    p.choose("p1", "pq1_ex", eq_label="pq1")
+    p.choose("p2", "pq2_ex", eq_label="pq2")
+
+    # Members.
+    p.have("mem_p1_f: mem_l p1 f").by(
+        PROOF_Q_HEAD_MEM, "p1", "f", "pq1"
+    )
+    p.have(
+        "mem_p2_imp: mem_l p2 (Imp_f f g)"
+    ).by(PROOF_Q_HEAD_MEM, "p2",
+         "Imp_f f g", "pq2")
+
+    # Lift via MEM_L_APPEND_PRESERVES with (p1' := p2, p2' := p1):
+    #   Proof_Q p2 (Imp_f f g) ==> (mem_l p2 a \/ mem_l p1 a) ==>
+    #     mem_l (append_l p2 p1) a.
+    p.have(
+        "disj_imp: mem_l p2 (Imp_f f g) \\/ mem_l p1 (Imp_f f g)"
+    ).by_disj("mem_p2_imp")
+    p.have(
+        "mem_app_imp: mem_l (append_l p2 p1) (Imp_f f g)"
+    ).by(MEM_L_APPEND_PRESERVES,
+         "p2", "Imp_f f g", "p1", "Imp_f f g",
+         "pq2", "disj_imp")
+    p.have(
+        "disj_f: mem_l p2 f \\/ mem_l p1 f"
+    ).by_disj("mem_p1_f")
+    p.have(
+        "mem_app_f: mem_l (append_l p2 p1) f"
+    ).by(MEM_L_APPEND_PRESERVES,
+         "p2", "Imp_f f g", "p1", "f",
+         "pq2", "disj_f")
+
+    # is_mp f (Imp_f f g) g  =  (Imp_f f g = Imp_f f g).
+    is_mp_at = SPECL(
+        [p._parse("f"), p._parse("Imp_f f g"), p._parse("g")],
+        IS_MP_AT,
+    )
+    p.have(
+        "is_mp_th: is_mp f (Imp_f f g) g"
+    ).by_eq_mp(SYM(is_mp_at), REFL(p._parse("Imp_f f g")))
+
+    # Build MP existential: ?f1 f2. mem_l (app) f1 /\ mem_l (app) f2 /\
+    #                                is_mp f1 f2 g.
+    body_conj_mp = CONJ(
+        p.fact("mem_app_f"),
+        CONJ(p.fact("mem_app_imp"), p.fact("is_mp_th")),
+    )
+    in_f = p._parse("f")
+    in_imp = p._parse("Imp_f f g")
+    f1_v = Var("F1_b", nat0_ty)
+    f2_v = Var("F2_b", nat0_ty)
+    app_t = p._parse("append_l p2 p1")
+    g_t = p._parse("g")
+    inner_body_for_f2 = mk_and(
+        mk_app(mem_l, app_t, in_f),
+        mk_and(
+            mk_app(mem_l, app_t, f2_v),
+            mk_app(is_mp, in_f, f2_v, g_t),
+        ),
+    )
+    inner_pred_f2 = mk_abs(f2_v, inner_body_for_f2)
+    inner_th_mp = EXISTS(inner_pred_f2, in_imp, body_conj_mp)
+    outer_body = mk_and(
+        mk_app(mem_l, app_t, f1_v),
+        mk_and(
+            mk_app(mem_l, app_t, f2_v),
+            mk_app(is_mp, f1_v, f2_v, g_t),
+        ),
+    )
+    outer_pred = mk_abs(f1_v, mk_exists(f2_v, outer_body))
+    mp_existential = EXISTS(outer_pred, in_f, inner_th_mp)
+    p.have(
+        "mp_ex: ?f1 f2. mem_l (append_l p2 p1) f1 "
+        "/\\ mem_l (append_l p2 p1) f2 "
+        "/\\ is_mp f1 f2 g"
+    ).by_thm(mp_existential)
+    valid_at = SPECL(
+        [app_t, g_t], VALID_STEP_AT
+    )
+    vd_str = (
+        "is_axiom g \\/ "
+        "(?f1 f2. mem_l (append_l p2 p1) f1 "
+        "/\\ mem_l (append_l p2 p1) f2 "
+        "/\\ is_mp f1 f2 g) \\/ "
+        "(?f1. mem_l (append_l p2 p1) f1 /\\ is_gen f1 g)"
+    )
+    p.have(f"vd: {vd_str}").by_disj("mp_ex")
+    p.have(
+        "valid_th: valid_step (append_l p2 p1) g"
+    ).by_eq_mp(SYM(valid_at), "vd")
+
+    # Tail disjunction: ?h_inner. Proof_Q (append_l p2 p1) h_inner via
+    # PROOF_Q_APPEND with witness Imp_f f g.
+    p.have(
+        "pq_app: Proof_Q (append_l p2 p1) (Imp_f f g)"
+    ).by(PROOF_Q_APPEND, "p2", "Imp_f f g", "p1", "f",
+         "pq2", "pq1")
+    p.have(
+        "tail_ex: ?h_inner. Proof_Q (append_l p2 p1) h_inner"
+    ).by_witness("Imp_f f g", "pq_app")
+    p.have(
+        "tail_disj: (append_l p2 p1) = nil_l "
+        "\\/ ?h_inner. Proof_Q (append_l p2 p1) h_inner"
+    ).by_disj("tail_ex")
+
+    target_eq = SPECL(
+        [g_t, app_t, g_t], PROOF_Q_AT_CONS
+    )
+    p.have(
+        "target_body: g = g "
+        "/\\ valid_step (append_l p2 p1) g "
+        "/\\ ((append_l p2 p1) = nil_l "
+        "\\/ ?h_inner. Proof_Q (append_l p2 p1) h_inner)"
+    ).by_thm(CONJ(
+        REFL(g_t),
+        CONJ(p.fact("valid_th"), p.fact("tail_disj")),
+    ))
+    p.have(
+        "pq_witness: Proof_Q "
+        "(cons_l g (append_l p2 p1)) g"
+    ).by_eq_mp(SYM(target_eq), "target_body")
+    p.thus("?p. Proof_Q p g").by_witness(
+        "cons_l g (append_l p2 p1)", "pq_witness"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Stage 3B (j) -- the equivalence ``Prov_Q n <=> ?p. Proof_Q p n``.
+#
+# Backward direction (Prov_Q ==> ?p): instantiate the impredicative
+# ``Prov_Q``'s admissibility hypothesis at ``P := \n. ?p. Proof_Q p n``.
+# The three closure clauses are exactly AXIOM_HAS_PROOF,
+# MP_HAS_PROOF, GEN_HAS_PROOF (suitably specialised).
+#
+# Forward direction (?p ==> Prov_Q): PROOF_Q_PROVES.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def PROV_Q_IFF_PROOF_Q(p):
+    """|- !n. Prov_Q n = ?p. Proof_Q p n."""
+    p.goal("!n. Prov_Q n = (?p. Proof_Q p n)")
+    p.fix("n")
+
+    # Forward: Prov_Q n ==> ?p. Proof_Q p n.
+    with p.have(
+        "fwd: Prov_Q n ==> ?p. Proof_Q p n"
+    ).proof():
+        p.assume("pq: Prov_Q n")
+        # Unfold via PROV_Q_AT.
+        pq_at = SPEC(p._parse("n"), PROV_Q_AT)
+        body_str = (
+            "!P:nat0->bool. "
+            "((!m. is_axiom m ==> P m) "
+            "/\\ ((!f g. P f /\\ P (Imp_f f g) ==> P g) "
+            "/\\ (!f x. P f ==> P (Forall_f x f)))) ==> P n"
+        )
+        p.have(f"body: {body_str}").by_eq_mp(pq_at, "pq")
+        # Specialise body at P := \k. ?p. Proof_Q p k.
+        from fusion import Var as _Var
+        k_var = Var("k", nat0_ty)
+        p_var = Var("p", nat0_ty)
+        P_term = mk_abs(
+            k_var, mk_exists(p_var, mk_app(Proof_Q, p_var, k_var))
+        )
+        body_at_P = SPEC(P_term, p.fact("body"))
+        # body_at_P : <admissibility for P> ==> P n,
+        # where P n BETA-reduces to ?p. Proof_Q p n.
+        # Need to prove the admissibility.
+        adm_str = (
+            "(!m. is_axiom m ==> ?p. Proof_Q p m) "
+            "/\\ ((!f g. (?p. Proof_Q p f) /\\ "
+            "           (?p. Proof_Q p (Imp_f f g)) "
+            "          ==> ?p. Proof_Q p g) "
+            "/\\ (!f x. (?p. Proof_Q p f) "
+            "           ==> ?p. Proof_Q p (Forall_f x f)))"
+        )
+        p.have(f"adm: {adm_str}").by_thm(CONJ(
+            AXIOM_HAS_PROOF,
+            CONJ(MP_HAS_PROOF, GEN_HAS_PROOF),
+        ))
+
+        # body_at_P after BETA_NORM: adm-shape ==> ?p. Proof_Q p n.
+        normed = EQ_MP(
+            BETA_NORM(body_at_P._concl), body_at_P
+        )
+        p.have(
+            "ex_p: ?p. Proof_Q p n"
+        ).by_thm(MP(normed, p.fact("adm")))
+        p.thus("?p. Proof_Q p n").by_thm(p.fact("ex_p"))
+
+    # Reverse: ?p. Proof_Q p n ==> Prov_Q n.
+    with p.have(
+        "rev: (?p. Proof_Q p n) ==> Prov_Q n"
+    ).proof():
+        p.assume("ex: ?p. Proof_Q p n")
+        p.choose("p", "ex", eq_label="pq")
+        p.thus("Prov_Q n").by(
+            PROOF_Q_PROVES, "p", "n", "pq"
+        )
+
+    p.thus("Prov_Q n = (?p. Proof_Q p n)").by_iff(
+        "fwd", "rev"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Roadmap -- Stage 3B and 3C.
 # ---------------------------------------------------------------------------
 #
@@ -968,13 +2656,21 @@ def PROOF_Q_AT_CONS(p):
 #     binder doesn't fire on hyp-laden rules, so each disjunct case
 #     handles its rewrite at the top level).
 #
-#   * Prove the equivalence with the impredicative ``Prov_Q``:
-#         |- !n. Prov_Q n <=> ?p. Proof_Q p n.
-#     Forward (?p ==> Prov_Q): induction on the proof list, using
-#     PROV_Q_AXIOM / PROV_Q_MP / PROV_Q_GEN at each step.
-#     Backward (Prov_Q ==> ?p): instantiate ``P := \n. ?p. Proof_Q p n``
-#     in PROV_Q_AT and verify the three closure clauses by exhibiting
-#     extended proof lists.
+#   * Prove the equivalence with the impredicative ``Prov_Q``:    [DONE]
+#         |- !n. Prov_Q n = ?p. Proof_Q p n.
+#     Forward direction (?p ==> Prov_Q): ``PROV_Q_OF_PROOF_Q``,
+#     proved by strong induction on the proof list ``p`` -- the
+#     stronger statement ``mem_l p f ==> ?h. Proof_Q p h ==>
+#     Prov_Q f`` factors out the membership-tracking needed to
+#     handle MP/Gen subterms inside the tail.
+#     Backward direction (Prov_Q ==> ?p): instantiate
+#     ``P := \n. ?p. Proof_Q p n`` in ``PROV_Q_AT``; the three
+#     closure clauses are ``AXIOM_HAS_PROOF`` (witness
+#     ``cons_l m nil_l``), ``GEN_HAS_PROOF`` (witness
+#     ``cons_l (Forall_f x f) p1``), and ``MP_HAS_PROOF`` (witness
+#     ``cons_l g (append_l p2 p1)``, requiring ``append_l``,
+#     ``MEM_L_APPEND_PRESERVES``, ``VALID_STEP_PRESERVES``, and
+#     ``PROOF_Q_APPEND`` to combine the two given proof lists).
 #
 #   * Representability of ``substitute``: Sigma_1 formula
 #     ``substitute_internal`` such that
@@ -1038,3 +2734,27 @@ if __name__ == "__main__":
     print("    PROOF_Q_REC_PW   :", pp_thm(PROOF_Q_REC_PW))
     print("    PROOF_Q_AT_NIL   :", pp_thm(PROOF_Q_AT_NIL))
     print("    PROOF_Q_AT_CONS  :", pp_thm(PROOF_Q_AT_CONS))
+    print()
+    print("Stage 3B (d) -- list concatenation append_l.")
+    print("    APPEND_L_DEF     :", pp_thm(APPEND_L_DEF))
+    print("    APPEND_L_REC     :", pp_thm(APPEND_L_REC))
+    print("    APPEND_L_AT_NIL  :", pp_thm(APPEND_L_AT_NIL))
+    print("    APPEND_L_AT_CONS :", pp_thm(APPEND_L_AT_CONS))
+    print()
+    print("Stage 3B (e-g) -- preservation lemmas.")
+    print("    MEM_L_APPEND_PRESERVES :",
+          pp_thm(MEM_L_APPEND_PRESERVES))
+    print("    VALID_STEP_PRESERVES   :",
+          pp_thm(VALID_STEP_PRESERVES))
+    print("    PROOF_Q_APPEND         :", pp_thm(PROOF_Q_APPEND))
+    print("    PROOF_Q_HEAD_MEM       :", pp_thm(PROOF_Q_HEAD_MEM))
+    print()
+    print("Stage 3B (h-i) -- forward + admissibility.")
+    print("    PROV_Q_OF_PROOF_Q :", pp_thm(PROV_Q_OF_PROOF_Q))
+    print("    PROOF_Q_PROVES    :", pp_thm(PROOF_Q_PROVES))
+    print("    AXIOM_HAS_PROOF   :", pp_thm(AXIOM_HAS_PROOF))
+    print("    GEN_HAS_PROOF     :", pp_thm(GEN_HAS_PROOF))
+    print("    MP_HAS_PROOF      :", pp_thm(MP_HAS_PROOF))
+    print()
+    print("Stage 3B (j) -- equivalence Prov_Q <=> ?p. Proof_Q.")
+    print("    PROV_Q_IFF_PROOF_Q :", pp_thm(PROV_Q_IFF_PROOF_Q))
