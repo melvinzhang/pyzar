@@ -649,6 +649,31 @@ def FREE_IN_DIAG_INTERNAL(p):
     p.sorry()
 
 
+@proof
+def DIAG_FUNCTIONAL(p):
+    """|- !n. Prov_Q (Forall_f (SUC0 0)
+                       (Imp_f (substitute_2 diag_internal
+                                 (numeral n) var_y var_x var_y)
+                              (Eq_f var_y (numeral (diag n))))).
+
+    Functionality of diag's representation: ``D(numeral n, y) -> y =
+    numeral (diag n)``, universally quantified over y. This is the
+    second half of representability of a function (uniqueness); the
+    first half is ``DIAG_REPRESENTS`` (existence: D holds at the
+    correct y). AXIOMATIZED.
+
+    Used in the diagonal lemma's forward direction to identify the
+    existential witness ``y_0`` with ``numeral psi``.
+    """
+    p.goal(
+        "!n. Prov_Q (Forall_f (SUC0 0) "
+        "             (Imp_f (substitute_2 diag_internal "
+        "                      (numeral n) var_y var_x var_y) "
+        "                    (Eq_f var_y (numeral (diag n)))))"
+    )
+    p.sorry()
+
+
 # ---------------------------------------------------------------------------
 # Stage 4 (b.2) -- theta-of-phi: the parametric self-referential carrier.
 #
@@ -789,6 +814,7 @@ if __name__ == "__main__":
     print("    DIAG_REPRESENTS         :", pp_thm(DIAG_REPRESENTS))
     print("    IS_FORM_DIAG_INTERNAL   :", pp_thm(IS_FORM_DIAG_INTERNAL))
     print("    FREE_IN_DIAG_INTERNAL   :", pp_thm(FREE_IN_DIAG_INTERNAL))
+    print("    DIAG_FUNCTIONAL         :", pp_thm(DIAG_FUNCTIONAL))
     print()
     print("Stage 4 (b.2) -- theta-of-phi construction.")
     print("    THETA_OF_PHI_DEF :", pp_thm(THETA_OF_PHI_DEF))
