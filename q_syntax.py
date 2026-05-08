@@ -77,12 +77,12 @@ from hf_sets import (  # noqa: F401  -- parser aliases for Pair_ord
     IN_ZERO,
 )
 from nat0 import AXIOM_3_0, AXIOM_4_0
-from nat0_order import NAT0_LT_TRANS
+from nat0_order import NAT0_LT_TRANS, define_wf_lt
 from proof import proof
 from tactics import (
-    SPEC, SPECL, GENL, SYM, EQ_MP, MP, CONJ, CONJUNCT1, CONJUNCT2,
-    EXISTS, CHOOSE_WITNESS, REWRITE_RULE, EQF_INTRO, NOT_ELIM,
-    DISCH, CONTR, TRANS, AP_TERM, or_chain_collapse,
+    SPEC, SPECL, GEN, GENL, SYM, EQ_MP, MP, CONJ, CONJUNCT1, CONJUNCT2,
+    EXISTS, CHOOSE_WITNESS, REWRITE_RULE, REWRITE_CONV, EQF_INTRO, NOT_ELIM,
+    DISCH, CONTR, TRANS, AP_TERM, BETA_NORM, or_chain_collapse,
 )
 
 
@@ -1080,6 +1080,73 @@ def mono_iff_binary_step(ctor, size_lemma_l, size_lemma_r, hyp_th):
     R_th = _direction(LHS, body_inner_r, swap_fg=False)
     L_th = _direction(RHS, body_inner_l, swap_fg=True)
     return DEDUCT_ANTISYM_RULE(L_th, R_th)
+
+
+def mono_iff_binary_right_step(ctor, size_lemma_r, hyp_th):
+    """Per-disjunct iff for a binary disjunct where ONLY the right argument
+    feeds back into the recursive predicate (e.g. ``Forall_f v phi /\\ f phi``,
+    where ``v`` is a bound-variable index that doesn't recurse).
+
+    Args:
+      ctor          : term, type ``nat0 -> nat0 -> nat0`` (e.g. ``Forall_f``).
+      size_lemma_r  : ``|- !a b. nat0_lt b (ctor a b)``.
+      hyp_th        : ``|- !k. nat0_lt k n ==> f k = g k``.
+
+    Returns:
+      ``|- (?a b. n = ctor a b /\\ f b) = (?a b. n = ctor a b /\\ g b)``
+    where n, f, g are read from ``hyp_th``.
+    """
+    n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
+    a_var = Var("a", k_ty)
+    b_var = Var("b", k_ty)
+
+    def _bodies(fn):
+        ctor_ab = mk_app(ctor, a_var, b_var)
+        return mk_and(mk_eq(n_t, ctor_ab), mk_app(fn, b_var))
+
+    body_inner_l = _bodies(f_t)
+    body_inner_r = _bodies(g_t)
+    LHS = mk_exists(a_var, mk_exists(b_var, body_inner_l))
+    RHS = mk_exists(a_var, mk_exists(b_var, body_inner_r))
+
+    def _direction(src, target_inner_body, swap_fg):
+        h_top = ASSUME(src)
+        outer_pred = dest_exists(src)
+        chosen_outer = CHOOSE_WITNESS(outer_pred, h_top)
+        new_inner_pred = dest_exists(chosen_outer._concl)
+        chosen_inner = CHOOSE_WITNESS(new_inner_pred, chosen_outer)
+        n_eq_th = CONJUNCT1(chosen_inner)
+        hb_th = CONJUNCT2(chosen_inner)
+        ctor_app = rand(n_eq_th._concl)
+        w_b = rand(ctor_app)
+        w_a = rand(rator(ctor_app))
+        sl_b = SPEC(w_b, SPEC(w_a, size_lemma_r))
+        lt_b_n = REWRITE_RULE([SYM(n_eq_th)], sl_b)
+        eq_b = MP(SPEC(w_b, hyp_th), lt_b_n)
+        if swap_fg:
+            hb_out = EQ_MP(SYM(eq_b), hb_th)
+        else:
+            hb_out = EQ_MP(eq_b, hb_th)
+        new_body = CONJ(n_eq_th, hb_out)
+        target_outer_pred_body = mk_abs(
+            a_var, mk_exists(b_var, target_inner_body)
+        )
+        inner_pred_aw = mk_abs(
+            b_var,
+            mk_and(
+                mk_eq(n_t, mk_app(ctor, w_a, b_var)),
+                mk_app(g_t if not swap_fg else f_t, b_var),
+            ),
+        )
+        inner_th = EXISTS(inner_pred_aw, w_b, new_body)
+        outer_th = EXISTS(target_outer_pred_body, w_a, inner_th)
+        return outer_th
+
+    R_th = _direction(LHS, body_inner_r, swap_fg=False)
+    L_th = _direction(RHS, body_inner_l, swap_fg=True)
+    return DEDUCT_ANTISYM_RULE(L_th, R_th)
+
+
 # ---------------------------------------------------------------------------
 # Constructor recursion-equation derivation.
 #
@@ -1384,54 +1451,231 @@ def derive_rec_eq(REC, target_ctor_name, var_names):
 
 
 # ---------------------------------------------------------------------------
-# Stage 1 (b)/(c) work to follow.
+# Stage 1 (b): is_term -- "encodes a Q term" predicate.
 #
-# Each of ``is_term``, ``is_form``, ``free_in``, ``substitute`` is
-# defined by ``define_wf_lt`` against a body that disjuncts over the
-# constructor patterns of its target type.  The supporting helpers
-# above are now in place; the per-function steps are:
+# Body shape:
+#   F is_term n  :=
+#        n = Zero_t
+#     \/ ?x. n = Succ_t x /\ is_term x
+#     \/ ?x. n = Var_t x
+#     \/ ?a b. n = Plus_t a b /\ is_term a /\ is_term b
+#     \/ ?a b. n = Times_t a b /\ is_term a /\ is_term b
 #
-#   1. Build the body F : (nat0 -> A) -> nat0 -> A as a HOL lambda
-#      whose disjuncts have the q-syntax shapes
-#         (n = K)                              -- nullary base
-#         (?x. n = C x /\ <recursive call>)    -- unary recursive
-#         (?x. n = C x)                        -- unary non-recursive
-#         (?a b. n = C a b /\ <recursive>)     -- binary recursive
-#      (~30 lines of mk_abs/mk_app glue per function).
+# The body is registered as constant ``_is_term_F`` so the MONO theorem
+# can speak about it by name. After ``define_wf_lt`` returns the raw
+# REC (``|- !n. is_term n = _is_term_F is_term n``), we unfold the
+# helper constant and beta-reduce its application to recover the
+# disjunction-shaped REC that ``derive_rec_eq`` consumes.
+# ---------------------------------------------------------------------------
+
+
+_x_n0 = Var("x", nat0_ty)
+_a_n0 = Var("a", nat0_ty)
+_b_n0 = Var("b", nat0_ty)
+_pred_ty = parse_type("nat0 -> bool")
+_F_pred_ty = parse_type("(nat0 -> bool) -> nat0 -> bool")
+_f_pred = Var("f", _pred_ty)
+_n_var_top = Var("n", nat0_ty)
+
+
+def _is_term_body(f_t, n_t):
+    """The disjunction body of ``_is_term_F`` at terms ``f_t`` and ``n_t``."""
+    return mk_or(
+        mk_eq(n_t, Zero_t),
+        mk_or(
+            mk_exists(_x_n0, mk_and(
+                mk_eq(n_t, mk_app(Succ_t, _x_n0)),
+                mk_app(f_t, _x_n0),
+            )),
+            mk_or(
+                mk_exists(_x_n0, mk_eq(n_t, mk_app(Var_t, _x_n0))),
+                mk_or(
+                    mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
+                        mk_eq(n_t, mk_app(Plus_t, _a_n0, _b_n0)),
+                        mk_and(mk_app(f_t, _a_n0), mk_app(f_t, _b_n0)),
+                    ))),
+                    mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
+                        mk_eq(n_t, mk_app(Times_t, _a_n0, _b_n0)),
+                        mk_and(mk_app(f_t, _a_n0), mk_app(f_t, _b_n0)),
+                    ))),
+                ),
+            ),
+        ),
+    )
+
+
+_IS_TERM_F_DEF = define(
+    "_is_term_F",
+    _F_pred_ty,
+    mk_abs(_f_pred, mk_abs(_n_var_top, _is_term_body(_f_pred, _n_var_top))),
+)
+_IS_TERM_F = mk_const("_is_term_F", [])
+
+
+@proof
+def IS_TERM_MONO(p):
+    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
+                  ==> _is_term_F f n = _is_term_F g n."""
+    p.goal(
+        "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> "
+        "_is_term_F f n = _is_term_F g n",
+        types={"f": _pred_ty, "g": _pred_ty,
+               "n": nat0_ty, "k": nat0_ty},
+    )
+    p.fix("f g n")
+    p.assume("h: !k. nat0_lt k n ==> f k = g k")
+
+    h_th = p.fact("h")
+    eq_zero = REFL(p._parse("n = Zero_t"))
+    eq_succ = mono_iff_unary_step(Succ_t, NAT0_LT_SUCC_T, h_th)
+    eq_var = REFL(p._parse("?x. n = Var_t x"))
+    eq_plus = mono_iff_binary_step(
+        Plus_t, NAT0_LT_PLUS_T_L, NAT0_LT_PLUS_T_R, h_th
+    )
+    eq_times = mono_iff_binary_step(
+        Times_t, NAT0_LT_TIMES_T_L, NAT0_LT_TIMES_T_R, h_th
+    )
+    body_eq = or_chain_collapse(
+        [eq_zero, eq_succ, eq_var, eq_plus, eq_times]
+    )
+
+    p.thus(
+        "_is_term_F f n = _is_term_F g n"
+    ).by_unfold(body_eq, _IS_TERM_F_DEF)
+
+
+def _unfold_rec_via_F_def(rec_raw, F_def):
+    """Convert ``|- !n. fn n = F fn n`` to ``|- !n. fn n = body[fn, n]``
+    by unfolding the helper constant and beta-reducing its application."""
+    forall_pred = dest_forall(rec_raw._concl)
+    n_local = forall_pred.bvar
+    spec = SPEC(n_local, rec_raw)               # |- fn n = F fn n
+    rhs = rand(spec._concl)
+    eq_unfold = REWRITE_CONV([F_def], rhs)      # |- F fn n = (\f n. body) fn n
+    eq_beta = BETA_NORM(rand(eq_unfold._concl)) # |- (\f n. body) fn n = body[fn, n]
+    rhs_eq = TRANS(eq_unfold, eq_beta)          # |- F fn n = body[fn, n]
+    return GEN(n_local, TRANS(spec, rhs_eq))
+
+
+IS_TERM_DEF, _IS_TERM_REC_RAW = define_wf_lt(
+    "is_term",
+    _pred_ty,
+    _IS_TERM_F,
+    IS_TERM_MONO,
+)
+IS_TERM_REC = _unfold_rec_via_F_def(_IS_TERM_REC_RAW, _IS_TERM_F_DEF)
+
+
+# Constructor recursion equations.
+IS_TERM_AT_SUCC = derive_rec_eq(IS_TERM_REC, "Succ_t", ["t"])
+IS_TERM_AT_VAR = derive_rec_eq(IS_TERM_REC, "Var_t", ["v"])
+IS_TERM_AT_PLUS = derive_rec_eq(IS_TERM_REC, "Plus_t", ["t1", "t2"])
+IS_TERM_AT_TIMES = derive_rec_eq(IS_TERM_REC, "Times_t", ["t1", "t2"])
+
+
+# ---------------------------------------------------------------------------
+# Stage 1 (b): is_form -- "encodes a Q formula" predicate.
 #
-#   2. Prove MONO:
-#         |- !f g n. (!k. nat0_lt k n ==> f k = g k) ==> F f n = F g n.
-#      Per-disjunct iffs come from ``mono_iff_unary_step`` /
-#      ``mono_iff_binary_step``; non-recursive disjuncts are REFL.
-#      Combine with ``OR_CONG`` (tactics.py).  ~25 lines per function.
+# Body shape:
+#   F is_form n :=
+#        ?a b. n = Eq_f a b /\ is_term a /\ is_term b      -- non-recursive in f
+#     \/ ?x. n = Not_f x /\ is_form x                       -- unary recursive
+#     \/ ?a b. n = Imp_f a b /\ is_form a /\ is_form b      -- binary recursive
+#     \/ ?a b. n = Forall_f a b /\ is_form b                -- right-only recursive
 #
-#   3. ``define_wf_lt(name, ty, F_body, MONO)`` returns ``(NAME_DEF, REC)``.
-#      ~5 lines per function.
-#
-#   4. Constructor recursion equations: one ``derive_rec_eq(REC, ctor,
-#      var_names)`` call each.  No further proof obligations -- the
-#      helper looks up disjointness / injectivity from ``_CTORS`` and
-#      collapses F-disjuncts via ``or_chain_collapse``.
-#      One line per equation; ~5-9 equations per function.
-#
-# Side helpers used at every step:
-#   * ``OR_F_LEFT`` / ``OR_F_RIGHT``   -- F-disjunct elimination.
-#   * ``or_chain_collapse``            -- chain per-disjunct eqs.
-#   * ``mono_iff_unary_step``          -- per-disjunct MONO iff (1 arg).
-#   * ``mono_iff_binary_step``         -- per-disjunct MONO iff (2 args).
-#   * ``derive_rec_eq``                -- whole constructor rec eq.
-#   * ``p.sorry()``                    -- stub to land partial proofs.
-#
-# Estimated total once these helpers are exercised:
-#   is_term  ~ 80 lines  (5 disjuncts: 1 nullary + 1 unary-rec + 1 unary
-#                         + 2 binary-rec; 5 rec eqs).
-#   is_form  ~ 80 lines  (4 disjuncts; depends on is_term for Eq_f).
-#   free_in  ~ 100 lines (2-arg recursion; ``A = nat0 -> bool``;
-#                         MONO needs FUN_EXT lift via ``by_ext``;
-#                         9 rec eqs).
-#   substitute ~ 150 lines (3-arg curried; ``A = nat0 -> nat0 -> nat0``;
-#                           non-bool result so no F-elim; bound-var case
-#                           for Forall_f).
+# Forall_f's "right-only" recursion needs ``mono_iff_binary_right_step``
+# (added above): the ``v`` (Var index) slot doesn't feed back into the
+# predicate, so the standard binary helper would prove the wrong iff.
+# ---------------------------------------------------------------------------
+
+
+is_term_const = mk_const("is_term", [])
+
+
+def _is_form_body(f_t, n_t):
+    return mk_or(
+        mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
+            mk_eq(n_t, mk_app(Eq_f, _a_n0, _b_n0)),
+            mk_and(mk_app(is_term_const, _a_n0),
+                   mk_app(is_term_const, _b_n0)),
+        ))),
+        mk_or(
+            mk_exists(_x_n0, mk_and(
+                mk_eq(n_t, mk_app(Not_f, _x_n0)),
+                mk_app(f_t, _x_n0),
+            )),
+            mk_or(
+                mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
+                    mk_eq(n_t, mk_app(Imp_f, _a_n0, _b_n0)),
+                    mk_and(mk_app(f_t, _a_n0), mk_app(f_t, _b_n0)),
+                ))),
+                mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
+                    mk_eq(n_t, mk_app(Forall_f, _a_n0, _b_n0)),
+                    mk_app(f_t, _b_n0),
+                ))),
+            ),
+        ),
+    )
+
+
+_IS_FORM_F_DEF = define(
+    "_is_form_F",
+    _F_pred_ty,
+    mk_abs(_f_pred, mk_abs(_n_var_top, _is_form_body(_f_pred, _n_var_top))),
+)
+_IS_FORM_F = mk_const("_is_form_F", [])
+
+
+@proof
+def IS_FORM_MONO(p):
+    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
+                  ==> _is_form_F f n = _is_form_F g n."""
+    p.goal(
+        "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> "
+        "_is_form_F f n = _is_form_F g n",
+        types={"f": _pred_ty, "g": _pred_ty,
+               "n": nat0_ty, "k": nat0_ty},
+    )
+    p.fix("f g n")
+    p.assume("h: !k. nat0_lt k n ==> f k = g k")
+
+    h_th = p.fact("h")
+    eq_eq = REFL(p._parse(
+        "?a b. n = Eq_f a b /\\ is_term a /\\ is_term b"
+    ))
+    eq_not = mono_iff_unary_step(Not_f, NAT0_LT_NOT_F, h_th)
+    eq_imp = mono_iff_binary_step(
+        Imp_f, NAT0_LT_IMP_F_L, NAT0_LT_IMP_F_R, h_th
+    )
+    eq_forall = mono_iff_binary_right_step(
+        Forall_f, NAT0_LT_FORALL_F_R, h_th
+    )
+    body_eq = or_chain_collapse(
+        [eq_eq, eq_not, eq_imp, eq_forall]
+    )
+
+    p.thus(
+        "_is_form_F f n = _is_form_F g n"
+    ).by_unfold(body_eq, _IS_FORM_F_DEF)
+
+
+IS_FORM_DEF, _IS_FORM_REC_RAW = define_wf_lt(
+    "is_form",
+    _pred_ty,
+    _IS_FORM_F,
+    IS_FORM_MONO,
+)
+IS_FORM_REC = _unfold_rec_via_F_def(_IS_FORM_REC_RAW, _IS_FORM_F_DEF)
+
+
+IS_FORM_AT_EQ = derive_rec_eq(IS_FORM_REC, "Eq_f", ["t1", "t2"])
+IS_FORM_AT_NOT = derive_rec_eq(IS_FORM_REC, "Not_f", ["phi"])
+IS_FORM_AT_IMP = derive_rec_eq(IS_FORM_REC, "Imp_f", ["phi1", "phi2"])
+IS_FORM_AT_FORALL = derive_rec_eq(IS_FORM_REC, "Forall_f", ["v", "phi"])
+
+
+# ---------------------------------------------------------------------------
+# Stage 1 (b)/(c) -- free_in, substitute: TODO.
 # ---------------------------------------------------------------------------
 
 
@@ -1564,4 +1808,23 @@ if __name__ == "__main__":
     print("  REC at Var_t  :", pp_thm(_REC_VAR))
     print("  REC at Plus_t :", pp_thm(_REC_PLUS))
     print()
-    print("Stage 1 (b)+(c) -- is_term, is_form, substitute, free_in: TODO.")
+    print("Stage 1 (b) -- is_term predicate.")
+    print("    _IS_TERM_F_DEF :", pp_thm(_IS_TERM_F_DEF))
+    print("    IS_TERM_MONO   :", pp_thm(IS_TERM_MONO))
+    print("    IS_TERM_DEF    :", pp_thm(IS_TERM_DEF))
+    print("    IS_TERM_REC    :", pp_thm(IS_TERM_REC))
+    print("    IS_TERM_AT_SUCC  :", pp_thm(IS_TERM_AT_SUCC))
+    print("    IS_TERM_AT_VAR   :", pp_thm(IS_TERM_AT_VAR))
+    print("    IS_TERM_AT_PLUS  :", pp_thm(IS_TERM_AT_PLUS))
+    print("    IS_TERM_AT_TIMES :", pp_thm(IS_TERM_AT_TIMES))
+    print()
+    print("Stage 1 (b) -- is_form predicate.")
+    print("    IS_FORM_MONO   :", pp_thm(IS_FORM_MONO))
+    print("    IS_FORM_DEF    :", pp_thm(IS_FORM_DEF))
+    print("    IS_FORM_REC    :", pp_thm(IS_FORM_REC))
+    print("    IS_FORM_AT_EQ     :", pp_thm(IS_FORM_AT_EQ))
+    print("    IS_FORM_AT_NOT    :", pp_thm(IS_FORM_AT_NOT))
+    print("    IS_FORM_AT_IMP    :", pp_thm(IS_FORM_AT_IMP))
+    print("    IS_FORM_AT_FORALL :", pp_thm(IS_FORM_AT_FORALL))
+    print()
+    print("Stage 1 (b)/(c) -- free_in, substitute: TODO.")
