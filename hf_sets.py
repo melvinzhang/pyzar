@@ -51,34 +51,6 @@ If this turns out to bite us in ``godel_first.py``, reinstate the
 subtype later -- it is a syntactic refactor, not a proof rewrite.
 """
 
-# ---------------------------------------------------------------------------
-# Implementation roadmap (revised against godel_first.py)
-# ---------------------------------------------------------------------------
-#
-# Prerequisites: bits.py (DONE), nat0_order.py (DONE), parts of nat.py
-# (+, *, < on nat0; the additive/multiplicative parts already exist
-# from the rationals-construction work).
-#
-#   1. Stage 2: hf alias + In definition. ~10 lines, no proof work.
-#
-#   2. Stage 3: Empty, Insert, Singleton, Pair, Pair_ord, Union,
-#      plus the Foundation derived rule. ~150 lines.
-#      Pair_ord and Union are the only new substance; the rest are
-#      one-step renames of bits.py lemmas.
-#
-#   3. Stage 4: vN, vN_succ, vN_plus, vN_times, plus the eight
-#      Q-axiom lemmas. ~150 lines.
-#
-#   Total here: ~310 lines. (Down from ~350 in the original sketch
-#   thanks to dropping Pow / Repl / Sep / refutation-of-Infinity.)
-#
-# Comparison: the original sketch was ~500 lines aimed at full ZF
-# surface. The trim above sheds roughly 40% of that scope. If a
-# downstream consumer turns up wanting Pow / Repl / Sep, restore them
-# in a sibling ``hf_zf.py`` rather than enlarging this file -- the
-# Q-model construction stays cleanest when not entangled with the
-# generic constructors.
-#
 # Optional follow-ups (each strictly downstream of this file):
 #   * ``hf_zf.py``     -- Pow, Repl, Sep, refutation of Infinity.
 #                         Needed only if someone wants Landau Saetze
@@ -100,14 +72,31 @@ subtype later -- it is a syntactic refactor, not a proof rewrite.
 #
 # That's it. ``In`` is just ``bit`` under a friendlier name.
 #
-# Membership lemmas reduce to the bit lemmas already in bits.py:
+# Lemmas proved below (all by trivial unfold to the corresponding
+# bit-level theorem in bits.py):
 #
-#   |- ~In x Empty                                from BIT_AT_ZERO
-#   |- !x y. In x y ==> nat0_lt x y               from BIT_LT  (foundation core)
-#   |- !a b. (!x. In x a = In x b) ==> a = b      from BIT_EXTENSIONALITY
-#                                                 (extensionality, immediate)
+#   IN_AT  : |- !x y. In x y = bit x y
+#     Pointwise unfolding of IN_DEF; the workhorse rewrite that lets
+#     downstream proofs hop between ``In`` and ``bit`` freely.
 #
-# No proof needed beyond a definitional unfolding step. ~30 lines.
+#   IN_ZERO : |- !x. In x 0 = F
+#     From BIT_AT_ZERO. Stated against ``0:nat0`` rather than
+#     ``Empty`` because ``Empty`` is not introduced until Stage 3.
+#     The ``Empty`` form (NOT_IN_EMPTY) is restated there as a one-
+#     line rewrite via EMPTY_DEF.
+#
+#   IN_LT : |- !y x. In x y ==> nat0_lt x y
+#     The membership-decreases-numeric-value fact, from BIT_LT. This
+#     is the half of "Foundation as a derived rule" that godel_first.py
+#     would actually use if it ever needed it; the full Foundation
+#     statement is not reified -- see the Stage 3 deferral list.
+#
+#   IN_EXT : |- !a b. (!x. In x a = In x b) ==> a = b
+#     Extensionality, from BIT_EXTENSIONALITY: lift the inner equality
+#     to the bit level under the universal quantifier and apply.
+#
+# No proof work beyond definitional unfolding. ~50 lines including
+# the IN_AT scaffolding.
 
 
 from fusion import Var
@@ -212,87 +201,65 @@ def IN_EXT(p):
 # ---------------------------------------------------------------------------
 # Stage 3 -- HF constructors needed by godel_first.py.
 #
-# What godel_first.py uses from this stage:
-#   (a) Empty, Insert, Singleton, Pair        -- to encode Q syntax as
-#                                                 finite tuples (HF trees).
-#   (b) Pair_ord (ordered Kuratowski pair)    -- to encode (index, value)
-#                                                 entries inside a tuple.
-#   (c) Union                                 -- to define the von Neumann
-#                                                 successor in the model
-#                                                 of Q (Stage 6 below).
-#   (d) Foundation as a derived rule          -- to argue that the
-#                                                 minimum-bit element
-#                                                 of any nonempty HF set
-#                                                 has no member also in it.
-#                                                 Drops out of BIT_LT.
+# Scope is set by what godel_first.py Stage 1 actually consumes for
+# encoding Q syntax as HF trees: Empty, Insert, Singleton, Pair, and
+# the ordered Kuratowski pair Pair_ord (for (index, value) tuple entries).
+# Stage 4's Q-model construction sits on top of Insert (vN_succ x =
+# Insert x x) and does not need Union, Pow, Repl, Sep, or a derived
+# Foundation rule. Each is therefore deferred:
 #
-# What godel_first.py does NOT use, and is therefore deferred:
-#   * Pow, Repl, Sep  -- the general ZF constructors. Doable in HF
-#     (sketches in the original draft of this file); they are not
-#     called from anywhere in the godel_first chain. Punt to a future
-#     ``hf_zf.py`` if/when a consumer wants full ZF surface.
-#   * Refutation of Infinity. A nice theorem, also deferred -- the
-#     consistency-of-Q argument in godel_first.py uses the *positive*
-#     fact that HF models Q, not the negative fact that HF refutes
-#     Infinity.
+#   * Union  -- the original draft used it to define vN_succ as
+#               ``Union (Pair x (Singleton x))``. We pick the
+#               equivalent ``Insert x x`` form instead (one bit-flip,
+#               no recursion-over-bit-positions scaffolding).
+#   * Pow, Repl, Sep  -- general ZF constructors; defer to a future
+#               ``hf_zf.py`` if a consumer wants full ZF surface.
+#   * Foundation as a derived rule -- a one-liner via BIT_LT + nat0
+#               well-ordering, but unused by godel_first.py (the
+#               Q-consistency argument needs the positive fact that
+#               HF models Q, not Foundation).
+#   * Refutation of Infinity -- nice corollary, also unused here.
+#
+# What is proved below:
+#
+#   EMPTY      -- defn ``Empty := 0``;
+#                 NOT_IN_EMPTY: |- !x. ~In x Empty
+#                   (trivial unfold to BIT_AT_ZERO + EQF_ELIM).
+#
+#   INSERT     -- defn ``Insert i s := set_bit i s``;
+#                 IN_INSERT_SAME: |- !i s. In i (Insert i s) = T
+#                   (BIT_AT_SET_BIT_SAME);
+#                 IN_INSERT_DIFF: |- !i j s. ~(i = j) ==>
+#                                            In j (Insert i s) = In j s
+#                   (BIT_AT_SET_BIT_DIFF).
+#                 Both are direct renames of the bit-level lemmas.
+#
+#   SINGLETON  -- defn ``Singleton x := pow2 x`` (= Insert x Empty);
+#                 IN_SINGLETON: |- !x y. In y (Singleton x) = (y = x)
+#                   case-split on y = x via EXCLUDED_MIDDLE,
+#                   BIT_AT_POW2_SAME / BIT_AT_POW2_DIFF on each branch.
+#
+#   PAIR       -- defn ``Pair x y := Insert x (Singleton y)``;
+#                 IN_PAIR: |- !a b z. In z (Pair a b) = (z = a \/ z = b)
+#                   case-split on z = a; the diff branch reduces to
+#                   IN_SINGLETON on b, and we discharge the disjunction
+#                   shape on each side.
+#
+#   PAIR_ORD   -- defn ``Pair_ord x y := Pair (Singleton x) (Pair x y)``
+#                 (Kuratowski {{x}, {x, y}});
+#                 IN_PAIR_ORD: |- !a b z. In z (Pair_ord a b) =
+#                                 (z = Singleton a \/ z = Pair a b)
+#                   one rewrite via PAIR_ORD_AT + IN_PAIR.
+#
+#                 The ordered-pair injectivity theorem
+#                   |- Pair_ord a b = Pair_ord c d <=> (a = c /\ b = d)
+#                 is *not* proved here -- godel_first.py Stage 1 gets
+#                 the injectivity it needs from bit-extensionality at
+#                 the nat0 level, never from the structural form. The
+#                 standard ~80-line case-analysis proof is left as a
+#                 TODO and recorded in the comment immediately preceding
+#                 the deferral marker further down.
 # ---------------------------------------------------------------------------
-
-# EMPTY  -- numeric 0.
-#   defn:  Empty := 0
-#   thm:   |- !x. ~In x Empty
-#   proof: BIT_AT_ZERO.
-
-# INSERT i s -- add element i.
-#   defn:  Insert i s := set_bit i s
-#   thms:  |- !i s. In i (Insert i s) = T                  (BIT_AT_SET_BIT_SAME)
-#          |- !i j s. ~(i = j) ==> In j (Insert i s) = In j s
-#                                                          (BIT_AT_SET_BIT_DIFF)
-#   note:  no proof work -- both lemmas are direct renames.
-
-# SINGLETON x -- {x}.
-#   defn:  Singleton x := Insert x Empty   = pow2 x
-#   thm:   |- !x y. In y (Singleton x) = (y = x)
-#   proof: BIT_AT_POW2_SAME / BIT_AT_POW2_DIFF + EXCLUDED_MIDDLE.
-#          ~10 lines.
-
-# PAIR x y -- {x, y}  (unordered).
-#   defn:  Pair x y := Insert x (Singleton y)
-#   thm:   |- !a b z. In z (Pair a b) = (z = a \\/ z = b)   (PAIRING)
-#   proof: case-split on z=a; INSERT lemmas + SINGLETON. ~15 lines.
-
-# PAIR_ORD x y -- Kuratowski (x, y) := {{x}, {x, y}}.
-#   defn:  Pair_ord x y := Pair (Singleton x) (Pair x y)
-#   thm:   |- !a b c d. Pair_ord a b = Pair_ord c d
-#                       <=> (a = c /\\ b = d)              (ordered-pair char.)
-#   proof: forward direction by EXTENSIONALITY: equal sets share their
-#          singleton coordinate, hence a = c; the {a,b} = {c,d} clause
-#          then pins b = d once a = c. Reverse direction immediate.
-#          ~30 lines, the only mildly substantive lemma in Stage 3.
-
-# UNION y -- bitwise OR of bits of members of y.
-#   defn:  Union y := OR_below (SUC0 y)
-#                              (\i. COND (bit i y) (rep_member i) 0)
-#          where rep_member i = i  (the HF member at bit position i).
-#          Concretely: bit x (Union y) = T  iff
-#                      ?i. bit i y /\\ bit x i.
-#          Implementation: recursion on a numeric "scan bound";
-#          BIT_LT gives ``~(bit i y) for i >= y``, so ``SUC0 y`` is a
-#          safe upper bound.
-#   thm:   |- !y x. In x (Union y) = ?z. In x z /\\ In z y     (UNION)
-#   proof: bit-extensionality + the OR_below characterisation lemma.
-#          ~50 lines including the OR_below scaffolding.
-
-# FOUNDATION (as a derived rule, not a constructor).
-#   thm:   |- !a. (?x. In x a) ==>
-#                 ?x. In x a /\\ ~(?y. In y a /\\ In y x)
-#   proof: ``In`` strictly decreases the numeric value (BIT_LT).
-#          So given any non-empty ``a``, the numerically-smallest
-#          element x of ``In . a`` (well-ordering of nat0) has
-#          no member also in ``a`` -- any such y would be smaller
-#          still, contradicting minimality.
-#          ~25 lines once nat0 well-ordering is invoked.
-#   note:  this is the slickest payoff of the encoding -- foundation
-#          becomes the well-ordering of the natural numbers.
 
 from bits import (
     BIT_AT_SET_BIT_SAME,
@@ -571,7 +538,19 @@ def IN_PAIR_ORD(p):
 # godel_first.py: the model construction that discharges the
 # consistency assumption.
 #
-# Define the von Neumann numerals as a HOL function vN : nat0 -> hf:
+# We split Stage 4 into two pieces:
+#
+#   (a) The canonical von Neumann embedding vN : nat0 -> hf, with
+#       its successor and the injectivity / nonzeroness lemmas. This
+#       is the "right" embedding of N into HF and is independently
+#       useful for syntax-encoding work in godel_first.py Stage 1
+#       (every numeral has a canonical HF representation).
+#
+#   (b) The Q-model interpretation. Carrier = hf = nat0; the symbols
+#       are 0 ↦ Empty, S ↦ SUC0, + ↦ n0plus, * ↦ n0times. Q1-Q7
+#       reduce to Peano facts on nat0. See the design note below.
+#
+# ---------- (a) The canonical vN embedding ----------
 #
 #   vN 0       := Empty                                          ( = 0 )
 #   vN (S n)   := vN_succ (vN n)
@@ -583,97 +562,76 @@ def IN_PAIR_ORD(p):
 #                                  -- agree because Singleton x = {x}
 #                                  -- and Union {x, {x}} = x ∪ {x}.
 #
-# We pick the ``Insert x x`` form to keep proofs short:
+# Lemmas (all proved below):
 #
-#   thm:   |- !n. vN_succ (vN n) = set_bit (vN n) (vN n)
-#                                                    (definition unfold)
-#
-# The four lemmas godel_first.py Stage 6 actually consumes, with
-# their proof sketches:
-#
-#   VN_SUCC_NEQ_ZERO  :  |- !n. ~(vN_succ (vN n) = Empty)
-#     Proof: vN_succ x = set_bit x x, which has bit x set
-#            (BIT_AT_SET_BIT_SAME), but bit x 0 = F (BIT_AT_ZERO).
-#            So vN_succ x != 0 = Empty.    ~10 lines.
+#   VN_SUCC_NEQ_ZERO  :  |- !x. ~(vN_succ x = Empty)
+#     Universal over hf, not just over the vN image. ``vN_succ x =
+#     Insert x x`` has bit x set (IN_INSERT_SAME) whereas Empty has
+#     none (NOT_IN_EMPTY); congruence on the assumed equation
+#     contradicts NOT_IN_EMPTY.    ~8 lines.
 #
 #   VN_SUCC_INJ        :  |- !m n. vN_succ m = vN_succ n ==> m = n
-#     Proof: from set_bit m m = set_bit n n, take HALF on both sides:
-#            vN_succ x peels exactly one bit at position x, so HALF
-#            recovers x in each case... actually cleaner: bit x of
-#            set_bit m m is "T iff x = m \\/ bit x m". The maximum
-#            bit position of set_bit m m is therefore max(m, max-bit(m))
-#            = m (because BIT_LT gives every set bit of m below m,
-#            but bit m itself is set). So m = n via the maximum-bit
-#            characterisation. ~40 lines, the bulk being the
-#            "maximum bit position" lemma. (Alternative shortcut:
-#            argue via cardinality / bit-extensionality directly;
-#            comparable length.)
-#
-#   VN_PRED            :  |- !x. ~(x = Empty) ==> ?y. x = vN_succ y
-#     Stated WITHIN the image of vN: i.e. only required when x is
-#     itself a vN numeral. This is what Q3 needs in the model.
-#     Proof: case-split on x = vN 0 (impossible by hypothesis) vs
-#            x = vN (S k); the latter directly gives y := vN k.
-#            ~15 lines plus a vN-image case-analysis lemma
-#            (provable by cases_on EXCLUDED_MIDDLE on x = vN 0,
-#            then nat0 induction extracting the predecessor).
+#     Proof: case-split on m = n. In the negative branch,
+#     BIT_AT_SET_BIT_SAME at i = m gives ``bit m (set_bit m m) = T``;
+#     BIT_AT_SET_BIT_DIFF at j = m, i = n collapses
+#     ``bit m (set_bit n n)`` to ``bit m n``; bit-equality from the
+#     hypothesis then forces ``bit m n = T``, whence BIT_LT gives
+#     nat0_lt m n. Symmetric argument gives nat0_lt n m, contradicting
+#     NAT0_LT_ASYM (lifted from num via _SATZ_9_EXCL_13).    ~35 lines.
 #
 #   VN_INJ             :  |- !m n. vN m = vN n ==> m = n
-#     The embedding is injective. Used to bridge HOL equality on
-#     numerals and Q-internal equality. Proof: nat0 induction on
-#     m with case-split on n; VN_SUCC_NEQ_ZERO + VN_SUCC_INJ.
-#     ~25 lines.
+#     Doubly-nested nat0 induction: the off-diagonal cases collapse
+#     to ``vN_succ y = Empty`` and apply VN_SUCC_NEQ_ZERO; the diagonal
+#     step peels successors via VN_SUCC_INJ + outer IH.    ~25 lines.
 #
-# Arithmetic on vN-numerals (Q4-Q7):
+#   VN_PRED            :  |- !n. ~(vN n = Empty) ==> ?y. vN n = vN_succ y
+#     Image-restricted predecessor. The universal-over-hf form
+#     ``!x. ~(x = Empty) ==> ?y. x = vN_succ y`` is *not* provable:
+#     vN_succ is not surjective on hf (e.g. {1} = 2 has no vN-
+#     predecessor since vN_succ y = set_bit y y ≠ 2 for every y).
+#     One-step nat0 induction.    ~10 lines.
 #
-#   defn:  vN_plus  x y := vN ((rep x) + (rep y))      via VN_INJ
-#          vN_times x y := vN ((rep x) * (rep y))
-#     where ``rep`` is the (HOL-level, total but only canonical on
-#     the vN image) inverse of vN. We do NOT need ``rep`` to be
-#     definable in the object language Q -- it is a HOL convenience
-#     used to *define* vN_plus / vN_times as functions on hf, then
-#     the Q-axiom proofs reduce to nat0-arithmetic identities.
+# ---------- (b) The Q-model interpretation ----------
 #
-#   thm:   VN_PLUS_ZERO   : |- !x. vN_plus x (vN 0)     = x
-#          VN_PLUS_SUCC   : |- !x y. vN_plus x (vN_succ y) = vN_succ (vN_plus x y)
-#          VN_TIMES_ZERO  : |- !x. vN_times x (vN 0)    = vN 0
-#          VN_TIMES_SUCC  : |- !x y. vN_times x (vN_succ y) = vN_plus (vN_times x y) x
-#     Each is one nat0-arithmetic line plus VN_INJ to translate.
-#     ~10 lines apiece, ~50 total.
+# Design note (deviation from the original sketch). The original sketch
+# proposed interpreting Q's S as ``vN_succ`` and defining
+# ``vN_plus x y := vN ((rep x) + (rep y))`` via a partial inverse
+# ``rep`` of vN. Two problems with that path:
 #
-# Bundle: Q1 -> VN_SUCC_NEQ_ZERO; Q2 -> VN_SUCC_INJ; Q3 -> VN_PRED;
-#         Q4-Q7 -> VN_PLUS_*, VN_TIMES_*. Together they give the
-#         "HF |= Q" theorem godel_first.py Stage 6 imports.
+#   1. Q4's universal closure ``!x. plus(x, 0) = x`` becomes
+#      ``vN(rep x) = x``, which holds only on the image of vN.
+#   2. Q5's universal closure refers to ``vN_succ y`` for arbitrary
+#      y:hf, so vN_plus must be definable for all y; outside the image
+#      of vN_succ (which is most of hf), satisfying Q5 needs a
+#      well-founded predecessor extraction (SELECT + recursion).
 #
-# Total Stage 4: ~150 lines (definitions + 4 + 4 named lemmas).
-
-
-
-# ---------------------------------------------------------------------------
-# Stage 5 -- bi-interpretation, briefly.
-# ---------------------------------------------------------------------------
+# Both go away by picking SUC0 instead of vN_succ as the model's
+# successor. The carrier is unchanged (hf = nat0), so HF still "supplies
+# the model" in the godel_first.py Stage 6 sense, and Q4-Q7 become
+# direct Peano equations:
 #
-# Ackermann's theorem (1937): PA and ZF - Infinity prove the same
-# arithmetic sentences. The forward translation is the encoding above
-# (every set is a natural number); the reverse is "the natural
-# numbers are the von Neumann ordinals" -- which is what Stage 4
-# explicitly constructs.
+#   defn:  n0plus  : nat0 -> nat0 -> nat0   (Peano + on nat0)
+#          n0times : nat0 -> nat0 -> nat0   (Peano * on nat0)
+#     defined via define_recursive_0 by recursion on the second arg.
 #
-# In pyzar this means: any theorem of HF (Stages 1-4 here) is an
-# arithmetic theorem of nat0, and conversely any arithmetic theorem
-# transports to an HF statement via vN. We do NOT mechanise the
-# bi-interpretation as an internal proof translation -- we only need
-# its semantic upshot (Stage 4 above). godel_first.py uses neither
-# direction explicitly; the bi-interpretation is conceptual scaffolding.
-
-
-# ---------------------------------------------------------------------------
-# Stage 4 -- a model of Q inside HF (start).
-# ---------------------------------------------------------------------------
+#   thm:   Q1_HF :  |- !n.   ~(SUC0 n = Empty)
+#          Q2_HF :  |- !m n. SUC0 m = SUC0 n ==> m = n
+#          Q3_HF :  |- !x.   ~(x = Empty) ==> ?y. x = SUC0 y
+#          Q4_HF :  |- !x.   n0plus x Empty = x
+#          Q5_HF :  |- !x y. n0plus x (SUC0 y) = SUC0 (n0plus x y)
+#          Q6_HF :  |- !x.   n0times x Empty = Empty
+#          Q7_HF :  |- !x y. n0times x (SUC0 y) = n0plus (n0times x y) x
 #
-# vN_succ x := Insert x x   ( = set_bit x x ; the von Neumann successor
-# x ∪ {x} expressed at the bit level ).
-# ---------------------------------------------------------------------------
+#     Q1 reduces to AXIOM_3_0 modulo EMPTY_DEF; Q2 is AXIOM_4_0
+#     verbatim; Q3 is one nat0 induction; Q4-Q7 are the BASE/STEP
+#     theorems returned by define_recursive_0 modulo EMPTY_DEF.
+#     ~50 lines total for the seven lemmas + the two recursive
+#     definitions.
+#
+# The vN/vN_succ block above remains in the file because godel_first.py
+# Stage 1 wants the canonical vN embedding for syntax encoding (each
+# numeral that appears inside a Q-formula gets a definite HF code via
+# vN). It is *not* used as the Q-model's successor.
 
 VN_SUCC_DEF = define(
     "vN_succ",
@@ -1051,6 +1009,22 @@ def Q7_HF(p):
         [N0TIMES_STEP]
     )
 
+# ---------------------------------------------------------------------------
+# bi-interpretation, briefly.
+# ---------------------------------------------------------------------------
+#
+# Ackermann's theorem (1937): PA and ZF - Infinity prove the same
+# arithmetic sentences. The forward translation is the encoding above
+# (every set is a natural number); the reverse is "the natural
+# numbers are the von Neumann ordinals" -- which is what Stage 4
+# explicitly constructs.
+#
+# In pyzar this means: any theorem of HF (Stages 1-4 here) is an
+# arithmetic theorem of nat0, and conversely any arithmetic theorem
+# transports to an HF statement via vN. We do NOT mechanise the
+# bi-interpretation as an internal proof translation -- we only need
+# its semantic upshot (Stage 4 above). godel_first.py uses neither
+# direction explicitly; the bi-interpretation is conceptual scaffolding.
 
 if __name__ == "__main__":
     from parser import pp_thm
