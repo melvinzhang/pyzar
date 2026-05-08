@@ -2537,21 +2537,36 @@ class _Have:
         with the substituted body discharged automatically.
 
         Each top-level ``/\\`` conjunct of the substituted body is proved
-        via ``REWRITE_PROVE(rules + active simp set)``; reflexive leaves
-        (``t = t``) need no rules at all. ``witnesses`` is a list/tuple of
-        terms (strings parsed in the current scope, or kernel terms).
+        in this order:
+          1. an alpha-matching user ``rule`` (raw or via ``simp_match``,
+             so folded/unfolded forms align) is used as-is -- this covers
+             non-equation conjuncts like membership claims, predicate
+             applications, or named lemma facts;
+          2. ``REWRITE_PROVE(rules + active simp set, conjunct)`` --
+             handles equation conjuncts including reflexive leaves
+             (``t = t``), which need no rules at all.
+
+        ``witnesses`` is a list/tuple of terms (strings parsed in the
+        current scope, or kernel terms).
         """
         p = self.p
         target = self.term
         if not isinstance(witnesses, (list, tuple)):
             witnesses = [witnesses]
         witnesses_t = [p._parse(w) if isinstance(w, str) else w for w in witnesses]
-        rules_thms = [p.coerce(r) for r in rules] + p._active_simp_rules()
+        user_rules = [p.coerce(r) for r in rules]
+        rules_thms = user_rules + p._active_simp_rules()
 
         def prove(tm):
             if is_conj(tm):
                 lhs, rhs = dest_conj(tm)
                 return CONJ(prove(lhs), prove(rhs))
+            for r_th in user_rules:
+                if aconv(tm, r_th._concl):
+                    return r_th
+                aligned = p.simp_match(tm, r_th)
+                if aligned is not None:
+                    return aligned
             return REWRITE_PROVE(rules_thms, tm)
 
         th = p._make_existential_multi(target, witnesses_t, prove)

@@ -1604,50 +1604,13 @@ def VALID_STEP_PRESERVES(p):
             p.have(
                 "mem_q2_f2: mem_l q2 f2"
             ).by("preserve", "f2", "mem_q1_f2")
-            # Build the existential manually. The in-scope ``f1``/``f2``
-            # are SELECT-derived witness terms (from the case auto-intro);
-            # we abstract over fresh kernel ``Var``s and EXISTS-substitute
-            # the SELECT terms back at the witness slot.
-            body_conj_mp = CONJ(
-                p.fact("mem_q2_f1"),
-                CONJ(p.fact("mem_q2_f2"), p.fact("mp_th")),
-            )
-            in_f1 = p._parse("f1")
-            in_f2 = p._parse("f2")
-            f1_v = Var("F1_b", nat0_ty)
-            f2_v = Var("F2_b", nat0_ty)
-            q2_t = p._parse("q2")
-            hd_t = p._parse("hd")
-            # Inner pred (only f2 abstracted, f1 still = in_f1).
-            inner_body_for_f2 = mk_and(
-                mk_app(mem_l, q2_t, in_f1),
-                mk_and(
-                    mk_app(mem_l, q2_t, f2_v),
-                    mk_app(is_mp, in_f1, f2_v, hd_t),
-                ),
-            )
-            inner_pred_f2 = mk_abs(f2_v, inner_body_for_f2)
-            inner_th_mp = EXISTS(
-                inner_pred_f2, in_f2, body_conj_mp
-            )
-            # Outer pred (over fresh f1).
-            outer_body_for_f1_f2 = mk_and(
-                mk_app(mem_l, q2_t, f1_v),
-                mk_and(
-                    mk_app(mem_l, q2_t, f2_v),
-                    mk_app(is_mp, f1_v, f2_v, hd_t),
-                ),
-            )
-            outer_pred_f1 = mk_abs(
-                f1_v, mk_exists(f2_v, outer_body_for_f1_f2)
-            )
-            new_mp_th = EXISTS(
-                outer_pred_f1, in_f1, inner_th_mp
-            )
             p.have(
                 "new_mp: ?f1 f2. mem_l q2 f1 /\\ mem_l q2 f2 "
                 "/\\ is_mp f1 f2 hd"
-            ).by_thm(new_mp_th)
+            ).by_exists(
+                ["f1", "f2"],
+                "mem_q2_f1", "mem_q2_f2", "mp_th",
+            )
             p.have(f"v2d: {vd2_str}").by_disj("new_mp")
             p.thus("valid_step q2 hd").by_eq_mp(
                 SYM(valid_at_2), "v2d"
@@ -1659,24 +1622,9 @@ def VALID_STEP_PRESERVES(p):
             p.have(
                 "mem_q2_f1: mem_l q2 f1"
             ).by("preserve", "f1", "mem_q1_f1")
-            body_conj_gen = CONJ(
-                p.fact("mem_q2_f1"), p.fact("gen_th")
-            )
-            in_f1 = p._parse("f1")
-            f1_v = Var("F1_b", nat0_ty)
-            q2_t = p._parse("q2")
-            hd_t = p._parse("hd")
-            gen_inner_body = mk_and(
-                mk_app(mem_l, q2_t, f1_v),
-                mk_app(is_gen, f1_v, hd_t),
-            )
-            gen_pred = mk_abs(f1_v, gen_inner_body)
-            new_gen_th = EXISTS(
-                gen_pred, in_f1, body_conj_gen
-            )
             p.have(
                 "new_gen: ?f1. mem_l q2 f1 /\\ is_gen f1 hd"
-            ).by_thm(new_gen_th)
+            ).by_exists(["f1"], "mem_q2_f1", "gen_th")
             p.have(f"v2d: {vd2_str}").by_disj("new_gen")
             p.thus("valid_step q2 hd").by_eq_mp(
                 SYM(valid_at_2), "v2d"
@@ -2344,24 +2292,10 @@ def GEN_HAS_PROOF(p):
     valid_at = SPECL(
         [p._parse("p1"), p._parse("Forall_f x f")], VALID_STEP_AT
     )
-    # Build inner gen existential: ?f1. mem_l p1 f1 /\ is_gen f1 (Forall_f x f).
-    in_f = p._parse("f")
-    f1_v = Var("F1_b", nat0_ty)
-    p1_t = p._parse("p1")
-    fa_t = p._parse("Forall_f x f")
-    gen_inner_body = mk_and(
-        mk_app(mem_l, p1_t, f1_v),
-        mk_app(is_gen, f1_v, fa_t),
-    )
-    gen_pred = mk_abs(f1_v, gen_inner_body)
-    gen_existential = EXISTS(
-        gen_pred, in_f,
-        CONJ(p.fact("mem_p1_f"), p.fact("gen_th")),
-    )
     p.have(
         "gen_ex: ?f1. mem_l p1 f1 /\\ "
         "is_gen f1 (Forall_f x f)"
-    ).by_thm(gen_existential)
+    ).by_exists(["f"], "mem_p1_f", "gen_th")
     vd_str = (
         "is_axiom (Forall_f x f) \\/ "
         "(?f1 f2. mem_l p1 f1 /\\ mem_l p1 f2 "
@@ -2382,9 +2316,9 @@ def GEN_HAS_PROOF(p):
         "\\/ ?h_inner. Proof_Q p1 h_inner"
     ).by_disj("tail_ex")
 
+    fa_t = p._parse("Forall_f x f")
     target_eq = SPECL(
-        [p._parse("Forall_f x f"), p1_t,
-         p._parse("Forall_f x f")],
+        [fa_t, p._parse("p1"), fa_t],
         PROOF_Q_AT_CONS,
     )
     p.have(
@@ -2467,41 +2401,16 @@ def MP_HAS_PROOF(p):
         "is_mp_th: is_mp f (Imp_f f g) g"
     ).by_eq_mp(SYM(is_mp_at), REFL(p._parse("Imp_f f g")))
 
-    # Build MP existential: ?f1 f2. mem_l (app) f1 /\ mem_l (app) f2 /\
-    #                                is_mp f1 f2 g.
-    body_conj_mp = CONJ(
-        p.fact("mem_app_f"),
-        CONJ(p.fact("mem_app_imp"), p.fact("is_mp_th")),
-    )
-    in_f = p._parse("f")
-    in_imp = p._parse("Imp_f f g")
-    f1_v = Var("F1_b", nat0_ty)
-    f2_v = Var("F2_b", nat0_ty)
-    app_t = p._parse("append_l p2 p1")
-    g_t = p._parse("g")
-    inner_body_for_f2 = mk_and(
-        mk_app(mem_l, app_t, in_f),
-        mk_and(
-            mk_app(mem_l, app_t, f2_v),
-            mk_app(is_mp, in_f, f2_v, g_t),
-        ),
-    )
-    inner_pred_f2 = mk_abs(f2_v, inner_body_for_f2)
-    inner_th_mp = EXISTS(inner_pred_f2, in_imp, body_conj_mp)
-    outer_body = mk_and(
-        mk_app(mem_l, app_t, f1_v),
-        mk_and(
-            mk_app(mem_l, app_t, f2_v),
-            mk_app(is_mp, f1_v, f2_v, g_t),
-        ),
-    )
-    outer_pred = mk_abs(f1_v, mk_exists(f2_v, outer_body))
-    mp_existential = EXISTS(outer_pred, in_f, inner_th_mp)
     p.have(
         "mp_ex: ?f1 f2. mem_l (append_l p2 p1) f1 "
         "/\\ mem_l (append_l p2 p1) f2 "
         "/\\ is_mp f1 f2 g"
-    ).by_thm(mp_existential)
+    ).by_exists(
+        ["f", "Imp_f f g"],
+        "mem_app_f", "mem_app_imp", "is_mp_th",
+    )
+    app_t = p._parse("append_l p2 p1")
+    g_t = p._parse("g")
     valid_at = SPECL(
         [app_t, g_t], VALID_STEP_AT
     )

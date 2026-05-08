@@ -192,7 +192,7 @@ conclusion is fixed by the args, no need to repeat it in the spec).
 | `.by_iff(fwd, rev)`                                 | iff-intro: combine `L ==> R` and `R ==> L` facts into the bool equality `L = R` (order-agnostic) |
 | `.by_fold(ref)`                                     | inverse of an unfolder: fold `ref` back into a registered relation     |
 | `.by_witness(witness, ref)`                         | `EXISTS` for an existential have-term                                  |
-| `.by_exists(witnesses, *rules)`                     | introduce `?v1...vn. body` at concrete witnesses; each `/\` conjunct of the substituted body is auto-discharged via `REWRITE_PROVE(rules + active simp set)` (reflexive bodies need no rules) |
+| `.by_exists(witnesses, *rules)`                     | introduce `?v1...vn. body` at concrete witnesses; each `/\` conjunct of the substituted body is auto-discharged by alpha-matching against a supplied rule (raw or via `simp_match`) and using it as-is, falling back to `REWRITE_PROVE(rules + active simp set)` for equation conjuncts (reflexive bodies need no rules at all) |
 | `.by_select_def(def_th, *args, from_)`              | read the body of a SELECT-style definition `f = \x1...xk. @v. P v` at concrete `args` from an existence fact `from_: ?v. P v` (one `CHOOSE_WITNESS` + `SYM(UNFOLD)` rewrite) |
 | `.by_disj(ref)`                                     | `DISJ1`/`DISJ2`-chain a fact into a disjunction goal                   |
 | `.by_ac(op, assoc, comm)`                           | `AC_PROVE` shortcut                                                    |
