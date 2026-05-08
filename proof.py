@@ -44,6 +44,7 @@ from fusion import (
     ABS,
     REFL,
     DEDUCT_ANTISYM_RULE,
+    new_axiom,
     vfree_in,
     vsubst,
     variant,
@@ -646,6 +647,7 @@ class Proof:
         self._frames = [_Frame(kind=FrameKind.ROOT)]
         self._facts = {}  # label -> thm
         self._anon = 0
+        self._sorries = []  # goal terms closed via p.sorry() (cheat-stubs)
 
     @property
     def _cur(self):
@@ -1827,6 +1829,27 @@ class Proof:
         if fr.goal is None:
             raise HolError("absurd: no current goal")
         return _Absurd(self, fr.goal)
+
+    def sorry(self):
+        """Cheat-close the current frame by posting ``new_axiom(goal)``.
+
+        Stub for incremental proof development: closes the frame so
+        the surrounding structure can be exercised while flagging the
+        unproved subgoal. Each call registers a fresh axiom in the
+        kernel's axiom list; the ``@proof`` decorator emits a warning
+        at proof end naming each sorried goal.
+
+        Use exactly where any other frame-closing call would go (i.e.
+        instead of ``p.thus(...).by_*``, ``p.absurd().by(...)``, ...).
+        """
+        fr = self._cur
+        if fr.goal is None:
+            raise HolError("sorry: no current goal")
+        if fr.result is not None:
+            raise HolError("sorry: frame already has a result")
+        sorry_th = new_axiom(fr.goal)
+        self._sorries.append(fr.goal)
+        fr.result = sorry_th
 
     def _auto_choose_for_case_leaf(self, leaf, user_term):
         """If ``leaf`` is ``?v. body``, derive a witness inside the
@@ -3131,6 +3154,16 @@ def proof(fn):
         raise HolError(
             f"proof({fn.__name__}): no result -- did you forget thus or close a block?"
         )
+    if p._sorries:
+        import sys
+        from parser import pp
+        print(
+            f"WARNING: proof({fn.__name__}) used p.sorry() {len(p._sorries)}x; "
+            f"closed via new_axiom on:",
+            file=sys.stderr,
+        )
+        for goal in p._sorries:
+            print(f"  - {pp(goal)}", file=sys.stderr)
     return p._close_frame(fr, fr.result)
 
 

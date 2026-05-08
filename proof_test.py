@@ -626,6 +626,52 @@ def main():
     else:
         raise AssertionError("expected HolError: calc final RHS doesn't match goal")
 
+    # ---- sorry: cheat-close, frame discharge, axiom registration -------
+    import io
+    import contextlib
+    from fusion import axioms as get_axioms
+
+    axioms_before = len(get_axioms())
+
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        @proof
+        def SORRY_DEMO(p):
+            p.goal("!x. (x = 1) ==> x + 1 = 1 + x")
+            p.fix("x")
+            p.assume("h: x = 1")  # exercises hyp discharge
+            p.sorry()
+
+    # Conclusion is the original goal (post fix/assume discharge).
+    expected = parse("!x. (x = 1) ==> x + 1 = 1 + x")
+    assert aconv(SORRY_DEMO._concl, expected), (
+        f"sorry result mismatch:\n  got: {pp(SORRY_DEMO._concl)}\n"
+        f"  want: {pp(expected)}"
+    )
+    # An axiom was posted; warning was emitted.
+    assert len(get_axioms()) == axioms_before + 1
+    msg = stderr.getvalue()
+    assert "sorry()" in msg and "SORRY_DEMO" in msg, msg
+
+    # ---- sorry: errors when no goal or already-closed frame ------------
+    p_no_goal = Proof()
+    try:
+        p_no_goal.sorry()
+    except HolError as e:
+        assert "no current goal" in str(e)
+    else:
+        raise AssertionError("expected HolError: sorry without goal")
+
+    p_already = Proof()
+    p_already.goal("1 = 1")
+    p_already.thus("1 = 1").by_thm(REFL(parse("1")))
+    try:
+        p_already.sorry()
+    except HolError as e:
+        assert "already has a result" in str(e)
+    else:
+        raise AssertionError("expected HolError: sorry on closed frame")
+
     print("proof.py self-tests passed.")
 
 
