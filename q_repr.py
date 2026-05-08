@@ -90,23 +90,6 @@
 #   thm:   |- !n. Prov_Q n <=>
 #                Prov_Q (godelnum (Prov_Q_internal (numeral n)))
 #
-# ------------------------------------------------------------------
-# This file (Stage 3A): foundations.
-# ------------------------------------------------------------------
-#
-#   * ``numeral`` defined via ``define_unary_0``.
-#   * ``IS_TERM_NUMERAL``: every numeral is a well-formed Q term.
-#   * ``represents_pred``: representability of a unary nat0-predicate.
-#
-# Stage 3B (deferred): list-based ``Proof_Q``, the Prov_Q ↔
-# ?p. Proof_Q p n equivalence, representability of ``substitute``.
-#
-# Stage 3C (deferred): ``Prov_Q_internal`` and the headline
-# representability theorem.
-
-# ---------------------------------------------------------------------------
-# Imports.
-# ---------------------------------------------------------------------------
 
 from fusion import Var
 from basics import mk_const, mk_app, mk_abs, rand, rator
@@ -2748,89 +2731,6 @@ def FREE_IN_PROV_Q_INTERNAL(p):
         "!v. free_in Prov_Q_internal v = (v = var_x)",
     )
     p.sorry()
-
-
-# ---------------------------------------------------------------------------
-# Roadmap -- Stage 3B and 3C.
-# ---------------------------------------------------------------------------
-#
-# Stage 3B (proof witnesses inside HOL):
-#
-#   * Define ``mem_l`` (list membership) via ``define_wf_lt``         [DONE]
-#     using ``NAT0_LT_CONS_L_TAIL`` from ``q_proof``. The MONO
-#     obligation reuses ``mono_iff_eq_or_pw_step`` (q_syntax) at
-#     ``cons_l`` to peel the existential under the cons-witness.
-#     ``MEM_L_AT_NIL`` discharged via ``CONS_L_NEQ_NIL``;
-#     ``MEM_L_AT_CONS`` via ``CONS_L_INJ``.
-#
-#   * Define ``valid_step``                                          [DONE]
-#     non-recursive disjunction over is_axiom, an MP existential,
-#     and a Gen existential (each consuming ``mem_l t _``).
-#
-#   * Define ``Proof_Q : nat0 -> nat0 -> bool`` via ``define_wf_lt``  [DONE]
-#     with body
-#       ?h t. p = cons_l h t /\ h = n /\ valid_step t h
-#             /\ (t = nil_l \/ ?h'. Proof_Q t h').
-#     ``PROOF_Q_AT_NIL`` discharges via ``CONS_L_NEQ_NIL``;
-#     ``PROOF_Q_AT_CONS`` via ``CONS_L_INJ`` + cases-split on the
-#     inner disjunction (the rewrite under the inner ``?h_inner``
-#     binder doesn't fire on hyp-laden rules, so each disjunct case
-#     handles its rewrite at the top level).
-#
-#   * Prove the equivalence with the impredicative ``Prov_Q``:    [DONE]
-#         |- !n. Prov_Q n = ?p. Proof_Q p n.
-#     Forward direction (?p ==> Prov_Q): ``PROV_Q_OF_PROOF_Q``,
-#     proved by strong induction on the proof list ``p`` -- the
-#     stronger statement ``mem_l p f ==> ?h. Proof_Q p h ==>
-#     Prov_Q f`` factors out the membership-tracking needed to
-#     handle MP/Gen subterms inside the tail.
-#     Backward direction (Prov_Q ==> ?p): instantiate
-#     ``P := \n. ?p. Proof_Q p n`` in ``PROV_Q_AT``; the three
-#     closure clauses are ``AXIOM_HAS_PROOF`` (witness
-#     ``cons_l m nil_l``), ``GEN_HAS_PROOF`` (witness
-#     ``cons_l (Forall_f x f) p1``), and ``MP_HAS_PROOF`` (witness
-#     ``cons_l g (append_l p2 p1)``, requiring ``append_l``,
-#     ``MEM_L_APPEND_PRESERVES``, ``VALID_STEP_PRESERVES``, and
-#     ``PROOF_Q_APPEND`` to combine the two given proof lists).
-#
-#   * Representability of ``substitute``: Sigma_1 formula        [SORRY]
-#     ``substitute_internal`` such that
-#         |- !F t v. Prov_Q (substitute_internal_eq F t v
-#                                                  (numeral
-#                                                   (substitute F t v))).
-#     ``SUBSTITUTE_REPRESENTS`` posted via ``p.sorry()`` against an
-#     opaque ``substitute_internal``; see Stage 3C(a) section for the
-#     full deferred construction (Cantor pairing or Goedel beta + 7-case
-#     induction on F, prerequisites: arithmetic representability of
-#     ``add``/``times``/``mod`` in Q).
-#
-# Stage 3D (representability of provability):                       [SORRY]
-#
-#   * Define ``Proof_Q_internal``: a Q-formula in two free variables
-#     ``var_x``, ``var_y`` such that ``substitute_2 Proof_Q_internal
-#     (numeral p) (numeral n) var_x var_y`` is Q-provable iff
-#     ``Proof_Q p n`` holds. Constructed bottom-up from
-#     ``substitute_internal``, ``is_axiom_internal``, ``is_mp_internal``,
-#     ``is_gen_internal`` -- each itself a representable predicate.
-#
-#   * Define ``Prov_Q_internal n := ?_internal var_y. Proof_Q_internal``
-#     where ``?_internal`` is encoded as ``~!y. ~``.
-#
-#   * Headline theorem (``PROV_Q_REPRESENTS``):
-#         |- !n. Prov_Q n <=>
-#                 Prov_Q (substitute Prov_Q_internal (numeral n) var_x).
-#     Forward: Prov_Q n => ?p. Proof_Q p n => Q proves the Sigma_1
-#     statement Proof_Q_internal(numeral p, numeral n) by Sigma_1
-#     completeness => Q proves Prov_Q_internal(numeral n) by EXISTS.
-#     Backward: Sigma_1 soundness (proved in Stage 6 from the HF model).
-#
-#   Posted via ``p.sorry()`` in Stage 3D(a) above against an opaque
-#   ``Prov_Q_internal``; ``substitute_2`` defined as a HOL helper for
-#   Stage 4 (diagonal lemma); diagonal-lemma side conditions
-#   ``IS_FORM_PROV_Q_INTERNAL`` and ``FREE_IN_PROV_Q_INTERNAL`` also
-#   sorry'd. Full discharge needs ``substitute_internal`` first
-#   (Stage 3C), plus Sigma_1 completeness for Q and the HF-model
-#   Sigma_1 soundness (Stage 6).
 
 
 if __name__ == "__main__":
