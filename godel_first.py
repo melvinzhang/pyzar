@@ -158,6 +158,35 @@ Sigma_1 soundness of Q outright, since HF *is* the standard model.)
 # ~300 lines for the term/formula datatype and the encoding lemmas.
 # (The grammar is the same as for PA -- only the axiom list at Stage 2
 # differs.)
+#
+# Stage 1 lives in ``q_syntax.py``. Currently executed there:
+#
+#   * Term constructors:
+#       Zero_t, Succ_t, Var_t, Plus_t, Times_t        (definitions)
+#   * Form constructors:
+#       Eq_f, Not_f, Imp_f, Forall_f                  (definitions)
+#   * Goedel numbering:
+#       godelnum     :  |- godelnum = (\n. n)         (= identity)
+#       GODELNUM_AT  :  |- !n. godelnum n = n
+#       GODELNUM_INJ :  |- !t1 t2. godelnum t1 = godelnum t2 ==> t1 = t2
+#
+# Pending in q_syntax.py (see the inventory at the foot of that file):
+#
+#   * is_term, is_form, substitute via ``define_wf_lt`` -- three
+#     recursive-definition calls, each with a ~80-120 line MONO proof
+#     for its body. The ``define_wf_lt`` helper is in ``nat0_order.py``;
+#     it consumes the polymorphic ``NUM_RECURSION_LT`` proved there.
+#   * Constructor structural lemmas (size / disjointness / injectivity),
+#     ~9 each, ~30-50 lines each. Provable by chaining IN_LT through the
+#     Pair_ord / Pair / Singleton / Insert stack (size) and applying
+#     bit-extensionality to the value-at-index slots (disjointness,
+#     injectivity).
+#   * Constructor-specific recursion equations
+#     (IS_TERM_SUCC, SUBSTITUTE_NOT, ..., ~18 lemmas, ~30 lines each)
+#     follow from the schematic recursion equations plus the structural
+#     lemmas.
+#   * Free-variable analysis (``free_in``) -- another ``define_wf_lt``
+#     call; needed by Stage 2's quantifier rules.
 
 # ---------------------------------------------------------------------------
 # Stage 2 -- the Q proof system.
