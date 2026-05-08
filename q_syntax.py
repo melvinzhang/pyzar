@@ -86,9 +86,19 @@ from fusion import Var, ASSUME, DEDUCT_ANTISYM_RULE, REFL, vsubst, INST_TYPE
 from basics import mk_const, mk_app, mk_eq, mk_abs, dest_eq, is_eq, rator, rand
 from parser import define, parse_type
 from axioms import (
-    F, mk_and, mk_exists, mk_not, mk_or, mk_select,
-    dest_conj, dest_forall, dest_imp, dest_exists, dest_disj,
-    SELECT_AX, aty,
+    F,
+    mk_and,
+    mk_exists,
+    mk_not,
+    mk_or,
+    mk_select,
+    dest_conj,
+    dest_forall,
+    dest_imp,
+    dest_exists,
+    dest_disj,
+    SELECT_AX,
+    aty,
 )
 from nat0 import nat0_ty
 from hf_sets import (  # noqa: F401  -- parser aliases for Pair_ord
@@ -104,10 +114,32 @@ from nat0_order import NAT0_LT_TRANS, define_wf_lt
 from proof import proof
 from fusion import ABS
 from tactics import (
-    SPEC, SPECL, GEN, GENL, SYM, EQ_MP, MP, CONJ, CONJUNCT1, CONJUNCT2,
-    EXISTS, CHOOSE_WITNESS, REWRITE_RULE, REWRITE_CONV, EQF_INTRO, NOT_ELIM,
-    DISCH, CONTR, TRANS, AP_TERM, AP_THM, BETA_CONV, BETA_NORM,
-    DISJ1, DISJ2, DISJ_CASES,
+    SPEC,
+    SPECL,
+    GEN,
+    GENL,
+    SYM,
+    EQ_MP,
+    MP,
+    CONJ,
+    CONJUNCT1,
+    CONJUNCT2,
+    EXISTS,
+    CHOOSE_WITNESS,
+    REWRITE_RULE,
+    REWRITE_CONV,
+    EQF_INTRO,
+    NOT_ELIM,
+    DISCH,
+    CONTR,
+    TRANS,
+    AP_TERM,
+    AP_THM,
+    BETA_CONV,
+    BETA_NORM,
+    DISJ1,
+    DISJ2,
+    DISJ_CASES,
     or_chain_collapse,
 )
 
@@ -150,16 +182,14 @@ Var_t = mk_const("Var_t", [])
 PLUS_T_DEF = define(
     "Plus_t",
     parse_type("nat0 -> nat0 -> nat0"),
-    "\\t1:nat0. \\t2:nat0. "
-    "Pair_ord (SUC0 (SUC0 (SUC0 0))) (Pair_ord t1 t2)",
+    "\\t1:nat0. \\t2:nat0. Pair_ord (SUC0 (SUC0 (SUC0 0))) (Pair_ord t1 t2)",
 )
 Plus_t = mk_const("Plus_t", [])
 
 TIMES_T_DEF = define(
     "Times_t",
     parse_type("nat0 -> nat0 -> nat0"),
-    "\\t1:nat0. \\t2:nat0. "
-    "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord t1 t2)",
+    "\\t1:nat0. \\t2:nat0. Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord t1 t2)",
 )
 Times_t = mk_const("Times_t", [])
 
@@ -213,6 +243,7 @@ Forall_f = mk_const("Forall_f", [])
 def _at1(def_th, x):
     from tactics import AP_THM, BETA_CONV, TRANS, GEN
     from basics import rand
+
     th = AP_THM(def_th, x)
     th = TRANS(th, BETA_CONV(rand(th._concl)))
     return GEN(x, th)
@@ -221,6 +252,7 @@ def _at1(def_th, x):
 def _at2(def_th, x, y):
     from tactics import AP_THM, BETA_CONV, TRANS, GENL
     from basics import rand
+
     th_x = AP_THM(def_th, x)
     th_x = TRANS(th_x, BETA_CONV(rand(th_x._concl)))
     th_xy = AP_THM(th_x, y)
@@ -301,13 +333,9 @@ def NAT0_LT_SUCC_T(p):
     p.fix("t")
     succ_at_t = SPEC(p._parse("t"), SUCC_T_AT)
     # nat0_lt t (Pair_ord (SUC0 0) t).
-    p.have("h: nat0_lt t (Pair_ord (SUC0 0) t)").by(
-        NAT0_LT_PAIR_ORD_R, "SUC0 0", "t"
-    )
+    p.have("h: nat0_lt t (Pair_ord (SUC0 0) t)").by(NAT0_LT_PAIR_ORD_R, "SUC0 0", "t")
     # Fold to Succ_t t.
-    p.thus("nat0_lt t (Succ_t t)").by_rewrite_of(
-        "h", [SYM(succ_at_t)]
-    )
+    p.thus("nat0_lt t (Succ_t t)").by_rewrite_of("h", [SYM(succ_at_t)])
 
 
 @proof
@@ -334,12 +362,8 @@ def NAT0_LT_NOT_F(p):
     not_at_phi = SPEC(p._parse("phi"), NOT_F_AT)
     p.have(
         "h: nat0_lt phi (Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))) phi)"
-    ).by(
-        NAT0_LT_PAIR_ORD_R, "SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))", "phi"
-    )
-    p.thus("nat0_lt phi (Not_f phi)").by_rewrite_of(
-        "h", [SYM(not_at_phi)]
-    )
+    ).by(NAT0_LT_PAIR_ORD_R, "SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))", "phi")
+    p.thus("nat0_lt phi (Not_f phi)").by_rewrite_of("h", [SYM(not_at_phi)])
 
 
 # ----- 2-arg (Insert-shape) size lemmas. -----
@@ -357,35 +381,33 @@ def _proof_lt_binary_left(thm_name, var_l, var_r, ctor_name, ctor_at, tag_str):
     def _THM(p):
         from tactics import SYM, SPECL
 
-        p.goal(
-            f"!{var_l} {var_r}. "
-            f"nat0_lt {var_l} ({ctor_name} {var_l} {var_r})"
-        )
+        p.goal(f"!{var_l} {var_r}. nat0_lt {var_l} ({ctor_name} {var_l} {var_r})")
         p.fix(f"{var_l} {var_r}")
-        ctor_at_inst = SPECL(
-            [p._parse(var_l), p._parse(var_r)], ctor_at
+        ctor_at_inst = SPECL([p._parse(var_l), p._parse(var_r)], ctor_at)
+        p.have(f"h1: nat0_lt {var_l} (Pair_ord {var_l} {var_r})").by(
+            NAT0_LT_PAIR_ORD_L, var_l, var_r
         )
-        p.have(
-            f"h1: nat0_lt {var_l} (Pair_ord {var_l} {var_r})"
-        ).by(NAT0_LT_PAIR_ORD_L, var_l, var_r)
         p.have(
             f"h2: nat0_lt (Pair_ord {var_l} {var_r}) "
             f"(Pair_ord ({tag_str}) (Pair_ord {var_l} {var_r}))"
         ).by(
             NAT0_LT_PAIR_ORD_R,
-            f"({tag_str})", f"Pair_ord {var_l} {var_r}",
+            f"({tag_str})",
+            f"Pair_ord {var_l} {var_r}",
         )
         p.have(
-            f"h3: nat0_lt {var_l} "
-            f"(Pair_ord ({tag_str}) (Pair_ord {var_l} {var_r}))"
+            f"h3: nat0_lt {var_l} (Pair_ord ({tag_str}) (Pair_ord {var_l} {var_r}))"
         ).by(
-            NAT0_LT_TRANS, var_l, f"Pair_ord {var_l} {var_r}",
+            NAT0_LT_TRANS,
+            var_l,
+            f"Pair_ord {var_l} {var_r}",
             f"Pair_ord ({tag_str}) (Pair_ord {var_l} {var_r})",
-            "h1", "h2",
+            "h1",
+            "h2",
         )
-        p.thus(
-            f"nat0_lt {var_l} ({ctor_name} {var_l} {var_r})"
-        ).by_rewrite_of("h3", [SYM(ctor_at_inst)])
+        p.thus(f"nat0_lt {var_l} ({ctor_name} {var_l} {var_r})").by_rewrite_of(
+            "h3", [SYM(ctor_at_inst)]
+        )
 
     return _THM
 
@@ -395,35 +417,33 @@ def _proof_lt_binary_right(thm_name, var_l, var_r, ctor_name, ctor_at, tag_str):
     def _THM(p):
         from tactics import SYM, SPECL
 
-        p.goal(
-            f"!{var_l} {var_r}. "
-            f"nat0_lt {var_r} ({ctor_name} {var_l} {var_r})"
-        )
+        p.goal(f"!{var_l} {var_r}. nat0_lt {var_r} ({ctor_name} {var_l} {var_r})")
         p.fix(f"{var_l} {var_r}")
-        ctor_at_inst = SPECL(
-            [p._parse(var_l), p._parse(var_r)], ctor_at
+        ctor_at_inst = SPECL([p._parse(var_l), p._parse(var_r)], ctor_at)
+        p.have(f"h1: nat0_lt {var_r} (Pair_ord {var_l} {var_r})").by(
+            NAT0_LT_PAIR_ORD_R, var_l, var_r
         )
-        p.have(
-            f"h1: nat0_lt {var_r} (Pair_ord {var_l} {var_r})"
-        ).by(NAT0_LT_PAIR_ORD_R, var_l, var_r)
         p.have(
             f"h2: nat0_lt (Pair_ord {var_l} {var_r}) "
             f"(Pair_ord ({tag_str}) (Pair_ord {var_l} {var_r}))"
         ).by(
             NAT0_LT_PAIR_ORD_R,
-            f"({tag_str})", f"Pair_ord {var_l} {var_r}",
+            f"({tag_str})",
+            f"Pair_ord {var_l} {var_r}",
         )
         p.have(
-            f"h3: nat0_lt {var_r} "
-            f"(Pair_ord ({tag_str}) (Pair_ord {var_l} {var_r}))"
+            f"h3: nat0_lt {var_r} (Pair_ord ({tag_str}) (Pair_ord {var_l} {var_r}))"
         ).by(
-            NAT0_LT_TRANS, var_r, f"Pair_ord {var_l} {var_r}",
+            NAT0_LT_TRANS,
+            var_r,
+            f"Pair_ord {var_l} {var_r}",
             f"Pair_ord ({tag_str}) (Pair_ord {var_l} {var_r})",
-            "h1", "h2",
+            "h1",
+            "h2",
         )
-        p.thus(
-            f"nat0_lt {var_r} ({ctor_name} {var_l} {var_r})"
-        ).by_rewrite_of("h3", [SYM(ctor_at_inst)])
+        p.thus(f"nat0_lt {var_r} ({ctor_name} {var_l} {var_r})").by_rewrite_of(
+            "h3", [SYM(ctor_at_inst)]
+        )
 
     return _THM
 
@@ -481,7 +501,7 @@ NAT0_LT_FORALL_F_R = _proof_lt_binary_right(
 @proof
 def SUCC_T_INJ(p):
     """|- !a b. Succ_t a = Succ_t b ==> a = b."""
-    from tactics import SYM, SPEC, CONJUNCT2
+    from tactics import SPEC, CONJUNCT2
 
     p.goal("!a b. Succ_t a = Succ_t b ==> a = b")
     p.fix("a b")
@@ -527,22 +547,23 @@ def NOT_F_INJ(p):
     p.assume("h: Not_f a = Not_f b")
     not_a = SPEC(p._parse("a"), NOT_F_AT)
     not_b = SPEC(p._parse("b"), NOT_F_AT)
-    p.have(
-        f"h_po: Pair_ord ({NOT_TAG}) a = Pair_ord ({NOT_TAG}) b"
-    ).by_rewrite_of("h", [not_a, not_b])
+    p.have(f"h_po: Pair_ord ({NOT_TAG}) a = Pair_ord ({NOT_TAG}) b").by_rewrite_of(
+        "h", [not_a, not_b]
+    )
     p.have(f"h_inj: {NOT_TAG} = {NOT_TAG} /\\ a = b").by(
         PAIR_ORD_INJ, f"({NOT_TAG})", "a", f"({NOT_TAG})", "b", "h_po"
     )
     p.thus("a = b").by_thm(CONJUNCT2(p.fact("h_inj")))
 
 
-def _proof_binary_inj(thm_name, var_l1, var_r1, var_l2, var_r2,
-                     ctor_name, ctor_at, tag_str):
+def _proof_binary_inj(
+    thm_name, var_l1, var_r1, var_l2, var_r2, ctor_name, ctor_at, tag_str
+):
     """Build ``|- !a1 b1 a2 b2. C a1 b1 = C a2 b2 ==> a1 = a2 /\\ b1 = b2``."""
 
     @proof
     def _THM(p):
-        from tactics import SPECL, CONJUNCT2, CONJ
+        from tactics import SPECL, CONJUNCT2
 
         p.goal(
             f"!{var_l1} {var_r1} {var_l2} {var_r2}. "
@@ -550,10 +571,7 @@ def _proof_binary_inj(thm_name, var_l1, var_r1, var_l2, var_r2,
             f"==> ({var_l1} = {var_l2} /\\ {var_r1} = {var_r2})"
         )
         p.fix(f"{var_l1} {var_r1} {var_l2} {var_r2}")
-        p.assume(
-            f"h: {ctor_name} {var_l1} {var_r1} "
-            f"= {ctor_name} {var_l2} {var_r2}"
-        )
+        p.assume(f"h: {ctor_name} {var_l1} {var_r1} = {ctor_name} {var_l2} {var_r2}")
         c1 = SPECL([p._parse(var_l1), p._parse(var_r1)], ctor_at)
         c2 = SPECL([p._parse(var_l2), p._parse(var_r2)], ctor_at)
         # Outer Pair_ord_inj: tag-slot equality + (Pair_ord a1 b1 =
@@ -567,20 +585,19 @@ def _proof_binary_inj(thm_name, var_l1, var_r1, var_l2, var_r2,
             f"Pair_ord {var_l1} {var_r1} = Pair_ord {var_l2} {var_r2}"
         ).by(
             PAIR_ORD_INJ,
-            f"({tag_str})", f"Pair_ord {var_l1} {var_r1}",
-            f"({tag_str})", f"Pair_ord {var_l2} {var_r2}",
+            f"({tag_str})",
+            f"Pair_ord {var_l1} {var_r1}",
+            f"({tag_str})",
+            f"Pair_ord {var_l2} {var_r2}",
             "h_po",
         )
         p.have(
-            f"h_inner: Pair_ord {var_l1} {var_r1} "
-            f"= Pair_ord {var_l2} {var_r2}"
+            f"h_inner: Pair_ord {var_l1} {var_r1} = Pair_ord {var_l2} {var_r2}"
         ).by_thm(CONJUNCT2(p.fact("h_outer")))
-        p.have(
-            f"h_split: {var_l1} = {var_l2} /\\ {var_r1} = {var_r2}"
-        ).by(PAIR_ORD_INJ, var_l1, var_r1, var_l2, var_r2, "h_inner")
-        p.thus(
-            f"{var_l1} = {var_l2} /\\ {var_r1} = {var_r2}"
-        ).by_thm(p.fact("h_split"))
+        p.have(f"h_split: {var_l1} = {var_l2} /\\ {var_r1} = {var_r2}").by(
+            PAIR_ORD_INJ, var_l1, var_r1, var_l2, var_r2, "h_inner"
+        )
+        p.thus(f"{var_l1} = {var_l2} /\\ {var_r1} = {var_r2}").by_thm(p.fact("h_split"))
 
     return _THM
 
@@ -598,8 +615,14 @@ IMP_F_INJ = _proof_binary_inj(
     "IMP_F_INJ", "a1", "a2", "b1", "b2", "Imp_f", IMP_F_AT, _IMP_F_TAG
 )
 FORALL_F_INJ = _proof_binary_inj(
-    "FORALL_F_INJ", "n1", "phi1", "n2", "phi2",
-    "Forall_f", FORALL_F_AT, _FORALL_F_TAG,
+    "FORALL_F_INJ",
+    "n1",
+    "phi1",
+    "n2",
+    "phi2",
+    "Forall_f",
+    FORALL_F_AT,
+    _FORALL_F_TAG,
 )
 
 
@@ -637,18 +660,14 @@ def _NEQ_PAIR_ORD_ZERO(p):
     IN_PAIR_ORD), but ~In (Singleton a) 0 (from IN_ZERO). The two
     contradict the assumed equation."""
     from fusion import REFL
-    from tactics import SYM, EQT_ELIM, EQF_ELIM
+    from tactics import SYM, EQF_ELIM
 
     p.goal("!a b. ~(Pair_ord a b = 0)")
     p.fix("a b")
     with p.suppose("h: Pair_ord a b = 0"):
         # In (Singleton a) (Pair_ord a b) via left disjunct.
-        p.have("hr: Singleton a = Singleton a").by_thm(
-            REFL(p._parse("Singleton a"))
-        )
-        p.have(
-            "hd: Singleton a = Singleton a \\/ Singleton a = Pair a b"
-        ).by_disj("hr")
+        p.have("hr: Singleton a = Singleton a").by_thm(REFL(p._parse("Singleton a")))
+        p.have("hd: Singleton a = Singleton a \\/ Singleton a = Pair a b").by_disj("hr")
         p.have(
             "e1: In (Singleton a) (Pair_ord a b) = "
             "(Singleton a = Singleton a \\/ Singleton a = Pair a b)"
@@ -667,6 +686,7 @@ def _NEQ_PAIR_ORD_ZERO(p):
 # instances we need below; each follows from AXIOM_3_0 + iterated
 # AXIOM_4_0 contrapositive.
 
+
 def _prove_tag_neq(thm_name, m, n):
     """Build ``|- ~(SUC0^m 0 = SUC0^n 0)`` for ``m != n``.
 
@@ -682,6 +702,7 @@ def _prove_tag_neq(thm_name, m, n):
     @proof
     def _THM(p):
         from tactics import SYM
+
         s_m = _suc0_chain(p, m)
         s_n = _suc0_chain(p, n)
         p.goal(f"~({s_m} = {s_n})")
@@ -693,9 +714,7 @@ def _prove_tag_neq(thm_name, m, n):
                 a = _suc0_chain(p, cur_m - 1)
                 b = _suc0_chain(p, cur_n - 1)
                 next_label = f"h_{cur_m - 1}_{cur_n - 1}"
-                p.have(f"{next_label}: {a} = {b}").by(
-                    AXIOM_4_0, a, b, cur
-                )
+                p.have(f"{next_label}: {a} = {b}").by(AXIOM_4_0, a, b, cur)
                 cur = next_label
                 cur_m -= 1
                 cur_n -= 1
@@ -749,20 +768,17 @@ def _proof_ctor_neq_zero_binary(thm_name, var_l, var_r, ctor_name, ctor_at, tag_
     def _THM(p):
         from tactics import SPECL
 
-        p.goal(
-            f"!{var_l} {var_r}. ~({ctor_name} {var_l} {var_r} = Zero_t)"
-        )
+        p.goal(f"!{var_l} {var_r}. ~({ctor_name} {var_l} {var_r} = Zero_t)")
         p.fix(f"{var_l} {var_r}")
         ctor_inst = SPECL([p._parse(var_l), p._parse(var_r)], ctor_at)
         with p.suppose(f"h: {ctor_name} {var_l} {var_r} = Zero_t"):
             p.have(
                 f"h_po: Pair_ord ({tag_str}) (Pair_ord {var_l} {var_r}) = 0"
             ).by_rewrite_of("h", [ctor_inst, ZERO_T_DEF])
-            p.have(
-                f"h_neg: ~(Pair_ord ({tag_str}) (Pair_ord {var_l} {var_r}) = 0)"
-            ).by(
+            p.have(f"h_neg: ~(Pair_ord ({tag_str}) (Pair_ord {var_l} {var_r}) = 0)").by(
                 _NEQ_PAIR_ORD_ZERO,
-                f"({tag_str})", f"Pair_ord {var_l} {var_r}",
+                f"({tag_str})",
+                f"Pair_ord {var_l} {var_r}",
             )
             p.absurd().by_conj("h_neg", "h_po")
 
@@ -817,15 +833,13 @@ def _ctor_decl(ctor_name, ctor_at, tag_idx, vars_, tag_str):
 
 _CTORS = {
     "Succ_t": _ctor_decl("Succ_t", SUCC_T_AT, 1, ["t"], _SUCC_T_TAG),
-    "Var_t":  _ctor_decl("Var_t", VAR_T_AT, 2, ["v"], _VAR_T_TAG),
+    "Var_t": _ctor_decl("Var_t", VAR_T_AT, 2, ["v"], _VAR_T_TAG),
     "Plus_t": _ctor_decl("Plus_t", PLUS_T_AT, 3, ["t1", "t2"], _PLUS_T_TAG),
     "Times_t": _ctor_decl("Times_t", TIMES_T_AT, 4, ["t1", "t2"], _TIMES_T_TAG),
-    "Eq_f":   _ctor_decl("Eq_f", EQ_F_AT, 5, ["t1", "t2"], _EQ_F_TAG),
-    "Not_f":  _ctor_decl("Not_f", NOT_F_AT, 6, ["phi"], _NOT_F_TAG),
-    "Imp_f":  _ctor_decl("Imp_f", IMP_F_AT, 7, ["phi1", "phi2"], _IMP_F_TAG),
-    "Forall_f": _ctor_decl(
-        "Forall_f", FORALL_F_AT, 8, ["n", "phi"], _FORALL_F_TAG
-    ),
+    "Eq_f": _ctor_decl("Eq_f", EQ_F_AT, 5, ["t1", "t2"], _EQ_F_TAG),
+    "Not_f": _ctor_decl("Not_f", NOT_F_AT, 6, ["phi"], _NOT_F_TAG),
+    "Imp_f": _ctor_decl("Imp_f", IMP_F_AT, 7, ["phi1", "phi2"], _IMP_F_TAG),
+    "Forall_f": _ctor_decl("Forall_f", FORALL_F_AT, 8, ["n", "phi"], _FORALL_F_TAG),
 }
 
 
@@ -858,10 +872,7 @@ def _proof_ctor_disjoint(thm_name, ctor1_name, ctor2_name):
     def _THM(p):
         from tactics import SPECL, CONJUNCT1
 
-        p.goal(
-            f"!{' '.join(all_vars)}. "
-            f"~({name1} {args1} = {name2} {args2})"
-        )
+        p.goal(f"!{' '.join(all_vars)}. ~({name1} {args1} = {name2} {args2})")
         p.fix(" ".join(all_vars))
         c1 = SPECL([p._parse(v) for v in fix_vars1], at1)
         c2 = SPECL([p._parse(v) for v in fix_vars2], at2)
@@ -869,38 +880,30 @@ def _proof_ctor_disjoint(thm_name, ctor1_name, ctor2_name):
             inner1 = _ctor_inner_arg(decl1, "1")
             inner2 = _ctor_inner_arg(decl2, "2")
             p.have(
-                f"h_po: Pair_ord ({tag1}) ({inner1}) "
-                f"= Pair_ord ({tag2}) ({inner2})"
+                f"h_po: Pair_ord ({tag1}) ({inner1}) = Pair_ord ({tag2}) ({inner2})"
             ).by_rewrite_of("h", [c1, c2])
-            p.have(
-                f"h_inj: ({tag1}) = ({tag2}) /\\ ({inner1}) = ({inner2})"
-            ).by(
+            p.have(f"h_inj: ({tag1}) = ({tag2}) /\\ ({inner1}) = ({inner2})").by(
                 PAIR_ORD_INJ,
-                f"({tag1})", f"({inner1})",
-                f"({tag2})", f"({inner2})",
+                f"({tag1})",
+                f"({inner1})",
+                f"({tag2})",
+                f"({inner2})",
                 "h_po",
             )
-            p.have(f"h_tag: ({tag1}) = ({tag2})").by_thm(
-                CONJUNCT1(p.fact("h_inj"))
-            )
+            p.have(f"h_tag: ({tag1}) = ({tag2})").by_thm(CONJUNCT1(p.fact("h_inj")))
             # Tag inequality.
             lo, hi = sorted([tag1_idx, tag2_idx])
             tag_neq = _TAG_NEQS[(lo, hi)]
             if tag1_idx < tag2_idx:
-                p.have(
-                    f"h_tag_neq: ~(({tag1}) = ({tag2}))"
-                ).by_thm(tag_neq)
+                p.have(f"h_tag_neq: ~(({tag1}) = ({tag2}))").by_thm(tag_neq)
                 p.absurd().by_conj("h_tag_neq", "h_tag")
             else:
                 # _TAG_NEQS is keyed (lo, hi) so the lemma's conclusion
                 # is ~(SUC0^lo 0 = SUC0^hi 0); flip to match h_tag.
                 from tactics import SYM
-                p.have(
-                    f"h_tag_sym: ({tag2}) = ({tag1})"
-                ).by_thm(SYM(p.fact("h_tag")))
-                p.have(
-                    f"h_tag_neq: ~(({tag2}) = ({tag1}))"
-                ).by_thm(tag_neq)
+
+                p.have(f"h_tag_sym: ({tag2}) = ({tag1})").by_thm(SYM(p.fact("h_tag")))
+                p.have(f"h_tag_neq: ~(({tag2}) = ({tag1}))").by_thm(tag_neq)
                 p.absurd().by_conj("h_tag_neq", "h_tag_sym")
 
     return _THM
@@ -909,15 +912,25 @@ def _proof_ctor_disjoint(thm_name, ctor1_name, ctor2_name):
 # Pairwise disjointness for the 8 non-zero constructors. We expose
 # ``CTOR1_NEQ_CTOR2`` for each ordered pair (lexicographic by tag).
 
-_CTOR_NAMES = ["Succ_t", "Var_t", "Plus_t", "Times_t",
-               "Eq_f", "Not_f", "Imp_f", "Forall_f"]
+_CTOR_NAMES = [
+    "Succ_t",
+    "Var_t",
+    "Plus_t",
+    "Times_t",
+    "Eq_f",
+    "Not_f",
+    "Imp_f",
+    "Forall_f",
+]
 
 CTOR_DISJOINTNESS = {}  # (name1, name2) -> theorem
 for _i in range(len(_CTOR_NAMES)):
     for _j in range(_i + 1, len(_CTOR_NAMES)):
         _n1, _n2 = _CTOR_NAMES[_i], _CTOR_NAMES[_j]
         CTOR_DISJOINTNESS[(_n1, _n2)] = _proof_ctor_disjoint(
-            f"{_n1.upper()}_NEQ_{_n2.upper()}", _n1, _n2,
+            f"{_n1.upper()}_NEQ_{_n2.upper()}",
+            _n1,
+            _n2,
         )
 
 
@@ -949,9 +962,7 @@ def _extract_nfg(hyp_th):
     """Pull n, f, g out of |- !k. nat0_lt k n ==> f k = g k."""
     forall_pred = dest_forall(hyp_th._concl)
     if forall_pred is None:
-        raise ValueError(
-            f"_extract_nfg: hyp_th not !k. ...; got {hyp_th._concl}"
-        )
+        raise ValueError(f"_extract_nfg: hyp_th not !k. ...; got {hyp_th._concl}")
     imp_parts = dest_imp(forall_pred.body)
     if imp_parts is None:
         raise ValueError(
@@ -992,10 +1003,10 @@ def mono_iff_unary_step(ctor, size_lemma, hyp_th):
     w_t = rand(n_eq_l._concl)  # ctor w; we just need w
     # Strip the ctor to get w itself (= rand of ctor w).
     w_t = rand(w_t)
-    sl_at_w = SPEC(w_t, size_lemma)              # |- nat0_lt w (ctor w)
+    sl_at_w = SPEC(w_t, size_lemma)  # |- nat0_lt w (ctor w)
     lt_w_n = REWRITE_RULE([SYM(n_eq_l)], sl_at_w)  # {LHS} |- nat0_lt w n
-    fw_eq_gw = MP(SPEC(w_t, hyp_th), lt_w_n)       # {LHS} |- f w = g w
-    gw_th = EQ_MP(fw_eq_gw, fw_th)                 # {LHS} |- g w
+    fw_eq_gw = MP(SPEC(w_t, hyp_th), lt_w_n)  # {LHS} |- f w = g w
+    gw_th = EQ_MP(fw_eq_gw, fw_th)  # {LHS} |- g w
     R_th = EXISTS(pred_r, w_t, CONJ(n_eq_l, gw_th))  # {LHS} |- RHS
 
     # Reverse: {RHS} |- LHS.  Same shape, swap f <-> g via SYM.
@@ -1081,10 +1092,7 @@ def mono_iff_binary_step(ctor, size_lemma_l, size_lemma_r, hyp_th):
         # is the only remaining bvar); outer pred is the result of inner
         # quantification with a still free, which we then bind to w_a.
         # Build via INST'd term shapes:
-        target_inner_pred_body = mk_abs(b_var, target_inner_body)
-        target_outer_pred_body = mk_abs(
-            a_var, mk_exists(b_var, target_inner_body)
-        )
+        target_outer_pred_body = mk_abs(a_var, mk_exists(b_var, target_inner_body))
         # EXISTS at b := w_b: substitutes b in target_inner_pred_body.
         # But we need substitution of a := w_a too; do it by picking the
         # right pred shape. EXISTS only substitutes the bvar of the
@@ -1154,9 +1162,7 @@ def mono_iff_binary_right_step(ctor, size_lemma_r, hyp_th):
         else:
             hb_out = EQ_MP(eq_b, hb_th)
         new_body = CONJ(n_eq_th, hb_out)
-        target_outer_pred_body = mk_abs(
-            a_var, mk_exists(b_var, target_inner_body)
-        )
+        target_outer_pred_body = mk_abs(a_var, mk_exists(b_var, target_inner_body))
         inner_pred_aw = mk_abs(
             b_var,
             mk_and(
@@ -1230,8 +1236,9 @@ def mono_iff_unary_pw_step(ctor, size_lemma, hyp_th, v_term):
     return DEDUCT_ANTISYM_RULE(L_th, R_th)
 
 
-def _mono_iff_binary_pw_step(ctor, size_lemma_l, size_lemma_r,
-                             hyp_th, v_term, rest_builder, recurses_l):
+def _mono_iff_binary_pw_step(
+    ctor, size_lemma_l, size_lemma_r, hyp_th, v_term, rest_builder, recurses_l
+):
     """Generic binary pointwise step.
 
     ``rest_builder(fn_t, a, b, v)`` returns the term plugged in as the
@@ -1283,9 +1290,7 @@ def _mono_iff_binary_pw_step(ctor, size_lemma_l, size_lemma_r,
         rest_out = REWRITE_RULE(rewrites, rest)
         new_body = CONJ(n_eq_th, rest_out)
         target_fn = g_t if not swap_fg else f_t
-        target_outer_pred_body = mk_abs(
-            a_var, mk_exists(b_var, target_inner_body)
-        )
+        target_outer_pred_body = mk_abs(a_var, mk_exists(b_var, target_inner_body))
         inner_pred_aw = mk_abs(
             b_var,
             mk_and(
@@ -1302,15 +1307,16 @@ def _mono_iff_binary_pw_step(ctor, size_lemma_l, size_lemma_r,
     return DEDUCT_ANTISYM_RULE(L_th, R_th)
 
 
-def mono_iff_binary_disj_pw_step(ctor, size_lemma_l, size_lemma_r,
-                                 hyp_th, v_term):
+def mono_iff_binary_disj_pw_step(ctor, size_lemma_l, size_lemma_r, hyp_th, v_term):
     """``(?a b. n = ctor a b /\\ (f a v \\/ f b v))
-        = (?a b. n = ctor a b /\\ (g a v \\/ g b v))``."""
+    = (?a b. n = ctor a b /\\ (g a v \\/ g b v))``."""
     return _mono_iff_binary_pw_step(
-        ctor, size_lemma_l, size_lemma_r, hyp_th, v_term,
-        rest_builder=lambda fn, a, b, v: mk_or(
-            mk_app(fn, a, v), mk_app(fn, b, v)
-        ),
+        ctor,
+        size_lemma_l,
+        size_lemma_r,
+        hyp_th,
+        v_term,
+        rest_builder=lambda fn, a, b, v: mk_or(mk_app(fn, a, v), mk_app(fn, b, v)),
         recurses_l=True,
     )
 
@@ -1322,10 +1328,12 @@ def mono_iff_forall_pw_step(size_lemma_r, hyp_th, v_term):
     The ``a`` slot is the bound-variable index of the encoded universal;
     only the body slot ``b`` recurses through ``f``."""
     return _mono_iff_binary_pw_step(
-        Forall_f, None, size_lemma_r, hyp_th, v_term,
-        rest_builder=lambda fn, a, b, v: mk_and(
-            mk_not(mk_eq(v, a)), mk_app(fn, b, v)
-        ),
+        Forall_f,
+        None,
+        size_lemma_r,
+        hyp_th,
+        v_term,
+        rest_builder=lambda fn, a, b, v: mk_and(mk_not(mk_eq(v, a)), mk_app(fn, b, v)),
         recurses_l=False,
     )
 
@@ -1339,10 +1347,12 @@ def mono_iff_eq_or_pw_step(ctor, size_lemma_r, hyp_th, v_term):
     is non-recursive (just an equality test against the query value),
     only the tail slot ``b`` recurses through ``f``."""
     return _mono_iff_binary_pw_step(
-        ctor, None, size_lemma_r, hyp_th, v_term,
-        rest_builder=lambda fn, a, b, v: mk_or(
-            mk_eq(v, a), mk_app(fn, b, v)
-        ),
+        ctor,
+        None,
+        size_lemma_r,
+        hyp_th,
+        v_term,
+        rest_builder=lambda fn, a, b, v: mk_or(mk_eq(v, a), mk_app(fn, b, v)),
         recurses_l=False,
     )
 
@@ -1427,8 +1437,9 @@ def mono_iff_value_unary_pw_step(ctor, size_lemma, hyp_th, args, r_term, value_f
     return DEDUCT_ANTISYM_RULE(L_th, R_th)
 
 
-def _mono_iff_value_binary_pw_step(ctor, size_lemma_l, size_lemma_r,
-                                   hyp_th, args, rest_builder, recurses_l):
+def _mono_iff_value_binary_pw_step(
+    ctor, size_lemma_l, size_lemma_r, hyp_th, args, rest_builder, recurses_l
+):
     """Generic binary value-shape pointwise step.
 
     ``rest_builder(fn, a, b, args)`` returns the rest term plugged in
@@ -1445,8 +1456,7 @@ def _mono_iff_value_binary_pw_step(ctor, size_lemma_l, size_lemma_r,
 
     def _bodies(fn):
         ctor_ab = mk_app(ctor, a_var, b_var)
-        return mk_and(mk_eq(n_t, ctor_ab),
-                      rest_builder(fn, a_var, b_var, args))
+        return mk_and(mk_eq(n_t, ctor_ab), rest_builder(fn, a_var, b_var, args))
 
     body_inner_l = _bodies(f_t)
     body_inner_r = _bodies(g_t)
@@ -1478,9 +1488,7 @@ def _mono_iff_value_binary_pw_step(ctor, size_lemma_l, size_lemma_r,
             rewrites = [SYM(r) for r in rewrites]
         rest_out = REWRITE_RULE(rewrites, rest)
         new_body = CONJ(n_eq_th, rest_out)
-        target_outer_pred_body = mk_abs(
-            a_var, mk_exists(b_var, target_inner_body)
-        )
+        target_outer_pred_body = mk_abs(a_var, mk_exists(b_var, target_inner_body))
         inner_pred_aw = mk_abs(
             b_var,
             mk_and(
@@ -1497,8 +1505,9 @@ def _mono_iff_value_binary_pw_step(ctor, size_lemma_l, size_lemma_r,
     return DEDUCT_ANTISYM_RULE(L_th, R_th)
 
 
-def mono_iff_value_binary_pw_step(ctor, size_lemma_l, size_lemma_r,
-                                  hyp_th, args, r_term, value_fn):
+def mono_iff_value_binary_pw_step(
+    ctor, size_lemma_l, size_lemma_r, hyp_th, args, r_term, value_fn
+):
     """``(?a b. n = ctor a b /\\ r = value_fn(f a args, f b args))
         = (?a b. n = ctor a b /\\ r = value_fn(g a args, g b args))``.
 
@@ -1506,7 +1515,11 @@ def mono_iff_value_binary_pw_step(ctor, size_lemma_l, size_lemma_r,
     ``lambda a, b: mk_app(ctor, a, b)``.
     """
     return _mono_iff_value_binary_pw_step(
-        ctor, size_lemma_l, size_lemma_r, hyp_th, args,
+        ctor,
+        size_lemma_l,
+        size_lemma_r,
+        hyp_th,
+        args,
         rest_builder=lambda fn, a, b, ags: mk_eq(
             r_term,
             value_fn(mk_app(fn, a, *ags), mk_app(fn, b, *ags)),
@@ -1515,8 +1528,7 @@ def mono_iff_value_binary_pw_step(ctor, size_lemma_l, size_lemma_r,
     )
 
 
-def mono_iff_forall_value_pw_step(size_lemma_r, hyp_th, args, r_term,
-                                  v_for_eq):
+def mono_iff_forall_value_pw_step(size_lemma_r, hyp_th, args, r_term, v_for_eq):
     """Per-disjunct iff for the ``Forall_f`` value disjunct.
 
     Body shape (LHS):
@@ -1528,13 +1540,17 @@ def mono_iff_forall_value_pw_step(size_lemma_r, hyp_th, args, r_term,
     f-reference.
     """
     return _mono_iff_value_binary_pw_step(
-        Forall_f, None, size_lemma_r, hyp_th, args,
+        Forall_f,
+        None,
+        size_lemma_r,
+        hyp_th,
+        args,
         rest_builder=lambda fn, a, b, ags: mk_or(
-            mk_and(mk_eq(v_for_eq, a),
-                   mk_eq(r_term, mk_app(Forall_f, a, b))),
-            mk_and(mk_not(mk_eq(v_for_eq, a)),
-                   mk_eq(r_term, mk_app(Forall_f, a,
-                                        mk_app(fn, b, *ags)))),
+            mk_and(mk_eq(v_for_eq, a), mk_eq(r_term, mk_app(Forall_f, a, b))),
+            mk_and(
+                mk_not(mk_eq(v_for_eq, a)),
+                mk_eq(r_term, mk_app(Forall_f, a, mk_app(fn, b, *ags))),
+            ),
         ),
         recurses_l=False,
     )
@@ -1548,15 +1564,15 @@ def _select_collapse_eq(K_t, r_var):
     """
     pred = mk_abs(r_var, mk_eq(r_var, K_t))
     sel_ax_at = INST_TYPE([(r_var.ty, aty)], SELECT_AX)
-    spec_p = SPEC(pred, sel_ax_at)              # |- !x. P x ==> P (@P)
-    spec_x = SPEC(K_t, spec_p)                  # |- P K ==> P (@P)
+    spec_p = SPEC(pred, sel_ax_at)  # |- !x. P x ==> P (@P)
+    spec_x = SPEC(K_t, spec_p)  # |- P K ==> P (@P)
     p_at_K = mk_app(pred, K_t)
-    bridge_K = BETA_CONV(p_at_K)                # |- P K = (K = K)
-    p_K_th = EQ_MP(SYM(bridge_K), REFL(K_t))    # |- P K
-    p_at_select = MP(spec_x, p_K_th)            # |- P (@P)
+    bridge_K = BETA_CONV(p_at_K)  # |- P K = (K = K)
+    p_K_th = EQ_MP(SYM(bridge_K), REFL(K_t))  # |- P K
+    p_at_select = MP(spec_x, p_K_th)  # |- P (@P)
     sel_t = mk_select(r_var, mk_eq(r_var, K_t))
-    bridge_sel = BETA_CONV(mk_app(pred, sel_t)) # |- P (@P) = ((@P) = K)
-    return EQ_MP(bridge_sel, p_at_select)       # |- (@r. r = K) = K
+    bridge_sel = BETA_CONV(mk_app(pred, sel_t))  # |- P (@P) = ((@P) = K)
+    return EQ_MP(bridge_sel, p_at_select)  # |- (@r. r = K) = K
 
 
 # ---------------------------------------------------------------------------
@@ -1585,15 +1601,24 @@ def _select_collapse_eq(K_t, r_var):
 
 # Lookup tables: NEQ_ZERO and INJ lemmas indexed by constructor name.
 _CTOR_NEQ_ZERO = {
-    "Succ_t": SUCC_T_NEQ_ZERO, "Var_t": VAR_T_NEQ_ZERO,
-    "Plus_t": PLUS_T_NEQ_ZERO, "Times_t": TIMES_T_NEQ_ZERO,
-    "Eq_f": EQ_F_NEQ_ZERO, "Not_f": NOT_F_NEQ_ZERO,
-    "Imp_f": IMP_F_NEQ_ZERO, "Forall_f": FORALL_F_NEQ_ZERO,
+    "Succ_t": SUCC_T_NEQ_ZERO,
+    "Var_t": VAR_T_NEQ_ZERO,
+    "Plus_t": PLUS_T_NEQ_ZERO,
+    "Times_t": TIMES_T_NEQ_ZERO,
+    "Eq_f": EQ_F_NEQ_ZERO,
+    "Not_f": NOT_F_NEQ_ZERO,
+    "Imp_f": IMP_F_NEQ_ZERO,
+    "Forall_f": FORALL_F_NEQ_ZERO,
 }
 _CTOR_INJ = {
-    "Succ_t": SUCC_T_INJ, "Var_t": VAR_T_INJ, "Not_f": NOT_F_INJ,
-    "Plus_t": PLUS_T_INJ, "Times_t": TIMES_T_INJ,
-    "Eq_f": EQ_F_INJ, "Imp_f": IMP_F_INJ, "Forall_f": FORALL_F_INJ,
+    "Succ_t": SUCC_T_INJ,
+    "Var_t": VAR_T_INJ,
+    "Not_f": NOT_F_INJ,
+    "Plus_t": PLUS_T_INJ,
+    "Times_t": TIMES_T_INJ,
+    "Eq_f": EQ_F_INJ,
+    "Imp_f": IMP_F_INJ,
+    "Forall_f": FORALL_F_INJ,
 }
 
 
@@ -1635,9 +1660,7 @@ def _disjunct_ctor_name(disj):
         else:
             break
     if not hasattr(head, "name"):
-        raise ValueError(
-            f"_disjunct_ctor_name: cannot pin down constructor in {disj}"
-        )
+        raise ValueError(f"_disjunct_ctor_name: cannot pin down constructor in {disj}")
     return head.name
 
 
@@ -1664,8 +1687,8 @@ def _disjunct_eq_F_via_neq(disj, neq_lemma_dir, target_args):
     head_app = dest_eq(head_eq_th._concl)[1]
     other_args = _spine_args(head_app)
     neq_specd = _spec_neq_at(neq_lemma_dir, target_args, other_args)
-    F_th = MP(NOT_ELIM(neq_specd), head_eq_th)   # {disj} |- F
-    rev = CONTR(disj, ASSUME(F))                  # {F} |- disj
+    F_th = MP(NOT_ELIM(neq_specd), head_eq_th)  # {disj} |- F
+    rev = CONTR(disj, ASSUME(F))  # {F} |- disj
     # DEDUCT_ANTISYM_RULE(t1, t2) yields t1._concl = t2._concl.
     return DEDUCT_ANTISYM_RULE(rev, F_th)
 
@@ -1703,24 +1726,27 @@ def _disjunct_eq_match_unary(disj, target_app, target_arg, inj_lemma):
         # No-recursion variant: ``?x. target_app = C x``. Witness x:=target_arg
         # via REFL; result is T.
         from tactics import EQT_INTRO
+
         rev = EXISTS(ex_pred, target_arg, REFL(target_app))  # |- ?x. ...
         return EQT_INTRO(rev)
     head_eq, rest = conj
     # rest = R(x); we want to show this equals R(target_arg).
     # Forward: {disj} |- R(target_arg).
     chosen = CHOOSE_WITNESS(ex_pred, ASSUME(disj))  # {disj} |- target_app = C x /\ R(x)
-    head_th = CONJUNCT1(chosen)   # {disj} |- target_app = C x
-    rest_th = CONJUNCT2(chosen)   # {disj} |- R(x)
+    head_th = CONJUNCT1(chosen)  # {disj} |- target_app = C x
+    rest_th = CONJUNCT2(chosen)  # {disj} |- R(x)
     # SYM head_th: |- C x = target_app. But target_app = C target_arg.
     # Use inj_lemma: C target_arg = C x ==> target_arg = x. From head_th
     # rewritten: C target_arg = C x. So target_arg = x.
     # Determine the witness term used by CHOOSE.
     sel_x = rand(head_th._concl)  # = C x
-    x_val = rand(sel_x)           # = x (the SELECT term)
-    inj_at = SPECL([target_arg, x_val], inj_lemma)  # |- C target_arg = C x ==> target_arg = x
+    x_val = rand(sel_x)  # = x (the SELECT term)
+    inj_at = SPECL(
+        [target_arg, x_val], inj_lemma
+    )  # |- C target_arg = C x ==> target_arg = x
     # head_th : {disj} |- target_app = C x. We have target_app = C target_arg by REFL of target_app.
     # Actually target_app is literally `C target_arg` (same term), so no rewrite needed.
-    targ_eq_x = MP(inj_at, head_th)   # {disj} |- target_arg = x
+    targ_eq_x = MP(inj_at, head_th)  # {disj} |- target_arg = x
     # Substitute x → target_arg in the rest. Use REWRITE_RULE so this
     # works whether ``rest_th`` is ``f x`` (single app) or a wider shape
     # like ``f x v`` (function-valued recursion at a fixed point).
@@ -1751,7 +1777,7 @@ def _disjunct_eq_match_binary(disj, target_app, target_args, inj_lemma):
     wb = rand(ctor_app)
     wa = rand(rator(ctor_app))
     inj_at = SPECL([a_t, b_t, wa, wb], inj_lemma)
-    pair = MP(inj_at, head_th)              # {disj} |- a_t = wa /\ b_t = wb
+    pair = MP(inj_at, head_th)  # {disj} |- a_t = wa /\ b_t = wb
     eq_a = CONJUNCT1(pair)
     eq_b = CONJUNCT2(pair)
     rest_at_target = REWRITE_RULE([SYM(eq_a), SYM(eq_b)], rest_th)
@@ -1781,7 +1807,9 @@ def _ctor_neq_lemma(ctor_a_name, ctor_b_name):
         return ("fwd", CTOR_DISJOINTNESS[(ctor_a_name, ctor_b_name)])
     if (ctor_b_name, ctor_a_name) in CTOR_DISJOINTNESS:
         return ("rev", CTOR_DISJOINTNESS[(ctor_b_name, ctor_a_name)])
-    raise ValueError(f"_ctor_neq_lemma: no disjointness for {ctor_a_name} vs {ctor_b_name}")
+    raise ValueError(
+        f"_ctor_neq_lemma: no disjointness for {ctor_a_name} vs {ctor_b_name}"
+    )
 
 
 def _spec_neq_at(neq_lemma_dir, ctor_a_args, ctor_b_args):
@@ -1799,6 +1827,7 @@ def _spec_neq_at(neq_lemma_dir, ctor_a_args, ctor_b_args):
     swapped = SPECL(ctor_b_args + ctor_a_args, lemma)
     # ~(B b = A a) -> ~(A a = B b).
     from tactics import NE_SYM
+
     return NE_SYM(swapped)
 
 
@@ -1834,7 +1863,7 @@ def derive_rec_eq(REC, target_ctor_name, var_names):
         )
     target_args = [Var(name, nat0_ty) for name in var_names]
     target_app = _ctor_app(target_decl, target_args)
-    rec_at = SPEC(target_app, REC)             # |- F target_app = body[F, target_app]
+    rec_at = SPEC(target_app, REC)  # |- F target_app = body[F, target_app]
     body_at = rand(rec_at._concl)
     disjuncts = _split_n_disj(body_at)
 
@@ -1845,9 +1874,13 @@ def derive_rec_eq(REC, target_ctor_name, var_names):
         head_name = _disjunct_ctor_name(disj)
         if head_name == target_ctor_name:
             if target_arity == 1:
-                eq = _disjunct_eq_match_unary(disj, target_app, target_args[0], target_inj)
+                eq = _disjunct_eq_match_unary(
+                    disj, target_app, target_args[0], target_inj
+                )
             else:
-                eq = _disjunct_eq_match_binary(disj, target_app, target_args, target_inj)
+                eq = _disjunct_eq_match_binary(
+                    disj, target_app, target_args, target_inj
+                )
         else:
             # Non-matching: collapse to F via disjointness lemma. Witnesses
             # are extracted post-CHOOSE_WITNESS inside the helper to keep
@@ -1856,8 +1889,8 @@ def derive_rec_eq(REC, target_ctor_name, var_names):
             eq = _disjunct_eq_F_via_neq(disj, neq_dir, target_args)
         per_eqs.append(eq)
 
-    body_eq = or_chain_collapse(per_eqs)        # |- body_at = collapsed_rhs
-    final = TRANS(rec_at, body_eq)              # |- F target_app = collapsed_rhs
+    body_eq = or_chain_collapse(per_eqs)  # |- body_at = collapsed_rhs
+    final = TRANS(rec_at, body_eq)  # |- F target_app = collapsed_rhs
     return GENL(target_args, final)
 
 
@@ -1928,8 +1961,8 @@ def _disjunct_eq_match_nullary(disj, target_app):
     if parts is None:
         raise ValueError("_disjunct_eq_match_nullary: not a conjunction")
     _head_eq, rest = parts
-    rest_th = CONJUNCT2(ASSUME(disj))                # {disj} |- rest
-    disj_th = CONJ(REFL(target_app), ASSUME(rest))   # {rest} |- disj
+    rest_th = CONJUNCT2(ASSUME(disj))  # {disj} |- rest
+    disj_th = CONJ(REFL(target_app), ASSUME(rest))  # {rest} |- disj
     return DEDUCT_ANTISYM_RULE(disj_th, rest_th)
 
 
@@ -1952,17 +1985,14 @@ def derive_rec_eq_select(REC, target_ctor_name, var_names, extra_arg_vars):
     if target_ctor_name == "Zero_t":
         if var_names:
             raise ValueError(
-                "derive_rec_eq_select: Zero_t is nullary; var_names must "
-                "be empty"
+                "derive_rec_eq_select: Zero_t is nullary; var_names must be empty"
             )
         target_arity = 0
         target_args = []
         target_app = Zero_t
     else:
         if target_ctor_name not in _CTORS:
-            raise ValueError(
-                f"derive_rec_eq_select: unknown ctor {target_ctor_name!r}"
-            )
+            raise ValueError(f"derive_rec_eq_select: unknown ctor {target_ctor_name!r}")
         target_decl = _CTORS[target_ctor_name]
         target_arity = len(target_decl[3])
         if len(var_names) != target_arity:
@@ -1983,10 +2013,10 @@ def derive_rec_eq_select(REC, target_ctor_name, var_names, extra_arg_vars):
         rhs_beta = BETA_CONV(rhs_redex)
         cur = TRANS(cur_app, rhs_beta)
     # cur : |- fn target_app arg1...argk = @r. body[fn, target_app, args, r]
-    select_term = rand(cur._concl)        # @r. body
-    select_pred = select_term.arg          # \r. body  (the predicate of @)
+    select_term = rand(cur._concl)  # @r. body
+    select_pred = select_term.arg  # \r. body  (the predicate of @)
     r_bvar = select_pred.bvar
-    body_at = select_pred.body            # body[fn, target_app, args, r]
+    body_at = select_pred.body  # body[fn, target_app, args, r]
     disjuncts = _split_n_disj(body_at)
 
     target_inj = _CTOR_INJ.get(target_ctor_name)
@@ -2027,8 +2057,7 @@ def derive_rec_eq_select(REC, target_ctor_name, var_names, extra_arg_vars):
 
     if matched_K is None:
         raise ValueError(
-            f"derive_rec_eq_select: no matching disjunct for "
-            f"{target_ctor_name}"
+            f"derive_rec_eq_select: no matching disjunct for {target_ctor_name}"
         )
 
     body_eq = or_chain_collapse(per_eqs)
@@ -2100,8 +2129,7 @@ def _conditional_body_eq(P_term, T_val, E_val, r_var, taking_then):
         return DEDUCT_ANTISYM_RULE(reverse, forward)
 
 
-def derive_rec_eq_select_cond(REC, target_ctor_name, var_names,
-                               extra_arg_vars):
+def derive_rec_eq_select_cond(REC, target_ctor_name, var_names, extra_arg_vars):
     """Constructor recursion equation for SELECT-shaped recursion with
     a conditional matching disjunct.
 
@@ -2115,8 +2143,7 @@ def derive_rec_eq_select_cond(REC, target_ctor_name, var_names,
     """
     if target_ctor_name not in _CTORS:
         raise ValueError(
-            f"derive_rec_eq_select_cond: unknown ctor "
-            f"{target_ctor_name!r}"
+            f"derive_rec_eq_select_cond: unknown ctor {target_ctor_name!r}"
         )
     target_decl = _CTORS[target_ctor_name]
     target_arity = len(target_decl[3])
@@ -2183,8 +2210,7 @@ def derive_rec_eq_select_cond(REC, target_ctor_name, var_names,
 
     if matched_form is None:
         raise ValueError(
-            f"derive_rec_eq_select_cond: no matching disjunct for "
-            f"{target_ctor_name}"
+            f"derive_rec_eq_select_cond: no matching disjunct for {target_ctor_name}"
         )
     P_t, T_val, E_val = matched_form
     body_eq = or_chain_collapse(per_eqs)
@@ -2203,8 +2229,7 @@ def derive_rec_eq_select_cond(REC, target_ctor_name, var_names,
         select_to_K = TRANS(select_to_eqK, sel_collapse)
         fn_eq_K = TRANS(cur, select_to_K)
         # fn_eq_K : {hyp_t} |- fn target_app extras = K
-        return GENL(target_args + list(extra_arg_vars),
-                    DISCH(hyp_t, fn_eq_K))
+        return GENL(target_args + list(extra_arg_vars), DISCH(hyp_t, fn_eq_K))
 
     THEN_TH = _build_branch(True, T_val, P_t)
     ELSE_TH = _build_branch(False, E_val, not_P_t)
@@ -2244,21 +2269,36 @@ def _is_term_body(f_t, n_t):
     return mk_or(
         mk_eq(n_t, Zero_t),
         mk_or(
-            mk_exists(_x_n0, mk_and(
-                mk_eq(n_t, mk_app(Succ_t, _x_n0)),
-                mk_app(f_t, _x_n0),
-            )),
+            mk_exists(
+                _x_n0,
+                mk_and(
+                    mk_eq(n_t, mk_app(Succ_t, _x_n0)),
+                    mk_app(f_t, _x_n0),
+                ),
+            ),
             mk_or(
                 mk_exists(_x_n0, mk_eq(n_t, mk_app(Var_t, _x_n0))),
                 mk_or(
-                    mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
-                        mk_eq(n_t, mk_app(Plus_t, _a_n0, _b_n0)),
-                        mk_and(mk_app(f_t, _a_n0), mk_app(f_t, _b_n0)),
-                    ))),
-                    mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
-                        mk_eq(n_t, mk_app(Times_t, _a_n0, _b_n0)),
-                        mk_and(mk_app(f_t, _a_n0), mk_app(f_t, _b_n0)),
-                    ))),
+                    mk_exists(
+                        _a_n0,
+                        mk_exists(
+                            _b_n0,
+                            mk_and(
+                                mk_eq(n_t, mk_app(Plus_t, _a_n0, _b_n0)),
+                                mk_and(mk_app(f_t, _a_n0), mk_app(f_t, _b_n0)),
+                            ),
+                        ),
+                    ),
+                    mk_exists(
+                        _a_n0,
+                        mk_exists(
+                            _b_n0,
+                            mk_and(
+                                mk_eq(n_t, mk_app(Times_t, _a_n0, _b_n0)),
+                                mk_and(mk_app(f_t, _a_n0), mk_app(f_t, _b_n0)),
+                            ),
+                        ),
+                    ),
                 ),
             ),
         ),
@@ -2276,12 +2316,10 @@ _IS_TERM_F = mk_const("_is_term_F", [])
 @proof
 def IS_TERM_MONO(p):
     """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
-                  ==> _is_term_F f n = _is_term_F g n."""
+    ==> _is_term_F f n = _is_term_F g n."""
     p.goal(
-        "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> "
-        "_is_term_F f n = _is_term_F g n",
-        types={"f": _pred_ty, "g": _pred_ty,
-               "n": nat0_ty, "k": nat0_ty},
+        "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> _is_term_F f n = _is_term_F g n",
+        types={"f": _pred_ty, "g": _pred_ty, "n": nat0_ty, "k": nat0_ty},
     )
     p.fix("f g n")
     p.assume("h: !k. nat0_lt k n ==> f k = g k")
@@ -2290,19 +2328,11 @@ def IS_TERM_MONO(p):
     eq_zero = REFL(p._parse("n = Zero_t"))
     eq_succ = mono_iff_unary_step(Succ_t, NAT0_LT_SUCC_T, h_th)
     eq_var = REFL(p._parse("?x. n = Var_t x"))
-    eq_plus = mono_iff_binary_step(
-        Plus_t, NAT0_LT_PLUS_T_L, NAT0_LT_PLUS_T_R, h_th
-    )
-    eq_times = mono_iff_binary_step(
-        Times_t, NAT0_LT_TIMES_T_L, NAT0_LT_TIMES_T_R, h_th
-    )
-    body_eq = or_chain_collapse(
-        [eq_zero, eq_succ, eq_var, eq_plus, eq_times]
-    )
+    eq_plus = mono_iff_binary_step(Plus_t, NAT0_LT_PLUS_T_L, NAT0_LT_PLUS_T_R, h_th)
+    eq_times = mono_iff_binary_step(Times_t, NAT0_LT_TIMES_T_L, NAT0_LT_TIMES_T_R, h_th)
+    body_eq = or_chain_collapse([eq_zero, eq_succ, eq_var, eq_plus, eq_times])
 
-    p.thus(
-        "_is_term_F f n = _is_term_F g n"
-    ).by_unfold(body_eq, _IS_TERM_F_DEF)
+    p.thus("_is_term_F f n = _is_term_F g n").by_unfold(body_eq, _IS_TERM_F_DEF)
 
 
 def _unfold_rec_via_F_def(rec_raw, F_def):
@@ -2310,11 +2340,11 @@ def _unfold_rec_via_F_def(rec_raw, F_def):
     by unfolding the helper constant and beta-reducing its application."""
     forall_pred = dest_forall(rec_raw._concl)
     n_local = forall_pred.bvar
-    spec = SPEC(n_local, rec_raw)               # |- fn n = F fn n
+    spec = SPEC(n_local, rec_raw)  # |- fn n = F fn n
     rhs = rand(spec._concl)
-    eq_unfold = REWRITE_CONV([F_def], rhs)      # |- F fn n = (\f n. body) fn n
-    eq_beta = BETA_NORM(rand(eq_unfold._concl)) # |- (\f n. body) fn n = body[fn, n]
-    rhs_eq = TRANS(eq_unfold, eq_beta)          # |- F fn n = body[fn, n]
+    eq_unfold = REWRITE_CONV([F_def], rhs)  # |- F fn n = (\f n. body) fn n
+    eq_beta = BETA_NORM(rand(eq_unfold._concl))  # |- (\f n. body) fn n = body[fn, n]
+    rhs_eq = TRANS(eq_unfold, eq_beta)  # |- F fn n = body[fn, n]
     return GEN(n_local, TRANS(spec, rhs_eq))
 
 
@@ -2355,25 +2385,45 @@ is_term_const = mk_const("is_term", [])
 
 def _is_form_body(f_t, n_t):
     return mk_or(
-        mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
-            mk_eq(n_t, mk_app(Eq_f, _a_n0, _b_n0)),
-            mk_and(mk_app(is_term_const, _a_n0),
-                   mk_app(is_term_const, _b_n0)),
-        ))),
+        mk_exists(
+            _a_n0,
+            mk_exists(
+                _b_n0,
+                mk_and(
+                    mk_eq(n_t, mk_app(Eq_f, _a_n0, _b_n0)),
+                    mk_and(mk_app(is_term_const, _a_n0), mk_app(is_term_const, _b_n0)),
+                ),
+            ),
+        ),
         mk_or(
-            mk_exists(_x_n0, mk_and(
-                mk_eq(n_t, mk_app(Not_f, _x_n0)),
-                mk_app(f_t, _x_n0),
-            )),
+            mk_exists(
+                _x_n0,
+                mk_and(
+                    mk_eq(n_t, mk_app(Not_f, _x_n0)),
+                    mk_app(f_t, _x_n0),
+                ),
+            ),
             mk_or(
-                mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
-                    mk_eq(n_t, mk_app(Imp_f, _a_n0, _b_n0)),
-                    mk_and(mk_app(f_t, _a_n0), mk_app(f_t, _b_n0)),
-                ))),
-                mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
-                    mk_eq(n_t, mk_app(Forall_f, _a_n0, _b_n0)),
-                    mk_app(f_t, _b_n0),
-                ))),
+                mk_exists(
+                    _a_n0,
+                    mk_exists(
+                        _b_n0,
+                        mk_and(
+                            mk_eq(n_t, mk_app(Imp_f, _a_n0, _b_n0)),
+                            mk_and(mk_app(f_t, _a_n0), mk_app(f_t, _b_n0)),
+                        ),
+                    ),
+                ),
+                mk_exists(
+                    _a_n0,
+                    mk_exists(
+                        _b_n0,
+                        mk_and(
+                            mk_eq(n_t, mk_app(Forall_f, _a_n0, _b_n0)),
+                            mk_app(f_t, _b_n0),
+                        ),
+                    ),
+                ),
             ),
         ),
     )
@@ -2390,34 +2440,22 @@ _IS_FORM_F = mk_const("_is_form_F", [])
 @proof
 def IS_FORM_MONO(p):
     """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
-                  ==> _is_form_F f n = _is_form_F g n."""
+    ==> _is_form_F f n = _is_form_F g n."""
     p.goal(
-        "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> "
-        "_is_form_F f n = _is_form_F g n",
-        types={"f": _pred_ty, "g": _pred_ty,
-               "n": nat0_ty, "k": nat0_ty},
+        "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> _is_form_F f n = _is_form_F g n",
+        types={"f": _pred_ty, "g": _pred_ty, "n": nat0_ty, "k": nat0_ty},
     )
     p.fix("f g n")
     p.assume("h: !k. nat0_lt k n ==> f k = g k")
 
     h_th = p.fact("h")
-    eq_eq = REFL(p._parse(
-        "?a b. n = Eq_f a b /\\ is_term a /\\ is_term b"
-    ))
+    eq_eq = REFL(p._parse("?a b. n = Eq_f a b /\\ is_term a /\\ is_term b"))
     eq_not = mono_iff_unary_step(Not_f, NAT0_LT_NOT_F, h_th)
-    eq_imp = mono_iff_binary_step(
-        Imp_f, NAT0_LT_IMP_F_L, NAT0_LT_IMP_F_R, h_th
-    )
-    eq_forall = mono_iff_binary_right_step(
-        Forall_f, NAT0_LT_FORALL_F_R, h_th
-    )
-    body_eq = or_chain_collapse(
-        [eq_eq, eq_not, eq_imp, eq_forall]
-    )
+    eq_imp = mono_iff_binary_step(Imp_f, NAT0_LT_IMP_F_L, NAT0_LT_IMP_F_R, h_th)
+    eq_forall = mono_iff_binary_right_step(Forall_f, NAT0_LT_FORALL_F_R, h_th)
+    body_eq = or_chain_collapse([eq_eq, eq_not, eq_imp, eq_forall])
 
-    p.thus(
-        "_is_form_F f n = _is_form_F g n"
-    ).by_unfold(body_eq, _IS_FORM_F_DEF)
+    p.thus("_is_form_F f n = _is_form_F g n").by_unfold(body_eq, _IS_FORM_F_DEF)
 
 
 IS_FORM_DEF, _IS_FORM_REC_RAW = define_wf_lt(
@@ -2466,22 +2504,35 @@ _f_pred2 = Var("f", _pred2_ty)
 
 def _free_in_body(f_t, n_t, v_t):
     """Bool body of ``_free_in_F`` at the v-applied level."""
+
     def _bin_disj(ctor):
-        return mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
-            mk_eq(n_t, mk_app(ctor, _a_n0, _b_n0)),
-            mk_or(mk_app(f_t, _a_n0, v_t), mk_app(f_t, _b_n0, v_t)),
-        )))
+        return mk_exists(
+            _a_n0,
+            mk_exists(
+                _b_n0,
+                mk_and(
+                    mk_eq(n_t, mk_app(ctor, _a_n0, _b_n0)),
+                    mk_or(mk_app(f_t, _a_n0, v_t), mk_app(f_t, _b_n0, v_t)),
+                ),
+            ),
+        )
 
     return mk_or(
-        mk_exists(_x_n0, mk_and(
-            mk_eq(n_t, mk_app(Succ_t, _x_n0)),
-            mk_app(f_t, _x_n0, v_t),
-        )),
+        mk_exists(
+            _x_n0,
+            mk_and(
+                mk_eq(n_t, mk_app(Succ_t, _x_n0)),
+                mk_app(f_t, _x_n0, v_t),
+            ),
+        ),
         mk_or(
-            mk_exists(_x_n0, mk_and(
-                mk_eq(n_t, mk_app(Var_t, _x_n0)),
-                mk_eq(v_t, _x_n0),
-            )),
+            mk_exists(
+                _x_n0,
+                mk_and(
+                    mk_eq(n_t, mk_app(Var_t, _x_n0)),
+                    mk_eq(v_t, _x_n0),
+                ),
+            ),
             mk_or(
                 _bin_disj(Plus_t),
                 mk_or(
@@ -2489,19 +2540,28 @@ def _free_in_body(f_t, n_t, v_t):
                     mk_or(
                         _bin_disj(Eq_f),
                         mk_or(
-                            mk_exists(_x_n0, mk_and(
-                                mk_eq(n_t, mk_app(Not_f, _x_n0)),
-                                mk_app(f_t, _x_n0, v_t),
-                            )),
+                            mk_exists(
+                                _x_n0,
+                                mk_and(
+                                    mk_eq(n_t, mk_app(Not_f, _x_n0)),
+                                    mk_app(f_t, _x_n0, v_t),
+                                ),
+                            ),
                             mk_or(
                                 _bin_disj(Imp_f),
-                                mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
-                                    mk_eq(n_t, mk_app(Forall_f, _a_n0, _b_n0)),
-                                    mk_and(
-                                        mk_not(mk_eq(v_t, _a_n0)),
-                                        mk_app(f_t, _b_n0, v_t),
+                                mk_exists(
+                                    _a_n0,
+                                    mk_exists(
+                                        _b_n0,
+                                        mk_and(
+                                            mk_eq(n_t, mk_app(Forall_f, _a_n0, _b_n0)),
+                                            mk_and(
+                                                mk_not(mk_eq(v_t, _a_n0)),
+                                                mk_app(f_t, _b_n0, v_t),
+                                            ),
+                                        ),
                                     ),
-                                ))),
+                                ),
                             ),
                         ),
                     ),
@@ -2514,8 +2574,10 @@ def _free_in_body(f_t, n_t, v_t):
 _FREE_IN_F_DEF = define(
     "_free_in_F",
     _F_pred2_ty,
-    mk_abs(_f_pred2, mk_abs(_n_var_top,
-        mk_abs(_v_n0, _free_in_body(_f_pred2, _n_var_top, _v_n0)))),
+    mk_abs(
+        _f_pred2,
+        mk_abs(_n_var_top, mk_abs(_v_n0, _free_in_body(_f_pred2, _n_var_top, _v_n0))),
+    ),
 )
 _FREE_IN_F = mk_const("_free_in_F", [])
 
@@ -2530,19 +2592,15 @@ def FREE_IN_MONO(p):
     helper constant on each side.
     """
     p.goal(
-        "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> "
-        "_free_in_F f n = _free_in_F g n",
-        types={"f": _pred2_ty, "g": _pred2_ty,
-               "n": nat0_ty, "k": nat0_ty},
+        "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> _free_in_F f n = _free_in_F g n",
+        types={"f": _pred2_ty, "g": _pred2_ty, "n": nat0_ty, "k": nat0_ty},
     )
     p.fix("f g n")
     p.assume("h: !k. nat0_lt k n ==> f k = g k")
 
     h_th = p.fact("h")
 
-    eq_succ = mono_iff_unary_pw_step(
-        Succ_t, NAT0_LT_SUCC_T, h_th, _v_n0
-    )
+    eq_succ = mono_iff_unary_pw_step(Succ_t, NAT0_LT_SUCC_T, h_th, _v_n0)
     eq_var = REFL(p._parse("?x. n = Var_t x /\\ v = x"))
     eq_plus = mono_iff_binary_disj_pw_step(
         Plus_t, NAT0_LT_PLUS_T_L, NAT0_LT_PLUS_T_R, h_th, _v_n0
@@ -2553,27 +2611,29 @@ def FREE_IN_MONO(p):
     eq_eq = mono_iff_binary_disj_pw_step(
         Eq_f, NAT0_LT_EQ_F_L, NAT0_LT_EQ_F_R, h_th, _v_n0
     )
-    eq_not = mono_iff_unary_pw_step(
-        Not_f, NAT0_LT_NOT_F, h_th, _v_n0
-    )
+    eq_not = mono_iff_unary_pw_step(Not_f, NAT0_LT_NOT_F, h_th, _v_n0)
     eq_imp = mono_iff_binary_disj_pw_step(
         Imp_f, NAT0_LT_IMP_F_L, NAT0_LT_IMP_F_R, h_th, _v_n0
     )
-    eq_forall = mono_iff_forall_pw_step(
-        NAT0_LT_FORALL_F_R, h_th, _v_n0
+    eq_forall = mono_iff_forall_pw_step(NAT0_LT_FORALL_F_R, h_th, _v_n0)
+    body_eq = or_chain_collapse(
+        [
+            eq_succ,
+            eq_var,
+            eq_plus,
+            eq_times,
+            eq_eq,
+            eq_not,
+            eq_imp,
+            eq_forall,
+        ]
     )
-    body_eq = or_chain_collapse([
-        eq_succ, eq_var, eq_plus, eq_times,
-        eq_eq, eq_not, eq_imp, eq_forall,
-    ])
     # body_eq : {h_concl} |- body[f, n, v] = body[g, n, v].
 
     abs_eq = ABS(_v_n0, body_eq)
     # abs_eq : {h_concl} |- (\v. body[f, n, v]) = (\v. body[g, n, v]).
 
-    p.thus(
-        "_free_in_F f n = _free_in_F g n"
-    ).by_unfold(abs_eq, _FREE_IN_F_DEF)
+    p.thus("_free_in_F f n = _free_in_F g n").by_unfold(abs_eq, _FREE_IN_F_DEF)
 
 
 FREE_IN_DEF, _FREE_IN_REC_RAW = define_wf_lt(
@@ -2652,72 +2712,122 @@ _f_pred3 = Var("f", _pred3_ty)
 
 def _substitute_body(f_t, n_t, new_t_t, v_t, r_t):
     """Bool body of the @r-disjunction inside ``_substitute_F``."""
+
     def fc(arg):
         return mk_app(f_t, arg, new_t_t, v_t)
 
     return mk_or(
         mk_and(mk_eq(n_t, Zero_t), mk_eq(r_t, Zero_t)),
         mk_or(
-            mk_exists(_x_n0, mk_and(
-                mk_eq(n_t, mk_app(Succ_t, _x_n0)),
-                mk_eq(r_t, mk_app(Succ_t, fc(_x_n0))),
-            )),
+            mk_exists(
+                _x_n0,
+                mk_and(
+                    mk_eq(n_t, mk_app(Succ_t, _x_n0)),
+                    mk_eq(r_t, mk_app(Succ_t, fc(_x_n0))),
+                ),
+            ),
             mk_or(
-                mk_exists(_x_n0, mk_and(
-                    mk_eq(n_t, mk_app(Var_t, _x_n0)),
-                    mk_or(
-                        mk_and(mk_eq(v_t, _x_n0), mk_eq(r_t, new_t_t)),
-                        mk_and(mk_not(mk_eq(v_t, _x_n0)),
-                               mk_eq(r_t, mk_app(Var_t, _x_n0))),
-                    ),
-                )),
-                mk_or(
-                    mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
-                        mk_eq(n_t, mk_app(Plus_t, _a_n0, _b_n0)),
-                        mk_eq(r_t, mk_app(Plus_t, fc(_a_n0), fc(_b_n0))),
-                    ))),
-                    mk_or(
-                        mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
-                            mk_eq(n_t, mk_app(Times_t, _a_n0, _b_n0)),
-                            mk_eq(r_t, mk_app(Times_t, fc(_a_n0), fc(_b_n0))),
-                        ))),
+                mk_exists(
+                    _x_n0,
+                    mk_and(
+                        mk_eq(n_t, mk_app(Var_t, _x_n0)),
                         mk_or(
-                            mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
-                                mk_eq(n_t, mk_app(Eq_f, _a_n0, _b_n0)),
-                                mk_eq(r_t, mk_app(Eq_f, fc(_a_n0), fc(_b_n0))),
-                            ))),
+                            mk_and(mk_eq(v_t, _x_n0), mk_eq(r_t, new_t_t)),
+                            mk_and(
+                                mk_not(mk_eq(v_t, _x_n0)),
+                                mk_eq(r_t, mk_app(Var_t, _x_n0)),
+                            ),
+                        ),
+                    ),
+                ),
+                mk_or(
+                    mk_exists(
+                        _a_n0,
+                        mk_exists(
+                            _b_n0,
+                            mk_and(
+                                mk_eq(n_t, mk_app(Plus_t, _a_n0, _b_n0)),
+                                mk_eq(r_t, mk_app(Plus_t, fc(_a_n0), fc(_b_n0))),
+                            ),
+                        ),
+                    ),
+                    mk_or(
+                        mk_exists(
+                            _a_n0,
+                            mk_exists(
+                                _b_n0,
+                                mk_and(
+                                    mk_eq(n_t, mk_app(Times_t, _a_n0, _b_n0)),
+                                    mk_eq(r_t, mk_app(Times_t, fc(_a_n0), fc(_b_n0))),
+                                ),
+                            ),
+                        ),
+                        mk_or(
+                            mk_exists(
+                                _a_n0,
+                                mk_exists(
+                                    _b_n0,
+                                    mk_and(
+                                        mk_eq(n_t, mk_app(Eq_f, _a_n0, _b_n0)),
+                                        mk_eq(r_t, mk_app(Eq_f, fc(_a_n0), fc(_b_n0))),
+                                    ),
+                                ),
+                            ),
                             mk_or(
-                                mk_exists(_x_n0, mk_and(
-                                    mk_eq(n_t, mk_app(Not_f, _x_n0)),
-                                    mk_eq(r_t, mk_app(Not_f, fc(_x_n0))),
-                                )),
+                                mk_exists(
+                                    _x_n0,
+                                    mk_and(
+                                        mk_eq(n_t, mk_app(Not_f, _x_n0)),
+                                        mk_eq(r_t, mk_app(Not_f, fc(_x_n0))),
+                                    ),
+                                ),
                                 mk_or(
-                                    mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
-                                        mk_eq(n_t, mk_app(Imp_f, _a_n0, _b_n0)),
-                                        mk_eq(r_t,
-                                              mk_app(Imp_f,
-                                                     fc(_a_n0),
-                                                     fc(_b_n0))),
-                                    ))),
-                                    mk_exists(_a_n0, mk_exists(_b_n0, mk_and(
-                                        mk_eq(n_t,
-                                              mk_app(Forall_f, _a_n0, _b_n0)),
-                                        mk_or(
+                                    mk_exists(
+                                        _a_n0,
+                                        mk_exists(
+                                            _b_n0,
                                             mk_and(
-                                                mk_eq(v_t, _a_n0),
-                                                mk_eq(r_t,
-                                                      mk_app(Forall_f,
-                                                             _a_n0, _b_n0)),
-                                            ),
-                                            mk_and(
-                                                mk_not(mk_eq(v_t, _a_n0)),
-                                                mk_eq(r_t,
-                                                      mk_app(Forall_f,
-                                                             _a_n0,
-                                                             fc(_b_n0))),
+                                                mk_eq(n_t, mk_app(Imp_f, _a_n0, _b_n0)),
+                                                mk_eq(
+                                                    r_t,
+                                                    mk_app(Imp_f, fc(_a_n0), fc(_b_n0)),
+                                                ),
                                             ),
                                         ),
-                                    ))),
+                                    ),
+                                    mk_exists(
+                                        _a_n0,
+                                        mk_exists(
+                                            _b_n0,
+                                            mk_and(
+                                                mk_eq(
+                                                    n_t, mk_app(Forall_f, _a_n0, _b_n0)
+                                                ),
+                                                mk_or(
+                                                    mk_and(
+                                                        mk_eq(v_t, _a_n0),
+                                                        mk_eq(
+                                                            r_t,
+                                                            mk_app(
+                                                                Forall_f, _a_n0, _b_n0
+                                                            ),
+                                                        ),
+                                                    ),
+                                                    mk_and(
+                                                        mk_not(mk_eq(v_t, _a_n0)),
+                                                        mk_eq(
+                                                            r_t,
+                                                            mk_app(
+                                                                Forall_f,
+                                                                _a_n0,
+                                                                fc(_b_n0),
+                                                            ),
+                                                        ),
+                                                    ),
+                                                ),
+                                            ),
+                                        ),
+                                    ),
                                 ),
                             ),
                         ),
@@ -2731,10 +2841,22 @@ def _substitute_body(f_t, n_t, new_t_t, v_t, r_t):
 _SUBSTITUTE_F_DEF = define(
     "_substitute_F",
     _F_pred3_ty,
-    mk_abs(_f_pred3, mk_abs(_n_var_top, mk_abs(_new_t_n0, mk_abs(_v_n0,
-        mk_select(_r_n0,
-                  _substitute_body(_f_pred3, _n_var_top, _new_t_n0,
-                                   _v_n0, _r_n0)))))),
+    mk_abs(
+        _f_pred3,
+        mk_abs(
+            _n_var_top,
+            mk_abs(
+                _new_t_n0,
+                mk_abs(
+                    _v_n0,
+                    mk_select(
+                        _r_n0,
+                        _substitute_body(_f_pred3, _n_var_top, _new_t_n0, _v_n0, _r_n0),
+                    ),
+                ),
+            ),
+        ),
+    ),
 )
 _SUBSTITUTE_F = mk_const("_substitute_F", [])
 
@@ -2754,8 +2876,7 @@ def SUBSTITUTE_MONO(p):
     p.goal(
         "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> "
         "_substitute_F f n = _substitute_F g n",
-        types={"f": _pred3_ty, "g": _pred3_ty,
-               "n": nat0_ty, "k": nat0_ty},
+        types={"f": _pred3_ty, "g": _pred3_ty, "n": nat0_ty, "k": nat0_ty},
     )
     p.fix("f g n")
     p.assume("h: !k. nat0_lt k n ==> f k = g k")
@@ -2766,45 +2887,92 @@ def SUBSTITUTE_MONO(p):
     n_t = p._parse("n")
     eq_zero = REFL(mk_and(mk_eq(n_t, Zero_t), mk_eq(_r_n0, Zero_t)))
     eq_succ = mono_iff_value_unary_pw_step(
-        Succ_t, NAT0_LT_SUCC_T, h_th, args, _r_n0,
+        Succ_t,
+        NAT0_LT_SUCC_T,
+        h_th,
+        args,
+        _r_n0,
         lambda t: mk_app(Succ_t, t),
     )
-    eq_var = REFL(mk_exists(_x_n0, mk_and(
-        mk_eq(n_t, mk_app(Var_t, _x_n0)),
-        mk_or(
-            mk_and(mk_eq(_v_n0, _x_n0), mk_eq(_r_n0, _new_t_n0)),
-            mk_and(mk_not(mk_eq(_v_n0, _x_n0)),
-                   mk_eq(_r_n0, mk_app(Var_t, _x_n0))),
-        ),
-    )))
+    eq_var = REFL(
+        mk_exists(
+            _x_n0,
+            mk_and(
+                mk_eq(n_t, mk_app(Var_t, _x_n0)),
+                mk_or(
+                    mk_and(mk_eq(_v_n0, _x_n0), mk_eq(_r_n0, _new_t_n0)),
+                    mk_and(
+                        mk_not(mk_eq(_v_n0, _x_n0)), mk_eq(_r_n0, mk_app(Var_t, _x_n0))
+                    ),
+                ),
+            ),
+        )
+    )
     eq_plus = mono_iff_value_binary_pw_step(
-        Plus_t, NAT0_LT_PLUS_T_L, NAT0_LT_PLUS_T_R, h_th, args, _r_n0,
+        Plus_t,
+        NAT0_LT_PLUS_T_L,
+        NAT0_LT_PLUS_T_R,
+        h_th,
+        args,
+        _r_n0,
         lambda a, b: mk_app(Plus_t, a, b),
     )
     eq_times = mono_iff_value_binary_pw_step(
-        Times_t, NAT0_LT_TIMES_T_L, NAT0_LT_TIMES_T_R, h_th, args, _r_n0,
+        Times_t,
+        NAT0_LT_TIMES_T_L,
+        NAT0_LT_TIMES_T_R,
+        h_th,
+        args,
+        _r_n0,
         lambda a, b: mk_app(Times_t, a, b),
     )
     eq_eq = mono_iff_value_binary_pw_step(
-        Eq_f, NAT0_LT_EQ_F_L, NAT0_LT_EQ_F_R, h_th, args, _r_n0,
+        Eq_f,
+        NAT0_LT_EQ_F_L,
+        NAT0_LT_EQ_F_R,
+        h_th,
+        args,
+        _r_n0,
         lambda a, b: mk_app(Eq_f, a, b),
     )
     eq_not = mono_iff_value_unary_pw_step(
-        Not_f, NAT0_LT_NOT_F, h_th, args, _r_n0,
+        Not_f,
+        NAT0_LT_NOT_F,
+        h_th,
+        args,
+        _r_n0,
         lambda t: mk_app(Not_f, t),
     )
     eq_imp = mono_iff_value_binary_pw_step(
-        Imp_f, NAT0_LT_IMP_F_L, NAT0_LT_IMP_F_R, h_th, args, _r_n0,
+        Imp_f,
+        NAT0_LT_IMP_F_L,
+        NAT0_LT_IMP_F_R,
+        h_th,
+        args,
+        _r_n0,
         lambda a, b: mk_app(Imp_f, a, b),
     )
     eq_forall = mono_iff_forall_value_pw_step(
-        NAT0_LT_FORALL_F_R, h_th, args, _r_n0, _v_n0,
+        NAT0_LT_FORALL_F_R,
+        h_th,
+        args,
+        _r_n0,
+        _v_n0,
     )
 
-    body_eq = or_chain_collapse([
-        eq_zero, eq_succ, eq_var, eq_plus, eq_times,
-        eq_eq, eq_not, eq_imp, eq_forall,
-    ])
+    body_eq = or_chain_collapse(
+        [
+            eq_zero,
+            eq_succ,
+            eq_var,
+            eq_plus,
+            eq_times,
+            eq_eq,
+            eq_not,
+            eq_imp,
+            eq_forall,
+        ]
+    )
     # body_eq : {h_concl} |- body[f, n, new_t, v, r] = body[g, n, new_t, v, r]
 
     abs_r_eq = ABS(_r_n0, body_eq)
@@ -2816,9 +2984,9 @@ def SUBSTITUTE_MONO(p):
     abs_nt_eq = ABS(_new_t_n0, abs_v_eq)
     # abs_nt_eq : ... |- (\new_t v. @r. body[f]) = (\new_t v. @r. body[g])
 
-    p.thus(
-        "_substitute_F f n = _substitute_F g n"
-    ).by_unfold(abs_nt_eq, _SUBSTITUTE_F_DEF)
+    p.thus("_substitute_F f n = _substitute_F g n").by_unfold(
+        abs_nt_eq, _SUBSTITUTE_F_DEF
+    )
 
 
 SUBSTITUTE_DEF, _SUBSTITUTE_REC_RAW = define_wf_lt(
@@ -2827,9 +2995,7 @@ SUBSTITUTE_DEF, _SUBSTITUTE_REC_RAW = define_wf_lt(
     _SUBSTITUTE_F,
     SUBSTITUTE_MONO,
 )
-SUBSTITUTE_REC = _unfold_rec_via_F_def(
-    _SUBSTITUTE_REC_RAW, _SUBSTITUTE_F_DEF
-)
+SUBSTITUTE_REC = _unfold_rec_via_F_def(_SUBSTITUTE_REC_RAW, _SUBSTITUTE_F_DEF)
 
 
 # Constructor recursion equations.
@@ -2840,33 +3006,60 @@ SUBSTITUTE_REC = _unfold_rec_via_F_def(
 # use ``derive_rec_eq_select_cond`` to produce a pair of conditional
 # rec equations (``cond ==> rhs = T`` and ``~cond ==> rhs = E``).
 SUBSTITUTE_AT_ZERO = derive_rec_eq_select(
-    SUBSTITUTE_REC, "Zero_t", [], [_new_t_n0, _v_n0],
+    SUBSTITUTE_REC,
+    "Zero_t",
+    [],
+    [_new_t_n0, _v_n0],
 )
 SUBSTITUTE_AT_SUCC = derive_rec_eq_select(
-    SUBSTITUTE_REC, "Succ_t", ["t"], [_new_t_n0, _v_n0],
+    SUBSTITUTE_REC,
+    "Succ_t",
+    ["t"],
+    [_new_t_n0, _v_n0],
 )
 SUBSTITUTE_AT_PLUS = derive_rec_eq_select(
-    SUBSTITUTE_REC, "Plus_t", ["t1", "t2"], [_new_t_n0, _v_n0],
+    SUBSTITUTE_REC,
+    "Plus_t",
+    ["t1", "t2"],
+    [_new_t_n0, _v_n0],
 )
 SUBSTITUTE_AT_TIMES = derive_rec_eq_select(
-    SUBSTITUTE_REC, "Times_t", ["t1", "t2"], [_new_t_n0, _v_n0],
+    SUBSTITUTE_REC,
+    "Times_t",
+    ["t1", "t2"],
+    [_new_t_n0, _v_n0],
 )
 SUBSTITUTE_AT_EQ = derive_rec_eq_select(
-    SUBSTITUTE_REC, "Eq_f", ["t1", "t2"], [_new_t_n0, _v_n0],
+    SUBSTITUTE_REC,
+    "Eq_f",
+    ["t1", "t2"],
+    [_new_t_n0, _v_n0],
 )
 SUBSTITUTE_AT_NOT = derive_rec_eq_select(
-    SUBSTITUTE_REC, "Not_f", ["phi"], [_new_t_n0, _v_n0],
+    SUBSTITUTE_REC,
+    "Not_f",
+    ["phi"],
+    [_new_t_n0, _v_n0],
 )
 SUBSTITUTE_AT_IMP = derive_rec_eq_select(
-    SUBSTITUTE_REC, "Imp_f", ["phi1", "phi2"], [_new_t_n0, _v_n0],
+    SUBSTITUTE_REC,
+    "Imp_f",
+    ["phi1", "phi2"],
+    [_new_t_n0, _v_n0],
 )
 # Conditional cases: each yields a HIT (cond branch) and MISS (~cond
 # branch) recursion equation.
 SUBSTITUTE_AT_VAR_HIT, SUBSTITUTE_AT_VAR_MISS = derive_rec_eq_select_cond(
-    SUBSTITUTE_REC, "Var_t", ["x"], [_new_t_n0, _v_n0],
+    SUBSTITUTE_REC,
+    "Var_t",
+    ["x"],
+    [_new_t_n0, _v_n0],
 )
 SUBSTITUTE_AT_FORALL_HIT, SUBSTITUTE_AT_FORALL_MISS = derive_rec_eq_select_cond(
-    SUBSTITUTE_REC, "Forall_f", ["a", "b"], [_new_t_n0, _v_n0],
+    SUBSTITUTE_REC,
+    "Forall_f",
+    ["a", "b"],
+    [_new_t_n0, _v_n0],
 )
 
 
@@ -2937,32 +3130,39 @@ if __name__ == "__main__":
     print("    EQ_F_NEQ_ZERO     :", pp_thm(EQ_F_NEQ_ZERO))
     print("    IMP_F_NEQ_ZERO    :", pp_thm(IMP_F_NEQ_ZERO))
     print("    FORALL_F_NEQ_ZERO :", pp_thm(FORALL_F_NEQ_ZERO))
-    print(f"  Pairwise distinct-tag disjointness: "
-          f"{len(CTOR_DISJOINTNESS)} lemmas, e.g.")
-    print("    SUCC_T_NEQ_VAR_T  :",
-          pp_thm(CTOR_DISJOINTNESS[('Succ_t', 'Var_t')]))
-    print("    PLUS_T_NEQ_TIMES_T:",
-          pp_thm(CTOR_DISJOINTNESS[('Plus_t', 'Times_t')]))
-    print("    EQ_F_NEQ_FORALL_F :",
-          pp_thm(CTOR_DISJOINTNESS[('Eq_f', 'Forall_f')]))
+    print(
+        f"  Pairwise distinct-tag disjointness: {len(CTOR_DISJOINTNESS)} lemmas, e.g."
+    )
+    print("    SUCC_T_NEQ_VAR_T  :", pp_thm(CTOR_DISJOINTNESS[("Succ_t", "Var_t")]))
+    print("    PLUS_T_NEQ_TIMES_T:", pp_thm(CTOR_DISJOINTNESS[("Plus_t", "Times_t")]))
+    print("    EQ_F_NEQ_FORALL_F :", pp_thm(CTOR_DISJOINTNESS[("Eq_f", "Forall_f")]))
     print()
     print("Stage 1 -- MONO helpers (per-disjunct iffs).")
     # Smoke test: build a fake hypothesis ASSUME(!k. nat0_lt k n ==> f k = g k)
     # and exercise both helpers against the q_syntax constructors.
     from axioms import mk_forall, mk_imp
     from basics import mk_app as _mk_app
+
     _f_smoke = Var("f", parse_type("nat0 -> bool"))
     _g_smoke = Var("g", parse_type("nat0 -> bool"))
     _n_smoke = Var("n", nat0_ty)
     _k_smoke = Var("k", nat0_ty)
     _nat0_lt_const = mk_const("nat0_lt", [])
-    _smoke_hyp = ASSUME(mk_forall(_k_smoke, mk_imp(
-        _mk_app(_nat0_lt_const, _k_smoke, _n_smoke),
-        mk_eq(_mk_app(_f_smoke, _k_smoke), _mk_app(_g_smoke, _k_smoke)),
-    )))
+    _smoke_hyp = ASSUME(
+        mk_forall(
+            _k_smoke,
+            mk_imp(
+                _mk_app(_nat0_lt_const, _k_smoke, _n_smoke),
+                mk_eq(_mk_app(_f_smoke, _k_smoke), _mk_app(_g_smoke, _k_smoke)),
+            ),
+        )
+    )
     _IFF_SUCC_T = mono_iff_unary_step(Succ_t, NAT0_LT_SUCC_T, _smoke_hyp)
     _IFF_PLUS_T = mono_iff_binary_step(
-        Plus_t, NAT0_LT_PLUS_T_L, NAT0_LT_PLUS_T_R, _smoke_hyp,
+        Plus_t,
+        NAT0_LT_PLUS_T_L,
+        NAT0_LT_PLUS_T_R,
+        _smoke_hyp,
     )
     print("  unary  (Succ_t):", pp_thm(_IFF_SUCC_T))
     print("  binary (Plus_t):", pp_thm(_IFF_PLUS_T))
@@ -2978,22 +3178,33 @@ if __name__ == "__main__":
     _body = mk_or(
         mk_eq(_n_var, Zero_t),
         mk_or(
-            mk_exists(_t_smoke, mk_and(
-                mk_eq(_n_var, _mk_app(Succ_t, _t_smoke)),
-                _mk_app(_F_pred, _t_smoke),
-            )),
+            mk_exists(
+                _t_smoke,
+                mk_and(
+                    mk_eq(_n_var, _mk_app(Succ_t, _t_smoke)),
+                    _mk_app(_F_pred, _t_smoke),
+                ),
+            ),
             mk_or(
                 mk_exists(_v_smoke, mk_eq(_n_var, _mk_app(Var_t, _v_smoke))),
-                mk_exists(_a_smoke, mk_exists(_b_smoke, mk_and(
-                    mk_eq(_n_var, _mk_app(Plus_t, _a_smoke, _b_smoke)),
-                    mk_and(_mk_app(_F_pred, _a_smoke), _mk_app(_F_pred, _b_smoke)),
-                ))),
+                mk_exists(
+                    _a_smoke,
+                    mk_exists(
+                        _b_smoke,
+                        mk_and(
+                            mk_eq(_n_var, _mk_app(Plus_t, _a_smoke, _b_smoke)),
+                            mk_and(
+                                _mk_app(_F_pred, _a_smoke), _mk_app(_F_pred, _b_smoke)
+                            ),
+                        ),
+                    ),
+                ),
             ),
         ),
     )
     _fake_REC = ASSUME(mk_forall(_n_var, mk_eq(_mk_app(_F_pred, _n_var), _body)))
     _REC_SUCC = derive_rec_eq(_fake_REC, "Succ_t", ["t"])
-    _REC_VAR  = derive_rec_eq(_fake_REC, "Var_t", ["v"])
+    _REC_VAR = derive_rec_eq(_fake_REC, "Var_t", ["v"])
     _REC_PLUS = derive_rec_eq(_fake_REC, "Plus_t", ["a", "b"])
     print("  REC at Succ_t :", pp_thm(_REC_SUCC))
     print("  REC at Var_t  :", pp_thm(_REC_VAR))

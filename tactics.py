@@ -385,11 +385,11 @@ def OR_CONG(eq_l, eq_r):
 def _build_or_F_left():
     """|- !p. (F \\/ p) = p"""
     pv = Var("p", bool_ty)
-    or_th = ASSUME(mk_app(mk_const("\\/", []), F, pv))   # {F \/ p} |- F \/ p
-    th_F_imp = DISCH(F, CONTR(pv, ASSUME(F)))             # |- F ==> p
-    th_p_imp = DISCH(pv, ASSUME(pv))                       # |- p ==> p
-    fwd = DISJ_CASES(or_th, th_F_imp, th_p_imp)            # {F \/ p} |- p
-    rev = DISJ2(F, ASSUME(pv))                             # {p} |- F \/ p
+    or_th = ASSUME(mk_app(mk_const("\\/", []), F, pv))  # {F \/ p} |- F \/ p
+    th_F_imp = DISCH(F, CONTR(pv, ASSUME(F)))  # |- F ==> p
+    th_p_imp = DISCH(pv, ASSUME(pv))  # |- p ==> p
+    fwd = DISJ_CASES(or_th, th_F_imp, th_p_imp)  # {F \/ p} |- p
+    rev = DISJ2(F, ASSUME(pv))  # {p} |- F \/ p
     # DEDUCT_ANTISYM_RULE(t1, t2) yields t1._concl = t2._concl; pass rev
     # first so the result is (F \/ p) = p, not p = (F \/ p).
     return GEN(pv, DEDUCT_ANTISYM_RULE(rev, fwd))
@@ -406,7 +406,7 @@ def _build_or_F_right():
     return GEN(pv, DEDUCT_ANTISYM_RULE(rev, fwd))
 
 
-OR_F_LEFT = _build_or_F_left()    # |- !p. (F \/ p) = p
+OR_F_LEFT = _build_or_F_left()  # |- !p. (F \/ p) = p
 OR_F_RIGHT = _build_or_F_right()  # |- !p. (p \/ F) = p
 
 

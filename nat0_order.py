@@ -24,9 +24,8 @@ from fusion import (
     INST_TYPE,
     HolError,
 )
-from basics import mk_abs, mk_app, mk_const, mk_eq, rand, rator
+from basics import mk_abs, mk_app, mk_const, mk_eq, rand
 from axioms import (
-    SELECT_AX,
     mk_and,
     mk_forall,
     mk_exists,
@@ -54,11 +53,11 @@ from tactics import (
     UNFOLD,
     REWRITE_RULE,
 )
-from classical import EXCLUDED_MIDDLE, NOT_NOT_ELIM, NOT_FORALL_TO_EX_NOT
+from classical import NOT_NOT_ELIM
 from num import num_ty
 from nat import LT_DEF, SATZ_27
 from nat0 import nat0_ty, abs_nat0, rep_nat0, REP_ABS, ABS_REP_NAT0
-from parser import define, parse_type, add_const
+from parser import define, parse_type
 from proof import proof, StrongInductionStrategy, register_strong_induction
 
 
@@ -173,7 +172,9 @@ def STRONG_INDUCTION_0(p):
             p.have("Rne:").by_thm(Rne_th)
 
             # SATZ_27 specialised at R_pred: (?r. R r) ==> ?r0. R r0 /\ !s. R s ==> r0 <= s.
-            satz27_R = SPEC(R_pred, SATZ_27)  # |- (?n. R n) ==> ?m. R m /\ !k. R k ==> m <= k
+            satz27_R = SPEC(
+                R_pred, SATZ_27
+            )  # |- (?n. R n) ==> ?m. R m /\ !k. R k ==> m <= k
             # Wait — SATZ_27 has bound vars n, m, k in its statement. Let me carefully check.
             # SATZ_27 : !N. (?n. N n) ==> ?m. N m /\ !k. N k ==> m <= k.
             # SPEC(R_pred, SATZ_27) gives (?n. R_pred n) ==> ?m. R_pred m /\ !k. R_pred k ==> m <= k.
@@ -194,36 +195,36 @@ def STRONG_INDUCTION_0(p):
             min_r0 = CONJUNCT2(chose_least)  # |- !k. R_pred k ==> r0_w <= k
 
             # Unfold R r0 to get the existential.
-            R_r0_unf = BETA_CONV(R_r0._concl)  # |- R r0_w = (?nn. r0_w = rep_nat0 nn /\ ~(P nn))
+            R_r0_unf = BETA_CONV(
+                R_r0._concl
+            )  # |- R r0_w = (?nn. r0_w = rep_nat0 nn /\ ~(P nn))
             R_r0_ex = EQ_MP(R_r0_unf, R_r0)
 
             # Choose n0.
-            r0_w = R_r0._concl.arg  # the SELECT term
             ex_at_r0_pred = R_r0_ex._concl.arg  # \nn. r0_w = rep_nat0 nn /\ ~(P nn)
             chose_n0 = CHOOSE_WITNESS(ex_at_r0_pred, R_r0_ex)
             # chose_n0 : |- r0_w = rep_nat0 n0_w /\ ~(P n0_w)
             #   where n0_w = @nn. ...
             r0_eq_rep = CONJUNCT1(chose_n0)
             nPn0 = CONJUNCT2(chose_n0)
-            n0_w = chose_n0._concl.fun.arg.arg  # rep_nat0 n0_w from r0_w = rep_nat0 n0_w
+            n0_w = (
+                chose_n0._concl.fun.arg.arg
+            )  # rep_nat0 n0_w from r0_w = rep_nat0 n0_w
             # Actually: chose_n0._concl is Comb(/\, fst, snd). fst = r0_w = rep_nat0 n0_w.
             # The n0_w is buried; let me just extract via term structure.
             # r0_eq_rep is r0_w = rep_nat0 n0_w; rand gives rep_nat0 n0_w; rand again gives n0_w.
             from basics import rand as _rand
+
             n0_w = _rand(_rand(r0_eq_rep._concl))
 
             # Prove !k. k <_0 n0_w ==> P k.
-            forallk_body_template = lambda kk: mk_imp(
-                mk_app(nat0_lt, kk, n0_w),
-                mk_app(P_var, kk),
-            )
-
             k_var = Var("k", nat0_ty)
-            forallk_at_k = forallk_body_template(k_var)
             # Inline proof.
             hk = ASSUME(mk_app(nat0_lt, k_var, n0_w))
             # rep_nat0 k < rep_nat0 n0_w via LT_NAT0.
-            lt_eq = SPECL([k_var, n0_w], LT_NAT0)  # |- nat0_lt k n0_w = (rep_nat0 k < rep_nat0 n0_w)
+            lt_eq = SPECL(
+                [k_var, n0_w], LT_NAT0
+            )  # |- nat0_lt k n0_w = (rep_nat0 k < rep_nat0 n0_w)
             hk_lt = EQ_MP(lt_eq, hk)  # |- rep_nat0 k < rep_nat0 n0_w
 
             # By contradiction on P k.
@@ -248,6 +249,7 @@ def STRONG_INDUCTION_0(p):
             le1 = MP(SPEC(mk_app(rep_nat0, k_var), min_r0), R_k)
             # Substitute r0_w = rep_nat0 n0_w into le1's LHS.
             from tactics import REWRITE_RULE as _RR
+
             le2 = _RR([r0_eq_rep], le1)
             # le2 : rep_nat0 n0_w <= rep_nat0 k.  Convert to rep_nat0 k >= rep_nat0 n0_w via SATZ_14.
             from nat import _CONTRA_LT_GE, SATZ_14
@@ -301,7 +303,7 @@ def STRONG_INDUCTION_0(p):
 #                                                           and REP_ABS.
 def _prove_rep_suc0():
     from nat0 import SUC0_DEF
-    from num import SUC, mk_suc
+    from num import mk_suc
 
     suc0_at_n = AP_THM(SUC0_DEF, _n)
     beta = BETA_CONV(rand(suc0_at_n._concl))
@@ -346,7 +348,9 @@ def NAT0_LT_SUC0(p):
     lt_in_suc = REWRITE_RULE([add1_n], lt_in_num)  # |- rep_n < SUC rep_n
     # SUC rep_n = rep_nat0 (SUC0 n) via SYM REP_SUC0.
     rep_suc0_n = SPEC(n_t, REP_SUC0)  # |- rep_nat0 (SUC0 n) = SUC (rep_nat0 n)
-    lt_via_rep = REWRITE_RULE([SYM(rep_suc0_n)], lt_in_suc)  # |- rep_n < rep_nat0 (SUC0 n)
+    lt_via_rep = REWRITE_RULE(
+        [SYM(rep_suc0_n)], lt_in_suc
+    )  # |- rep_n < rep_nat0 (SUC0 n)
     # Fold via LT_NAT0.
     lt_eq = SPECL([n_t, mk_app(mk_const("SUC0", []), n_t)], LT_NAT0)
     p.thus("nat0_lt n (SUC0 n)").by_eq_mp(SYM(lt_eq), lt_via_rep)
@@ -392,7 +396,9 @@ def NAT0_LT_NOT_REFL(p):
         nn_eq = SPECL([n_t, n_t], LT_NAT0)
         h_num = EQ_MP(nn_eq, p.fact("h"))  # |- rep_n < rep_n
         # x < y unfolds to ?v. y = x + v.
-        ex_eq = UNFOLD(LT_DEF, rep_n, rep_n)  # |- (rep_n < rep_n) = (?v. rep_n = rep_n + v)
+        ex_eq = UNFOLD(
+            LT_DEF, rep_n, rep_n
+        )  # |- (rep_n < rep_n) = (?v. rep_n = rep_n + v)
         ex_th = EQ_MP(ex_eq, h_num)  # |- ?v. rep_n = rep_n + v
         # _SATZ_9_EXCL_13 : !x y. ~(x = y /\ ?v. y = x + v).
         excl = SPECL([rep_n, rep_n], _SATZ_9_EXCL_13)
@@ -410,9 +416,7 @@ def NAT0_LT_ASYM(p):
     p.fix("m n")
     p.assume("hmn: nat0_lt m n")
     with p.suppose("hnm: nat0_lt n m"):
-        p.have("hmm: nat0_lt m m").by(
-            NAT0_LT_TRANS, "m", "n", "m", "hmn", "hnm"
-        )
+        p.have("hmm: nat0_lt m m").by(NAT0_LT_TRANS, "m", "n", "m", "hmn", "hnm")
         p.have("nrefl: ~(nat0_lt m m)").by(NAT0_LT_NOT_REFL, "m")
         p.absurd().by_conj("nrefl", "hmm")
 
@@ -437,7 +441,6 @@ def NAT0_LT_SUC0_MONO(p):
     nm_eq = SPECL([n_t, m_t], LT_NAT0)
     h_num = EQ_MP(nm_eq, p.fact("h"))  # |- rep_n < rep_m
     one_t = mk_const("1", [])
-    plus = mk_const("+", [])
     h_plus_one = MP(SPECL([rep_n, rep_m, one_t], SATZ_19C), h_num)
     # |- rep_n + 1 < rep_m + 1
     add1_n = SPEC(rep_n, ADD_1)
@@ -466,13 +469,16 @@ def NAT0_LT_0_SUC0(p):
         with p.base():
             p.thus("nat0_lt 0 (SUC0 0)").by(NAT0_LT_SUC0, "0")
         with p.step("IH"):
-            p.have(
-                "step_lt: nat0_lt (SUC0 m) (SUC0 (SUC0 m))"
-            ).by(NAT0_LT_SUC0, "SUC0 m")
+            p.have("step_lt: nat0_lt (SUC0 m) (SUC0 (SUC0 m))").by(
+                NAT0_LT_SUC0, "SUC0 m"
+            )
             p.thus("nat0_lt 0 (SUC0 (SUC0 m))").by(
                 NAT0_LT_TRANS,
-                "0", "SUC0 m", "SUC0 (SUC0 m)",
-                "IH", "step_lt",
+                "0",
+                "SUC0 m",
+                "SUC0 (SUC0 m)",
+                "IH",
+                "step_lt",
             )
 
 
@@ -567,10 +573,12 @@ def NAT0_NOT_LT_ZERO(p):
 # NAT0_NEQ_ZERO_PRED : |- !d. ~(d = 0) ==> ?d'. d = SUC0 d'.
 #   Direct nat0 induction.
 
+
 @proof
 def NAT0_NEQ_ZERO_PRED(p):
     from fusion import REFL
     from nat0 import mk_suc0
+
     p.goal(
         "!d. ~(d = 0) ==> ?dp:nat0. d = SUC0 dp",
         types={"d": nat0_ty},
@@ -584,9 +592,7 @@ def NAT0_NEQ_ZERO_PRED(p):
         with p.step("IH_unused"):
             p.assume("h: ~(SUC0 d = 0)")
             d_t = p._parse("d")
-            p.thus("?dp:nat0. SUC0 d = SUC0 dp").by_witness(
-                "d", REFL(mk_suc0(d_t))
-            )
+            p.thus("?dp:nat0. SUC0 d = SUC0 dp").by_witness("d", REFL(mk_suc0(d_t)))
 
 
 # NAT0_LT_SUC0_CASES :  |- !k d. nat0_lt k (SUC0 d) ==> k = d \/ nat0_lt k d.
@@ -594,11 +600,11 @@ def NAT0_NEQ_ZERO_PRED(p):
 #   (Landau SATZ_25/SATZ_22), and ``<= y`` splits as ``< y`` or ``= y``;
 #   the equality lifts back to ``k = d`` via ABS_REP_NAT0.
 
+
 @proof
 def NAT0_LT_SUC0_CASES(p):
-    from nat import SATZ_10, SATZ_25, SATZ_13, SATZ_22A, SATZ_22B, ADD_1
-    from classical import EXCLUDED_MIDDLE
-    from nat0 import SUC0_DEF, mk_suc0
+    from nat import SATZ_10, SATZ_25, ADD_1
+    from nat0 import mk_suc0
     from num import mk_suc
 
     p.goal(
@@ -617,8 +623,6 @@ def NAT0_LT_SUC0_CASES(p):
     h_lt_suc = REWRITE_RULE([rep_suc0_d], h_num)  # |- rep_k < SUC rep_d
     # SUC rep_d = rep_d + 1 by ADD_1 (sym).
     add1_d = SPEC(rep_d, ADD_1)  # |- rep_d + 1 = SUC rep_d
-    # rep_k < rep_d + 1.
-    h_lt_p1 = REWRITE_RULE([SYM(add1_d)], h_lt_suc)
     # SATZ_10 : !x y. (x = y) \/ (x > y) \/ (x < y).
     tri = SPECL([rep_k, rep_d], SATZ_10)
     p.have(
@@ -636,9 +640,7 @@ def NAT0_LT_SUC0_CASES(p):
             k_eq_d = TRANS(SYM(abs_k), TRANS(abs_eq, abs_d))
             p.have("kd: k = d").by_thm(k_eq_d)
             p.thus("k = d \\/ nat0_lt k d").by_disj("kd")
-        with p.case(
-            "rest: (rep_nat0 k > rep_nat0 d) \\/ (rep_nat0 k < rep_nat0 d)"
-        ):
+        with p.case("rest: (rep_nat0 k > rep_nat0 d) \\/ (rep_nat0 k < rep_nat0 d)"):
             with p.cases_on("rest"):
                 with p.case("hgt: rep_nat0 k > rep_nat0 d"):
                     # Contradicts h_lt_suc: rep_k < SUC rep_d.
@@ -648,6 +650,7 @@ def NAT0_LT_SUC0_CASES(p):
                     ge_suc = REWRITE_RULE([add1_d], ge_th)
                     # Contradiction: h_lt_suc says rep_k < SUC rep_d.
                     from nat import _CONTRA_LT_GE
+
                     contra = MP(
                         MP(
                             SPECL([rep_k, mk_suc(rep_d)], _CONTRA_LT_GE),
@@ -658,9 +661,7 @@ def NAT0_LT_SUC0_CASES(p):
                     p.absurd().by_thm(contra)
                 with p.case("hlt: rep_nat0 k < rep_nat0 d"):
                     kd_eq = SPECL([k_t, d_t], LT_NAT0)
-                    p.have("klt: nat0_lt k d").by_eq_mp(
-                        SYM(kd_eq), p.fact("hlt")
-                    )
+                    p.have("klt: nat0_lt k d").by_eq_mp(SYM(kd_eq), p.fact("hlt"))
                     p.thus("k = d \\/ nat0_lt k d").by_disj("klt")
 
 
@@ -714,7 +715,6 @@ def _build_mono_term(F_var, f_var, g_var, n_var, k_var, nat0_lt_const):
 def _prove_num_recursion_lt():
     from nat0 import (
         ZERO,
-        SUC0_DEF,
         mk_suc0,
         NUM_RECURSION_0,
     )
@@ -732,8 +732,6 @@ def _prove_num_recursion_lt():
     d_var = Var("d", nat0_ty)
     j_var = Var("j", nat0_ty)
     arb_A = mk_select(Var("v", A), T)  # ARB := @v:A. T
-
-    SUC0_c = mk_const("SUC0", [])
 
     # MONO_F as a term.
     mono_term = _build_mono_term(F_var, f_var, g_var, n_var, k_var, nat0_lt)
@@ -761,18 +759,16 @@ def _prove_num_recursion_lt():
     # H_props_raw : H 0 = c_const /\ !d. H (SUC0 d) = h_step d (H d)
     # where H = @fn. ...
     H_term = mk_app(
-        mk_const("@", [(nat0_to_A, aty)]) if False
+        mk_const("@", [(nat0_to_A, aty)])
+        if False
         else mk_const("@", [(parse_type("nat0 -> nat0 -> A"), aty)]),
         pred_H,
     )
 
-    H_base_raw = CONJUNCT1(H_props_raw)  # H 0 = (\n. ARB)
     H_step_raw = CONJUNCT2(H_props_raw)  # !d. H (SUC0 d) = h_step d (H d)
 
     # Beta-reduce h_step to clean form: H (SUC0 d) = \n. F (H d) n.
     H_step_at_d_raw = SPEC(d_var, H_step_raw)  # H (SUC0 d) = h_step d (H d)
-    # Beta both layers.
-    rhs_raw = rand(H_step_at_d_raw._concl)  # h_step d (H d)
     # h_step d = \prev. \n. F prev n  (by beta)
     h_step_at_d = BETA_CONV(mk_app(h_step, d_var))
     # |- h_step d = (\prev. \n. F prev n)
@@ -915,10 +911,9 @@ def _prove_num_recursion_lt():
 
     # Combine via DISJ_CASES.
     from tactics import DISJ_CASES
+
     j_lt_dp = DISJ_CASES(cases, branch1, branch2)
     # |- nat0_lt j dp_w (under {j_lt_k, kd_lt, mono})
-    j_lt_dp_dischk = DISCH(j_lt_k_term, j_lt_dp)
-    # |- nat0_lt j k ==> nat0_lt j dp_w (under {kd_lt, mono})
 
     # Step 3f. Use IH at j to get H dp_w j = h j and H k j = h j.
     # IH at j: nat0_lt j k ==> !d. nat0_lt j d ==> H d j = h j.
@@ -1112,15 +1107,10 @@ NUM_RECURSION_LT = _prove_num_recursion_lt()
 
 def _check_nat0_to_A(fn_ty):
     from fusion import Tyapp
-    ok = (
-        isinstance(fn_ty, Tyapp)
-        and fn_ty.tyop == "fun"
-        and fn_ty.args[0] == nat0_ty
-    )
+
+    ok = isinstance(fn_ty, Tyapp) and fn_ty.tyop == "fun" and fn_ty.args[0] == nat0_ty
     if not ok:
-        raise HolError(
-            f"define_wf_lt: fn_ty must be 'nat0 -> A', got {fn_ty}"
-        )
+        raise HolError(f"define_wf_lt: fn_ty must be 'nat0 -> A', got {fn_ty}")
     return fn_ty.args[1]
 
 

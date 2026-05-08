@@ -27,7 +27,7 @@ from fusion import (
     INST_TYPE,
 )
 from basics import mk_abs, mk_app, mk_const, mk_eq, rand, rator
-from axioms import T, F, SELECT_AX, mk_not, mk_or, mk_and, mk_imp
+from axioms import T, F, SELECT_AX, mk_not, mk_or
 from parser import parse_type, define
 from tactics import (
     AP_TERM,
@@ -317,15 +317,14 @@ def _prove_COND_T():
     # COND_DEF rewrite: COND T x y = sel. Combine to get COND T x y = x.
 
     # Beta-reduce COND T x y three times.
-    cond_T_x_y = mk_app(COND, T, _x_A, _y_A)
-    # COND = \b x y. @z. ...
-    # COND_DEF: |- COND = (\b x y. @z. ...)
-    cond_unfold = AP_TERM(_x_A.ty if False else None, COND_DEF) if False else None  # placeholder
-
-    # Actually: from COND_DEF |- COND = body, AP_THM at T:
-    cond_T_eq = AP_THM(COND_DEF, T)  # |- COND T = (\x y. ...) T -- wait, COND_DEF's RHS is \b x y. ..., so AP_THM at T beta is needed.
+    # From COND_DEF |- COND = body, AP_THM at T:
+    cond_T_eq = AP_THM(
+        COND_DEF, T
+    )  # |- COND T = (\x y. ...) T -- wait, COND_DEF's RHS is \b x y. ..., so AP_THM at T beta is needed.
     # AP_THM: |- (COND) T = (\b x y. ...) T
-    cond_T_beta = BETA_CONV(rand(cond_T_eq._concl))  # |- (\b x y. ...) T = \x y. (...with b:=T)
+    cond_T_beta = BETA_CONV(
+        rand(cond_T_eq._concl)
+    )  # |- (\b x y. ...) T = \x y. (...with b:=T)
     cond_T = TRANS(cond_T_eq, cond_T_beta)  # |- COND T = \x y. (...with b:=T)
 
     cond_T_x_eq = AP_THM(cond_T, _x_A)
@@ -404,7 +403,7 @@ def _prove_COND_F():
 
 # AP_THM is needed below; import lazily to avoid reordering the long
 # import block at the top.
-from tactics import AP_THM
+from tactics import AP_THM  # noqa: E402 -- intentional late import to keep top block compact
 
 COND_T = _prove_COND_T()
 COND_F = _prove_COND_F()

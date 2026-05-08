@@ -82,24 +82,32 @@
 from fusion import Var
 from basics import mk_const, mk_app, mk_eq
 from parser import define, parse_type
-from nat0 import nat0_ty, ZERO, mk_suc0
+from nat0 import nat0_ty
 from hf_sets import (
-    Pair_ord,
     PAIR_ORD_INJ,
 )
 from proof import proof
 from tactics import (
-    SPECL, GEN, GENL, SYM, MP, CONJ, CONJUNCT1, CONJUNCT2,
-    AP_THM, BETA_CONV, TRANS, DISJ1, DISJ2, EQ_MP,
+    SPECL,
+    GEN,
+    GENL,
+    SYM,
+    CONJ,
+    AP_THM,
+    BETA_CONV,
+    TRANS,
+    DISJ1,
+    DISJ2,
+    EQ_MP,
 )
 from basics import mk_abs, rand
 from axioms import mk_or
 from fusion import REFL
 from q_syntax import (
-    Zero_t, Succ_t, Var_t, Plus_t, Times_t,
-    Eq_f, Not_f, Imp_f, Forall_f,
-    SUCC_T_AT, VAR_T_AT, PLUS_T_AT, TIMES_T_AT,
-    EQ_F_AT, NOT_F_AT, IMP_F_AT, FORALL_F_AT,
+    Eq_f,
+    Not_f,
+    Imp_f,
+    Forall_f,
 )
 
 
@@ -163,10 +171,7 @@ CONS_L_AT = _at2(CONS_L_DEF, _h_n0, _t_n0)
 #                                 h1 = h2 /\ t1 = t2.
 @proof
 def CONS_L_INJ(p):
-    p.goal(
-        "!h1 t1 h2 t2. cons_l h1 t1 = cons_l h2 t2 ==> "
-        "(h1 = h2 /\\ t1 = t2)"
-    )
+    p.goal("!h1 t1 h2 t2. cons_l h1 t1 = cons_l h2 t2 ==> (h1 = h2 /\\ t1 = t2)")
     p.fix("h1 t1 h2 t2")
     p.assume("h: cons_l h1 t1 = cons_l h2 t2")
     cons_at_1 = SPECL([p._parse("h1"), p._parse("t1")], CONS_L_AT)
@@ -175,14 +180,11 @@ def CONS_L_INJ(p):
         "h_outer: Pair_ord (SUC0 0) (Pair_ord h1 t1) = "
         "Pair_ord (SUC0 0) (Pair_ord h2 t2)"
     ).by_rewrite_of("h", [cons_at_1, cons_at_2])
-    p.have(
-        "h_inner_conj: SUC0 0 = SUC0 0 /\\ Pair_ord h1 t1 = Pair_ord h2 t2"
-    ).by(PAIR_ORD_INJ, "SUC0 0", "Pair_ord h1 t1", "SUC0 0", "Pair_ord h2 t2",
-         "h_outer")
-    p.split("h_inner_conj", "(_, h_inner)")
-    p.thus("h1 = h2 /\\ t1 = t2").by(
-        PAIR_ORD_INJ, "h1", "t1", "h2", "t2", "h_inner"
+    p.have("h_inner_conj: SUC0 0 = SUC0 0 /\\ Pair_ord h1 t1 = Pair_ord h2 t2").by(
+        PAIR_ORD_INJ, "SUC0 0", "Pair_ord h1 t1", "SUC0 0", "Pair_ord h2 t2", "h_outer"
     )
+    p.split("h_inner_conj", "(_, h_inner)")
+    p.thus("h1 = h2 /\\ t1 = t2").by(PAIR_ORD_INJ, "h1", "t1", "h2", "t2", "h_inner")
 
 
 # Disjointness with nil:  |- !h t. ~(cons_l h t = nil_l).
@@ -191,7 +193,7 @@ def CONS_L_INJ(p):
 # Pair_ord _ _ != 0 from ``_NEQ_PAIR_ORD_ZERO`` (q_syntax).
 
 
-from q_syntax import _NEQ_PAIR_ORD_ZERO
+from q_syntax import _NEQ_PAIR_ORD_ZERO  # noqa: E402 -- imported just before CONS_L_NEQ_NIL
 
 
 @proof
@@ -201,12 +203,12 @@ def CONS_L_NEQ_NIL(p):
     p.fix("h t")
     cons_at_ht = SPECL([p._parse("h"), p._parse("t")], CONS_L_AT)
     with p.suppose("h_eq: cons_l h t = nil_l"):
-        p.have(
-            "h_po: Pair_ord (SUC0 0) (Pair_ord h t) = 0"
-        ).by_rewrite_of("h_eq", [cons_at_ht, NIL_L_DEF])
-        p.have(
-            "h_neg: ~(Pair_ord (SUC0 0) (Pair_ord h t) = 0)"
-        ).by(_NEQ_PAIR_ORD_ZERO, "SUC0 0", "Pair_ord h t")
+        p.have("h_po: Pair_ord (SUC0 0) (Pair_ord h t) = 0").by_rewrite_of(
+            "h_eq", [cons_at_ht, NIL_L_DEF]
+        )
+        p.have("h_neg: ~(Pair_ord (SUC0 0) (Pair_ord h t) = 0)").by(
+            _NEQ_PAIR_ORD_ZERO, "SUC0 0", "Pair_ord h t"
+        )
         p.absurd().by_conj("h_neg", "h_po")
 
 
@@ -346,15 +348,17 @@ def _disj_chain(eqs):
     return out
 
 
-_q_axiom_disj = _disj_chain([
-    mk_eq(_n_n0, Q1_axiom),
-    mk_eq(_n_n0, Q2_axiom),
-    mk_eq(_n_n0, Q3_axiom),
-    mk_eq(_n_n0, Q4_axiom),
-    mk_eq(_n_n0, Q5_axiom),
-    mk_eq(_n_n0, Q6_axiom),
-    mk_eq(_n_n0, Q7_axiom),
-])
+_q_axiom_disj = _disj_chain(
+    [
+        mk_eq(_n_n0, Q1_axiom),
+        mk_eq(_n_n0, Q2_axiom),
+        mk_eq(_n_n0, Q3_axiom),
+        mk_eq(_n_n0, Q4_axiom),
+        mk_eq(_n_n0, Q5_axiom),
+        mk_eq(_n_n0, Q6_axiom),
+        mk_eq(_n_n0, Q7_axiom),
+    ]
+)
 
 IS_Q_AXIOM_DEF = define(
     "is_q_axiom",
@@ -381,7 +385,7 @@ def _prove_q_axiom_holds(name, axiom_const, position):
     idx = position - 1
     th = REFL(axiom_const)  # |- axiom_const = axiom_const
     if idx < len(eq_chain) - 1:
-        right_tail = _disj_chain(eq_chain[idx + 1:])
+        right_tail = _disj_chain(eq_chain[idx + 1 :])
         th = DISJ1(th, right_tail)
     for j in range(idx - 1, -1, -1):
         th = DISJ2(eq_chain[j], th)
@@ -438,7 +442,7 @@ def _at3(def_th, x, y, z):
 IS_MP_AT = _at3(IS_MP_DEF, _f1_n0, _f2_n0, _g_n0)
 
 
-from axioms import mk_exists
+from axioms import mk_exists  # noqa: E402 -- needed by the IS_GEN definition below
 
 
 _is_gen_body = mk_exists(_x_n0, mk_eq(_g_n0, mk_app(Forall_f, _x_n0, _f_n0)))
@@ -494,6 +498,7 @@ _x_pf_n0 = Var("x", nat0_ty)
 
 def _and_chain(props):
     from axioms import mk_and
+
     out = props[-1]
     for p_ in reversed(props[:-1]):
         out = mk_and(p_, out)
@@ -516,12 +521,16 @@ def _ist(t):
 
 
 # is_K(n) :<=> ?A B. is_form A /\ is_form B /\ n = A -> (B -> A).
-_is_K_body = _exists_chain([_A_n0, _B_n0], _and_chain([
-    _isf(_A_n0),
-    _isf(_B_n0),
-    mk_eq(_n_n0, mk_app(Imp_f, _A_n0,
-                         mk_app(Imp_f, _B_n0, _A_n0))),
-]))
+_is_K_body = _exists_chain(
+    [_A_n0, _B_n0],
+    _and_chain(
+        [
+            _isf(_A_n0),
+            _isf(_B_n0),
+            mk_eq(_n_n0, mk_app(Imp_f, _A_n0, mk_app(Imp_f, _B_n0, _A_n0))),
+        ]
+    ),
+)
 IS_K_DEF = define("is_K", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_K_body))
 is_K = mk_const("is_K", [])
 IS_K_AT = _at1(IS_K_DEF, _n_n0)
@@ -529,16 +538,26 @@ IS_K_AT = _at1(IS_K_DEF, _n_n0)
 
 # is_S(n) :<=> ?A B C. is_form A /\ is_form B /\ is_form C /\
 #                       n = (A -> (B -> C)) -> ((A -> B) -> (A -> C)).
-_is_S_body = _exists_chain([_A_n0, _B_n0, _C_n0], _and_chain([
-    _isf(_A_n0),
-    _isf(_B_n0),
-    _isf(_C_n0),
-    mk_eq(_n_n0, mk_app(Imp_f,
-        mk_app(Imp_f, _A_n0, mk_app(Imp_f, _B_n0, _C_n0)),
-        mk_app(Imp_f,
-            mk_app(Imp_f, _A_n0, _B_n0),
-            mk_app(Imp_f, _A_n0, _C_n0)))),
-]))
+_is_S_body = _exists_chain(
+    [_A_n0, _B_n0, _C_n0],
+    _and_chain(
+        [
+            _isf(_A_n0),
+            _isf(_B_n0),
+            _isf(_C_n0),
+            mk_eq(
+                _n_n0,
+                mk_app(
+                    Imp_f,
+                    mk_app(Imp_f, _A_n0, mk_app(Imp_f, _B_n0, _C_n0)),
+                    mk_app(
+                        Imp_f, mk_app(Imp_f, _A_n0, _B_n0), mk_app(Imp_f, _A_n0, _C_n0)
+                    ),
+                ),
+            ),
+        ]
+    ),
+)
 IS_S_DEF = define("is_S", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_S_body))
 is_S = mk_const("is_S", [])
 IS_S_AT = _at1(IS_S_DEF, _n_n0)
@@ -546,13 +565,23 @@ IS_S_AT = _at1(IS_S_DEF, _n_n0)
 
 # is_N(n) :<=> ?A B. is_form A /\ is_form B /\
 #                     n = (~B -> ~A) -> (A -> B).
-_is_N_body = _exists_chain([_A_n0, _B_n0], _and_chain([
-    _isf(_A_n0),
-    _isf(_B_n0),
-    mk_eq(_n_n0, mk_app(Imp_f,
-        mk_app(Imp_f, mk_app(Not_f, _B_n0), mk_app(Not_f, _A_n0)),
-        mk_app(Imp_f, _A_n0, _B_n0))),
-]))
+_is_N_body = _exists_chain(
+    [_A_n0, _B_n0],
+    _and_chain(
+        [
+            _isf(_A_n0),
+            _isf(_B_n0),
+            mk_eq(
+                _n_n0,
+                mk_app(
+                    Imp_f,
+                    mk_app(Imp_f, mk_app(Not_f, _B_n0), mk_app(Not_f, _A_n0)),
+                    mk_app(Imp_f, _A_n0, _B_n0),
+                ),
+            ),
+        ]
+    ),
+)
 IS_N_DEF = define("is_N", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_N_body))
 is_N = mk_const("is_N", [])
 IS_N_AT = _at1(IS_N_DEF, _n_n0)
@@ -560,41 +589,60 @@ IS_N_AT = _at1(IS_N_DEF, _n_n0)
 
 # is_UI(n) :<=> ?x F t. is_form F /\ is_term t /\
 #                       n = Imp_f (Forall_f x F) (substitute F t x).
-_is_UI_body = _exists_chain([_x_pf_n0, _F_n0, _t_pf_n0], _and_chain([
-    _isf(_F_n0),
-    _ist(_t_pf_n0),
-    mk_eq(_n_n0, mk_app(Imp_f,
-        mk_app(Forall_f, _x_pf_n0, _F_n0),
-        mk_app(substitute, _F_n0, _t_pf_n0, _x_pf_n0))),
-]))
-IS_UI_DEF = define("is_UI", parse_type("nat0 -> bool"),
-                   mk_abs(_n_n0, _is_UI_body))
+_is_UI_body = _exists_chain(
+    [_x_pf_n0, _F_n0, _t_pf_n0],
+    _and_chain(
+        [
+            _isf(_F_n0),
+            _ist(_t_pf_n0),
+            mk_eq(
+                _n_n0,
+                mk_app(
+                    Imp_f,
+                    mk_app(Forall_f, _x_pf_n0, _F_n0),
+                    mk_app(substitute, _F_n0, _t_pf_n0, _x_pf_n0),
+                ),
+            ),
+        ]
+    ),
+)
+IS_UI_DEF = define("is_UI", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_UI_body))
 is_UI = mk_const("is_UI", [])
 IS_UI_AT = _at1(IS_UI_DEF, _n_n0)
 
 
 # is_Vac(n) :<=> ?x F. is_form F /\ ~(free_in F x) /\
 #                      n = Imp_f F (Forall_f x F).
-from axioms import mk_not as _mk_not
-_is_Vac_body = _exists_chain([_x_pf_n0, _F_n0], _and_chain([
-    _isf(_F_n0),
-    _mk_not(mk_app(free_in, _F_n0, _x_pf_n0)),
-    mk_eq(_n_n0, mk_app(Imp_f, _F_n0,
-                         mk_app(Forall_f, _x_pf_n0, _F_n0))),
-]))
-IS_VAC_DEF = define("is_Vac", parse_type("nat0 -> bool"),
-                    mk_abs(_n_n0, _is_Vac_body))
+from axioms import mk_not as _mk_not  # noqa: E402 -- aliased for the is_Vac definition below
+
+_is_Vac_body = _exists_chain(
+    [_x_pf_n0, _F_n0],
+    _and_chain(
+        [
+            _isf(_F_n0),
+            _mk_not(mk_app(free_in, _F_n0, _x_pf_n0)),
+            mk_eq(_n_n0, mk_app(Imp_f, _F_n0, mk_app(Forall_f, _x_pf_n0, _F_n0))),
+        ]
+    ),
+)
+IS_VAC_DEF = define("is_Vac", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_Vac_body))
 is_Vac = mk_const("is_Vac", [])
 IS_VAC_AT = _at1(IS_VAC_DEF, _n_n0)
 
 
 # is_Refl(n) :<=> ?t. is_term t /\ n = Eq_f t t.
-_is_Refl_body = _exists_chain([_t_pf_n0], _and_chain([
-    _ist(_t_pf_n0),
-    mk_eq(_n_n0, mk_app(Eq_f, _t_pf_n0, _t_pf_n0)),
-]))
-IS_REFL_DEF = define("is_Refl", parse_type("nat0 -> bool"),
-                     mk_abs(_n_n0, _is_Refl_body))
+_is_Refl_body = _exists_chain(
+    [_t_pf_n0],
+    _and_chain(
+        [
+            _ist(_t_pf_n0),
+            mk_eq(_n_n0, mk_app(Eq_f, _t_pf_n0, _t_pf_n0)),
+        ]
+    ),
+)
+IS_REFL_DEF = define(
+    "is_Refl", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_Refl_body)
+)
 is_Refl = mk_const("is_Refl", [])
 IS_REFL_AT = _at1(IS_REFL_DEF, _n_n0)
 
@@ -603,19 +651,31 @@ IS_REFL_AT = _at1(IS_REFL_DEF, _n_n0)
 #                              n = Imp_f (Eq_f t1 t2)
 #                                        (Imp_f (substitute F t1 x)
 #                                               (substitute F t2 x)).
-_is_Subst_body = _exists_chain([_x_pf_n0, _F_n0, _t1_pf_n0, _t2_pf_n0],
-    _and_chain([
-        _isf(_F_n0),
-        _ist(_t1_pf_n0),
-        _ist(_t2_pf_n0),
-        mk_eq(_n_n0, mk_app(Imp_f,
-            mk_app(Eq_f, _t1_pf_n0, _t2_pf_n0),
-            mk_app(Imp_f,
-                mk_app(substitute, _F_n0, _t1_pf_n0, _x_pf_n0),
-                mk_app(substitute, _F_n0, _t2_pf_n0, _x_pf_n0)))),
-    ]))
-IS_SUBST_DEF = define("is_Subst", parse_type("nat0 -> bool"),
-                      mk_abs(_n_n0, _is_Subst_body))
+_is_Subst_body = _exists_chain(
+    [_x_pf_n0, _F_n0, _t1_pf_n0, _t2_pf_n0],
+    _and_chain(
+        [
+            _isf(_F_n0),
+            _ist(_t1_pf_n0),
+            _ist(_t2_pf_n0),
+            mk_eq(
+                _n_n0,
+                mk_app(
+                    Imp_f,
+                    mk_app(Eq_f, _t1_pf_n0, _t2_pf_n0),
+                    mk_app(
+                        Imp_f,
+                        mk_app(substitute, _F_n0, _t1_pf_n0, _x_pf_n0),
+                        mk_app(substitute, _F_n0, _t2_pf_n0, _x_pf_n0),
+                    ),
+                ),
+            ),
+        ]
+    ),
+)
+IS_SUBST_DEF = define(
+    "is_Subst", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_Subst_body)
+)
 is_Subst = mk_const("is_Subst", [])
 IS_SUBST_AT = _at1(IS_SUBST_DEF, _n_n0)
 
@@ -631,15 +691,17 @@ IS_SUBST_AT = _at1(IS_SUBST_DEF, _n_n0)
 # ---------------------------------------------------------------------------
 
 
-_is_logical_body = _disj_chain([
-    mk_app(is_K, _n_n0),
-    mk_app(is_S, _n_n0),
-    mk_app(is_N, _n_n0),
-    mk_app(is_UI, _n_n0),
-    mk_app(is_Vac, _n_n0),
-    mk_app(is_Refl, _n_n0),
-    mk_app(is_Subst, _n_n0),
-])
+_is_logical_body = _disj_chain(
+    [
+        mk_app(is_K, _n_n0),
+        mk_app(is_S, _n_n0),
+        mk_app(is_N, _n_n0),
+        mk_app(is_UI, _n_n0),
+        mk_app(is_Vac, _n_n0),
+        mk_app(is_Refl, _n_n0),
+        mk_app(is_Subst, _n_n0),
+    ]
+)
 IS_LOGICAL_AXIOM_DEF = define(
     "is_logical_axiom",
     parse_type("nat0 -> bool"),
@@ -649,8 +711,7 @@ is_logical_axiom = mk_const("is_logical_axiom", [])
 IS_LOGICAL_AXIOM_AT = _at1(IS_LOGICAL_AXIOM_DEF, _n_n0)
 
 
-_is_axiom_body = mk_or(mk_app(is_q_axiom, _n_n0),
-                       mk_app(is_logical_axiom, _n_n0))
+_is_axiom_body = mk_or(mk_app(is_q_axiom, _n_n0), mk_app(is_logical_axiom, _n_n0))
 IS_AXIOM_DEF = define(
     "is_axiom",
     parse_type("nat0 -> bool"),
@@ -671,8 +732,8 @@ IS_AXIOM_AT = _at1(IS_AXIOM_DEF, _n_n0)
 # ---------------------------------------------------------------------------
 
 
-from hf_sets import NAT0_LT_PAIR_ORD_L, NAT0_LT_PAIR_ORD_R
-from nat0_order import NAT0_LT_TRANS
+from hf_sets import NAT0_LT_PAIR_ORD_L, NAT0_LT_PAIR_ORD_R  # noqa: E402 -- pair-order lemmas used right below
+from nat0_order import NAT0_LT_TRANS  # noqa: E402 -- transitivity used right below
 
 
 @proof
@@ -681,16 +742,18 @@ def NAT0_LT_CONS_L_HEAD(p):
     p.goal("!h t. nat0_lt h (cons_l h t)")
     p.fix("h t")
     cons_at_ht = SPECL([p._parse("h"), p._parse("t")], CONS_L_AT)
-    p.have("h1: nat0_lt h (Pair_ord h t)").by(
-        NAT0_LT_PAIR_ORD_L, "h", "t"
+    p.have("h1: nat0_lt h (Pair_ord h t)").by(NAT0_LT_PAIR_ORD_L, "h", "t")
+    p.have("h2: nat0_lt (Pair_ord h t) (Pair_ord (SUC0 0) (Pair_ord h t))").by(
+        NAT0_LT_PAIR_ORD_R, "SUC0 0", "Pair_ord h t"
     )
-    p.have(
-        "h2: nat0_lt (Pair_ord h t) (Pair_ord (SUC0 0) (Pair_ord h t))"
-    ).by(NAT0_LT_PAIR_ORD_R, "SUC0 0", "Pair_ord h t")
-    p.have(
-        "h3: nat0_lt h (Pair_ord (SUC0 0) (Pair_ord h t))"
-    ).by(NAT0_LT_TRANS, "h", "Pair_ord h t",
-         "Pair_ord (SUC0 0) (Pair_ord h t)", "h1", "h2")
+    p.have("h3: nat0_lt h (Pair_ord (SUC0 0) (Pair_ord h t))").by(
+        NAT0_LT_TRANS,
+        "h",
+        "Pair_ord h t",
+        "Pair_ord (SUC0 0) (Pair_ord h t)",
+        "h1",
+        "h2",
+    )
     p.thus("nat0_lt h (cons_l h t)").by_rewrite_of("h3", [SYM(cons_at_ht)])
 
 
@@ -700,16 +763,18 @@ def NAT0_LT_CONS_L_TAIL(p):
     p.goal("!h t. nat0_lt t (cons_l h t)")
     p.fix("h t")
     cons_at_ht = SPECL([p._parse("h"), p._parse("t")], CONS_L_AT)
-    p.have("h1: nat0_lt t (Pair_ord h t)").by(
-        NAT0_LT_PAIR_ORD_R, "h", "t"
+    p.have("h1: nat0_lt t (Pair_ord h t)").by(NAT0_LT_PAIR_ORD_R, "h", "t")
+    p.have("h2: nat0_lt (Pair_ord h t) (Pair_ord (SUC0 0) (Pair_ord h t))").by(
+        NAT0_LT_PAIR_ORD_R, "SUC0 0", "Pair_ord h t"
     )
-    p.have(
-        "h2: nat0_lt (Pair_ord h t) (Pair_ord (SUC0 0) (Pair_ord h t))"
-    ).by(NAT0_LT_PAIR_ORD_R, "SUC0 0", "Pair_ord h t")
-    p.have(
-        "h3: nat0_lt t (Pair_ord (SUC0 0) (Pair_ord h t))"
-    ).by(NAT0_LT_TRANS, "t", "Pair_ord h t",
-         "Pair_ord (SUC0 0) (Pair_ord h t)", "h1", "h2")
+    p.have("h3: nat0_lt t (Pair_ord (SUC0 0) (Pair_ord h t))").by(
+        NAT0_LT_TRANS,
+        "t",
+        "Pair_ord h t",
+        "Pair_ord (SUC0 0) (Pair_ord h t)",
+        "h1",
+        "h2",
+    )
     p.thus("nat0_lt t (cons_l h t)").by_rewrite_of("h3", [SYM(cons_at_ht)])
 
 
@@ -737,7 +802,7 @@ def NAT0_LT_CONS_L_TAIL(p):
 # ---------------------------------------------------------------------------
 
 
-from axioms import mk_forall, mk_imp, mk_and
+from axioms import mk_forall, mk_imp, mk_and  # noqa: E402 -- needed for Prov_Q construction below
 
 
 _P_pred = Var("P", parse_type("nat0 -> bool"))
@@ -746,21 +811,36 @@ _m_n0 = Var("m", nat0_ty)
 
 def _admissible_clauses(P_term):
     """Build (axiom-clause /\\ MP-clause /\\ Gen-clause) at predicate ``P_term``."""
-    axiom_clause = mk_forall(_m_n0,
-        mk_imp(mk_app(is_axiom, _m_n0), mk_app(P_term, _m_n0)))
-    mp_clause = mk_forall(_f_n0, mk_forall(_g_n0,
-        mk_imp(
-            mk_and(mk_app(P_term, _f_n0),
-                   mk_app(P_term, mk_app(Imp_f, _f_n0, _g_n0))),
-            mk_app(P_term, _g_n0))))
-    gen_clause = mk_forall(_f_n0, mk_forall(_x_n0,
-        mk_imp(mk_app(P_term, _f_n0),
-               mk_app(P_term, mk_app(Forall_f, _x_n0, _f_n0)))))
+    axiom_clause = mk_forall(
+        _m_n0, mk_imp(mk_app(is_axiom, _m_n0), mk_app(P_term, _m_n0))
+    )
+    mp_clause = mk_forall(
+        _f_n0,
+        mk_forall(
+            _g_n0,
+            mk_imp(
+                mk_and(
+                    mk_app(P_term, _f_n0), mk_app(P_term, mk_app(Imp_f, _f_n0, _g_n0))
+                ),
+                mk_app(P_term, _g_n0),
+            ),
+        ),
+    )
+    gen_clause = mk_forall(
+        _f_n0,
+        mk_forall(
+            _x_n0,
+            mk_imp(
+                mk_app(P_term, _f_n0), mk_app(P_term, mk_app(Forall_f, _x_n0, _f_n0))
+            ),
+        ),
+    )
     return mk_and(axiom_clause, mk_and(mp_clause, gen_clause))
 
 
-_prov_q_body = mk_forall(_P_pred,
-    mk_imp(_admissible_clauses(_P_pred), mk_app(_P_pred, _n_n0)))
+_prov_q_body = mk_forall(
+    _P_pred, mk_imp(_admissible_clauses(_P_pred), mk_app(_P_pred, _n_n0))
+)
 
 
 PROV_Q_DEF = define(
@@ -803,10 +883,12 @@ def PROV_Q_AXIOM(p):
     )
     with p.have(f"body: {body_str}").proof():
         p.fix("P")
-        p.assume("(adm_ax, _adm_mp, _adm_gen): "
-                 "(!m. is_axiom m ==> P m) /\\ "
-                 "((!f g. (P f /\\ P (Imp_f f g)) ==> P g) /\\ "
-                 "(!f x. P f ==> P (Forall_f x f)))")
+        p.assume(
+            "(adm_ax, _adm_mp, _adm_gen): "
+            "(!m. is_axiom m ==> P m) /\\ "
+            "((!f g. (P f /\\ P (Imp_f f g)) ==> P g) /\\ "
+            "(!f x. P f ==> P (Forall_f x f)))"
+        )
         p.thus("P n").by("adm_ax", "n", "ax")
 
     pq_at_n = SPECL([p._parse("n")], PROV_Q_AT)
@@ -827,28 +909,36 @@ def PROV_Q_MP(p):
     )
     with p.have(f"body: {body_str}").proof():
         p.fix("P")
-        p.assume("(_adm_ax, (adm_mp, _adm_gen)): "
-                 "(!m. is_axiom m ==> P m) /\\ "
-                 "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
-                 "(!a x. P a ==> P (Forall_f x a)))")
+        p.assume(
+            "(_adm_ax, (adm_mp, _adm_gen)): "
+            "(!m. is_axiom m ==> P m) /\\ "
+            "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
+            "(!a x. P a ==> P (Forall_f x a)))"
+        )
 
         # P f and P (Imp_f f g) follow by specialising pf, pfg at P.
-        adm_concl = ("(!m. is_axiom m ==> P m) /\\ "
-                     "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
-                     "(!a x. P a ==> P (Forall_f x a)))")
+        adm_concl = (
+            "(!m. is_axiom m ==> P m) /\\ "
+            "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
+            "(!a x. P a ==> P (Forall_f x a)))"
+        )
         # Unfold Prov_Q at f, Imp_f f g.
         pq_at_f = SPECL([p._parse("f")], PROV_Q_AT)
         pq_at_fg = SPECL([p._parse("Imp_f f g")], PROV_Q_AT)
         p.have("body_f: !P. " + adm_concl + " ==> P f").by_eq_mp(pq_at_f, "pf")
-        p.have(
-            "body_fg: !P. " + adm_concl + " ==> P (Imp_f f g)"
-        ).by_eq_mp(pq_at_fg, "pfg")
-        p.have("Pf: P f").by("body_f", "P",
-            CONJ(p.fact("_adm_ax"),
-                 CONJ(p.fact("adm_mp"), p.fact("_adm_gen"))))
-        p.have("Pfg: P (Imp_f f g)").by("body_fg", "P",
-            CONJ(p.fact("_adm_ax"),
-                 CONJ(p.fact("adm_mp"), p.fact("_adm_gen"))))
+        p.have("body_fg: !P. " + adm_concl + " ==> P (Imp_f f g)").by_eq_mp(
+            pq_at_fg, "pfg"
+        )
+        p.have("Pf: P f").by(
+            "body_f",
+            "P",
+            CONJ(p.fact("_adm_ax"), CONJ(p.fact("adm_mp"), p.fact("_adm_gen"))),
+        )
+        p.have("Pfg: P (Imp_f f g)").by(
+            "body_fg",
+            "P",
+            CONJ(p.fact("_adm_ax"), CONJ(p.fact("adm_mp"), p.fact("_adm_gen"))),
+        )
         p.thus("P g").by("adm_mp", "f", "g", CONJ(p.fact("Pf"), p.fact("Pfg")))
 
     pq_at_g = SPECL([p._parse("g")], PROV_Q_AT)
@@ -869,19 +959,25 @@ def PROV_Q_GEN(p):
     )
     with p.have(f"body: {body_str}").proof():
         p.fix("P")
-        p.assume("(_adm_ax, (_adm_mp, adm_gen)): "
-                 "(!m. is_axiom m ==> P m) /\\ "
-                 "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
-                 "(!a y. P a ==> P (Forall_f y a)))")
+        p.assume(
+            "(_adm_ax, (_adm_mp, adm_gen)): "
+            "(!m. is_axiom m ==> P m) /\\ "
+            "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
+            "(!a y. P a ==> P (Forall_f y a)))"
+        )
 
-        adm_concl = ("(!m. is_axiom m ==> P m) /\\ "
-                     "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
-                     "(!a y. P a ==> P (Forall_f y a)))")
+        adm_concl = (
+            "(!m. is_axiom m ==> P m) /\\ "
+            "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
+            "(!a y. P a ==> P (Forall_f y a)))"
+        )
         pq_at_f = SPECL([p._parse("f")], PROV_Q_AT)
         p.have("body_f: !P. " + adm_concl + " ==> P f").by_eq_mp(pq_at_f, "pf")
-        p.have("Pf: P f").by("body_f", "P",
-            CONJ(p.fact("_adm_ax"),
-                 CONJ(p.fact("_adm_mp"), p.fact("adm_gen"))))
+        p.have("Pf: P f").by(
+            "body_f",
+            "P",
+            CONJ(p.fact("_adm_ax"), CONJ(p.fact("_adm_mp"), p.fact("adm_gen"))),
+        )
         p.thus("P (Forall_f x f)").by("adm_gen", "f", "x", "Pf")
 
     pq_at_fx = SPECL([p._parse("Forall_f x f")], PROV_Q_AT)

@@ -43,7 +43,6 @@ from tactics import (
     DISCH,
     MP,
     NOT_ELIM,
-    UNFOLD,
 )
 from num import (
     num_ty,
@@ -54,8 +53,6 @@ from num import (
     AXIOM_4,
     INDUCTION,
     NUM_RECURSION,
-    x as _x_num,
-    y as _y_num,
 )
 from fusion import aty, INST_TYPE
 from fusion import mk_type, new_basic_type_definition
@@ -136,9 +133,7 @@ REP_ABS = _prove_rep_abs()  # |- !r. rep_nat0 (abs_nat0 r) = r
 ZERO_DEF = define("0", nat0_ty, "abs_nat0 1")
 ZERO = mk_const("0", [])
 
-SUC0_DEF = define(
-    "SUC0", "nat0 -> nat0", "\\n:nat0. abs_nat0 (SUC (rep_nat0 n))"
-)
+SUC0_DEF = define("SUC0", "nat0 -> nat0", "\\n:nat0. abs_nat0 (SUC (rep_nat0 n))")
 SUC0 = mk_const("SUC0", [])
 
 
@@ -215,7 +210,9 @@ def AXIOM_4_0(p):
     h_rep = AP_TERM(rep_nat0, p.fact("h_abs"))
     # |- rep_nat0 (abs_nat0 (SUC (rep_nat0 m))) = rep_nat0 (abs_nat0 (SUC (rep_nat0 n)))
 
-    eq_m_peel = SPEC(suc_rep_m, REP_ABS)  # rep_nat0 (abs_nat0 (SUC (rep_nat0 m))) = SUC (rep_nat0 m)
+    eq_m_peel = SPEC(
+        suc_rep_m, REP_ABS
+    )  # rep_nat0 (abs_nat0 (SUC (rep_nat0 m))) = SUC (rep_nat0 m)
     eq_n_peel = SPEC(suc_rep_n, REP_ABS)
     with p.calc("h_peel: SUC (rep_nat0 m)") as c:
         c.step("= rep_nat0 (abs_nat0 (SUC (rep_nat0 m)))").by_thm(SYM(eq_m_peel))
@@ -263,7 +260,6 @@ def INDUCT_0(pred, base_th, step_th):
 
     k_var = Var("k", num_ty)
     abs_k = mk_app(abs_nat0, k_var)
-    abs_sk = mk_app(abs_nat0, mk_suc(k_var))
     Q = mk_abs(k_var, mk_app(pred, abs_k))
 
     # ----- Q 1: transport base_th. -----
@@ -279,7 +275,6 @@ def INDUCT_0(pred, base_th, step_th):
     Q_k = mk_app(Q, k_var)
     Q_sk = mk_app(Q, mk_suc(k_var))
     pred_at_abs_k = mk_app(pred, abs_k)
-    pred_at_abs_sk = mk_app(pred, abs_sk)
 
     # Q k = pred (abs_nat0 k) = body[v := abs_nat0 k]
     beta_Q_k = BETA_CONV(Q_k)
@@ -323,10 +318,14 @@ def INDUCT_0(pred, base_th, step_th):
     # ----- Recover body[v] for arbitrary v:nat0. -----
     rep_v = mk_app(rep_nat0, v_var)
     Q_at_rep = SPEC(rep_v, Q_all)  # |- Q (rep_nat0 v)
-    beta_Q_rep = BETA_CONV(mk_app(Q, rep_v))  # |- Q (rep_nat0 v) = pred (abs_nat0 (rep_nat0 v))
+    beta_Q_rep = BETA_CONV(
+        mk_app(Q, rep_v)
+    )  # |- Q (rep_nat0 v) = pred (abs_nat0 (rep_nat0 v))
     a_var = Var("a", nat0_ty)
     abs_rep_at_v = INST([(v_var, a_var)], ABS_REP_NAT0)  # |- abs_nat0 (rep_nat0 v) = v
-    pred_eq_at_v = AP_TERM(pred, abs_rep_at_v)  # |- pred (abs_nat0 (rep_nat0 v)) = pred v
+    pred_eq_at_v = AP_TERM(
+        pred, abs_rep_at_v
+    )  # |- pred (abs_nat0 (rep_nat0 v)) = pred v
     beta_pred_v = BETA_CONV(mk_app(pred, v_var))  # |- pred v = body[v := v]
     Q_rep_eq_body_v = TRANS(TRANS(beta_Q_rep, pred_eq_at_v), beta_pred_v)
     body_at_v = EQ_MP(Q_rep_eq_body_v, Q_at_rep)
@@ -409,18 +408,17 @@ register_induction(
 # verify both recursion equations via REP_ABS / ABS_REP_NAT0.
 # ---------------------------------------------------------------------------
 
-from tactics import EXISTS, CHOOSE_WITNESS, AP_TERM as _AP_TERM, GENL
+from tactics import EXISTS, CHOOSE_WITNESS, AP_TERM as _AP_TERM, GENL  # noqa: E402 -- imported lazily for the recursion lift below
 
 
 def _prove_num_recursion_0():
-    from axioms import mk_forall, mk_imp, mk_and, mk_exists
+    from axioms import mk_forall, mk_and
 
     # Type variable A and the relevant function types.
     A = aty
     nat0_to_A = parse_type("nat0 -> A")
     num_to_A = parse_type("num -> A")
     h_nat0 = parse_type("nat0 -> A -> A")
-    h_num = parse_type("num -> A -> A")
 
     c_var = Var("c", A)
     h_var = Var("h", h_nat0)
@@ -428,7 +426,6 @@ def _prove_num_recursion_0():
     n_var = Var("n", nat0_ty)
     k_var = Var("k", num_ty)
     a_var = Var("a", A)
-    gn_var = Var("gn", num_to_A)
 
     # h' : num -> A -> A, h' = \k a. h (abs_nat0 k) a.
     h_prime = mk_abs(
@@ -479,7 +476,9 @@ def _prove_num_recursion_0():
     #   rep_nat0 (SUC0 n) = rep_nat0 (abs_nat0 (SUC (rep_nat0 n))) = SUC (rep_nat0 n)  by REP_ABS
     SUC0_at_n = AP_THM(SUC0_DEF, n_var)
     beta_SUC0_n = BETA_CONV(rand(SUC0_at_n._concl))
-    SUC0_unfold = TRANS(SUC0_at_n, beta_SUC0_n)  # |- SUC0 n = abs_nat0 (SUC (rep_nat0 n))
+    SUC0_unfold = TRANS(
+        SUC0_at_n, beta_SUC0_n
+    )  # |- SUC0 n = abs_nat0 (SUC (rep_nat0 n))
     rep_SUC0 = _AP_TERM(rep_nat0, SUC0_unfold)
     rep_abs_chain = SPEC(mk_suc(mk_app(rep_nat0, n_var)), REP_ABS)
     rep_SUC0_n_eq = TRANS(rep_SUC0, rep_abs_chain)
@@ -494,7 +493,6 @@ def _prove_num_recursion_0():
     h_prime_at_rep = mk_app(h_prime, mk_app(rep_nat0, n_var))
     beta_h_prime_1 = BETA_CONV(h_prime_at_rep)
     # |- (\k a. h (abs_nat0 k) a) (rep_nat0 n) = \a. h (abs_nat0 (rep_nat0 n)) a
-    h_prime_full = mk_app(h_prime_at_rep, mk_app(gn_term, mk_app(rep_nat0, n_var)))
     inner = AP_THM(beta_h_prime_1, mk_app(gn_term, mk_app(rep_nat0, n_var)))
     beta_h_prime_2 = BETA_CONV(rand(inner._concl))
     # |- (\a. h (abs_nat0 (rep_nat0 n)) a) (gn_term (rep_nat0 n))
@@ -505,7 +503,9 @@ def _prove_num_recursion_0():
     # abs_nat0 (rep_nat0 n) = n  by ABS_REP_NAT0 (free var a; INST to n_var)
     abs_rep_n = INST([(n_var, Var("a", nat0_ty))], ABS_REP_NAT0)
     # h (abs_nat0 (rep_nat0 n)) (...) = h n (...)
-    h_arg_fix = AP_THM(_AP_TERM(h_var, abs_rep_n), mk_app(gn_term, mk_app(rep_nat0, n_var)))
+    h_arg_fix = AP_THM(
+        _AP_TERM(h_var, abs_rep_n), mk_app(gn_term, mk_app(rep_nat0, n_var))
+    )
 
     # Compose: fn (SUC0 n)
     #   = gn_term (rep_nat0 (SUC0 n))                         beta_fn_Sn

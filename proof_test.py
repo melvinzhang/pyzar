@@ -638,8 +638,11 @@ def main():
         p.fix("a b c d e r")
         p.assume("h: a \\/ b \\/ c \\/ d \\/ e")
         p.assume(
-            "ar: a ==> r", "br: b ==> r", "cr: c ==> r",
-            "dr: d ==> r", "er: e ==> r",
+            "ar: a ==> r",
+            "br: b ==> r",
+            "cr: c ==> r",
+            "dr: d ==> r",
+            "er: e ==> r",
         )
         with p.cases_on("h"):
             with p.case("ha: a"):
@@ -652,10 +655,12 @@ def main():
                 p.thus("r").by_match("dr", "hd")
             with p.case("he: e"):
                 p.thus("r").by_match("er", "he")
+
     # Just check the proof closed with the expected outer shape.
     assert FIVE_WAY._asl == []
-    assert "(a \\/ (b \\/ (c \\/ (d \\/ e))))" in pp(FIVE_WAY._concl), \
+    assert "(a \\/ (b \\/ (c \\/ (d \\/ e))))" in pp(FIVE_WAY._concl), (
         f"unexpected shape: {pp(FIVE_WAY._concl)}"
+    )
 
     # Branch order can differ from disjunct order (alpha-matched).
     @proof
@@ -669,8 +674,11 @@ def main():
         p.fix("a b c d e r")
         p.assume("h: a \\/ b \\/ c \\/ d \\/ e")
         p.assume(
-            "ar: a ==> r", "br: b ==> r", "cr: c ==> r",
-            "dr: d ==> r", "er: e ==> r",
+            "ar: a ==> r",
+            "br: b ==> r",
+            "cr: c ==> r",
+            "dr: d ==> r",
+            "er: e ==> r",
         )
         with p.cases_on("h"):
             with p.case("hc: c"):
@@ -683,6 +691,7 @@ def main():
                 p.thus("r").by_match("br", "hb")
             with p.case("hd: d"):
                 p.thus("r").by_match("dr", "hd")
+
     assert aconv(FIVE_WAY._concl, FIVE_WAY_REORDERED._concl)
 
     # ---- sorry: cheat-close, frame discharge, axiom registration -------
@@ -694,6 +703,7 @@ def main():
 
     stderr = io.StringIO()
     with contextlib.redirect_stderr(stderr):
+
         @proof
         def SORRY_DEMO(p):
             p.goal("!x. (x = 1) ==> x + 1 = 1 + x")

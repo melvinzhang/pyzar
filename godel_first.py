@@ -371,7 +371,6 @@ Sigma_1 soundness of Q outright, since HF *is* the standard model.)
 # ``phi := Not_f Prov_Q_internal``.
 # ===========================================================================
 
-
 from fusion import Var
 from basics import mk_const, mk_app, mk_abs
 from parser import define, parse_type
@@ -379,13 +378,17 @@ from nat0 import nat0_ty
 from proof import proof
 from tactics import SPECL, MP
 from q_syntax import (
-    Not_f, Imp_f, Forall_f,
-    SUBSTITUTE_AT_NOT, SUBSTITUTE_AT_IMP,
+    Not_f,
+    Imp_f,
+    Forall_f,
+    SUBSTITUTE_AT_NOT,
+    SUBSTITUTE_AT_IMP,
     SUBSTITUTE_AT_FORALL_MISS,
 )
-from q_proof import var_x, var_y, VAR_X_DEF, VAR_Y_DEF
+from q_proof import var_x, var_y
 from q_repr import (
-    numeral, substitute,
+    numeral,
+    substitute,
 )
 
 
@@ -412,9 +415,9 @@ _f_n0 = Var("f", nat0_ty)
 AND_F_DEF = define(
     "And_f",
     parse_type("nat0 -> nat0 -> nat0"),
-    mk_abs(_a_n0, mk_abs(_b_n0,
-        mk_app(Not_f, mk_app(Imp_f, _a_n0,
-                             mk_app(Not_f, _b_n0))))),
+    mk_abs(
+        _a_n0, mk_abs(_b_n0, mk_app(Not_f, mk_app(Imp_f, _a_n0, mk_app(Not_f, _b_n0))))
+    ),
 )
 And_f = mk_const("And_f", [])
 
@@ -422,8 +425,7 @@ And_f = mk_const("And_f", [])
 OR_F_DEF = define(
     "Or_f",
     parse_type("nat0 -> nat0 -> nat0"),
-    mk_abs(_a_n0, mk_abs(_b_n0,
-        mk_app(Imp_f, mk_app(Not_f, _a_n0), _b_n0))),
+    mk_abs(_a_n0, mk_abs(_b_n0, mk_app(Imp_f, mk_app(Not_f, _a_n0), _b_n0))),
 )
 Or_f = mk_const("Or_f", [])
 
@@ -431,10 +433,13 @@ Or_f = mk_const("Or_f", [])
 IFF_F_DEF = define(
     "Iff_f",
     parse_type("nat0 -> nat0 -> nat0"),
-    mk_abs(_a_n0, mk_abs(_b_n0,
-        mk_app(And_f,
-               mk_app(Imp_f, _a_n0, _b_n0),
-               mk_app(Imp_f, _b_n0, _a_n0)))),
+    mk_abs(
+        _a_n0,
+        mk_abs(
+            _b_n0,
+            mk_app(And_f, mk_app(Imp_f, _a_n0, _b_n0), mk_app(Imp_f, _b_n0, _a_n0)),
+        ),
+    ),
 )
 Iff_f = mk_const("Iff_f", [])
 
@@ -442,10 +447,10 @@ Iff_f = mk_const("Iff_f", [])
 EXISTS_F_DEF = define(
     "Exists_f",
     parse_type("nat0 -> nat0 -> nat0"),
-    mk_abs(_v_n0, mk_abs(_f_n0,
-        mk_app(Not_f,
-               mk_app(Forall_f, _v_n0,
-                      mk_app(Not_f, _f_n0))))),
+    mk_abs(
+        _v_n0,
+        mk_abs(_f_n0, mk_app(Not_f, mk_app(Forall_f, _v_n0, mk_app(Not_f, _f_n0)))),
+    ),
 )
 Exists_f = mk_const("Exists_f", [])
 
@@ -453,8 +458,8 @@ Exists_f = mk_const("Exists_f", [])
 # Pointwise-applied form of each connective definition: useful as a
 # rewrite rule (REWRITE_PROVE doesn't beta-reduce, so the bare DEF
 # theorems don't fire under an applied And_f / Or_f / Iff_f).
-from tactics import AP_THM, BETA_CONV, TRANS as _TRANS_, GENL
-from basics import rand
+from tactics import AP_THM, BETA_CONV, TRANS as _TRANS_, GENL  # noqa: E402 -- needed only after definitions above
+from basics import rand  # noqa: E402 -- paired with the lazy tactics import above
 
 
 def _at2(def_th, x, y):
@@ -489,48 +494,50 @@ EXISTS_F_AT = _at2(EXISTS_F_DEF, _v_n0, _f_n0)
 @proof
 def SUBSTITUTE_AT_AND(p):
     """|- !a b t v. substitute (And_f a b) t v
-                   = And_f (substitute a t v) (substitute b t v)."""
+    = And_f (substitute a t v) (substitute b t v)."""
     p.goal(
         "!a b t v. substitute (And_f a b) t v = "
         "And_f (substitute a t v) (substitute b t v)"
     )
     p.fix("a b t v")
     p.thus(
-        "substitute (And_f a b) t v = "
-        "And_f (substitute a t v) (substitute b t v)"
+        "substitute (And_f a b) t v = And_f (substitute a t v) (substitute b t v)"
     ).by_rewrite([AND_F_AT, SUBSTITUTE_AT_NOT, SUBSTITUTE_AT_IMP])
 
 
 @proof
 def SUBSTITUTE_AT_OR(p):
     """|- !a b t v. substitute (Or_f a b) t v
-                   = Or_f (substitute a t v) (substitute b t v)."""
+    = Or_f (substitute a t v) (substitute b t v)."""
     p.goal(
         "!a b t v. substitute (Or_f a b) t v = "
         "Or_f (substitute a t v) (substitute b t v)"
     )
     p.fix("a b t v")
     p.thus(
-        "substitute (Or_f a b) t v = "
-        "Or_f (substitute a t v) (substitute b t v)"
+        "substitute (Or_f a b) t v = Or_f (substitute a t v) (substitute b t v)"
     ).by_rewrite([OR_F_AT, SUBSTITUTE_AT_NOT, SUBSTITUTE_AT_IMP])
 
 
 @proof
 def SUBSTITUTE_AT_IFF(p):
     """|- !a b t v. substitute (Iff_f a b) t v
-                   = Iff_f (substitute a t v) (substitute b t v)."""
+    = Iff_f (substitute a t v) (substitute b t v)."""
     p.goal(
         "!a b t v. substitute (Iff_f a b) t v = "
         "Iff_f (substitute a t v) (substitute b t v)"
     )
     p.fix("a b t v")
     p.thus(
-        "substitute (Iff_f a b) t v = "
-        "Iff_f (substitute a t v) (substitute b t v)"
-    ).by_rewrite([
-        IFF_F_AT, AND_F_AT, SUBSTITUTE_AT_NOT, SUBSTITUTE_AT_IMP,
-    ])
+        "substitute (Iff_f a b) t v = Iff_f (substitute a t v) (substitute b t v)"
+    ).by_rewrite(
+        [
+            IFF_F_AT,
+            AND_F_AT,
+            SUBSTITUTE_AT_NOT,
+            SUBSTITUTE_AT_IMP,
+        ]
+    )
 
 
 @proof
@@ -550,14 +557,12 @@ def SUBSTITUTE_AT_EXISTS_MISS(p):
     p.fix("w body t v")
     p.assume("hne: ~(v = w)")
     forall_miss_at = SPECL(
-        [p._parse("w"), p._parse("Not_f body"),
-         p._parse("t"), p._parse("v")],
+        [p._parse("w"), p._parse("Not_f body"), p._parse("t"), p._parse("v")],
         SUBSTITUTE_AT_FORALL_MISS,
     )
     forall_miss_app = MP(forall_miss_at, p.fact("hne"))
     p.thus(
-        "substitute (Exists_f w body) t v = "
-        "Exists_f w (substitute body t v)"
+        "substitute (Exists_f w body) t v = Exists_f w (substitute body t v)"
     ).by_rewrite([EXISTS_F_AT, SUBSTITUTE_AT_NOT, forall_miss_app])
 
 
@@ -579,9 +584,7 @@ _n_diag = Var("n", nat0_ty)
 DIAG_DEF = define(
     "diag",
     parse_type("nat0 -> nat0"),
-    mk_abs(_n_diag,
-        mk_app(substitute, _n_diag,
-               mk_app(numeral, _n_diag), var_x)),
+    mk_abs(_n_diag, mk_app(substitute, _n_diag, mk_app(numeral, _n_diag), var_x)),
 )
 diag = mk_const("diag", [])
 
@@ -610,7 +613,7 @@ diag = mk_const("diag", [])
 # ---------------------------------------------------------------------------
 
 
-from fusion import new_constant
+from fusion import new_constant  # noqa: E402 -- registers the constant only at this point
 
 
 new_constant("diag_internal", nat0_ty)
@@ -643,9 +646,7 @@ def IS_FORM_DIAG_INTERNAL(p):
 def FREE_IN_DIAG_INTERNAL(p):
     """|- !v. free_in diag_internal v <=> (v = var_x \\/ v = var_y).
     AXIOMATIZED."""
-    p.goal(
-        "!v. free_in diag_internal v = (v = var_x \\/ v = var_y)"
-    )
+    p.goal("!v. free_in diag_internal v = (v = var_x \\/ v = var_y)")
     p.sorry()
 
 
@@ -698,7 +699,7 @@ def DIAG_FUNCTIONAL(p):
 _phi_n0 = Var("phi", nat0_ty)
 
 
-from nat0 import ZERO, mk_suc0
+from nat0 import ZERO, mk_suc0  # noqa: E402 -- imported here for use in the theta_of_phi definition
 
 
 # theta_of_phi(phi) := Exists_f (SUC0 0)
@@ -707,12 +708,14 @@ from nat0 import ZERO, mk_suc0
 THETA_OF_PHI_DEF = define(
     "theta_of_phi",
     parse_type("nat0 -> nat0"),
-    mk_abs(_phi_n0,
-        mk_app(Exists_f,
-               mk_suc0(ZERO),
-               mk_app(And_f,
-                      diag_internal,
-                      mk_app(substitute, _phi_n0, var_y, var_x)))),
+    mk_abs(
+        _phi_n0,
+        mk_app(
+            Exists_f,
+            mk_suc0(ZERO),
+            mk_app(And_f, diag_internal, mk_app(substitute, _phi_n0, var_y, var_x)),
+        ),
+    ),
 )
 theta_of_phi = mk_const("theta_of_phi", [])
 
@@ -772,8 +775,7 @@ def SUBSTITUTE_PRESERVES_IS_FORM(p):
     well-formedness conjunct of DIAGONAL_LEMMA's conclusion.
     """
     p.goal(
-        "!F t v. is_form F /\\ is_term t "
-        "==> is_form (substitute F t v)",
+        "!F t v. is_form F /\\ is_term t ==> is_form (substitute F t v)",
         types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
     )
     p.sorry()
@@ -816,8 +818,7 @@ def FREE_IN_SUBSTITUTE_AT_DIFFERENT_VAR(p):
     p.goal(
         "!F t v w. ~(v = w) /\\ ~(free_in F v) /\\ ~(free_in t v) "
         "==> ~(free_in (substitute F t w) v)",
-        types={"F": nat0_ty, "t": nat0_ty,
-               "v": nat0_ty, "w": nat0_ty},
+        types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty, "w": nat0_ty},
     )
     p.sorry()
 
@@ -925,16 +926,16 @@ if __name__ == "__main__":
     print("    THETA_OF_PHI_DEF :", pp_thm(THETA_OF_PHI_DEF))
     print()
     print("Stage 4 (b.3) -- HOL-level subst/free_in/is_form lemmas (STUB).")
-    print("    VAR_X_NEQ_SUC0_0                  :",
-          pp_thm(VAR_X_NEQ_SUC0_0))
-    print("    VAR_Y_NEQ_VAR_X                   :",
-          pp_thm(VAR_Y_NEQ_VAR_X))
-    print("    SUBSTITUTE_PRESERVES_IS_FORM      :",
-          pp_thm(SUBSTITUTE_PRESERVES_IS_FORM))
-    print("    SUBSTITUTE_FREE_NO_OP             :",
-          pp_thm(SUBSTITUTE_FREE_NO_OP))
-    print("    FREE_IN_SUBSTITUTE_AT_DIFFERENT_VAR :",
-          pp_thm(FREE_IN_SUBSTITUTE_AT_DIFFERENT_VAR))
+    print("    VAR_X_NEQ_SUC0_0                  :", pp_thm(VAR_X_NEQ_SUC0_0))
+    print("    VAR_Y_NEQ_VAR_X                   :", pp_thm(VAR_Y_NEQ_VAR_X))
+    print(
+        "    SUBSTITUTE_PRESERVES_IS_FORM      :", pp_thm(SUBSTITUTE_PRESERVES_IS_FORM)
+    )
+    print("    SUBSTITUTE_FREE_NO_OP             :", pp_thm(SUBSTITUTE_FREE_NO_OP))
+    print(
+        "    FREE_IN_SUBSTITUTE_AT_DIFFERENT_VAR :",
+        pp_thm(FREE_IN_SUBSTITUTE_AT_DIFFERENT_VAR),
+    )
     print()
     print("Stage 4 (c) -- diagonal lemma (SORRY: Prov_Q part).")
     print("    DIAGONAL_LEMMA :", pp_thm(DIAGONAL_LEMMA))

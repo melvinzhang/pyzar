@@ -21,28 +21,33 @@
 # ---------------------------------------------------------------------------
 
 
-from fusion import Var, REFL
-from basics import mk_const, mk_app, mk_eq, mk_abs, rand
-from parser import define, parse_type
+from basics import mk_app, rand
 from nat0 import nat0_ty
 from proof import proof
 from tactics import (
-    SPEC, SPECL, GEN, MP, CONJ, DISJ1, DISJ2, EQ_MP, SYM, EXISTS,
+    SPEC,
+    SPECL,
+    MP,
+    CONJ,
+    DISJ1,
+    DISJ2,
+    EQ_MP,
+    SYM,
 )
-from axioms import mk_or
 
 from q_syntax import (
-    Not_f, Imp_f,
-    IS_FORM_AT_IMP, IS_FORM_AT_NOT,
+    IS_FORM_AT_IMP,
+    IS_FORM_AT_NOT,
 )
 from q_proof import (
-    Prov_Q,
-    PROV_Q_AXIOM, PROV_Q_MP,
-    is_K, is_S, is_N,
-    IS_K_AT, IS_S_AT, IS_N_AT,
-    is_logical_axiom, is_axiom,
+    PROV_Q_AXIOM,
+    PROV_Q_MP,
+    IS_K_AT,
+    IS_S_AT,
+    IS_N_AT,
     is_q_axiom,
-    IS_LOGICAL_AXIOM_AT, IS_AXIOM_AT,
+    IS_LOGICAL_AXIOM_AT,
+    IS_AXIOM_AT,
 )
 
 
@@ -82,12 +87,15 @@ def _prov_of_logical(p, name, slot_th, slot_idx, n_term):
         # cur is either D \/ rest or final D.
         # Detect Or by looking at outer rator.
         from basics import rator, rand as _rand
+
         outer = rator(cur)
         from basics import rator as _rator
+
         # outer should be Comb(Or, D) for non-final, else just D.
         try:
             head = _rator(outer)  # if cur is "Or D rest", head should be Or
             from fusion import Const
+
             if isinstance(head, Const) and head.name == "\\/":
                 d_part = _rand(outer)
                 rest = _rand(cur)
@@ -119,10 +127,12 @@ def _prov_of_logical(p, name, slot_th, slot_idx, n_term):
         suffix = rhs_disj
         for _ in range(slot_idx):
             from basics import rand as _rand
+
             suffix = _rand(suffix)
         # suffix at this point is parts[slot_idx] \/ tail.
         # tail = rand of suffix.
         from basics import rand as _rand
+
         tail = _rand(suffix)
         th = DISJ1(th, tail)
         # th : |- parts[slot_idx] \/ tail
@@ -136,8 +146,7 @@ def _prov_of_logical(p, name, slot_th, slot_idx, n_term):
     is_axiom_at = SPEC(n_term, IS_AXIOM_AT)
     # is_axiom_at : |- is_axiom n = is_q_axiom n \/ is_logical_axiom n
     q_axiom_part = mk_app(is_q_axiom, n_term)
-    is_axiom_th = EQ_MP(SYM(is_axiom_at),
-                        DISJ2(q_axiom_part, is_logical_th))
+    is_axiom_th = EQ_MP(SYM(is_axiom_at), DISJ2(q_axiom_part, is_logical_th))
     # is_axiom_th : |- is_axiom n_term
 
     # Apply PROV_Q_AXIOM at n_term.
@@ -160,8 +169,7 @@ def PROV_Q_K(p):
     The K schema instance, lifted through the disjunction chain.
     """
     p.goal(
-        "!A B. is_form A /\\ is_form B "
-        "==> Prov_Q (Imp_f A (Imp_f B A))",
+        "!A B. is_form A /\\ is_form B ==> Prov_Q (Imp_f A (Imp_f B A))",
         types={"A": nat0_ty, "B": nat0_ty},
     )
     p.fix("A B")
@@ -199,9 +207,7 @@ def PROV_Q_S(p):
     p.fix("A B C")
     p.assume("(hA, hB, hC): is_form A /\\ is_form B /\\ is_form C")
 
-    n_term = p._parse(
-        "Imp_f (Imp_f A (Imp_f B C)) (Imp_f (Imp_f A B) (Imp_f A C))"
-    )
+    n_term = p._parse("Imp_f (Imp_f A (Imp_f B C)) (Imp_f (Imp_f A B) (Imp_f A C))")
     is_s_at_n = SPEC(n_term, IS_S_AT)
 
     p.have(
@@ -235,9 +241,7 @@ def PROV_Q_N(p):
     p.fix("A B")
     p.assume("(hA, hB): is_form A /\\ is_form B")
 
-    n_term = p._parse(
-        "Imp_f (Imp_f (Not_f B) (Not_f A)) (Imp_f A B)"
-    )
+    n_term = p._parse("Imp_f (Imp_f (Not_f B) (Not_f A)) (Imp_f A B)")
     is_n_at_n = SPEC(n_term, IS_N_AT)
 
     p.have(
@@ -248,9 +252,7 @@ def PROV_Q_N(p):
     is_n_th = EQ_MP(SYM(is_n_at_n), p.fact("nbody"))
 
     prov_q_th = _prov_of_logical(p, "n", is_n_th, 2, n_term)
-    p.thus(
-        "Prov_Q (Imp_f (Imp_f (Not_f B) (Not_f A)) (Imp_f A B))"
-    ).by_thm(prov_q_th)
+    p.thus("Prov_Q (Imp_f (Imp_f (Not_f B) (Not_f A)) (Imp_f A B))").by_thm(prov_q_th)
 
 
 # ---------------------------------------------------------------------------
@@ -287,24 +289,18 @@ def PROV_Q_IMP_REFL(p):
     p.have("hA_AA: is_form A /\\ is_form (Imp_f A A)").by_thm(
         CONJ(p.fact("hA"), p.fact("hAA"))
     )
-    p.have("hA_A: is_form A /\\ is_form A").by_thm(
-        CONJ(p.fact("hA"), p.fact("hA"))
-    )
-    p.have(
-        "h_S_conj: is_form A /\\ is_form (Imp_f A A) /\\ is_form A"
-    ).by_thm(
+    p.have("hA_A: is_form A /\\ is_form A").by_thm(CONJ(p.fact("hA"), p.fact("hA")))
+    p.have("h_S_conj: is_form A /\\ is_form (Imp_f A A) /\\ is_form A").by_thm(
         CONJ(p.fact("hA"), CONJ(p.fact("hAA"), p.fact("hA")))
     )
 
     # Step 1: K at (A, Imp_f A A).
-    p.have(
-        "k1: Prov_Q (Imp_f A (Imp_f (Imp_f A A) A))"
-    ).by(PROV_Q_K, "A", "Imp_f A A", "hA_AA")
+    p.have("k1: Prov_Q (Imp_f A (Imp_f (Imp_f A A) A))").by(
+        PROV_Q_K, "A", "Imp_f A A", "hA_AA"
+    )
 
     # Step 2: K at (A, A).
-    p.have(
-        "k2: Prov_Q (Imp_f A (Imp_f A A))"
-    ).by(PROV_Q_K, "A", "A", "hA_A")
+    p.have("k2: Prov_Q (Imp_f A (Imp_f A A))").by(PROV_Q_K, "A", "A", "hA_A")
 
     # Step 3: S at (A, A -> A, A).
     p.have(
@@ -314,15 +310,18 @@ def PROV_Q_IMP_REFL(p):
     ).by(PROV_Q_S, "A", "Imp_f A A", "A", "h_S_conj")
 
     # Step 4: MP(k1, s1) -> mp1.
-    p.have("k1_s1: Prov_Q (Imp_f A (Imp_f (Imp_f A A) A)) /\\ "
-           "             Prov_Q (Imp_f (Imp_f A (Imp_f (Imp_f A A) A)) "
-           "                           (Imp_f (Imp_f A (Imp_f A A)) "
-           "                                  (Imp_f A A)))"
-           ).by_thm(CONJ(p.fact("k1"), p.fact("s1")))
     p.have(
-        "mp1: Prov_Q (Imp_f (Imp_f A (Imp_f A A)) (Imp_f A A))"
-    ).by(PROV_Q_MP, "Imp_f A (Imp_f (Imp_f A A) A)",
-         "Imp_f (Imp_f A (Imp_f A A)) (Imp_f A A)", "k1_s1")
+        "k1_s1: Prov_Q (Imp_f A (Imp_f (Imp_f A A) A)) /\\ "
+        "             Prov_Q (Imp_f (Imp_f A (Imp_f (Imp_f A A) A)) "
+        "                           (Imp_f (Imp_f A (Imp_f A A)) "
+        "                                  (Imp_f A A)))"
+    ).by_thm(CONJ(p.fact("k1"), p.fact("s1")))
+    p.have("mp1: Prov_Q (Imp_f (Imp_f A (Imp_f A A)) (Imp_f A A))").by(
+        PROV_Q_MP,
+        "Imp_f A (Imp_f (Imp_f A A) A)",
+        "Imp_f (Imp_f A (Imp_f A A)) (Imp_f A A)",
+        "k1_s1",
+    )
 
     # Step 5: MP(k2, mp1).
     p.have(
@@ -344,28 +343,21 @@ def PROV_Q_HYP_DROP(p):
     ``B -> (A -> B)``; MP with ``Prov_Q B`` yields ``Prov_Q (A -> B)``.
     """
     p.goal(
-        "!A B. is_form A /\\ is_form B /\\ Prov_Q B "
-        "==> Prov_Q (Imp_f A B)",
+        "!A B. is_form A /\\ is_form B /\\ Prov_Q B ==> Prov_Q (Imp_f A B)",
         types={"A": nat0_ty, "B": nat0_ty},
     )
     p.fix("A B")
     p.assume("(hA, hB, hPB): is_form A /\\ is_form B /\\ Prov_Q B")
 
     # K at (B, A): Prov_Q (Imp_f B (Imp_f A B)).
-    p.have("hB_A: is_form B /\\ is_form A").by_thm(
-        CONJ(p.fact("hB"), p.fact("hA"))
-    )
-    p.have(
-        "k_BA: Prov_Q (Imp_f B (Imp_f A B))"
-    ).by(PROV_Q_K, "B", "A", "hB_A")
+    p.have("hB_A: is_form B /\\ is_form A").by_thm(CONJ(p.fact("hB"), p.fact("hA")))
+    p.have("k_BA: Prov_Q (Imp_f B (Imp_f A B))").by(PROV_Q_K, "B", "A", "hB_A")
 
     # MP(hPB, k_BA): Prov_Q (Imp_f A B).
-    p.have(
-        "mp_in: Prov_Q B /\\ Prov_Q (Imp_f B (Imp_f A B))"
-    ).by_thm(CONJ(p.fact("hPB"), p.fact("k_BA")))
-    p.thus("Prov_Q (Imp_f A B)").by(
-        PROV_Q_MP, "B", "Imp_f A B", "mp_in"
+    p.have("mp_in: Prov_Q B /\\ Prov_Q (Imp_f B (Imp_f A B))").by_thm(
+        CONJ(p.fact("hPB"), p.fact("k_BA"))
     )
+    p.thus("Prov_Q (Imp_f A B)").by(PROV_Q_MP, "B", "Imp_f A B", "mp_in")
 
 
 @proof
@@ -395,26 +387,23 @@ def PROV_Q_TRANS_IMP(p):
     )
 
     # is_form (Imp_f B C) for HYP_DROP.
-    is_form_imp_BC = SPECL(
-        [p._parse("B"), p._parse("C")], IS_FORM_AT_IMP
-    )
+    is_form_imp_BC = SPECL([p._parse("B"), p._parse("C")], IS_FORM_AT_IMP)
     p.have("hBC_form: is_form (Imp_f B C)").by_eq_mp(
         SYM(is_form_imp_BC), CONJ(p.fact("hB"), p.fact("hC"))
     )
 
     # Step 1: HYP_DROP gives A -> (B -> C).
-    p.have(
-        "hyp_in: is_form A /\\ is_form (Imp_f B C) /\\ Prov_Q (Imp_f B C)"
-    ).by_thm(CONJ(p.fact("hA"),
-                  CONJ(p.fact("hBC_form"), p.fact("hBC"))))
-    p.have(
-        "p1: Prov_Q (Imp_f A (Imp_f B C))"
-    ).by(PROV_Q_HYP_DROP, "A", "Imp_f B C", "hyp_in")
+    p.have("hyp_in: is_form A /\\ is_form (Imp_f B C) /\\ Prov_Q (Imp_f B C)").by_thm(
+        CONJ(p.fact("hA"), CONJ(p.fact("hBC_form"), p.fact("hBC")))
+    )
+    p.have("p1: Prov_Q (Imp_f A (Imp_f B C))").by(
+        PROV_Q_HYP_DROP, "A", "Imp_f B C", "hyp_in"
+    )
 
     # Step 2: S at (A, B, C).
-    p.have(
-        "h_S_conj: is_form A /\\ is_form B /\\ is_form C"
-    ).by_thm(CONJ(p.fact("hA"), CONJ(p.fact("hB"), p.fact("hC"))))
+    p.have("h_S_conj: is_form A /\\ is_form B /\\ is_form C").by_thm(
+        CONJ(p.fact("hA"), CONJ(p.fact("hB"), p.fact("hC")))
+    )
     p.have(
         "p2: Prov_Q (Imp_f (Imp_f A (Imp_f B C)) "
         "                  (Imp_f (Imp_f A B) (Imp_f A C)))"
@@ -426,19 +415,15 @@ def PROV_Q_TRANS_IMP(p):
         "      Prov_Q (Imp_f (Imp_f A (Imp_f B C)) "
         "                    (Imp_f (Imp_f A B) (Imp_f A C)))"
     ).by_thm(CONJ(p.fact("p1"), p.fact("p2")))
-    p.have(
-        "p3: Prov_Q (Imp_f (Imp_f A B) (Imp_f A C))"
-    ).by(PROV_Q_MP, "Imp_f A (Imp_f B C)",
-         "Imp_f (Imp_f A B) (Imp_f A C)", "mp_a")
+    p.have("p3: Prov_Q (Imp_f (Imp_f A B) (Imp_f A C))").by(
+        PROV_Q_MP, "Imp_f A (Imp_f B C)", "Imp_f (Imp_f A B) (Imp_f A C)", "mp_a"
+    )
 
     # Step 3b: MP(hAB, p3): Prov_Q (Imp_f A C).
     p.have(
-        "mp_b: Prov_Q (Imp_f A B) /\\ "
-        "      Prov_Q (Imp_f (Imp_f A B) (Imp_f A C))"
+        "mp_b: Prov_Q (Imp_f A B) /\\       Prov_Q (Imp_f (Imp_f A B) (Imp_f A C))"
     ).by_thm(CONJ(p.fact("hAB"), p.fact("p3")))
-    p.thus("Prov_Q (Imp_f A C)").by(
-        PROV_Q_MP, "Imp_f A B", "Imp_f A C", "mp_b"
-    )
+    p.thus("Prov_Q (Imp_f A C)").by(PROV_Q_MP, "Imp_f A B", "Imp_f A C", "mp_b")
 
 
 @proof
@@ -451,8 +436,7 @@ def PROV_Q_EX_FALSO(p):
     gives ``(~B -> ~A) -> (A -> B)``; TRANS_IMP composes them.
     """
     p.goal(
-        "!A B. is_form A /\\ is_form B "
-        "==> Prov_Q (Imp_f (Not_f A) (Imp_f A B))",
+        "!A B. is_form A /\\ is_form B ==> Prov_Q (Imp_f (Not_f A) (Imp_f A B))",
         types={"A": nat0_ty, "B": nat0_ty},
     )
     p.fix("A B")
@@ -466,13 +450,10 @@ def PROV_Q_EX_FALSO(p):
     is_form_imp_NB_NA = SPECL(
         [p._parse("Not_f B"), p._parse("Not_f A")], IS_FORM_AT_IMP
     )
-    p.have(
-        "hNBNA_form: is_form (Imp_f (Not_f B) (Not_f A))"
-    ).by_eq_mp(SYM(is_form_imp_NB_NA),
-               CONJ(p.fact("hNB"), p.fact("hNA")))
-    is_form_imp_AB = SPECL(
-        [p._parse("A"), p._parse("B")], IS_FORM_AT_IMP
+    p.have("hNBNA_form: is_form (Imp_f (Not_f B) (Not_f A))").by_eq_mp(
+        SYM(is_form_imp_NB_NA), CONJ(p.fact("hNB"), p.fact("hNA"))
     )
+    is_form_imp_AB = SPECL([p._parse("A"), p._parse("B")], IS_FORM_AT_IMP)
     p.have("hAB_form: is_form (Imp_f A B)").by_eq_mp(
         SYM(is_form_imp_AB), CONJ(p.fact("hA"), p.fact("hB"))
     )
@@ -481,14 +462,14 @@ def PROV_Q_EX_FALSO(p):
     p.have("h_K_in: is_form (Not_f A) /\\ is_form (Not_f B)").by_thm(
         CONJ(p.fact("hNA"), p.fact("hNB"))
     )
-    p.have(
-        "k1: Prov_Q (Imp_f (Not_f A) (Imp_f (Not_f B) (Not_f A)))"
-    ).by(PROV_Q_K, "Not_f A", "Not_f B", "h_K_in")
+    p.have("k1: Prov_Q (Imp_f (Not_f A) (Imp_f (Not_f B) (Not_f A)))").by(
+        PROV_Q_K, "Not_f A", "Not_f B", "h_K_in"
+    )
 
     # N at (A, B): (~B -> ~A) -> (A -> B).
-    p.have(
-        "n1: Prov_Q (Imp_f (Imp_f (Not_f B) (Not_f A)) (Imp_f A B))"
-    ).by(PROV_Q_N, "A", "B", CONJ(p.fact("hA"), p.fact("hB")))
+    p.have("n1: Prov_Q (Imp_f (Imp_f (Not_f B) (Not_f A)) (Imp_f A B))").by(
+        PROV_Q_N, "A", "B", CONJ(p.fact("hA"), p.fact("hB"))
+    )
 
     # TRANS_IMP: ~A -> (~B -> ~A), (~B -> ~A) -> (A -> B), so ~A -> (A -> B).
     p.have(
@@ -497,13 +478,20 @@ def PROV_Q_EX_FALSO(p):
         "/\\ is_form (Imp_f A B) "
         "/\\ Prov_Q (Imp_f (Not_f A) (Imp_f (Not_f B) (Not_f A))) "
         "/\\ Prov_Q (Imp_f (Imp_f (Not_f B) (Not_f A)) (Imp_f A B))"
-    ).by_thm(CONJ(p.fact("hNA"),
-                  CONJ(p.fact("hNBNA_form"),
-                       CONJ(p.fact("hAB_form"),
-                            CONJ(p.fact("k1"), p.fact("n1"))))))
+    ).by_thm(
+        CONJ(
+            p.fact("hNA"),
+            CONJ(
+                p.fact("hNBNA_form"),
+                CONJ(p.fact("hAB_form"), CONJ(p.fact("k1"), p.fact("n1"))),
+            ),
+        )
+    )
     p.thus("Prov_Q (Imp_f (Not_f A) (Imp_f A B))").by(
         PROV_Q_TRANS_IMP,
-        "Not_f A", "Imp_f (Not_f B) (Not_f A)", "Imp_f A B",
+        "Not_f A",
+        "Imp_f (Not_f B) (Not_f A)",
+        "Imp_f A B",
         "h_T_conj",
     )
 
@@ -596,12 +584,8 @@ def PROV_Q_IFF_INTRO(p):
     )
 
     # is_form (Imp_f A B), is_form (Imp_f B A) for AND_INTRO.
-    is_form_imp_AB = SPECL(
-        [p._parse("A"), p._parse("B")], IS_FORM_AT_IMP
-    )
-    is_form_imp_BA = SPECL(
-        [p._parse("B"), p._parse("A")], IS_FORM_AT_IMP
-    )
+    is_form_imp_AB = SPECL([p._parse("A"), p._parse("B")], IS_FORM_AT_IMP)
+    is_form_imp_BA = SPECL([p._parse("B"), p._parse("A")], IS_FORM_AT_IMP)
     p.have("hABf: is_form (Imp_f A B)").by_eq_mp(
         SYM(is_form_imp_AB), CONJ(p.fact("hA"), p.fact("hB"))
     )
@@ -613,12 +597,12 @@ def PROV_Q_IFF_INTRO(p):
     p.have(
         "and_in: is_form (Imp_f A B) /\\ is_form (Imp_f B A) "
         "        /\\ Prov_Q (Imp_f A B) /\\ Prov_Q (Imp_f B A)"
-    ).by_thm(CONJ(p.fact("hABf"),
-                  CONJ(p.fact("hBAf"),
-                       CONJ(p.fact("hAB"), p.fact("hBA")))))
-    p.thus(
-        "Prov_Q (Not_f (Imp_f (Imp_f A B) (Not_f (Imp_f B A))))"
-    ).by(PROV_Q_AND_INTRO, "Imp_f A B", "Imp_f B A", "and_in")
+    ).by_thm(
+        CONJ(p.fact("hABf"), CONJ(p.fact("hBAf"), CONJ(p.fact("hAB"), p.fact("hBA"))))
+    )
+    p.thus("Prov_Q (Not_f (Imp_f (Imp_f A B) (Not_f (Imp_f B A))))").by(
+        PROV_Q_AND_INTRO, "Imp_f A B", "Imp_f B A", "and_in"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -753,8 +737,7 @@ def PROV_Q_SUBST_EQ(p):
         "==> Prov_Q (Imp_f (Eq_f t1 t2) "
         "                  (Imp_f (substitute F t1 x) "
         "                         (substitute F t2 x)))",
-        types={"x": nat0_ty, "F": nat0_ty,
-               "t1": nat0_ty, "t2": nat0_ty},
+        types={"x": nat0_ty, "F": nat0_ty, "t1": nat0_ty, "t2": nat0_ty},
     )
     p.sorry()
 

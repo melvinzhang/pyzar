@@ -4,8 +4,15 @@ from fusion import Var, bool_ty, ASSUME, concl, HolError
 from basics import aconv, mk_eq, mk_app, mk_fun_ty
 from axioms import T, F, mk_or
 from tactics import (
-    SYM, EQT_INTRO, EQT_ELIM, TRUTH, REWRITE_CONV, OR_CONG,
-    OR_F_LEFT, OR_F_RIGHT, or_chain_collapse,
+    SYM,
+    EQT_INTRO,
+    EQT_ELIM,
+    TRUTH,
+    REWRITE_CONV,
+    OR_CONG,
+    OR_F_LEFT,
+    OR_F_RIGHT,
+    or_chain_collapse,
 )
 
 
@@ -38,16 +45,17 @@ def main():
     assert aconv(concl(OR_F_LEFT), concl(OR_F_LEFT))  # trivially holds
     # (Better: just check pp.)
     from parser import pp_thm
+
     assert pp_thm(OR_F_LEFT) == "|- (!p. ((F \\/ p) = p))"
     assert pp_thm(OR_F_RIGHT) == "|- (!p. ((p \\/ F) = p))"
 
     # or_chain_collapse: 4-disjunct body, only middle survives.
     d1, d2, d3, d4 = (Var(n, bool_ty) for n in ("d1", "d2", "d3", "d4"))
     e2 = Var("e2", bool_ty)
-    eq1 = ASSUME(mk_eq(d1, F))    # |- d1 = F
-    eq2 = ASSUME(mk_eq(d2, e2))   # |- d2 = e2
-    eq3 = ASSUME(mk_eq(d3, F))    # |- d3 = F
-    eq4 = ASSUME(mk_eq(d4, F))    # |- d4 = F
+    eq1 = ASSUME(mk_eq(d1, F))  # |- d1 = F
+    eq2 = ASSUME(mk_eq(d2, e2))  # |- d2 = e2
+    eq3 = ASSUME(mk_eq(d3, F))  # |- d3 = F
+    eq4 = ASSUME(mk_eq(d4, F))  # |- d4 = F
     out = or_chain_collapse([eq1, eq2, eq3, eq4])
     expected_lhs = mk_or(d1, mk_or(d2, mk_or(d3, d4)))
     # After OR_F_LEFT/RIGHT: F \/ e2 \/ F \/ F → e2.

@@ -584,6 +584,7 @@ class _Binding:
     replay GEN/DISCH in the natural reverse order, preserving goals
     shaped like ``!a. h1 ==> !b. h2 ==> body``.
     """
+
     kind: str  # "var" | "hyp"
     var: object = None  # for "var"
     asm: object = None  # for "hyp": the saved ASSUME thm
@@ -1474,9 +1475,7 @@ class Proof:
         else:
             env = self._scope_env()
             if var_name not in env:
-                raise HolError(
-                    f"strong_induction: unknown variable {var_name!r}"
-                )
+                raise HolError(f"strong_induction: unknown variable {var_name!r}")
             var, inner_body, peel = env[var_name], body, False
         strategy = _STRONG_INDUCTION_STRATEGIES.get(var.ty)
         if strategy is None:
@@ -3008,9 +3007,7 @@ class _StrongInductionCtx:
         # fresh w.r.t. the body so substitution doesn't capture.
         k = variant([body], Var("k", var.ty))
         body_at_k = subst_term(var, k, body)
-        self.ih_term = mk_forall(
-            k, mk_imp(mk_app(strategy.lt, k, var), body_at_k)
-        )
+        self.ih_term = mk_forall(k, mk_imp(mk_app(strategy.lt, k, var), body_at_k))
 
     def __enter__(self):
         # Goal of the sub-frame is the body (var free); the IH is registered
@@ -3193,6 +3190,7 @@ def proof(fn):
     if p._sorries:
         import sys
         from parser import pp
+
         print(
             f"WARNING: proof({fn.__name__}) used p.sorry() {len(p._sorries)}x; "
             f"closed via new_axiom on:",

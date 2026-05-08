@@ -98,14 +98,12 @@ subtype later -- it is a syntactic refactor, not a proof rewrite.
 # No proof work beyond definitional unfolding. ~50 lines including
 # the IN_AT scaffolding.
 
-
 from fusion import Var
 from basics import mk_abs, mk_app, mk_const, rand
 from parser import define, parse_type
 from nat0 import (
     nat0_ty,
     ZERO,
-    SUC0,
     AXIOM_3_0,
     AXIOM_4_0,
     define_unary_0,
@@ -142,9 +140,9 @@ def _prove_in_at():
     from fusion import REFL  # noqa: F401
     from tactics import AP_THM, BETA_CONV, TRANS, GENL
 
-    th_x = AP_THM(IN_DEF, _x_n0)                 # |- In x = (\x. \y. bit x y) x
+    th_x = AP_THM(IN_DEF, _x_n0)  # |- In x = (\x. \y. bit x y) x
     th_x_eq = TRANS(th_x, BETA_CONV(rand(th_x._concl)))
-    th_xy = AP_THM(th_x_eq, _y_n0)               # |- In x y = (\y. bit x y) y
+    th_xy = AP_THM(th_x_eq, _y_n0)  # |- In x y = (\y. bit x y) y
     return GENL([_x_n0, _y_n0], TRANS(th_xy, BETA_CONV(rand(th_xy._concl))))
 
 
@@ -261,7 +259,7 @@ def IN_EXT(p):
 #                 the deferral marker further down.
 # ---------------------------------------------------------------------------
 
-from bits import (
+from bits import (  # noqa: E402 -- needs nat0_lt parser alias registered above
     BIT_AT_SET_BIT_SAME,
     BIT_AT_SET_BIT_DIFF,
     BIT_AT_POW2_SAME,
@@ -325,9 +323,7 @@ INSERT_AT = _prove_insert_at()
 def IN_INSERT_SAME(p):
     p.goal("!i s. In i (Insert i s) = T")
     p.fix("i s")
-    p.thus("In i (Insert i s) = T").by_rewrite(
-        [IN_AT, INSERT_AT, BIT_AT_SET_BIT_SAME]
-    )
+    p.thus("In i (Insert i s) = T").by_rewrite([IN_AT, INSERT_AT, BIT_AT_SET_BIT_SAME])
 
 
 # Lemma: |- !i j s. ~(i = j) ==> In j (Insert i s) = In j s.
@@ -380,20 +376,14 @@ def IN_SINGLETON(p):
                 [IN_AT, SINGLETON_AT, "hyx", BIT_AT_POW2_SAME]
             )
             p.have("h_rhs: (y = x) = T").by_thm(EQT_INTRO(p.fact("hyx")))
-            p.thus("In y (Singleton x) = (y = x)").by_rewrite(
-                ["h_lhs", "h_rhs"]
-            )
+            p.thus("In y (Singleton x) = (y = x)").by_rewrite(["h_lhs", "h_rhs"])
         with p.case("hnyx: ~(y = x)"):
-            p.have("hb: bit y (pow2 x) = F").by(
-                BIT_AT_POW2_DIFF, "x", "y", "hnyx"
-            )
+            p.have("hb: bit y (pow2 x) = F").by(BIT_AT_POW2_DIFF, "x", "y", "hnyx")
             p.have("h_lhs: In y (Singleton x) = F").by_rewrite_of(
                 "hb", [IN_AT, SINGLETON_AT]
             )
             p.have("h_rhs: (y = x) = F").by_thm(EQF_INTRO(p.fact("hnyx")))
-            p.thus("In y (Singleton x) = (y = x)").by_rewrite(
-                ["h_lhs", "h_rhs"]
-            )
+            p.thus("In y (Singleton x) = (y = x)").by_rewrite(["h_lhs", "h_rhs"])
 
 
 # ---------------------------------------------------------------------------
@@ -437,24 +427,18 @@ def IN_PAIR(p):
                 [PAIR_AT, IN_AT, INSERT_AT, "hza", BIT_AT_SET_BIT_SAME]
             )
             p.have("h_disj: z = a \\/ z = b").by_disj("hza")
-            p.have("h_rhs: (z = a \\/ z = b) = T").by_thm(
-                EQT_INTRO(p.fact("h_disj"))
-            )
-            p.thus("In z (Pair a b) = (z = a \\/ z = b)").by_rewrite(
-                ["h_lhs", "h_rhs"]
-            )
+            p.have("h_rhs: (z = a \\/ z = b) = T").by_thm(EQT_INTRO(p.fact("h_disj")))
+            p.thus("In z (Pair a b) = (z = a \\/ z = b)").by_rewrite(["h_lhs", "h_rhs"])
         with p.case("hnza: ~(z = a)"):
             # IN_INSERT_DIFF needs ~(a = z); flip ~(z = a).
             with p.have("h_az: ~(a = z)").proof():
                 with p.suppose("haz: a = z"):
                     p.have("hza2: z = a").by_thm(SYM(p.fact("haz")))
                     p.absurd().by_conj("hnza", "hza2")
-            p.have(
-                "h_diff: In z (Insert a (Singleton b)) = In z (Singleton b)"
-            ).by(IN_INSERT_DIFF, "a", "z", "Singleton b", "h_az")
-            p.have("h_sing: In z (Singleton b) = (z = b)").by(
-                IN_SINGLETON, "b", "z"
+            p.have("h_diff: In z (Insert a (Singleton b)) = In z (Singleton b)").by(
+                IN_INSERT_DIFF, "a", "z", "Singleton b", "h_az"
             )
+            p.have("h_sing: In z (Singleton b) = (z = b)").by(IN_SINGLETON, "b", "z")
             p.have("h_lhs: In z (Pair a b) = (z = b)").by_rewrite(
                 [PAIR_AT, "h_diff", "h_sing"]
             )
@@ -471,9 +455,7 @@ def IN_PAIR(p):
                     p.assume("hzb: z = b")
                     p.thus("z = a \\/ z = b").by_disj("hzb")
                 p.thus("(z = a \\/ z = b) = (z = b)").by_iff("fwd", "rev")
-            p.thus("In z (Pair a b) = (z = a \\/ z = b)").by_rewrite(
-                ["h_lhs", "h_rhs"]
-            )
+            p.thus("In z (Pair a b) = (z = a \\/ z = b)").by_rewrite(["h_lhs", "h_rhs"])
 
 
 # ---------------------------------------------------------------------------
@@ -509,13 +491,12 @@ PAIR_ORD_AT = _prove_pair_ord_at()
 def IN_PAIR_ORD(p):
     p.goal("!a b z. In z (Pair_ord a b) = (z = Singleton a \\/ z = Pair a b)")
     p.fix("a b z")
-    p.have("h: In z (Pair (Singleton a) (Pair a b)) "
-           "= (z = Singleton a \\/ z = Pair a b)").by(
-        IN_PAIR, "Singleton a", "Pair a b", "z"
+    p.have(
+        "h: In z (Pair (Singleton a) (Pair a b)) = (z = Singleton a \\/ z = Pair a b)"
+    ).by(IN_PAIR, "Singleton a", "Pair a b", "z")
+    p.thus("In z (Pair_ord a b) = (z = Singleton a \\/ z = Pair a b)").by_rewrite_of(
+        "h", [PAIR_ORD_AT]
     )
-    p.thus(
-        "In z (Pair_ord a b) = (z = Singleton a \\/ z = Pair a b)"
-    ).by_rewrite_of("h", [PAIR_ORD_AT])
 
 
 # ---------------------------------------------------------------------------
@@ -554,9 +535,7 @@ def SINGLETON_INJ(p):
     # In a (Singleton a) = (a = a), and a = a holds, so In a (Singleton a).
     p.have("e_aa: In a (Singleton a) = (a = a)").by(IN_SINGLETON, "a", "a")
     p.have("haa: a = a").by_thm(REFL(p._parse("a")))
-    p.have("h_in_a: In a (Singleton a)").by_eq_mp(
-        SYM(p.fact("e_aa")), "haa"
-    )
+    p.have("h_in_a: In a (Singleton a)").by_eq_mp(SYM(p.fact("e_aa")), "haa")
     # Transport via h.
     p.have("h_in_b: In a (Singleton b)").by_rewrite_of("h_in_a", ["h"])
     # In a (Singleton b) = (a = b); EQ_MP yields a = b.
@@ -578,13 +557,9 @@ def SINGLETON_EQ_PAIR(p):
     # Show x = a: a in Pair a b (left), so a in Singleton x, so a = x.
     p.have("haa: a = a").by_thm(REFL(p._parse("a")))
     p.have("hd_a: a = a \\/ a = b").by_disj("haa")
-    p.have("e_a: In a (Pair a b) = (a = a \\/ a = b)").by(
-        IN_PAIR, "a", "b", "a"
-    )
+    p.have("e_a: In a (Pair a b) = (a = a \\/ a = b)").by(IN_PAIR, "a", "b", "a")
     p.have("h_a_pair: In a (Pair a b)").by_eq_mp(SYM(p.fact("e_a")), "hd_a")
-    p.have("h_a_sing: In a (Singleton x)").by_rewrite_of(
-        "h_a_pair", ["h_sym"]
-    )
+    p.have("h_a_sing: In a (Singleton x)").by_rewrite_of("h_a_pair", ["h_sym"])
     p.have("e_xa: In a (Singleton x) = (a = x)").by(IN_SINGLETON, "x", "a")
     p.have("h_a_eq_x: a = x").by_eq_mp(p.fact("e_xa"), "h_a_sing")
     p.have("hxa: x = a").by_thm(SYM(p.fact("h_a_eq_x")))
@@ -592,13 +567,9 @@ def SINGLETON_EQ_PAIR(p):
     # Show x = b: same shape on the b side.
     p.have("hbb: b = b").by_thm(REFL(p._parse("b")))
     p.have("hd_b: b = a \\/ b = b").by_disj("hbb")
-    p.have("e_b: In b (Pair a b) = (b = a \\/ b = b)").by(
-        IN_PAIR, "a", "b", "b"
-    )
+    p.have("e_b: In b (Pair a b) = (b = a \\/ b = b)").by(IN_PAIR, "a", "b", "b")
     p.have("h_b_pair: In b (Pair a b)").by_eq_mp(SYM(p.fact("e_b")), "hd_b")
-    p.have("h_b_sing: In b (Singleton x)").by_rewrite_of(
-        "h_b_pair", ["h_sym"]
-    )
+    p.have("h_b_sing: In b (Singleton x)").by_rewrite_of("h_b_pair", ["h_sym"])
     p.have("e_xb: In b (Singleton x) = (b = x)").by(IN_SINGLETON, "x", "b")
     p.have("h_b_eq_x: b = x").by_eq_mp(p.fact("e_xb"), "h_b_sing")
     p.have("hxb: x = b").by_thm(SYM(p.fact("h_b_eq_x")))
@@ -629,21 +600,17 @@ def PAIR_ORD_INJ(p):
     from fusion import REFL
     from tactics import SYM, CONJ, CONJUNCT1, CONJUNCT2
 
-    p.goal(
-        "!a b c d. Pair_ord a b = Pair_ord c d ==> (a = c /\\ b = d)"
-    )
+    p.goal("!a b c d. Pair_ord a b = Pair_ord c d ==> (a = c /\\ b = d)")
     p.fix("a b c d")
     p.assume("h: Pair_ord a b = Pair_ord c d")
     p.have("h_sym: Pair_ord c d = Pair_ord a b").by_thm(SYM(p.fact("h")))
 
     # ----- Step 1: Singleton a in Pair_ord c d -----
     # In (Singleton a) (Pair_ord a b) holds (left disjunct of IN_PAIR_ORD).
-    p.have("hr_sa: Singleton a = Singleton a").by_thm(
-        REFL(p._parse("Singleton a"))
+    p.have("hr_sa: Singleton a = Singleton a").by_thm(REFL(p._parse("Singleton a")))
+    p.have("hd_sa: Singleton a = Singleton a \\/ Singleton a = Pair a b").by_disj(
+        "hr_sa"
     )
-    p.have(
-        "hd_sa: Singleton a = Singleton a \\/ Singleton a = Pair a b"
-    ).by_disj("hr_sa")
     p.have(
         "e_sa: In (Singleton a) (Pair_ord a b) = "
         "(Singleton a = Singleton a \\/ Singleton a = Pair a b)"
@@ -660,9 +627,9 @@ def PAIR_ORD_INJ(p):
         "e_sa_cd: In (Singleton a) (Pair_ord c d) = "
         "(Singleton a = Singleton c \\/ Singleton a = Pair c d)"
     ).by(IN_PAIR_ORD, "c", "d", "Singleton a")
-    p.have(
-        "h_sa_disj: Singleton a = Singleton c \\/ Singleton a = Pair c d"
-    ).by_eq_mp(p.fact("e_sa_cd"), "h_sa_in_cd")
+    p.have("h_sa_disj: Singleton a = Singleton c \\/ Singleton a = Pair c d").by_eq_mp(
+        p.fact("e_sa_cd"), "h_sa_in_cd"
+    )
 
     # ----- Step 2: derive a = c -----
     with p.have("h_ac: a = c").proof():
@@ -676,12 +643,8 @@ def PAIR_ORD_INJ(p):
                 p.thus("a = c").by_thm(CONJUNCT1(p.fact("h2c")))
 
     # ----- Step 3: similarly Pair a b is in Pair_ord c d -----
-    p.have("hr_pab: Pair a b = Pair a b").by_thm(
-        REFL(p._parse("Pair a b"))
-    )
-    p.have(
-        "hd_pab: Pair a b = Singleton a \\/ Pair a b = Pair a b"
-    ).by_disj("hr_pab")
+    p.have("hr_pab: Pair a b = Pair a b").by_thm(REFL(p._parse("Pair a b")))
+    p.have("hd_pab: Pair a b = Singleton a \\/ Pair a b = Pair a b").by_disj("hr_pab")
     p.have(
         "e_pab: In (Pair a b) (Pair_ord a b) = "
         "(Pair a b = Singleton a \\/ Pair a b = Pair a b)"
@@ -696,9 +659,9 @@ def PAIR_ORD_INJ(p):
         "e_pab_cd: In (Pair a b) (Pair_ord c d) = "
         "(Pair a b = Singleton c \\/ Pair a b = Pair c d)"
     ).by(IN_PAIR_ORD, "c", "d", "Pair a b")
-    p.have(
-        "h_pab_disj: Pair a b = Singleton c \\/ Pair a b = Pair c d"
-    ).by_eq_mp(p.fact("e_pab_cd"), "h_pab_in_cd")
+    p.have("h_pab_disj: Pair a b = Singleton c \\/ Pair a b = Pair c d").by_eq_mp(
+        p.fact("e_pab_cd"), "h_pab_in_cd"
+    )
 
     # ----- Step 4: derive b = d -----
     # We work in the case-on of h_pab_disj. Each branch we resolve via
@@ -707,19 +670,15 @@ def PAIR_ORD_INJ(p):
         # Common: In b (Pair a b) holds (right disjunct of IN_PAIR).
         p.have("hbb: b = b").by_thm(REFL(p._parse("b")))
         p.have("hd_b: b = a \\/ b = b").by_disj("hbb")
-        p.have(
-            "e_b_in_ab: In b (Pair a b) = (b = a \\/ b = b)"
-        ).by(IN_PAIR, "a", "b", "b")
-        p.have("h_b_in_ab: In b (Pair a b)").by_eq_mp(
-            SYM(p.fact("e_b_in_ab")), "hd_b"
+        p.have("e_b_in_ab: In b (Pair a b) = (b = a \\/ b = b)").by(
+            IN_PAIR, "a", "b", "b"
         )
+        p.have("h_b_in_ab: In b (Pair a b)").by_eq_mp(SYM(p.fact("e_b_in_ab")), "hd_b")
 
         with p.cases_on("h_pab_disj"):
             with p.case("h3: Pair a b = Singleton c"):
                 # Singleton c = Pair a b.
-                p.have("h3_sym: Singleton c = Pair a b").by_thm(
-                    SYM(p.fact("h3"))
-                )
+                p.have("h3_sym: Singleton c = Pair a b").by_thm(SYM(p.fact("h3")))
                 p.have("h3c: c = a /\\ c = b").by(
                     SINGLETON_EQ_PAIR, "c", "a", "b", "h3_sym"
                 )
@@ -730,9 +689,7 @@ def PAIR_ORD_INJ(p):
                 # h_sym : Pair_ord c d = Pair_ord a b.
                 # In (Pair c d) (Pair_ord c d) holds; transport gives
                 # In (Pair c d) (Pair_ord a b).
-                p.have("hr_pcd: Pair c d = Pair c d").by_thm(
-                    REFL(p._parse("Pair c d"))
-                )
+                p.have("hr_pcd: Pair c d = Pair c d").by_thm(REFL(p._parse("Pair c d")))
                 p.have(
                     "hd_pcd: Pair c d = Singleton c \\/ Pair c d = Pair c d"
                 ).by_disj("hr_pcd")
@@ -743,9 +700,9 @@ def PAIR_ORD_INJ(p):
                 p.have("h_pcd_in_cd: In (Pair c d) (Pair_ord c d)").by_eq_mp(
                     SYM(p.fact("e_pcd")), "hd_pcd"
                 )
-                p.have(
-                    "h_pcd_in_ab: In (Pair c d) (Pair_ord a b)"
-                ).by_rewrite_of("h_pcd_in_cd", ["h_sym"])
+                p.have("h_pcd_in_ab: In (Pair c d) (Pair_ord a b)").by_rewrite_of(
+                    "h_pcd_in_cd", ["h_sym"]
+                )
                 p.have(
                     "e_pcd_ab: In (Pair c d) (Pair_ord a b) = "
                     "(Pair c d = Singleton a \\/ Pair c d = Pair a b)"
@@ -762,9 +719,7 @@ def PAIR_ORD_INJ(p):
                         p.have("h4a_split: a = c /\\ a = d").by(
                             SINGLETON_EQ_PAIR, "a", "c", "d", "h4a_sym"
                         )
-                        p.have("h4a_d: a = d").by_thm(
-                            CONJUNCT2(p.fact("h4a_split"))
-                        )
+                        p.have("h4a_d: a = d").by_thm(CONJUNCT2(p.fact("h4a_split")))
                         # b = c = a (from h3_bc and h_ac).
                         p.have("h_ba: b = a").by_rewrite_of(
                             "h3_bc", [SYM(p.fact("h_ac"))]
@@ -774,25 +729,23 @@ def PAIR_ORD_INJ(p):
                     with p.case("h4b: Pair c d = Pair a b"):
                         # Pair c d = Pair a b. We have b = c (h3_bc).
                         # In d (Pair c d) holds.
-                        p.have("hdd: d = d").by_thm(
-                            REFL(p._parse("d"))
-                        )
+                        p.have("hdd: d = d").by_thm(REFL(p._parse("d")))
                         p.have("hd_d: d = c \\/ d = d").by_disj("hdd")
-                        p.have(
-                            "e_d_cd: In d (Pair c d) = (d = c \\/ d = d)"
-                        ).by(IN_PAIR, "c", "d", "d")
+                        p.have("e_d_cd: In d (Pair c d) = (d = c \\/ d = d)").by(
+                            IN_PAIR, "c", "d", "d"
+                        )
                         p.have("h_d_cd: In d (Pair c d)").by_eq_mp(
                             SYM(p.fact("e_d_cd")), "hd_d"
                         )
                         p.have("h_d_ab: In d (Pair a b)").by_rewrite_of(
                             "h_d_cd", ["h4b"]
                         )
-                        p.have(
-                            "e_d_ab: In d (Pair a b) = (d = a \\/ d = b)"
-                        ).by(IN_PAIR, "a", "b", "d")
-                        p.have(
-                            "h_d_disj: d = a \\/ d = b"
-                        ).by_eq_mp(p.fact("e_d_ab"), "h_d_ab")
+                        p.have("e_d_ab: In d (Pair a b) = (d = a \\/ d = b)").by(
+                            IN_PAIR, "a", "b", "d"
+                        )
+                        p.have("h_d_disj: d = a \\/ d = b").by_eq_mp(
+                            p.fact("e_d_ab"), "h_d_ab"
+                        )
                         with p.cases_on("h_d_disj"):
                             with p.case("h5a: d = a"):
                                 # a = b (because Pair a b = Singleton c
@@ -800,28 +753,20 @@ def PAIR_ORD_INJ(p):
                                 p.have("h_ba: b = a").by_rewrite_of(
                                     "h3_bc", [SYM(p.fact("h_ac"))]
                                 )
-                                p.have("h5a_sym: a = d").by_thm(
-                                    SYM(p.fact("h5a"))
-                                )
-                                p.thus("b = d").by_rewrite_of(
-                                    "h_ba", ["h5a_sym"]
-                                )
+                                p.have("h5a_sym: a = d").by_thm(SYM(p.fact("h5a")))
+                                p.thus("b = d").by_rewrite_of("h_ba", ["h5a_sym"])
                             with p.case("h5b: d = b"):
-                                p.thus("b = d").by_thm(
-                                    SYM(p.fact("h5b"))
-                                )
+                                p.thus("b = d").by_thm(SYM(p.fact("h5b")))
             with p.case("h6: Pair a b = Pair c d"):
                 # h_ac : a = c.  So Pair a b = Pair a d.
                 # In b (Pair a b) holds; transport gives In b (Pair a d).
                 p.have("h6c: Pair a b = Pair a d").by_rewrite_of(
                     "h6", [SYM(p.fact("h_ac"))]
                 )
-                p.have("h_b_in_ad: In b (Pair a d)").by_rewrite_of(
-                    "h_b_in_ab", ["h6c"]
+                p.have("h_b_in_ad: In b (Pair a d)").by_rewrite_of("h_b_in_ab", ["h6c"])
+                p.have("e_b_ad: In b (Pair a d) = (b = a \\/ b = d)").by(
+                    IN_PAIR, "a", "d", "b"
                 )
-                p.have(
-                    "e_b_ad: In b (Pair a d) = (b = a \\/ b = d)"
-                ).by(IN_PAIR, "a", "d", "b")
                 p.have("h_b_disj: b = a \\/ b = d").by_eq_mp(
                     p.fact("e_b_ad"), "h_b_in_ad"
                 )
@@ -835,9 +780,9 @@ def PAIR_ORD_INJ(p):
                         # IN_PAIR: d = a \/ d = a, so d = a. And b = a.
                         p.have("hdd: d = d").by_thm(REFL(p._parse("d")))
                         p.have("hd_d: d = a \\/ d = d").by_disj("hdd")
-                        p.have(
-                            "e_d_ad: In d (Pair a d) = (d = a \\/ d = d)"
-                        ).by(IN_PAIR, "a", "d", "d")
+                        p.have("e_d_ad: In d (Pair a d) = (d = a \\/ d = d)").by(
+                            IN_PAIR, "a", "d", "d"
+                        )
                         p.have("h_d_ad: In d (Pair a d)").by_eq_mp(
                             SYM(p.fact("e_d_ad")), "hd_d"
                         )
@@ -852,34 +797,24 @@ def PAIR_ORD_INJ(p):
                         p.have("h_d_aa: In d (Pair a a)").by_rewrite_of(
                             "h_d_ab", ["h7a_sym"]
                         )
-                        p.have(
-                            "e_d_aa: In d (Pair a a) = (d = a \\/ d = a)"
-                        ).by(IN_PAIR, "a", "a", "d")
+                        p.have("e_d_aa: In d (Pair a a) = (d = a \\/ d = a)").by(
+                            IN_PAIR, "a", "a", "d"
+                        )
                         p.have("h_d_disj_aa: d = a \\/ d = a").by_eq_mp(
                             p.fact("e_d_aa"), "h_d_aa"
                         )
                         with p.cases_on("h_d_disj_aa"):
                             with p.case("h8a: d = a"):
                                 # b = a, d = a -> b = d.
-                                p.have("h_da: a = d").by_thm(
-                                    SYM(p.fact("h8a"))
-                                )
-                                p.thus("b = d").by_rewrite_of(
-                                    "h7a", ["h_da"]
-                                )
+                                p.have("h_da: a = d").by_thm(SYM(p.fact("h8a")))
+                                p.thus("b = d").by_rewrite_of("h7a", ["h_da"])
                             with p.case("h8b: d = a"):
-                                p.have("h_da: a = d").by_thm(
-                                    SYM(p.fact("h8b"))
-                                )
-                                p.thus("b = d").by_rewrite_of(
-                                    "h7a", ["h_da"]
-                                )
+                                p.have("h_da: a = d").by_thm(SYM(p.fact("h8b")))
+                                p.thus("b = d").by_rewrite_of("h7a", ["h_da"])
                     with p.case("h7b: b = d"):
                         p.thus("b = d").by_thm(p.fact("h7b"))
 
-    p.thus("a = c /\\ b = d").by_thm(
-        CONJ(p.fact("h_ac"), p.fact("h_bd"))
-    )
+    p.thus("a = c /\\ b = d").by_thm(CONJ(p.fact("h_ac"), p.fact("h_bd")))
 
 
 # Lemma:  |- !a b. nat0_lt a (Pair_ord a b).
@@ -898,20 +833,14 @@ def NAT0_LT_PAIR_ORD_L(p):
     # In a (Pair a b) via left disjunct.
     p.have("haa: a = a").by_thm(REFL(p._parse("a")))
     p.have("hd_a: a = a \\/ a = b").by_disj("haa")
-    p.have("e_a: In a (Pair a b) = (a = a \\/ a = b)").by(
-        IN_PAIR, "a", "b", "a"
-    )
-    p.have("h_a_in_pair: In a (Pair a b)").by_eq_mp(
-        SYM(p.fact("e_a")), "hd_a"
-    )
+    p.have("e_a: In a (Pair a b) = (a = a \\/ a = b)").by(IN_PAIR, "a", "b", "a")
+    p.have("h_a_in_pair: In a (Pair a b)").by_eq_mp(SYM(p.fact("e_a")), "hd_a")
     p.have("h_a_lt_pair: nat0_lt a (Pair a b)").by(
         IN_LT, "Pair a b", "a", "h_a_in_pair"
     )
     # In (Pair a b) (Pair_ord a b) via right disjunct of IN_PAIR_ORD.
     p.have("hr_p: Pair a b = Pair a b").by_thm(REFL(p._parse("Pair a b")))
-    p.have(
-        "hd_p: Pair a b = Singleton a \\/ Pair a b = Pair a b"
-    ).by_disj("hr_p")
+    p.have("hd_p: Pair a b = Singleton a \\/ Pair a b = Pair a b").by_disj("hr_p")
     p.have(
         "e_p: In (Pair a b) (Pair_ord a b) = "
         "(Pair a b = Singleton a \\/ Pair a b = Pair a b)"
@@ -923,8 +852,12 @@ def NAT0_LT_PAIR_ORD_L(p):
         IN_LT, "Pair_ord a b", "Pair a b", "h_p_in_po"
     )
     p.thus("nat0_lt a (Pair_ord a b)").by(
-        NAT0_LT_TRANS, "a", "Pair a b", "Pair_ord a b",
-        "h_a_lt_pair", "h_p_lt_po",
+        NAT0_LT_TRANS,
+        "a",
+        "Pair a b",
+        "Pair_ord a b",
+        "h_a_lt_pair",
+        "h_p_lt_po",
     )
 
 
@@ -939,19 +872,13 @@ def NAT0_LT_PAIR_ORD_R(p):
     p.fix("a b")
     p.have("hbb: b = b").by_thm(REFL(p._parse("b")))
     p.have("hd_b: b = a \\/ b = b").by_disj("hbb")
-    p.have("e_b: In b (Pair a b) = (b = a \\/ b = b)").by(
-        IN_PAIR, "a", "b", "b"
-    )
-    p.have("h_b_in_pair: In b (Pair a b)").by_eq_mp(
-        SYM(p.fact("e_b")), "hd_b"
-    )
+    p.have("e_b: In b (Pair a b) = (b = a \\/ b = b)").by(IN_PAIR, "a", "b", "b")
+    p.have("h_b_in_pair: In b (Pair a b)").by_eq_mp(SYM(p.fact("e_b")), "hd_b")
     p.have("h_b_lt_pair: nat0_lt b (Pair a b)").by(
         IN_LT, "Pair a b", "b", "h_b_in_pair"
     )
     p.have("hr_p: Pair a b = Pair a b").by_thm(REFL(p._parse("Pair a b")))
-    p.have(
-        "hd_p: Pair a b = Singleton a \\/ Pair a b = Pair a b"
-    ).by_disj("hr_p")
+    p.have("hd_p: Pair a b = Singleton a \\/ Pair a b = Pair a b").by_disj("hr_p")
     p.have(
         "e_p: In (Pair a b) (Pair_ord a b) = "
         "(Pair a b = Singleton a \\/ Pair a b = Pair a b)"
@@ -963,9 +890,14 @@ def NAT0_LT_PAIR_ORD_R(p):
         IN_LT, "Pair_ord a b", "Pair a b", "h_p_in_po"
     )
     p.thus("nat0_lt b (Pair_ord a b)").by(
-        NAT0_LT_TRANS, "b", "Pair a b", "Pair_ord a b",
-        "h_b_lt_pair", "h_p_lt_po",
+        NAT0_LT_TRANS,
+        "b",
+        "Pair a b",
+        "Pair_ord a b",
+        "h_b_lt_pair",
+        "h_p_lt_po",
     )
+
 
 # ---------------------------------------------------------------------------
 # Stage 4 -- a model of Q inside HF.   (used by godel_first.py Stage 6)
@@ -1105,9 +1037,7 @@ def VN_SUCC_NEQ_ZERO(p):
     p.goal("!x. ~(vN_succ x = Empty)")
     p.fix("x")
     with p.suppose("h: vN_succ x = Empty"):
-        p.have("hT: In x (vN_succ x) = T").by_rewrite(
-            [VN_SUCC_AT, IN_INSERT_SAME]
-        )
+        p.have("hT: In x (vN_succ x) = T").by_rewrite([VN_SUCC_AT, IN_INSERT_SAME])
         p.have("hET: In x Empty = T").by_rewrite_of("hT", ["h"])
         p.have("hP: In x Empty").by_thm(EQT_ELIM(p.fact("hET")))
         p.have("hN: ~In x Empty").by(NOT_IN_EMPTY, "x")
@@ -1170,42 +1100,28 @@ def VN_SUCC_INJ(p):
             )
             # Direction 1: bit m (set_bit m m) = T, transport via h_set,
             # then BIT_AT_SET_BIT_DIFF gives bit m n = T.
-            p.have("h_bm: bit m (set_bit m m) = T").by(
-                BIT_AT_SET_BIT_SAME, "m", "m"
-            )
-            p.have("h_bm_n: bit m (set_bit n n) = T").by_rewrite_of(
-                "h_bm", ["h_set"]
-            )
+            p.have("h_bm: bit m (set_bit m m) = T").by(BIT_AT_SET_BIT_SAME, "m", "m")
+            p.have("h_bm_n: bit m (set_bit n n) = T").by_rewrite_of("h_bm", ["h_set"])
             p.have("h_diff_n: bit m (set_bit n n) = bit m n").by(
                 BIT_AT_SET_BIT_DIFF, "n", "m", "n", "h_nm"
             )
-            p.have("h_bit_mn: bit m n = T").by_rewrite_of(
-                "h_bm_n", ["h_diff_n"]
-            )
+            p.have("h_bit_mn: bit m n = T").by_rewrite_of("h_bm_n", ["h_diff_n"])
             p.have("h_bmn_pos: bit m n").by_thm(EQT_ELIM(p.fact("h_bit_mn")))
             p.have("h_lt_mn: nat0_lt m n").by(BIT_LT, "n", "m", "h_bmn_pos")
             # Direction 2 (symmetric).
-            p.have("h_bn: bit n (set_bit n n) = T").by(
-                BIT_AT_SET_BIT_SAME, "n", "n"
-            )
-            p.have("h_set_sym: set_bit n n = set_bit m m").by_thm(
-                SYM(p.fact("h_set"))
-            )
+            p.have("h_bn: bit n (set_bit n n) = T").by(BIT_AT_SET_BIT_SAME, "n", "n")
+            p.have("h_set_sym: set_bit n n = set_bit m m").by_thm(SYM(p.fact("h_set")))
             p.have("h_bn_m: bit n (set_bit m m) = T").by_rewrite_of(
                 "h_bn", ["h_set_sym"]
             )
             p.have("h_diff_m: bit n (set_bit m m) = bit n m").by(
                 BIT_AT_SET_BIT_DIFF, "m", "n", "m", "hnmn"
             )
-            p.have("h_bit_nm: bit n m = T").by_rewrite_of(
-                "h_bn_m", ["h_diff_m"]
-            )
+            p.have("h_bit_nm: bit n m = T").by_rewrite_of("h_bn_m", ["h_diff_m"])
             p.have("h_bnm_pos: bit n m").by_thm(EQT_ELIM(p.fact("h_bit_nm")))
             p.have("h_lt_nm: nat0_lt n m").by(BIT_LT, "m", "n", "h_bnm_pos")
             # Asymmetry contradiction.
-            p.have("h_nasym: ~(nat0_lt n m)").by(
-                NAT0_LT_ASYM, "m", "n", "h_lt_mn"
-            )
+            p.have("h_nasym: ~(nat0_lt n m)").by(NAT0_LT_ASYM, "m", "n", "h_lt_mn")
             p.absurd().by_conj("h_nasym", "h_lt_nm")
 
 
@@ -1238,9 +1154,7 @@ def VN_INJ(p):
                     p.have("h_eq: Empty = vN_succ (vN n)").by_rewrite_of(
                         "h", [VN_BASE, VN_STEP]
                     )
-                    p.have("h_sym: vN_succ (vN n) = Empty").by_thm(
-                        SYM(p.fact("h_eq"))
-                    )
+                    p.have("h_sym: vN_succ (vN n) = Empty").by_thm(SYM(p.fact("h_eq")))
                     p.have("h_neq: ~(vN_succ (vN n) = Empty)").by(
                         VN_SUCC_NEQ_ZERO, "vN n"
                     )
@@ -1324,8 +1238,8 @@ def VN_PRED(p):
 N0PLUS_BASE, N0PLUS_STEP = define_recursive_0(
     "n0plus",
     parse_type("nat0 -> nat0 -> nat0"),
-    _x_n0,            # carried first arg
-    _x_n0,            # base: n0plus x 0 = x
+    _x_n0,  # carried first arg
+    _x_n0,  # base: n0plus x 0 = x
     mk_abs(_n_n0, mk_abs(_a_hf, mk_suc0(_a_hf))),  # step: \k a. SUC0 a
     result_ty=nat0_ty,
 )
@@ -1336,8 +1250,8 @@ n0plus = mk_const("n0plus", [])
 N0TIMES_BASE, N0TIMES_STEP = define_recursive_0(
     "n0times",
     parse_type("nat0 -> nat0 -> nat0"),
-    _x_n0,            # carried first arg
-    ZERO,             # base: n0times x 0 = 0
+    _x_n0,  # carried first arg
+    ZERO,  # base: n0times x 0 = 0
     mk_abs(_n_n0, mk_abs(_a_hf, mk_app(n0plus, _a_hf, _x_n0))),  # step: a + x
     result_ty=nat0_ty,
 )
@@ -1442,9 +1356,8 @@ def Q6_HF(p):
 def Q7_HF(p):
     p.goal("!x y. n0times x (SUC0 y) = n0plus (n0times x y) x")
     p.fix("x y")
-    p.thus("n0times x (SUC0 y) = n0plus (n0times x y) x").by_rewrite(
-        [N0TIMES_STEP]
-    )
+    p.thus("n0times x (SUC0 y) = n0plus (n0times x y) x").by_rewrite([N0TIMES_STEP])
+
 
 # ---------------------------------------------------------------------------
 # bi-interpretation, briefly.

@@ -28,10 +28,10 @@ from nat0 import (
     ZERO,
     mk_suc0,
     define_unary_0,
-    define_recursive_0,
 )
-from classical import COND, mk_cond, COND_T, COND_F, NOT_NOT_EQ, EXCLUDED_MIDDLE
+from classical import mk_cond, COND_T, COND_F, NOT_NOT_EQ, EXCLUDED_MIDDLE
 from proof import proof
+
 # Importing ``nat0_order`` registers the ``nat0`` strong-induction strategy
 # with the proof DSL (so ``p.strong_induction("n", "IH")`` works below).
 from nat0_order import (
@@ -67,7 +67,6 @@ _NOT_F_EQ_T = _prove_not_F_eq_T()
 # via NOT_NOT_EQ at T plus TRUTH, giving |- ~~T, then EQF_INTRO over the
 # outer ``~``.
 def _prove_not_T_eq_F():
-    from fusion import REFL
     from tactics import EQF_INTRO, SPEC, SYM, EQ_MP, TRUTH
 
     nn_T_eq_T = SPEC(T, _NOT_NOT_EQ)  # |- ~~T = T
@@ -75,7 +74,7 @@ def _prove_not_T_eq_F():
     return SYM(EQF_INTRO(nn_T))  # EQF_INTRO orients as F = ~T; SYM flips it
 
 
-from classical import NOT_NOT_EQ as _NOT_NOT_EQ
+from classical import NOT_NOT_EQ as _NOT_NOT_EQ  # noqa: E402 -- needed by _prove_not_T_eq_F above
 
 _NOT_T_EQ_F = _prove_not_T_eq_F()
 
@@ -89,7 +88,7 @@ COND_F_NAT0 = INST_TYPE([(nat0_ty, aty)], COND_F)
 # Register a parser alias for the nat0-instance of COND so we can write
 # ``COND b x y`` in goal strings without worrying about the parser's lack of
 # polymorphic-constant unification.
-from parser import add_const as _add_const
+from parser import add_const as _add_const  # noqa: E402 -- registered after COND_T/F are defined
 
 _COND_nat0_const = mk_const("COND", [(nat0_ty, aty)])
 _add_const("COND_nat0", _COND_nat0_const)
@@ -216,8 +215,7 @@ bit = mk_const("bit", [])
 # Pointwise form of BIT_STEP, used by every downstream proof:
 #   |- !i n. bit (SUC0 i) n = bit i (HALF n).
 def _prove_bit_step_at():
-    from fusion import REFL
-    from tactics import AP_THM, BETA_CONV, SYM, TRANS, SPEC, GEN, GENL
+    from tactics import AP_THM, BETA_CONV, TRANS, SPEC, GENL
 
     # BIT_STEP : |- !i. bit (SUC0 i) = (\n. (bit i) (HALF n))
     step_at_i = SPEC(_i, BIT_STEP)
@@ -379,14 +377,17 @@ def RECONSTRUCT(p):
         with p.base():
             p.thus(
                 "0 = COND_nat0 (ODD 0) (SUC0 (double (HALF 0))) (double (HALF 0))"
-            ).by_rewrite(
-                [ODD_BASE, HALF_BASE, DOUBLE_BASE, COND_F_NAT0]
-            )
+            ).by_rewrite([ODD_BASE, HALF_BASE, DOUBLE_BASE, COND_F_NAT0])
         with p.step("IH"):
             from classical import EXCLUDED_MIDDLE
             from tactics import (
-                EQT_INTRO, EQF_INTRO, REWRITE_RULE, REWRITE_CONV, SYM,
-                AP_TERM as _APT, TRANS,
+                EQT_INTRO,
+                EQF_INTRO,
+                REWRITE_RULE,
+                REWRITE_CONV,
+                SYM,
+                AP_TERM as _APT,
+                TRANS,
             )
 
             SUC0_c = mk_const("SUC0", [])
@@ -406,9 +407,13 @@ def RECONSTRUCT(p):
                     )
                     rhs_eq = REWRITE_CONV(
                         [
-                            ODD_STEP, HALF_STEP, DOUBLE_STEP,
-                            odd_eq_T, _NOT_T_EQ_F,
-                            COND_T_NAT0, COND_F_NAT0,
+                            ODD_STEP,
+                            HALF_STEP,
+                            DOUBLE_STEP,
+                            odd_eq_T,
+                            _NOT_T_EQ_F,
+                            COND_T_NAT0,
+                            COND_F_NAT0,
                         ],
                         target,
                     )  # |- target = SUC0 (SUC0 (double (HALF n)))
@@ -429,9 +434,13 @@ def RECONSTRUCT(p):
                     )
                     rhs_eq = REWRITE_CONV(
                         [
-                            ODD_STEP, HALF_STEP, DOUBLE_STEP,
-                            odd_eq_F, _NOT_F_EQ_T,
-                            COND_T_NAT0, COND_F_NAT0,
+                            ODD_STEP,
+                            HALF_STEP,
+                            DOUBLE_STEP,
+                            odd_eq_F,
+                            _NOT_F_EQ_T,
+                            COND_T_NAT0,
+                            COND_F_NAT0,
                         ],
                         target,
                     )  # |- target = SUC0 (double (HALF n))
@@ -472,8 +481,13 @@ def BIT_AT_POW2_DIFF(p):
                     p.assume("h: ~(SUC0 i = 0)")
                     p.thus("bit (SUC0 i) (pow2 0) = F").by_rewrite(
                         [
-                            BIT_STEP_AT, POW2_BASE, HALF_STEP, ODD_BASE,
-                            COND_F_NAT0, HALF_BASE, BIT_AT_ZERO,
+                            BIT_STEP_AT,
+                            POW2_BASE,
+                            HALF_STEP,
+                            ODD_BASE,
+                            COND_F_NAT0,
+                            HALF_BASE,
+                            BIT_AT_ZERO,
                         ]
                     )
         with p.step("IH_j"):
@@ -529,12 +543,13 @@ def HALF_LT_SUC0(p):
                     p.have("succ_lt: nat0_lt (SUC0 n) (SUC0 (SUC0 n))").by(
                         NAT0_LT_SUC0, "SUC0 n"
                     )
-                    p.have(
-                        "trans_lt: nat0_lt (HALF (SUC0 n)) (SUC0 (SUC0 n))"
-                    ).by(
+                    p.have("trans_lt: nat0_lt (HALF (SUC0 n)) (SUC0 (SUC0 n))").by(
                         NAT0_LT_TRANS,
-                        "HALF (SUC0 n)", "SUC0 n", "SUC0 (SUC0 n)",
-                        "IH", "succ_lt",
+                        "HALF (SUC0 n)",
+                        "SUC0 n",
+                        "SUC0 (SUC0 n)",
+                        "IH",
+                        "succ_lt",
                     )
                     p.thus(
                         "nat0_lt (HALF (SUC0 (SUC0 n))) (SUC0 (SUC0 n))"
@@ -548,7 +563,9 @@ def HALF_LT_SUC0(p):
                         "mono_lt: nat0_lt (SUC0 (HALF (SUC0 n))) (SUC0 (SUC0 n))"
                     ).by(
                         NAT0_LT_SUC0_MONO,
-                        "HALF (SUC0 n)", "SUC0 n", "IH",
+                        "HALF (SUC0 n)",
+                        "SUC0 n",
+                        "IH",
                     )
                     p.thus(
                         "nat0_lt (HALF (SUC0 (SUC0 n))) (SUC0 (SUC0 n))"
@@ -602,9 +619,7 @@ def ZERO_BITS(p):
                 with p.have("hh: !i. bit i (HALF n) = F").proof():
                     p.fix("i")
                     p.have("hSi: bit (SUC0 i) n = F").by("h", "SUC0 i")
-                    p.thus("bit i (HALF n) = F").by_rewrite_of(
-                        "hSi", [BIT_STEP_AT]
-                    )
+                    p.thus("bit i (HALF n) = F").by_rewrite_of("hSi", [BIT_STEP_AT])
                 p.have("hhalfz: HALF n = 0").by("IH", "HALF n", "hlt", "hh")
                 p.have("h0: bit 0 n = F").by("h", "0")
                 p.have("hodd: ODD n = F").by_rewrite_of("h0", [BIT_BASE])
@@ -649,16 +664,12 @@ def BIT_EXTENSIONALITY(p):
                         [SYM(p.fact("hi")), "hz", BIT_AT_ZERO]
                     )
                 p.have("hm0: m = 0").by(ZERO_BITS, "m", "hm_zero")
-                p.thus("n = m").by_thm(
-                    TRANS(p.fact("hz"), SYM(p.fact("hm0")))
-                )
+                p.thus("n = m").by_thm(TRANS(p.fact("hz"), SYM(p.fact("hm0"))))
             with p.case("hnz: ~(n = 0)"):
                 p.have("hlt: nat0_lt (HALF n) n").by(HALF_LT_NZ, "n", "hnz")
                 with p.have("hh: !i. bit i (HALF n) = bit i (HALF m)").proof():
                     p.fix("i")
-                    p.have("h_si: bit (SUC0 i) n = bit (SUC0 i) m").by(
-                        "h", "SUC0 i"
-                    )
+                    p.have("h_si: bit (SUC0 i) n = bit (SUC0 i) m").by("h", "SUC0 i")
                     p.thus("bit i (HALF n) = bit i (HALF m)").by_rewrite_of(
                         "h_si", [BIT_STEP_AT]
                     )
@@ -785,18 +796,24 @@ def BIT_AT_SET_BIT_SAME(p):
                     p.have("hO_eq: ODD n = T").by(EQT_INTRO, "hO")
                     p.thus("bit (SUC0 i) (set_bit (SUC0 i) n) = T").by_rewrite(
                         [
-                            BIT_STEP_AT, SET_BIT_STEP_AT,
-                            "hO_eq", COND_T_NAT0,
-                            HALF_SUC0_DOUBLE, "ih_at",
+                            BIT_STEP_AT,
+                            SET_BIT_STEP_AT,
+                            "hO_eq",
+                            COND_T_NAT0,
+                            HALF_SUC0_DOUBLE,
+                            "ih_at",
                         ]
                     )
                 with p.case("hF: ~(ODD n)"):
                     p.have("hF_eq: ODD n = F").by(EQF_INTRO, "hF")
                     p.thus("bit (SUC0 i) (set_bit (SUC0 i) n) = T").by_rewrite(
                         [
-                            BIT_STEP_AT, SET_BIT_STEP_AT,
-                            "hF_eq", COND_F_NAT0,
-                            HALF_DOUBLE, "ih_at",
+                            BIT_STEP_AT,
+                            SET_BIT_STEP_AT,
+                            "hF_eq",
+                            COND_F_NAT0,
+                            HALF_DOUBLE,
+                            "ih_at",
                         ]
                     )
 
@@ -849,22 +866,24 @@ def BIT_AT_SET_BIT_DIFF(p):
                     with p.cases_on(EXCLUDED_MIDDLE, "ODD n"):
                         with p.case("hO: ODD n"):
                             p.have("hO_eq: ODD n = T").by(EQT_INTRO, "hO")
-                            p.thus(
-                                "bit 0 (set_bit (SUC0 i) n) = bit 0 n"
-                            ).by_rewrite(
+                            p.thus("bit 0 (set_bit (SUC0 i) n) = bit 0 n").by_rewrite(
                                 [
-                                    BIT_BASE, SET_BIT_STEP_AT,
-                                    "hO_eq", COND_T_NAT0, ODD_SUC0_DOUBLE,
+                                    BIT_BASE,
+                                    SET_BIT_STEP_AT,
+                                    "hO_eq",
+                                    COND_T_NAT0,
+                                    ODD_SUC0_DOUBLE,
                                 ]
                             )
                         with p.case("hF: ~(ODD n)"):
                             p.have("hF_eq: ODD n = F").by(EQF_INTRO, "hF")
-                            p.thus(
-                                "bit 0 (set_bit (SUC0 i) n) = bit 0 n"
-                            ).by_rewrite(
+                            p.thus("bit 0 (set_bit (SUC0 i) n) = bit 0 n").by_rewrite(
                                 [
-                                    BIT_BASE, SET_BIT_STEP_AT,
-                                    "hF_eq", COND_F_NAT0, ODD_DOUBLE,
+                                    BIT_BASE,
+                                    SET_BIT_STEP_AT,
+                                    "hF_eq",
+                                    COND_F_NAT0,
+                                    ODD_DOUBLE,
                                 ]
                             )
                 with p.step("IH_j_unused"):
@@ -874,9 +893,9 @@ def BIT_AT_SET_BIT_DIFF(p):
                         with p.suppose("heq: i = j"):
                             p.have("seq: SUC0 i = SUC0 j").by_cong(SUC0_c, "heq")
                             p.absurd().by_conj("h", "seq")
-                    p.have(
-                        "rec: bit j (set_bit i (HALF n)) = bit j (HALF n)"
-                    ).by("IH_i", "j", "HALF n", "hij")
+                    p.have("rec: bit j (set_bit i (HALF n)) = bit j (HALF n)").by(
+                        "IH_i", "j", "HALF n", "hij"
+                    )
                     with p.cases_on(EXCLUDED_MIDDLE, "ODD n"):
                         with p.case("hO: ODD n"):
                             p.have("hO_eq: ODD n = T").by(EQT_INTRO, "hO")
@@ -884,9 +903,12 @@ def BIT_AT_SET_BIT_DIFF(p):
                                 "bit (SUC0 j) (set_bit (SUC0 i) n) = bit (SUC0 j) n"
                             ).by_rewrite(
                                 [
-                                    BIT_STEP_AT, SET_BIT_STEP_AT,
-                                    "hO_eq", COND_T_NAT0,
-                                    HALF_SUC0_DOUBLE, "rec",
+                                    BIT_STEP_AT,
+                                    SET_BIT_STEP_AT,
+                                    "hO_eq",
+                                    COND_T_NAT0,
+                                    HALF_SUC0_DOUBLE,
+                                    "rec",
                                 ]
                             )
                         with p.case("hF: ~(ODD n)"):
@@ -895,9 +917,12 @@ def BIT_AT_SET_BIT_DIFF(p):
                                 "bit (SUC0 j) (set_bit (SUC0 i) n) = bit (SUC0 j) n"
                             ).by_rewrite(
                                 [
-                                    BIT_STEP_AT, SET_BIT_STEP_AT,
-                                    "hF_eq", COND_F_NAT0,
-                                    HALF_DOUBLE, "rec",
+                                    BIT_STEP_AT,
+                                    SET_BIT_STEP_AT,
+                                    "hF_eq",
+                                    COND_F_NAT0,
+                                    HALF_DOUBLE,
+                                    "rec",
                                 ]
                             )
 
@@ -938,9 +963,9 @@ def BIT_LT(p):
                 p.have("n_eq: n = SUC0 (double (HALF n))").by_rewrite_of(
                     "recon", ["hodd_eq", COND_T_NAT0]
                 )
-                p.have(
-                    "lt: nat0_lt 0 (SUC0 (double (HALF n)))"
-                ).by(NAT0_LT_0_SUC0, "double (HALF n)")
+                p.have("lt: nat0_lt 0 (SUC0 (double (HALF n)))").by(
+                    NAT0_LT_0_SUC0, "double (HALF n)"
+                )
                 p.thus("nat0_lt 0 n").by_rewrite_of("lt", [SYM(p.fact("n_eq"))])
             with p.step("IH_i_unused"):
                 p.assume("hb: bit (SUC0 i) n")
@@ -948,17 +973,11 @@ def BIT_LT(p):
                 with p.have("hh_nz: ~(HALF n = 0)").proof():
                     with p.suppose("hh_z: HALF n = 0"):
                         p.have("bit_at_0: bit i 0 = F").by(BIT_AT_ZERO, "i")
-                        p.have("hb_at_0: bit i 0").by_rewrite_of(
-                            "hb_half", ["hh_z"]
-                        )
-                        p.absurd().by_thm(
-                            _EQ_MP(p.fact("bit_at_0"), p.fact("hb_at_0"))
-                        )
+                        p.have("hb_at_0: bit i 0").by_rewrite_of("hb_half", ["hh_z"])
+                        p.absurd().by_thm(_EQ_MP(p.fact("bit_at_0"), p.fact("hb_at_0")))
                 with p.have("hn_nz: ~(n = 0)").proof():
                     with p.suppose("hn_z: n = 0"):
-                        p.have("hh_z: HALF n = 0").by_rewrite_of(
-                            HALF_BASE, ["hn_z"]
-                        )
+                        p.have("hh_z: HALF n = 0").by_rewrite_of(HALF_BASE, ["hn_z"])
                         p.absurd().by_conj("hh_nz", "hh_z")
                 p.have("half_lt: nat0_lt (HALF n) n").by(HALF_LT_NZ, "n", "hn_nz")
                 p.have("i_lt_half: nat0_lt i (HALF n)").by(
@@ -966,8 +985,11 @@ def BIT_LT(p):
                 )
                 p.thus("nat0_lt (SUC0 i) n").by(
                     NAT0_LT_SUC0_INSERT,
-                    "i", "HALF n", "n",
-                    "i_lt_half", "half_lt",
+                    "i",
+                    "HALF n",
+                    "n",
+                    "i_lt_half",
+                    "half_lt",
                 )
 
 
