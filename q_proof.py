@@ -186,15 +186,28 @@ def CONS_L_INJ(p):
 
 
 # Disjointness with nil:  |- !h t. ~(cons_l h t = nil_l).
-# Proof: cons_l h t = Pair_ord (SUC0 0) ..., and we need
-# ~(Pair_ord (SUC0 0) (Pair_ord h t) = 0). The right way is via
-# membership: Pair_ord a b is non-empty (contains Singleton a), but 0
-# is empty. Defer the discharge until needed -- the fact is implied by
-# nat0 inhabitation arguments at Pair_ord, parallel to the
-# ``CTOR_NEQ_ZERO`` proofs in q_syntax.py.
 #
-# (Stage 2 itself does not consume cons_l =/= nil_l until the proof-
-# checker is wired up; we list the lemma here as a TODO marker.)
+# Direct: cons_l h t = Pair_ord (SUC0 0) (Pair_ord h t) and nil_l = 0;
+# Pair_ord _ _ != 0 from ``_NEQ_PAIR_ORD_ZERO`` (q_syntax).
+
+
+from q_syntax import _NEQ_PAIR_ORD_ZERO
+
+
+@proof
+def CONS_L_NEQ_NIL(p):
+    """|- !h t. ~(cons_l h t = nil_l)."""
+    p.goal("!h t. ~(cons_l h t = nil_l)")
+    p.fix("h t")
+    cons_at_ht = SPECL([p._parse("h"), p._parse("t")], CONS_L_AT)
+    with p.suppose("h_eq: cons_l h t = nil_l"):
+        p.have(
+            "h_po: Pair_ord (SUC0 0) (Pair_ord h t) = 0"
+        ).by_rewrite_of("h_eq", [cons_at_ht, NIL_L_DEF])
+        p.have(
+            "h_neg: ~(Pair_ord (SUC0 0) (Pair_ord h t) = 0)"
+        ).by(_NEQ_PAIR_ORD_ZERO, "SUC0 0", "Pair_ord h t")
+        p.absurd().by_conj("h_neg", "h_po")
 
 
 # ---------------------------------------------------------------------------
@@ -883,6 +896,7 @@ if __name__ == "__main__":
     print("    CONS_L_DEF     :", pp_thm(CONS_L_DEF))
     print("    CONS_L_AT      :", pp_thm(CONS_L_AT))
     print("    CONS_L_INJ     :", pp_thm(CONS_L_INJ))
+    print("    CONS_L_NEQ_NIL :", pp_thm(CONS_L_NEQ_NIL))
     print()
     print("Stage 2 (b) -- variable-index conventions.")
     print("    VAR_X_DEF      :", pp_thm(VAR_X_DEF))

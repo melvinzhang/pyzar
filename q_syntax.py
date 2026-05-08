@@ -1330,6 +1330,23 @@ def mono_iff_forall_pw_step(size_lemma_r, hyp_th, v_term):
     )
 
 
+def mono_iff_eq_or_pw_step(ctor, size_lemma_r, hyp_th, v_term):
+    """``(?a b. n = ctor a b /\\ (v = a \\/ f b v))
+        = (?a b. n = ctor a b /\\ (v = a \\/ g b v))``.
+
+    Used for list-membership-style recursion ``mem_l p x  :=
+    ?h t. p = cons_l h t /\\ (x = h \\/ mem_l t x)``: the head slot ``a``
+    is non-recursive (just an equality test against the query value),
+    only the tail slot ``b`` recurses through ``f``."""
+    return _mono_iff_binary_pw_step(
+        ctor, None, size_lemma_r, hyp_th, v_term,
+        rest_builder=lambda fn, a, b, v: mk_or(
+            mk_eq(v, a), mk_app(fn, b, v)
+        ),
+        recurses_l=False,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Value-shape pointwise MONO helpers (for ``substitute``-style recursion).
 #

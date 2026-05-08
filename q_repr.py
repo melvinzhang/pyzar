@@ -109,23 +109,32 @@
 # ---------------------------------------------------------------------------
 
 from fusion import Var
-from basics import mk_const, mk_app, mk_abs, rand
+from basics import mk_const, mk_app, mk_abs, rand, rator
 from parser import define, parse_type
-from axioms import mk_forall, mk_imp, mk_not, mk_and
+from axioms import mk_forall, mk_imp, mk_not, mk_and, mk_or, mk_exists
 from nat0 import nat0_ty, define_unary_0
+from nat0_order import define_wf_lt
 from proof import proof
 from tactics import (
-    SPEC, GEN, GENL, SYM, AP_THM, BETA_CONV, TRANS, DISJ1, REFL,
+    SPEC, SPECL, GEN, GENL, SYM, AP_THM, BETA_CONV, TRANS, DISJ1, DISJ2, REFL,
+    EQ_MP, MP, CONJ, CONJUNCT1, CONJUNCT2, EXISTS, FUN_EXT, NOT_INTRO, DISCH,
+    NOT_ELIM, EQF_INTRO, EQF_ELIM, CONTR,
 )
+from fusion import ASSUME, ABS
+from basics import mk_eq
 
 from q_syntax import (
     Zero_t, Succ_t,
     is_term_const,
     IS_TERM_REC, IS_TERM_AT_SUCC,
+    mono_iff_eq_or_pw_step,
+    _unfold_rec_via_F_def,
 )
 from q_proof import (
     var_x,
     Prov_Q,
+    nil_l, cons_l, NIL_L_DEF, CONS_L_AT, CONS_L_INJ, CONS_L_NEQ_NIL,
+    NAT0_LT_CONS_L_TAIL,
 )
 
 
@@ -308,16 +317,230 @@ REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 
 
 # ---------------------------------------------------------------------------
+# Stage 3B (a) -- list membership ``mem_l``.
+#
+#   mem_l p x  :<=>  ?h t. p = cons_l h t /\ (x = h \/ mem_l t x).
+#
+# The nil_l case (``p = 0``) returns F naturally: there is no h, t such
+# that ``nil_l = cons_l h t`` (CONS_L_NEQ_NIL). Recursion is on the
+# first argument (the list), so ``mem_l : nat0 -> nat0 -> bool`` is
+# declared via ``define_wf_lt`` with the body packaged into a helper
+# constant ``_mem_l_F``. The MONO obligation is dispatched pointwise
+# via ``mono_iff_eq_or_pw_step`` (matches ``(x = h \/ f t x)`` rest).
+# ---------------------------------------------------------------------------
+
+
+_pred2_ty = parse_type("nat0 -> nat0 -> bool")
+_F_pred2_ty = parse_type("(nat0 -> nat0 -> bool) -> nat0 -> nat0 -> bool")
+_f_pred2 = Var("f", _pred2_ty)
+_p_n0_var = Var("p", nat0_ty)
+_h_n0_local = Var("h", nat0_ty)
+_t_n0_local = Var("t", nat0_ty)
+_x_n0_for_mem = Var("x", nat0_ty)
+
+
+def _mem_l_body(f_t, p_t, x_t):
+    """Bool body of ``_mem_l_F`` at the x-applied level."""
+    return mk_exists(_h_n0_local, mk_exists(_t_n0_local, mk_and(
+        mk_eq(p_t, mk_app(cons_l, _h_n0_local, _t_n0_local)),
+        mk_or(mk_eq(x_t, _h_n0_local),
+              mk_app(f_t, _t_n0_local, x_t)),
+    )))
+
+
+_MEM_L_F_DEF = define(
+    "_mem_l_F",
+    _F_pred2_ty,
+    mk_abs(_f_pred2, mk_abs(_p_n0_var,
+        mk_abs(_x_n0_for_mem,
+               _mem_l_body(_f_pred2, _p_n0_var, _x_n0_for_mem)))),
+)
+_MEM_L_F = mk_const("_mem_l_F", [])
+
+
+@proof
+def MEM_L_MONO(p):
+    """|- !f g p. (!k. nat0_lt k p ==> f k = g k)
+                  ==> _mem_l_F f p = _mem_l_F g p.
+
+    Function-valued MONO: prove the bool body equation pointwise at a
+    fixed ``x``, then ABS over x to lift to the lambda equality, then
+    ``by_unfold`` through ``_MEM_L_F_DEF`` on each side."""
+    p.goal(
+        "!f g p. (!k. nat0_lt k p ==> f k = g k) ==> "
+        "_mem_l_F f p = _mem_l_F g p",
+        types={"f": _pred2_ty, "g": _pred2_ty,
+               "p": nat0_ty, "k": nat0_ty},
+    )
+    p.fix("f g p")
+    p.assume("h: !k. nat0_lt k p ==> f k = g k")
+
+    h_th = p.fact("h")
+    body_eq = mono_iff_eq_or_pw_step(
+        cons_l, NAT0_LT_CONS_L_TAIL, h_th, _x_n0_for_mem
+    )
+    # body_eq : {h_concl} |- body[f, p, x] = body[g, p, x].
+    abs_eq = ABS(_x_n0_for_mem, body_eq)
+    # abs_eq : {h_concl} |- (\x. body[f, p, x]) = (\x. body[g, p, x]).
+
+    p.thus(
+        "_mem_l_F f p = _mem_l_F g p"
+    ).by_unfold(abs_eq, _MEM_L_F_DEF)
+
+
+MEM_L_DEF, _MEM_L_REC_RAW = define_wf_lt(
+    "mem_l",
+    _pred2_ty,
+    _MEM_L_F,
+    MEM_L_MONO,
+)
+mem_l = mk_const("mem_l", [])
+
+
+# |- !p. mem_l p = (\x. ?h t. p = cons_l h t /\ (x = h \/ mem_l t x)).
+MEM_L_REC = _unfold_rec_via_F_def(_MEM_L_REC_RAW, _MEM_L_F_DEF)
+
+
+# Pointwise unfold:
+#   |- !p x. mem_l p x = (?h t. p = cons_l h t /\ (x = h \/ mem_l t x)).
+def _mem_l_rec_pw():
+    spec_p = SPEC(_p_n0_var, MEM_L_REC)         # |- mem_l p = \x. body
+    ap_x = AP_THM(spec_p, _x_n0_for_mem)         # |- mem_l p x = (\x. body) x
+    rhs = rand(ap_x._concl)
+    beta_x = BETA_CONV(rhs)                      # |- (\x. body) x = body[x]
+    pw = TRANS(ap_x, beta_x)                     # |- mem_l p x = body[x]
+    return GENL([_p_n0_var, _x_n0_for_mem], pw)
+
+
+MEM_L_REC_PW = _mem_l_rec_pw()
+
+
+# Constructor equations: nil_l and cons_l.
+#
+#   |- !x. mem_l nil_l x = F.
+#   |- !h t x. mem_l (cons_l h t) x =
+#              (x = h \/ mem_l t x).
+
+
+_MEM_L_RHS_STR = (
+    "?h t. nil_l = cons_l h t /\\ (x = h \\/ mem_l t x)"
+)
+
+
+@proof
+def MEM_L_AT_NIL(p):
+    """|- !x. mem_l nil_l x = F."""
+    p.goal("!x. mem_l nil_l x = F")
+    p.fix("x")
+
+    rec_at_nil_x = SPECL(
+        [p._parse("nil_l"), p._parse("x")], MEM_L_REC_PW
+    )
+    # rec_at_nil_x : |- mem_l nil_l x =
+    #                  (?h t. nil_l = cons_l h t /\ (x = h \/ mem_l t x))
+
+    # Show RHS = F via ~RHS:
+    with p.have(f"rhs_neg: ~({_MEM_L_RHS_STR})").proof():
+        with p.suppose(f"hex: {_MEM_L_RHS_STR}"):
+            p.choose("h", "hex", eq_label="ex_t")
+            p.choose("t", "ex_t", eq_label="conj_ht")
+            p.split("conj_ht", "(eq_nil, _disj)")
+            p.have(
+                "eq_swap: cons_l h t = nil_l"
+            ).by_thm(SYM(p.fact("eq_nil")))
+            p.have("neq: ~(cons_l h t = nil_l)").by(CONS_L_NEQ_NIL, "h", "t")
+            p.absurd().by_conj("neq", "eq_swap")
+
+    p.have(f"rhs_F: ({_MEM_L_RHS_STR}) = F").by_thm(
+        EQF_INTRO(p.fact("rhs_neg"))
+    )
+    p.thus("mem_l nil_l x = F").by_thm(
+        TRANS(rec_at_nil_x, p.fact("rhs_F"))
+    )
+
+
+@proof
+def MEM_L_AT_CONS(p):
+    """|- !h t x. mem_l (cons_l h t) x = (x = h \\/ mem_l t x)."""
+    p.goal("!h t x. mem_l (cons_l h t) x = (x = h \\/ mem_l t x)")
+    p.fix("h t x")
+
+    rec_at = SPECL(
+        [p._parse("cons_l h t"), p._parse("x")], MEM_L_REC_PW
+    )
+    # rec_at : |- mem_l (cons_l h t) x =
+    #            (?h1 t1. cons_l h t = cons_l h1 t1
+    #                     /\ (x = h1 \/ mem_l t1 x))
+
+    rhs_str = (
+        "?h1 t1. cons_l h t = cons_l h1 t1 /\\ "
+        "(x = h1 \\/ mem_l t1 x)"
+    )
+    target_str = "x = h \\/ mem_l t x"
+
+    # Forward: RHS ==> target.
+    with p.have(f"fwd: ({rhs_str}) ==> ({target_str})").proof():
+        p.assume(f"hex: {rhs_str}")
+        p.choose("h1", "hex", eq_label="ex_t")
+        p.choose("t1", "ex_t", eq_label="conj")
+        p.split("conj", "(eq_cons, disj)")
+        p.have("inj: h = h1 /\\ t = t1").by(
+            CONS_L_INJ, "h", "t", "h1", "t1", "eq_cons"
+        )
+        p.split("inj", "(eq_h, eq_t)")
+        # disj: x = h1 \/ mem_l t1 x; rewrite via SYM(eq_h), SYM(eq_t)
+        # to land at: x = h \/ mem_l t x.
+        p.thus(target_str).by_rewrite_of(
+            "disj", [SYM(p.fact("eq_h")), SYM(p.fact("eq_t"))]
+        )
+
+    # Backward: target ==> RHS. Build the witness manually via EXISTS
+    # so we don't have to coax REWRITE_PROVE through a disjunction.
+    with p.have(f"rev: ({target_str}) ==> ({rhs_str})").proof():
+        p.assume(f"htgt: {target_str}")
+        h_t = p._parse("h")
+        t_t = p._parse("t")
+        x_t = p._parse("x")
+        h1_var = Var("h1", nat0_ty)
+        t1_var = Var("t1", nat0_ty)
+        cons_h_t = mk_app(cons_l, h_t, t_t)
+        body_th = CONJ(REFL(cons_h_t), p.fact("htgt"))
+        # Inner pred: \t1. cons_l h t = cons_l h t1 /\ (x = h \/ mem_l t1 x)
+        inner_body_t1 = mk_and(
+            mk_eq(cons_h_t, mk_app(cons_l, h_t, t1_var)),
+            mk_or(mk_eq(x_t, h_t), mk_app(mem_l, t1_var, x_t)),
+        )
+        inner_pred = mk_abs(t1_var, inner_body_t1)
+        inner_th = EXISTS(inner_pred, t_t, body_th)
+        # Outer pred: \h1. ?t1. cons_l h t = cons_l h1 t1
+        #                       /\ (x = h1 \/ mem_l t1 x)
+        outer_inner_body = mk_and(
+            mk_eq(cons_h_t, mk_app(cons_l, h1_var, t1_var)),
+            mk_or(mk_eq(x_t, h1_var), mk_app(mem_l, t1_var, x_t)),
+        )
+        outer_pred = mk_abs(h1_var,
+            mk_exists(t1_var, outer_inner_body))
+        outer_th = EXISTS(outer_pred, h_t, inner_th)
+        p.thus(rhs_str).by_thm(outer_th)
+
+    p.have(f"iff: ({rhs_str}) = ({target_str})").by_iff("fwd", "rev")
+    p.thus("mem_l (cons_l h t) x = (x = h \\/ mem_l t x)").by_thm(
+        TRANS(rec_at, p.fact("iff"))
+    )
+
+
+# ---------------------------------------------------------------------------
 # Roadmap -- Stage 3B and 3C.
 # ---------------------------------------------------------------------------
 #
 # Stage 3B (proof witnesses inside HOL):
 #
-#   * Define ``mem_l`` (list membership) via ``define_wf_lt`` using
-#     ``NAT0_LT_CONS_L_HEAD`` / ``NAT0_LT_CONS_L_TAIL`` from
-#     ``q_proof``. The MONO obligation peels off the existential
-#     under the cons-witness and uses the size lemmas to discharge
-#     the recursive call.
+#   * Define ``mem_l`` (list membership) via ``define_wf_lt``         [DONE]
+#     using ``NAT0_LT_CONS_L_TAIL`` from ``q_proof``. The MONO
+#     obligation reuses ``mono_iff_eq_or_pw_step`` (q_syntax) at
+#     ``cons_l`` to peel the existential under the cons-witness.
+#     ``MEM_L_AT_NIL`` discharged via ``CONS_L_NEQ_NIL``;
+#     ``MEM_L_AT_CONS`` via ``CONS_L_INJ``.
 #
 #   * Define ``Proof_Q : nat0 -> nat0 -> bool`` via ``define_wf_lt``:
 #         Proof_Q p n :<=>
@@ -381,3 +604,10 @@ if __name__ == "__main__":
     print("Stage 3A (c) -- representability scaffolding.")
     print("    REPRESENTS_PRED_DEF :", pp_thm(REPRESENTS_PRED_DEF))
     print("    REPRESENTS_PRED_AT  :", pp_thm(REPRESENTS_PRED_AT))
+    print()
+    print("Stage 3B (a) -- list membership ``mem_l``.")
+    print("    MEM_L_DEF       :", pp_thm(MEM_L_DEF))
+    print("    MEM_L_REC       :", pp_thm(MEM_L_REC))
+    print("    MEM_L_REC_PW    :", pp_thm(MEM_L_REC_PW))
+    print("    MEM_L_AT_NIL    :", pp_thm(MEM_L_AT_NIL))
+    print("    MEM_L_AT_CONS   :", pp_thm(MEM_L_AT_CONS))
