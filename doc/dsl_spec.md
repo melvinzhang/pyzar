@@ -39,18 +39,31 @@ corresponding kind.
 
 ### Closing a frame
 
+`fix` and `assume` write `_Binding` records into a single
+`fr.bindings` list in interleaved registration order (`kind="var"` for
+fix, `kind="hyp"` for assume). `vars_added` / `hyps_added` are now
+read-only views over that list.
+
 `_close_frame(fr, th)` runs in this order:
 
-1. For each `h` in `reversed(fr.hyps_added)`, `DISCH(h.asm._concl, th)`,
-   then rewrite the antecedent to its goal-form via the saved
-   `term_eq_ant` shape equation (so the user's surface form survives
-   simp/let bridging).
-2. `_discharge_lazy_lets(fr, th)` — substitute every lazy-let carrier
+1. `_discharge_lazy_lets(fr, th)` — substitute every lazy-let carrier
    with its `\args. body` abstraction, BETA-normalize, `PROVE_HYP` the
-   now-trivial local-equation hypothesis. Reverse registration order.
-3. `_beta_norm_concl(th)`.
-4. `GEN` over `reversed(fr.vars_added)` (must be free of remaining
-   hyps).
+   now-trivial local-equation hypothesis. Reverse registration order;
+   saved `ASSUME`s are INST'd in lockstep, so each binding's
+   `asm._concl` still matches `th._asl` when DISCH runs later.
+2. `_beta_norm_concl(th)`.
+3. Replay `reversed(fr.bindings)`, alternating per kind:
+   * `"var"` → `GEN(b.var, th)` (its `ABS` step requires `b.var` to
+     be absent from remaining hyps; reverse iteration discharges any
+     `v`-mentioning hyp before its GEN, since a hyp added before
+     `fix("v")` cannot mention `v`).
+   * `"hyp"` → `DISCH(b.asm._concl, th)`, then rewrite the antecedent
+     to its goal-form via the saved `term_eq_ant` shape equation (so
+     the user's surface form survives simp/let bridging).
+
+Interleaved replay means goals shaped like `!a. h1 ==> !b. h2 ==>
+body` close naturally with `fix("a"); assume("h1"); fix("b");
+assume("h2"); thus(body)` — no need to peel all foralls up front.
 
 Sub-frames also `p._drop_facts(fr.facts_added)` after their `on_close`
 runs, so frame-local labels do not leak.
@@ -82,8 +95,11 @@ unambiguous against juxtaposed bvars.
 Peel one or more outer foralls. `names` is a string of
 whitespace-separated names or a list. Each name must match the next
 binder's name *exactly* (no auto-rename). Each peeled binder is added
-to `vars_added` and registered in scope; the frame's goal becomes the
-binder body.
+to `bindings` (as a `"var"` entry) and registered in scope; the
+frame's goal becomes the binder body. `fix` and `assume` may be
+interleaved freely — `_close_frame` replays them in reverse, so a
+goal like `!a. h ==> !b. body` accepts `fix("a"); assume("h");
+fix("b")` without flattening the foralls first.
 
 ### `p.assume(*specs)`
 
@@ -174,31 +190,29 @@ conclusion is fixed by the args, no need to repeat it in the spec).
 
 ### Justification methods on `_Have`
 
-| Method                                              | Meaning                                                                |
-|-----------------------------------------------------|------------------------------------------------------------------------|
-| `.by_thm(th)`                                       | direct: `th` already proves the term                                   |
-| `.by(just, *args)`                                  | SPEC/MP chain (term arg → `SPEC`, fact arg → `MP`); or callable; simp-aware |
-| `.by_match(just, *args)`                            | backward-chaining: foralls inferred by first-order matching against goal + facts; `...` (Ellipsis) at an antecedent slot auto-derives a reflexive claim via `register_refl_prover` |
-| `.by_rewrite(rules, *, ac=None, ac_rules=())`       | `REWRITE_PROVE(rules + active simp set, term, ac=ac)`                  |
-| `.by_rewrite_of(ref, rules, *, ac=None, beta=False, op=...)` | rewrite source `ref` to the have-term via shared normal form    |
-| `.by_unfold(src, *defs)`                            | `by_rewrite_of` with `beta=True` — bridge unfolded ↔ defined-symbol forms |
-| `.by_eq_mp(eq_th, ref)`                             | `EQ_MP(eq_th, fact)` modulo simp on the LHS; sym-tolerant — flips `eq_th` if the fact aligns with the RHS |
-| `.by_def(def_th, ref)`                              | unfold `def_th` at `ref`'s head args, then `EQ_MP` — sugar for `by_eq_mp(UNFOLD(def_th, ...), ref)` |
-| `.by_inst(lemma, *terms)`                           | `SPECL(terms, lemma)` — pre-instantiate a lemma at term args; pairs with `have("label:")` so the result's conclusion need not be spelled out |
-| `.by_trans(*eqs)`                                   | `TRANS_CHAIN(eqs)` — compose `a=b`, `b=c`, ... into `a=c`; greedily orients each link, so equations in either direction work |
-| `.by_cong(left, right)`                             | single-step congruence: term + fact → `AP_TERM`; fact + term → `AP_THM`; fact + fact → `MK_COMB` |
-| `.by_cong(op, eq1, eq2)`                            | binop shorthand: from `a=c` and `b=d` derive `op a b = op c d` (i.e. `MK_COMB(AP_TERM(op, eq1), eq2)`) |
-| `.by_ext(ref)`                                      | function extensionality: `ref` is `!x1...xn. f t1...tn = g t1...tn`; collapses every outer forall via SPEC + `FUN_EXT(GEN ...)` to yield `f = g` |
-| `.by_iff(fwd, rev)`                                 | iff-intro: combine `L ==> R` and `R ==> L` facts into the bool equality `L = R` (order-agnostic) |
-| `.by_fold(ref)`                                     | inverse of an unfolder: fold `ref` back into a registered relation     |
-| `.by_witness(witness, ref)`                         | `EXISTS` for an existential have-term                                  |
-| `.by_exists(witnesses, *rules)`                     | introduce `?v1...vn. body` at concrete witnesses; each `/\` conjunct of the substituted body is auto-discharged by alpha-matching against a supplied rule (raw or via `simp_match`) and using it as-is, falling back to `REWRITE_PROVE(rules + active simp set)` for equation conjuncts (reflexive bodies need no rules at all) |
-| `.by_select_def(def_th, *args, from_)`              | read the body of a SELECT-style definition `f = \x1...xk. @v. P v` at concrete `args` from an existence fact `from_: ?v. P v` (one `CHOOSE_WITNESS` + `SYM(UNFOLD)` rewrite) |
-| `.by_disj(ref)`                                     | `DISJ1`/`DISJ2`-chain a fact into a disjunction goal                   |
-| `.by_ac(op, assoc, comm)`                           | `AC_PROVE` shortcut                                                    |
-| `.by_cases(ref, *args)`                             | open `cases_on` whose target is the have-term                          |
-| `.proof()`                                          | open a sub-frame to prove the have-term inline                         |
-| `.by_contradiction(label_spec)`                     | classical: open `F`-frame with `~target` as fact, close via `NOT_NOT_ELIM` |
+* `.by_thm(th)` — direct: `th` already proves the term.
+* `.by(just, *args)` — SPEC/MP chain (term arg → `SPEC`, fact arg → `MP`); or callable; simp-aware.
+* `.by_match(just, *args)` — backward-chaining: foralls inferred by first-order matching against goal + facts; `...` (Ellipsis) at an antecedent slot auto-derives a reflexive claim via `register_refl_prover`.
+* `.by_rewrite(rules, *, ac=None, ac_rules=())` — `REWRITE_PROVE(rules + active simp set, term, ac=ac)`.
+* `.by_rewrite_of(ref, rules, *, ac=None, beta=False, op=...)` — rewrite source `ref` to the have-term via shared normal form.
+* `.by_unfold(src, *defs)` — `by_rewrite_of` with `beta=True` — bridge unfolded ↔ defined-symbol forms.
+* `.by_eq_mp(eq_th, ref)` — `EQ_MP(eq_th, fact)` modulo simp on the LHS; sym-tolerant — flips `eq_th` if the fact aligns with the RHS.
+* `.by_def(def_th, ref)` — unfold `def_th` at `ref`'s head args, then `EQ_MP` — sugar for `by_eq_mp(UNFOLD(def_th, ...), ref)`.
+* `.by_inst(lemma, *terms)` — `SPECL(terms, lemma)` — pre-instantiate a lemma at term args; pairs with `have("label:")` so the result's conclusion need not be spelled out.
+* `.by_trans(*eqs)` — `TRANS_CHAIN(eqs)` — compose `a=b`, `b=c`, ... into `a=c`; greedily orients each link, so equations in either direction work.
+* `.by_cong(left, right)` — single-step congruence: term + fact → `AP_TERM`; fact + term → `AP_THM`; fact + fact → `MK_COMB`.
+* `.by_cong(op, eq1, eq2)` — binop shorthand: from `a=c` and `b=d` derive `op a b = op c d` (i.e. `MK_COMB(AP_TERM(op, eq1), eq2)`).
+* `.by_ext(ref)` — function extensionality: `ref` is `!x1...xn. f t1...tn = g t1...tn`; collapses every outer forall via SPEC + `FUN_EXT(GEN ...)` to yield `f = g`.
+* `.by_iff(fwd, rev)` — iff-intro: combine `L ==> R` and `R ==> L` facts into the bool equality `L = R` (order-agnostic).
+* `.by_fold(ref)` — inverse of an unfolder: fold `ref` back into a registered relation.
+* `.by_witness(witness, ref)` — `EXISTS` for an existential have-term.
+* `.by_exists(witnesses, *rules)` — introduce `?v1...vn. body` at concrete witnesses; each `/\` conjunct of the substituted body is auto-discharged by alpha-matching against a supplied rule (raw or via `simp_match`) and using it as-is, falling back to `REWRITE_PROVE(rules + active simp set)` for equation conjuncts (reflexive bodies need no rules at all).
+* `.by_select_def(def_th, *args, from_)` — read the body of a SELECT-style definition `f = \x1...xk. @v. P v` at concrete `args` from an existence fact `from_: ?v. P v` (one `CHOOSE_WITNESS` + `SYM(UNFOLD)` rewrite).
+* `.by_disj(ref)` — `DISJ1`/`DISJ2`-chain a fact into a disjunction goal.
+* `.by_ac(op, assoc, comm)` — `AC_PROVE` shortcut.
+* `.by_cases(ref, *args)` — open `cases_on` whose target is the have-term.
+* `.proof()` — open a sub-frame to prove the have-term inline.
+* `.by_contradiction(label_spec)` — classical: open `F`-frame with `~target` as fact, close via `NOT_NOT_ELIM`.
 
 `.by` and `.by_match` resolve string args polymorphically: a known
 fact label resolves to a theorem, otherwise the string is parsed as a
@@ -468,13 +482,11 @@ the bvar is not free in any hyp.
 conclusion `F`, wrapped via `CONTR(goal, F_th)` and set as the
 frame's result. Methods:
 
-| Method                                    | Meaning                                                           |
-|-------------------------------------------|-------------------------------------------------------------------|
-| `.by_thm(th)`                             | `th` already proves `F`                                            |
-| `.by(just, *args)`                        | SPEC/MP chain (non-simp); or callable                              |
-| `.by_conj(ref_a, ref_b)`                  | match `P` against `~P` (either order); `MP(NOT_ELIM, P)`           |
-| `.auto(ref)` / `.auto(ref_a, ref_b)`      | one-fact: discharge `~(t = t)` via `MP(NOT_ELIM, REFL(t))`. Two-fact: look up a contradiction finder for `(rel(a), rel(b))` in `_CONTRA_FINDERS` |
-| `.via(forward, case, *, source)`          | lift `case` through `forward` (an implication) into a fact contradicting `source` via `auto` |
+* `.by_thm(th)` — `th` already proves `F`.
+* `.by(just, *args)` — SPEC/MP chain (non-simp); or callable.
+* `.by_conj(ref_a, ref_b)` — match `P` against `~P` (either order); `MP(NOT_ELIM, P)`.
+* `.auto(ref)` / `.auto(ref_a, ref_b)` — one-fact: discharge `~(t = t)` via `MP(NOT_ELIM, REFL(t))`. Two-fact: look up a contradiction finder for `(rel(a), rel(b))` in `_CONTRA_FINDERS`.
+* `.via(forward, case, *, source)` — lift `case` through `forward` (an implication) into a fact contradicting `source` via `auto`.
 
 ---
 
