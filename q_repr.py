@@ -149,6 +149,8 @@ from tactics import (
 from fusion import vsubst, aty, DEDUCT_ANTISYM_RULE, new_constant
 from q_proof import (
     var_x,
+    var_z,
+    VAR_Z_DEF,
     nil_l,
     cons_l,
     CONS_L_INJ,
@@ -2171,33 +2173,26 @@ REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 # induction on F (~1500 lines of new infrastructure including the arith.
 # representability prerequisites for ``add``, ``times``, ``mod``).
 #
-# Planned alternative discharge path (Q + HF strengthening; see the
-# PROPOSED EXTENSION block at the end of q_proof.py's Q-axiom list):
-#
-#   * Add Insert_t / In_a / Empty_t to Q's signature, plus axioms
-#     Q8-Q12 mirroring NOT_IN_EMPTY / IN_INSERT_SAME / IN_INSERT_DIFF /
-#     IN_EXT / IN_LT from hf_sets.py.
-#   * ``substitute_internal`` is then the Sigma_1 predicate
-#         ?T. is_substitute_trace T F t v r
-#     where T : nat0 is an HF set of (subterm-shape, output-shape)
-#     pairs (Pair_ord-encoded), and is_substitute_trace asserts:
-#       (i)   the input pair (F, r) is in T;
-#       (ii)  every (a, b) in T satisfies the structural-recursion
-#             clause matching ``substitute``'s SUBSTITUTE_AT_*
-#             equations -- a bounded conjunction over its members
-#             via In, decoded by Pair_ord projection.
-#   * Q proves ``substitute_internal (numeral F) (numeral t) (numeral v)
-#     (numeral (substitute F t v))`` at every numeral instance by
-#     exhibiting the trace HF set explicitly (it has |F|-many
-#     elements, each one a closed Pair_ord numeral); the verification
-#     conjuncts are decidable equalities + In-membership facts, all
-#     Sigma_0 in Q + HF.
-#   * Lines: ~150 vs ~1500 in the beta-function path.
+# TODO -- discharge via Q + HF (preferred over the beta-function path).
+# The HF primitives (Insert_t / In_a / Empty_t) and axioms Q8-Q12 are
+# already in place (q_syntax.py, q_proof.py). Define
+# ``substitute_internal`` as the Sigma_1 predicate
+#     ?T. is_substitute_trace T F t v r
+# where T : nat0 is an HF set of (subterm-shape, output-shape) pairs
+# (Pair_ord-encoded), and is_substitute_trace asserts:
+#   (i)  the input pair (F, r) is in T;
+#   (ii) every (a, b) in T satisfies the structural-recursion clause
+#        matching substitute's SUBSTITUTE_AT_* equations -- a bounded
+#        conjunction over its members via In, decoded by Pair_ord
+#        projection.
+# Q proves substitute_internal at every numeral instance by exhibiting
+# the trace HF set explicitly (|F|-many closed Pair_ord numerals);
+# verification conjuncts are decidable equalities + In-membership
+# facts, all Sigma_0 in Q + HF. Estimated ~150 lines vs ~1500 for the
+# beta-function path. Prerequisite: extend is_term/is_form/free_in/
+# substitute in q_syntax.py to recognise Insert_t and In_a.
 # ---------------------------------------------------------------------------
 
-
-VAR_Z_DEF = define("var_z", parse_type("nat0"), "Var_t (SUC0 (SUC0 0))")
-var_z = mk_const("var_z", [])
 
 VAR_W_DEF = define("var_w", parse_type("nat0"), "Var_t (SUC0 (SUC0 (SUC0 0)))")
 var_w = mk_const("var_w", [])
@@ -2288,12 +2283,11 @@ def SUBSTITUTE_REPRESENTS(p):
 # Also defines ``substitute_2`` as a HOL helper for the diagonal lemma:
 #   substitute_2 F a b vx vy := substitute (substitute F a vx) b vy.
 #
-# Planned alternative discharge path (Q + HF strengthening; see the
-# PROPOSED EXTENSION block at the end of q_proof.py's Q-axiom list).
-# Now that Prov_Q has been collapsed to ``\n. ?p. Proof_Q p n``, the
-# Q-internal form is forced to be the existential closure
+# TODO -- discharge via Q + HF (preferred). Prov_Q has been collapsed
+# to ``\n. ?p. Proof_Q p n``, so the Q-internal form is the existential
+# closure
 #   Prov_Q_internal(x) := ?_internal y. Proof_Q_internal(y, x).
-# Under the HF strengthening:
+# Under the HF strengthening (axioms Q8-Q12, already in q_proof.py):
 #
 #   * ``mem_l_internal`` collapses to ``In_a`` -- proof lists are HF
 #     sets; "p has formula f" is just membership. (~5 lines vs the
@@ -2311,13 +2305,14 @@ def SUBSTITUTE_REPRESENTS(p):
 #     witness via PROV_Q_AT, exhibit its HF encoding as a Q-numeral,
 #     verify the conjuncts term-by-term (each one a closed Sigma_0
 #     fact Q proves at numerals).
-#   * Backward direction (Q proves ==> HOL): unchanged -- Stage 6
-#     HF |= (Q + Q8-Q12) is one HOL theorem citation per axiom.
+#   * Backward direction (Q proves ==> HOL): Stage 6 HF |= (Q + Q8-Q12)
+#     is one HOL theorem citation per axiom.
 #
-# Lines: ~150 vs ~1500 in the beta-function path. Side conditions
-# IS_FORM and FREE_IN become routine once Prov_Q_internal has its
-# defining body, both decided by the same syntactic recursion that
-# verified is_form for the connectives in q_syntax.py.
+# Side conditions IS_FORM and FREE_IN become routine once
+# Prov_Q_internal has its defining body, both decided by the same
+# syntactic recursion that verifies is_form for the connectives in
+# q_syntax.py. Prerequisite: extend is_form to recognise In_a (see
+# the corresponding TODO in q_proof.py).
 # ---------------------------------------------------------------------------
 
 

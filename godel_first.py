@@ -611,9 +611,8 @@ diag = mk_const("diag", [])
 # and ``numeral_internal`` (deferred). We axiomatize ``diag_internal``
 # directly to bypass the intermediate ``numeral_internal`` step.
 #
-# Planned alternative discharge path (Q + HF strengthening; see the
-# PROPOSED EXTENSION block at the end of q_proof.py's Q-axiom list):
-#
+# TODO -- discharge via Q + HF (preferred). The HF axioms Q8-Q12 are
+# already in place; build:
 #   * ``numeral_internal(x, y) := In y (Insert y Empty) /\ ...`` --
 #     numerals are concrete Pair_ord-tagged HF terms; the trace
 #     witnessing ``y = numeral x`` is an HF set of (k, numeral k)
@@ -627,7 +626,10 @@ diag = mk_const("diag", [])
 #   * DIAG_REPRESENTS / DIAG_FUNCTIONAL: forward direction by
 #     exhibiting the composite trace HF set; functionality from
 #     SUBSTITUTE_REPRESENTS uniqueness + HF extensionality (Q11).
-#   * Lines: ~80 vs ~400 in the beta-function path.
+# Estimated ~80 lines vs ~400 in the beta-function path. Depends on
+# the substitute_internal / Prov_Q_internal TODOs in q_repr.py, which
+# in turn need is_term/is_form extended for Insert_t and In_a (see
+# q_proof.py TODO).
 # ---------------------------------------------------------------------------
 
 

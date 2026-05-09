@@ -7,7 +7,8 @@
 #   * Quantifier axioms: !x. F[x] -> F[t/x]; F -> !x. F (x not free).
 #   * Equality: t = t; substitution under equality.
 #
-# Non-logical axioms (Robinson Q, seven closed formulas):
+# Non-logical axioms. Robinson Q's arithmetic core (seven closed
+# formulas):
 #   Q1.  !x.    ~(Succ x = Zero)
 #   Q2.  !x y.  Succ x = Succ y  ->  x = y
 #   Q3.  !x.    ~(x = Zero)  ->  ?y. x = Succ y
@@ -16,12 +17,21 @@
 #   Q6.  !x.    Times x Zero = Zero
 #   Q7.  !x y.  Times x (Succ y) = Plus (Times x y) x
 #
+# HF strengthening (five closed formulas; In_a / Insert_t / Empty_t
+# are added to Q's signature in q_syntax.py):
+#   Q8.  !x.       ~In x Empty
+#   Q9.  !i s.     In i (Insert i s)
+#   Q10. !i j s.   ~(i = j) -> (In j (Insert i s) <-> In j s)
+#   Q11. !a b.     (!x. In x a <-> In x b) -> a = b
+#   Q12. !x y.     In x y -> ?z. y = x + Succ z         (foundation/lt)
+#
 # Rules: modus ponens; generalization.
 #
 # Stage 2A (foundations):
 #   * List encoding on nat0 (proofs are lists of formula godelnums).
-#   * The seven Q axioms as concrete encoded nat0 terms.
-#   * ``is_q_axiom``: decidable recogniser for the seven Q axioms.
+#   * The twelve Q axioms as concrete encoded nat0 terms (Q1-Q7
+#     arithmetic core; Q8-Q12 HF extension).
+#   * ``is_q_axiom``: decidable recogniser for the twelve Q axioms.
 #
 # Stage 2B (proof system):
 #   * ``is_mp``, ``is_gen``: modus-ponens / generalisation predicates
@@ -107,6 +117,9 @@ from q_syntax import (
     Not_f,
     Imp_f,
     Forall_f,
+    Empty_t,
+    Insert_t,
+    In_a,
 )
 
 
@@ -230,9 +243,13 @@ var_x = mk_const("var_x", [])
 VAR_Y_DEF = define("var_y", parse_type("nat0"), "Var_t (SUC0 0)")
 var_y = mk_const("var_y", [])
 
+# Third bound-variable slot, used by the Q + HF axioms (Q10, Q11, Q12).
+VAR_Z_DEF = define("var_z", parse_type("nat0"), "Var_t (SUC0 (SUC0 0))")
+var_z = mk_const("var_z", [])
+
 
 # ---------------------------------------------------------------------------
-# The seven Q axioms as concrete encoded nat0 terms.
+# The seven arithmetic Q axioms (Q1-Q7) as concrete encoded nat0 terms.
 #
 # Each axiom is a closed Q sentence; its godelnum is a closed nat0
 # numeral (a deeply nested ``Pair_ord``-tree). We define each as a
@@ -314,7 +331,7 @@ Q7_AXIOM_DEF = define(
 Q7_axiom = mk_const("Q7_axiom", [])
 
 
-Q_AXIOMS = [
+Q_AXIOMS_BASE = [
     ("Q1_axiom", Q1_axiom, Q1_AXIOM_DEF),
     ("Q2_axiom", Q2_axiom, Q2_AXIOM_DEF),
     ("Q3_axiom", Q3_axiom, Q3_AXIOM_DEF),
@@ -326,78 +343,149 @@ Q_AXIOMS = [
 
 
 # ---------------------------------------------------------------------------
-# PROPOSED EXTENSION (NOT YET LANDED) -- Q + HF primitives.
+# Q + HF extension axioms Q8-Q12. These mirror the HOL theorems
+# ``NOT_IN_EMPTY``, ``IN_INSERT_SAME``, ``IN_INSERT_DIFF``, ``IN_EXT``,
+# ``IN_LT`` from ``hf_sets.py`` / ``bits.py``. The encoding desugars
+# absent connectives:
 #
-# Motivation. Stage 3C/3D require a way to talk about finite sequences
-# (proof lists, substitute traces) inside Q's own language. The
-# textbook route is Goedel's beta function via the Chinese Remainder
-# Theorem (~150 lines) plus pow2 on top (~80 lines) plus bit-level
-# decoding (~100 lines) before any of the *_internal predicates can be
-# stated. The HOL-level ``hf_sets.py`` already gives us exactly the
-# combinatorial substrate we want -- bit-encoded HF sets with In,
-# Empty, Insert, Singleton, Pair, Pair_ord -- but inside Q we cannot
-# reuse it without internalizing the bit predicate, which itself
-# needs sequence coding (circular). Strengthening Q to make HF
-# primitive breaks that bootstrap.
+#   p /\ q       :=  ~(p -> ~q)
+#   p <-> q      :=  (p -> q) /\ (q -> p)
+#                =   ~( (p -> q) -> ~(q -> p) )
+#   ?z. body     :=  ~!z. ~body
+#   nat0_lt x y  :=  ?z. y = x + Succ z       (Q-internal arithmetic lt)
 #
-# Additions to Q's signature (q_syntax.py side):
-#   * Term constructor   Insert_t : nat0 -> nat0 -> nat0
-#   * Atomic formula     In_a : nat0 -> nat0 -> nat0
-#                        (encoded analogously to Eq_a; same Pair_ord
-#                        tag layout, just a fresh tag.)
-#   * Empty_t : nat0     (constant term; encodes ``Zero_t`` reused, or
-#                        a fresh tag.)
+# Variable indices: var_x = 0, var_y = SUC0 0, var_z = SUC0 (SUC0 0).
+# ---------------------------------------------------------------------------
+
+
+# Q8.  !x. ~In x Empty
+Q8_AXIOM_DEF = define(
+    "Q8_axiom",
+    parse_type("nat0"),
+    "Forall_f 0 (Not_f (In_a var_x Empty_t))",
+)
+Q8_axiom = mk_const("Q8_axiom", [])
+
+
+# Q9.  !x y. In x (Insert x y)        ("i in Insert i s" with i=x, s=y)
+Q9_AXIOM_DEF = define(
+    "Q9_axiom",
+    parse_type("nat0"),
+    "Forall_f 0 (Forall_f (SUC0 0) (In_a var_x (Insert_t var_x var_y)))",
+)
+Q9_axiom = mk_const("Q9_axiom", [])
+
+
+# Q10. !x y z. ~(x = y) -> (In y (Insert x z) <-> In y z)
+# Iff body desugared:
+#   A <-> B  :=  ~( (A -> B) -> ~(B -> A) )
+# where A = In_a var_y (Insert_t var_x var_z),
+#       B = In_a var_y var_z.
+Q10_AXIOM_DEF = define(
+    "Q10_axiom",
+    parse_type("nat0"),
+    "Forall_f 0 (Forall_f (SUC0 0) (Forall_f (SUC0 (SUC0 0)) "
+    "(Imp_f (Not_f (Eq_f var_x var_y)) "
+    "(Not_f (Imp_f "
+    "(Imp_f (In_a var_y (Insert_t var_x var_z)) (In_a var_y var_z)) "
+    "(Not_f (Imp_f (In_a var_y var_z) (In_a var_y (Insert_t var_x var_z))))"
+    ")))))",
+)
+Q10_axiom = mk_const("Q10_axiom", [])
+
+
+# Q11. !a b. (!x. In x a <-> In x b) -> a = b
+# (a, b, x) -> (var_x, var_y, var_z).
+# Inner iff: Not_f (Imp_f (Imp_f (In z a) (In z b)) (Not_f (Imp_f (In z b) (In z a))))
+Q11_AXIOM_DEF = define(
+    "Q11_axiom",
+    parse_type("nat0"),
+    "Forall_f 0 (Forall_f (SUC0 0) "
+    "(Imp_f "
+    "(Forall_f (SUC0 (SUC0 0)) "
+    "(Not_f (Imp_f "
+    "(Imp_f (In_a var_z var_x) (In_a var_z var_y)) "
+    "(Not_f (Imp_f (In_a var_z var_y) (In_a var_z var_x)))"
+    "))) "
+    "(Eq_f var_x var_y)))",
+)
+Q11_axiom = mk_const("Q11_axiom", [])
+
+
+# Q12. !x y. In x y -> nat0_lt x y
+# nat0_lt x y desugars to ?z. y = x + Succ z, encoded as ~!z. ~(y = ...).
+Q12_AXIOM_DEF = define(
+    "Q12_axiom",
+    parse_type("nat0"),
+    "Forall_f 0 (Forall_f (SUC0 0) "
+    "(Imp_f (In_a var_x var_y) "
+    "(Not_f (Forall_f (SUC0 (SUC0 0)) "
+    "(Not_f (Eq_f var_y (Plus_t var_x (Succ_t var_z))))))))",
+)
+Q12_axiom = mk_const("Q12_axiom", [])
+
+
+Q_AXIOMS_HF = [
+    ("Q8_axiom", Q8_axiom, Q8_AXIOM_DEF),
+    ("Q9_axiom", Q9_axiom, Q9_AXIOM_DEF),
+    ("Q10_axiom", Q10_axiom, Q10_AXIOM_DEF),
+    ("Q11_axiom", Q11_axiom, Q11_AXIOM_DEF),
+    ("Q12_axiom", Q12_axiom, Q12_AXIOM_DEF),
+]
+
+
+Q_AXIOMS = Q_AXIOMS_BASE + Q_AXIOMS_HF
+
+
+# ---------------------------------------------------------------------------
+# Q + HF strengthening -- design notes.
 #
-# Additions to Q's axiom list (this file):
-#   * Q8  empty:        !x. ~In x Empty
-#   * Q9  insert_same:  !i s. In i (Insert i s)
-#   * Q10 insert_diff:  !i j s. ~(i = j) -> (In j (Insert i s) <-> In j s)
-#   * Q11 extensional:  !a b. (!x. In x a = In x b) -> a = b
-#   * Q12 foundation:   !x y. In x y -> nat0_lt x y
+# The HF axioms Q8-Q12 above mirror the HOL theorems NOT_IN_EMPTY /
+# IN_INSERT_SAME / IN_INSERT_DIFF / IN_EXT / IN_LT from hf_sets.py and
+# bits.py, so HF |= Q + (Q8-Q12) is one HOL citation per axiom.
 #
-# All five mirror existing HOL theorems in ``hf_sets.py`` /
-# ``bits.py`` (NOT_IN_EMPTY, IN_INSERT_SAME, IN_INSERT_DIFF, IN_EXT,
-# IN_LT). HF |= Q + (Q8-Q12) is therefore one HOL theorem citation
-# per axiom -- exactly the work already done in the HF stack.
+# Conservativity: Q + HF is consistent if Q is, since hf_sets builds an
+# explicit model. The first-incompleteness theorem still holds verbatim
+# for Q + HF; what's lost is the textbook claim "weakest theory
+# exhibiting incompleteness". The five axioms are conservative over
+# Q + I_Sigma_0 + Exp (Ackermann encoding).
 #
-# What this buys at Stage 3C/3D:
+# TODO -- follow-up work to actually exploit Q+HF at Stage 3C/3D:
 #
-#   * ``mem_l_internal`` becomes a one-liner: list-as-HF-set,
-#     mem_l = In. No recursion-trace, no beta function.
-#   * ``substitute_internal`` is built from In + Insert + decidable
-#     pair/triple decoding; the substitute trace is an HF set of
-#     (input-shape, output-shape) pairs, and Q-internal verification
-#     is a Sigma_1 conjunction over its members.
-#   * ``Proof_Q_internal`` is the natural HF mirror of the HOL
-#     ``Proof_Q``: an HF set of formulas with valid_step_internal
-#     holding for each. The bottom-up construction
-#       mem_l_internal -> valid_step_internal -> Proof_Q_internal
-#     becomes ~150 lines instead of ~1500.
+#   * Extend the structural recognisers in q_syntax.py to know about
+#     the new constructors:
+#       - is_term: add an Insert_t disjunct (binary recursive).
+#       - is_form: add an In_a disjunct (binary, non-recursive in f --
+#                  both slots are terms, checked via is_term).
+#       - free_in / substitute: add Insert_t (term) and In_a (atomic)
+#                  AT-equations and extend the MONO proofs.
+#     Without this, the logical-axiom schemas (is_K, is_S, ...) cannot
+#     accept formulas mentioning In_a, since they gate on is_form.
 #
-# Cost in lines:
-#   * +30  q_syntax.py: Insert_t / In_a / Empty_t encoding tags.
-#   * +80  this file:   Q8-Q12 definitions, IS_Q_AXIOM_HOLDS rows.
-#   * +20  is_q_axiom unfolding:  extend the disjunction chain.
-# Total: ~130 lines added; ~1500+ lines saved at Stage 3C/3D.
+#   * Rewrite the *_internal predicates in q_repr.py against the new
+#     primitives:
+#       - mem_l_internal collapses to In_a (list-as-HF-set).
+#       - substitute_internal: Sigma_1 over an HF trace set of
+#         (input-shape, output-shape) pairs, with bounded conjunction
+#         via In + Pair_ord projection.
+#       - Proof_Q_internal: HF set of formulas + per-member
+#         valid_step_internal, bounded by Q12 foundation.
+#     Estimated saving: ~1500 lines (vs. the beta-function path).
 #
-# Trust-base impact. The five new axioms are conservative over
-# Q + I_Sigma_0 + Exp (every model of bounded arithmetic with
-# exponentiation extends to a Q+HF model via Ackermann). In
-# particular Q + HF is consistent if Q is, since the HOL-level
-# ``hf_sets`` construction *is* a model. The first-incompleteness
-# theorem still holds verbatim for Q + HF; what's lost is the
-# textbook claim "weakest theory exhibiting incompleteness".
+#   * Discharge DIAG_REPRESENTS / DIAG_FUNCTIONAL in godel_first.py
+#     by composing substitute_internal with the numeral predicate,
+#     both Sigma_1 and expressible in Q + HF.
 # ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
-# is_q_axiom -- decidable recogniser for the seven Q axioms.
+# is_q_axiom -- decidable recogniser for the twelve Q axioms (Q1-Q7
+# arithmetic core; Q8-Q12 HF extension).
 #
-#   is_q_axiom n  :<=>  n = Q1_axiom \/ n = Q2_axiom \/ ... \/ n = Q7_axiom
+#   is_q_axiom n  :<=>  n = Q1_axiom \/ ... \/ n = Q12_axiom
 #
-# Closed under no recursion -- it is just a 7-fold disjunction of
-# equalities with closed nat0 numerals. Decidable trivially (each
-# disjunct is decidable equality between concrete nat0s).
+# No recursion -- a 12-fold disjunction of equalities with closed nat0
+# numerals. Decidable trivially.
 # ---------------------------------------------------------------------------
 
 
@@ -413,15 +501,7 @@ def _disj_chain(eqs):
 
 
 _q_axiom_disj = _disj_chain(
-    [
-        mk_eq(_n_n0, Q1_axiom),
-        mk_eq(_n_n0, Q2_axiom),
-        mk_eq(_n_n0, Q3_axiom),
-        mk_eq(_n_n0, Q4_axiom),
-        mk_eq(_n_n0, Q5_axiom),
-        mk_eq(_n_n0, Q6_axiom),
-        mk_eq(_n_n0, Q7_axiom),
-    ]
+    [mk_eq(_n_n0, ax_const) for (_, ax_const, _) in Q_AXIOMS]
 )
 
 IS_Q_AXIOM_DEF = define(
@@ -443,7 +523,7 @@ IS_Q_AXIOM_AT = _at1(IS_Q_AXIOM_DEF, _n_n0)
 def _prove_q_axiom_holds(name, axiom_const, position):
     """|- is_q_axiom name_axiom -- discharge by DISJ at position.
 
-    ``position`` is 1-indexed (1..7).
+    ``position`` is 1-indexed (1..len(Q_AXIOMS)).
     """
     eq_chain = [mk_eq(axiom_const, ax_const) for (_, ax_const, _) in Q_AXIOMS]
     idx = position - 1
@@ -879,8 +959,9 @@ if __name__ == "__main__":
     print("Stage 2 (b) -- variable-index conventions.")
     print("    VAR_X_DEF      :", pp_thm(VAR_X_DEF))
     print("    VAR_Y_DEF      :", pp_thm(VAR_Y_DEF))
+    print("    VAR_Z_DEF      :", pp_thm(VAR_Z_DEF))
     print()
-    print("Stage 2 (c) -- the seven Q axioms (encoded).")
+    print("Stage 2 (c) -- the twelve Q axioms (encoded).")
     for name, _ax, def_th in Q_AXIOMS:
         print(f"    {name:<10} :", pp_thm(def_th))
     print()

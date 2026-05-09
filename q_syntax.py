@@ -233,6 +233,42 @@ Forall_f = mk_const("Forall_f", [])
 
 
 # ---------------------------------------------------------------------------
+# Q + HF primitives -- Insert_t, In_a (fresh tags 9, 10); Empty_t aliases
+# Zero_t. See q_proof.py's Q + HF design-notes block (after the Q8-Q12
+# axiom encodings) for the rationale.
+#
+# TODO -- the structural recognisers (is_term, is_form, free_in,
+# substitute) below are still Q-arithmetic only. Extend them to
+# recognise Insert_t (term ctor) and In_a (atomic formula) so the
+# logical-axiom schemas (is_K, is_S, ...) accept formulas mentioning
+# them. Each predicate needs a new disjunct in its body, a matching
+# mono_iff_*_step in the MONO proof, and an _AT recursion equation.
+# ---------------------------------------------------------------------------
+
+EMPTY_T_DEF = define("Empty_t", parse_type("nat0"), "Zero_t")
+Empty_t = mk_const("Empty_t", [])
+
+INSERT_T_DEF = define(
+    "Insert_t",
+    parse_type("nat0 -> nat0 -> nat0"),
+    "\\t1:nat0. \\t2:nat0. "
+    "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))))) "
+    "(Pair_ord t1 t2)",
+)
+Insert_t = mk_const("Insert_t", [])
+
+IN_A_DEF = define(
+    "In_a",
+    parse_type("nat0 -> nat0 -> nat0"),
+    "\\t1:nat0. \\t2:nat0. "
+    "Pair_ord "
+    "(SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))))))) "
+    "(Pair_ord t1 t2)",
+)
+In_a = mk_const("In_a", [])
+
+
+# ---------------------------------------------------------------------------
 # Pointwise unfold helpers.  ``define`` returns ``name = \\args. body``;
 # we beta-reduce on each argument to get the applied form
 # ``name a1 .. ak = body[a1, .., ak]`` so downstream rewrites can
@@ -268,6 +304,8 @@ EQ_F_AT = _at2(EQ_F_DEF, _t1_n0, _t2_n0)
 NOT_F_AT = _at1(NOT_F_DEF, _phi_n0)
 IMP_F_AT = _at2(IMP_F_DEF, _phi1_n0, _phi2_n0)
 FORALL_F_AT = _at2(FORALL_F_DEF, _n_n0, _phi_n0)
+INSERT_T_AT = _at2(INSERT_T_DEF, _t1_n0, _t2_n0)
+IN_A_AT = _at2(IN_A_DEF, _t1_n0, _t2_n0)
 
 
 # ---------------------------------------------------------------------------
@@ -3086,6 +3124,12 @@ if __name__ == "__main__":
     print("    IMP_F_AT      :", pp_thm(IMP_F_AT))
     print("    FORALL_F_DEF  :", pp_thm(FORALL_F_DEF))
     print("    FORALL_F_AT   :", pp_thm(FORALL_F_AT))
+    print("  Q + HF primitives:")
+    print("    EMPTY_T_DEF   :", pp_thm(EMPTY_T_DEF))
+    print("    INSERT_T_DEF  :", pp_thm(INSERT_T_DEF))
+    print("    INSERT_T_AT   :", pp_thm(INSERT_T_AT))
+    print("    IN_A_DEF      :", pp_thm(IN_A_DEF))
+    print("    IN_A_AT       :", pp_thm(IN_A_AT))
     print("  Goedel numbering:")
     print("    GODELNUM_DEF  :", pp_thm(GODELNUM_DEF))
     print("    GODELNUM_AT   :", pp_thm(GODELNUM_AT))
