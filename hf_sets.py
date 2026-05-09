@@ -204,12 +204,15 @@ def IN_EXT(p):
 # the ordered Kuratowski pair Pair_ord (for (index, value) tuple entries).
 # Stage 4's Q-model construction sits on top of Insert (vN_succ x =
 # Insert x x) and does not need Union, Pow, Repl, Sep, or a derived
-# Foundation rule. Each is therefore deferred:
+# Foundation rule. Pow / Repl / Sep are still deferred:
 #
-#   * Union  -- the original draft used it to define vN_succ as
-#               ``Union (Pair x (Singleton x))``. We pick the
-#               equivalent ``Insert x x`` form instead (one bit-flip,
-#               no recursion-over-bit-positions scaffolding).
+#   * Union  -- now defined further below (Stage 3 cont.) as a binary
+#               bit-OR ``Union a b`` via well-founded recursion on
+#               HALF a; the membership characterisation is IN_UNION.
+#               Stage 4 still uses ``Insert x x`` for vN_succ; Union
+#               is required by downstream code (q_repr.py) that needs
+#               to combine HF-set traces in the substitute representability
+#               proof.
 #   * Pow, Repl, Sep  -- general ZF constructors; defer to a future
 #               ``hf_zf.py`` if a consumer wants full ZF surface.
 #   * Foundation as a derived rule -- a one-liner via BIT_LT + nat0
@@ -894,6 +897,350 @@ def NAT0_LT_PAIR_ORD_R(p):
 
 
 # ---------------------------------------------------------------------------
+# Stage 3 (cont.) -- Union a b   ( bit-OR on two HF sets ).
+#
+# Definition (well-founded recursion on the first arg via HALF):
+#   Union n m = m                                      when n = 0
+#             = COND (ODD n \/ ODD m)
+#                    (SUC0 (double (Union (HALF n) (HALF m))))
+#                    (double (Union (HALF n) (HALF m)))   when ~(n = 0)
+#
+# Justification: HALF n < n for n != 0 (HALF_LT_NZ), so the recursion is
+# well-founded under nat0_lt; the body packs the OR of low bits onto the
+# doubled recursive result, recovering the bit-or value.
+#
+# Characterisation: |- !x a b. In x (Union a b) = In x a \/ In x b
+# (IN_UNION). This is the only consumer-facing fact -- everything else
+# (the recursion equations, the helper _union_F constant) is internal
+# scaffolding.
+# ---------------------------------------------------------------------------
+
+from nat0_order import define_wf_lt as _define_wf_lt  # noqa: E402
+
+from bits import (  # noqa: E402
+    ODD,  # noqa: F401  -- parser alias
+    HALF,  # noqa: F401  -- parser alias
+    double,  # noqa: F401  -- parser alias
+    HALF_LT_NZ,
+    HALF_BASE,
+    BIT_BASE,
+    BIT_STEP_AT,
+    HALF_DOUBLE,
+    HALF_SUC0_DOUBLE,
+    ODD_DOUBLE,
+    ODD_SUC0_DOUBLE,
+    COND_T_NAT0,
+    COND_F_NAT0,
+)
+from classical import EXCLUDED_MIDDLE  # noqa: E402
+
+
+_F_union_ty = parse_type("(nat0 -> nat0 -> nat0) -> nat0 -> nat0 -> nat0")
+_union_fn_ty = parse_type("nat0 -> nat0 -> nat0")
+
+
+_UNION_F_DEF = define(
+    "_union_F",
+    _F_union_ty,
+    "\\f:nat0->nat0->nat0. \\n:nat0. \\m:nat0. "
+    "COND_nat0 (n = 0) m "
+    "(COND_nat0 (ODD n \\/ ODD m) "
+    "  (SUC0 (double (f (HALF n) (HALF m)))) "
+    "  (double (f (HALF n) (HALF m))))",
+)
+_union_F = mk_const("_union_F", [])
+
+
+# Pointwise / beta-normalised form:
+#   |- !f n m. _union_F f n m =
+#                COND_nat0 (n = 0) m
+#                  (COND_nat0 (ODD n \/ ODD m)
+#                             (SUC0 (double (f (HALF n) (HALF m))))
+#                             (double (f (HALF n) (HALF m)))).
+# REWRITE_CONV doesn't beta-reduce (\f n m. body) f n m by itself, so we
+# do the three AP_THM/BETA_CONV peels here once and use this fully-applied
+# form as the unfolder downstream.
+def _prove_union_F_at():
+    from tactics import AP_THM, BETA_CONV, TRANS, GENL
+
+    _f_var = Var("f", _union_fn_ty)
+    _n_var = Var("n", nat0_ty)
+    _m_var = Var("m", nat0_ty)
+    th_f = AP_THM(_UNION_F_DEF, _f_var)
+    th_f_eq = TRANS(th_f, BETA_CONV(rand(th_f._concl)))
+    th_fn = AP_THM(th_f_eq, _n_var)
+    th_fn_eq = TRANS(th_fn, BETA_CONV(rand(th_fn._concl)))
+    th_fnm = AP_THM(th_fn_eq, _m_var)
+    th_fnm_eq = TRANS(th_fnm, BETA_CONV(rand(th_fnm._concl)))
+    return GENL([_f_var, _n_var, _m_var], th_fnm_eq)
+
+
+_UNION_F_AT = _prove_union_F_at()
+
+
+@proof
+def UNION_MONO(p):
+    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
+                 ==> _union_F f n = _union_F g n."""
+    from tactics import AP_THM, EQF_INTRO, EQT_INTRO
+
+    p.goal(
+        "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> _union_F f n = _union_F g n",
+        types={
+            "f": _union_fn_ty,
+            "g": _union_fn_ty,
+            "n": nat0_ty,
+            "k": nat0_ty,
+        },
+    )
+    p.fix("f g n")
+    p.assume("h: !k. nat0_lt k n ==> f k = g k")
+    # Prove the pointwise equality at every m, then by_ext to get the
+    # function equality _union_F f n = _union_F g n.
+    with p.have("ext: !m. _union_F f n m = _union_F g n m").proof():
+        p.fix("m")
+        with p.cases_on(EXCLUDED_MIDDLE, "n = 0"):
+            with p.case("hz: n = 0"):
+                # Both sides of the body collapse to the outer THEN-branch (m).
+                p.have("hz_eq: (n = 0) = T").by_thm(EQT_INTRO(p.fact("hz")))
+                p.thus("_union_F f n m = _union_F g n m").by_rewrite(
+                    [_UNION_F_AT, "hz_eq", COND_T_NAT0]
+                )
+            with p.case("hnz: ~(n = 0)"):
+                # HALF n < n -> the IH at HALF n gives f (HALF n) = g (HALF n).
+                p.have("hlt: nat0_lt (HALF n) n").by(HALF_LT_NZ, "n", "hnz")
+                p.have("hfg: f (HALF n) = g (HALF n)").by("h", "HALF n", "hlt")
+                p.have(
+                    "hfg_m: f (HALF n) (HALF m) = g (HALF n) (HALF m)"
+                ).by_thm(AP_THM(p.fact("hfg"), p._parse("HALF m")))
+                p.have("hnz_eq: (n = 0) = F").by_thm(EQF_INTRO(p.fact("hnz")))
+                p.thus("_union_F f n m = _union_F g n m").by_rewrite(
+                    [_UNION_F_AT, "hnz_eq", COND_F_NAT0, "hfg_m"]
+                )
+    p.thus("_union_F f n = _union_F g n").by_ext("ext")
+
+
+# Well-founded recursive definition.
+#   UNION_DEF : |- Union = (@h. !n. h n = _union_F h n)
+#   UNION_REC : |- !n. Union n = _union_F Union n
+UNION_DEF, UNION_REC = _define_wf_lt(
+    "Union",
+    parse_type("nat0 -> nat0 -> nat0"),
+    _union_F,
+    UNION_MONO,
+)
+Union = mk_const("Union", [])
+
+
+# Unfolding equations.
+#   UNION_AT  : |- !n m. Union n m = body[Union, n, m]   (raw recursion)
+#   UNION_AT_ZERO : |- !m. Union 0 m = m
+#   UNION_AT_NZ   : |- !n m. ~(n = 0) ==>
+#                       Union n m =
+#                         COND_nat0 (ODD n \/ ODD m)
+#                           (SUC0 (double (Union (HALF n) (HALF m))))
+#                           (double (Union (HALF n) (HALF m)))
+#
+# Cannot use UNION_REC as a generic ``by_rewrite`` rule because its RHS
+# (``_union_F Union n``) keeps producing fresh ``Union`` applications under
+# ``_UNION_F_AT`` -- the rewriter never reaches a fixpoint. Instead, SPEC
+# UNION_REC once at the target ``n``, AP_THM through ``m``, then chain
+# through ``_UNION_F_AT`` and the relevant COND collapse.
+
+
+def _prove_union_at():
+    """|- !n m. Union n m = body[Union, n, m]."""
+    from tactics import SPEC, SPECL, AP_THM, TRANS, GENL
+
+    n_v = Var("n", nat0_ty)
+    m_v = Var("m", nat0_ty)
+    union_n = SPEC(n_v, UNION_REC)
+    union_n_m = AP_THM(union_n, m_v)
+    F_at_n_m = SPECL([Union, n_v, m_v], _UNION_F_AT)
+    return GENL([n_v, m_v], TRANS(union_n_m, F_at_n_m))
+
+
+UNION_AT = _prove_union_at()
+
+
+def _prove_union_at_zero():
+    """|- !m. Union 0 m = m."""
+    from tactics import SPECL, REWRITE_RULE, EQT_INTRO, GEN
+    from fusion import REFL
+
+    m_v = Var("m", nat0_ty)
+    base = SPECL([ZERO, m_v], UNION_AT)
+    # base : |- Union 0 m = COND_nat0 (0 = 0) m (...).
+    simp = REWRITE_RULE([EQT_INTRO(REFL(ZERO)), COND_T_NAT0], base)
+    # simp : |- Union 0 m = m.
+    return GEN(m_v, simp)
+
+
+UNION_AT_ZERO = _prove_union_at_zero()
+
+
+@proof
+def UNION_AT_NZ(p):
+    from tactics import EQF_INTRO, SPECL
+
+    p.goal(
+        "!n m. ~(n = 0) ==> Union n m = "
+        "COND_nat0 (ODD n \\/ ODD m) "
+        "  (SUC0 (double (Union (HALF n) (HALF m)))) "
+        "  (double (Union (HALF n) (HALF m)))"
+    )
+    p.fix("n m")
+    p.assume("hnz: ~(n = 0)")
+    p.have("base: Union n m = "
+           "COND_nat0 (n = 0) m "
+           "(COND_nat0 (ODD n \\/ ODD m) "
+           "  (SUC0 (double (Union (HALF n) (HALF m)))) "
+           "  (double (Union (HALF n) (HALF m))))").by(UNION_AT, "n", "m")
+    p.have("hnz_eq: (n = 0) = F").by_thm(EQF_INTRO(p.fact("hnz")))
+    p.thus(
+        "Union n m = "
+        "COND_nat0 (ODD n \\/ ODD m) "
+        "  (SUC0 (double (Union (HALF n) (HALF m)))) "
+        "  (double (Union (HALF n) (HALF m)))"
+    ).by_rewrite_of("base", ["hnz_eq", COND_F_NAT0])
+
+
+# Bit/bit-position structure of Union: HALF and ODD distribute through it.
+#   UNION_HALF : |- !a b. HALF (Union a b) = Union (HALF a) (HALF b)
+#   UNION_ODD  : |- !a b. ODD  (Union a b) = (ODD a \/ ODD b)
+# Both proved by case-split on a = 0 (use UNION_AT_ZERO) versus
+# ~(a = 0) (UNION_AT_NZ + sub-case-split on the OR-of-low-bits guard
+# selecting which arm of the inner COND was taken).
+
+
+@proof
+def UNION_HALF(p):
+    from tactics import EQT_INTRO, EQF_INTRO
+
+    p.goal("!a b. HALF (Union a b) = Union (HALF a) (HALF b)")
+    p.fix("a b")
+    with p.cases_on(EXCLUDED_MIDDLE, "a = 0"):
+        with p.case("hz: a = 0"):
+            p.thus("HALF (Union a b) = Union (HALF a) (HALF b)").by_rewrite(
+                [UNION_AT_ZERO, "hz", HALF_BASE]
+            )
+        with p.case("hnz: ~(a = 0)"):
+            p.have(
+                "hu: Union a b = "
+                "COND_nat0 (ODD a \\/ ODD b) "
+                "  (SUC0 (double (Union (HALF a) (HALF b)))) "
+                "  (double (Union (HALF a) (HALF b)))"
+            ).by(UNION_AT_NZ, "a", "b", "hnz")
+            with p.cases_on(EXCLUDED_MIDDLE, "ODD a \\/ ODD b"):
+                with p.case("hOd: ODD a \\/ ODD b"):
+                    p.have("hOd_eq: (ODD a \\/ ODD b) = T").by_thm(
+                        EQT_INTRO(p.fact("hOd"))
+                    )
+                    p.have(
+                        "hu_T: Union a b = SUC0 (double (Union (HALF a) (HALF b)))"
+                    ).by_rewrite_of("hu", ["hOd_eq", COND_T_NAT0])
+                    p.thus(
+                        "HALF (Union a b) = Union (HALF a) (HALF b)"
+                    ).by_rewrite(["hu_T", HALF_SUC0_DOUBLE])
+                with p.case("hnOd: ~(ODD a \\/ ODD b)"):
+                    p.have("hnOd_eq: (ODD a \\/ ODD b) = F").by_thm(
+                        EQF_INTRO(p.fact("hnOd"))
+                    )
+                    p.have(
+                        "hu_F: Union a b = double (Union (HALF a) (HALF b))"
+                    ).by_rewrite_of("hu", ["hnOd_eq", COND_F_NAT0])
+                    p.thus(
+                        "HALF (Union a b) = Union (HALF a) (HALF b)"
+                    ).by_rewrite(["hu_F", HALF_DOUBLE])
+
+
+@proof
+def UNION_ODD(p):
+    from tactics import EQT_INTRO, EQF_INTRO, OR_F_LEFT
+    from bits import ODD_BASE
+
+    p.goal("!a b. ODD (Union a b) = (ODD a \\/ ODD b)")
+    p.fix("a b")
+    with p.cases_on(EXCLUDED_MIDDLE, "a = 0"):
+        with p.case("hz: a = 0"):
+            # ODD (Union 0 b) = ODD b; RHS: ODD 0 \/ ODD b = F \/ ODD b = ODD b.
+            p.thus("ODD (Union a b) = (ODD a \\/ ODD b)").by_rewrite(
+                [UNION_AT_ZERO, "hz", ODD_BASE, OR_F_LEFT]
+            )
+        with p.case("hnz: ~(a = 0)"):
+            p.have(
+                "hu: Union a b = "
+                "COND_nat0 (ODD a \\/ ODD b) "
+                "  (SUC0 (double (Union (HALF a) (HALF b)))) "
+                "  (double (Union (HALF a) (HALF b)))"
+            ).by(UNION_AT_NZ, "a", "b", "hnz")
+            with p.cases_on(EXCLUDED_MIDDLE, "ODD a \\/ ODD b"):
+                with p.case("hOd: ODD a \\/ ODD b"):
+                    p.have("hOd_eq: (ODD a \\/ ODD b) = T").by_thm(
+                        EQT_INTRO(p.fact("hOd"))
+                    )
+                    p.have(
+                        "hu_T: Union a b = SUC0 (double (Union (HALF a) (HALF b)))"
+                    ).by_rewrite_of("hu", ["hOd_eq", COND_T_NAT0])
+                    # ODD (SUC0 (double Z)) = T; RHS = T.
+                    p.thus("ODD (Union a b) = (ODD a \\/ ODD b)").by_rewrite(
+                        ["hu_T", ODD_SUC0_DOUBLE, "hOd_eq"]
+                    )
+                with p.case("hnOd: ~(ODD a \\/ ODD b)"):
+                    p.have("hnOd_eq: (ODD a \\/ ODD b) = F").by_thm(
+                        EQF_INTRO(p.fact("hnOd"))
+                    )
+                    p.have(
+                        "hu_F: Union a b = double (Union (HALF a) (HALF b))"
+                    ).by_rewrite_of("hu", ["hnOd_eq", COND_F_NAT0])
+                    # ODD (double Z) = F; RHS = F.
+                    p.thus("ODD (Union a b) = (ODD a \\/ ODD b)").by_rewrite(
+                        ["hu_F", ODD_DOUBLE, "hnOd_eq"]
+                    )
+
+
+# Helper: |- !x y. In (SUC0 x) y = In x (HALF y).
+# Mirror of BIT_STEP_AT under IN_AT, kept in In-form so it composes with
+# In-shaped IHs without flipping back through bit/In conversions.
+@proof
+def IN_SUCC_AT(p):
+    p.goal("!x y. In (SUC0 x) y = In x (HALF y)")
+    p.fix("x y")
+    p.thus("In (SUC0 x) y = In x (HALF y)").by_rewrite([IN_AT, BIT_STEP_AT])
+
+
+# Membership characterisation:
+#   IN_UNION : |- !x a b. In x (Union a b) = (In x a \/ In x b).
+# Peano induction on x; UNION_ODD discharges the bit-0 case and
+# UNION_HALF + the IH (re-instantiated at HALF a, HALF b) discharges
+# the bit-(SUC0 x) case.
+
+
+@proof
+def IN_UNION(p):
+    p.goal("!x a b. In x (Union a b) = (In x a \\/ In x b)")
+    with p.induction("x"):
+        with p.base():
+            p.fix("a b")
+            # In 0 y = bit 0 y = ODD y; combine with UNION_ODD.
+            p.thus("In 0 (Union a b) = (In 0 a \\/ In 0 b)").by_rewrite(
+                [IN_AT, BIT_BASE, UNION_ODD]
+            )
+        with p.step("IH"):
+            p.fix("a b")
+            # In (SUC0 x) y = In x (HALF y) (IN_SUCC_AT);
+            # HALF (Union a b) = Union (HALF a) (HALF b) (UNION_HALF);
+            # IH at HALF a, HALF b lifts the inner Union to a disjunction.
+            p.have(
+                "hIH: In x (Union (HALF a) (HALF b)) "
+                "= (In x (HALF a) \\/ In x (HALF b))"
+            ).by("IH", "HALF a", "HALF b")
+            p.thus(
+                "In (SUC0 x) (Union a b) = (In (SUC0 x) a \\/ In (SUC0 x) b)"
+            ).by_rewrite([IN_SUCC_AT, UNION_HALF, "hIH"])
+
+
+# ---------------------------------------------------------------------------
 # Stage 4 -- a model of Q inside HF.   (used by godel_first.py Stage 6)
 # ---------------------------------------------------------------------------
 #
@@ -1395,6 +1742,14 @@ if __name__ == "__main__":
     print("  PAIR_ORD_DEF    :", pp_thm(PAIR_ORD_DEF))
     print("  PAIR_ORD_AT     :", pp_thm(PAIR_ORD_AT))
     print("  IN_PAIR_ORD     :", pp_thm(IN_PAIR_ORD))
+    print("Stage 3 (cont.) -- Union (bit-OR on HF sets).")
+    print("  UNION_DEF       :", pp_thm(UNION_DEF))
+    print("  UNION_AT_ZERO   :", pp_thm(UNION_AT_ZERO))
+    print("  UNION_AT_NZ     :", pp_thm(UNION_AT_NZ))
+    print("  UNION_HALF      :", pp_thm(UNION_HALF))
+    print("  UNION_ODD       :", pp_thm(UNION_ODD))
+    print("  IN_SUCC_AT      :", pp_thm(IN_SUCC_AT))
+    print("  IN_UNION        :", pp_thm(IN_UNION))
     print("Stage 4 -- vN embedding lemmas (canonical von Neumann).")
     print("  VN_SUCC_DEF     :", pp_thm(VN_SUCC_DEF))
     print("  VN_SUCC_AT      :", pp_thm(VN_SUCC_AT))
