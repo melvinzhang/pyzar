@@ -44,6 +44,7 @@ from nat0_order import (
     NAT0_NOT_LT_ZERO,
     NAT0_NEQ_ZERO_PRED,
     NAT0_LT_SUC0_CASES,
+    NAT0_LT_SUC0_INV,
     define_wf_lt,
 )
 from basics import rand
@@ -1395,6 +1396,399 @@ def CLEAR_LOW_LT(p):
                 )
 
 
+# ---------------------------------------------------------------------------
+# Step 26 -- canonical-Insert helpers for the hf_to_qhf bridge (q_repr.py).
+#
+# When ``i`` is strictly below the lowest set bit of ``s`` (or s = 0),
+# ``set_bit i s`` lands in the canonical low-bit decomposition with
+# ``low_bit (set_bit i s) = i`` and ``clear_low (set_bit i s) = s``. These
+# lemmas drive HF_TO_QHF_AT_INSERT_LOW: the structural Insert form of
+# hf_to_qhf at canonical inputs.
+#
+# Without the precondition the lemmas are inconsistent (a set with two
+# Insert-decompositions would force its hf_to_qhf image into two distinct
+# Insert_t-trees under Insert_t injectivity).
+# ---------------------------------------------------------------------------
+
+
+# |- !i n. ODD (set_bit (SUC0 i) n) = ODD n.
+#
+# Case-split on ODD n; SET_BIT_STEP_AT + chosen COND branch +
+# ODD_SUC0_DOUBLE / ODD_DOUBLE collapse both sides identically.
+@proof
+def ODD_SET_BIT_STEP(p):
+    from tactics import EQT_INTRO, EQF_INTRO
+
+    p.goal("!i n. ODD (set_bit (SUC0 i) n) = ODD n")
+    p.fix("i n")
+    with p.cases_on(EXCLUDED_MIDDLE, "ODD n"):
+        with p.case("hO: ODD n"):
+            p.have("hO_eq: ODD n = T").by(EQT_INTRO, "hO")
+            p.thus("ODD (set_bit (SUC0 i) n) = ODD n").by_rewrite(
+                [SET_BIT_STEP_AT, "hO_eq", COND_T_NAT0, ODD_SUC0_DOUBLE]
+            )
+        with p.case("hF: ~(ODD n)"):
+            p.have("hF_eq: ODD n = F").by(EQF_INTRO, "hF")
+            p.thus("ODD (set_bit (SUC0 i) n) = ODD n").by_rewrite(
+                [SET_BIT_STEP_AT, "hF_eq", COND_F_NAT0, ODD_DOUBLE]
+            )
+
+
+# |- !i n. HALF (set_bit (SUC0 i) n) = set_bit i (HALF n).
+#
+# Same case-split; HALF_SUC0_DOUBLE / HALF_DOUBLE collapse both sides.
+@proof
+def HALF_SET_BIT_STEP(p):
+    from tactics import EQT_INTRO, EQF_INTRO
+
+    p.goal("!i n. HALF (set_bit (SUC0 i) n) = set_bit i (HALF n)")
+    p.fix("i n")
+    with p.cases_on(EXCLUDED_MIDDLE, "ODD n"):
+        with p.case("hO: ODD n"):
+            p.have("hO_eq: ODD n = T").by(EQT_INTRO, "hO")
+            p.thus("HALF (set_bit (SUC0 i) n) = set_bit i (HALF n)").by_rewrite(
+                [SET_BIT_STEP_AT, "hO_eq", COND_T_NAT0, HALF_SUC0_DOUBLE]
+            )
+        with p.case("hF: ~(ODD n)"):
+            p.have("hF_eq: ODD n = F").by(EQF_INTRO, "hF")
+            p.thus("HALF (set_bit (SUC0 i) n) = set_bit i (HALF n)").by_rewrite(
+                [SET_BIT_STEP_AT, "hF_eq", COND_F_NAT0, HALF_DOUBLE]
+            )
+
+
+# |- !i n. ~(set_bit i n = 0).
+#
+# bit i (set_bit i n) = T (BIT_AT_SET_BIT_SAME) and bit i 0 = F
+# (BIT_AT_ZERO); if set_bit i n = 0 the two yield T = F, contradicting TRUTH.
+@proof
+def SET_BIT_NZ(p):
+    from tactics import TRUTH, EQ_MP, TRANS, SYM
+
+    p.goal("!i n. ~(set_bit i n = 0)")
+    p.fix("i n")
+    with p.suppose("h_eq: set_bit i n = 0"):
+        p.have("h_set: bit i (set_bit i n) = T").by(BIT_AT_SET_BIT_SAME, "i", "n")
+        p.have("h_via: bit i 0 = T").by_rewrite_of("h_set", ["h_eq"])
+        p.have("h_zero: bit i 0 = F").by(BIT_AT_ZERO, "i")
+        h_TF = TRANS(SYM(p.fact("h_via")), p.fact("h_zero"))  # |- T = F
+        p.absurd().by_thm(EQ_MP(h_TF, TRUTH))
+
+
+# |- !s. ~(low_bit s = 0) ==>
+#         ~(s = 0) /\ ~(ODD s) /\ low_bit s = SUC0 (low_bit (HALF s)).
+#
+# Reverse-decompose LOW_BIT_AT under the assumption ``low_bit s != 0``: the
+# outer COND (s = 0) and inner COND (ODD s) both have value-0 T-branches, so
+# under ``low_bit s != 0`` neither can fire, leaving the F/F branch
+# ``SUC0 (low_bit (HALF s))``.
+@proof
+def LOW_BIT_NZ_DECOMP(p):
+    from tactics import EQT_INTRO, EQF_INTRO, CONJ, SPEC
+
+    p.goal(
+        "!s. ~(low_bit s = 0) ==> "
+        "~(s = 0) /\\ ~(ODD s) /\\ low_bit s = SUC0 (low_bit (HALF s))"
+    )
+    p.fix("s")
+    p.assume("h: ~(low_bit s = 0)")
+    lb_unf = SPEC(p._parse("s"), LOW_BIT_AT)
+    # s != 0.
+    with p.have("h_sn0: ~(s = 0)").proof():
+        with p.suppose("hs0: s = 0"):
+            p.have("hs0_eq: (s = 0) = T").by(EQT_INTRO, "hs0")
+            p.have("h_lb_zero: low_bit s = 0").by_rewrite_of(
+                lb_unf, ["hs0_eq", COND_T_NAT0]
+            )
+            p.absurd().by_conj("h", "h_lb_zero")
+    p.have("h_sn0_eq: (s = 0) = F").by(EQF_INTRO, "h_sn0")
+    p.have(
+        "lb_red1: low_bit s = COND_nat0 (ODD s) 0 (SUC0 (low_bit (HALF s)))"
+    ).by_rewrite_of(lb_unf, ["h_sn0_eq", COND_F_NAT0])
+    # ~ODD s.
+    with p.have("h_not_odd: ~(ODD s)").proof():
+        with p.suppose("hO: ODD s"):
+            p.have("hO_eq: ODD s = T").by(EQT_INTRO, "hO")
+            p.have("h_lb_zero: low_bit s = 0").by_rewrite_of(
+                "lb_red1", ["hO_eq", COND_T_NAT0]
+            )
+            p.absurd().by_conj("h", "h_lb_zero")
+    p.have("h_not_odd_eq: ODD s = F").by(EQF_INTRO, "h_not_odd")
+    p.have("h_lb_form: low_bit s = SUC0 (low_bit (HALF s))").by_rewrite_of(
+        "lb_red1", ["h_not_odd_eq", COND_F_NAT0]
+    )
+    p.thus(
+        "~(s = 0) /\\ ~(ODD s) /\\ low_bit s = SUC0 (low_bit (HALF s))"
+    ).by_thm(CONJ(p.fact("h_sn0"), CONJ(p.fact("h_not_odd"), p.fact("h_lb_form"))))
+
+
+# |- !i s. (s = 0 \/ nat0_lt i (low_bit s)) ==> ~(ODD s).
+#
+# Either branch of the precondition yields ~ODD s: in s = 0, ODD 0 = F
+# (ODD_BASE); in nat0_lt i (low_bit s), low_bit s != 0 (NAT0_NOT_LT_ZERO
+# contrapositive), so LOW_BIT_NZ_DECOMP gives ~ODD s.
+@proof
+def PRECOND_NOT_ODD(p):
+    from tactics import EQF_ELIM, SYM
+
+    p.goal(
+        "!i s. (s = 0 \\/ nat0_lt i (low_bit s)) ==> ~(ODD s)"
+    )
+    p.fix("i s")
+    p.assume("h: s = 0 \\/ nat0_lt i (low_bit s)")
+    with p.cases_on("h"):
+        with p.case("hs0: s = 0"):
+            not_odd_0 = EQF_ELIM(ODD_BASE)  # |- ~(ODD 0)
+            p.thus("~(ODD s)").by_rewrite_of(not_odd_0, [SYM(p.fact("hs0"))])
+        with p.case("h_lt: nat0_lt i (low_bit s)"):
+            with p.have("h_lb_nz: ~(low_bit s = 0)").proof():
+                with p.suppose("hlb0: low_bit s = 0"):
+                    p.have("h_lt_0: nat0_lt i 0").by_rewrite_of("h_lt", ["hlb0"])
+                    p.have("h_not_lt_0: ~(nat0_lt i 0)").by(NAT0_NOT_LT_ZERO, "i")
+                    p.absurd().by_conj("h_not_lt_0", "h_lt_0")
+            p.have(
+                "h_decomp: ~(s = 0) /\\ ~(ODD s) /\\ "
+                "low_bit s = SUC0 (low_bit (HALF s))"
+            ).by(LOW_BIT_NZ_DECOMP, "s", "h_lb_nz")
+            p.split("h_decomp", "(_, h_not_odd, _)")
+            p.thus("~(ODD s)").by_thm(p.fact("h_not_odd"))
+
+
+# |- !i s. (s = 0 \/ nat0_lt (SUC0 i) (low_bit s)) ==>
+#           HALF s = 0 \/ nat0_lt i (low_bit (HALF s)).
+#
+# Step-case precondition transport for LOW_BIT_SET_BIT_NEW /
+# CLEAR_LOW_SET_BIT_NEW. In s = 0: HALF 0 = 0 (HALF_BASE) feeds the left
+# disjunct. In nat0_lt (SUC0 i) (low_bit s): low_bit s != 0 (NAT0_NOT_LT_ZERO
+# contrapositive), so LOW_BIT_NZ_DECOMP gives
+# ``low_bit s = SUC0 (low_bit (HALF s))``; rewrite the hypothesis through
+# that and apply NAT0_LT_SUC0_INV to peel SUC0 from both sides.
+@proof
+def LOW_BIT_PRECOND_PEEL(p):
+    p.goal(
+        "!i s. (s = 0 \\/ nat0_lt (SUC0 i) (low_bit s)) ==> "
+        "HALF s = 0 \\/ nat0_lt i (low_bit (HALF s))"
+    )
+    p.fix("i s")
+    p.assume("h: s = 0 \\/ nat0_lt (SUC0 i) (low_bit s)")
+    with p.cases_on("h"):
+        with p.case("hs0: s = 0"):
+            p.have("h_half_0: HALF s = 0").by_rewrite(["hs0", HALF_BASE])
+            p.thus("HALF s = 0 \\/ nat0_lt i (low_bit (HALF s))").by_disj("h_half_0")
+        with p.case("h_lt: nat0_lt (SUC0 i) (low_bit s)"):
+            with p.have("h_lb_nz: ~(low_bit s = 0)").proof():
+                with p.suppose("hlb0: low_bit s = 0"):
+                    p.have("h_lt_0: nat0_lt (SUC0 i) 0").by_rewrite_of(
+                        "h_lt", ["hlb0"]
+                    )
+                    p.have("h_not_lt_0: ~(nat0_lt (SUC0 i) 0)").by(
+                        NAT0_NOT_LT_ZERO, "SUC0 i"
+                    )
+                    p.absurd().by_conj("h_not_lt_0", "h_lt_0")
+            p.have(
+                "h_decomp: ~(s = 0) /\\ ~(ODD s) /\\ "
+                "low_bit s = SUC0 (low_bit (HALF s))"
+            ).by(LOW_BIT_NZ_DECOMP, "s", "h_lb_nz")
+            p.split("h_decomp", "(_, _, h_lb_form)")
+            p.have(
+                "h_lt_suc: nat0_lt (SUC0 i) (SUC0 (low_bit (HALF s)))"
+            ).by_rewrite_of("h_lt", ["h_lb_form"])
+            p.have("h_lt_inv: nat0_lt i (low_bit (HALF s))").by(
+                NAT0_LT_SUC0_INV, "i", "low_bit (HALF s)", "h_lt_suc"
+            )
+            p.thus("HALF s = 0 \\/ nat0_lt i (low_bit (HALF s))").by_disj(
+                "h_lt_inv"
+            )
+
+
+# |- !i s. (s = 0 \/ nat0_lt i (low_bit s)) ==> low_bit (set_bit i s) = i.
+#
+# Peano induction on i.
+#   i = 0: set_bit 0 s = SUC0 (double (HALF s)); ODD = T at SUC0 of double,
+#          AXIOM_3_0 gives non-zero, so LOW_BIT_AT collapses through both
+#          CONDs to 0. Precondition unused at this layer.
+#   i = SUC0 i': PRECOND_NOT_ODD gives ~ODD s; LOW_BIT_PRECOND_PEEL gives
+#                the IH precondition at HALF s. SET_BIT_NZ + ODD_SET_BIT_STEP
+#                + HALF_SET_BIT_STEP collapse LOW_BIT_AT to
+#                SUC0 (low_bit (set_bit i' (HALF s))); IH at HALF s yields
+#                the inner low_bit = i', so the result is SUC0 i'.
+@proof
+def LOW_BIT_SET_BIT_NEW(p):
+    from nat0 import AXIOM_3_0
+    from tactics import EQF_INTRO, SPEC, SYM, TRANS
+
+    p.goal(
+        "!i s. (s = 0 \\/ nat0_lt i (low_bit s)) ==> "
+        "low_bit (set_bit i s) = i"
+    )
+    with p.induction("i"):
+        with p.base():
+            p.fix("s")
+            p.assume("h: s = 0 \\/ nat0_lt 0 (low_bit s)")
+            p.have("h_sb: set_bit 0 s = SUC0 (double (HALF s))").by(
+                SET_BIT_BASE_AT, "s"
+            )
+            p.have("h_nz: ~(SUC0 (double (HALF s)) = 0)").by(
+                AXIOM_3_0, "double (HALF s)"
+            )
+            p.have("h_eq_F: (SUC0 (double (HALF s)) = 0) = F").by(EQF_INTRO, "h_nz")
+            p.have("h_odd: ODD (SUC0 (double (HALF s))) = T").by(
+                ODD_SUC0_DOUBLE, "HALF s"
+            )
+            lb_unf = SPEC(p._parse("SUC0 (double (HALF s))"), LOW_BIT_AT)
+            p.have("lb_eq_inner: low_bit (SUC0 (double (HALF s))) = 0").by_rewrite_of(
+                lb_unf, ["h_eq_F", COND_F_NAT0, "h_odd", COND_T_NAT0]
+            )
+            p.thus("low_bit (set_bit 0 s) = 0").by_rewrite_of(
+                "lb_eq_inner", [SYM(p.fact("h_sb"))]
+            )
+        with p.step("IH"):
+            p.fix("s")
+            p.assume("h: s = 0 \\/ nat0_lt (SUC0 i) (low_bit s)")
+            p.have("h_not_odd: ~(ODD s)").by(PRECOND_NOT_ODD, "SUC0 i", "s", "h")
+            p.have(
+                "h_inner: HALF s = 0 \\/ nat0_lt i (low_bit (HALF s))"
+            ).by(LOW_BIT_PRECOND_PEEL, "i", "s", "h")
+            p.have("h_ih: low_bit (set_bit i (HALF s)) = i").by(
+                "IH", "HALF s", "h_inner"
+            )
+            p.have("h_sb_nz: ~(set_bit (SUC0 i) s = 0)").by(
+                SET_BIT_NZ, "SUC0 i", "s"
+            )
+            p.have("h_sb_nz_eq: (set_bit (SUC0 i) s = 0) = F").by(
+                EQF_INTRO, "h_sb_nz"
+            )
+            p.have("h_odd_sb: ODD (set_bit (SUC0 i) s) = ODD s").by(
+                ODD_SET_BIT_STEP, "i", "s"
+            )
+            p.have("h_not_odd_eq: ODD s = F").by(EQF_INTRO, "h_not_odd")
+            p.have("h_odd_sb_F: ODD (set_bit (SUC0 i) s) = F").by_thm(
+                TRANS(p.fact("h_odd_sb"), p.fact("h_not_odd_eq"))
+            )
+            p.have(
+                "h_half_sb: HALF (set_bit (SUC0 i) s) = set_bit i (HALF s)"
+            ).by(HALF_SET_BIT_STEP, "i", "s")
+            lb_unf = SPEC(p._parse("set_bit (SUC0 i) s"), LOW_BIT_AT)
+            p.thus("low_bit (set_bit (SUC0 i) s) = SUC0 i").by_rewrite_of(
+                lb_unf,
+                [
+                    "h_sb_nz_eq",
+                    COND_F_NAT0,
+                    "h_odd_sb_F",
+                    COND_F_NAT0,
+                    "h_half_sb",
+                    "h_ih",
+                ],
+            )
+
+
+# |- !i s. (s = 0 \/ nat0_lt i (low_bit s)) ==> clear_low (set_bit i s) = s.
+#
+# Peano induction on i.
+#   i = 0: set_bit 0 s = SUC0 (double (HALF s)); CLEAR_LOW_AT collapses
+#          through outer COND (non-zero by AXIOM_3_0) and inner COND (ODD = T
+#          by ODD_SUC0_DOUBLE) to ``double (HALF (SUC0 (double (HALF s))))``,
+#          which simplifies to ``double (HALF s)`` via HALF_SUC0_DOUBLE.
+#          PRECOND_NOT_ODD then RECONSTRUCT (~ODD branch) folds back to s.
+#   i = SUC0 i': PRECOND_NOT_ODD + LOW_BIT_PRECOND_PEEL as in
+#                LOW_BIT_SET_BIT_NEW. CLEAR_LOW_AT collapses to
+#                ``double (clear_low (set_bit i' (HALF s)))``; IH on HALF s
+#                folds the inner clear_low to HALF s; RECONSTRUCT (~ODD s
+#                branch) folds ``double (HALF s) = s``.
+@proof
+def CLEAR_LOW_SET_BIT_NEW(p):
+    from nat0 import AXIOM_3_0
+    from tactics import EQF_INTRO, SPEC, SYM, TRANS
+
+    p.goal(
+        "!i s. (s = 0 \\/ nat0_lt i (low_bit s)) ==> "
+        "clear_low (set_bit i s) = s"
+    )
+    with p.induction("i"):
+        with p.base():
+            p.fix("s")
+            p.assume("h: s = 0 \\/ nat0_lt 0 (low_bit s)")
+            p.have("h_not_odd: ~(ODD s)").by(PRECOND_NOT_ODD, "0", "s", "h")
+            p.have("h_not_odd_eq: ODD s = F").by(EQF_INTRO, "h_not_odd")
+            p.have("h_sb: set_bit 0 s = SUC0 (double (HALF s))").by(
+                SET_BIT_BASE_AT, "s"
+            )
+            p.have("h_nz: ~(SUC0 (double (HALF s)) = 0)").by(
+                AXIOM_3_0, "double (HALF s)"
+            )
+            p.have("h_eq_F: (SUC0 (double (HALF s)) = 0) = F").by(EQF_INTRO, "h_nz")
+            p.have("h_odd: ODD (SUC0 (double (HALF s))) = T").by(
+                ODD_SUC0_DOUBLE, "HALF s"
+            )
+            p.have("h_half: HALF (SUC0 (double (HALF s))) = HALF s").by(
+                HALF_SUC0_DOUBLE, "HALF s"
+            )
+            cl_unf = SPEC(p._parse("SUC0 (double (HALF s))"), CLEAR_LOW_AT)
+            p.have(
+                "cl_eq_inner: clear_low (SUC0 (double (HALF s))) = double (HALF s)"
+            ).by_rewrite_of(
+                cl_unf,
+                ["h_eq_F", COND_F_NAT0, "h_odd", COND_T_NAT0, "h_half"],
+            )
+            # RECONSTRUCT at s, in the ~ODD branch, gives s = double (HALF s).
+            recon_s = SPEC(p._parse("s"), RECONSTRUCT)
+            p.have("h_recon: s = double (HALF s)").by_rewrite_of(
+                recon_s, ["h_not_odd_eq", COND_F_NAT0]
+            )
+            p.have("cl_eq_d: clear_low (set_bit 0 s) = double (HALF s)").by_rewrite_of(
+                "cl_eq_inner", [SYM(p.fact("h_sb"))]
+            )
+            p.thus("clear_low (set_bit 0 s) = s").by_rewrite_of(
+                "cl_eq_d", [SYM(p.fact("h_recon"))]
+            )
+        with p.step("IH"):
+            p.fix("s")
+            p.assume("h: s = 0 \\/ nat0_lt (SUC0 i) (low_bit s)")
+            p.have("h_not_odd: ~(ODD s)").by(PRECOND_NOT_ODD, "SUC0 i", "s", "h")
+            p.have("h_not_odd_eq: ODD s = F").by(EQF_INTRO, "h_not_odd")
+            p.have(
+                "h_inner: HALF s = 0 \\/ nat0_lt i (low_bit (HALF s))"
+            ).by(LOW_BIT_PRECOND_PEEL, "i", "s", "h")
+            p.have("h_ih: clear_low (set_bit i (HALF s)) = HALF s").by(
+                "IH", "HALF s", "h_inner"
+            )
+            p.have("h_sb_nz: ~(set_bit (SUC0 i) s = 0)").by(
+                SET_BIT_NZ, "SUC0 i", "s"
+            )
+            p.have("h_sb_nz_eq: (set_bit (SUC0 i) s = 0) = F").by(
+                EQF_INTRO, "h_sb_nz"
+            )
+            p.have("h_odd_sb: ODD (set_bit (SUC0 i) s) = ODD s").by(
+                ODD_SET_BIT_STEP, "i", "s"
+            )
+            p.have("h_odd_sb_F: ODD (set_bit (SUC0 i) s) = F").by_thm(
+                TRANS(p.fact("h_odd_sb"), p.fact("h_not_odd_eq"))
+            )
+            p.have(
+                "h_half_sb: HALF (set_bit (SUC0 i) s) = set_bit i (HALF s)"
+            ).by(HALF_SET_BIT_STEP, "i", "s")
+            cl_unf = SPEC(p._parse("set_bit (SUC0 i) s"), CLEAR_LOW_AT)
+            p.have(
+                "cl_eq_d: clear_low (set_bit (SUC0 i) s) = double (HALF s)"
+            ).by_rewrite_of(
+                cl_unf,
+                [
+                    "h_sb_nz_eq",
+                    COND_F_NAT0,
+                    "h_odd_sb_F",
+                    COND_F_NAT0,
+                    "h_half_sb",
+                    "h_ih",
+                ],
+            )
+            recon_s = SPEC(p._parse("s"), RECONSTRUCT)
+            p.have("h_recon: s = double (HALF s)").by_rewrite_of(
+                recon_s, ["h_not_odd_eq", COND_F_NAT0]
+            )
+            p.thus("clear_low (set_bit (SUC0 i) s) = s").by_rewrite_of(
+                "cl_eq_d", [SYM(p.fact("h_recon"))]
+            )
+
+
 if __name__ == "__main__":
     from parser import pp_thm
 
@@ -1460,3 +1854,12 @@ if __name__ == "__main__":
     print("  LOW_BIT_LT      :", pp_thm(LOW_BIT_LT))
     print("Step 25 OK -- CLEAR_LOW_LT proved.")
     print("  CLEAR_LOW_LT    :", pp_thm(CLEAR_LOW_LT))
+    print("Step 26 OK -- canonical-Insert helpers (hf_to_qhf bridge).")
+    print("  ODD_SET_BIT_STEP    :", pp_thm(ODD_SET_BIT_STEP))
+    print("  HALF_SET_BIT_STEP   :", pp_thm(HALF_SET_BIT_STEP))
+    print("  SET_BIT_NZ          :", pp_thm(SET_BIT_NZ))
+    print("  LOW_BIT_NZ_DECOMP   :", pp_thm(LOW_BIT_NZ_DECOMP))
+    print("  PRECOND_NOT_ODD     :", pp_thm(PRECOND_NOT_ODD))
+    print("  LOW_BIT_PRECOND_PEEL:", pp_thm(LOW_BIT_PRECOND_PEEL))
+    print("  LOW_BIT_SET_BIT_NEW :", pp_thm(LOW_BIT_SET_BIT_NEW))
+    print("  CLEAR_LOW_SET_BIT_NEW:", pp_thm(CLEAR_LOW_SET_BIT_NEW))

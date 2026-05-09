@@ -665,6 +665,35 @@ def NAT0_LT_SUC0_CASES(p):
                     p.thus("k = d \\/ nat0_lt k d").by_disj("klt")
 
 
+# NAT0_LT_SUC0_INV :  |- !a b. nat0_lt (SUC0 a) (SUC0 b) ==> nat0_lt a b.
+#
+# Inverse of NAT0_LT_SUC0_MONO. Apply NAT0_LT_SUC0_CASES to the hypothesis to
+# get ``SUC0 a = b \/ nat0_lt (SUC0 a) b``; in the equality branch substitute
+# b := SUC0 a and conclude via NAT0_LT_SUC0; in the strict branch chain
+# ``nat0_lt a (SUC0 a)`` (NAT0_LT_SUC0) with the strict fact via NAT0_LT_TRANS.
+
+
+@proof
+def NAT0_LT_SUC0_INV(p):
+    p.goal(
+        "!a b. nat0_lt (SUC0 a) (SUC0 b) ==> nat0_lt a b",
+        types={"a": nat0_ty, "b": nat0_ty},
+    )
+    p.fix("a b")
+    p.assume("h: nat0_lt (SUC0 a) (SUC0 b)")
+    p.have("h_cases: SUC0 a = b \\/ nat0_lt (SUC0 a) b").by(
+        NAT0_LT_SUC0_CASES, "SUC0 a", "b", "h"
+    )
+    p.have("h_a_lt_sa: nat0_lt a (SUC0 a)").by(NAT0_LT_SUC0, "a")
+    with p.cases_on("h_cases"):
+        with p.case("h_eq: SUC0 a = b"):
+            p.thus("nat0_lt a b").by_rewrite_of("h_a_lt_sa", ["h_eq"])
+        with p.case("h_lt: nat0_lt (SUC0 a) b"):
+            p.thus("nat0_lt a b").by(
+                NAT0_LT_TRANS, "a", "SUC0 a", "b", "h_a_lt_sa", "h_lt"
+            )
+
+
 # ---------------------------------------------------------------------------
 # Step 5.  NUM_RECURSION_LT -- polymorphic well-founded-recursion existence.
 #
@@ -1170,5 +1199,6 @@ if __name__ == "__main__":
     print("  NAT0_NOT_LT_ZERO   :", pp_thm(NAT0_NOT_LT_ZERO))
     print("  NAT0_NEQ_ZERO_PRED :", pp_thm(NAT0_NEQ_ZERO_PRED))
     print("  NAT0_LT_SUC0_CASES :", pp_thm(NAT0_LT_SUC0_CASES))
+    print("  NAT0_LT_SUC0_INV   :", pp_thm(NAT0_LT_SUC0_INV))
     print("Step 5 OK -- NUM_RECURSION_LT (well-founded recursion existence).")
     print("  NUM_RECURSION_LT   :", pp_thm(NUM_RECURSION_LT))

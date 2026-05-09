@@ -183,6 +183,7 @@ from hf_sets import (
     Empty,  # noqa: F401  -- parser alias for hf_to_qhf bridge
     Union,  # used by TRACE_EXISTS to merge sub-traces
     EMPTY_DEF,  # used by HF_TO_QHF_AT_EMPTY to fold Empty into 0
+    INSERT_AT,  # used by HF_TO_QHF_AT_INSERT_LOW to unfold Insert to set_bit
     IN_INSERT_SAME,
     IN_INSERT_DIFF,
     IN_UNION,
@@ -196,6 +197,9 @@ from bits import (  # noqa: E402 -- canonical low-bit decomposition for hf_to_qh
     CLEAR_LOW_LT,
     COND_T_NAT0,
     COND_F_NAT0,
+    LOW_BIT_SET_BIT_NEW,
+    CLEAR_LOW_SET_BIT_NEW,
+    SET_BIT_NZ,
 )
 from classical import (  # noqa: E402 -- COND machinery for hf_to_qhf body
     mk_cond,
@@ -4209,6 +4213,58 @@ def HF_TO_QHF_AT_NZ(p):
     ).by_rewrite_of(rec_at_n, ["hnz_eq", COND_F_NAT0])
 
 
+@proof
+def HF_TO_QHF_AT_INSERT_LOW(p):
+    """|- !i s. (s = 0 \\/ nat0_lt i (low_bit s)) ==>
+                hf_to_qhf (Insert i s) = Insert_t (hf_to_qhf i) (hf_to_qhf s).
+
+    Bridge from HOL HF Insert to Q-syntax Insert_t, in the canonical
+    low-bit-first form. The precondition pins ``Insert i s = set_bit i s``
+    to the canonical decomposition where ``low_bit (Insert i s) = i`` and
+    ``clear_low (Insert i s) = s``, so HF_TO_QHF_AT_NZ collapses to the
+    structural form. A precondition-free version is HOL-inconsistent under
+    Insert_t injectivity (a set with two Insert decompositions would force
+    its hf_to_qhf image into two distinct Insert_t-trees).
+    """
+    p.goal(
+        "!i s. (s = 0 \\/ nat0_lt i (low_bit s)) ==> "
+        "hf_to_qhf (Insert i s) = Insert_t (hf_to_qhf i) (hf_to_qhf s)"
+    )
+    p.fix("i s")
+    p.assume("h: s = 0 \\/ nat0_lt i (low_bit s)")
+    # Insert i s = set_bit i s.
+    p.have("h_set: Insert i s = set_bit i s").by(INSERT_AT, "i", "s")
+    # Non-zero: SET_BIT_NZ is unconditional.
+    p.have("h_nz_sb: ~(set_bit i s = 0)").by(SET_BIT_NZ, "i", "s")
+    p.have("h_nz: ~(Insert i s = 0)").by_rewrite_of(
+        "h_nz_sb", [SYM(p.fact("h_set"))]
+    )
+    # Canonical decomposition matches the structural one under the precondition.
+    p.have("h_lb_sb: low_bit (set_bit i s) = i").by(
+        LOW_BIT_SET_BIT_NEW, "i", "s", "h"
+    )
+    p.have("h_lb: low_bit (Insert i s) = i").by_rewrite_of(
+        "h_lb_sb", [SYM(p.fact("h_set"))]
+    )
+    p.have("h_cl_sb: clear_low (set_bit i s) = s").by(
+        CLEAR_LOW_SET_BIT_NEW, "i", "s", "h"
+    )
+    p.have("h_cl: clear_low (Insert i s) = s").by_rewrite_of(
+        "h_cl_sb", [SYM(p.fact("h_set"))]
+    )
+    # Specialise HF_TO_QHF_AT_NZ at (Insert i s) and discharge the non-zero
+    # side condition; rewrite the canonical args back to (i, s).
+    rec_nz = SPEC(p._parse("Insert i s"), HF_TO_QHF_AT_NZ)
+    p.have(
+        "h_rec: hf_to_qhf (Insert i s) = "
+        "Insert_t (hf_to_qhf (low_bit (Insert i s))) "
+        "(hf_to_qhf (clear_low (Insert i s)))"
+    ).by(rec_nz, "h_nz")
+    p.thus(
+        "hf_to_qhf (Insert i s) = Insert_t (hf_to_qhf i) (hf_to_qhf s)"
+    ).by_rewrite_of("h_rec", ["h_lb", "h_cl"])
+
+
 # B1.0 (b) -- Pair_ord representability.
 # Needed for the trace HF set: the trace consists of Pair_ord-encoded
 # (sub-shape, output-shape) entries, and Q must prove each entry's shape
@@ -4667,6 +4723,9 @@ if __name__ == "__main__":
     )
     print(
         "    HF_TO_QHF_AT_NZ                       : |- !n. ~(n = 0) ==> hf_to_qhf n = Insert_t (hf_to_qhf (low_bit n)) (hf_to_qhf (clear_low n))  (canonical low-bit decomposition)"
+    )
+    print(
+        "    HF_TO_QHF_AT_INSERT_LOW               :", pp_thm(HF_TO_QHF_AT_INSERT_LOW)
     )
     print(
         "    IS_PAIR_ORD_REPRESENTS (SORRY)        : |- !x y. Prov_Q (.. is_Pair_ord_internal .. (hf_to_qhf (Pair_ord x y)) ..)"
