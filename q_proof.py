@@ -326,6 +326,71 @@ Q_AXIOMS = [
 
 
 # ---------------------------------------------------------------------------
+# PROPOSED EXTENSION (NOT YET LANDED) -- Q + HF primitives.
+#
+# Motivation. Stage 3C/3D require a way to talk about finite sequences
+# (proof lists, substitute traces) inside Q's own language. The
+# textbook route is Goedel's beta function via the Chinese Remainder
+# Theorem (~150 lines) plus pow2 on top (~80 lines) plus bit-level
+# decoding (~100 lines) before any of the *_internal predicates can be
+# stated. The HOL-level ``hf_sets.py`` already gives us exactly the
+# combinatorial substrate we want -- bit-encoded HF sets with In,
+# Empty, Insert, Singleton, Pair, Pair_ord -- but inside Q we cannot
+# reuse it without internalizing the bit predicate, which itself
+# needs sequence coding (circular). Strengthening Q to make HF
+# primitive breaks that bootstrap.
+#
+# Additions to Q's signature (q_syntax.py side):
+#   * Term constructor   Insert_t : nat0 -> nat0 -> nat0
+#   * Atomic formula     In_a : nat0 -> nat0 -> nat0
+#                        (encoded analogously to Eq_a; same Pair_ord
+#                        tag layout, just a fresh tag.)
+#   * Empty_t : nat0     (constant term; encodes ``Zero_t`` reused, or
+#                        a fresh tag.)
+#
+# Additions to Q's axiom list (this file):
+#   * Q8  empty:        !x. ~In x Empty
+#   * Q9  insert_same:  !i s. In i (Insert i s)
+#   * Q10 insert_diff:  !i j s. ~(i = j) -> (In j (Insert i s) <-> In j s)
+#   * Q11 extensional:  !a b. (!x. In x a = In x b) -> a = b
+#   * Q12 foundation:   !x y. In x y -> nat0_lt x y
+#
+# All five mirror existing HOL theorems in ``hf_sets.py`` /
+# ``bits.py`` (NOT_IN_EMPTY, IN_INSERT_SAME, IN_INSERT_DIFF, IN_EXT,
+# IN_LT). HF |= Q + (Q8-Q12) is therefore one HOL theorem citation
+# per axiom -- exactly the work already done in the HF stack.
+#
+# What this buys at Stage 3C/3D:
+#
+#   * ``mem_l_internal`` becomes a one-liner: list-as-HF-set,
+#     mem_l = In. No recursion-trace, no beta function.
+#   * ``substitute_internal`` is built from In + Insert + decidable
+#     pair/triple decoding; the substitute trace is an HF set of
+#     (input-shape, output-shape) pairs, and Q-internal verification
+#     is a Sigma_1 conjunction over its members.
+#   * ``Proof_Q_internal`` is the natural HF mirror of the HOL
+#     ``Proof_Q``: an HF set of formulas with valid_step_internal
+#     holding for each. The bottom-up construction
+#       mem_l_internal -> valid_step_internal -> Proof_Q_internal
+#     becomes ~150 lines instead of ~1500.
+#
+# Cost in lines:
+#   * +30  q_syntax.py: Insert_t / In_a / Empty_t encoding tags.
+#   * +80  this file:   Q8-Q12 definitions, IS_Q_AXIOM_HOLDS rows.
+#   * +20  is_q_axiom unfolding:  extend the disjunction chain.
+# Total: ~130 lines added; ~1500+ lines saved at Stage 3C/3D.
+#
+# Trust-base impact. The five new axioms are conservative over
+# Q + I_Sigma_0 + Exp (every model of bounded arithmetic with
+# exponentiation extends to a Q+HF model via Ackermann). In
+# particular Q + HF is consistent if Q is, since the HOL-level
+# ``hf_sets`` construction *is* a model. The first-incompleteness
+# theorem still holds verbatim for Q + HF; what's lost is the
+# textbook claim "weakest theory exhibiting incompleteness".
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
 # is_q_axiom -- decidable recogniser for the seven Q axioms.
 #
 #   is_q_axiom n  :<=>  n = Q1_axiom \/ n = Q2_axiom \/ ... \/ n = Q7_axiom

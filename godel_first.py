@@ -610,6 +610,24 @@ diag = mk_const("diag", [])
 # representation factors through ``substitute_internal`` (Stage 3C(a))
 # and ``numeral_internal`` (deferred). We axiomatize ``diag_internal``
 # directly to bypass the intermediate ``numeral_internal`` step.
+#
+# Planned alternative discharge path (Q + HF strengthening; see the
+# PROPOSED EXTENSION block at the end of q_proof.py's Q-axiom list):
+#
+#   * ``numeral_internal(x, y) := In y (Insert y Empty) /\ ...`` --
+#     numerals are concrete Pair_ord-tagged HF terms; the trace
+#     witnessing ``y = numeral x`` is an HF set of (k, numeral k)
+#     pairs for k <= x, verified by structural induction on x via
+#     foundation Q12.
+#   * ``diag_internal := substitute_internal[F:=var_x, t:=numeral_internal,
+#                                            v:=var_x, r:=var_y]``
+#     -- composition of substitute_internal with numeral_internal,
+#     both Sigma_1, expressible in Q + HF without any further
+#     sequence-coding machinery.
+#   * DIAG_REPRESENTS / DIAG_FUNCTIONAL: forward direction by
+#     exhibiting the composite trace HF set; functionality from
+#     SUBSTITUTE_REPRESENTS uniqueness + HF extensionality (Q11).
+#   * Lines: ~80 vs ~400 in the beta-function path.
 # ---------------------------------------------------------------------------
 
 
