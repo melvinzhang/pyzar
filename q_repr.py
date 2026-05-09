@@ -149,7 +149,6 @@ from tactics import (
 from fusion import vsubst, aty, DEDUCT_ANTISYM_RULE, new_constant
 from q_proof import (
     var_x,
-    var_z,
     VAR_Z_DEF,
     nil_l,
     cons_l,
@@ -2189,8 +2188,9 @@ REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 # the trace HF set explicitly (|F|-many closed Pair_ord numerals);
 # verification conjuncts are decidable equalities + In-membership
 # facts, all Sigma_0 in Q + HF. Estimated ~150 lines vs ~1500 for the
-# beta-function path. Prerequisite: extend is_term/is_form/free_in/
-# substitute in q_syntax.py to recognise Insert_t and In_a.
+# beta-function path. The structural recognisers in q_syntax.py
+# (is_term, is_form, free_in, substitute) already cover Insert_t and
+# In_a, so this can be attempted directly.
 # ---------------------------------------------------------------------------
 
 
@@ -2311,8 +2311,7 @@ def SUBSTITUTE_REPRESENTS(p):
 # Side conditions IS_FORM and FREE_IN become routine once
 # Prov_Q_internal has its defining body, both decided by the same
 # syntactic recursion that verifies is_form for the connectives in
-# q_syntax.py. Prerequisite: extend is_form to recognise In_a (see
-# the corresponding TODO in q_proof.py).
+# q_syntax.py (which already covers In_a via IS_FORM_AT_IN).
 # ---------------------------------------------------------------------------
 
 

@@ -235,14 +235,12 @@ Forall_f = mk_const("Forall_f", [])
 # ---------------------------------------------------------------------------
 # Q + HF primitives -- Insert_t, In_a (fresh tags 9, 10); Empty_t aliases
 # Zero_t. See q_proof.py's Q + HF design-notes block (after the Q8-Q12
-# axiom encodings) for the rationale.
-#
-# TODO -- the structural recognisers (is_term, is_form, free_in,
-# substitute) below are still Q-arithmetic only. Extend them to
-# recognise Insert_t (term ctor) and In_a (atomic formula) so the
-# logical-axiom schemas (is_K, is_S, ...) accept formulas mentioning
-# them. Each predicate needs a new disjunct in its body, a matching
-# mono_iff_*_step in the MONO proof, and an _AT recursion equation.
+# axiom encodings) for the rationale. The structural recognisers below
+# (is_term, is_form, free_in, substitute) all carry matching disjuncts
+# and AT-equations for the new constructors:
+#   * is_term recognises Insert_t (binary recursive).
+#   * is_form recognises In_a (atomic; both slots checked via is_term).
+#   * free_in / substitute have AT-equations for both.
 # ---------------------------------------------------------------------------
 
 EMPTY_T_DEF = define("Empty_t", parse_type("nat0"), "Zero_t")
@@ -525,6 +523,22 @@ NAT0_LT_FORALL_F_R = _proof_lt_binary_right(
     "NAT0_LT_FORALL_F_R", "n", "phi", "Forall_f", FORALL_F_AT, _FORALL_F_TAG
 )
 
+# Q + HF size lemmas (tags 9, 10).
+_INSERT_T_TAG = "SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))))"
+_IN_A_TAG = "SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))))))"
+NAT0_LT_INSERT_T_L = _proof_lt_binary_left(
+    "NAT0_LT_INSERT_T_L", "t1", "t2", "Insert_t", INSERT_T_AT, _INSERT_T_TAG
+)
+NAT0_LT_INSERT_T_R = _proof_lt_binary_right(
+    "NAT0_LT_INSERT_T_R", "t1", "t2", "Insert_t", INSERT_T_AT, _INSERT_T_TAG
+)
+NAT0_LT_IN_A_L = _proof_lt_binary_left(
+    "NAT0_LT_IN_A_L", "t1", "t2", "In_a", IN_A_AT, _IN_A_TAG
+)
+NAT0_LT_IN_A_R = _proof_lt_binary_right(
+    "NAT0_LT_IN_A_R", "t1", "t2", "In_a", IN_A_AT, _IN_A_TAG
+)
+
 
 # ---------------------------------------------------------------------------
 # Constructor injectivity.
@@ -662,6 +676,12 @@ FORALL_F_INJ = _proof_binary_inj(
     FORALL_F_AT,
     _FORALL_F_TAG,
 )
+INSERT_T_INJ = _proof_binary_inj(
+    "INSERT_T_INJ", "a1", "b1", "a2", "b2", "Insert_t", INSERT_T_AT, _INSERT_T_TAG
+)
+IN_A_INJ = _proof_binary_inj(
+    "IN_A_INJ", "a1", "b1", "a2", "b2", "In_a", IN_A_AT, _IN_A_TAG
+)
 
 
 # ---------------------------------------------------------------------------
@@ -770,8 +790,8 @@ def _prove_tag_neq(thm_name, m, n):
 # 36 once; each is ~5-10 lines through _prove_tag_neq's loop.
 
 _TAG_NEQS = {}
-for _m in range(9):
-    for _n in range(_m + 1, 9):
+for _m in range(11):
+    for _n in range(_m + 1, 11):
         _TAG_NEQS[(_m, _n)] = _prove_tag_neq(f"_TAG_NEQ_{_m}_{_n}", _m, _n)
 
 
@@ -852,6 +872,12 @@ IMP_F_NEQ_ZERO = _proof_ctor_neq_zero_binary(
 FORALL_F_NEQ_ZERO = _proof_ctor_neq_zero_binary(
     "FORALL_F_NEQ_ZERO", "n", "phi", "Forall_f", FORALL_F_AT, _FORALL_F_TAG
 )
+INSERT_T_NEQ_ZERO = _proof_ctor_neq_zero_binary(
+    "INSERT_T_NEQ_ZERO", "t1", "t2", "Insert_t", INSERT_T_AT, _INSERT_T_TAG
+)
+IN_A_NEQ_ZERO = _proof_ctor_neq_zero_binary(
+    "IN_A_NEQ_ZERO", "t1", "t2", "In_a", IN_A_AT, _IN_A_TAG
+)
 
 
 # ---------------------------------------------------------------------------
@@ -878,6 +904,8 @@ _CTORS = {
     "Not_f": _ctor_decl("Not_f", NOT_F_AT, 6, ["phi"], _NOT_F_TAG),
     "Imp_f": _ctor_decl("Imp_f", IMP_F_AT, 7, ["phi1", "phi2"], _IMP_F_TAG),
     "Forall_f": _ctor_decl("Forall_f", FORALL_F_AT, 8, ["n", "phi"], _FORALL_F_TAG),
+    "Insert_t": _ctor_decl("Insert_t", INSERT_T_AT, 9, ["t1", "t2"], _INSERT_T_TAG),
+    "In_a": _ctor_decl("In_a", IN_A_AT, 10, ["t1", "t2"], _IN_A_TAG),
 }
 
 
@@ -959,6 +987,8 @@ _CTOR_NAMES = [
     "Not_f",
     "Imp_f",
     "Forall_f",
+    "Insert_t",
+    "In_a",
 ]
 
 CTOR_DISJOINTNESS = {}  # (name1, name2) -> theorem
@@ -1647,6 +1677,8 @@ _CTOR_NEQ_ZERO = {
     "Not_f": NOT_F_NEQ_ZERO,
     "Imp_f": IMP_F_NEQ_ZERO,
     "Forall_f": FORALL_F_NEQ_ZERO,
+    "Insert_t": INSERT_T_NEQ_ZERO,
+    "In_a": IN_A_NEQ_ZERO,
 }
 _CTOR_INJ = {
     "Succ_t": SUCC_T_INJ,
@@ -1657,6 +1689,8 @@ _CTOR_INJ = {
     "Eq_f": EQ_F_INJ,
     "Imp_f": IMP_F_INJ,
     "Forall_f": FORALL_F_INJ,
+    "Insert_t": INSERT_T_INJ,
+    "In_a": IN_A_INJ,
 }
 
 
@@ -2304,6 +2338,19 @@ _n_var_top = Var("n", nat0_ty)
 
 def _is_term_body(f_t, n_t):
     """The disjunction body of ``_is_term_F`` at terms ``f_t`` and ``n_t``."""
+
+    def _bin_rec(ctor):
+        return mk_exists(
+            _a_n0,
+            mk_exists(
+                _b_n0,
+                mk_and(
+                    mk_eq(n_t, mk_app(ctor, _a_n0, _b_n0)),
+                    mk_and(mk_app(f_t, _a_n0), mk_app(f_t, _b_n0)),
+                ),
+            ),
+        )
+
     return mk_or(
         mk_eq(n_t, Zero_t),
         mk_or(
@@ -2317,25 +2364,10 @@ def _is_term_body(f_t, n_t):
             mk_or(
                 mk_exists(_x_n0, mk_eq(n_t, mk_app(Var_t, _x_n0))),
                 mk_or(
-                    mk_exists(
-                        _a_n0,
-                        mk_exists(
-                            _b_n0,
-                            mk_and(
-                                mk_eq(n_t, mk_app(Plus_t, _a_n0, _b_n0)),
-                                mk_and(mk_app(f_t, _a_n0), mk_app(f_t, _b_n0)),
-                            ),
-                        ),
-                    ),
-                    mk_exists(
-                        _a_n0,
-                        mk_exists(
-                            _b_n0,
-                            mk_and(
-                                mk_eq(n_t, mk_app(Times_t, _a_n0, _b_n0)),
-                                mk_and(mk_app(f_t, _a_n0), mk_app(f_t, _b_n0)),
-                            ),
-                        ),
+                    _bin_rec(Plus_t),
+                    mk_or(
+                        _bin_rec(Times_t),
+                        _bin_rec(Insert_t),
                     ),
                 ),
             ),
@@ -2368,7 +2400,12 @@ def IS_TERM_MONO(p):
     eq_var = REFL(p._parse("?x. n = Var_t x"))
     eq_plus = mono_iff_binary_step(Plus_t, NAT0_LT_PLUS_T_L, NAT0_LT_PLUS_T_R, h_th)
     eq_times = mono_iff_binary_step(Times_t, NAT0_LT_TIMES_T_L, NAT0_LT_TIMES_T_R, h_th)
-    body_eq = or_chain_collapse([eq_zero, eq_succ, eq_var, eq_plus, eq_times])
+    eq_insert = mono_iff_binary_step(
+        Insert_t, NAT0_LT_INSERT_T_L, NAT0_LT_INSERT_T_R, h_th
+    )
+    body_eq = or_chain_collapse(
+        [eq_zero, eq_succ, eq_var, eq_plus, eq_times, eq_insert]
+    )
 
     p.thus("_is_term_F f n = _is_term_F g n").by_unfold(body_eq, _IS_TERM_F_DEF)
 
@@ -2400,6 +2437,7 @@ IS_TERM_AT_SUCC = derive_rec_eq(IS_TERM_REC, "Succ_t", ["t"])
 IS_TERM_AT_VAR = derive_rec_eq(IS_TERM_REC, "Var_t", ["v"])
 IS_TERM_AT_PLUS = derive_rec_eq(IS_TERM_REC, "Plus_t", ["t1", "t2"])
 IS_TERM_AT_TIMES = derive_rec_eq(IS_TERM_REC, "Times_t", ["t1", "t2"])
+IS_TERM_AT_INSERT = derive_rec_eq(IS_TERM_REC, "Insert_t", ["t1", "t2"])
 
 
 # ---------------------------------------------------------------------------
@@ -2422,17 +2460,21 @@ is_term_const = mk_const("is_term", [])
 
 
 def _is_form_body(f_t, n_t):
-    return mk_or(
-        mk_exists(
+    def _atomic(ctor):
+        # ?a b. n = ctor a b /\ is_term a /\ is_term b
+        return mk_exists(
             _a_n0,
             mk_exists(
                 _b_n0,
                 mk_and(
-                    mk_eq(n_t, mk_app(Eq_f, _a_n0, _b_n0)),
+                    mk_eq(n_t, mk_app(ctor, _a_n0, _b_n0)),
                     mk_and(mk_app(is_term_const, _a_n0), mk_app(is_term_const, _b_n0)),
                 ),
             ),
-        ),
+        )
+
+    return mk_or(
+        _atomic(Eq_f),
         mk_or(
             mk_exists(
                 _x_n0,
@@ -2452,15 +2494,18 @@ def _is_form_body(f_t, n_t):
                         ),
                     ),
                 ),
-                mk_exists(
-                    _a_n0,
+                mk_or(
                     mk_exists(
-                        _b_n0,
-                        mk_and(
-                            mk_eq(n_t, mk_app(Forall_f, _a_n0, _b_n0)),
-                            mk_app(f_t, _b_n0),
+                        _a_n0,
+                        mk_exists(
+                            _b_n0,
+                            mk_and(
+                                mk_eq(n_t, mk_app(Forall_f, _a_n0, _b_n0)),
+                                mk_app(f_t, _b_n0),
+                            ),
                         ),
                     ),
+                    _atomic(In_a),
                 ),
             ),
         ),
@@ -2491,7 +2536,8 @@ def IS_FORM_MONO(p):
     eq_not = mono_iff_unary_step(Not_f, NAT0_LT_NOT_F, h_th)
     eq_imp = mono_iff_binary_step(Imp_f, NAT0_LT_IMP_F_L, NAT0_LT_IMP_F_R, h_th)
     eq_forall = mono_iff_binary_right_step(Forall_f, NAT0_LT_FORALL_F_R, h_th)
-    body_eq = or_chain_collapse([eq_eq, eq_not, eq_imp, eq_forall])
+    eq_in = REFL(p._parse("?a b. n = In_a a b /\\ is_term a /\\ is_term b"))
+    body_eq = or_chain_collapse([eq_eq, eq_not, eq_imp, eq_forall, eq_in])
 
     p.thus("_is_form_F f n = _is_form_F g n").by_unfold(body_eq, _IS_FORM_F_DEF)
 
@@ -2509,6 +2555,7 @@ IS_FORM_AT_EQ = derive_rec_eq(IS_FORM_REC, "Eq_f", ["t1", "t2"])
 IS_FORM_AT_NOT = derive_rec_eq(IS_FORM_REC, "Not_f", ["phi"])
 IS_FORM_AT_IMP = derive_rec_eq(IS_FORM_REC, "Imp_f", ["phi1", "phi2"])
 IS_FORM_AT_FORALL = derive_rec_eq(IS_FORM_REC, "Forall_f", ["v", "phi"])
+IS_FORM_AT_IN = derive_rec_eq(IS_FORM_REC, "In_a", ["t1", "t2"])
 
 
 # ---------------------------------------------------------------------------
@@ -2587,17 +2634,26 @@ def _free_in_body(f_t, n_t, v_t):
                             ),
                             mk_or(
                                 _bin_disj(Imp_f),
-                                mk_exists(
-                                    _a_n0,
+                                mk_or(
                                     mk_exists(
-                                        _b_n0,
-                                        mk_and(
-                                            mk_eq(n_t, mk_app(Forall_f, _a_n0, _b_n0)),
+                                        _a_n0,
+                                        mk_exists(
+                                            _b_n0,
                                             mk_and(
-                                                mk_not(mk_eq(v_t, _a_n0)),
-                                                mk_app(f_t, _b_n0, v_t),
+                                                mk_eq(
+                                                    n_t,
+                                                    mk_app(Forall_f, _a_n0, _b_n0),
+                                                ),
+                                                mk_and(
+                                                    mk_not(mk_eq(v_t, _a_n0)),
+                                                    mk_app(f_t, _b_n0, v_t),
+                                                ),
                                             ),
                                         ),
+                                    ),
+                                    mk_or(
+                                        _bin_disj(Insert_t),
+                                        _bin_disj(In_a),
                                     ),
                                 ),
                             ),
@@ -2654,6 +2710,12 @@ def FREE_IN_MONO(p):
         Imp_f, NAT0_LT_IMP_F_L, NAT0_LT_IMP_F_R, h_th, _v_n0
     )
     eq_forall = mono_iff_forall_pw_step(NAT0_LT_FORALL_F_R, h_th, _v_n0)
+    eq_insert = mono_iff_binary_disj_pw_step(
+        Insert_t, NAT0_LT_INSERT_T_L, NAT0_LT_INSERT_T_R, h_th, _v_n0
+    )
+    eq_in = mono_iff_binary_disj_pw_step(
+        In_a, NAT0_LT_IN_A_L, NAT0_LT_IN_A_R, h_th, _v_n0
+    )
     body_eq = or_chain_collapse(
         [
             eq_succ,
@@ -2664,6 +2726,8 @@ def FREE_IN_MONO(p):
             eq_not,
             eq_imp,
             eq_forall,
+            eq_insert,
+            eq_in,
         ]
     )
     # body_eq : {h_concl} |- body[f, n, v] = body[g, n, v].
@@ -2692,6 +2756,8 @@ FREE_IN_AT_EQ = derive_rec_eq_pw(FREE_IN_REC, "Eq_f", ["t1", "t2"])
 FREE_IN_AT_NOT = derive_rec_eq_pw(FREE_IN_REC, "Not_f", ["phi"])
 FREE_IN_AT_IMP = derive_rec_eq_pw(FREE_IN_REC, "Imp_f", ["phi1", "phi2"])
 FREE_IN_AT_FORALL = derive_rec_eq_pw(FREE_IN_REC, "Forall_f", ["w", "phi"])
+FREE_IN_AT_INSERT = derive_rec_eq_pw(FREE_IN_REC, "Insert_t", ["t1", "t2"])
+FREE_IN_AT_IN = derive_rec_eq_pw(FREE_IN_REC, "In_a", ["t1", "t2"])
 
 
 # ---------------------------------------------------------------------------
@@ -2833,31 +2899,80 @@ def _substitute_body(f_t, n_t, new_t_t, v_t, r_t):
                                             ),
                                         ),
                                     ),
-                                    mk_exists(
-                                        _a_n0,
+                                    mk_or(
                                         mk_exists(
-                                            _b_n0,
-                                            mk_and(
-                                                mk_eq(
-                                                    n_t, mk_app(Forall_f, _a_n0, _b_n0)
-                                                ),
-                                                mk_or(
-                                                    mk_and(
-                                                        mk_eq(v_t, _a_n0),
-                                                        mk_eq(
-                                                            r_t,
-                                                            mk_app(
-                                                                Forall_f, _a_n0, _b_n0
+                                            _a_n0,
+                                            mk_exists(
+                                                _b_n0,
+                                                mk_and(
+                                                    mk_eq(
+                                                        n_t,
+                                                        mk_app(Forall_f, _a_n0, _b_n0),
+                                                    ),
+                                                    mk_or(
+                                                        mk_and(
+                                                            mk_eq(v_t, _a_n0),
+                                                            mk_eq(
+                                                                r_t,
+                                                                mk_app(
+                                                                    Forall_f,
+                                                                    _a_n0,
+                                                                    _b_n0,
+                                                                ),
+                                                            ),
+                                                        ),
+                                                        mk_and(
+                                                            mk_not(mk_eq(v_t, _a_n0)),
+                                                            mk_eq(
+                                                                r_t,
+                                                                mk_app(
+                                                                    Forall_f,
+                                                                    _a_n0,
+                                                                    fc(_b_n0),
+                                                                ),
                                                             ),
                                                         ),
                                                     ),
+                                                ),
+                                            ),
+                                        ),
+                                        mk_or(
+                                            mk_exists(
+                                                _a_n0,
+                                                mk_exists(
+                                                    _b_n0,
                                                     mk_and(
-                                                        mk_not(mk_eq(v_t, _a_n0)),
+                                                        mk_eq(
+                                                            n_t,
+                                                            mk_app(
+                                                                Insert_t, _a_n0, _b_n0
+                                                            ),
+                                                        ),
                                                         mk_eq(
                                                             r_t,
                                                             mk_app(
-                                                                Forall_f,
-                                                                _a_n0,
+                                                                Insert_t,
+                                                                fc(_a_n0),
+                                                                fc(_b_n0),
+                                                            ),
+                                                        ),
+                                                    ),
+                                                ),
+                                            ),
+                                            mk_exists(
+                                                _a_n0,
+                                                mk_exists(
+                                                    _b_n0,
+                                                    mk_and(
+                                                        mk_eq(
+                                                            n_t,
+                                                            mk_app(In_a, _a_n0, _b_n0),
+                                                        ),
+                                                        mk_eq(
+                                                            r_t,
+                                                            mk_app(
+                                                                In_a,
+                                                                fc(_a_n0),
                                                                 fc(_b_n0),
                                                             ),
                                                         ),
@@ -2997,6 +3112,24 @@ def SUBSTITUTE_MONO(p):
         _r_n0,
         _v_n0,
     )
+    eq_insert = mono_iff_value_binary_pw_step(
+        Insert_t,
+        NAT0_LT_INSERT_T_L,
+        NAT0_LT_INSERT_T_R,
+        h_th,
+        args,
+        _r_n0,
+        lambda a, b: mk_app(Insert_t, a, b),
+    )
+    eq_in = mono_iff_value_binary_pw_step(
+        In_a,
+        NAT0_LT_IN_A_L,
+        NAT0_LT_IN_A_R,
+        h_th,
+        args,
+        _r_n0,
+        lambda a, b: mk_app(In_a, a, b),
+    )
 
     body_eq = or_chain_collapse(
         [
@@ -3009,6 +3142,8 @@ def SUBSTITUTE_MONO(p):
             eq_not,
             eq_imp,
             eq_forall,
+            eq_insert,
+            eq_in,
         ]
     )
     # body_eq : {h_concl} |- body[f, n, new_t, v, r] = body[g, n, new_t, v, r]
@@ -3083,6 +3218,18 @@ SUBSTITUTE_AT_IMP = derive_rec_eq_select(
     SUBSTITUTE_REC,
     "Imp_f",
     ["phi1", "phi2"],
+    [_new_t_n0, _v_n0],
+)
+SUBSTITUTE_AT_INSERT = derive_rec_eq_select(
+    SUBSTITUTE_REC,
+    "Insert_t",
+    ["t1", "t2"],
+    [_new_t_n0, _v_n0],
+)
+SUBSTITUTE_AT_IN = derive_rec_eq_select(
+    SUBSTITUTE_REC,
+    "In_a",
+    ["t1", "t2"],
     [_new_t_n0, _v_n0],
 )
 # Conditional cases: each yields a HIT (cond branch) and MISS (~cond
@@ -3263,6 +3410,7 @@ if __name__ == "__main__":
     print("    IS_TERM_AT_VAR   :", pp_thm(IS_TERM_AT_VAR))
     print("    IS_TERM_AT_PLUS  :", pp_thm(IS_TERM_AT_PLUS))
     print("    IS_TERM_AT_TIMES :", pp_thm(IS_TERM_AT_TIMES))
+    print("    IS_TERM_AT_INSERT:", pp_thm(IS_TERM_AT_INSERT))
     print()
     print("Stage 1 (b) -- is_form predicate.")
     print("    IS_FORM_MONO   :", pp_thm(IS_FORM_MONO))
@@ -3272,6 +3420,7 @@ if __name__ == "__main__":
     print("    IS_FORM_AT_NOT    :", pp_thm(IS_FORM_AT_NOT))
     print("    IS_FORM_AT_IMP    :", pp_thm(IS_FORM_AT_IMP))
     print("    IS_FORM_AT_FORALL :", pp_thm(IS_FORM_AT_FORALL))
+    print("    IS_FORM_AT_IN     :", pp_thm(IS_FORM_AT_IN))
     print()
     print("Stage 1 (c) -- free_in predicate.")
     print("    FREE_IN_MONO   :", pp_thm(FREE_IN_MONO))
@@ -3285,6 +3434,8 @@ if __name__ == "__main__":
     print("    FREE_IN_AT_NOT    :", pp_thm(FREE_IN_AT_NOT))
     print("    FREE_IN_AT_IMP    :", pp_thm(FREE_IN_AT_IMP))
     print("    FREE_IN_AT_FORALL :", pp_thm(FREE_IN_AT_FORALL))
+    print("    FREE_IN_AT_INSERT :", pp_thm(FREE_IN_AT_INSERT))
+    print("    FREE_IN_AT_IN     :", pp_thm(FREE_IN_AT_IN))
     print()
     print("Stage 1 (c) -- substitute.")
     print("    SUBSTITUTE_MONO         :", pp_thm(SUBSTITUTE_MONO))
@@ -3301,3 +3452,5 @@ if __name__ == "__main__":
     print("    SUBSTITUTE_AT_IMP       :", pp_thm(SUBSTITUTE_AT_IMP))
     print("    SUBSTITUTE_AT_FORALL_HIT :", pp_thm(SUBSTITUTE_AT_FORALL_HIT))
     print("    SUBSTITUTE_AT_FORALL_MISS:", pp_thm(SUBSTITUTE_AT_FORALL_MISS))
+    print("    SUBSTITUTE_AT_INSERT     :", pp_thm(SUBSTITUTE_AT_INSERT))
+    print("    SUBSTITUTE_AT_IN         :", pp_thm(SUBSTITUTE_AT_IN))

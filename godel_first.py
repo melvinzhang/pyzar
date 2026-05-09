@@ -627,9 +627,7 @@ diag = mk_const("diag", [])
 #     exhibiting the composite trace HF set; functionality from
 #     SUBSTITUTE_REPRESENTS uniqueness + HF extensionality (Q11).
 # Estimated ~80 lines vs ~400 in the beta-function path. Depends on
-# the substitute_internal / Prov_Q_internal TODOs in q_repr.py, which
-# in turn need is_term/is_form extended for Insert_t and In_a (see
-# q_proof.py TODO).
+# the substitute_internal / Prov_Q_internal TODOs in q_repr.py.
 # ---------------------------------------------------------------------------
 
 

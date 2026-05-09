@@ -117,10 +117,11 @@ from q_syntax import (
     Not_f,
     Imp_f,
     Forall_f,
-    Empty_t,
-    Insert_t,
-    In_a,
 )
+
+# The HF primitives Empty_t, Insert_t, In_a are referenced by name from
+# parser strings in this file; importing q_syntax above is sufficient
+# to register them as kernel constants.
 
 
 # ---------------------------------------------------------------------------
@@ -450,17 +451,12 @@ Q_AXIOMS = Q_AXIOMS_BASE + Q_AXIOMS_HF
 # exhibiting incompleteness". The five axioms are conservative over
 # Q + I_Sigma_0 + Exp (Ackermann encoding).
 #
-# TODO -- follow-up work to actually exploit Q+HF at Stage 3C/3D:
+# The structural recognisers in q_syntax.py (is_term, is_form,
+# free_in, substitute) already carry matching disjuncts and AT-
+# equations for Insert_t and In_a, so Q-formulas mentioning the new
+# atomic In_a pass the is_form gate of the logical-axiom schemas.
 #
-#   * Extend the structural recognisers in q_syntax.py to know about
-#     the new constructors:
-#       - is_term: add an Insert_t disjunct (binary recursive).
-#       - is_form: add an In_a disjunct (binary, non-recursive in f --
-#                  both slots are terms, checked via is_term).
-#       - free_in / substitute: add Insert_t (term) and In_a (atomic)
-#                  AT-equations and extend the MONO proofs.
-#     Without this, the logical-axiom schemas (is_K, is_S, ...) cannot
-#     accept formulas mentioning In_a, since they gate on is_form.
+# TODO -- follow-up work to actually exploit Q+HF at Stage 3C/3D:
 #
 #   * Rewrite the *_internal predicates in q_repr.py against the new
 #     primitives:
