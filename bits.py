@@ -993,6 +993,68 @@ def BIT_LT(p):
                 )
 
 
+# ---------------------------------------------------------------------------
+# 8. ``low_bit n`` and ``clear_low n`` -- canonical decomposition stubs.
+#
+#   low_bit n   :=  position of n's lowest set bit  (junk at n = 0)
+#   clear_low n :=  n with its lowest set bit cleared (clear_low 0 = 0)
+#
+# Used by ``hf_to_qhf`` (q_repr.py) to drive the canonical low-bit-first
+# Insert_t-tower bridge from HF sets (bit-encoded) to Q-syntax.
+#
+# STUBS: declared as opaque ``new_constant``; the two side conditions
+#
+#   LOW_BIT_LT   : ~(n = 0) ==> nat0_lt (low_bit n) n
+#   CLEAR_LOW_LT : ~(n = 0) ==> nat0_lt (clear_low n) n
+#
+# (sufficient for the well-founded-recursion MONO obligation of
+# ``hf_to_qhf``) are sorry'd here. The remaining lemmas needed by
+# downstream representability proofs --
+#
+#   BIT_LOW_BIT, BIT_LOW_BIT_CLEAR_LOW, SET_BIT_LOW_BIT_CLEAR_LOW
+#
+# -- are added when those proofs land. Concretising ``low_bit`` /
+# ``clear_low`` and discharging all four/five sorries is a follow-up
+# (the natural definition is HALF-decreasing primitive recursion via
+# ``define_wf_lt``).
+# ---------------------------------------------------------------------------
+
+
+from fusion import new_constant as _new_constant  # noqa: E402
+
+_new_constant("low_bit", parse_type("nat0 -> nat0"))
+low_bit = mk_const("low_bit", [])
+
+_new_constant("clear_low", parse_type("nat0 -> nat0"))
+clear_low = mk_const("clear_low", [])
+
+_add_const("low_bit", low_bit)
+_add_const("clear_low", clear_low)
+
+
+@proof
+def LOW_BIT_LT(p):
+    """|- !n. ~(n = 0) ==> nat0_lt (low_bit n) n.
+
+    SORRY (stub). Holds because ``low_bit n`` is a member of n (its
+    lowest set-bit position), and any member is < the set under
+    nat0_lt (BIT_LT).
+    """
+    p.goal("!n. ~(n = 0) ==> nat0_lt (low_bit n) n")
+    p.sorry()
+
+
+@proof
+def CLEAR_LOW_LT(p):
+    """|- !n. ~(n = 0) ==> nat0_lt (clear_low n) n.
+
+    SORRY (stub). Holds because clearing one set bit strictly reduces
+    the bit-encoded set under nat0_lt.
+    """
+    p.goal("!n. ~(n = 0) ==> nat0_lt (clear_low n) n")
+    p.sorry()
+
+
 if __name__ == "__main__":
     from parser import pp_thm
 

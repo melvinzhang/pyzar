@@ -137,7 +137,8 @@ from q_syntax import (
     Not_f,  # noqa: F401  -- parser alias for is_substitute_step
     Imp_f,  # noqa: F401  -- parser alias for is_substitute_step
     Forall_f,  # noqa: F401  -- parser alias for is_substitute_step
-    Insert_t,  # noqa: F401  -- parser alias for is_substitute_step
+    Insert_t,
+    Empty_t,  # noqa: F401  -- used in _hf_to_qhf_body
     In_a,  # noqa: F401  -- parser alias for is_substitute_step
     IS_TERM_REC,
     IS_TERM_AT_SUCC,
@@ -156,7 +157,21 @@ from hf_sets import (
     Pair_ord,  # noqa: F401  -- parser alias for is_substitute_step
     Insert,  # noqa: F401  -- parser alias for hf_to_qhf bridge
     Empty,  # noqa: F401  -- parser alias for hf_to_qhf bridge
+    EMPTY_DEF,  # used by HF_TO_QHF_AT_EMPTY to fold Empty into 0
 )
+from bits import (  # noqa: E402 -- canonical low-bit decomposition for hf_to_qhf
+    low_bit,
+    clear_low,
+    LOW_BIT_LT,
+    CLEAR_LOW_LT,
+    COND_T_NAT0,
+    COND_F_NAT0,
+)
+from classical import (  # noqa: E402 -- COND machinery for hf_to_qhf body
+    mk_cond,
+    EXCLUDED_MIDDLE,
+)
+from tactics import EQT_INTRO, EQF_INTRO  # noqa: E402,F401  -- used in HF_TO_QHF_MONO/_AT_NZ
 from axioms import mk_select
 from axioms import dest_exists
 from tactics import (
@@ -3051,59 +3066,171 @@ def TRACE_EXISTS(p):
 # is Insert-tower-shaped from Q's perspective, so Q8-Q10 fire on
 # membership / non-membership queries directly.
 #
-# Recursion structure (canonical form):
-#   hf_to_qhf 0           = Empty_t.
-#   hf_to_qhf (Insert i s) = Insert_t (hf_to_qhf i) (hf_to_qhf s).
-#       (Side condition: ~In i s, ensuring ``Insert i s`` actually adds
-#       a fresh element so the recursion strictly decreases on s.)
+# Recursion structure (canonical low-bit-first form):
+#   hf_to_qhf 0  = Empty_t.
+#   hf_to_qhf n  = Insert_t (hf_to_qhf (low_bit n)) (hf_to_qhf (clear_low n))
+#                  for n != 0.
+#       (Decomposition is deterministic: each non-empty set is split
+#        on its lowest set bit. ``low_bit n`` and ``clear_low n`` are
+#        both < n under nat0_lt, so the recursion is well-founded.)
 #
-# Currently declared as an opaque constant + SORRY'd unfolding equations.
-# Concrete construction: well-founded recursion on the input via
-# ``define_wf_lt`` over ``nat0_lt``, decomposing each non-empty set as
-# ``Insert (least_bit y) (clear_bit (least_bit y) y)`` and recursing on
-# both the chosen bit position (treated as a child set, hence transitive
-# HF recursion) and the cleared remainder.
-new_constant("hf_to_qhf", parse_type("nat0 -> nat0"))
-hf_to_qhf = mk_const("hf_to_qhf", [])
-# Register with the parser so ``hf_to_qhf`` resolves to the kernel constant
-# (rather than parsing as a free variable) inside goal strings.
-from parser import add_const as _add_const  # noqa: E402
+# Concrete construction: well-founded recursion on ``nat0_lt`` via
+# ``define_wf_lt`` with body
+#
+#     F f n = COND (n = 0) Empty_t
+#                  (Insert_t (f (low_bit n)) (f (clear_low n))).
+#
+# This is the *canonical low-bit-first* form: every non-empty set is
+# decomposed deterministically by its lowest set bit. The corresponding
+# recursion equation is ``HF_TO_QHF_AT_NZ`` (replaces the previous
+# opaque ``HF_TO_QHF_AT_INSERT``); a literal ``~In i s ==> hf_to_qhf
+# (Insert i s) = Insert_t (hf_to_qhf i) (hf_to_qhf s)`` for *arbitrary*
+# fresh ``i`` is HOL-inconsistent under ``Insert_t`` injectivity, so
+# downstream consumers walk the canonical structure instead.
+#
+# ``low_bit`` / ``clear_low`` are still opaque stubs (bits.py) with
+# only their MONO-relevant side conditions sorry'd. Concretising them
+# is task #7.
+_hf_to_qhf_fn_ty = parse_type("nat0 -> nat0")
+_hf_to_qhf_F_ty = parse_type("(nat0 -> nat0) -> nat0 -> nat0")
+_f_qhf = Var("f", _hf_to_qhf_fn_ty)
+_g_qhf = Var("g", _hf_to_qhf_fn_ty)
+_n_qhf = Var("n", nat0_ty)
 
-_add_const("hf_to_qhf", hf_to_qhf)
+
+def _hf_to_qhf_body(f_t, n_t):
+    """Body of ``_hf_to_qhf_F`` at the n-applied level."""
+    return mk_cond(
+        mk_eq(n_t, ZERO),
+        Empty_t,
+        mk_app(
+            Insert_t,
+            mk_app(f_t, mk_app(low_bit, n_t)),
+            mk_app(f_t, mk_app(clear_low, n_t)),
+        ),
+    )
+
+
+_HF_TO_QHF_F_DEF = define(
+    "_hf_to_qhf_F",
+    _hf_to_qhf_F_ty,
+    mk_abs(_f_qhf, mk_abs(_n_qhf, _hf_to_qhf_body(_f_qhf, _n_qhf))),
+)
+_HF_TO_QHF_F = mk_const("_hf_to_qhf_F", [])
+
+
+@proof
+def HF_TO_QHF_MONO(p):
+    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
+                  ==> _hf_to_qhf_F f n = _hf_to_qhf_F g n.
+
+    Value-valued MONO. Build the body equation
+        ``body[f, n] = body[g, n]``
+    by case-split on ``n = 0`` (T branch: COND collapses both to
+    Empty_t; F branch: f/g agree at low_bit n / clear_low n via the
+    hypothesis + LOW_BIT_LT / CLEAR_LOW_LT, so by_rewrite chains them
+    through the Insert_t branch). ``by_unfold`` then folds the body
+    equation back to the F-level via _HF_TO_QHF_F_DEF.
+    """
+    p.goal(
+        "!f g n. (!k. nat0_lt k n ==> f k = g k) "
+        "==> _hf_to_qhf_F f n = _hf_to_qhf_F g n",
+        types={
+            "f": _hf_to_qhf_fn_ty,
+            "g": _hf_to_qhf_fn_ty,
+            "n": nat0_ty,
+            "k": nat0_ty,
+        },
+    )
+    p.fix("f g n")
+    p.assume("h: !k. nat0_lt k n ==> f k = g k")
+
+    body_eq_str = (
+        "COND_nat0 (n = 0) Empty_t (Insert_t (f (low_bit n)) (f (clear_low n))) "
+        "= COND_nat0 (n = 0) Empty_t (Insert_t (g (low_bit n)) (g (clear_low n)))"
+    )
+
+    with p.have(f"body_eq: {body_eq_str}").proof():
+        with p.cases_on(EXCLUDED_MIDDLE, "n = 0"):
+            with p.case("hz: n = 0"):
+                p.have("hz_eq: (n = 0) = T").by(EQT_INTRO, "hz")
+                p.thus(body_eq_str).by_rewrite(["hz_eq", COND_T_NAT0])
+            with p.case("hnz: ~(n = 0)"):
+                p.have("hnz_eq: (n = 0) = F").by(EQF_INTRO, "hnz")
+                p.have("lb_lt: nat0_lt (low_bit n) n").by(LOW_BIT_LT, "n", "hnz")
+                p.have("cl_lt: nat0_lt (clear_low n) n").by(
+                    CLEAR_LOW_LT, "n", "hnz"
+                )
+                p.have("f_lb_eq: f (low_bit n) = g (low_bit n)").by(
+                    "h", "low_bit n", "lb_lt"
+                )
+                p.have("f_cl_eq: f (clear_low n) = g (clear_low n)").by(
+                    "h", "clear_low n", "cl_lt"
+                )
+                p.thus(body_eq_str).by_rewrite(
+                    ["hnz_eq", COND_F_NAT0, "f_lb_eq", "f_cl_eq"]
+                )
+
+    p.thus("_hf_to_qhf_F f n = _hf_to_qhf_F g n").by_unfold(
+        p.fact("body_eq"), _HF_TO_QHF_F_DEF
+    )
+
+
+HF_TO_QHF_DEF, _HF_TO_QHF_REC_RAW = define_wf_lt(
+    "hf_to_qhf",
+    _hf_to_qhf_fn_ty,
+    _HF_TO_QHF_F,
+    HF_TO_QHF_MONO,
+)
+hf_to_qhf = mk_const("hf_to_qhf", [])
+
+# |- !n. hf_to_qhf n =
+#        COND (n = 0) Empty_t (Insert_t (hf_to_qhf (low_bit n))
+#                                       (hf_to_qhf (clear_low n))).
+HF_TO_QHF_REC = _unfold_rec_via_F_def(_HF_TO_QHF_REC_RAW, _HF_TO_QHF_F_DEF)
 
 
 @proof
 def HF_TO_QHF_AT_EMPTY(p):
     """|- hf_to_qhf Empty = Empty_t.
 
-    SORRY. Base case of the well-founded recursion: the empty HF set
-    maps to the Q-syntax empty term. (HOL ``Empty`` and Q-syntax
-    ``Empty_t`` are both definitionally ``0 : nat0``, so the equation
-    is trivially true after unfolding once the recursion is concretely
-    constructed.)
+    Specialise HF_TO_QHF_REC at 0; the ``(0 = 0) = T`` branch of the
+    body collapses to ``Empty_t`` via COND_T_NAT0. EMPTY_DEF folds the
+    LHS from ``hf_to_qhf 0`` to ``hf_to_qhf Empty``.
     """
     p.goal("hf_to_qhf Empty = Empty_t")
-    p.sorry()
+    p.have("zero_eq_zero: (0 = 0) = T").by_thm(EQT_INTRO(REFL(ZERO)))
+    rec_at_0 = SPEC(ZERO, HF_TO_QHF_REC)
+    # rec_at_0 : |- hf_to_qhf 0 = COND (0 = 0) Empty_t (Insert_t ...)
+    p.thus("hf_to_qhf Empty = Empty_t").by_rewrite_of(
+        rec_at_0, [EMPTY_DEF, "zero_eq_zero", COND_T_NAT0]
+    )
 
 
 @proof
-def HF_TO_QHF_AT_INSERT(p):
-    """|- !i s. ~In i s ==>
-              hf_to_qhf (Insert i s) = Insert_t (hf_to_qhf i) (hf_to_qhf s).
+def HF_TO_QHF_AT_NZ(p):
+    """|- !n. ~(n = 0) ==>
+              hf_to_qhf n = Insert_t (hf_to_qhf (low_bit n))
+                                     (hf_to_qhf (clear_low n)).
 
-    SORRY. Step case: when ``i`` is a fresh element of ``s``, the
-    bit-encoded ``Insert i s`` corresponds to the Q-syntax Insert_t
-    applied to the bridge-encoded child and tail. The fresh-element
-    side condition ``~In i s`` ensures the recursion is well-defined
-    (set_bit is idempotent on already-set bits, so the canonical
-    decomposition picks ``i = least_bit (Insert i s)``, ``s =
-    clear_bit i (Insert i s)``).
+    Specialise HF_TO_QHF_REC at n; under ``~(n = 0)`` the body collapses
+    via ``(n = 0) = F`` + COND_F_NAT0 to the Insert_t branch. This is
+    the canonical low-bit decomposition equation: it replaces the
+    inconsistent ``~In i s ==> hf_to_qhf (Insert i s) = Insert_t ...``
+    form. Downstream consumers must walk this canonical structure.
     """
     p.goal(
-        "!i s. ~In i s ==> "
-        "hf_to_qhf (Insert i s) = Insert_t (hf_to_qhf i) (hf_to_qhf s)"
+        "!n. ~(n = 0) ==> "
+        "hf_to_qhf n = Insert_t (hf_to_qhf (low_bit n)) (hf_to_qhf (clear_low n))"
     )
-    p.sorry()
+    p.fix("n")
+    p.assume("hnz: ~(n = 0)")
+    p.have("hnz_eq: (n = 0) = F").by(EQF_INTRO, "hnz")
+    rec_at_n = SPEC(p._parse("n"), HF_TO_QHF_REC)
+    # rec_at_n : |- hf_to_qhf n = COND (n = 0) Empty_t (Insert_t ...)
+    p.thus(
+        "hf_to_qhf n = Insert_t (hf_to_qhf (low_bit n)) (hf_to_qhf (clear_low n))"
+    ).by_rewrite_of(rec_at_n, ["hnz_eq", COND_F_NAT0])
 
 
 # B1.0 (b) -- Pair_ord representability.
@@ -3560,10 +3687,10 @@ if __name__ == "__main__":
         "==> ?T. is_substitute_trace T F t v (substitute F t v)"
     )
     print(
-        "    HF_TO_QHF_AT_EMPTY (SORRY)            : |- hf_to_qhf Empty = Empty_t"
+        "    HF_TO_QHF_AT_EMPTY                    : |- hf_to_qhf Empty = Empty_t"
     )
     print(
-        "    HF_TO_QHF_AT_INSERT (SORRY)           : |- !i s. ~In i s ==> hf_to_qhf (Insert i s) = Insert_t (hf_to_qhf i) (hf_to_qhf s)"
+        "    HF_TO_QHF_AT_NZ                       : |- !n. ~(n = 0) ==> hf_to_qhf n = Insert_t (hf_to_qhf (low_bit n)) (hf_to_qhf (clear_low n))  (canonical low-bit decomposition)"
     )
     print(
         "    IS_PAIR_ORD_REPRESENTS (SORRY)        : |- !x y. Prov_Q (.. is_Pair_ord_internal .. (hf_to_qhf (Pair_ord x y)) ..)"
