@@ -4710,35 +4710,15 @@ if __name__ == "__main__":
     print("    IS_SUBSTITUTE_STEP_AT  : <13-disjunct body>")
     print("    IS_SUBSTITUTE_TRACE_DEF:", pp_thm(IS_SUBSTITUTE_TRACE_DEF))
     print("    IS_SUBSTITUTE_TRACE_AT :", pp_thm(IS_SUBSTITUTE_TRACE_AT))
-    print(
-        "    TRACE_STEP_MONO        : |- !T1 T2. (!x. In x T1 ==> In x T2) "
-        "==> !t v a b. is_substitute_step T1 ... ==> is_substitute_step T2 ..."
-    )
-    print(
-        "    TRACE_EXISTS (SORRY)   : |- !F t v. (is_term F \\/ is_form F) "
-        "==> ?T. is_substitute_trace T F t v (substitute F t v)"
-    )
-    print(
-        "    HF_TO_QHF_AT_EMPTY                    : |- hf_to_qhf Empty = Empty_t"
-    )
-    print(
-        "    HF_TO_QHF_AT_NZ                       : |- !n. ~(n = 0) ==> hf_to_qhf n = Insert_t (hf_to_qhf (low_bit n)) (hf_to_qhf (clear_low n))  (canonical low-bit decomposition)"
-    )
-    print(
-        "    HF_TO_QHF_AT_INSERT_LOW               :", pp_thm(HF_TO_QHF_AT_INSERT_LOW)
-    )
-    print(
-        "    IS_PAIR_ORD_REPRESENTS (SORRY)        : |- !x y. Prov_Q (.. is_Pair_ord_internal .. (hf_to_qhf (Pair_ord x y)) ..)"
-    )
-    print(
-        "    IS_IN_REPRESENTS (SORRY)              : |- !x y. (In x y => Prov_Q ..) /\\ (~In x y => Prov_Q (Not_f ..))  (hf_to_qhf-encoded)"
-    )
-    print(
-        "    IS_SUBSTITUTE_STEP_REPRESENTS (SORRY) : |- !T t v a b. is_substitute_step T t v a b => Prov_Q ..  (hf_to_qhf-encoded)"
-    )
-    print(
-        "    IS_SUBSTITUTE_TRACE_REPRESENTS (SORRY): |- !T F t v r. is_substitute_trace T F t v r => Prov_Q ..  (hf_to_qhf-encoded)"
-    )
+    print("    TRACE_STEP_MONO                       :", pp_thm(TRACE_STEP_MONO))
+    print("    TRACE_EXISTS (SORRY)                  :", pp_thm(TRACE_EXISTS))
+    print("    HF_TO_QHF_AT_EMPTY                    :", pp_thm(HF_TO_QHF_AT_EMPTY))
+    print("    HF_TO_QHF_AT_NZ                       :", pp_thm(HF_TO_QHF_AT_NZ))
+    print("    HF_TO_QHF_AT_INSERT_LOW               :", pp_thm(HF_TO_QHF_AT_INSERT_LOW))
+    print("    IS_PAIR_ORD_REPRESENTS (SORRY)        :", pp_thm(IS_PAIR_ORD_REPRESENTS))
+    print("    IS_IN_REPRESENTS (SORRY)              :", pp_thm(IS_IN_REPRESENTS))
+    print("    IS_SUBSTITUTE_STEP_REPRESENTS (SORRY) :", pp_thm(IS_SUBSTITUTE_STEP_REPRESENTS))
+    print("    IS_SUBSTITUTE_TRACE_REPRESENTS (SORRY):", pp_thm(IS_SUBSTITUTE_TRACE_REPRESENTS))
     print("    SUBSTITUTE_REPRESENTS  :", pp_thm(SUBSTITUTE_REPRESENTS))
     print()
     print("Stage 3D (a) -- representability of provability (SORRY).")
