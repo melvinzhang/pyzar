@@ -251,12 +251,6 @@ def IN_EXT(p):
 #
 #                 The ordered-pair injectivity theorem
 #                   |- Pair_ord a b = Pair_ord c d <=> (a = c /\ b = d)
-#                 is *not* proved here -- godel_first.py Stage 1 gets
-#                 the injectivity it needs from bit-extensionality at
-#                 the nat0 level, never from the structural form. The
-#                 standard ~80-line case-analysis proof is left as a
-#                 TODO and recorded in the comment immediately preceding
-#                 the deferral marker further down.
 # ---------------------------------------------------------------------------
 
 from bits import (  # noqa: E402 -- needs nat0_lt parser alias registered above
