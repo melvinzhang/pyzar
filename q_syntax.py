@@ -2336,49 +2336,16 @@ _f_pred = Var("f", _pred_ty)
 _n_var_top = Var("n", nat0_ty)
 
 
-def _is_term_body(f_t, n_t):
-    """The disjunction body of ``_is_term_F`` at terms ``f_t`` and ``n_t``."""
-
-    def _bin_rec(ctor):
-        return mk_exists(
-            _a_n0,
-            mk_exists(
-                _b_n0,
-                mk_and(
-                    mk_eq(n_t, mk_app(ctor, _a_n0, _b_n0)),
-                    mk_and(mk_app(f_t, _a_n0), mk_app(f_t, _b_n0)),
-                ),
-            ),
-        )
-
-    return mk_or(
-        mk_eq(n_t, Zero_t),
-        mk_or(
-            mk_exists(
-                _x_n0,
-                mk_and(
-                    mk_eq(n_t, mk_app(Succ_t, _x_n0)),
-                    mk_app(f_t, _x_n0),
-                ),
-            ),
-            mk_or(
-                mk_exists(_x_n0, mk_eq(n_t, mk_app(Var_t, _x_n0))),
-                mk_or(
-                    _bin_rec(Plus_t),
-                    mk_or(
-                        _bin_rec(Times_t),
-                        _bin_rec(Insert_t),
-                    ),
-                ),
-            ),
-        ),
-    )
-
-
 _IS_TERM_F_DEF = define(
     "_is_term_F",
     _F_pred_ty,
-    mk_abs(_f_pred, mk_abs(_n_var_top, _is_term_body(_f_pred, _n_var_top))),
+    "\\f:nat0->bool. \\n:nat0. "
+    "n = Zero_t \\/ "
+    "(?x. n = Succ_t x /\\ f x) \\/ "
+    "(?x. n = Var_t x) \\/ "
+    "(?a b. n = Plus_t a b /\\ f a /\\ f b) \\/ "
+    "(?a b. n = Times_t a b /\\ f a /\\ f b) \\/ "
+    "(?a b. n = Insert_t a b /\\ f a /\\ f b)",
 )
 _IS_TERM_F = mk_const("_is_term_F", [])
 
@@ -2456,66 +2423,15 @@ IS_TERM_AT_INSERT = derive_rec_eq(IS_TERM_REC, "Insert_t", ["t1", "t2"])
 # ---------------------------------------------------------------------------
 
 
-is_term_const = mk_const("is_term", [])
-
-
-def _is_form_body(f_t, n_t):
-    def _atomic(ctor):
-        # ?a b. n = ctor a b /\ is_term a /\ is_term b
-        return mk_exists(
-            _a_n0,
-            mk_exists(
-                _b_n0,
-                mk_and(
-                    mk_eq(n_t, mk_app(ctor, _a_n0, _b_n0)),
-                    mk_and(mk_app(is_term_const, _a_n0), mk_app(is_term_const, _b_n0)),
-                ),
-            ),
-        )
-
-    return mk_or(
-        _atomic(Eq_f),
-        mk_or(
-            mk_exists(
-                _x_n0,
-                mk_and(
-                    mk_eq(n_t, mk_app(Not_f, _x_n0)),
-                    mk_app(f_t, _x_n0),
-                ),
-            ),
-            mk_or(
-                mk_exists(
-                    _a_n0,
-                    mk_exists(
-                        _b_n0,
-                        mk_and(
-                            mk_eq(n_t, mk_app(Imp_f, _a_n0, _b_n0)),
-                            mk_and(mk_app(f_t, _a_n0), mk_app(f_t, _b_n0)),
-                        ),
-                    ),
-                ),
-                mk_or(
-                    mk_exists(
-                        _a_n0,
-                        mk_exists(
-                            _b_n0,
-                            mk_and(
-                                mk_eq(n_t, mk_app(Forall_f, _a_n0, _b_n0)),
-                                mk_app(f_t, _b_n0),
-                            ),
-                        ),
-                    ),
-                    _atomic(In_a),
-                ),
-            ),
-        ),
-    )
-
-
 _IS_FORM_F_DEF = define(
     "_is_form_F",
     _F_pred_ty,
-    mk_abs(_f_pred, mk_abs(_n_var_top, _is_form_body(_f_pred, _n_var_top))),
+    "\\f:nat0->bool. \\n:nat0. "
+    "(?a b. n = Eq_f a b /\\ is_term a /\\ is_term b) \\/ "
+    "(?x. n = Not_f x /\\ f x) \\/ "
+    "(?a b. n = Imp_f a b /\\ f a /\\ f b) \\/ "
+    "(?a b. n = Forall_f a b /\\ f b) \\/ "
+    "(?a b. n = In_a a b /\\ is_term a /\\ is_term b)",
 )
 _IS_FORM_F = mk_const("_is_form_F", [])
 
@@ -2587,91 +2503,20 @@ _F_pred2_ty = parse_type("(nat0 -> nat0 -> bool) -> nat0 -> nat0 -> bool")
 _f_pred2 = Var("f", _pred2_ty)
 
 
-def _free_in_body(f_t, n_t, v_t):
-    """Bool body of ``_free_in_F`` at the v-applied level."""
-
-    def _bin_disj(ctor):
-        return mk_exists(
-            _a_n0,
-            mk_exists(
-                _b_n0,
-                mk_and(
-                    mk_eq(n_t, mk_app(ctor, _a_n0, _b_n0)),
-                    mk_or(mk_app(f_t, _a_n0, v_t), mk_app(f_t, _b_n0, v_t)),
-                ),
-            ),
-        )
-
-    return mk_or(
-        mk_exists(
-            _x_n0,
-            mk_and(
-                mk_eq(n_t, mk_app(Succ_t, _x_n0)),
-                mk_app(f_t, _x_n0, v_t),
-            ),
-        ),
-        mk_or(
-            mk_exists(
-                _x_n0,
-                mk_and(
-                    mk_eq(n_t, mk_app(Var_t, _x_n0)),
-                    mk_eq(v_t, _x_n0),
-                ),
-            ),
-            mk_or(
-                _bin_disj(Plus_t),
-                mk_or(
-                    _bin_disj(Times_t),
-                    mk_or(
-                        _bin_disj(Eq_f),
-                        mk_or(
-                            mk_exists(
-                                _x_n0,
-                                mk_and(
-                                    mk_eq(n_t, mk_app(Not_f, _x_n0)),
-                                    mk_app(f_t, _x_n0, v_t),
-                                ),
-                            ),
-                            mk_or(
-                                _bin_disj(Imp_f),
-                                mk_or(
-                                    mk_exists(
-                                        _a_n0,
-                                        mk_exists(
-                                            _b_n0,
-                                            mk_and(
-                                                mk_eq(
-                                                    n_t,
-                                                    mk_app(Forall_f, _a_n0, _b_n0),
-                                                ),
-                                                mk_and(
-                                                    mk_not(mk_eq(v_t, _a_n0)),
-                                                    mk_app(f_t, _b_n0, v_t),
-                                                ),
-                                            ),
-                                        ),
-                                    ),
-                                    mk_or(
-                                        _bin_disj(Insert_t),
-                                        _bin_disj(In_a),
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-        ),
-    )
-
-
 _FREE_IN_F_DEF = define(
     "_free_in_F",
     _F_pred2_ty,
-    mk_abs(
-        _f_pred2,
-        mk_abs(_n_var_top, mk_abs(_v_n0, _free_in_body(_f_pred2, _n_var_top, _v_n0))),
-    ),
+    "\\f:nat0->nat0->bool. \\n:nat0. \\v:nat0. "
+    "(?x. n = Succ_t x /\\ f x v) \\/ "
+    "(?x. n = Var_t x /\\ v = x) \\/ "
+    "(?a b. n = Plus_t a b /\\ (f a v \\/ f b v)) \\/ "
+    "(?a b. n = Times_t a b /\\ (f a v \\/ f b v)) \\/ "
+    "(?a b. n = Eq_f a b /\\ (f a v \\/ f b v)) \\/ "
+    "(?x. n = Not_f x /\\ f x v) \\/ "
+    "(?a b. n = Imp_f a b /\\ (f a v \\/ f b v)) \\/ "
+    "(?a b. n = Forall_f a b /\\ ~(v = a) /\\ f b v) \\/ "
+    "(?a b. n = Insert_t a b /\\ (f a v \\/ f b v)) \\/ "
+    "(?a b. n = In_a a b /\\ (f a v \\/ f b v))",
 )
 _FREE_IN_F = mk_const("_free_in_F", [])
 
@@ -2814,202 +2659,24 @@ _F_pred3_ty = parse_type(
 _f_pred3 = Var("f", _pred3_ty)
 
 
-def _substitute_body(f_t, n_t, new_t_t, v_t, r_t):
-    """Bool body of the @r-disjunction inside ``_substitute_F``."""
-
-    def fc(arg):
-        return mk_app(f_t, arg, new_t_t, v_t)
-
-    return mk_or(
-        mk_and(mk_eq(n_t, Zero_t), mk_eq(r_t, Zero_t)),
-        mk_or(
-            mk_exists(
-                _x_n0,
-                mk_and(
-                    mk_eq(n_t, mk_app(Succ_t, _x_n0)),
-                    mk_eq(r_t, mk_app(Succ_t, fc(_x_n0))),
-                ),
-            ),
-            mk_or(
-                mk_exists(
-                    _x_n0,
-                    mk_and(
-                        mk_eq(n_t, mk_app(Var_t, _x_n0)),
-                        mk_or(
-                            mk_and(mk_eq(v_t, _x_n0), mk_eq(r_t, new_t_t)),
-                            mk_and(
-                                mk_not(mk_eq(v_t, _x_n0)),
-                                mk_eq(r_t, mk_app(Var_t, _x_n0)),
-                            ),
-                        ),
-                    ),
-                ),
-                mk_or(
-                    mk_exists(
-                        _a_n0,
-                        mk_exists(
-                            _b_n0,
-                            mk_and(
-                                mk_eq(n_t, mk_app(Plus_t, _a_n0, _b_n0)),
-                                mk_eq(r_t, mk_app(Plus_t, fc(_a_n0), fc(_b_n0))),
-                            ),
-                        ),
-                    ),
-                    mk_or(
-                        mk_exists(
-                            _a_n0,
-                            mk_exists(
-                                _b_n0,
-                                mk_and(
-                                    mk_eq(n_t, mk_app(Times_t, _a_n0, _b_n0)),
-                                    mk_eq(r_t, mk_app(Times_t, fc(_a_n0), fc(_b_n0))),
-                                ),
-                            ),
-                        ),
-                        mk_or(
-                            mk_exists(
-                                _a_n0,
-                                mk_exists(
-                                    _b_n0,
-                                    mk_and(
-                                        mk_eq(n_t, mk_app(Eq_f, _a_n0, _b_n0)),
-                                        mk_eq(r_t, mk_app(Eq_f, fc(_a_n0), fc(_b_n0))),
-                                    ),
-                                ),
-                            ),
-                            mk_or(
-                                mk_exists(
-                                    _x_n0,
-                                    mk_and(
-                                        mk_eq(n_t, mk_app(Not_f, _x_n0)),
-                                        mk_eq(r_t, mk_app(Not_f, fc(_x_n0))),
-                                    ),
-                                ),
-                                mk_or(
-                                    mk_exists(
-                                        _a_n0,
-                                        mk_exists(
-                                            _b_n0,
-                                            mk_and(
-                                                mk_eq(n_t, mk_app(Imp_f, _a_n0, _b_n0)),
-                                                mk_eq(
-                                                    r_t,
-                                                    mk_app(Imp_f, fc(_a_n0), fc(_b_n0)),
-                                                ),
-                                            ),
-                                        ),
-                                    ),
-                                    mk_or(
-                                        mk_exists(
-                                            _a_n0,
-                                            mk_exists(
-                                                _b_n0,
-                                                mk_and(
-                                                    mk_eq(
-                                                        n_t,
-                                                        mk_app(Forall_f, _a_n0, _b_n0),
-                                                    ),
-                                                    mk_or(
-                                                        mk_and(
-                                                            mk_eq(v_t, _a_n0),
-                                                            mk_eq(
-                                                                r_t,
-                                                                mk_app(
-                                                                    Forall_f,
-                                                                    _a_n0,
-                                                                    _b_n0,
-                                                                ),
-                                                            ),
-                                                        ),
-                                                        mk_and(
-                                                            mk_not(mk_eq(v_t, _a_n0)),
-                                                            mk_eq(
-                                                                r_t,
-                                                                mk_app(
-                                                                    Forall_f,
-                                                                    _a_n0,
-                                                                    fc(_b_n0),
-                                                                ),
-                                                            ),
-                                                        ),
-                                                    ),
-                                                ),
-                                            ),
-                                        ),
-                                        mk_or(
-                                            mk_exists(
-                                                _a_n0,
-                                                mk_exists(
-                                                    _b_n0,
-                                                    mk_and(
-                                                        mk_eq(
-                                                            n_t,
-                                                            mk_app(
-                                                                Insert_t, _a_n0, _b_n0
-                                                            ),
-                                                        ),
-                                                        mk_eq(
-                                                            r_t,
-                                                            mk_app(
-                                                                Insert_t,
-                                                                fc(_a_n0),
-                                                                fc(_b_n0),
-                                                            ),
-                                                        ),
-                                                    ),
-                                                ),
-                                            ),
-                                            mk_exists(
-                                                _a_n0,
-                                                mk_exists(
-                                                    _b_n0,
-                                                    mk_and(
-                                                        mk_eq(
-                                                            n_t,
-                                                            mk_app(In_a, _a_n0, _b_n0),
-                                                        ),
-                                                        mk_eq(
-                                                            r_t,
-                                                            mk_app(
-                                                                In_a,
-                                                                fc(_a_n0),
-                                                                fc(_b_n0),
-                                                            ),
-                                                        ),
-                                                    ),
-                                                ),
-                                            ),
-                                        ),
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-        ),
-    )
-
-
 _SUBSTITUTE_F_DEF = define(
     "_substitute_F",
     _F_pred3_ty,
-    mk_abs(
-        _f_pred3,
-        mk_abs(
-            _n_var_top,
-            mk_abs(
-                _new_t_n0,
-                mk_abs(
-                    _v_n0,
-                    mk_select(
-                        _r_n0,
-                        _substitute_body(_f_pred3, _n_var_top, _new_t_n0, _v_n0, _r_n0),
-                    ),
-                ),
-            ),
-        ),
-    ),
+    "\\f:nat0->nat0->nat0->nat0. \\n:nat0. \\new_t:nat0. \\v:nat0. @r:nat0. "
+    "(n = Zero_t /\\ r = Zero_t) \\/ "
+    "(?x. n = Succ_t x /\\ r = Succ_t (f x new_t v)) \\/ "
+    "(?x. n = Var_t x /\\ "
+    "((v = x /\\ r = new_t) \\/ (~(v = x) /\\ r = Var_t x))) \\/ "
+    "(?a b. n = Plus_t a b /\\ r = Plus_t (f a new_t v) (f b new_t v)) \\/ "
+    "(?a b. n = Times_t a b /\\ r = Times_t (f a new_t v) (f b new_t v)) \\/ "
+    "(?a b. n = Eq_f a b /\\ r = Eq_f (f a new_t v) (f b new_t v)) \\/ "
+    "(?x. n = Not_f x /\\ r = Not_f (f x new_t v)) \\/ "
+    "(?a b. n = Imp_f a b /\\ r = Imp_f (f a new_t v) (f b new_t v)) \\/ "
+    "(?a b. n = Forall_f a b /\\ "
+    "((v = a /\\ r = Forall_f a b) \\/ "
+    "(~(v = a) /\\ r = Forall_f a (f b new_t v)))) \\/ "
+    "(?a b. n = Insert_t a b /\\ r = Insert_t (f a new_t v) (f b new_t v)) \\/ "
+    "(?a b. n = In_a a b /\\ r = In_a (f a new_t v) (f b new_t v))",
 )
 _SUBSTITUTE_F = mk_const("_substitute_F", [])
 

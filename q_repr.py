@@ -130,7 +130,6 @@ from basics import mk_eq
 from q_syntax import (
     Zero_t,
     Succ_t,
-    is_term_const,
     IS_TERM_REC,
     IS_TERM_AT_SUCC,
     mono_iff_eq_or_pw_step,
@@ -208,7 +207,7 @@ numeral = mk_const("numeral", [])
 # ---------------------------------------------------------------------------
 
 
-is_term = is_term_const  # parser-friendly alias
+is_term = mk_const("is_term", [])
 
 
 @proof
