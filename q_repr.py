@@ -95,7 +95,7 @@ from fusion import Var
 from basics import mk_const, mk_app, mk_abs, rand, rator
 from parser import define, parse_type
 from axioms import mk_forall, mk_imp, mk_not, mk_and, mk_or, mk_exists
-from nat0 import nat0_ty, define_unary_0
+from nat0 import nat0_ty, define_unary_0, mk_suc0, ZERO
 from nat0_order import define_wf_lt
 from proof import proof
 from tactics import (
@@ -130,12 +130,25 @@ from basics import mk_eq
 from q_syntax import (
     Zero_t,
     Succ_t,
+    Var_t,  # noqa: F401  -- parser alias for is_substitute_step
+    Plus_t,  # noqa: F401  -- parser alias for is_substitute_step
+    Times_t,  # noqa: F401  -- parser alias for is_substitute_step
+    Eq_f,  # noqa: F401  -- parser alias for is_substitute_step
+    Not_f,  # noqa: F401  -- parser alias for is_substitute_step
+    Imp_f,  # noqa: F401  -- parser alias for is_substitute_step
+    Forall_f,  # noqa: F401  -- parser alias for is_substitute_step
+    Insert_t,  # noqa: F401  -- parser alias for is_substitute_step
+    In_a,  # noqa: F401  -- parser alias for is_substitute_step
     IS_TERM_REC,
     IS_TERM_AT_SUCC,
     mono_iff_eq_or_pw_step,
     _unfold_rec_via_F_def,
     _extract_nfg,
     _mono_iff_value_binary_pw_step,
+)
+from hf_sets import (
+    In,  # noqa: F401  -- parser alias for is_substitute_step
+    Pair_ord,  # noqa: F401  -- parser alias for is_substitute_step
 )
 from axioms import mk_select
 from axioms import dest_exists
@@ -2190,11 +2203,846 @@ REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 # beta-function path. The structural recognisers in q_syntax.py
 # (is_term, is_form, free_in, substitute) already cover Insert_t and
 # In_a, so this can be attempted directly.
+#
+# Progress (2026-05-09):
+#   * Union added to hf_sets.py (Stage 3 cont.) with IN_UNION.
+#   * var_T (Var_t 4) and var_a..var_f2 (Var_t 5..15) added as the
+#     internal Q-variable indices used by the trace-encoding formula.
+#   * is_substitute_step (HOL) and is_substitute_trace (HOL) defined,
+#     with pointwise unfolding lemmas IS_SUBSTITUTE_STEP_AT and
+#     IS_SUBSTITUTE_TRACE_AT.
+#   * TRACE_STEP_MONO proved -- membership-monotonicity of
+#     is_substitute_step (the foundation for binary trace assembly via
+#     ``Insert (Pair_ord F r) (Union T1 T2)``).
+#   * Q_and / Q_or / Q_exists / Q_imp / ... Python-level helpers for
+#     building Q-formulas compositionally (Q has only Forall_f / Imp_f
+#     / Not_f / Eq_f as primitives -- these macros suppress the
+#     bookkeeping bloat of explicit Not_f/Imp_f trees).
+#   * TRACE_EXISTS stated under syntactic precondition (is_term F \/
+#     is_form F) and SORRY'd. Full proof is mechanical follow-up:
+#     strong induction on F via nat0_lt; the 13 SUBSTITUTE_AT_* cases
+#     each construct ``Insert (Pair_ord F (substitute F t v))
+#     (Union T_sub1 T_sub2 ...)`` over IH-supplied sub-traces and
+#     verify is_substitute_trace via TRACE_STEP_MONO + IN_UNION +
+#     IN_INSERT.
+#
+# Remaining significant scope (B1-B3):
+#
+#   B1 (Q-encoding):  is_substitute_step_internal as a closed Q-formula
+#     blocks on Sigma_1 representability of ``Pair_ord`` and ``In``
+#     (neither is in Q's primitive vocabulary -- ``Pair_ord`` is an
+#     HF helper, ``In`` is bit-extraction). Each disjunct of
+#     is_substitute_step references ``In (Pair_ord _ _) T`` and
+#     constructor patterns ``a = Var_t v / Plus_t a1 a2 / ...`` which
+#     all involve ``Pair_ord`` (since each Q-syntax constructor
+#     unfolds to a ``Pair_ord``-prefixed encoding). Without
+#     representing-formula constants ``is_Pair_ord_internal``,
+#     ``is_In_internal`` (or inlined Sigma_1-equivalent expansions),
+#     the Q-formula cannot be spelled out. Each representability
+#     proof is its own ~50-100 line construction (size lemmas, strict
+#     monotonicity, the Sigma_0 verification at numerals).
+#
+#   B2 (replace opaque substitute_internal):  Becomes one ``define``
+#     call once B1's is_substitute_trace_internal is in hand. Trivial
+#     in isolation; blocked on B1.
+#
+#   B3 (SUBSTITUTE_REPRESENTS proof):  Combines TRACE_EXISTS (A4) with
+#     B1's Q-encoding, exhibiting the trace HF set T and discharging
+#     each disjunct's Sigma_0 verification using Q + HF axioms. Blocks
+#     on A4 + B1 + B2; itself ~200-300 lines (mostly Q-axiom citations).
+#
+# Total remaining estimate after foundations: ~500-1000 lines, plus
+# the Pair_ord / In representability prerequisites (~200 lines).
 # ---------------------------------------------------------------------------
 
 
 VAR_W_DEF = define("var_w", parse_type("nat0"), "Var_t (SUC0 (SUC0 (SUC0 0)))")
 var_w = mk_const("var_w", [])
+
+
+# var_T -- Q-internal bound variable for the existentially-quantified HF
+# trace set inside ``substitute_internal``. Index 4 (SUC0^4 0); the four
+# free slots var_x/y/z/w (indices 0..3) are reserved for the input/output
+# pair (F, t, v, r).
+VAR_T_DEF = define(
+    "var_T",
+    parse_type("nat0"),
+    "Var_t (SUC0 (SUC0 (SUC0 (SUC0 0))))",
+)
+var_T = mk_const("var_T", [])
+
+
+# Additional Q-internal variables for the body of is_substitute_trace_internal:
+#   var_a, var_b           -- the "!a b. ..." outer for-all binders.
+#   var_s1, var_s2         -- Succ_t / Not_f sub-shape existentials.
+#   var_wq                 -- Var_t-miss / Forall_f-* index existentials
+#                             (named with q-suffix to avoid clash with HOL w).
+#   var_a1, var_a2,        -- binary-constructor sub-shape existentials.
+#   var_b1, var_b2
+#   var_f1, var_f2         -- Forall_f-miss body existentials.
+# Indices 5..14 of the Q-variable namespace.
+def _var_q_def(name, idx):
+    suc = "0"
+    for _ in range(idx):
+        suc = f"(SUC0 {suc})"
+    return define(name, parse_type("nat0"), f"Var_t {suc}")
+
+
+VAR_A_DEF = _var_q_def("var_a", 5)
+var_a = mk_const("var_a", [])
+VAR_B_DEF = _var_q_def("var_b", 6)
+var_b = mk_const("var_b", [])
+VAR_S1_DEF = _var_q_def("var_s1", 7)
+var_s1 = mk_const("var_s1", [])
+VAR_S2_DEF = _var_q_def("var_s2", 8)
+var_s2 = mk_const("var_s2", [])
+VAR_WQ_DEF = _var_q_def("var_wq", 9)
+var_wq = mk_const("var_wq", [])
+VAR_A1_DEF = _var_q_def("var_a1", 10)
+var_a1 = mk_const("var_a1", [])
+VAR_A2_DEF = _var_q_def("var_a2", 11)
+var_a2 = mk_const("var_a2", [])
+VAR_B1_DEF = _var_q_def("var_b1", 12)
+var_b1 = mk_const("var_b1", [])
+VAR_B2_DEF = _var_q_def("var_b2", 13)
+var_b2 = mk_const("var_b2", [])
+VAR_F1_DEF = _var_q_def("var_f1", 14)
+var_f1 = mk_const("var_f1", [])
+VAR_F2_DEF = _var_q_def("var_f2", 15)
+var_f2 = mk_const("var_f2", [])
+
+
+# Q-encoding macros at the Python level. Q has only Forall_f, Imp_f, Not_f,
+# Eq_f as primitives -- everything else is hand-encoded. Build Q-formulas
+# compositionally rather than spelling out the Not_f/Imp_f/Forall_f tree
+# literally (which would balloon any large Q-formula by 10x).
+def Q_and(a, b):
+    """Q's /\\ as Not_f (Imp_f a (Not_f b))."""
+    return mk_app(Not_f, mk_app(Imp_f, a, mk_app(Not_f, b)))
+
+
+def Q_or(a, b):
+    """Q's \\/ as Imp_f (Not_f a) b."""
+    return mk_app(Imp_f, mk_app(Not_f, a), b)
+
+
+def Q_imp(a, b):
+    """Q's ==> -- Imp_f a b."""
+    return mk_app(Imp_f, a, b)
+
+
+def Q_not(a):
+    return mk_app(Not_f, a)
+
+
+def Q_eq(a, b):
+    return mk_app(Eq_f, a, b)
+
+
+def Q_neq(a, b):
+    return Q_not(Q_eq(a, b))
+
+
+def Q_forall(idx, body):
+    """Q's !x. body  --  Forall_f idx body  (idx is the raw nat0 index)."""
+    return mk_app(Forall_f, idx, body)
+
+
+def Q_exists(idx, body):
+    """Q's ?x. body  --  Not_f (Forall_f idx (Not_f body))."""
+    return Q_not(Q_forall(idx, Q_not(body)))
+
+
+def Q_and_chain(*xs):
+    """Right-associated /\\ chain."""
+    if not xs:
+        raise ValueError("Q_and_chain: need at least one term")
+    out = xs[-1]
+    for x in reversed(xs[:-1]):
+        out = Q_and(x, out)
+    return out
+
+
+def Q_or_chain(*xs):
+    """Right-associated \\/ chain."""
+    if not xs:
+        raise ValueError("Q_or_chain: need at least one term")
+    out = xs[-1]
+    for x in reversed(xs[:-1]):
+        out = Q_or(x, out)
+    return out
+
+
+def Q_exists_chain(idxs, body):
+    """Nested Q-exists ``?idx0 idx1 ... . body``."""
+    out = body
+    for idx in reversed(idxs):
+        out = Q_exists(idx, out)
+    return out
+
+
+# Raw nat0 indices (NOT the Var_t-wrapped term forms) used as the
+# binder-position arguments for Q_forall / Q_exists. ``var_*`` (Var_t k)
+# is the *term* form -- referenced inside formula bodies; the binder
+# position takes just ``k``. Build them once so the encoding code below
+# can splice them as needed.
+def _idx_term(k):
+    suc = ZERO
+    for _ in range(k):
+        suc = mk_suc0(suc)
+    return suc
+
+
+_idx_x = ZERO  # var_x = Var_t 0   (F slot)
+_idx_y = mk_suc0(ZERO)  # var_y = Var_t 1   (t slot)
+_idx_z = mk_suc0(mk_suc0(ZERO))  # var_z = Var_t 2   (v slot)
+_idx_w = mk_suc0(mk_suc0(mk_suc0(ZERO)))  # var_w = Var_t 3   (r slot)
+_idx_T = _idx_term(4)
+_idx_a = _idx_term(5)
+_idx_b = _idx_term(6)
+_idx_s1 = _idx_term(7)
+_idx_s2 = _idx_term(8)
+_idx_wq = _idx_term(9)
+_idx_a1 = _idx_term(10)
+_idx_a2 = _idx_term(11)
+_idx_b1 = _idx_term(12)
+_idx_b2 = _idx_term(13)
+_idx_f1 = _idx_term(14)
+_idx_f2 = _idx_term(15)
+
+
+# ---------------------------------------------------------------------------
+# is_substitute_step T t v a b -- "(a, b) is a valid substitute clause".
+#
+# Sigma_0 (decidable) HOL predicate. Holds iff the pair (a, b) matches one
+# of the 13 SUBSTITUTE_AT_* clauses with respect to the substitution
+# parameters (t, v) and a trace HF set T:
+#   * Constant-shape clauses (Zero_t, Var_t at v, Var_t off v, Forall_f
+#     hit) require no trace consultations -- b is determined by a alone.
+#   * Recursive clauses (Succ_t / Not_f, the binary constructors, and
+#     Forall_f miss) require the corresponding sub-shape pairs to be in T,
+#     witnessed via In (Pair_ord _ _) T.
+#
+# This predicate is the HOL counterpart of the Q-formula
+# ``is_substitute_trace_internal`` to be encoded in Stage B1; the trace
+# existence lemma in Stage A4 builds an HF set T satisfying
+# ``In_a (Pair_ord F r) T /\ !a b. In (Pair_ord a b) T ==>
+#  is_substitute_step T t v a b``.
+# ---------------------------------------------------------------------------
+
+_a_step = Var("a", nat0_ty)
+_b_step = Var("b", nat0_ty)
+_t_step = Var("t", nat0_ty)
+_v_step = Var("v", nat0_ty)
+_T_step = Var("T", nat0_ty)
+
+
+IS_SUBSTITUTE_STEP_DEF = define(
+    "is_substitute_step",
+    parse_type("nat0 -> nat0 -> nat0 -> nat0 -> nat0 -> bool"),
+    "\\T:nat0. \\t:nat0. \\v:nat0. \\a:nat0. \\b:nat0. "
+    "(a = Zero_t /\\ b = Zero_t) "
+    "\\/ (?s1 s2. a = Succ_t s1 /\\ b = Succ_t s2 /\\ In (Pair_ord s1 s2) T) "
+    "\\/ (a = Var_t v /\\ b = t) "
+    "\\/ (?w. a = Var_t w /\\ ~(w = v) /\\ b = Var_t w) "
+    "\\/ (?a1 a2 b1 b2. a = Plus_t a1 a2 /\\ b = Plus_t b1 b2 "
+    "      /\\ In (Pair_ord a1 b1) T /\\ In (Pair_ord a2 b2) T) "
+    "\\/ (?a1 a2 b1 b2. a = Times_t a1 a2 /\\ b = Times_t b1 b2 "
+    "      /\\ In (Pair_ord a1 b1) T /\\ In (Pair_ord a2 b2) T) "
+    "\\/ (?a1 a2 b1 b2. a = Eq_f a1 a2 /\\ b = Eq_f b1 b2 "
+    "      /\\ In (Pair_ord a1 b1) T /\\ In (Pair_ord a2 b2) T) "
+    "\\/ (?s1 s2. a = Not_f s1 /\\ b = Not_f s2 /\\ In (Pair_ord s1 s2) T) "
+    "\\/ (?a1 a2 b1 b2. a = Imp_f a1 a2 /\\ b = Imp_f b1 b2 "
+    "      /\\ In (Pair_ord a1 b1) T /\\ In (Pair_ord a2 b2) T) "
+    "\\/ (?w f1. a = Forall_f w f1 /\\ w = v /\\ b = Forall_f w f1) "
+    "\\/ (?w f1 f2. a = Forall_f w f1 /\\ ~(w = v) "
+    "      /\\ b = Forall_f w f2 /\\ In (Pair_ord f1 f2) T) "
+    "\\/ (?a1 a2 b1 b2. a = Insert_t a1 a2 /\\ b = Insert_t b1 b2 "
+    "      /\\ In (Pair_ord a1 b1) T /\\ In (Pair_ord a2 b2) T) "
+    "\\/ (?a1 a2 b1 b2. a = In_a a1 a2 /\\ b = In_a b1 b2 "
+    "      /\\ In (Pair_ord a1 b1) T /\\ In (Pair_ord a2 b2) T)",
+)
+is_substitute_step = mk_const("is_substitute_step", [])
+
+
+# Pointwise: |- !T t v a b. is_substitute_step T t v a b = body[T,t,v,a,b].
+def _build_is_substitute_step_at():
+    from tactics import AP_THM, BETA_CONV, TRANS, GENL
+
+    th = IS_SUBSTITUTE_STEP_DEF
+    args = [_T_step, _t_step, _v_step, _a_step, _b_step]
+    for x in args:
+        th = AP_THM(th, x)
+        th = TRANS(th, BETA_CONV(rand(th._concl)))
+    return GENL(args, th)
+
+
+IS_SUBSTITUTE_STEP_AT = _build_is_substitute_step_at()
+
+
+# Pointwise unfolding helper for n-ary curried definitions: given
+# ``def_th : c = \x1 ... xn. body``, produce
+# ``|- !x1 ... xn. c x1 ... xn = body[xi]``.
+def _at_n(def_th, args):
+    from tactics import AP_THM, BETA_CONV, TRANS, GENL
+
+    th = def_th
+    for x in args:
+        th = AP_THM(th, x)
+        th = TRANS(th, BETA_CONV(rand(th._concl)))
+    return GENL(list(args), th)
+
+
+# ---------------------------------------------------------------------------
+# is_substitute_trace T F t v r -- "T is a complete substitute trace
+# witnessing  r = substitute F t v".
+#
+#   is_substitute_trace T F t v r :=
+#       In (Pair_ord F r) T
+#       /\ (!a b. In (Pair_ord a b) T ==> is_substitute_step T t v a b).
+#
+# Two conjuncts:
+#   (i)  the headline (F, r) pair is in T, so r is the recorded substitute
+#        result for F;
+#   (ii) every member of T is a valid substitute clause (witnessed by the
+#        Sigma_0 recogniser ``is_substitute_step``), so the trace as a
+#        whole is internally consistent and grounded in the SUBSTITUTE_AT_*
+#        equations.
+#
+# ``IS_SUBSTITUTE_TRACE_AT`` exposes this body pointwise for downstream
+# rewriting; the @ args go in the canonical order T, F, t, v, r.
+# ---------------------------------------------------------------------------
+
+_T_n0 = Var("T", nat0_ty)
+_F_n0 = Var("F", nat0_ty)
+_tt_n0 = Var("t", nat0_ty)
+_vv_n0 = Var("v", nat0_ty)
+_rr_n0 = Var("r", nat0_ty)
+
+
+IS_SUBSTITUTE_TRACE_DEF = define(
+    "is_substitute_trace",
+    parse_type("nat0 -> nat0 -> nat0 -> nat0 -> nat0 -> bool"),
+    "\\T:nat0. \\F:nat0. \\t:nat0. \\v:nat0. \\r:nat0. "
+    "In (Pair_ord F r) T "
+    "/\\ (!a b. In (Pair_ord a b) T ==> is_substitute_step T t v a b)",
+)
+is_substitute_trace = mk_const("is_substitute_trace", [])
+
+
+# Pointwise: |- !T F t v r. is_substitute_trace T F t v r =
+#                          In (Pair_ord F r) T /\
+#                          (!a b. In (Pair_ord a b) T ==>
+#                                 is_substitute_step T t v a b).
+IS_SUBSTITUTE_TRACE_AT = _at_n(
+    IS_SUBSTITUTE_TRACE_DEF,
+    [_T_n0, _F_n0, _tt_n0, _vv_n0, _rr_n0],
+)
+
+
+# String-templated 13-disjunction body of is_substitute_step, with the
+# trace HF set ``T`` substituted in. Used by TRACE_STEP_MONO so the same
+# disjunction can be referenced under both T1 and T2 without copy-paste.
+def _is_step_body(T):
+    return (
+        f"(a = Zero_t /\\ b = Zero_t) "
+        f"\\/ (?s1 s2. a = Succ_t s1 /\\ b = Succ_t s2 "
+        f"      /\\ In (Pair_ord s1 s2) {T}) "
+        f"\\/ (a = Var_t v /\\ b = t) "
+        f"\\/ (?w. a = Var_t w /\\ ~(w = v) /\\ b = Var_t w) "
+        f"\\/ (?a1 a2 b1 b2. a = Plus_t a1 a2 /\\ b = Plus_t b1 b2 "
+        f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T}) "
+        f"\\/ (?a1 a2 b1 b2. a = Times_t a1 a2 /\\ b = Times_t b1 b2 "
+        f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T}) "
+        f"\\/ (?a1 a2 b1 b2. a = Eq_f a1 a2 /\\ b = Eq_f b1 b2 "
+        f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T}) "
+        f"\\/ (?s1 s2. a = Not_f s1 /\\ b = Not_f s2 "
+        f"      /\\ In (Pair_ord s1 s2) {T}) "
+        f"\\/ (?a1 a2 b1 b2. a = Imp_f a1 a2 /\\ b = Imp_f b1 b2 "
+        f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T}) "
+        f"\\/ (?w f1. a = Forall_f w f1 /\\ w = v /\\ b = Forall_f w f1) "
+        f"\\/ (?w f1 f2. a = Forall_f w f1 /\\ ~(w = v) "
+        f"      /\\ b = Forall_f w f2 /\\ In (Pair_ord f1 f2) {T}) "
+        f"\\/ (?a1 a2 b1 b2. a = Insert_t a1 a2 /\\ b = Insert_t b1 b2 "
+        f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T}) "
+        f"\\/ (?a1 a2 b1 b2. a = In_a a1 a2 /\\ b = In_a b1 b2 "
+        f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T})"
+    )
+
+
+@proof
+def TRACE_STEP_MONO(p):
+    """|- !T1 T2. (!x. In x T1 ==> In x T2) ==>
+            !t v a b. is_substitute_step T1 t v a b
+                      ==> is_substitute_step T2 t v a b.
+
+    Membership-monotonicity of ``is_substitute_step``. Used by the
+    binary trace-assembly cases of TRACE_EXISTS: combining sub-traces
+    ``T1, T2`` into ``Insert (F, r) (Union T1 T2)`` requires lifting
+    each ``In (Pair_ord _ _) T_i`` justification to the combined trace.
+    """
+    p.goal(
+        "!T1 T2. (!x. In x T1 ==> In x T2) ==> "
+        "!t v a b. is_substitute_step T1 t v a b "
+        "          ==> is_substitute_step T2 t v a b"
+    )
+    p.fix("T1 T2")
+    p.assume("hsub: !x. In x T1 ==> In x T2")
+    p.fix("t v a b")
+    p.assume("hstep: is_substitute_step T1 t v a b")
+
+    body_T1 = _is_step_body("T1")
+    body_T2 = _is_step_body("T2")
+
+    p.have(f"hd1: {body_T1}").by_rewrite_of("hstep", [IS_SUBSTITUTE_STEP_AT])
+
+    with p.have(f"hd2: {body_T2}").proof():
+        with p.cases_on("hd1"):
+            # 1. Zero_t (atomic).
+            with p.case("c1: a = Zero_t /\\ b = Zero_t"):
+                p.thus(body_T2).by_disj("c1")
+            # 2. Succ_t (unary recursive).
+            with p.case(
+                "c2: ?s1 s2. a = Succ_t s1 /\\ b = Succ_t s2 "
+                "/\\ In (Pair_ord s1 s2) T1"
+            ):
+                # case auto-chooses outer s1; s1_eq: ?s2. body[s1, s2].
+                p.choose("s2", "s1_eq")
+                p.split("s2_eq", "(c2a, c2b, c2_in1)")
+                p.have("c2_in2: In (Pair_ord s1 s2) T2").by(
+                    "hsub", "Pair_ord s1 s2", "c2_in1"
+                )
+                p.have(
+                    "c2d: ?s1 s2. a = Succ_t s1 /\\ b = Succ_t s2 "
+                    "/\\ In (Pair_ord s1 s2) T2"
+                ).by_exists(["s1", "s2"], "c2a", "c2b", "c2_in2")
+                p.thus(body_T2).by_disj("c2d")
+            # 3. Var_t hit (atomic).
+            with p.case("c3: a = Var_t v /\\ b = t"):
+                p.thus(body_T2).by_disj("c3")
+            # 4. Var_t miss (existential, no In).
+            with p.case(
+                "c4: ?w. a = Var_t w /\\ ~(w = v) /\\ b = Var_t w"
+            ):
+                p.thus(body_T2).by_disj("c4")
+            # 5. Plus_t (binary recursive).
+            with p.case(
+                "c5: ?a1 a2 b1 b2. a = Plus_t a1 a2 /\\ b = Plus_t b1 b2 "
+                "/\\ In (Pair_ord a1 b1) T1 /\\ In (Pair_ord a2 b2) T1"
+            ):
+                p.choose("a2", "a1_eq")
+                p.choose("b1", "a2_eq")
+                p.choose("b2", "b1_eq")
+                p.split("b2_eq", "(c5a, c5b, c5_in1, c5_in2)")
+                p.have("c5_in1_T2: In (Pair_ord a1 b1) T2").by(
+                    "hsub", "Pair_ord a1 b1", "c5_in1"
+                )
+                p.have("c5_in2_T2: In (Pair_ord a2 b2) T2").by(
+                    "hsub", "Pair_ord a2 b2", "c5_in2"
+                )
+                p.have(
+                    "c5d: ?a1 a2 b1 b2. a = Plus_t a1 a2 /\\ b = Plus_t b1 b2 "
+                    "/\\ In (Pair_ord a1 b1) T2 /\\ In (Pair_ord a2 b2) T2"
+                ).by_exists(
+                    ["a1", "a2", "b1", "b2"],
+                    "c5a", "c5b", "c5_in1_T2", "c5_in2_T2",
+                )
+                p.thus(body_T2).by_disj("c5d")
+            # 6. Times_t (binary recursive).
+            with p.case(
+                "c6: ?a1 a2 b1 b2. a = Times_t a1 a2 /\\ b = Times_t b1 b2 "
+                "/\\ In (Pair_ord a1 b1) T1 /\\ In (Pair_ord a2 b2) T1"
+            ):
+                p.choose("a2", "a1_eq")
+                p.choose("b1", "a2_eq")
+                p.choose("b2", "b1_eq")
+                p.split("b2_eq", "(c6a, c6b, c6_in1, c6_in2)")
+                p.have("c6_in1_T2: In (Pair_ord a1 b1) T2").by(
+                    "hsub", "Pair_ord a1 b1", "c6_in1"
+                )
+                p.have("c6_in2_T2: In (Pair_ord a2 b2) T2").by(
+                    "hsub", "Pair_ord a2 b2", "c6_in2"
+                )
+                p.have(
+                    "c6d: ?a1 a2 b1 b2. a = Times_t a1 a2 /\\ b = Times_t b1 b2 "
+                    "/\\ In (Pair_ord a1 b1) T2 /\\ In (Pair_ord a2 b2) T2"
+                ).by_exists(
+                    ["a1", "a2", "b1", "b2"],
+                    "c6a", "c6b", "c6_in1_T2", "c6_in2_T2",
+                )
+                p.thus(body_T2).by_disj("c6d")
+            # 7. Eq_f (binary recursive).
+            with p.case(
+                "c7: ?a1 a2 b1 b2. a = Eq_f a1 a2 /\\ b = Eq_f b1 b2 "
+                "/\\ In (Pair_ord a1 b1) T1 /\\ In (Pair_ord a2 b2) T1"
+            ):
+                p.choose("a2", "a1_eq")
+                p.choose("b1", "a2_eq")
+                p.choose("b2", "b1_eq")
+                p.split("b2_eq", "(c7a, c7b, c7_in1, c7_in2)")
+                p.have("c7_in1_T2: In (Pair_ord a1 b1) T2").by(
+                    "hsub", "Pair_ord a1 b1", "c7_in1"
+                )
+                p.have("c7_in2_T2: In (Pair_ord a2 b2) T2").by(
+                    "hsub", "Pair_ord a2 b2", "c7_in2"
+                )
+                p.have(
+                    "c7d: ?a1 a2 b1 b2. a = Eq_f a1 a2 /\\ b = Eq_f b1 b2 "
+                    "/\\ In (Pair_ord a1 b1) T2 /\\ In (Pair_ord a2 b2) T2"
+                ).by_exists(
+                    ["a1", "a2", "b1", "b2"],
+                    "c7a", "c7b", "c7_in1_T2", "c7_in2_T2",
+                )
+                p.thus(body_T2).by_disj("c7d")
+            # 8. Not_f (unary recursive).
+            with p.case(
+                "c8: ?s1 s2. a = Not_f s1 /\\ b = Not_f s2 "
+                "/\\ In (Pair_ord s1 s2) T1"
+            ):
+                p.choose("s2", "s1_eq")
+                p.split("s2_eq", "(c8a, c8b, c8_in1)")
+                p.have("c8_in2: In (Pair_ord s1 s2) T2").by(
+                    "hsub", "Pair_ord s1 s2", "c8_in1"
+                )
+                p.have(
+                    "c8d: ?s1 s2. a = Not_f s1 /\\ b = Not_f s2 "
+                    "/\\ In (Pair_ord s1 s2) T2"
+                ).by_exists(["s1", "s2"], "c8a", "c8b", "c8_in2")
+                p.thus(body_T2).by_disj("c8d")
+            # 9. Imp_f (binary recursive).
+            with p.case(
+                "c9: ?a1 a2 b1 b2. a = Imp_f a1 a2 /\\ b = Imp_f b1 b2 "
+                "/\\ In (Pair_ord a1 b1) T1 /\\ In (Pair_ord a2 b2) T1"
+            ):
+                p.choose("a2", "a1_eq")
+                p.choose("b1", "a2_eq")
+                p.choose("b2", "b1_eq")
+                p.split("b2_eq", "(c9a, c9b, c9_in1, c9_in2)")
+                p.have("c9_in1_T2: In (Pair_ord a1 b1) T2").by(
+                    "hsub", "Pair_ord a1 b1", "c9_in1"
+                )
+                p.have("c9_in2_T2: In (Pair_ord a2 b2) T2").by(
+                    "hsub", "Pair_ord a2 b2", "c9_in2"
+                )
+                p.have(
+                    "c9d: ?a1 a2 b1 b2. a = Imp_f a1 a2 /\\ b = Imp_f b1 b2 "
+                    "/\\ In (Pair_ord a1 b1) T2 /\\ In (Pair_ord a2 b2) T2"
+                ).by_exists(
+                    ["a1", "a2", "b1", "b2"],
+                    "c9a", "c9b", "c9_in1_T2", "c9_in2_T2",
+                )
+                p.thus(body_T2).by_disj("c9d")
+            # 10. Forall_f hit (existential, no In).
+            with p.case(
+                "c10: ?w f1. a = Forall_f w f1 /\\ w = v /\\ b = Forall_f w f1"
+            ):
+                p.thus(body_T2).by_disj("c10")
+            # 11. Forall_f miss (existential with In).
+            with p.case(
+                "c11: ?w f1 f2. a = Forall_f w f1 /\\ ~(w = v) "
+                "/\\ b = Forall_f w f2 /\\ In (Pair_ord f1 f2) T1"
+            ):
+                p.choose("f1", "w_eq")
+                p.choose("f2", "f1_eq")
+                p.split("f2_eq", "(c11a, c11b, c11c, c11_in1)")
+                p.have("c11_in2: In (Pair_ord f1 f2) T2").by(
+                    "hsub", "Pair_ord f1 f2", "c11_in1"
+                )
+                p.have(
+                    "c11d: ?w f1 f2. a = Forall_f w f1 /\\ ~(w = v) "
+                    "/\\ b = Forall_f w f2 /\\ In (Pair_ord f1 f2) T2"
+                ).by_exists(
+                    ["w", "f1", "f2"], "c11a", "c11b", "c11c", "c11_in2"
+                )
+                p.thus(body_T2).by_disj("c11d")
+            # 12. Insert_t (binary recursive).
+            with p.case(
+                "c12: ?a1 a2 b1 b2. a = Insert_t a1 a2 /\\ b = Insert_t b1 b2 "
+                "/\\ In (Pair_ord a1 b1) T1 /\\ In (Pair_ord a2 b2) T1"
+            ):
+                p.choose("a2", "a1_eq")
+                p.choose("b1", "a2_eq")
+                p.choose("b2", "b1_eq")
+                p.split("b2_eq", "(c12a, c12b, c12_in1, c12_in2)")
+                p.have("c12_in1_T2: In (Pair_ord a1 b1) T2").by(
+                    "hsub", "Pair_ord a1 b1", "c12_in1"
+                )
+                p.have("c12_in2_T2: In (Pair_ord a2 b2) T2").by(
+                    "hsub", "Pair_ord a2 b2", "c12_in2"
+                )
+                p.have(
+                    "c12d: ?a1 a2 b1 b2. a = Insert_t a1 a2 "
+                    "/\\ b = Insert_t b1 b2 "
+                    "/\\ In (Pair_ord a1 b1) T2 /\\ In (Pair_ord a2 b2) T2"
+                ).by_exists(
+                    ["a1", "a2", "b1", "b2"],
+                    "c12a", "c12b", "c12_in1_T2", "c12_in2_T2",
+                )
+                p.thus(body_T2).by_disj("c12d")
+            # 13. In_a (binary recursive).
+            with p.case(
+                "c13: ?a1 a2 b1 b2. a = In_a a1 a2 /\\ b = In_a b1 b2 "
+                "/\\ In (Pair_ord a1 b1) T1 /\\ In (Pair_ord a2 b2) T1"
+            ):
+                p.choose("a2", "a1_eq")
+                p.choose("b1", "a2_eq")
+                p.choose("b2", "b1_eq")
+                p.split("b2_eq", "(c13a, c13b, c13_in1, c13_in2)")
+                p.have("c13_in1_T2: In (Pair_ord a1 b1) T2").by(
+                    "hsub", "Pair_ord a1 b1", "c13_in1"
+                )
+                p.have("c13_in2_T2: In (Pair_ord a2 b2) T2").by(
+                    "hsub", "Pair_ord a2 b2", "c13_in2"
+                )
+                p.have(
+                    "c13d: ?a1 a2 b1 b2. a = In_a a1 a2 /\\ b = In_a b1 b2 "
+                    "/\\ In (Pair_ord a1 b1) T2 /\\ In (Pair_ord a2 b2) T2"
+                ).by_exists(
+                    ["a1", "a2", "b1", "b2"],
+                    "c13a", "c13b", "c13_in1_T2", "c13_in2_T2",
+                )
+                p.thus(body_T2).by_disj("c13d")
+
+    p.thus("is_substitute_step T2 t v a b").by_rewrite_of(
+        "hd2", [IS_SUBSTITUTE_STEP_AT]
+    )
+
+
+# ---------------------------------------------------------------------------
+# TRACE_EXISTS -- trace existence for syntactic F.
+#
+#   |- !F t v. (is_term F \/ is_form F) ==>
+#               ?T. is_substitute_trace T F t v (substitute F t v).
+#
+# Strong induction on F via nat0_lt; case-split on the is_term / is_form
+# disjuncts to expose F's constructor shape; in each constructor case
+# build the trace as ``Insert (Pair_ord F (substitute F t v))
+# (Union T_sub1 T_sub2 ...)`` over IH-supplied sub-traces.
+#
+# 13 cases (one per SUBSTITUTE_AT_* clause) -- each ~50-100 lines in
+# the obvious mechanical style: pattern-match F, recurse via IH on
+# proper sub-formulas, lift inner is_substitute_step facts through
+# TRACE_STEP_MONO across the Insert+Union extension. The pattern is
+# uniform but verbose; the binary cases (Plus_t, Times_t, Eq_f, Imp_f,
+# Insert_t, In_a) and Forall_f miss are the longest.
+#
+# Currently SORRY'd; the foundations (TRACE_STEP_MONO, IS_SUBSTITUTE_*_AT,
+# Union/IN_UNION) are all in place so this is mechanical follow-up work.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def TRACE_EXISTS(p):
+    p.goal(
+        "!F t v. (is_term F \\/ is_form F) ==> "
+        "?T. is_substitute_trace T F t v (substitute F t v)"
+    )
+    p.sorry()
+
+
+# ===========================================================================
+# Stubs for the Q-encoding side (B1).
+#
+# Each ``is_X_internal`` is the Q-formula encoding of the HOL predicate
+# ``X``. The associated ``IS_X_REPRESENTS`` theorem says: at every closed
+# numeral instance where the HOL fact holds, Q proves the substituted
+# Q-formula. (Sigma_1 completeness applied to the specific Sigma_1
+# statement.)
+#
+# All declared opaque (``new_constant``, no defining body) and SORRY'd to
+# allow downstream construction (B3) to type-check while leaving the
+# representability proofs as discrete follow-up tasks. Concrete bodies
+# are spelled out in the docstrings; once filled in, replace the
+# ``new_constant`` with ``define`` and drop the ``sorry``.
+# ===========================================================================
+
+
+# B1.0 (a) -- pow2 representability.
+# Needed by Singleton (= pow2) and hence by Pair_ord. Sigma_1
+# representability of the recursive function ``pow2 : nat0 -> nat0``.
+new_constant("is_pow2_internal", nat0_ty)
+is_pow2_internal = mk_const("is_pow2_internal", [])
+
+
+@proof
+def IS_POW2_REPRESENTS(p):
+    """|- !x. Prov_Q (substitute (substitute is_pow2_internal
+                       (numeral x) var_x)
+                       (numeral (pow2 x)) var_y).
+
+    SORRY. Construction (~80 lines):
+      * Body: ?p. is_pow2_trace_internal p var_x var_y, where the trace
+        p (HF set or sequence) records ``(i, pow2 i)`` for i = 0..x.
+      * Trace clause: (0, 1) in p, and (i, k) in p for i > 0 implies
+        (i-1, k/2) in p (i.e. each step applies double).
+      * At numerals: exhibit the trace as ``Insert_t``-stacked closed
+        Pair_ord numerals, all Sigma_0-verifiable in Q + HF.
+    """
+    p.goal(
+        "!x. Prov_Q (substitute (substitute is_pow2_internal "
+        "  (numeral x) var_x) "
+        "  (numeral (pow2 x)) var_y)"
+    )
+    p.sorry()
+
+
+# B1.0 (b) -- Pair_ord representability.
+# Needed for the trace HF set: the trace consists of Pair_ord-encoded
+# (sub-shape, output-shape) entries, and Q must prove each entry's shape
+# at numerals.
+new_constant("is_Pair_ord_internal", nat0_ty)
+is_Pair_ord_internal = mk_const("is_Pair_ord_internal", [])
+
+
+@proof
+def IS_PAIR_ORD_REPRESENTS(p):
+    """|- !x y. Prov_Q (substitute^3 is_Pair_ord_internal
+                          (numeral x) var_x
+                          (numeral y) var_y
+                          (numeral (Pair_ord x y)) var_z).
+
+    SORRY. Construction (~80 lines, on top of IS_POW2_REPRESENTS):
+      Pair_ord x y = Pair (Singleton x) (Pair x y)
+                    = Insert (pow2 x) (Insert x (pow2 y)).
+      Body of is_Pair_ord_internal: the Q-formula stating that var_z is
+      the result of two Insert_t applications wrapped around the pow2
+      values of var_x and var_y. Composition of:
+        * IS_POW2_REPRESENTS at var_x   (pow2 x = some w_x)
+        * IS_POW2_REPRESENTS at var_y   (pow2 y = some w_y)
+        * Sigma_0 verification of Insert_t (pow2 x) (Insert_t var_x (pow2 y))
+          = var_z at closed numerals (decidable in Q + HF).
+    """
+    p.goal(
+        "!x y. Prov_Q (substitute (substitute (substitute "
+        "  is_Pair_ord_internal (numeral x) var_x) "
+        "  (numeral y) var_y) "
+        "  (numeral (Pair_ord x y)) var_z)"
+    )
+    p.sorry()
+
+
+# B1.0 (c) -- In representability.
+# Needed by every disjunct of is_substitute_step (which references
+# ``In (Pair_ord _ _) T``) and by is_substitute_trace clause (i).
+new_constant("is_In_internal", nat0_ty)
+is_In_internal = mk_const("is_In_internal", [])
+
+
+@proof
+def IS_IN_REPRESENTS(p):
+    """|- !x y. (In x y ==> Prov_Q (substitute^2 is_In_internal
+                                       (numeral x) var_x
+                                       (numeral y) var_y))
+              /\\ (~In x y ==> Prov_Q (Not_f (substitute^2 is_In_internal
+                                                (numeral x) var_x
+                                                (numeral y) var_y))).
+
+    SORRY. Both directions are Sigma_1 / Sigma_0-decidable since In x y
+    = bit x y = ODD (HALF^x y), a primitive-recursive predicate decidable
+    in Q + HF at closed numerals. Construction (~80 lines):
+      * Body: a Sigma_1 trace formula recording the HALF chain
+        y, HALF y, ..., HALF^x y, then asserting ODD of the last entry.
+      * Forward: exhibit the trace at concrete x, y; verify each HALF
+        step via Q's Q4-Q7 + HF Q8-Q12 axiom citations.
+      * Negation: dual; use ~ODD (= Eq_f ... Zero_t variant) verifier.
+    """
+    p.goal(
+        "!x y. (In x y ==> Prov_Q (substitute (substitute "
+        "  is_In_internal (numeral x) var_x) "
+        "  (numeral y) var_y)) "
+        "/\\ (~(In x y) ==> Prov_Q (Not_f (substitute (substitute "
+        "  is_In_internal (numeral x) var_x) "
+        "  (numeral y) var_y)))"
+    )
+    p.sorry()
+
+
+# B1.1 -- Q-encoding of is_substitute_step.
+# 13-disjunct Q-formula matching the HOL ``is_substitute_step``. Free
+# vars: var_T (trace), var_y (t), var_z (v), var_a (a), var_b (b).
+# Composes IS_PAIR_ORD_REPRESENTS + IS_IN_REPRESENTS for the In-checks
+# inside each recursive disjunct.
+new_constant("is_substitute_step_internal", nat0_ty)
+is_substitute_step_internal = mk_const("is_substitute_step_internal", [])
+
+
+@proof
+def IS_SUBSTITUTE_STEP_REPRESENTS(p):
+    """|- !T t v a b. is_substitute_step T t v a b ==>
+                         Prov_Q (substitute^5 is_substitute_step_internal
+                                 (numeral T) var_T
+                                 (numeral t) var_y
+                                 (numeral v) var_z
+                                 (numeral a) var_a
+                                 (numeral b) var_b).
+
+    SORRY. Body of is_substitute_step_internal: 13-disjunction mirroring
+    is_substitute_step's HOL body (Q_or_chain over the 13 cases), with
+    each ``In (Pair_ord _ _) T``-check expressed via IS_PAIR_ORD +
+    IS_IN composed inside Q_exists chains for the constructor-witness
+    sub-shapes. ~150 lines: 13 disjuncts × (Q-encoded constructor
+    pattern) + final assembly via Q_or_chain.
+
+    Proof strategy: case-split on the IS_SUBSTITUTE_STEP_DEF disjunct
+    of ``is_substitute_step T t v a b``; in each case dispatch the
+    corresponding Q-disjunct's Sigma_1 witness using
+    IS_PAIR_ORD_REPRESENTS / IS_IN_REPRESENTS / Q-axiom citations
+    over closed numerals.
+    """
+    p.goal(
+        "!T t v a b. is_substitute_step T t v a b ==> "
+        "Prov_Q (substitute (substitute (substitute (substitute (substitute "
+        "  is_substitute_step_internal "
+        "  (numeral T) var_T) "
+        "  (numeral t) var_y) "
+        "  (numeral v) var_z) "
+        "  (numeral a) var_a) "
+        "  (numeral b) var_b)"
+    )
+    p.sorry()
+
+
+# B1.2 -- Q-encoding of is_substitute_trace.
+# Free vars: var_T (trace), var_x (F), var_y (t), var_z (v), var_w (r).
+# Body: the conjunction
+#   In (Pair_ord var_x var_w) var_T
+#   /\ (Forall_f var_a (Forall_f var_b
+#         (In (Pair_ord var_a var_b) var_T ==>
+#          is_substitute_step_internal[var_T, var_y, var_z, var_a, var_b])))
+# at the Q level. The single bound-variable forall is over (var_a, var_b),
+# matching the HOL definition's ``!a b. ...``.
+new_constant("is_substitute_trace_internal", nat0_ty)
+is_substitute_trace_internal = mk_const("is_substitute_trace_internal", [])
+
+
+@proof
+def IS_SUBSTITUTE_TRACE_REPRESENTS(p):
+    """|- !T F t v r. is_substitute_trace T F t v r ==>
+                         Prov_Q (substitute^5 is_substitute_trace_internal
+                                 (numeral T) var_T
+                                 (numeral F) var_x
+                                 (numeral t) var_y
+                                 (numeral v) var_z
+                                 (numeral r) var_w).
+
+    SORRY. Combines IS_PAIR_ORD_REPRESENTS (for clause (i): In (Pair_ord
+    F r) T) with IS_IN_REPRESENTS and IS_SUBSTITUTE_STEP_REPRESENTS
+    (for clause (ii): the bounded forall over members of T). The
+    bounded forall is decidable in Q + HF because T is a closed
+    numeral with finitely many members witnessed by Q12 (foundation /
+    HF nat0_lt). ~100 lines.
+    """
+    p.goal(
+        "!T F t v r. is_substitute_trace T F t v r ==> "
+        "Prov_Q (substitute (substitute (substitute (substitute (substitute "
+        "  is_substitute_trace_internal "
+        "  (numeral T) var_T) "
+        "  (numeral F) var_x) "
+        "  (numeral t) var_y) "
+        "  (numeral v) var_z) "
+        "  (numeral r) var_w)"
+    )
+    p.sorry()
 
 
 # Opaque: no defining body. Stage 3C will replace this with a definition
@@ -2459,6 +3307,45 @@ if __name__ == "__main__":
     print("Stage 3C (a) -- representability of substitute (SORRY).")
     print("    VAR_Z_DEF              :", pp_thm(VAR_Z_DEF))
     print("    VAR_W_DEF              :", pp_thm(VAR_W_DEF))
+    print("    VAR_T_DEF              :", pp_thm(VAR_T_DEF))
+    print("    VAR_A_DEF              :", pp_thm(VAR_A_DEF))
+    print("    VAR_B_DEF              :", pp_thm(VAR_B_DEF))
+    print("    VAR_S1_DEF              :", pp_thm(VAR_S1_DEF))
+    print("    VAR_S2_DEF              :", pp_thm(VAR_S2_DEF))
+    print("    VAR_WQ_DEF             :", pp_thm(VAR_WQ_DEF))
+    print("    VAR_A1_DEF              :", pp_thm(VAR_A1_DEF))
+    print("    VAR_A2_DEF              :", pp_thm(VAR_A2_DEF))
+    print("    VAR_B1_DEF              :", pp_thm(VAR_B1_DEF))
+    print("    VAR_B2_DEF              :", pp_thm(VAR_B2_DEF))
+    print("    VAR_F1_DEF              :", pp_thm(VAR_F1_DEF))
+    print("    VAR_F2_DEF              :", pp_thm(VAR_F2_DEF))
+    print("    IS_SUBSTITUTE_STEP_DEF :", pp_thm(IS_SUBSTITUTE_STEP_DEF))
+    print("    IS_SUBSTITUTE_STEP_AT  : <13-disjunct body>")
+    print("    IS_SUBSTITUTE_TRACE_DEF:", pp_thm(IS_SUBSTITUTE_TRACE_DEF))
+    print("    IS_SUBSTITUTE_TRACE_AT :", pp_thm(IS_SUBSTITUTE_TRACE_AT))
+    print(
+        "    TRACE_STEP_MONO        : |- !T1 T2. (!x. In x T1 ==> In x T2) "
+        "==> !t v a b. is_substitute_step T1 ... ==> is_substitute_step T2 ..."
+    )
+    print(
+        "    TRACE_EXISTS (SORRY)   : |- !F t v. (is_term F \\/ is_form F) "
+        "==> ?T. is_substitute_trace T F t v (substitute F t v)"
+    )
+    print(
+        "    IS_POW2_REPRESENTS (SORRY)            : |- !x. Prov_Q (.. is_pow2_internal .. (pow2 x) ..)"
+    )
+    print(
+        "    IS_PAIR_ORD_REPRESENTS (SORRY)        : |- !x y. Prov_Q (.. is_Pair_ord_internal .. (Pair_ord x y) ..)"
+    )
+    print(
+        "    IS_IN_REPRESENTS (SORRY)              : |- !x y. (In x y => Prov_Q ..) /\\ (~In x y => Prov_Q (Not_f ..))"
+    )
+    print(
+        "    IS_SUBSTITUTE_STEP_REPRESENTS (SORRY) : |- !T t v a b. is_substitute_step T t v a b => Prov_Q .."
+    )
+    print(
+        "    IS_SUBSTITUTE_TRACE_REPRESENTS (SORRY): |- !T F t v r. is_substitute_trace T F t v r => Prov_Q .."
+    )
     print("    SUBSTITUTE_REPRESENTS  :", pp_thm(SUBSTITUTE_REPRESENTS))
     print()
     print("Stage 3D (a) -- representability of provability (SORRY).")
