@@ -141,6 +141,11 @@ from q_syntax import (
     In_a,  # noqa: F401  -- parser alias for is_substitute_step
     IS_TERM_REC,
     IS_TERM_AT_SUCC,
+    SUBSTITUTE_AT_NOT,
+    SUBSTITUTE_AT_IMP,
+    SUBSTITUTE_AT_EQ,
+    SUBSTITUTE_AT_FORALL_HIT,
+    SUBSTITUTE_AT_FORALL_MISS,
     mono_iff_eq_or_pw_step,
     _unfold_rec_via_F_def,
     _extract_nfg,
@@ -2391,6 +2396,166 @@ def _idx_term(k):
     for _ in range(k):
         suc = mk_suc0(suc)
     return suc
+
+
+# ---------------------------------------------------------------------------
+# Substitute-pushing lemmas for the Q-encoding macros.
+#
+# Q_not / Q_imp / Q_eq / Q_forall coincide with their primitive HOL
+# constructors (Not_f / Imp_f / Eq_f / Forall_f), so the existing
+# SUBSTITUTE_AT_NOT / _IMP / _EQ / _FORALL_HIT / _FORALL_MISS already
+# push substitute through them -- no new lemma needed.
+#
+# Q_and / Q_or / Q_neq / Q_exists desugar into composite Not_f / Imp_f /
+# Forall_f trees. Each lemma below packages the multi-step push of
+# substitute through the literal expansion into a single named theorem
+# usable as a one-shot ``by_rewrite`` rule when reducing
+# ``substitute (Q_macro ...) new_t v`` symbolically inside
+# representability proofs.
+#
+# These are all unconditional (Q_and / Q_or / Q_neq) or split into HIT /
+# MISS branches by the binder side condition (Q_exists). Each is a
+# one-line composition of SUBSTITUTE_AT_NOT / _IMP / _EQ / _FORALL_*.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def SUBSTITUTE_Q_AND(p):
+    """|- !a b new_t v.
+            substitute (Not_f (Imp_f a (Not_f b))) new_t v
+            = Not_f (Imp_f (substitute a new_t v)
+                           (Not_f (substitute b new_t v))).
+
+    Q_and a b = Not_f (Imp_f a (Not_f b)); pushes substitute through
+    the outer Not_f, the Imp_f, and the inner Not_f wrapping b.
+    """
+    p.goal(
+        "!a b new_t v. "
+        "substitute (Not_f (Imp_f a (Not_f b))) new_t v "
+        "= Not_f (Imp_f (substitute a new_t v) "
+        "               (Not_f (substitute b new_t v)))"
+    )
+    p.fix("a b new_t v")
+    p.thus(
+        "substitute (Not_f (Imp_f a (Not_f b))) new_t v "
+        "= Not_f (Imp_f (substitute a new_t v) "
+        "               (Not_f (substitute b new_t v)))"
+    ).by_rewrite([SUBSTITUTE_AT_NOT, SUBSTITUTE_AT_IMP])
+
+
+@proof
+def SUBSTITUTE_Q_OR(p):
+    """|- !a b new_t v.
+            substitute (Imp_f (Not_f a) b) new_t v
+            = Imp_f (Not_f (substitute a new_t v))
+                    (substitute b new_t v).
+
+    Q_or a b = Imp_f (Not_f a) b; substitute pushes through the Imp_f
+    and the Not_f wrapping a.
+    """
+    p.goal(
+        "!a b new_t v. "
+        "substitute (Imp_f (Not_f a) b) new_t v "
+        "= Imp_f (Not_f (substitute a new_t v)) "
+        "        (substitute b new_t v)"
+    )
+    p.fix("a b new_t v")
+    p.thus(
+        "substitute (Imp_f (Not_f a) b) new_t v "
+        "= Imp_f (Not_f (substitute a new_t v)) "
+        "        (substitute b new_t v)"
+    ).by_rewrite([SUBSTITUTE_AT_NOT, SUBSTITUTE_AT_IMP])
+
+
+@proof
+def SUBSTITUTE_Q_NEQ(p):
+    """|- !a b new_t v.
+            substitute (Not_f (Eq_f a b)) new_t v
+            = Not_f (Eq_f (substitute a new_t v)
+                          (substitute b new_t v)).
+
+    Q_neq a b = Not_f (Eq_f a b); substitute pushes through the outer
+    Not_f and the Eq_f.
+    """
+    p.goal(
+        "!a b new_t v. "
+        "substitute (Not_f (Eq_f a b)) new_t v "
+        "= Not_f (Eq_f (substitute a new_t v) "
+        "              (substitute b new_t v))"
+    )
+    p.fix("a b new_t v")
+    p.thus(
+        "substitute (Not_f (Eq_f a b)) new_t v "
+        "= Not_f (Eq_f (substitute a new_t v) "
+        "              (substitute b new_t v))"
+    ).by_rewrite([SUBSTITUTE_AT_NOT, SUBSTITUTE_AT_EQ])
+
+
+@proof
+def SUBSTITUTE_Q_EXISTS_HIT(p):
+    """|- !idx body new_t v. v = idx ==>
+            substitute (Not_f (Forall_f idx (Not_f body))) new_t v
+            = Not_f (Forall_f idx (Not_f body)).
+
+    Q_exists idx body = Not_f (Forall_f idx (Not_f body)); when v
+    equals the binder index, the inner Forall_f hits and substitute
+    halts: the body is unchanged.
+    """
+    p.goal(
+        "!idx body new_t v. v = idx ==> "
+        "substitute (Not_f (Forall_f idx (Not_f body))) new_t v "
+        "= Not_f (Forall_f idx (Not_f body))"
+    )
+    p.fix("idx body new_t v")
+    p.assume("hv: v = idx")
+    forall_hit_at = SPECL(
+        [
+            p._parse("idx"),
+            p._parse("Not_f body"),
+            p._parse("new_t"),
+            p._parse("v"),
+        ],
+        SUBSTITUTE_AT_FORALL_HIT,
+    )
+    forall_hit_app = MP(forall_hit_at, p.fact("hv"))
+    p.thus(
+        "substitute (Not_f (Forall_f idx (Not_f body))) new_t v "
+        "= Not_f (Forall_f idx (Not_f body))"
+    ).by_rewrite([SUBSTITUTE_AT_NOT, forall_hit_app])
+
+
+@proof
+def SUBSTITUTE_Q_EXISTS_MISS(p):
+    """|- !idx body new_t v. ~(v = idx) ==>
+            substitute (Not_f (Forall_f idx (Not_f body))) new_t v
+            = Not_f (Forall_f idx (Not_f (substitute body new_t v))).
+
+    Q_exists idx body = Not_f (Forall_f idx (Not_f body)); when v
+    differs from the binder index, substitute pushes through the outer
+    Not_f, the Forall_f (capture-free under v != idx), and the inner
+    Not_f wrapping body.
+    """
+    p.goal(
+        "!idx body new_t v. ~(v = idx) ==> "
+        "substitute (Not_f (Forall_f idx (Not_f body))) new_t v "
+        "= Not_f (Forall_f idx (Not_f (substitute body new_t v)))"
+    )
+    p.fix("idx body new_t v")
+    p.assume("hne: ~(v = idx)")
+    forall_miss_at = SPECL(
+        [
+            p._parse("idx"),
+            p._parse("Not_f body"),
+            p._parse("new_t"),
+            p._parse("v"),
+        ],
+        SUBSTITUTE_AT_FORALL_MISS,
+    )
+    forall_miss_app = MP(forall_miss_at, p.fact("hne"))
+    p.thus(
+        "substitute (Not_f (Forall_f idx (Not_f body))) new_t v "
+        "= Not_f (Forall_f idx (Not_f (substitute body new_t v)))"
+    ).by_rewrite([SUBSTITUTE_AT_NOT, forall_miss_app])
 
 
 _idx_x = ZERO  # var_x = Var_t 0   (F slot)
