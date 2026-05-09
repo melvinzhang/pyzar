@@ -106,7 +106,6 @@ from tactics import (
     SYM,
     AP_THM,
     BETA_CONV,
-    BETA_NORM,
     TRANS,
     DISJ1,
     DISJ2,
@@ -150,11 +149,6 @@ from tactics import (
 from fusion import vsubst, aty, DEDUCT_ANTISYM_RULE, new_constant
 from q_proof import (
     var_x,
-    Prov_Q,
-    PROV_Q_AT,
-    PROV_Q_AXIOM,
-    PROV_Q_MP,
-    PROV_Q_GEN,
     nil_l,
     cons_l,
     CONS_L_INJ,
@@ -280,20 +274,13 @@ def IS_TERM_NUMERAL(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 3A (c) -- representability scaffolding.
+# Stage 3A (c) -- shared constants and helpers used by the Stage 3B
+# Proof_Q infrastructure and beyond.
 #
-# A unary predicate ``P : nat0 -> bool`` is *represented* by a
-# Q-formula ``F`` (a nat0 godelnum, taken to be a Q-formula whose only
-# free variable is ``var_x``) iff:
-#
-#   * (positive)  !n. P n      ==> Prov_Q (substitute F (numeral n) var_x).
-#   * (negative)  !n. ~ P n    ==> Prov_Q (Not_f (substitute F (numeral n) var_x)).
-#
-# We package the conjunction of the two conditions as
-# ``represents_pred F P``.
-#
-# ``represents_func`` and the various function-arity variants are
-# deferred to Stage 3B/C.
+# ``substitute`` and ``Not_f`` are referenced by name from this point on;
+# the ``represents_pred`` scaffolding (which mentions ``Prov_Q``) lives
+# in Stage 3B (k) below, after ``Prov_Q`` has been defined as the
+# Sigma_1 form ``\n. ?p. Proof_Q p n``.
 # ---------------------------------------------------------------------------
 
 
@@ -310,28 +297,6 @@ def _subst_at_numeral(F_term, n_term):
     return mk_app(substitute, F_term, mk_app(numeral, n_term), var_x)
 
 
-_pos_clause = mk_forall(
-    _n_n0,
-    mk_imp(mk_app(_P_pred, _n_n0), mk_app(Prov_Q, _subst_at_numeral(_F_n0, _n_n0))),
-)
-_neg_clause = mk_forall(
-    _n_n0,
-    mk_imp(
-        mk_not(mk_app(_P_pred, _n_n0)),
-        mk_app(Prov_Q, mk_app(Not_f, _subst_at_numeral(_F_n0, _n_n0))),
-    ),
-)
-
-_represents_pred_body = mk_and(_pos_clause, _neg_clause)
-
-REPRESENTS_PRED_DEF = define(
-    "represents_pred",
-    parse_type("nat0 -> (nat0 -> bool) -> bool"),
-    mk_abs(_F_n0, mk_abs(_P_pred, _represents_pred_body)),
-)
-represents_pred = mk_const("represents_pred", [])
-
-
 def _at1(def_th, x):
     th = AP_THM(def_th, x)
     th = TRANS(th, BETA_CONV(rand(th._concl)))
@@ -344,13 +309,6 @@ def _at2(def_th, x, y):
     th_xy = AP_THM(th_x, y)
     th_xy = TRANS(th_xy, BETA_CONV(rand(th_xy._concl)))
     return GENL([x, y], th_xy)
-
-
-# |- !F P. represents_pred F P =
-#          ((!n. P n ==> Prov_Q (substitute F (numeral n) var_x))
-#        /\ (!n. ~ P n
-#               ==> Prov_Q (Not_f (substitute F (numeral n) var_x)))).
-REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 
 
 # ---------------------------------------------------------------------------
@@ -1769,285 +1727,20 @@ def PROOF_Q_APPEND(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 3B (d) -- forward direction of the Prov_Q / Proof_Q equivalence.
+# (DELETED) Forward direction of an old Prov_Q / Proof_Q equivalence.
 #
-#   |- !p f. mem_l p f ==> (?h. Proof_Q p h) ==> Prov_Q f.
-#
-# By strong induction on the proof list ``p``: if ``p`` is non-empty (it
-# must be, since ``Proof_Q nil_l _ = F``), unfold ``Proof_Q p h_top`` to
-# get ``p = cons_l hd tl``, ``hd = h_top``, ``valid_step tl hd`` and
-# either ``tl = nil_l`` or ``?h'. Proof_Q tl h'`` (a smaller proof). The
-# membership claim is split: ``f = hd`` (then ``f`` is justified by
-# ``valid_step tl hd``: axiom / MP / Gen) or ``mem_l tl f`` (then IH on
-# ``tl < p`` recovers ``Prov_Q f``).
-#
-# Each MP / Gen sub-case requires that the cited members of ``tl`` be
-# provable, which is exactly what the IH delivers when ``tl`` itself
-# has a proof; if ``tl = nil_l`` the membership claim contradicts
-# ``MEM_L_AT_NIL``.
+# An earlier draft proved
+#   |- !p f. mem_l p f ==> (?h. Proof_Q p h) ==> Prov_Q f
+# by strong induction on the proof list, then derived the convenience
+# corollary ``PROOF_Q_PROVES : !p n. Proof_Q p n ==> Prov_Q n``. Both
+# were needed only because ``Prov_Q`` was originally defined
+# impredicatively in q_proof.py and had to be bridged to the list-based
+# ``Proof_Q``. After collapsing ``Prov_Q := \n. ?p. Proof_Q p n``
+# (defined later in this file via the Sigma_1 form), ``PROOF_Q_PROVES``
+# becomes ``EXISTS_INTRO`` and the strong-induction argument is no
+# longer needed for any downstream consumer. Both lemmas are retired.
 # ---------------------------------------------------------------------------
 
-
-@proof
-def PROV_Q_OF_PROOF_Q(p):
-    """|- !p f. mem_l p f ==> (?h. Proof_Q p h) ==> Prov_Q f."""
-    p.goal("!p. !f. mem_l p f ==> (?h. Proof_Q p h) ==> Prov_Q f")
-    with p.strong_induction("p", "IH"):
-        p.fix("f")
-        p.assume("mem_pf: mem_l p f")
-        p.assume("hex: ?h. Proof_Q p h")
-
-        p.choose("h_top", "hex", eq_label="pq")
-        # pq : Proof_Q p h_top.
-
-        # Unfold Proof_Q at p, h_top.
-        rec_pq = SPECL([p._parse("p"), p._parse("h_top")], PROOF_Q_REC_PW)
-        body_str = (
-            "?h t. p = cons_l h t /\\ h = h_top /\\ valid_step t h "
-            "/\\ (t = nil_l \\/ ?h_inner. Proof_Q t h_inner)"
-        )
-        p.have(f"body: {body_str}").by_eq_mp(rec_pq, "pq")
-
-        p.choose("hd", "body", eq_label="ex_t")
-        p.choose("tl", "ex_t", eq_label="conj")
-        p.split("conj", "(p_eq_cons, hd_eq_top, valid_th, tail_disj)")
-        # p_eq_cons  : p = cons_l hd tl
-        # hd_eq_top  : hd = h_top
-        # valid_th   : valid_step tl hd
-        # tail_disj  : tl = nil_l \/ ?h_inner. Proof_Q tl h_inner
-
-        # nat0_lt tl p (for the IH).
-        lt_t_cons = SPECL([p._parse("hd"), p._parse("tl")], NAT0_LT_CONS_L_TAIL)
-        # |- nat0_lt tl (cons_l hd tl)
-        p.have("lt_tl_p: nat0_lt tl p").by_rewrite_of(
-            lt_t_cons, [SYM(p.fact("p_eq_cons"))]
-        )
-
-        # mem_l p f at the cons-form.
-        p.have("mem_at_cons: mem_l (cons_l hd tl) f").by_rewrite_of(
-            "mem_pf", [p.fact("p_eq_cons")]
-        )
-        mem_at_cons_eq = SPECL(
-            [p._parse("hd"), p._parse("tl"), p._parse("f")],
-            MEM_L_AT_CONS,
-        )
-        p.have("mem_disj: f = hd \\/ mem_l tl f").by_eq_mp(
-            mem_at_cons_eq, "mem_at_cons"
-        )
-
-        # Helper closures: derive ?h. Proof_Q tl h from tail_disj's
-        # right disjunct, or derive Prov_Q f vacuously from
-        # ``mem_l nil_l _ = F`` when ``tl = nil_l``.
-        with p.cases_on("mem_disj"):
-            with p.case("eq_case: f = hd"):
-                # Justify Prov_Q hd via valid_step tl hd.
-                valid_at = SPECL([p._parse("tl"), p._parse("hd")], VALID_STEP_AT)
-                vd_str = (
-                    "is_axiom hd "
-                    "\\/ (?f1 f2. mem_l tl f1 /\\ mem_l tl f2 "
-                    "/\\ is_mp f1 f2 hd) "
-                    "\\/ (?f1. mem_l tl f1 /\\ is_gen f1 hd)"
-                )
-                p.have(f"vd: {vd_str}").by_eq_mp(valid_at, "valid_th")
-
-                with p.cases_on("vd"):
-                    with p.case("ax_case: is_axiom hd"):
-                        p.have("prov_hd: Prov_Q hd").by(PROV_Q_AXIOM, "hd", "ax_case")
-                        p.thus("Prov_Q f").by_rewrite_of(
-                            "prov_hd", [SYM(p.fact("eq_case"))]
-                        )
-
-                    with p.case(
-                        "mp_case: ?f1 f2. mem_l tl f1 /\\ mem_l tl f2 "
-                        "/\\ is_mp f1 f2 hd"
-                    ):
-                        # Auto-introduces ``f1`` with f1_eq:
-                        #   ?f2. mem_l tl f1 /\ mem_l tl f2
-                        #         /\ is_mp f1 f2 hd
-                        p.choose("f2", "f1_eq", eq_label="conj_mp")
-                        p.split("conj_mp", "(mem_f1, mem_f2, mp_th)")
-                        is_mp_at = SPECL(
-                            [p._parse("f1"), p._parse("f2"), p._parse("hd")],
-                            IS_MP_AT,
-                        )
-                        p.have("f2_eq_imp: f2 = Imp_f f1 hd").by_eq_mp(
-                            is_mp_at, "mp_th"
-                        )
-
-                        with p.cases_on("tail_disj"):
-                            with p.case("tnil: tl = nil_l"):
-                                p.have("mem_nil_f1: mem_l nil_l f1").by_rewrite_of(
-                                    "mem_f1", [p.fact("tnil")]
-                                )
-                                mem_nil_at = SPEC(p._parse("f1"), MEM_L_AT_NIL)
-                                p.have("mem_F: F").by_eq_mp(mem_nil_at, "mem_nil_f1")
-                                p.thus("Prov_Q f").by_thm(
-                                    CONTR(
-                                        p._parse("Prov_Q f"),
-                                        p.fact("mem_F"),
-                                    )
-                                )
-                            with p.case("texists: ?h_inner. Proof_Q tl h_inner"):
-                                # Auto-intro: h_inner_eq: Proof_Q tl h_inner.
-                                p.have("tlex: ?h. Proof_Q tl h").by_witness(
-                                    "h_inner", "h_inner_eq"
-                                )
-                                p.have("prov_f1: Prov_Q f1").by(
-                                    "IH",
-                                    "tl",
-                                    "lt_tl_p",
-                                    "f1",
-                                    "mem_f1",
-                                    "tlex",
-                                )
-                                p.have("prov_f2: Prov_Q f2").by(
-                                    "IH",
-                                    "tl",
-                                    "lt_tl_p",
-                                    "f2",
-                                    "mem_f2",
-                                    "tlex",
-                                )
-                                p.have("prov_imp: Prov_Q (Imp_f f1 hd)").by_rewrite_of(
-                                    "prov_f2", [p.fact("f2_eq_imp")]
-                                )
-                                p.have("prov_hd: Prov_Q hd").by(
-                                    PROV_Q_MP,
-                                    "f1",
-                                    "hd",
-                                    CONJ(
-                                        p.fact("prov_f1"),
-                                        p.fact("prov_imp"),
-                                    ),
-                                )
-                                p.thus("Prov_Q f").by_rewrite_of(
-                                    "prov_hd",
-                                    [SYM(p.fact("eq_case"))],
-                                )
-
-                    with p.case("gen_case: ?f1. mem_l tl f1 /\\ is_gen f1 hd"):
-                        # Auto-intro: f1_eq: mem_l tl f1 /\ is_gen f1 hd.
-                        p.split("f1_eq", "(mem_f1, gen_th)")
-                        is_gen_at = SPECL(
-                            [p._parse("f1"), p._parse("hd")],
-                            IS_GEN_AT,
-                        )
-                        p.have("gen_unfold: ?x. hd = Forall_f x f1").by_eq_mp(
-                            is_gen_at, "gen_th"
-                        )
-                        p.choose(
-                            "x_var",
-                            "gen_unfold",
-                            eq_label="hd_eq_forall",
-                        )
-                        # hd_eq_forall: hd = Forall_f x_var f1.
-
-                        with p.cases_on("tail_disj"):
-                            with p.case("tnil: tl = nil_l"):
-                                p.have("mem_nil_f1: mem_l nil_l f1").by_rewrite_of(
-                                    "mem_f1", [p.fact("tnil")]
-                                )
-                                mem_nil_at = SPEC(p._parse("f1"), MEM_L_AT_NIL)
-                                p.have("mem_F: F").by_eq_mp(mem_nil_at, "mem_nil_f1")
-                                p.thus("Prov_Q f").by_thm(
-                                    CONTR(
-                                        p._parse("Prov_Q f"),
-                                        p.fact("mem_F"),
-                                    )
-                                )
-                            with p.case("texists: ?h_inner. Proof_Q tl h_inner"):
-                                p.have("tlex: ?h. Proof_Q tl h").by_witness(
-                                    "h_inner", "h_inner_eq"
-                                )
-                                p.have("prov_f1: Prov_Q f1").by(
-                                    "IH",
-                                    "tl",
-                                    "lt_tl_p",
-                                    "f1",
-                                    "mem_f1",
-                                    "tlex",
-                                )
-                                p.have("prov_forall: Prov_Q (Forall_f x_var f1)").by(
-                                    PROV_Q_GEN,
-                                    "f1",
-                                    "x_var",
-                                    "prov_f1",
-                                )
-                                p.have("prov_hd: Prov_Q hd").by_rewrite_of(
-                                    "prov_forall",
-                                    [SYM(p.fact("hd_eq_forall"))],
-                                )
-                                p.thus("Prov_Q f").by_rewrite_of(
-                                    "prov_hd",
-                                    [SYM(p.fact("eq_case"))],
-                                )
-
-            with p.case("mem_tl: mem_l tl f"):
-                with p.cases_on("tail_disj"):
-                    with p.case("tnil: tl = nil_l"):
-                        p.have("mem_nil_f: mem_l nil_l f").by_rewrite_of(
-                            "mem_tl", [p.fact("tnil")]
-                        )
-                        mem_nil_at = SPEC(p._parse("f"), MEM_L_AT_NIL)
-                        p.have("mem_F: F").by_eq_mp(mem_nil_at, "mem_nil_f")
-                        p.thus("Prov_Q f").by_thm(
-                            CONTR(
-                                p._parse("Prov_Q f"),
-                                p.fact("mem_F"),
-                            )
-                        )
-                    with p.case("texists: ?h_inner. Proof_Q tl h_inner"):
-                        p.have("tlex: ?h. Proof_Q tl h").by_witness(
-                            "h_inner", "h_inner_eq"
-                        )
-                        p.thus("Prov_Q f").by(
-                            "IH",
-                            "tl",
-                            "lt_tl_p",
-                            "f",
-                            "mem_tl",
-                            "tlex",
-                        )
-
-
-# Corollary: ``Proof_Q p n ==> Prov_Q n`` (specialise the membership
-# lemma at ``f := n``; ``n`` is the head of ``p`` so ``mem_l p n`` is
-# the left disjunct of ``MEM_L_AT_CONS``).
-@proof
-def PROOF_Q_PROVES(p):
-    """|- !p n. Proof_Q p n ==> Prov_Q n."""
-    p.goal("!p n. Proof_Q p n ==> Prov_Q n")
-    p.fix("p n")
-    p.assume("pq: Proof_Q p n")
-
-    # Unfold to extract p = cons_l hd tl.
-    rec_pq = SPECL([p._parse("p"), p._parse("n")], PROOF_Q_REC_PW)
-    body_str = (
-        "?h t. p = cons_l h t /\\ h = n /\\ valid_step t h "
-        "/\\ (t = nil_l \\/ ?h_inner. Proof_Q t h_inner)"
-    )
-    p.have(f"body: {body_str}").by_eq_mp(rec_pq, "pq")
-    p.choose("hd", "body", eq_label="ex_t")
-    p.choose("tl", "ex_t", eq_label="conj")
-    p.split("conj", "(p_eq_cons, hd_eq_n, _valid, _tail_disj)")
-
-    # mem_l (cons_l hd tl) hd via the left disjunct.
-    mem_at_cons_eq = SPECL(
-        [p._parse("hd"), p._parse("tl"), p._parse("hd")],
-        MEM_L_AT_CONS,
-    )
-    p.have("mem_disj: hd = hd \\/ mem_l tl hd").by_disj(REFL(p._parse("hd")))
-    p.have("mem_at_cons: mem_l (cons_l hd tl) hd").by_eq_mp(
-        SYM(mem_at_cons_eq), "mem_disj"
-    )
-    p.have("mem_p_hd: mem_l p hd").by_rewrite_of(
-        "mem_at_cons", [SYM(p.fact("p_eq_cons"))]
-    )
-
-    p.have("hex: ?h. Proof_Q p h").by_witness("n", "pq")
-
-    p.have("prov_hd: Prov_Q hd").by(PROV_Q_OF_PROOF_Q, "p", "hd", "mem_p_hd", "hex")
-    p.thus("Prov_Q n").by_rewrite_of("prov_hd", [p.fact("hd_eq_n")])
 
 
 # ---------------------------------------------------------------------------
@@ -2305,70 +1998,136 @@ def MP_HAS_PROOF(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 3B (j) -- the equivalence ``Prov_Q n <=> ?p. Proof_Q p n``.
+# Stage 3B (j) -- Sigma_1 definition of Prov_Q.
 #
-# Backward direction (Prov_Q ==> ?p): instantiate the impredicative
-# ``Prov_Q``'s admissibility hypothesis at ``P := \n. ?p. Proof_Q p n``.
-# The three closure clauses are exactly AXIOM_HAS_PROOF,
-# MP_HAS_PROOF, GEN_HAS_PROOF (suitably specialised).
+#   Prov_Q n  :<=>  ?p. Proof_Q p n.
 #
-# Forward direction (?p ==> Prov_Q): PROOF_Q_PROVES.
+# This is the canonical form: provability is the existence of an
+# explicit list-of-formulas proof. The closure rules under axioms,
+# modus ponens, and generalisation are derived from AXIOM_HAS_PROOF,
+# MP_HAS_PROOF, GEN_HAS_PROOF below.
+# ---------------------------------------------------------------------------
+
+
+PROV_Q_DEF = define(
+    "Prov_Q",
+    parse_type("nat0 -> bool"),
+    "\\n:nat0. ?p:nat0. Proof_Q p n",
+)
+Prov_Q = mk_const("Prov_Q", [])
+# |- !n. Prov_Q n = (?p. Proof_Q p n).
+PROV_Q_AT = _at1(PROV_Q_DEF, _n_n0)
+
+
+# ---------------------------------------------------------------------------
+# Stage 3B (k) -- closure rules.
+#
+#   (1) |- !n. is_axiom n ==> Prov_Q n.
+#   (2) |- !f g. Prov_Q f /\ Prov_Q (Imp_f f g) ==> Prov_Q g.
+#   (3) |- !f x. Prov_Q f ==> Prov_Q (Forall_f x f).
+#
+# Each one is the corresponding *_HAS_PROOF lemma packaged through
+# PROV_Q_AT (which folds ``?p. Proof_Q p _`` into ``Prov_Q _``).
 # ---------------------------------------------------------------------------
 
 
 @proof
-def PROV_Q_IFF_PROOF_Q(p):
-    """|- !n. Prov_Q n = ?p. Proof_Q p n."""
-    p.goal("!n. Prov_Q n = (?p. Proof_Q p n)")
+def PROV_Q_AXIOM(p):
+    """|- !n. is_axiom n ==> Prov_Q n."""
+    p.goal("!n. is_axiom n ==> Prov_Q n")
     p.fix("n")
+    p.assume("ax: is_axiom n")
+    p.have("ex: ?p. Proof_Q p n").by(AXIOM_HAS_PROOF, "n", "ax")
+    pq_at_n = SPEC(p._parse("n"), PROV_Q_AT)
+    p.thus("Prov_Q n").by_eq_mp(SYM(pq_at_n), "ex")
 
-    # Forward: Prov_Q n ==> ?p. Proof_Q p n.
-    with p.have("fwd: Prov_Q n ==> ?p. Proof_Q p n").proof():
-        p.assume("pq: Prov_Q n")
-        # Unfold via PROV_Q_AT.
-        pq_at = SPEC(p._parse("n"), PROV_Q_AT)
-        body_str = (
-            "!P:nat0->bool. "
-            "((!m. is_axiom m ==> P m) "
-            "/\\ ((!f g. P f /\\ P (Imp_f f g) ==> P g) "
-            "/\\ (!f x. P f ==> P (Forall_f x f)))) ==> P n"
-        )
-        p.have(f"body: {body_str}").by_eq_mp(pq_at, "pq")
-        # Specialise body at P := \k. ?p. Proof_Q p k.
-        k_var = Var("k", nat0_ty)
-        p_var = Var("p", nat0_ty)
-        P_term = mk_abs(k_var, mk_exists(p_var, mk_app(Proof_Q, p_var, k_var)))
-        body_at_P = SPEC(P_term, p.fact("body"))
-        # body_at_P : <admissibility for P> ==> P n,
-        # where P n BETA-reduces to ?p. Proof_Q p n.
-        # Need to prove the admissibility.
-        adm_str = (
-            "(!m. is_axiom m ==> ?p. Proof_Q p m) "
-            "/\\ ((!f g. (?p. Proof_Q p f) /\\ "
-            "           (?p. Proof_Q p (Imp_f f g)) "
-            "          ==> ?p. Proof_Q p g) "
-            "/\\ (!f x. (?p. Proof_Q p f) "
-            "           ==> ?p. Proof_Q p (Forall_f x f)))"
-        )
-        p.have(f"adm: {adm_str}").by_thm(
-            CONJ(
-                AXIOM_HAS_PROOF,
-                CONJ(MP_HAS_PROOF, GEN_HAS_PROOF),
-            )
-        )
 
-        # body_at_P after BETA_NORM: adm-shape ==> ?p. Proof_Q p n.
-        normed = EQ_MP(BETA_NORM(body_at_P._concl), body_at_P)
-        p.have("ex_p: ?p. Proof_Q p n").by_thm(MP(normed, p.fact("adm")))
-        p.thus("?p. Proof_Q p n").by_thm(p.fact("ex_p"))
+@proof
+def PROV_Q_MP(p):
+    """|- !f g. Prov_Q f /\\ Prov_Q (Imp_f f g) ==> Prov_Q g."""
+    p.goal("!f g. (Prov_Q f /\\ Prov_Q (Imp_f f g)) ==> Prov_Q g")
+    p.fix("f g")
+    p.assume("(pf, pfg): Prov_Q f /\\ Prov_Q (Imp_f f g)")
+    pq_at_f = SPEC(p._parse("f"), PROV_Q_AT)
+    pq_at_fg = SPEC(p._parse("Imp_f f g"), PROV_Q_AT)
+    pq_at_g = SPEC(p._parse("g"), PROV_Q_AT)
+    p.have("ex_f: ?p. Proof_Q p f").by_eq_mp(pq_at_f, "pf")
+    p.have("ex_fg: ?p. Proof_Q p (Imp_f f g)").by_eq_mp(pq_at_fg, "pfg")
+    p.have("ex_g: ?p. Proof_Q p g").by(
+        MP_HAS_PROOF, "f", "g", CONJ(p.fact("ex_f"), p.fact("ex_fg"))
+    )
+    p.thus("Prov_Q g").by_eq_mp(SYM(pq_at_g), "ex_g")
 
-    # Reverse: ?p. Proof_Q p n ==> Prov_Q n.
-    with p.have("rev: (?p. Proof_Q p n) ==> Prov_Q n").proof():
-        p.assume("ex: ?p. Proof_Q p n")
-        p.choose("p", "ex", eq_label="pq")
-        p.thus("Prov_Q n").by(PROOF_Q_PROVES, "p", "n", "pq")
 
-    p.thus("Prov_Q n = (?p. Proof_Q p n)").by_iff("fwd", "rev")
+@proof
+def PROV_Q_GEN(p):
+    """|- !f x. Prov_Q f ==> Prov_Q (Forall_f x f)."""
+    p.goal("!f x. Prov_Q f ==> Prov_Q (Forall_f x f)")
+    p.fix("f x")
+    p.assume("pf: Prov_Q f")
+    pq_at_f = SPEC(p._parse("f"), PROV_Q_AT)
+    pq_at_fx = SPEC(p._parse("Forall_f x f"), PROV_Q_AT)
+    p.have("ex_f: ?p. Proof_Q p f").by_eq_mp(pq_at_f, "pf")
+    p.have("ex_fx: ?p. Proof_Q p (Forall_f x f)").by(
+        GEN_HAS_PROOF, "f", "x", "ex_f"
+    )
+    p.thus("Prov_Q (Forall_f x f)").by_eq_mp(SYM(pq_at_fx), "ex_fx")
+
+
+# ---------------------------------------------------------------------------
+# Stage 3B (l) -- the equivalence ``Prov_Q n <=> ?p. Proof_Q p n``.
+#
+# It is the defining equation, packaged via ``PROV_Q_AT``. Kept under
+# the historic name so downstream code that imports
+# ``PROV_Q_IFF_PROOF_Q`` keeps working.
+# ---------------------------------------------------------------------------
+
+
+PROV_Q_IFF_PROOF_Q = PROV_Q_AT
+
+
+# ---------------------------------------------------------------------------
+# Stage 3B (m) -- representability scaffolding.
+#
+# A unary predicate ``P : nat0 -> bool`` is *represented* by a
+# Q-formula ``F`` (a nat0 godelnum, taken to be a Q-formula whose only
+# free variable is ``var_x``) iff:
+#
+#   * (positive)  !n. P n      ==> Prov_Q (substitute F (numeral n) var_x).
+#   * (negative)  !n. ~ P n    ==> Prov_Q (Not_f (substitute F (numeral n) var_x)).
+#
+# We package the conjunction of the two conditions as
+# ``represents_pred F P``. Defined here, after ``Prov_Q``.
+# ---------------------------------------------------------------------------
+
+
+_pos_clause = mk_forall(
+    _n_n0,
+    mk_imp(mk_app(_P_pred, _n_n0), mk_app(Prov_Q, _subst_at_numeral(_F_n0, _n_n0))),
+)
+_neg_clause = mk_forall(
+    _n_n0,
+    mk_imp(
+        mk_not(mk_app(_P_pred, _n_n0)),
+        mk_app(Prov_Q, mk_app(Not_f, _subst_at_numeral(_F_n0, _n_n0))),
+    ),
+)
+
+_represents_pred_body = mk_and(_pos_clause, _neg_clause)
+
+REPRESENTS_PRED_DEF = define(
+    "represents_pred",
+    parse_type("nat0 -> (nat0 -> bool) -> bool"),
+    mk_abs(_F_n0, mk_abs(_P_pred, _represents_pred_body)),
+)
+represents_pred = mk_const("represents_pred", [])
+
+
+# |- !F P. represents_pred F P =
+#          ((!n. P n ==> Prov_Q (substitute F (numeral n) var_x))
+#        /\ (!n. ~ P n
+#               ==> Prov_Q (Not_f (substitute F (numeral n) var_x)))).
+REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 
 
 # ---------------------------------------------------------------------------
@@ -2603,10 +2362,6 @@ if __name__ == "__main__":
     print("    IS_TERM_SUCC     :", pp_thm(IS_TERM_SUCC))
     print("    IS_TERM_NUMERAL  :", pp_thm(IS_TERM_NUMERAL))
     print()
-    print("Stage 3A (c) -- representability scaffolding.")
-    print("    REPRESENTS_PRED_DEF :", pp_thm(REPRESENTS_PRED_DEF))
-    print("    REPRESENTS_PRED_AT  :", pp_thm(REPRESENTS_PRED_AT))
-    print()
     print("Stage 3B (a) -- list membership ``mem_l``.")
     print("    MEM_L_DEF       :", pp_thm(MEM_L_DEF))
     print("    MEM_L_REC       :", pp_thm(MEM_L_REC))
@@ -2637,15 +2392,22 @@ if __name__ == "__main__":
     print("    PROOF_Q_APPEND         :", pp_thm(PROOF_Q_APPEND))
     print("    PROOF_Q_HEAD_MEM       :", pp_thm(PROOF_Q_HEAD_MEM))
     print()
-    print("Stage 3B (h-i) -- forward + admissibility.")
-    print("    PROV_Q_OF_PROOF_Q :", pp_thm(PROV_Q_OF_PROOF_Q))
-    print("    PROOF_Q_PROVES    :", pp_thm(PROOF_Q_PROVES))
+    print("Stage 3B (i) -- proof witnesses for the closure rules.")
     print("    AXIOM_HAS_PROOF   :", pp_thm(AXIOM_HAS_PROOF))
     print("    GEN_HAS_PROOF     :", pp_thm(GEN_HAS_PROOF))
     print("    MP_HAS_PROOF      :", pp_thm(MP_HAS_PROOF))
     print()
-    print("Stage 3B (j) -- equivalence Prov_Q <=> ?p. Proof_Q.")
+    print("Stage 3B (j-l) -- Sigma_1 Prov_Q and closure rules.")
+    print("    PROV_Q_DEF         :", pp_thm(PROV_Q_DEF))
+    print("    PROV_Q_AT          :", pp_thm(PROV_Q_AT))
+    print("    PROV_Q_AXIOM       :", pp_thm(PROV_Q_AXIOM))
+    print("    PROV_Q_MP          :", pp_thm(PROV_Q_MP))
+    print("    PROV_Q_GEN         :", pp_thm(PROV_Q_GEN))
     print("    PROV_Q_IFF_PROOF_Q :", pp_thm(PROV_Q_IFF_PROOF_Q))
+    print()
+    print("Stage 3B (m) -- representability scaffolding.")
+    print("    REPRESENTS_PRED_DEF :", pp_thm(REPRESENTS_PRED_DEF))
+    print("    REPRESENTS_PRED_AT  :", pp_thm(REPRESENTS_PRED_AT))
     print()
     print("Stage 3C (a) -- representability of substitute (SORRY).")
     print("    VAR_Z_DEF              :", pp_thm(VAR_Z_DEF))

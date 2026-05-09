@@ -92,7 +92,6 @@ from tactics import (
     GEN,
     GENL,
     SYM,
-    CONJ,
     AP_THM,
     BETA_CONV,
     TRANS,
@@ -779,209 +778,27 @@ def NAT0_LT_CONS_L_TAIL(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 2B (e) -- Prov_Q via impredicative intersection.
+# Stage 2B (e) -- Prov_Q is defined in q_repr.py.
 #
-#   Prov_Q n  :<=>  !P. (!m. is_axiom m ==> P m)
-#                       /\ (!f g. P f /\ P (Imp_f f g) ==> P g)
-#                       /\ (!f x. P f ==> P (Forall_f x f))
-#                       ==> P n.
+#   Prov_Q n  :<=>  ?p. Proof_Q p n.
 #
-# n is provable iff n lies in every set P that contains all axioms and
-# is closed under modus ponens and generalisation. This is the standard
-# "least closed" definition, equivalent in HOL to ``?proof. Proof_Q
-# proof n``.
+# The Sigma_1 form is the canonical one: it makes provability a witness
+# predicate (every provable formula has an explicit list-of-formulas
+# proof), and matches the shape that the diagonal lemma's internal
+# provability formula will internalise. The closure lemmas
+# ``PROV_Q_AXIOM``, ``PROV_Q_MP``, ``PROV_Q_GEN`` are derived from the
+# explicit proof-list constructions ``AXIOM_HAS_PROOF``,
+# ``MP_HAS_PROOF``, ``GEN_HAS_PROOF`` in q_repr.py.
 #
-# The advantage over a list-based Proof_Q encoding: the three closure
-# rules (axiom inclusion, MP, generalisation) drop out by direct
-# specialisation -- no well-founded recursion on lists, no mem_l, no
-# complex MONO obligation.
-#
-# A list-based Proof_Q witness predicate is needed for *representability*
-# in Stage 3 (the diagonal lemma must speak about explicit proofs inside
-# Q's own language). It is implemented there, against this Prov_Q.
+# Historical note: an earlier draft defined ``Prov_Q`` via impredicative
+# intersection (``!P. (closure clauses) ==> P n``) here in q_proof.py,
+# before ``Proof_Q`` was available. That definition was equivalent
+# (Knaster-Tarski) but redundant once the list-based ``Proof_Q`` was
+# built. The audit found that nothing downstream used the impredicative
+# shape essentially -- every consumer treats ``Prov_Q`` as a black box
+# closed under axiom/MP/Gen -- so we collapsed to the single Sigma_1
+# definition.
 # ---------------------------------------------------------------------------
-
-
-from axioms import mk_forall, mk_imp, mk_and  # noqa: E402 -- needed for Prov_Q construction below
-
-
-_P_pred = Var("P", parse_type("nat0 -> bool"))
-_m_n0 = Var("m", nat0_ty)
-
-
-def _admissible_clauses(P_term):
-    """Build (axiom-clause /\\ MP-clause /\\ Gen-clause) at predicate ``P_term``."""
-    axiom_clause = mk_forall(
-        _m_n0, mk_imp(mk_app(is_axiom, _m_n0), mk_app(P_term, _m_n0))
-    )
-    mp_clause = mk_forall(
-        _f_n0,
-        mk_forall(
-            _g_n0,
-            mk_imp(
-                mk_and(
-                    mk_app(P_term, _f_n0), mk_app(P_term, mk_app(Imp_f, _f_n0, _g_n0))
-                ),
-                mk_app(P_term, _g_n0),
-            ),
-        ),
-    )
-    gen_clause = mk_forall(
-        _f_n0,
-        mk_forall(
-            _x_n0,
-            mk_imp(
-                mk_app(P_term, _f_n0), mk_app(P_term, mk_app(Forall_f, _x_n0, _f_n0))
-            ),
-        ),
-    )
-    return mk_and(axiom_clause, mk_and(mp_clause, gen_clause))
-
-
-_prov_q_body = mk_forall(
-    _P_pred, mk_imp(_admissible_clauses(_P_pred), mk_app(_P_pred, _n_n0))
-)
-
-
-PROV_Q_DEF = define(
-    "Prov_Q",
-    parse_type("nat0 -> bool"),
-    mk_abs(_n_n0, _prov_q_body),
-)
-Prov_Q = mk_const("Prov_Q", [])
-PROV_Q_AT = _at1(PROV_Q_DEF, _n_n0)
-
-
-# ---------------------------------------------------------------------------
-# Stage 2B (f) -- closure rules.
-#
-#   (1) |- !n. is_axiom n ==> Prov_Q n.
-#   (2) |- !f g. Prov_Q f /\ Prov_Q (Imp_f f g) ==> Prov_Q g.
-#   (3) |- !f x. Prov_Q f ==> Prov_Q (Forall_f x f).
-#
-# Each is a direct consequence of the impredicative-intersection
-# definition: instantiate the universally quantified P, peel off the
-# corresponding clause from the admissibility hypothesis, and apply.
-# ---------------------------------------------------------------------------
-
-
-_pred_bool_ty = parse_type("nat0 -> bool")
-
-
-@proof
-def PROV_Q_AXIOM(p):
-    """|- !n. is_axiom n ==> Prov_Q n."""
-    p.goal("!n. is_axiom n ==> Prov_Q n")
-    p.fix("n")
-    p.assume("ax: is_axiom n")
-
-    # Prove the unfolded body, then EQ_MP through SYM(PROV_Q_AT @ n).
-    body_str = (
-        "!P:nat0->bool. ((!m. is_axiom m ==> P m) /\\ "
-        "((!f g. (P f /\\ P (Imp_f f g)) ==> P g) /\\ "
-        "(!f x. P f ==> P (Forall_f x f)))) ==> P n"
-    )
-    with p.have(f"body: {body_str}").proof():
-        p.fix("P")
-        p.assume(
-            "(adm_ax, _adm_mp, _adm_gen): "
-            "(!m. is_axiom m ==> P m) /\\ "
-            "((!f g. (P f /\\ P (Imp_f f g)) ==> P g) /\\ "
-            "(!f x. P f ==> P (Forall_f x f)))"
-        )
-        p.thus("P n").by("adm_ax", "n", "ax")
-
-    pq_at_n = SPECL([p._parse("n")], PROV_Q_AT)
-    p.thus("Prov_Q n").by_eq_mp(SYM(pq_at_n), "body")
-
-
-@proof
-def PROV_Q_MP(p):
-    """|- !f g. Prov_Q f /\\ Prov_Q (Imp_f f g) ==> Prov_Q g."""
-    p.goal("!f g. (Prov_Q f /\\ Prov_Q (Imp_f f g)) ==> Prov_Q g")
-    p.fix("f g")
-    p.assume("(pf, pfg): Prov_Q f /\\ Prov_Q (Imp_f f g)")
-
-    body_str = (
-        "!P:nat0->bool. ((!m. is_axiom m ==> P m) /\\ "
-        "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
-        "(!a x. P a ==> P (Forall_f x a)))) ==> P g"
-    )
-    with p.have(f"body: {body_str}").proof():
-        p.fix("P")
-        p.assume(
-            "(_adm_ax, (adm_mp, _adm_gen)): "
-            "(!m. is_axiom m ==> P m) /\\ "
-            "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
-            "(!a x. P a ==> P (Forall_f x a)))"
-        )
-
-        # P f and P (Imp_f f g) follow by specialising pf, pfg at P.
-        adm_concl = (
-            "(!m. is_axiom m ==> P m) /\\ "
-            "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
-            "(!a x. P a ==> P (Forall_f x a)))"
-        )
-        # Unfold Prov_Q at f, Imp_f f g.
-        pq_at_f = SPECL([p._parse("f")], PROV_Q_AT)
-        pq_at_fg = SPECL([p._parse("Imp_f f g")], PROV_Q_AT)
-        p.have("body_f: !P. " + adm_concl + " ==> P f").by_eq_mp(pq_at_f, "pf")
-        p.have("body_fg: !P. " + adm_concl + " ==> P (Imp_f f g)").by_eq_mp(
-            pq_at_fg, "pfg"
-        )
-        p.have("Pf: P f").by(
-            "body_f",
-            "P",
-            CONJ(p.fact("_adm_ax"), CONJ(p.fact("adm_mp"), p.fact("_adm_gen"))),
-        )
-        p.have("Pfg: P (Imp_f f g)").by(
-            "body_fg",
-            "P",
-            CONJ(p.fact("_adm_ax"), CONJ(p.fact("adm_mp"), p.fact("_adm_gen"))),
-        )
-        p.thus("P g").by("adm_mp", "f", "g", CONJ(p.fact("Pf"), p.fact("Pfg")))
-
-    pq_at_g = SPECL([p._parse("g")], PROV_Q_AT)
-    p.thus("Prov_Q g").by_eq_mp(SYM(pq_at_g), "body")
-
-
-@proof
-def PROV_Q_GEN(p):
-    """|- !f x. Prov_Q f ==> Prov_Q (Forall_f x f)."""
-    p.goal("!f x. Prov_Q f ==> Prov_Q (Forall_f x f)")
-    p.fix("f x")
-    p.assume("pf: Prov_Q f")
-
-    body_str = (
-        "!P:nat0->bool. ((!m. is_axiom m ==> P m) /\\ "
-        "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
-        "(!a y. P a ==> P (Forall_f y a)))) ==> P (Forall_f x f)"
-    )
-    with p.have(f"body: {body_str}").proof():
-        p.fix("P")
-        p.assume(
-            "(_adm_ax, (_adm_mp, adm_gen)): "
-            "(!m. is_axiom m ==> P m) /\\ "
-            "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
-            "(!a y. P a ==> P (Forall_f y a)))"
-        )
-
-        adm_concl = (
-            "(!m. is_axiom m ==> P m) /\\ "
-            "((!a b. (P a /\\ P (Imp_f a b)) ==> P b) /\\ "
-            "(!a y. P a ==> P (Forall_f y a)))"
-        )
-        pq_at_f = SPECL([p._parse("f")], PROV_Q_AT)
-        p.have("body_f: !P. " + adm_concl + " ==> P f").by_eq_mp(pq_at_f, "pf")
-        p.have("Pf: P f").by(
-            "body_f",
-            "P",
-            CONJ(p.fact("_adm_ax"), CONJ(p.fact("_adm_mp"), p.fact("adm_gen"))),
-        )
-        p.thus("P (Forall_f x f)").by("adm_gen", "f", "x", "Pf")
-
-    pq_at_fx = SPECL([p._parse("Forall_f x f")], PROV_Q_AT)
-    p.thus("Prov_Q (Forall_f x f)").by_eq_mp(SYM(pq_at_fx), "body")
 
 
 if __name__ == "__main__":
@@ -1030,11 +847,4 @@ if __name__ == "__main__":
     print("    NAT0_LT_CONS_L_HEAD :", pp_thm(NAT0_LT_CONS_L_HEAD))
     print("    NAT0_LT_CONS_L_TAIL :", pp_thm(NAT0_LT_CONS_L_TAIL))
     print()
-    print("Stage 2B (e) -- Prov_Q.")
-    print("    PROV_Q_DEF     :", pp_thm(PROV_Q_DEF))
-    print("    PROV_Q_AT      :", pp_thm(PROV_Q_AT))
-    print()
-    print("Stage 2B (f) -- closure rules.")
-    print("    PROV_Q_AXIOM   :", pp_thm(PROV_Q_AXIOM))
-    print("    PROV_Q_MP      :", pp_thm(PROV_Q_MP))
-    print("    PROV_Q_GEN     :", pp_thm(PROV_Q_GEN))
+    print("Stage 2B (e) -- Prov_Q is defined in q_repr.py via ?p. Proof_Q p n.")

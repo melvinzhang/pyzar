@@ -40,14 +40,16 @@ from q_syntax import (
     IS_FORM_AT_NOT,
 )
 from q_proof import (
-    PROV_Q_AXIOM,
-    PROV_Q_MP,
     IS_K_AT,
     IS_S_AT,
     IS_N_AT,
     is_q_axiom,
     IS_LOGICAL_AXIOM_AT,
     IS_AXIOM_AT,
+)
+from q_repr import (
+    PROV_Q_AXIOM,
+    PROV_Q_MP,
 )
 
 
