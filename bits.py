@@ -41,7 +41,12 @@ from nat0_order import (
     NAT0_LT_SUC0_MONO,
     NAT0_LT_0_SUC0,
     NAT0_LT_SUC0_INSERT,
+    NAT0_NOT_LT_ZERO,
+    NAT0_NEQ_ZERO_PRED,
+    NAT0_LT_SUC0_CASES,
+    define_wf_lt,
 )
+from basics import rand
 
 
 # Bits work entirely on ``nat0``, so default free vars to that type for the
@@ -994,65 +999,400 @@ def BIT_LT(p):
 
 
 # ---------------------------------------------------------------------------
-# 8. ``low_bit n`` and ``clear_low n`` -- canonical decomposition stubs.
+# 8. ``low_bit n`` and ``clear_low n`` -- canonical low-bit decomposition.
 #
-#   low_bit n   :=  position of n's lowest set bit  (junk at n = 0)
-#   clear_low n :=  n with its lowest set bit cleared (clear_low 0 = 0)
+#   low_bit n   = COND (n=0) 0 (COND (ODD n) 0 (SUC0 (low_bit (HALF n))))
+#               -- position of n's lowest set bit (junk at n = 0).
+#   clear_low n = COND (n=0) 0 (COND (ODD n) (double (HALF n))
+#                                            (double (clear_low (HALF n))))
+#               -- n with its lowest set bit cleared (clear_low 0 = 0).
+#
+# Both are well-founded recursive on ``nat0_lt`` since the recursive
+# call goes to ``HALF n`` and ``HALF_LT_NZ`` gives ``HALF n < n`` for
+# ``n != 0`` -- declared via ``define_wf_lt``.
+#
+# Verify by hand:
+#   low_bit 6 = COND F (COND F 0 (SUC0 (low_bit 3)))
+#             = SUC0 (COND F (COND T 0 (SUC0 (low_bit 1))))
+#             = SUC0 0 = 1.                        (110 -> bit 1 lowest)
+#   clear_low 6 = double (clear_low 3)
+#               = double (double (HALF 3))   [ODD 3 = T branch]
+#               = double (double 1) = 4.           (110 -> 100)
 #
 # Used by ``hf_to_qhf`` (q_repr.py) to drive the canonical low-bit-first
-# Insert_t-tower bridge from HF sets (bit-encoded) to Q-syntax.
-#
-# STUBS: declared as opaque ``new_constant``; the two side conditions
+# Insert_t-tower bridge from HF sets to Q-syntax. The two side conditions
 #
 #   LOW_BIT_LT   : ~(n = 0) ==> nat0_lt (low_bit n) n
 #   CLEAR_LOW_LT : ~(n = 0) ==> nat0_lt (clear_low n) n
 #
-# (sufficient for the well-founded-recursion MONO obligation of
-# ``hf_to_qhf``) are sorry'd here. The remaining lemmas needed by
-# downstream representability proofs --
-#
-#   BIT_LOW_BIT, BIT_LOW_BIT_CLEAR_LOW, SET_BIT_LOW_BIT_CLEAR_LOW
-#
-# -- are added when those proofs land. Concretising ``low_bit`` /
-# ``clear_low`` and discharging all four/five sorries is a follow-up
-# (the natural definition is HALF-decreasing primitive recursion via
-# ``define_wf_lt``).
+# (the well-founded-recursion MONO obligation for ``hf_to_qhf``) are
+# proved below. The remaining lemmas needed by downstream representability
+# proofs (BIT_LOW_BIT, BIT_LOW_BIT_CLEAR_LOW, SET_BIT_LOW_BIT_CLEAR_LOW)
+# are added when those proofs land.
 # ---------------------------------------------------------------------------
 
 
-from fusion import new_constant as _new_constant  # noqa: E402
+# Helper: F-body for low_bit, clear_low. ``define_wf_lt`` consumes a body
+# F : (nat0 -> nat0) -> nat0 -> nat0 along with a MONO proof; we give F a
+# name so the recursion equation reads cleanly as ``f n = _F_low_bit f n``.
 
-_new_constant("low_bit", parse_type("nat0 -> nat0"))
+_F_lcl_ty = parse_type("(nat0 -> nat0) -> nat0 -> nat0")
+_F_arg_ty = parse_type("nat0 -> nat0")
+
+from parser import define as _define  # noqa: E402
+
+_LOW_BIT_F_DEF = _define(
+    "_low_bit_F",
+    _F_lcl_ty,
+    "\\f:nat0->nat0. \\n:nat0. "
+    "COND_nat0 (n = 0) 0 "
+    "(COND_nat0 (ODD n) 0 (SUC0 (f (HALF n))))",
+)
+_low_bit_F = mk_const("_low_bit_F", [])
+
+_CLEAR_LOW_F_DEF = _define(
+    "_clear_low_F",
+    _F_lcl_ty,
+    "\\f:nat0->nat0. \\n:nat0. "
+    "COND_nat0 (n = 0) 0 "
+    "(COND_nat0 (ODD n) (double (HALF n)) (double (f (HALF n))))",
+)
+_clear_low_F = mk_const("_clear_low_F", [])
+
+
+# Pointwise / beta-normalised forms (analogous to ``_UNION_F_AT`` in
+# hf_sets.py): two AP_THM/BETA_CONV peels collapse the ``(\f n. body) f n``
+# application to the body.
+def _prove_F_at(F_def):
+    from tactics import AP_THM, BETA_CONV, TRANS, GENL
+
+    f_var = Var("f", _F_arg_ty)
+    n_var = Var("n", nat0_ty)
+    th_f = AP_THM(F_def, f_var)
+    th_f_eq = TRANS(th_f, BETA_CONV(rand(th_f._concl)))
+    th_fn = AP_THM(th_f_eq, n_var)
+    th_fn_eq = TRANS(th_fn, BETA_CONV(rand(th_fn._concl)))
+    return GENL([f_var, n_var], th_fn_eq)
+
+
+_LOW_BIT_F_AT = _prove_F_at(_LOW_BIT_F_DEF)
+_CLEAR_LOW_F_AT = _prove_F_at(_CLEAR_LOW_F_DEF)
+
+
+# MONO obligations for ``define_wf_lt``: the body's value at ``n`` only
+# depends on ``f``'s value at ``HALF n`` (which is < n for n != 0). The
+# n = 0 branch ignores ``f`` entirely; the n != 0 branch funnels through
+# the IH (``f (HALF n) = g (HALF n)``).
+
+
+@proof
+def LOW_BIT_MONO(p):
+    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
+                ==> _low_bit_F f n = _low_bit_F g n."""
+    from tactics import EQT_INTRO, EQF_INTRO
+
+    p.goal(
+        "!f g n. (!k. nat0_lt k n ==> f k = g k) "
+        "==> _low_bit_F f n = _low_bit_F g n",
+        types={"f": _F_arg_ty, "g": _F_arg_ty, "n": nat0_ty, "k": nat0_ty},
+    )
+    p.fix("f g n")
+    p.assume("h: !k. nat0_lt k n ==> f k = g k")
+    with p.cases_on(EXCLUDED_MIDDLE, "n = 0"):
+        with p.case("hz: n = 0"):
+            p.have("hz_eq: (n = 0) = T").by_thm(EQT_INTRO(p.fact("hz")))
+            p.thus("_low_bit_F f n = _low_bit_F g n").by_rewrite(
+                [_LOW_BIT_F_AT, "hz_eq", COND_T_NAT0]
+            )
+        with p.case("hnz: ~(n = 0)"):
+            p.have("hlt: nat0_lt (HALF n) n").by(HALF_LT_NZ, "n", "hnz")
+            p.have("hfg: f (HALF n) = g (HALF n)").by("h", "HALF n", "hlt")
+            p.have("hnz_eq: (n = 0) = F").by_thm(EQF_INTRO(p.fact("hnz")))
+            p.thus("_low_bit_F f n = _low_bit_F g n").by_rewrite(
+                [_LOW_BIT_F_AT, "hnz_eq", COND_F_NAT0, "hfg"]
+            )
+
+
+@proof
+def CLEAR_LOW_MONO(p):
+    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
+                ==> _clear_low_F f n = _clear_low_F g n."""
+    from tactics import EQT_INTRO, EQF_INTRO
+
+    p.goal(
+        "!f g n. (!k. nat0_lt k n ==> f k = g k) "
+        "==> _clear_low_F f n = _clear_low_F g n",
+        types={"f": _F_arg_ty, "g": _F_arg_ty, "n": nat0_ty, "k": nat0_ty},
+    )
+    p.fix("f g n")
+    p.assume("h: !k. nat0_lt k n ==> f k = g k")
+    with p.cases_on(EXCLUDED_MIDDLE, "n = 0"):
+        with p.case("hz: n = 0"):
+            p.have("hz_eq: (n = 0) = T").by_thm(EQT_INTRO(p.fact("hz")))
+            p.thus("_clear_low_F f n = _clear_low_F g n").by_rewrite(
+                [_CLEAR_LOW_F_AT, "hz_eq", COND_T_NAT0]
+            )
+        with p.case("hnz: ~(n = 0)"):
+            p.have("hlt: nat0_lt (HALF n) n").by(HALF_LT_NZ, "n", "hnz")
+            p.have("hfg: f (HALF n) = g (HALF n)").by("h", "HALF n", "hlt")
+            p.have("hnz_eq: (n = 0) = F").by_thm(EQF_INTRO(p.fact("hnz")))
+            p.thus("_clear_low_F f n = _clear_low_F g n").by_rewrite(
+                [_CLEAR_LOW_F_AT, "hnz_eq", COND_F_NAT0, "hfg"]
+            )
+
+
+# Well-founded recursive definitions.
+LOW_BIT_DEF, LOW_BIT_REC = define_wf_lt(
+    "low_bit",
+    parse_type("nat0 -> nat0"),
+    _low_bit_F,
+    LOW_BIT_MONO,
+)
 low_bit = mk_const("low_bit", [])
 
-_new_constant("clear_low", parse_type("nat0 -> nat0"))
+CLEAR_LOW_DEF, CLEAR_LOW_REC = define_wf_lt(
+    "clear_low",
+    parse_type("nat0 -> nat0"),
+    _clear_low_F,
+    CLEAR_LOW_MONO,
+)
 clear_low = mk_const("clear_low", [])
 
-_add_const("low_bit", low_bit)
-_add_const("clear_low", clear_low)
+
+# Direct unfolders: |- !n. low_bit n = body[low_bit, n] (and similarly
+# for clear_low). Compose REC (|- !n. f n = _F_f f n) with _F_AT (|- !f n.
+# _F f n = body[f, n]) by SPECL + TRANS so the body is in beta-normal form.
+def _prove_at_eq(REC_th, F_AT_th, fn_const):
+    from tactics import SPEC, SPECL, TRANS, GEN
+
+    n_v = Var("n", nat0_ty)
+    fn_at_n = SPEC(n_v, REC_th)
+    F_at_n = SPECL([fn_const, n_v], F_AT_th)
+    return GEN(n_v, TRANS(fn_at_n, F_at_n))
+
+
+LOW_BIT_AT = _prove_at_eq(LOW_BIT_REC, _LOW_BIT_F_AT, low_bit)
+CLEAR_LOW_AT = _prove_at_eq(CLEAR_LOW_REC, _CLEAR_LOW_F_AT, clear_low)
+
+
+# ---------------------------------------------------------------------------
+# Helper:  |- !a b. nat0_lt a b ==> nat0_lt (double a) (double b).
+# Used by CLEAR_LOW_LT in the even-n case where clear_low n unfolds to
+# double (clear_low (HALF n)) and the strong-IH at HALF n only gives
+# clear_low (HALF n) < HALF n -- the doubling has to be lifted across <.
+#
+# Induction on b. Base vacuous (NAT0_NOT_LT_ZERO). Step splits a < SUC0 b
+# via NAT0_LT_SUC0_CASES into a = b / a < b; both branches reach
+# nat0_lt (double a) (SUC0 (SUC0 (double b))) ( = double (SUC0 b) by
+# DOUBLE_STEP) via two NAT0_LT_SUC0 hops, with the IH plugged in for the
+# strict-< case.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def DOUBLE_MONO_LT(p):
+    p.goal("!a b. nat0_lt a b ==> nat0_lt (double a) (double b)")
+    p.fix("a b")
+    with p.induction("b"):
+        with p.base():
+            p.assume("hlt: nat0_lt a 0")
+            p.have("notlt: ~(nat0_lt a 0)").by(NAT0_NOT_LT_ZERO, "a")
+            p.absurd().by_conj("notlt", "hlt")
+        with p.step("IH"):
+            p.assume("hlt: nat0_lt a (SUC0 b)")
+            p.have("hop1: nat0_lt (double b) (SUC0 (double b))").by(
+                NAT0_LT_SUC0, "double b"
+            )
+            p.have(
+                "hop2: nat0_lt (SUC0 (double b)) (SUC0 (SUC0 (double b)))"
+            ).by(NAT0_LT_SUC0, "SUC0 (double b)")
+            p.have(
+                "hop: nat0_lt (double b) (SUC0 (SUC0 (double b)))"
+            ).by(
+                NAT0_LT_TRANS,
+                "double b",
+                "SUC0 (double b)",
+                "SUC0 (SUC0 (double b))",
+                "hop1",
+                "hop2",
+            )
+            p.have("step_eq: double (SUC0 b) = SUC0 (SUC0 (double b))").by(
+                DOUBLE_STEP, "b"
+            )
+            p.have("cases: a = b \\/ nat0_lt a b").by(
+                NAT0_LT_SUC0_CASES, "a", "b", "hlt"
+            )
+            with p.cases_on("cases"):
+                with p.case("heq: a = b"):
+                    p.thus("nat0_lt (double a) (double (SUC0 b))").by_rewrite_of(
+                        "hop", ["heq", "step_eq"]
+                    )
+                with p.case("hlt2: nat0_lt a b"):
+                    p.have("ih_at: nat0_lt (double a) (double b)").by("IH", "hlt2")
+                    p.have(
+                        "trans_lt: nat0_lt (double a) (SUC0 (SUC0 (double b)))"
+                    ).by(
+                        NAT0_LT_TRANS,
+                        "double a",
+                        "double b",
+                        "SUC0 (SUC0 (double b))",
+                        "ih_at",
+                        "hop",
+                    )
+                    p.thus("nat0_lt (double a) (double (SUC0 b))").by_rewrite_of(
+                        "trans_lt", ["step_eq"]
+                    )
+
+
+# ---------------------------------------------------------------------------
+# |- !n. ~(n = 0) ==> nat0_lt (low_bit n) n.
+#
+# Strong induction on n; case-split on ODD n.
+#   ODD n  : low_bit n = 0 (LOW_BIT_AT collapses both COND branches).
+#            n != 0 yields n = SUC0 d (NAT0_NEQ_ZERO_PRED), so
+#            nat0_lt 0 n via NAT0_LT_0_SUC0.
+#   ~ODD n : low_bit n = SUC0 (low_bit (HALF n)).
+#            HALF n != 0 (else RECONSTRUCT collapses n to 0, contradiction);
+#            HALF n < n by HALF_LT_NZ; strong-IH at HALF n gives
+#            low_bit (HALF n) < HALF n; NAT0_LT_SUC0_INSERT chains to
+#            SUC0 (low_bit (HALF n)) < n.
+# ---------------------------------------------------------------------------
 
 
 @proof
 def LOW_BIT_LT(p):
-    """|- !n. ~(n = 0) ==> nat0_lt (low_bit n) n.
+    from tactics import EQT_INTRO, EQF_INTRO
 
-    SORRY (stub). Holds because ``low_bit n`` is a member of n (its
-    lowest set-bit position), and any member is < the set under
-    nat0_lt (BIT_LT).
-    """
     p.goal("!n. ~(n = 0) ==> nat0_lt (low_bit n) n")
-    p.sorry()
+    with p.strong_induction("n", "IH"):
+        p.assume("hnz: ~(n = 0)")
+        p.have("hnz_eq: (n = 0) = F").by_thm(EQF_INTRO(p.fact("hnz")))
+        # SPEC LOW_BIT_AT at n once, then rewrite-of without re-applying it
+        # downstream (its body recurses through ``low_bit (HALF n)``, so
+        # leaving it in the rule set blows the rewriter's fixpoint budget).
+        p.have(
+            "lb_n: low_bit n = COND_nat0 (n = 0) 0 "
+            "(COND_nat0 (ODD n) 0 (SUC0 (low_bit (HALF n))))"
+        ).by(LOW_BIT_AT, "n")
+        with p.cases_on(EXCLUDED_MIDDLE, "ODD n"):
+            with p.case("hO: ODD n"):
+                p.have("hO_eq: ODD n = T").by_thm(EQT_INTRO(p.fact("hO")))
+                p.have("lb_zero: low_bit n = 0").by_rewrite_of(
+                    "lb_n", ["hnz_eq", "hO_eq", COND_F_NAT0, COND_T_NAT0]
+                )
+                p.have("pred: ?d. n = SUC0 d").by(NAT0_NEQ_ZERO_PRED, "n", "hnz")
+                p.choose("d", "pred")  # registers d_eq: n = SUC0 d
+                p.have("lt_succ: nat0_lt 0 (SUC0 d)").by(NAT0_LT_0_SUC0, "d")
+                p.have("lt_n: nat0_lt 0 n").by_rewrite_of("lt_succ", ["d_eq"])
+                p.thus("nat0_lt (low_bit n) n").by_rewrite_of("lt_n", ["lb_zero"])
+            with p.case("hF: ~(ODD n)"):
+                p.have("hF_eq: ODD n = F").by_thm(EQF_INTRO(p.fact("hF")))
+                with p.have("hh_nz: ~(HALF n = 0)").proof():
+                    with p.suppose("hh_z: HALF n = 0"):
+                        p.have(
+                            "recon: n = COND_nat0 (ODD n) "
+                            "(SUC0 (double (HALF n))) (double (HALF n))"
+                        ).by(RECONSTRUCT, "n")
+                        p.have("n_zero: n = 0").by_rewrite_of(
+                            "recon", ["hF_eq", "hh_z", COND_F_NAT0, DOUBLE_BASE]
+                        )
+                        p.absurd().by_conj("hnz", "n_zero")
+                p.have("hh_lt: nat0_lt (HALF n) n").by(HALF_LT_NZ, "n", "hnz")
+                p.have("lb_lt: nat0_lt (low_bit (HALF n)) (HALF n)").by(
+                    "IH", "HALF n", "hh_lt", "hh_nz"
+                )
+                p.have("ins: nat0_lt (SUC0 (low_bit (HALF n))) n").by(
+                    NAT0_LT_SUC0_INSERT,
+                    "low_bit (HALF n)",
+                    "HALF n",
+                    "n",
+                    "lb_lt",
+                    "hh_lt",
+                )
+                p.have(
+                    "lb_eq: low_bit n = SUC0 (low_bit (HALF n))"
+                ).by_rewrite_of("lb_n", ["hnz_eq", "hF_eq", COND_F_NAT0])
+                p.thus("nat0_lt (low_bit n) n").by_rewrite_of("ins", ["lb_eq"])
+
+
+# ---------------------------------------------------------------------------
+# |- !n. ~(n = 0) ==> nat0_lt (clear_low n) n.
+#
+# Strong induction on n; case-split on ODD n.
+#   ODD n  : clear_low n = double (HALF n); RECONSTRUCT (ODD n = T branch)
+#            gives n = SUC0 (double (HALF n)); NAT0_LT_SUC0 closes.
+#   ~ODD n : clear_low n = double (clear_low (HALF n)); RECONSTRUCT
+#            (~ODD n branch) gives n = double (HALF n). HALF n != 0 (else
+#            n = double 0 = 0); strong-IH at HALF n gives clear_low (HALF n)
+#            < HALF n; DOUBLE_MONO_LT lifts to double (clear_low (HALF n))
+#            < double (HALF n) = n.
+# ---------------------------------------------------------------------------
 
 
 @proof
 def CLEAR_LOW_LT(p):
-    """|- !n. ~(n = 0) ==> nat0_lt (clear_low n) n.
+    from tactics import EQT_INTRO, EQF_INTRO, SYM
 
-    SORRY (stub). Holds because clearing one set bit strictly reduces
-    the bit-encoded set under nat0_lt.
-    """
     p.goal("!n. ~(n = 0) ==> nat0_lt (clear_low n) n")
-    p.sorry()
+    with p.strong_induction("n", "IH"):
+        p.assume("hnz: ~(n = 0)")
+        p.have("hnz_eq: (n = 0) = F").by_thm(EQF_INTRO(p.fact("hnz")))
+        p.have(
+            "recon: n = COND_nat0 (ODD n) "
+            "(SUC0 (double (HALF n))) (double (HALF n))"
+        ).by(RECONSTRUCT, "n")
+        # SPEC CLEAR_LOW_AT once at n, then rewrite-of without re-applying it
+        # downstream (recursive in clear_low (HALF n) -- same loop hazard).
+        p.have(
+            "cl_n: clear_low n = COND_nat0 (n = 0) 0 "
+            "(COND_nat0 (ODD n) (double (HALF n)) (double (clear_low (HALF n))))"
+        ).by(CLEAR_LOW_AT, "n")
+        with p.cases_on(EXCLUDED_MIDDLE, "ODD n"):
+            with p.case("hO: ODD n"):
+                p.have("hO_eq: ODD n = T").by_thm(EQT_INTRO(p.fact("hO")))
+                p.have("cl_eq: clear_low n = double (HALF n)").by_rewrite_of(
+                    "cl_n", ["hnz_eq", "hO_eq", COND_F_NAT0, COND_T_NAT0]
+                )
+                p.have("n_eq: n = SUC0 (double (HALF n))").by_rewrite_of(
+                    "recon", ["hO_eq", COND_T_NAT0]
+                )
+                p.have(
+                    "lt_succ: nat0_lt (double (HALF n)) (SUC0 (double (HALF n)))"
+                ).by(NAT0_LT_SUC0, "double (HALF n)")
+                # n_eq has shape ``n = SUC0 (double (HALF n))`` -- the RHS
+                # mentions ``n``, so leaving it LR would loop. Flip via SYM
+                # so the rule shrinks the larger term to ``n``.
+                p.thus("nat0_lt (clear_low n) n").by_rewrite_of(
+                    "lt_succ", ["cl_eq", SYM(p.fact("n_eq"))]
+                )
+            with p.case("hF: ~(ODD n)"):
+                p.have("hF_eq: ODD n = F").by_thm(EQF_INTRO(p.fact("hF")))
+                p.have("n_eq: n = double (HALF n)").by_rewrite_of(
+                    "recon", ["hF_eq", COND_F_NAT0]
+                )
+                with p.have("hh_nz: ~(HALF n = 0)").proof():
+                    with p.suppose("hh_z: HALF n = 0"):
+                        p.have("n_zero: n = 0").by_rewrite_of(
+                            "n_eq", ["hh_z", DOUBLE_BASE]
+                        )
+                        p.absurd().by_conj("hnz", "n_zero")
+                p.have("hh_lt: nat0_lt (HALF n) n").by(HALF_LT_NZ, "n", "hnz")
+                p.have("cl_lt: nat0_lt (clear_low (HALF n)) (HALF n)").by(
+                    "IH", "HALF n", "hh_lt", "hh_nz"
+                )
+                p.have(
+                    "double_lt: "
+                    "nat0_lt (double (clear_low (HALF n))) (double (HALF n))"
+                ).by(DOUBLE_MONO_LT, "clear_low (HALF n)", "HALF n", "cl_lt")
+                p.have(
+                    "cl_eq: clear_low n = double (clear_low (HALF n))"
+                ).by_rewrite_of(
+                    "cl_n", ["hnz_eq", "hF_eq", COND_F_NAT0]
+                )
+                # Same SYM(n_eq) trick as in the ODD branch.
+                p.thus("nat0_lt (clear_low n) n").by_rewrite_of(
+                    "double_lt", ["cl_eq", SYM(p.fact("n_eq"))]
+                )
 
 
 if __name__ == "__main__":
@@ -1109,3 +1449,14 @@ if __name__ == "__main__":
     print("  BIT_AT_SET_BIT_DIFF:", pp_thm(BIT_AT_SET_BIT_DIFF))
     print("Step 21 OK -- BIT_LT proved.")
     print("  BIT_LT          :", pp_thm(BIT_LT))
+    print("Step 22 OK -- low_bit / clear_low defined.")
+    print("  LOW_BIT_REC     :", pp_thm(LOW_BIT_REC))
+    print("  LOW_BIT_AT      :", pp_thm(LOW_BIT_AT))
+    print("  CLEAR_LOW_REC   :", pp_thm(CLEAR_LOW_REC))
+    print("  CLEAR_LOW_AT    :", pp_thm(CLEAR_LOW_AT))
+    print("Step 23 OK -- DOUBLE_MONO_LT proved.")
+    print("  DOUBLE_MONO_LT  :", pp_thm(DOUBLE_MONO_LT))
+    print("Step 24 OK -- LOW_BIT_LT proved.")
+    print("  LOW_BIT_LT      :", pp_thm(LOW_BIT_LT))
+    print("Step 25 OK -- CLEAR_LOW_LT proved.")
+    print("  CLEAR_LOW_LT    :", pp_thm(CLEAR_LOW_LT))
