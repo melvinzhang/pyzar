@@ -154,6 +154,8 @@ from q_syntax import (
 from hf_sets import (
     In,  # noqa: F401  -- parser alias for is_substitute_step
     Pair_ord,  # noqa: F401  -- parser alias for is_substitute_step
+    Insert,  # noqa: F401  -- parser alias for hf_to_qhf bridge
+    Empty,  # noqa: F401  -- parser alias for hf_to_qhf bridge
 )
 from axioms import mk_select
 from axioms import dest_exists
@@ -3009,44 +3011,97 @@ def TRACE_EXISTS(p):
 # Stubs for the Q-encoding side (B1).
 #
 # Each ``is_X_internal`` is the Q-formula encoding of the HOL predicate
-# ``X``. The associated ``IS_X_REPRESENTS`` theorem says: at every closed
-# numeral instance where the HOL fact holds, Q proves the substituted
-# Q-formula. (Sigma_1 completeness applied to the specific Sigma_1
-# statement.)
+# ``X``. The associated ``IS_X_REPRESENTS`` theorem says: at every input
+# where the HOL fact holds, Q proves the substituted Q-formula.
 #
-# All declared opaque (``new_constant``, no defining body) and SORRY'd to
-# allow downstream construction (B3) to type-check while leaving the
-# representability proofs as discrete follow-up tasks. Concrete bodies
-# are spelled out in the docstrings; once filled in, replace the
-# ``new_constant`` with ``define`` and drop the ``sorry``.
+# Encoding strategy (option A -- hf_to_qhf bridge):
+#
+#   HOL HF sets are bit-encoded (``Insert i s = set_bit i s``); Q-syntax
+#   HF sets are Insert_t-tower-encoded (``Insert_t i s = Pair_ord 9
+#   (Pair_ord i s)``). The two are different nat0 functions. To make
+#   Q's HF axioms Q8-Q12 (which speak about Insert_t / Empty_t) apply
+#   to HOL-witnessed HF facts, we bridge at the goal interface via
+#
+#       hf_to_qhf : nat0 -> nat0   -- bit-encoded HF set -> Insert_t-tower.
+#
+#   Every HF-set input slot in a representability goal uses ``hf_to_qhf``.
+#   Numeric-input slots (where Q4-Q7 fire on Succ_t-towered ``numeral n``)
+#   continue to use ``numeral``. The ``SUBSTITUTE_REPRESENTS`` headline
+#   keeps ``numeral`` for the F / t / v / r slots (downstream concern);
+#   the IS_*_REPRESENTS stubs below use ``hf_to_qhf`` throughout since
+#   their inputs are all HF-shaped (traces, encoded shapes, set members).
+#
+#   IS_POW2_REPRESENTS is no longer required: pow2 was a prerequisite
+#   only for the bit-extraction trace formula (option B); under the
+#   bridge, Pair_ord and In are represented directly via Q's HF axioms
+#   without internalising bit arithmetic in Q.
+#
+# All ``is_X_internal`` constants are declared opaque (``new_constant``,
+# no defining body) and SORRY'd to allow downstream construction to
+# type-check while leaving the representability proofs as discrete
+# follow-up tasks.
 # ===========================================================================
 
 
-# B1.0 (a) -- pow2 representability.
-# Needed by Singleton (= pow2) and hence by Pair_ord. Sigma_1
-# representability of the recursive function ``pow2 : nat0 -> nat0``.
-new_constant("is_pow2_internal", nat0_ty)
-is_pow2_internal = mk_const("is_pow2_internal", [])
+# B1.0 -- hf_to_qhf bridge (the encoding interface).
+#
+# HOL ``Insert`` (bit-encoded) and Q-syntax ``Insert_t`` (Pair_ord-tagged)
+# are different nat0 functions; ``hf_to_qhf`` recursively rebuilds an HF
+# set as an Insert_t-tower of nat0-element-encoded children. The result
+# is Insert-tower-shaped from Q's perspective, so Q8-Q10 fire on
+# membership / non-membership queries directly.
+#
+# Recursion structure (canonical form):
+#   hf_to_qhf 0           = Empty_t.
+#   hf_to_qhf (Insert i s) = Insert_t (hf_to_qhf i) (hf_to_qhf s).
+#       (Side condition: ~In i s, ensuring ``Insert i s`` actually adds
+#       a fresh element so the recursion strictly decreases on s.)
+#
+# Currently declared as an opaque constant + SORRY'd unfolding equations.
+# Concrete construction: well-founded recursion on the input via
+# ``define_wf_lt`` over ``nat0_lt``, decomposing each non-empty set as
+# ``Insert (least_bit y) (clear_bit (least_bit y) y)`` and recursing on
+# both the chosen bit position (treated as a child set, hence transitive
+# HF recursion) and the cleared remainder.
+new_constant("hf_to_qhf", parse_type("nat0 -> nat0"))
+hf_to_qhf = mk_const("hf_to_qhf", [])
+# Register with the parser so ``hf_to_qhf`` resolves to the kernel constant
+# (rather than parsing as a free variable) inside goal strings.
+from parser import add_const as _add_const  # noqa: E402
+
+_add_const("hf_to_qhf", hf_to_qhf)
 
 
 @proof
-def IS_POW2_REPRESENTS(p):
-    """|- !x. Prov_Q (substitute (substitute is_pow2_internal
-                       (numeral x) var_x)
-                       (numeral (pow2 x)) var_y).
+def HF_TO_QHF_AT_EMPTY(p):
+    """|- hf_to_qhf Empty = Empty_t.
 
-    SORRY. Construction (~80 lines):
-      * Body: ?p. is_pow2_trace_internal p var_x var_y, where the trace
-        p (HF set or sequence) records ``(i, pow2 i)`` for i = 0..x.
-      * Trace clause: (0, 1) in p, and (i, k) in p for i > 0 implies
-        (i-1, k/2) in p (i.e. each step applies double).
-      * At numerals: exhibit the trace as ``Insert_t``-stacked closed
-        Pair_ord numerals, all Sigma_0-verifiable in Q + HF.
+    SORRY. Base case of the well-founded recursion: the empty HF set
+    maps to the Q-syntax empty term. (HOL ``Empty`` and Q-syntax
+    ``Empty_t`` are both definitionally ``0 : nat0``, so the equation
+    is trivially true after unfolding once the recursion is concretely
+    constructed.)
+    """
+    p.goal("hf_to_qhf Empty = Empty_t")
+    p.sorry()
+
+
+@proof
+def HF_TO_QHF_AT_INSERT(p):
+    """|- !i s. ~In i s ==>
+              hf_to_qhf (Insert i s) = Insert_t (hf_to_qhf i) (hf_to_qhf s).
+
+    SORRY. Step case: when ``i`` is a fresh element of ``s``, the
+    bit-encoded ``Insert i s`` corresponds to the Q-syntax Insert_t
+    applied to the bridge-encoded child and tail. The fresh-element
+    side condition ``~In i s`` ensures the recursion is well-defined
+    (set_bit is idempotent on already-set bits, so the canonical
+    decomposition picks ``i = least_bit (Insert i s)``, ``s =
+    clear_bit i (Insert i s)``).
     """
     p.goal(
-        "!x. Prov_Q (substitute (substitute is_pow2_internal "
-        "  (numeral x) var_x) "
-        "  (numeral (pow2 x)) var_y)"
+        "!i s. ~In i s ==> "
+        "hf_to_qhf (Insert i s) = Insert_t (hf_to_qhf i) (hf_to_qhf s)"
     )
     p.sorry()
 
@@ -3062,26 +3117,26 @@ is_Pair_ord_internal = mk_const("is_Pair_ord_internal", [])
 @proof
 def IS_PAIR_ORD_REPRESENTS(p):
     """|- !x y. Prov_Q (substitute^3 is_Pair_ord_internal
-                          (numeral x) var_x
-                          (numeral y) var_y
-                          (numeral (Pair_ord x y)) var_z).
+                          (hf_to_qhf x) var_x
+                          (hf_to_qhf y) var_y
+                          (hf_to_qhf (Pair_ord x y)) var_z).
 
-    SORRY. Construction (~80 lines, on top of IS_POW2_REPRESENTS):
-      Pair_ord x y = Pair (Singleton x) (Pair x y)
-                    = Insert (pow2 x) (Insert x (pow2 y)).
-      Body of is_Pair_ord_internal: the Q-formula stating that var_z is
-      the result of two Insert_t applications wrapped around the pow2
-      values of var_x and var_y. Composition of:
-        * IS_POW2_REPRESENTS at var_x   (pow2 x = some w_x)
-        * IS_POW2_REPRESENTS at var_y   (pow2 y = some w_y)
-        * Sigma_0 verification of Insert_t (pow2 x) (Insert_t var_x (pow2 y))
-          = var_z at closed numerals (decidable in Q + HF).
+    SORRY. Under the hf_to_qhf bridge: HF inputs / output are encoded
+    as Insert_t-towers; ``Pair_ord x y = Pair (Singleton x) (Pair x y)``
+    is itself an Insert-tower at the HOL level, and ``hf_to_qhf`` lifts
+    it pointwise to the matching Q-syntax Insert_t-tower.
+
+    Body of is_Pair_ord_internal: the Q-formula expressing that var_z
+    has the Kuratowski shape Insert_t (Insert_t var_x Empty_t)
+    (Insert_t var_x (Insert_t var_y Empty_t)). At numerals the structural
+    equality is verified by Q's reflexivity axiom + HF axioms Q8-Q10
+    walking the Insert_t-tower of (hf_to_qhf (Pair_ord x y)). ~50 lines.
     """
     p.goal(
         "!x y. Prov_Q (substitute (substitute (substitute "
-        "  is_Pair_ord_internal (numeral x) var_x) "
-        "  (numeral y) var_y) "
-        "  (numeral (Pair_ord x y)) var_z)"
+        "  is_Pair_ord_internal (hf_to_qhf x) var_x) "
+        "  (hf_to_qhf y) var_y) "
+        "  (hf_to_qhf (Pair_ord x y)) var_z)"
     )
     p.sorry()
 
@@ -3096,28 +3151,31 @@ is_In_internal = mk_const("is_In_internal", [])
 @proof
 def IS_IN_REPRESENTS(p):
     """|- !x y. (In x y ==> Prov_Q (substitute^2 is_In_internal
-                                       (numeral x) var_x
-                                       (numeral y) var_y))
+                                       (hf_to_qhf x) var_x
+                                       (hf_to_qhf y) var_y))
               /\\ (~In x y ==> Prov_Q (Not_f (substitute^2 is_In_internal
-                                                (numeral x) var_x
-                                                (numeral y) var_y))).
+                                                (hf_to_qhf x) var_x
+                                                (hf_to_qhf y) var_y))).
 
-    SORRY. Both directions are Sigma_1 / Sigma_0-decidable since In x y
-    = bit x y = ODD (HALF^x y), a primitive-recursive predicate decidable
-    in Q + HF at closed numerals. Construction (~80 lines):
-      * Body: a Sigma_1 trace formula recording the HALF chain
-        y, HALF y, ..., HALF^x y, then asserting ODD of the last entry.
-      * Forward: exhibit the trace at concrete x, y; verify each HALF
-        step via Q's Q4-Q7 + HF Q8-Q12 axiom citations.
-      * Negation: dual; use ~ODD (= Eq_f ... Zero_t variant) verifier.
+    SORRY. Under the hf_to_qhf bridge the body collapses to
+    ``is_In_internal := In_a var_x var_y`` and the proof reduces to
+    structural induction on the Insert-tower of ``hf_to_qhf y``:
+      * y = Empty: NOT_IN_EMPTY ==> antecedent fails (forward); Q8
+        directly proves ``Not_f (In_a (hf_to_qhf x) Empty_t)`` (negative).
+      * y = Insert i s, ~In i s: hf_to_qhf y = Insert_t (hf_to_qhf i)
+        (hf_to_qhf s).
+          - x = i: Q9 proves In_a (hf_to_qhf i) (Insert_t ...).
+          - x != i: Q10 reduces membership to In_a (hf_to_qhf x)
+            (hf_to_qhf s); IH on s closes both directions.
+    ~80 lines.
     """
     p.goal(
         "!x y. (In x y ==> Prov_Q (substitute (substitute "
-        "  is_In_internal (numeral x) var_x) "
-        "  (numeral y) var_y)) "
+        "  is_In_internal (hf_to_qhf x) var_x) "
+        "  (hf_to_qhf y) var_y)) "
         "/\\ (~(In x y) ==> Prov_Q (Not_f (substitute (substitute "
-        "  is_In_internal (numeral x) var_x) "
-        "  (numeral y) var_y)))"
+        "  is_In_internal (hf_to_qhf x) var_x) "
+        "  (hf_to_qhf y) var_y)))"
     )
     p.sorry()
 
@@ -3135,34 +3193,37 @@ is_substitute_step_internal = mk_const("is_substitute_step_internal", [])
 def IS_SUBSTITUTE_STEP_REPRESENTS(p):
     """|- !T t v a b. is_substitute_step T t v a b ==>
                          Prov_Q (substitute^5 is_substitute_step_internal
-                                 (numeral T) var_T
-                                 (numeral t) var_y
-                                 (numeral v) var_z
-                                 (numeral a) var_a
-                                 (numeral b) var_b).
+                                 (hf_to_qhf T) var_T
+                                 (hf_to_qhf t) var_y
+                                 (hf_to_qhf v) var_z
+                                 (hf_to_qhf a) var_a
+                                 (hf_to_qhf b) var_b).
 
-    SORRY. Body of is_substitute_step_internal: 13-disjunction mirroring
-    is_substitute_step's HOL body (Q_or_chain over the 13 cases), with
-    each ``In (Pair_ord _ _) T``-check expressed via IS_PAIR_ORD +
-    IS_IN composed inside Q_exists chains for the constructor-witness
-    sub-shapes. ~150 lines: 13 disjuncts × (Q-encoded constructor
-    pattern) + final assembly via Q_or_chain.
+    SORRY. Under the hf_to_qhf bridge: every input is encoded as an
+    Insert_t-tower so Q's HF axioms Q8-Q10 fire on membership checks
+    inside the trace ``hf_to_qhf T``. Body of
+    is_substitute_step_internal: 13-disjunction (Q_or_chain) mirroring
+    is_substitute_step's HOL body, with each ``In (Pair_ord _ _) T``
+    check expressed as ``In_a (Pair_ord_q var_a var_b) var_T`` (where
+    Pair_ord_q is the Q-syntax Kuratowski Insert_t-tower) and
+    constructor patterns ``a = Var_t v`` etc. expressed as Q-formula
+    Eq_f equalities verified by Q's reflexivity axiom on identical
+    Insert_t-tower shapes.
 
-    Proof strategy: case-split on the IS_SUBSTITUTE_STEP_DEF disjunct
-    of ``is_substitute_step T t v a b``; in each case dispatch the
-    corresponding Q-disjunct's Sigma_1 witness using
-    IS_PAIR_ORD_REPRESENTS / IS_IN_REPRESENTS / Q-axiom citations
-    over closed numerals.
+    Proof strategy: case-split on the IS_SUBSTITUTE_STEP_DEF disjunct;
+    in each case dispatch the corresponding Q-disjunct's witness using
+    IS_PAIR_ORD_REPRESENTS, IS_IN_REPRESENTS, and Q-axiom citations on
+    Insert_t-towers. ~150 lines.
     """
     p.goal(
         "!T t v a b. is_substitute_step T t v a b ==> "
         "Prov_Q (substitute (substitute (substitute (substitute (substitute "
         "  is_substitute_step_internal "
-        "  (numeral T) var_T) "
-        "  (numeral t) var_y) "
-        "  (numeral v) var_z) "
-        "  (numeral a) var_a) "
-        "  (numeral b) var_b)"
+        "  (hf_to_qhf T) var_T) "
+        "  (hf_to_qhf t) var_y) "
+        "  (hf_to_qhf v) var_z) "
+        "  (hf_to_qhf a) var_a) "
+        "  (hf_to_qhf b) var_b)"
     )
     p.sorry()
 
@@ -3184,28 +3245,30 @@ is_substitute_trace_internal = mk_const("is_substitute_trace_internal", [])
 def IS_SUBSTITUTE_TRACE_REPRESENTS(p):
     """|- !T F t v r. is_substitute_trace T F t v r ==>
                          Prov_Q (substitute^5 is_substitute_trace_internal
-                                 (numeral T) var_T
-                                 (numeral F) var_x
-                                 (numeral t) var_y
-                                 (numeral v) var_z
-                                 (numeral r) var_w).
+                                 (hf_to_qhf T) var_T
+                                 (hf_to_qhf F) var_x
+                                 (hf_to_qhf t) var_y
+                                 (hf_to_qhf v) var_z
+                                 (hf_to_qhf r) var_w).
 
-    SORRY. Combines IS_PAIR_ORD_REPRESENTS (for clause (i): In (Pair_ord
-    F r) T) with IS_IN_REPRESENTS and IS_SUBSTITUTE_STEP_REPRESENTS
-    (for clause (ii): the bounded forall over members of T). The
-    bounded forall is decidable in Q + HF because T is a closed
-    numeral with finitely many members witnessed by Q12 (foundation /
-    HF nat0_lt). ~100 lines.
+    SORRY. Under the hf_to_qhf bridge: combines IS_PAIR_ORD_REPRESENTS
+    (clause (i): ``In (Pair_ord F r) T`` -- structural membership in
+    the Insert_t-tower of ``hf_to_qhf T``) with IS_IN_REPRESENTS and
+    IS_SUBSTITUTE_STEP_REPRESENTS (clause (ii): bounded forall over
+    members of ``hf_to_qhf T``). The bounded forall expands to a
+    finite conjunction over T's Insert_t-tower, each conjunct
+    discharged via IS_SUBSTITUTE_STEP_REPRESENTS at the corresponding
+    encoded entry. ~80 lines.
     """
     p.goal(
         "!T F t v r. is_substitute_trace T F t v r ==> "
         "Prov_Q (substitute (substitute (substitute (substitute (substitute "
         "  is_substitute_trace_internal "
-        "  (numeral T) var_T) "
-        "  (numeral F) var_x) "
-        "  (numeral t) var_y) "
-        "  (numeral v) var_z) "
-        "  (numeral r) var_w)"
+        "  (hf_to_qhf T) var_T) "
+        "  (hf_to_qhf F) var_x) "
+        "  (hf_to_qhf t) var_y) "
+        "  (hf_to_qhf v) var_z) "
+        "  (hf_to_qhf r) var_w)"
     )
     p.sorry()
 
@@ -3497,19 +3560,22 @@ if __name__ == "__main__":
         "==> ?T. is_substitute_trace T F t v (substitute F t v)"
     )
     print(
-        "    IS_POW2_REPRESENTS (SORRY)            : |- !x. Prov_Q (.. is_pow2_internal .. (pow2 x) ..)"
+        "    HF_TO_QHF_AT_EMPTY (SORRY)            : |- hf_to_qhf Empty = Empty_t"
     )
     print(
-        "    IS_PAIR_ORD_REPRESENTS (SORRY)        : |- !x y. Prov_Q (.. is_Pair_ord_internal .. (Pair_ord x y) ..)"
+        "    HF_TO_QHF_AT_INSERT (SORRY)           : |- !i s. ~In i s ==> hf_to_qhf (Insert i s) = Insert_t (hf_to_qhf i) (hf_to_qhf s)"
     )
     print(
-        "    IS_IN_REPRESENTS (SORRY)              : |- !x y. (In x y => Prov_Q ..) /\\ (~In x y => Prov_Q (Not_f ..))"
+        "    IS_PAIR_ORD_REPRESENTS (SORRY)        : |- !x y. Prov_Q (.. is_Pair_ord_internal .. (hf_to_qhf (Pair_ord x y)) ..)"
     )
     print(
-        "    IS_SUBSTITUTE_STEP_REPRESENTS (SORRY) : |- !T t v a b. is_substitute_step T t v a b => Prov_Q .."
+        "    IS_IN_REPRESENTS (SORRY)              : |- !x y. (In x y => Prov_Q ..) /\\ (~In x y => Prov_Q (Not_f ..))  (hf_to_qhf-encoded)"
     )
     print(
-        "    IS_SUBSTITUTE_TRACE_REPRESENTS (SORRY): |- !T F t v r. is_substitute_trace T F t v r => Prov_Q .."
+        "    IS_SUBSTITUTE_STEP_REPRESENTS (SORRY) : |- !T t v a b. is_substitute_step T t v a b => Prov_Q ..  (hf_to_qhf-encoded)"
+    )
+    print(
+        "    IS_SUBSTITUTE_TRACE_REPRESENTS (SORRY): |- !T F t v r. is_substitute_trace T F t v r => Prov_Q ..  (hf_to_qhf-encoded)"
     )
     print("    SUBSTITUTE_REPRESENTS  :", pp_thm(SUBSTITUTE_REPRESENTS))
     print()
