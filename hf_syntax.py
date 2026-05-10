@@ -98,6 +98,7 @@ from nat0 import AXIOM_3_0, AXIOM_4_0
 from nat0_order import NAT0_LT_TRANS, define_wf_lt
 from proof import proof
 from fusion import ABS
+from classical import EXCLUDED_MIDDLE
 from tactics import (
     SPEC,
     SPECL,
@@ -2718,34 +2719,365 @@ SUBSTITUTE_AT_FORALL_HIT, SUBSTITUTE_AT_FORALL_MISS = derive_rec_eq_select_cond(
 
 
 # ---------------------------------------------------------------------------
-# Stage 1 (d) -- substitute / is_form preservation (STUB).
+# Stage 1 (d) -- substitute / is_term + is_form preservation.
 #
 # Used by Prov_HF-internal logic (PROV_HF_EXISTS_INTRO and downstream
 # representability proofs) to discharge the ``is_form (substitute phi t
-# v)`` side condition of CONTRAP / similar. Proper proof requires
-# structural induction on the formula F (cases for Eq_f / Not_f / Imp_f
-# / Forall_f / In_a) plus a parallel SUBSTITUTE_PRESERVES_IS_TERM lemma
-# for the term arguments. STUB pending the structural-induction
-# infrastructure; relocated from godel_first.py so hf_logic.py can
-# consume it without a circular import.
+# v)`` side condition of CONTRAP / similar. The IS_TERM half is split
+# off as a free-standing lemma because the IS_FORM cases for Eq_f / In_a
+# (whose children are encoded HF terms, not formulas) need is_term
+# preservation on each subterm -- the form-only IH cannot supply it.
+#
+# Both proofs are strong-induction on the encoded nat0; case-split via
+# IS_TERM_REC / IS_FORM_REC's disjunctive characterisation; each
+# constructor case rewrites through the matching SUBSTITUTE_AT_* equation
+# and lifts via the IS_*_AT_* iff. Forall_f and Var_t use EXCLUDED_MIDDLE
+# on ``v = bound`` to pick the HIT vs. MISS branch. Relocated from
+# godel_first.py so hf_logic.py can consume it without a circular
+# import.
 # ---------------------------------------------------------------------------
 
 
 @proof
-def SUBSTITUTE_PRESERVES_IS_FORM(p):
-    """|- !F t v. is_form F /\\ is_term t ==> is_form (substitute F t v).
+def SUBSTITUTE_PRESERVES_IS_TERM(p):
+    """|- !s t v. is_term s /\\ is_term t ==> is_term (substitute s t v).
 
-    Substitution into a well-formed HF-formula (replacing a variable
-    index by a well-formed HF-term) yields a well-formed HF-formula.
-    Strong induction on F using SUBSTITUTE_AT_* equations and the
-    is_form constructor closure lemmas (IS_FORM_AT_EQ / NOT / IMP /
-    FORALL / IN). STUB.
+    Substitution into a well-formed HF-term (replacing a variable index
+    by a well-formed HF-term) yields a well-formed HF-term. Strong
+    induction on ``s`` using SUBSTITUTE_AT_* / IS_TERM_AT_* on the
+    Empty_t / Var_t / Insert_t cases.
     """
     p.goal(
-        "!F t v. is_form F /\\ is_term t ==> is_form (substitute F t v)",
-        types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+        "!s. !t v. is_term s /\\ is_term t ==> is_term (substitute s t v)",
+        types={"s": nat0_ty, "t": nat0_ty, "v": nat0_ty},
     )
-    p.sorry()
+    with p.strong_induction("s", "IH"):
+        p.fix("t v")
+        p.assume("(h_s, h_t): is_term s /\\ is_term t")
+
+        # Disjunctive characterisation of is_term s.
+        rec_at_s = SPEC(p._parse("s"), IS_TERM_REC)
+        p.have(
+            "h_disj: s = Empty_t \\/ (?x. s = Var_t x) "
+            "\\/ (?a b. s = Insert_t a b /\\ is_term a /\\ is_term b)"
+        ).by_eq_mp(rec_at_s, "h_s")
+
+        # is_term Empty_t -- DISJ1 of REFL(Empty_t) into the IS_TERM_REC
+        # body; needed by the Empty_t case below. Inline because hf_syntax
+        # is upstream of the global ``IS_TERM_EMPTY`` lemma in hf_repr_core.
+        rec_at_empty = SPEC(Empty_t, IS_TERM_REC)
+        _empty_rhs = rand(rec_at_empty._concl)
+        _empty_rest = rand(_empty_rhs)
+        IS_TERM_EMPTY_TH = EQ_MP(
+            SYM(rec_at_empty), DISJ1(REFL(Empty_t), _empty_rest)
+        )
+
+        is_term_const = mk_const("is_term", [])
+
+        with p.cases_on("h_disj"):
+            # --- Empty_t ---
+            with p.case("c_empty: s = Empty_t"):
+                p.have("h_subst: substitute s t v = Empty_t").by_rewrite(
+                    ["c_empty", SUBSTITUTE_AT_EMPTY]
+                )
+                # DSL friction: ``by_rewrite_of(IS_TERM_EMPTY_TH,
+                # [SYM(h_subst)])`` non-terminates -- the rewriter retries
+                # the symmetric ``Empty_t = substitute s t v`` rule against
+                # the running source until it exceeds the fixpoint cap. Use
+                # AP_TERM + EQ_MP directly to avoid the rewrite loop.
+                ap_eq = AP_TERM(is_term_const, p.fact("h_subst"))
+                p.thus("is_term (substitute s t v)").by_eq_mp(
+                    ap_eq, IS_TERM_EMPTY_TH
+                )
+
+            # --- Var_t x (HIT / MISS via EXCLUDED_MIDDLE on v = x) ---
+            with p.case("c_var: ?x. s = Var_t x"):
+                # auto-chooses x; x_eq: s = Var_t x.
+                with p.cases_on(EXCLUDED_MIDDLE, "v = x"):
+                    with p.case("hit: v = x"):
+                        p.have(
+                            "h_subst_inner: substitute (Var_t x) t v = t"
+                        ).by(SUBSTITUTE_AT_VAR_HIT, "x", "t", "v", "hit")
+                        p.have("h_subst: substitute s t v = t").by_rewrite_of(
+                            "h_subst_inner", [SYM(p.fact("x_eq"))]
+                        )
+                        # DSL friction: ``by_rewrite_of("h_t",
+                        # [SYM(h_subst)])`` non-terminates because the
+                        # rule ``t = substitute s t v`` rewrites the ``t``
+                        # inside the new RHS recursively. Use AP_TERM +
+                        # EQ_MP for the clean lift.
+                        ap_eq = AP_TERM(is_term_const, p.fact("h_subst"))
+                        p.thus("is_term (substitute s t v)").by_eq_mp(
+                            ap_eq, "h_t"
+                        )
+                    with p.case("miss: ~(v = x)"):
+                        p.have(
+                            "h_subst_inner: substitute (Var_t x) t v = Var_t x"
+                        ).by(SUBSTITUTE_AT_VAR_MISS, "x", "t", "v", "miss")
+                        p.have("h_subst: substitute s t v = s").by_rewrite_of(
+                            "h_subst_inner", [SYM(p.fact("x_eq"))]
+                        )
+                        ap_eq = AP_TERM(is_term_const, p.fact("h_subst"))
+                        p.thus("is_term (substitute s t v)").by_eq_mp(
+                            ap_eq, "h_s"
+                        )
+
+            # --- Insert_t a b (recursive on both children) ---
+            with p.case(
+                "c_ins: ?a b. s = Insert_t a b /\\ is_term a /\\ is_term b"
+            ):
+                # auto-chooses a; a_eq: ?b. s = Insert_t a b /\ is_term a /\ is_term b.
+                p.choose("b", "a_eq")
+                p.split("b_eq", "(s_eq, h_a, h_b)")
+                p.have("lt_a: nat0_lt a s").by_rewrite_of(
+                    SPECL([p._parse("a"), p._parse("b")], NAT0_LT_INSERT_T_L),
+                    ["s_eq"],
+                )
+                p.have("lt_b: nat0_lt b s").by_rewrite_of(
+                    SPECL([p._parse("a"), p._parse("b")], NAT0_LT_INSERT_T_R),
+                    ["s_eq"],
+                )
+                p.have("hsub_a: is_term (substitute a t v)").by(
+                    "IH", "a", "lt_a", "t", "v",
+                    CONJ(p.fact("h_a"), p.fact("h_t")),
+                )
+                p.have("hsub_b: is_term (substitute b t v)").by(
+                    "IH", "b", "lt_b", "t", "v",
+                    CONJ(p.fact("h_b"), p.fact("h_t")),
+                )
+                p.have(
+                    "h_subst: substitute s t v "
+                    "= Insert_t (substitute a t v) (substitute b t v)"
+                ).by_rewrite(["s_eq", SUBSTITUTE_AT_INSERT])
+                at_ins = SPECL(
+                    [p._parse("substitute a t v"), p._parse("substitute b t v")],
+                    IS_TERM_AT_INSERT,
+                )
+                p.have(
+                    "h_ins_term: is_term "
+                    "(Insert_t (substitute a t v) (substitute b t v))"
+                ).by_eq_mp(SYM(at_ins), CONJ(p.fact("hsub_a"), p.fact("hsub_b")))
+                p.thus("is_term (substitute s t v)").by_rewrite_of(
+                    "h_ins_term", [SYM(p.fact("h_subst"))]
+                )
+
+
+@proof
+def SUBSTITUTE_PRESERVES_IS_FORM(p):
+    """|- !phi t v. is_form phi /\\ is_term t ==> is_form (substitute phi t v).
+
+    Strong induction on the formula encoding ``phi`` using IS_FORM_REC's
+    case-split (Eq_f / Not_f / Imp_f / Forall_f / In_a). Atomic
+    formula cases (Eq_f, In_a) delegate to SUBSTITUTE_PRESERVES_IS_TERM
+    on each subterm; compound cases (Not_f, Imp_f, Forall_f) use the IH
+    on subforms. Forall_f branches via EXCLUDED_MIDDLE on ``v = a`` to
+    pick HIT (substitution stops, formula unchanged) vs. MISS (recurse
+    on the body).
+
+    Goal binder is named ``phi`` (not ``F``) because the parser resolves
+    bare ``F`` to the boolean false constant; the published theorem is
+    alpha-equivalent regardless of internal naming.
+    """
+    p.goal(
+        "!phi. !t v. is_form phi /\\ is_term t ==> is_form (substitute phi t v)",
+        types={"phi": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    is_form_const = mk_const("is_form", [])
+
+    with p.strong_induction("phi", "IH"):
+        p.fix("t v")
+        p.assume("(h_phi, h_t): is_form phi /\\ is_term t")
+
+        rec_at_phi = SPEC(p._parse("phi"), IS_FORM_REC)
+        p.have(
+            "h_disj: (?a b. phi = Eq_f a b /\\ is_term a /\\ is_term b) "
+            "\\/ (?x. phi = Not_f x /\\ is_form x) "
+            "\\/ (?a b. phi = Imp_f a b /\\ is_form a /\\ is_form b) "
+            "\\/ (?a b. phi = Forall_f a b /\\ is_form b) "
+            "\\/ (?a b. phi = In_a a b /\\ is_term a /\\ is_term b)"
+        ).by_eq_mp(rec_at_phi, "h_phi")
+
+        with p.cases_on("h_disj"):
+            # --- Eq_f a b (atomic; both children are terms) ---
+            with p.case(
+                "c_eq: ?a b. phi = Eq_f a b /\\ is_term a /\\ is_term b"
+            ):
+                p.choose("b", "a_eq")
+                p.split("b_eq", "(phi_eq, h_a, h_b)")
+                p.have("hsub_a: is_term (substitute a t v)").by(
+                    SUBSTITUTE_PRESERVES_IS_TERM, "a", "t", "v",
+                    CONJ(p.fact("h_a"), p.fact("h_t")),
+                )
+                p.have("hsub_b: is_term (substitute b t v)").by(
+                    SUBSTITUTE_PRESERVES_IS_TERM, "b", "t", "v",
+                    CONJ(p.fact("h_b"), p.fact("h_t")),
+                )
+                p.have(
+                    "h_subst: substitute phi t v "
+                    "= Eq_f (substitute a t v) (substitute b t v)"
+                ).by_rewrite(["phi_eq", SUBSTITUTE_AT_EQ])
+                at_eq = SPECL(
+                    [p._parse("substitute a t v"), p._parse("substitute b t v")],
+                    IS_FORM_AT_EQ,
+                )
+                p.have(
+                    "h_eq_form: is_form "
+                    "(Eq_f (substitute a t v) (substitute b t v))"
+                ).by_eq_mp(SYM(at_eq), CONJ(p.fact("hsub_a"), p.fact("hsub_b")))
+                p.thus("is_form (substitute phi t v)").by_rewrite_of(
+                    "h_eq_form", [SYM(p.fact("h_subst"))]
+                )
+
+            # --- Not_f x (unary; recurse on body) ---
+            with p.case("c_not: ?x. phi = Not_f x /\\ is_form x"):
+                p.split("x_eq", "(phi_eq, h_x)")
+                p.have("lt_x: nat0_lt x phi").by_rewrite_of(
+                    SPEC(p._parse("x"), NAT0_LT_NOT_F), ["phi_eq"]
+                )
+                p.have("hsub_x: is_form (substitute x t v)").by(
+                    "IH", "x", "lt_x", "t", "v",
+                    CONJ(p.fact("h_x"), p.fact("h_t")),
+                )
+                p.have(
+                    "h_subst: substitute phi t v = Not_f (substitute x t v)"
+                ).by_rewrite(["phi_eq", SUBSTITUTE_AT_NOT])
+                at_not = SPEC(p._parse("substitute x t v"), IS_FORM_AT_NOT)
+                p.have(
+                    "h_not_form: is_form (Not_f (substitute x t v))"
+                ).by_eq_mp(SYM(at_not), "hsub_x")
+                p.thus("is_form (substitute phi t v)").by_rewrite_of(
+                    "h_not_form", [SYM(p.fact("h_subst"))]
+                )
+
+            # --- Imp_f a b (binary; recurse on both children) ---
+            with p.case(
+                "c_imp: ?a b. phi = Imp_f a b /\\ is_form a /\\ is_form b"
+            ):
+                p.choose("b", "a_eq")
+                p.split("b_eq", "(phi_eq, h_a, h_b)")
+                p.have("lt_a: nat0_lt a phi").by_rewrite_of(
+                    SPECL([p._parse("a"), p._parse("b")], NAT0_LT_IMP_F_L),
+                    ["phi_eq"],
+                )
+                p.have("lt_b: nat0_lt b phi").by_rewrite_of(
+                    SPECL([p._parse("a"), p._parse("b")], NAT0_LT_IMP_F_R),
+                    ["phi_eq"],
+                )
+                p.have("hsub_a: is_form (substitute a t v)").by(
+                    "IH", "a", "lt_a", "t", "v",
+                    CONJ(p.fact("h_a"), p.fact("h_t")),
+                )
+                p.have("hsub_b: is_form (substitute b t v)").by(
+                    "IH", "b", "lt_b", "t", "v",
+                    CONJ(p.fact("h_b"), p.fact("h_t")),
+                )
+                p.have(
+                    "h_subst: substitute phi t v "
+                    "= Imp_f (substitute a t v) (substitute b t v)"
+                ).by_rewrite(["phi_eq", SUBSTITUTE_AT_IMP])
+                at_imp = SPECL(
+                    [p._parse("substitute a t v"), p._parse("substitute b t v")],
+                    IS_FORM_AT_IMP,
+                )
+                p.have(
+                    "h_imp_form: is_form "
+                    "(Imp_f (substitute a t v) (substitute b t v))"
+                ).by_eq_mp(SYM(at_imp), CONJ(p.fact("hsub_a"), p.fact("hsub_b")))
+                p.thus("is_form (substitute phi t v)").by_rewrite_of(
+                    "h_imp_form", [SYM(p.fact("h_subst"))]
+                )
+
+            # --- Forall_f a b (HIT v=a leaves phi alone; MISS recurses) ---
+            with p.case("c_fa: ?a b. phi = Forall_f a b /\\ is_form b"):
+                p.choose("b", "a_eq")
+                p.split("b_eq", "(phi_eq, h_b)")
+                with p.cases_on(EXCLUDED_MIDDLE, "v = a"):
+                    with p.case("hit: v = a"):
+                        p.have(
+                            "h_subst_inner: substitute (Forall_f a b) t v "
+                            "= Forall_f a b"
+                        ).by(
+                            SUBSTITUTE_AT_FORALL_HIT, "a", "b", "t", "v", "hit"
+                        )
+                        p.have(
+                            "h_subst: substitute phi t v = phi"
+                        ).by_rewrite_of(
+                            "h_subst_inner", [SYM(p.fact("phi_eq"))]
+                        )
+                        # DSL friction: same non-termination as the Var_t
+                        # HIT case in IS_TERM -- the rule ``phi = substitute
+                        # phi t v`` rewrites the new RHS forever. Use
+                        # AP_TERM + EQ_MP for the lift.
+                        ap_eq = AP_TERM(is_form_const, p.fact("h_subst"))
+                        p.thus("is_form (substitute phi t v)").by_eq_mp(
+                            ap_eq, "h_phi"
+                        )
+                    with p.case("miss: ~(v = a)"):
+                        p.have(
+                            "h_subst_inner: substitute (Forall_f a b) t v "
+                            "= Forall_f a (substitute b t v)"
+                        ).by(
+                            SUBSTITUTE_AT_FORALL_MISS,
+                            "a", "b", "t", "v", "miss",
+                        )
+                        p.have(
+                            "h_subst: substitute phi t v "
+                            "= Forall_f a (substitute b t v)"
+                        ).by_rewrite_of(
+                            "h_subst_inner", [SYM(p.fact("phi_eq"))]
+                        )
+                        p.have("lt_b: nat0_lt b phi").by_rewrite_of(
+                            SPECL(
+                                [p._parse("a"), p._parse("b")],
+                                NAT0_LT_FORALL_F_R,
+                            ),
+                            ["phi_eq"],
+                        )
+                        p.have("hsub_b: is_form (substitute b t v)").by(
+                            "IH", "b", "lt_b", "t", "v",
+                            CONJ(p.fact("h_b"), p.fact("h_t")),
+                        )
+                        at_fa = SPECL(
+                            [p._parse("a"), p._parse("substitute b t v")],
+                            IS_FORM_AT_FORALL,
+                        )
+                        p.have(
+                            "h_fa_form: is_form "
+                            "(Forall_f a (substitute b t v))"
+                        ).by_eq_mp(SYM(at_fa), "hsub_b")
+                        p.thus("is_form (substitute phi t v)").by_rewrite_of(
+                            "h_fa_form", [SYM(p.fact("h_subst"))]
+                        )
+
+            # --- In_a a b (atomic; both children are terms) ---
+            with p.case(
+                "c_in: ?a b. phi = In_a a b /\\ is_term a /\\ is_term b"
+            ):
+                p.choose("b", "a_eq")
+                p.split("b_eq", "(phi_eq, h_a, h_b)")
+                p.have("hsub_a: is_term (substitute a t v)").by(
+                    SUBSTITUTE_PRESERVES_IS_TERM, "a", "t", "v",
+                    CONJ(p.fact("h_a"), p.fact("h_t")),
+                )
+                p.have("hsub_b: is_term (substitute b t v)").by(
+                    SUBSTITUTE_PRESERVES_IS_TERM, "b", "t", "v",
+                    CONJ(p.fact("h_b"), p.fact("h_t")),
+                )
+                p.have(
+                    "h_subst: substitute phi t v "
+                    "= In_a (substitute a t v) (substitute b t v)"
+                ).by_rewrite(["phi_eq", SUBSTITUTE_AT_IN])
+                at_in = SPECL(
+                    [p._parse("substitute a t v"), p._parse("substitute b t v")],
+                    IS_FORM_AT_IN,
+                )
+                p.have(
+                    "h_in_form: is_form "
+                    "(In_a (substitute a t v) (substitute b t v))"
+                ).by_eq_mp(SYM(at_in), CONJ(p.fact("hsub_a"), p.fact("hsub_b")))
+                p.thus("is_form (substitute phi t v)").by_rewrite_of(
+                    "h_in_form", [SYM(p.fact("h_subst"))]
+                )
 
 
 if __name__ == "__main__":
@@ -2913,3 +3245,13 @@ if __name__ == "__main__":
     print("    SUBSTITUTE_AT_FORALL_MISS:", pp_thm(SUBSTITUTE_AT_FORALL_MISS))
     print("    SUBSTITUTE_AT_INSERT     :", pp_thm(SUBSTITUTE_AT_INSERT))
     print("    SUBSTITUTE_AT_IN         :", pp_thm(SUBSTITUTE_AT_IN))
+    print()
+    print("Stage 1 (d) -- substitute / is_term + is_form preservation.")
+    print(
+        "    SUBSTITUTE_PRESERVES_IS_TERM :",
+        pp_thm(SUBSTITUTE_PRESERVES_IS_TERM),
+    )
+    print(
+        "    SUBSTITUTE_PRESERVES_IS_FORM :",
+        pp_thm(SUBSTITUTE_PRESERVES_IS_FORM),
+    )
