@@ -95,7 +95,7 @@ from fusion import Var
 from basics import mk_const, mk_app, mk_abs, rand, rator
 from parser import define, parse_type
 from axioms import mk_forall, mk_imp, mk_not, mk_and, mk_or, mk_exists
-from nat0 import nat0_ty, define_unary_0, mk_suc0, ZERO
+from nat0 import nat0_ty, define_unary_0, mk_suc0, ZERO, AXIOM_3_0, AXIOM_4_0
 from nat0_order import define_wf_lt
 from proof import proof
 from tactics import (
@@ -215,6 +215,10 @@ from tactics import (
 from fusion import vsubst, aty, DEDUCT_ANTISYM_RULE, new_constant
 from hf_proof import (
     var_x,
+    VAR_X_DEF,
+    var_y,
+    VAR_Y_DEF,
+    var_z,
     VAR_Z_DEF,
     nil_l,
     cons_l,
@@ -363,8 +367,11 @@ _P_pred = Var("P", parse_type("nat0 -> bool"))
 
 
 def _subst_at_numeral(F_term, n_term):
-    """Build ``substitute F (numeral n) var_x``."""
-    return mk_app(substitute, F_term, mk_app(numeral, n_term), var_x)
+    """Build ``substitute F (numeral n) 0`` -- substitute the F-slot
+    variable (index 0, encoded ``var_x = Var_t 0``) in ``F`` with the
+    numeral encoding of n.
+    """
+    return mk_app(substitute, F_term, mk_app(numeral, n_term), ZERO)
 
 
 def _at1(def_th, x):
@@ -2313,6 +2320,39 @@ REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Variable-index constants ``idx_x``, ``idx_y``, ... -- the *indices*
+# (small nat0 numerals 0, 1, 2, ...) of HF-syntax variables, distinct
+# from the *encodings* ``var_x = Var_t 0``, ``var_y = Var_t 1``, ... .
+#
+# Convention (matches ``hf_proof.is_UI`` and the SUBSTITUTE_AT_VAR_HIT/
+# MISS recursion equations):
+#   * Inside an HF formula body, a free variable is referenced by its
+#     encoding -- e.g. ``var_x = Var_t 0`` for the F-slot in
+#     ``substitute_internal``.
+#   * The third argument to ``substitute`` (and the first to ``Forall_f``)
+#     is the variable's *index*, not its encoding -- so substitute calls
+#     pass ``idx_x = 0``, not ``var_x = Var_t 0``.
+#
+# Stage 3 representability theorems thread these consistently:
+# ``substitute F (numeral n) idx_x`` substitutes the variable named x
+# in F with (numeral n).
+# ---------------------------------------------------------------------------
+
+
+IDX_X_DEF = define("idx_x", parse_type("nat0"), "0")
+idx_x = mk_const("idx_x", [])
+
+IDX_Y_DEF = define("idx_y", parse_type("nat0"), "SUC0 0")
+idx_y = mk_const("idx_y", [])
+
+IDX_Z_DEF = define("idx_z", parse_type("nat0"), "SUC0 (SUC0 0)")
+idx_z = mk_const("idx_z", [])
+
+IDX_W_DEF = define("idx_w", parse_type("nat0"), "SUC0 (SUC0 (SUC0 0))")
+idx_w = mk_const("idx_w", [])
+
+
 VAR_W_DEF = define("var_w", parse_type("nat0"), "Var_t (SUC0 (SUC0 (SUC0 0)))")
 var_w = mk_const("var_w", [])
 
@@ -2328,6 +2368,9 @@ VAR_T_DEF = define(
 )
 var_T = mk_const("var_T", [])
 
+IDX_T_DEF = define("idx_T", parse_type("nat0"), "SUC0 (SUC0 (SUC0 (SUC0 0)))")
+idx_T = mk_const("idx_T", [])
+
 
 # Additional HF-internal variables for the body of is_substitute_trace_internal:
 #   var_a, var_b           -- the "!a b. ..." outer for-all binders.
@@ -2337,7 +2380,8 @@ var_T = mk_const("var_T", [])
 #   var_a1, var_a2,        -- binary-constructor sub-shape existentials.
 #   var_b1, var_b2
 #   var_f1, var_f2         -- Forall_f-miss body existentials.
-# Indices 5..14 of the HF-variable namespace.
+# Indices 5..14 of the HF-variable namespace; the matching index
+# constants ``idx_a``, ``idx_b``, ... live alongside.
 def _var_q_def(name, idx):
     suc = "0"
     for _ in range(idx):
@@ -2345,10 +2389,21 @@ def _var_q_def(name, idx):
     return define(name, parse_type("nat0"), f"Var_t {suc}")
 
 
+def _idx_q_def(name, idx):
+    suc = "0"
+    for _ in range(idx):
+        suc = f"(SUC0 {suc})"
+    return define(name, parse_type("nat0"), suc)
+
+
 VAR_A_DEF = _var_q_def("var_a", 5)
 var_a = mk_const("var_a", [])
+IDX_A_DEF = _idx_q_def("idx_a", 5)
+idx_a = mk_const("idx_a", [])
 VAR_B_DEF = _var_q_def("var_b", 6)
 var_b = mk_const("var_b", [])
+IDX_B_DEF = _idx_q_def("idx_b", 6)
+idx_b = mk_const("idx_b", [])
 VAR_S1_DEF = _var_q_def("var_s1", 7)
 var_s1 = mk_const("var_s1", [])
 VAR_S2_DEF = _var_q_def("var_s2", 8)
@@ -4353,6 +4408,201 @@ def HF_INDUCTION(p):
                 )
 
 
+# ---------------------------------------------------------------------------
+# IS_TERM_QUOTE_HF / SUBSTITUTE_QUOTE_HF -- structural facts about the
+# image of ``quote_hf``.
+#
+# ``quote_hf`` produces an HF-syntax encoding using only ``Empty_t`` /
+# ``Insert_t`` constructors (no ``Var_t``). Two consequences exploited
+# downstream:
+#   * IS_TERM_QUOTE_HF: every output is a well-formed HF term.
+#   * SUBSTITUTE_QUOTE_HF: substitute on a quote_hf image is identity --
+#     no Var_t leaf for the substitution to land on.
+#
+# Both proofs use STRONG_INDUCTION on ``s`` to access the IH at both
+# ``low_bit s`` and ``clear_low s`` (HF_INDUCTION's induction hypothesis
+# only fires on the tail, which would force a separate induction on the
+# bound head ``i``).
+# ---------------------------------------------------------------------------
+
+
+@proof
+def IS_TERM_QUOTE_HF(p):
+    """|- !s. is_term (quote_hf s).
+
+    Strong induction on ``s``. Base ``s = 0``: ``quote_hf 0 = Empty_t``
+    via EMPTY_DEF + QUOTE_HF_AT_EMPTY; closed by IS_TERM_EMPTY. Step
+    ``s != 0``: bit-decompose into ``Insert (low_bit s) (clear_low s)``,
+    fire IH at both ``low_bit s`` (LOW_BIT_LT) and ``clear_low s``
+    (CLEAR_LOW_LT) under the canonical-form precondition
+    LOW_BIT_CLEAR_LOW_PRECOND, then IS_TERM_INSERT closes.
+    """
+    p.goal("!s. is_term (quote_hf s)")
+    with p.strong_induction("s", "IH"):
+        with p.cases_on(EXCLUDED_MIDDLE, "s = 0"):
+            with p.case("hz: s = 0"):
+                p.have("h_eq: quote_hf s = Empty_t").by_rewrite(
+                    ["hz", SYM(EMPTY_DEF), QUOTE_HF_AT_EMPTY]
+                )
+                p.thus("is_term (quote_hf s)").by_rewrite_of(
+                    IS_TERM_EMPTY, [SYM(p.fact("h_eq"))]
+                )
+            with p.case("hnz: ~(s = 0)"):
+                p.have("h_lb_lt: nat0_lt (low_bit s) s").by(
+                    LOW_BIT_LT, "s", "hnz"
+                )
+                p.have("h_cl_lt: nat0_lt (clear_low s) s").by(
+                    CLEAR_LOW_LT, "s", "hnz"
+                )
+                p.have(
+                    "h_pre: clear_low s = 0 "
+                    "\\/ nat0_lt (low_bit s) (low_bit (clear_low s))"
+                ).by(LOW_BIT_CLEAR_LOW_PRECOND, "s", "hnz")
+                p.have(
+                    "h_recon_sb: s = set_bit (low_bit s) (clear_low s)"
+                ).by(INSERT_LOW_BIT_CLEAR_LOW, "s", "hnz")
+                p.have(
+                    "h_in_sb: Insert (low_bit s) (clear_low s) "
+                    "= set_bit (low_bit s) (clear_low s)"
+                ).by(INSERT_AT, "low_bit s", "clear_low s")
+                p.have(
+                    "h_recon: s = Insert (low_bit s) (clear_low s)"
+                ).by_rewrite_of("h_recon_sb", [SYM(p.fact("h_in_sb"))])
+                p.have(
+                    "ih_lb: is_term (quote_hf (low_bit s))"
+                ).by("IH", "low_bit s", "h_lb_lt")
+                p.have(
+                    "ih_cl: is_term (quote_hf (clear_low s))"
+                ).by("IH", "clear_low s", "h_cl_lt")
+                p.have(
+                    "h_q_split: quote_hf (Insert (low_bit s) (clear_low s)) "
+                    "= Insert_t (quote_hf (low_bit s)) (quote_hf (clear_low s))"
+                ).by(
+                    QUOTE_HF_AT_INSERT_LOW, "low_bit s", "clear_low s", "h_pre"
+                )
+                p.have(
+                    "h_pair: is_term (quote_hf (low_bit s)) "
+                    "/\\ is_term (quote_hf (clear_low s))"
+                ).by_thm(CONJ(p.fact("ih_lb"), p.fact("ih_cl")))
+                p.have(
+                    "h_ins_term: is_term (Insert_t "
+                    "(quote_hf (low_bit s)) (quote_hf (clear_low s)))"
+                ).by(
+                    IS_TERM_INSERT,
+                    "quote_hf (low_bit s)",
+                    "quote_hf (clear_low s)",
+                    "h_pair",
+                )
+                p.have(
+                    "h_q_ins: is_term "
+                    "(quote_hf (Insert (low_bit s) (clear_low s)))"
+                ).by_rewrite_of("h_ins_term", [SYM(p.fact("h_q_split"))])
+                p.thus("is_term (quote_hf s)").by_rewrite_of(
+                    "h_q_ins", [SYM(p.fact("h_recon"))]
+                )
+
+
+@proof
+def SUBSTITUTE_QUOTE_HF(p):
+    """|- !s t v. substitute (quote_hf s) t v = quote_hf s.
+
+    Strong induction on ``s``. Base ``s = 0``: ``quote_hf 0 = Empty_t``
+    and SUBSTITUTE_AT_EMPTY closes. Step ``s != 0``: bit-decompose,
+    fire IH at both ``low_bit s`` and ``clear_low s``, push substitute
+    through Insert_t via SUBSTITUTE_AT_INSERT.
+
+    The ``!t v.`` quantifiers move inside the IH cleanly because both
+    are unconstrained -- the IH body holds for any choice.
+    """
+    p.goal(
+        "!s t v. substitute (quote_hf s) t v = quote_hf s",
+        types={"s": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    with p.strong_induction("s", "IH"):
+        p.fix("t v")
+        with p.cases_on(EXCLUDED_MIDDLE, "s = 0"):
+            with p.case("hz: s = 0"):
+                p.have("h_q_eq: quote_hf s = Empty_t").by_rewrite(
+                    ["hz", SYM(EMPTY_DEF), QUOTE_HF_AT_EMPTY]
+                )
+                p.have(
+                    "h_subst_empty: substitute Empty_t t v = Empty_t"
+                ).by(SUBSTITUTE_AT_EMPTY, "t", "v")
+                p.thus("substitute (quote_hf s) t v = quote_hf s").by_rewrite(
+                    ["h_q_eq", "h_subst_empty"]
+                )
+            with p.case("hnz: ~(s = 0)"):
+                p.have("h_lb_lt: nat0_lt (low_bit s) s").by(
+                    LOW_BIT_LT, "s", "hnz"
+                )
+                p.have("h_cl_lt: nat0_lt (clear_low s) s").by(
+                    CLEAR_LOW_LT, "s", "hnz"
+                )
+                p.have(
+                    "h_pre: clear_low s = 0 "
+                    "\\/ nat0_lt (low_bit s) (low_bit (clear_low s))"
+                ).by(LOW_BIT_CLEAR_LOW_PRECOND, "s", "hnz")
+                p.have(
+                    "h_recon_sb: s = set_bit (low_bit s) (clear_low s)"
+                ).by(INSERT_LOW_BIT_CLEAR_LOW, "s", "hnz")
+                p.have(
+                    "h_in_sb: Insert (low_bit s) (clear_low s) "
+                    "= set_bit (low_bit s) (clear_low s)"
+                ).by(INSERT_AT, "low_bit s", "clear_low s")
+                p.have(
+                    "h_recon: s = Insert (low_bit s) (clear_low s)"
+                ).by_rewrite_of("h_recon_sb", [SYM(p.fact("h_in_sb"))])
+                p.have(
+                    "h_q_split: quote_hf (Insert (low_bit s) (clear_low s)) "
+                    "= Insert_t (quote_hf (low_bit s)) (quote_hf (clear_low s))"
+                ).by(
+                    QUOTE_HF_AT_INSERT_LOW, "low_bit s", "clear_low s", "h_pre"
+                )
+                # AP_TERM quote_hf to h_recon, then TRANS with h_q_split.
+                p.have(
+                    "h_q_outer: quote_hf s "
+                    "= quote_hf (Insert (low_bit s) (clear_low s))"
+                ).by_cong("quote_hf", "h_recon")
+                p.have(
+                    "h_q_eq: quote_hf s "
+                    "= Insert_t (quote_hf (low_bit s)) (quote_hf (clear_low s))"
+                ).by_thm(TRANS(p.fact("h_q_outer"), p.fact("h_q_split")))
+                # IH at low_bit s and clear_low s, specialized at our t, v.
+                p.have(
+                    "ih_lb_all: !t v. "
+                    "substitute (quote_hf (low_bit s)) t v = quote_hf (low_bit s)"
+                ).by("IH", "low_bit s", "h_lb_lt")
+                p.have(
+                    "ih_lb: substitute (quote_hf (low_bit s)) t v "
+                    "= quote_hf (low_bit s)"
+                ).by("ih_lb_all", "t", "v")
+                p.have(
+                    "ih_cl_all: !t v. "
+                    "substitute (quote_hf (clear_low s)) t v = quote_hf (clear_low s)"
+                ).by("IH", "clear_low s", "h_cl_lt")
+                p.have(
+                    "ih_cl: substitute (quote_hf (clear_low s)) t v "
+                    "= quote_hf (clear_low s)"
+                ).by("ih_cl_all", "t", "v")
+                # Push substitute through Insert_t.
+                p.have(
+                    "h_subst_ins: substitute (Insert_t "
+                    "(quote_hf (low_bit s)) (quote_hf (clear_low s))) t v "
+                    "= Insert_t "
+                    "(substitute (quote_hf (low_bit s)) t v) "
+                    "(substitute (quote_hf (clear_low s)) t v)"
+                ).by(
+                    SUBSTITUTE_AT_INSERT,
+                    "quote_hf (low_bit s)",
+                    "quote_hf (clear_low s)",
+                    "t",
+                    "v",
+                )
+                p.thus("substitute (quote_hf s) t v = quote_hf s").by_rewrite(
+                    ["h_q_eq", "h_subst_ins", "ih_lb", "ih_cl"]
+                )
+
+
 # Helper: lift |- is_<X> n through the logical-axiom disjunction chain
 # to |- Prov_HF n. Mirrors hf_logic._prov_of_logical (which sits a layer
 # above and cannot be imported here without a cycle); duplicated locally
@@ -4427,62 +4677,312 @@ def PROV_HF_REFL(p):
 # (sub-shape, output-shape) entries, and HF must prove each entry's shape
 # at numerals.
 #
-# Body: ``Eq_f Empty_t Empty_t`` -- a closed reflexive HF-formula whose
-# substitution image at any (var_x, var_y, var_z) triple is itself, and
-# which HF proves trivially via the Refl logical-axiom schema. This thin
-# body is sufficient to discharge ``IS_PAIR_ORD_REPRESENTS``'s positive
-# representability claim; the genuine Kuratowski-shape encoding (see the
-# Stage 3 docstring) is deferred until downstream Stage-4 consumers
-# require the full negative direction. Until then,
-# ``is_Pair_ord_internal`` participates only as a syntactic placeholder
-# inside higher composites (``is_substitute_step_internal`` etc.), which
-# remain themselves opaque.
+# Body: faithful equational encoding of the Kuratowski pair shape --
+# ``var_z = {{var_x}, {var_x, var_y}}`` written out at the HF-syntax
+# level using only ``Insert_t`` and ``Empty_t``:
+#
+#   Eq_f var_z
+#     (Insert_t (Insert_t var_x Empty_t)        -- {var_x}
+#       (Insert_t                                -- + {{var_x, var_y}}
+#         (Insert_t var_x (Insert_t var_y Empty_t))   -- = {var_x, var_y}
+#         Empty_t))
+#
+# This matches QUOTE_HF_AT_PAIR_ORD's RHS shape; substituting the three
+# slots with ``quote_hf x``, ``quote_hf y``, ``quote_hf (Pair_ord x y)``
+# yields a reflexivity claim that PROV_HF_REFL closes -- but the bridge
+# requires ``nat0_lt x y`` (QUOTE_HF_AT_PAIR_ORD's precondition). The
+# theorem ``IS_PAIR_ORD_REPRESENTS`` carries the precondition
+# explicitly; downstream consumers (``IS_SUBSTITUTE_STEP_REPRESENTS``,
+# etc.) will instantiate it at concrete numerals where the order is
+# easily established.
 IS_PAIR_ORD_INTERNAL_DEF = define(
     "is_Pair_ord_internal",
     nat0_ty,
-    "Eq_f Empty_t Empty_t",
+    "Eq_f var_z "
+    "(Insert_t (Insert_t var_x Empty_t) "
+    "          (Insert_t "
+    "             (Insert_t var_x (Insert_t var_y Empty_t)) "
+    "             Empty_t))",
 )
 is_Pair_ord_internal = mk_const("is_Pair_ord_internal", [])
 
 
+# Six unconditional substitute lemmas covering the (var_X, idx_Y) pairs
+# encountered while walking the threefold substitute over
+# is_Pair_ord_internal:
+#   HIT:   substitute var_X t idx_X = t  (X in {x, y, z})
+#   MISS:  substitute var_X t idx_Y = var_X  (X != Y)
+# Built by SPECL'ing SUBSTITUTE_AT_VAR_HIT/MISS at the concrete indices
+# (0, SUC0 0, SUC0 SUC0 0), discharging the precondition (REFL for HIT,
+# AXIOM_3_0/AXIOM_4_0 for MISS), and folding back via VAR_*_DEF and
+# IDX_*_DEF. They function as the "leaf-rewrite" rules feeding the by-
+# rewrite that collapses the threefold substitute below.
+_t_subst = Var("t", nat0_ty)
+
+
+def _build_hit(var_def, idx_def, inner_idx):
+    """|- !t. substitute var_X t idx_X = t.
+
+    Two-stage fold: first apply ``SYM(var_def)`` to collapse the
+    ``Var_t inner_idx`` pattern into the named constant ``var_X``,
+    then apply ``SYM(idx_def)`` to fold the remaining substitute-
+    parameter occurrence ``inner_idx`` into ``idx_X``. Applying both
+    rules in one pass would let the deep-first rewriter rewrite the
+    inner ``inner_idx`` of ``Var_t inner_idx`` first, blocking the
+    var-fold.
+    """
+    base = MP(
+        SPECL([inner_idx, _t_subst, inner_idx], SUBSTITUTE_AT_VAR_HIT),
+        REFL(inner_idx),
+    )
+    folded = REWRITE_RULE([SYM(var_def)], base)
+    folded = REWRITE_RULE([SYM(idx_def)], folded)
+    return GEN(_t_subst, folded)
+
+
+def _build_miss(var_def, idx_def, inner_idx, idx_val, neq_th):
+    """|- !t. substitute var_X t idx_Y = var_X (X != Y)."""
+    base = MP(
+        SPECL([inner_idx, _t_subst, idx_val], SUBSTITUTE_AT_VAR_MISS),
+        neq_th,
+    )
+    folded = REWRITE_RULE([SYM(var_def)], base)
+    folded = REWRITE_RULE([SYM(idx_def)], folded)
+    return GEN(_t_subst, folded)
+
+
+# ~(SUC0 0 = 0) and the six index-inequalities derived from AXIOM_3_0 +
+# AXIOM_4_0. Each takes one or two lines.
+_neq_s0_0 = SPEC(ZERO, AXIOM_3_0)              # ~(SUC0 0 = 0)
+_neq_ss0_0 = SPEC(mk_suc0(ZERO), AXIOM_3_0)    # ~(SUC0 (SUC0 0) = 0)
+
+
+def _flip_neq(neq_th, lhs_term, rhs_term):
+    """From ``|- ~(a = b)`` derive ``|- ~(b = a)``."""
+    asm = ASSUME(mk_eq(rhs_term, lhs_term))    # b = a |- b = a
+    a_eq_b = SYM(asm)                           # b = a |- a = b
+    contra = MP(NOT_ELIM(neq_th), a_eq_b)       # b = a |- F
+    return NOT_INTRO(DISCH(mk_eq(rhs_term, lhs_term), contra))
+
+
+_neq_0_s0 = _flip_neq(_neq_s0_0, mk_suc0(ZERO), ZERO)        # ~(0 = SUC0 0)
+_neq_0_ss0 = _flip_neq(
+    _neq_ss0_0, mk_suc0(mk_suc0(ZERO)), ZERO
+)  # ~(0 = SUC0 (SUC0 0))
+
+# ~(SUC0 0 = SUC0 (SUC0 0)) via AXIOM_4_0 contrapositive on ~(0 = SUC0 0).
+def _build_neq_s0_ss0():
+    # AXIOM_4_0: !m n. SUC0 m = SUC0 n ==> m = n.
+    # Specialize m=0, n=SUC0 0: SUC0 0 = SUC0 (SUC0 0) ==> 0 = SUC0 0.
+    inj = SPECL([ZERO, mk_suc0(ZERO)], AXIOM_4_0)
+    asm = ASSUME(mk_eq(mk_suc0(ZERO), mk_suc0(mk_suc0(ZERO))))
+    z_eq_s0 = MP(inj, asm)
+    contra = MP(NOT_ELIM(_neq_0_s0), z_eq_s0)
+    return NOT_INTRO(
+        DISCH(mk_eq(mk_suc0(ZERO), mk_suc0(mk_suc0(ZERO))), contra)
+    )
+
+
+_neq_s0_ss0 = _build_neq_s0_ss0()
+# ~(SUC0 (SUC0 0) = SUC0 0) is the symmetric counterpart -- flip
+# ~(SUC0 0 = SUC0 (SUC0 0)) so the lhs/rhs args match the original eq.
+_neq_ss0_s0 = _flip_neq(
+    _neq_s0_ss0, mk_suc0(ZERO), mk_suc0(mk_suc0(ZERO))
+)
+
+# Build the six leaf-rewrite lemmas.
+_SUBST_VX_AT_X = _build_hit(VAR_X_DEF, IDX_X_DEF, ZERO)
+_SUBST_VY_AT_Y = _build_hit(VAR_Y_DEF, IDX_Y_DEF, mk_suc0(ZERO))
+_SUBST_VZ_AT_Z = _build_hit(VAR_Z_DEF, IDX_Z_DEF, mk_suc0(mk_suc0(ZERO)))
+# MISS: substitute var_y t idx_x = var_y. var_y inner = SUC0 0; v = 0.
+# cond ~(0 = SUC0 0) = _neq_0_s0.
+_SUBST_VY_AT_X = _build_miss(
+    VAR_Y_DEF, IDX_X_DEF, mk_suc0(ZERO), ZERO, _neq_0_s0
+)
+# MISS: substitute var_z t idx_x = var_z. var_z inner = SUC0 SUC0 0; v = 0.
+_SUBST_VZ_AT_X = _build_miss(
+    VAR_Z_DEF, IDX_X_DEF, mk_suc0(mk_suc0(ZERO)), ZERO, _neq_0_ss0
+)
+# MISS: substitute var_z t idx_y = var_z. var_z inner = SUC0 SUC0 0; v = SUC0 0.
+_SUBST_VZ_AT_Y = _build_miss(
+    VAR_Z_DEF,
+    IDX_Y_DEF,
+    mk_suc0(mk_suc0(ZERO)),
+    mk_suc0(ZERO),
+    _neq_s0_ss0,
+)
+
+
 @proof
 def IS_PAIR_ORD_REPRESENTS(p):
-    """|- !x y. Prov_HF (substitute^3 is_Pair_ord_internal
-                          (quote_hf x) var_x
-                          (quote_hf y) var_y
-                          (quote_hf (Pair_ord x y)) var_z).
+    """|- !x y. nat0_lt x y ==>
+                Prov_HF (substitute^3 is_Pair_ord_internal
+                          (quote_hf x) idx_x
+                          (quote_hf y) idx_y
+                          (quote_hf (Pair_ord x y)) idx_z).
 
-    With the thin body ``is_Pair_ord_internal := Eq_f Empty_t Empty_t``,
-    each substitute layer pushes through the binary Eq_f via
-    SUBSTITUTE_AT_EQ and bottoms out at the closed leaf via
-    SUBSTITUTE_AT_EMPTY -- the fully substituted formula is just
-    ``Eq_f Empty_t Empty_t``. PROV_HF_REFL then closes the goal at
-    ``t = Empty_t`` with ``is_term Empty_t`` from IS_TERM_EMPTY.
+    Faithful encoding: with
+    ``is_Pair_ord_internal := Eq_f var_z (<Insert_t tower over var_x,
+    var_y, Empty_t>)`` (the syntactic Kuratowski pair shape), the
+    threefold substitute walks each layer via SUBSTITUTE_AT_EQ /
+    SUBSTITUTE_AT_INSERT / SUBSTITUTE_AT_EMPTY, replaces the var_x /
+    var_y / var_z leaves with quote_hf x / quote_hf y / quote_hf
+    (Pair_ord x y) via the six leaf lemmas built above, and treats
+    quote_hf'd subterms as closed via SUBSTITUTE_QUOTE_HF.
+
+    The fully substituted form is ``Eq_f (quote_hf (Pair_ord x y))
+    <Insert tower>``; QUOTE_HF_AT_PAIR_ORD (under ``nat0_lt x y``)
+    rewrites the LHS into the same Insert tower, so PROV_HF_REFL closes
+    via IS_TERM_QUOTE_HF + IS_TERM_INSERT + IS_TERM_EMPTY.
     """
     p.goal(
-        "!x y. Prov_HF (substitute (substitute (substitute "
-        "  is_Pair_ord_internal (quote_hf x) var_x) "
-        "  (quote_hf y) var_y) "
-        "  (quote_hf (Pair_ord x y)) var_z)"
+        "!x y. nat0_lt x y ==> "
+        "Prov_HF (substitute (substitute (substitute "
+        "  is_Pair_ord_internal (quote_hf x) idx_x) "
+        "  (quote_hf y) idx_y) "
+        "  (quote_hf (Pair_ord x y)) idx_z)"
     )
     p.fix("x y")
+    p.assume("hxy: nat0_lt x y")
+
+    # Compute the threefold substitute symbolically. The leaf lemmas
+    # _SUBST_V*_AT_* push substitute past the var_x/y/z leaves; the
+    # AT-equations push through Eq_f / Insert_t / Empty_t; quoted
+    # subterms (quote_hf x, quote_hf y) are unchanged by SUBSTITUTE_QUOTE_HF.
+    rewrite_rules = [
+        IS_PAIR_ORD_INTERNAL_DEF,
+        SUBSTITUTE_AT_EQ,
+        SUBSTITUTE_AT_INSERT,
+        SUBSTITUTE_AT_EMPTY,
+        SUBSTITUTE_QUOTE_HF,
+        _SUBST_VX_AT_X,
+        _SUBST_VY_AT_Y,
+        _SUBST_VZ_AT_Z,
+        _SUBST_VY_AT_X,
+        _SUBST_VZ_AT_X,
+        _SUBST_VZ_AT_Y,
+    ]
     p.have(
-        "h_subst: substitute (substitute (substitute "
-        "  is_Pair_ord_internal (quote_hf x) var_x) "
-        "  (quote_hf y) var_y) "
-        "  (quote_hf (Pair_ord x y)) var_z = Eq_f Empty_t Empty_t"
-    ).by_rewrite(
-        [IS_PAIR_ORD_INTERNAL_DEF, SUBSTITUTE_AT_EQ, SUBSTITUTE_AT_EMPTY]
+        "h_subst3: substitute (substitute (substitute "
+        "  is_Pair_ord_internal (quote_hf x) idx_x) "
+        "  (quote_hf y) idx_y) "
+        "  (quote_hf (Pair_ord x y)) idx_z "
+        "= Eq_f (quote_hf (Pair_ord x y)) "
+        "       (Insert_t (Insert_t (quote_hf x) Empty_t) "
+        "                 (Insert_t (Insert_t (quote_hf x) "
+        "                                     (Insert_t (quote_hf y) Empty_t)) "
+        "                           Empty_t))"
+    ).by_rewrite(rewrite_rules)
+
+    # QUOTE_HF_AT_PAIR_ORD bridges quote_hf (Pair_ord x y) into the
+    # canonical Insert tower; substituting reduces the Eq_f to Eq_f T T.
+    p.have(
+        "h_qhf: quote_hf (Pair_ord x y) "
+        "= Insert_t (Insert_t (quote_hf x) Empty_t) "
+        "          (Insert_t (Insert_t (quote_hf x) "
+        "                              (Insert_t (quote_hf y) Empty_t)) "
+        "                    Empty_t)"
+    ).by(QUOTE_HF_AT_PAIR_ORD, "x", "y", "hxy")
+
+    p.have(
+        "h_subst3_refl: substitute (substitute (substitute "
+        "  is_Pair_ord_internal (quote_hf x) idx_x) "
+        "  (quote_hf y) idx_y) "
+        "  (quote_hf (Pair_ord x y)) idx_z "
+        "= Eq_f (Insert_t (Insert_t (quote_hf x) Empty_t) "
+        "                 (Insert_t (Insert_t (quote_hf x) "
+        "                                     (Insert_t (quote_hf y) Empty_t)) "
+        "                           Empty_t)) "
+        "       (Insert_t (Insert_t (quote_hf x) Empty_t) "
+        "                 (Insert_t (Insert_t (quote_hf x) "
+        "                                     (Insert_t (quote_hf y) Empty_t)) "
+        "                           Empty_t))"
+    ).by_rewrite_of("h_subst3", ["h_qhf"])
+
+    # Build is_term for the Insert tower from IS_TERM_QUOTE_HF +
+    # IS_TERM_INSERT + IS_TERM_EMPTY.
+    p.have("h_is_term_qx: is_term (quote_hf x)").by(IS_TERM_QUOTE_HF, "x")
+    p.have("h_is_term_qy: is_term (quote_hf y)").by(IS_TERM_QUOTE_HF, "y")
+    p.have("h_is_term_empty: is_term Empty_t").by_thm(IS_TERM_EMPTY)
+    # Inner: Insert_t (quote_hf y) Empty_t.
+    p.have(
+        "h_is_term_qy_empty: is_term (Insert_t (quote_hf y) Empty_t)"
+    ).by(
+        IS_TERM_INSERT,
+        "quote_hf y",
+        "Empty_t",
+        CONJ(p.fact("h_is_term_qy"), p.fact("h_is_term_empty")),
     )
-    p.have("h_refl: Prov_HF (Eq_f Empty_t Empty_t)").by(
-        PROV_HF_REFL, "Empty_t", IS_TERM_EMPTY
+    # Insert_t (quote_hf x) (Insert_t (quote_hf y) Empty_t).
+    p.have(
+        "h_is_term_pair: is_term "
+        "(Insert_t (quote_hf x) (Insert_t (quote_hf y) Empty_t))"
+    ).by(
+        IS_TERM_INSERT,
+        "quote_hf x",
+        "Insert_t (quote_hf y) Empty_t",
+        CONJ(p.fact("h_is_term_qx"), p.fact("h_is_term_qy_empty")),
     )
+    # Insert_t (Insert_t (quote_hf x) (Insert_t (quote_hf y) Empty_t)) Empty_t.
+    p.have(
+        "h_is_term_pair_singleton: is_term "
+        "(Insert_t "
+        "  (Insert_t (quote_hf x) (Insert_t (quote_hf y) Empty_t)) "
+        "  Empty_t)"
+    ).by(
+        IS_TERM_INSERT,
+        "Insert_t (quote_hf x) (Insert_t (quote_hf y) Empty_t)",
+        "Empty_t",
+        CONJ(p.fact("h_is_term_pair"), p.fact("h_is_term_empty")),
+    )
+    # Insert_t (quote_hf x) Empty_t.
+    p.have(
+        "h_is_term_qx_empty: is_term (Insert_t (quote_hf x) Empty_t)"
+    ).by(
+        IS_TERM_INSERT,
+        "quote_hf x",
+        "Empty_t",
+        CONJ(p.fact("h_is_term_qx"), p.fact("h_is_term_empty")),
+    )
+    # The full Kuratowski tower T.
+    p.have(
+        "h_is_term_T: is_term "
+        "(Insert_t (Insert_t (quote_hf x) Empty_t) "
+        "          (Insert_t "
+        "             (Insert_t (quote_hf x) (Insert_t (quote_hf y) Empty_t)) "
+        "             Empty_t))"
+    ).by(
+        IS_TERM_INSERT,
+        "Insert_t (quote_hf x) Empty_t",
+        "Insert_t (Insert_t (quote_hf x) (Insert_t (quote_hf y) Empty_t)) Empty_t",
+        CONJ(p.fact("h_is_term_qx_empty"), p.fact("h_is_term_pair_singleton")),
+    )
+    # PROV_HF_REFL at T.
+    p.have(
+        "h_refl: Prov_HF (Eq_f "
+        "(Insert_t (Insert_t (quote_hf x) Empty_t) "
+        "          (Insert_t "
+        "             (Insert_t (quote_hf x) (Insert_t (quote_hf y) Empty_t)) "
+        "             Empty_t)) "
+        "(Insert_t (Insert_t (quote_hf x) Empty_t) "
+        "          (Insert_t "
+        "             (Insert_t (quote_hf x) (Insert_t (quote_hf y) Empty_t)) "
+        "             Empty_t)))"
+    ).by(
+        PROV_HF_REFL,
+        "Insert_t (Insert_t (quote_hf x) Empty_t) "
+        "(Insert_t "
+        "  (Insert_t (quote_hf x) (Insert_t (quote_hf y) Empty_t)) "
+        "  Empty_t)",
+        "h_is_term_T",
+    )
+    # Final: lift refl back through h_subst3_refl.
     p.thus(
         "Prov_HF (substitute (substitute (substitute "
-        "  is_Pair_ord_internal (quote_hf x) var_x) "
-        "  (quote_hf y) var_y) "
-        "  (quote_hf (Pair_ord x y)) var_z)"
-    ).by_rewrite_of("h_refl", [SYM(p.fact("h_subst"))])
+        "  is_Pair_ord_internal (quote_hf x) idx_x) "
+        "  (quote_hf y) idx_y) "
+        "  (quote_hf (Pair_ord x y)) idx_z)"
+    ).by_rewrite_of("h_refl", [SYM(p.fact("h_subst3_refl"))])
 
 
 # B1.0 (c) -- In representability.
@@ -4536,11 +5036,11 @@ def IS_IN_REPRESENTS(p):
     """
     p.goal(
         "!x y. (In x y ==> Prov_HF (substitute (substitute "
-        "  is_In_internal (quote_hf x) var_x) "
-        "  (quote_hf y) var_y)) "
+        "  is_In_internal (quote_hf x) idx_x) "
+        "  (quote_hf y) idx_y)) "
         "/\\ (~(In x y) ==> Prov_HF (Not_f (substitute (substitute "
-        "  is_In_internal (quote_hf x) var_x) "
-        "  (quote_hf y) var_y)))"
+        "  is_In_internal (quote_hf x) idx_x) "
+        "  (quote_hf y) idx_y)))"
     )
     p.sorry()
 
@@ -4596,11 +5096,11 @@ def IS_SUBSTITUTE_STEP_REPRESENTS(p):
         "!T t v a b. is_substitute_step T t v a b ==> "
         "Prov_HF (substitute (substitute (substitute (substitute (substitute "
         "  is_substitute_step_internal "
-        "  (quote_hf T) var_T) "
-        "  (quote_hf t) var_y) "
-        "  (quote_hf v) var_z) "
-        "  (quote_hf a) var_a) "
-        "  (quote_hf b) var_b)"
+        "  (quote_hf T) idx_T) "
+        "  (quote_hf t) idx_y) "
+        "  (quote_hf v) idx_z) "
+        "  (quote_hf a) idx_a) "
+        "  (quote_hf b) idx_b)"
     )
     p.sorry()
 
@@ -4650,11 +5150,11 @@ def IS_SUBSTITUTE_TRACE_REPRESENTS(p):
         "!T F t v r. is_substitute_trace T F t v r ==> "
         "Prov_HF (substitute (substitute (substitute (substitute (substitute "
         "  is_substitute_trace_internal "
-        "  (quote_hf T) var_T) "
-        "  (quote_hf F) var_x) "
-        "  (quote_hf t) var_y) "
-        "  (quote_hf v) var_z) "
-        "  (quote_hf r) var_w)"
+        "  (quote_hf T) idx_T) "
+        "  (quote_hf F) idx_x) "
+        "  (quote_hf t) idx_y) "
+        "  (quote_hf v) idx_z) "
+        "  (quote_hf r) idx_w)"
     )
     p.sorry()
 
@@ -4681,10 +5181,10 @@ def SUBSTITUTE_REPRESENTS(p):
     p.goal(
         "!F t v. Prov_HF ("
         "substitute (substitute (substitute (substitute "
-        "  substitute_internal (numeral F) var_x) "
-        "  (numeral t) var_y) "
-        "  (numeral v) var_z) "
-        "  (numeral (substitute F t v)) var_w)"
+        "  substitute_internal (numeral F) idx_x) "
+        "  (numeral t) idx_y) "
+        "  (numeral v) idx_z) "
+        "  (numeral (substitute F t v)) idx_w)"
     )
     p.sorry()
 
@@ -4828,7 +5328,7 @@ def PROV_HF_REPRESENTS(p):
     ``p.sorry()``; see Stage 3D section comment for the deferred
     construction (Proof_HF_internal + Sigma_1 completeness/soundness).
     """
-    p.goal("!n. Prov_HF n = Prov_HF (substitute Prov_HF_internal (numeral n) var_x)")
+    p.goal("!n. Prov_HF n = Prov_HF (substitute Prov_HF_internal (numeral n) idx_x)")
     p.sorry()
 
 
@@ -4854,7 +5354,7 @@ def FREE_IN_PROV_HF_INTERNAL(p):
     representation pattern.
     """
     p.goal(
-        "!v. free_in Prov_HF_internal v = (v = var_x)",
+        "!v. free_in Prov_HF_internal v = (v = idx_x)",
     )
     p.sorry()
 
@@ -4948,6 +5448,8 @@ if __name__ == "__main__":
     print("    QUOTE_HF_AT_PAIR                      :", pp_thm(QUOTE_HF_AT_PAIR))
     print("    QUOTE_HF_AT_PAIR_ORD                  :", pp_thm(QUOTE_HF_AT_PAIR_ORD))
     print("    HF_INDUCTION                          :", pp_thm(HF_INDUCTION))
+    print("    IS_TERM_QUOTE_HF                      :", pp_thm(IS_TERM_QUOTE_HF))
+    print("    SUBSTITUTE_QUOTE_HF                   :", pp_thm(SUBSTITUTE_QUOTE_HF))
     print("    IS_PAIR_ORD_INTERNAL_DEF              :", pp_thm(IS_PAIR_ORD_INTERNAL_DEF))
     print("    PROV_HF_REFL                          :", pp_thm(PROV_HF_REFL))
     print("    IS_PAIR_ORD_REPRESENTS                :", pp_thm(IS_PAIR_ORD_REPRESENTS))
