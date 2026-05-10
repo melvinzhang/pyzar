@@ -1085,28 +1085,26 @@ def PROV_HF_DOUBLE_NEG_ELIM(p):
 
 
 @proof
-def PROV_HF_DOUBLE_NEG_INTRO(p):
-    """|- !A. is_form A /\\ Prov_HF A ==> Prov_HF (Not_f (Not_f A)).
+def PROV_HF_DOUBLE_NEG_INTRO_IMP(p):
+    """|- !A. is_form A ==> Prov_HF (Imp_f A (Not_f (Not_f A))).
 
-    Mendelson Lemma 1.11(b): double-negation introduction. Three steps:
+    Mendelson Lemma 1.11(b) at the implication level. Two steps:
       1. ``~~~A -> ~A``                 [ELIM_IMP at ~A]
       2. ``(~~~A -> ~A) -> (A -> ~~A)`` [N(A, ~~A)]
       3. ``A -> ~~A``                   [MP 1, 2]
-    Then one final MP with the supplied ``Prov_HF A`` to close the rule
-    form.
     """
     p.goal(
-        "!A. is_form A /\\ Prov_HF A ==> Prov_HF (Not_f (Not_f A))",
+        "!A. is_form A ==> Prov_HF (Imp_f A (Not_f (Not_f A)))",
         types={"A": nat0_ty},
     )
     p.fix("A")
-    p.assume("(hA, hPA): is_form A /\\ Prov_HF A")
+    p.assume("hA: is_form A")
 
-    # is_form for ~A and ~~A (needed by ELIM_IMP at ~A and N(A, ~~A)).
-    isf_A = SPEC(p._parse("A"), IS_FORM_AT_NOT)
-    p.have("hnA: is_form (Not_f A)").by_eq_mp(SYM(isf_A), "hA")
-    isf_nA = SPEC(p._parse("Not_f A"), IS_FORM_AT_NOT)
-    p.have("hnnA: is_form (Not_f (Not_f A))").by_eq_mp(SYM(isf_nA), "hnA")
+    # is_form for ~A and ~~A.
+    isf_A_at = SPEC(p._parse("A"), IS_FORM_AT_NOT)
+    p.have("hnA: is_form (Not_f A)").by_eq_mp(SYM(isf_A_at), "hA")
+    isf_nA_at = SPEC(p._parse("Not_f A"), IS_FORM_AT_NOT)
+    p.have("hnnA: is_form (Not_f (Not_f A))").by_eq_mp(SYM(isf_nA_at), "hnA")
 
     # Step 1: ELIM_IMP at ~A gives Prov_HF (~~~A -> ~A).
     p.have(
@@ -1127,27 +1125,158 @@ def PROV_HF_DOUBLE_NEG_INTRO(p):
 
     # Step 3: MP h1 h2 gives Prov_HF (A -> ~~A).
     p.have(
-        "h_mp1_in: Prov_HF (Imp_f (Not_f (Not_f (Not_f A))) (Not_f A)) "
+        "h_mp_in: Prov_HF (Imp_f (Not_f (Not_f (Not_f A))) (Not_f A)) "
         "/\\ Prov_HF (Imp_f "
         "    (Imp_f (Not_f (Not_f (Not_f A))) (Not_f A)) "
         "    (Imp_f A (Not_f (Not_f A))))"
     ).by_thm(CONJ(p.fact("h1"), p.fact("h2")))
-    p.have(
-        "h_imp: Prov_HF (Imp_f A (Not_f (Not_f A)))"
-    ).by(
+    p.thus("Prov_HF (Imp_f A (Not_f (Not_f A)))").by(
         PROV_HF_MP,
         "Imp_f (Not_f (Not_f (Not_f A))) (Not_f A)",
         "Imp_f A (Not_f (Not_f A))",
-        "h_mp1_in",
+        "h_mp_in",
     )
 
-    # Final: MP h_imp with hPA.
+
+@proof
+def PROV_HF_DOUBLE_NEG_INTRO(p):
+    """|- !A. is_form A /\\ Prov_HF A ==> Prov_HF (Not_f (Not_f A)).
+
+    Rule-form wrapper around PROV_HF_DOUBLE_NEG_INTRO_IMP plus one MP.
+    """
+    p.goal(
+        "!A. is_form A /\\ Prov_HF A ==> Prov_HF (Not_f (Not_f A))",
+        types={"A": nat0_ty},
+    )
+    p.fix("A")
+    p.assume("(hA, hPA): is_form A /\\ Prov_HF A")
+
+    p.have("h_imp: Prov_HF (Imp_f A (Not_f (Not_f A)))").by(
+        PROV_HF_DOUBLE_NEG_INTRO_IMP, "A", "hA"
+    )
     p.have(
         "h_final_in: Prov_HF A "
         "/\\ Prov_HF (Imp_f A (Not_f (Not_f A)))"
     ).by_thm(CONJ(p.fact("hPA"), p.fact("h_imp")))
     p.thus("Prov_HF (Not_f (Not_f A))").by(
         PROV_HF_MP, "A", "Not_f (Not_f A)", "h_final_in"
+    )
+
+
+@proof
+def PROV_HF_CONTRAP(p):
+    """|- !A B. is_form A /\\ is_form B /\\ Prov_HF (Imp_f A B)
+                ==> Prov_HF (Imp_f (Not_f B) (Not_f A)).
+
+    Contraposition (rule form). Standard chain through double-negation:
+      1. ~~A -> A                   [DNE_IMP at A]
+      2. ~~A -> B                   [TRANS_IMP of step 1 and the hyp A -> B]
+      3. B -> ~~B                   [DNI_IMP at B]
+      4. ~~A -> ~~B                 [TRANS_IMP of steps 2 and 3]
+      5. (~~A -> ~~B) -> (~B -> ~A) [N(~B, ~A)]
+      6. ~B -> ~A                   [MP 4, 5]
+
+    The dual direction of the N axiom -- N gives us
+    ``(~B -> ~A) -> (A -> B)``; CONTRAP gives the converse, derivable
+    via the double-negation round-trip.
+    """
+    p.goal(
+        "!A B. is_form A /\\ is_form B /\\ Prov_HF (Imp_f A B) "
+        "==> Prov_HF (Imp_f (Not_f B) (Not_f A))",
+        types={"A": nat0_ty, "B": nat0_ty},
+    )
+    p.fix("A B")
+    p.assume(
+        "(hA, hB, hAB): is_form A /\\ is_form B /\\ Prov_HF (Imp_f A B)"
+    )
+
+    # is_form for ~A, ~B, ~~A, ~~B (needed by TRANS_IMP and N(~B, ~A)).
+    isf_A_at = SPEC(p._parse("A"), IS_FORM_AT_NOT)
+    p.have("hnA: is_form (Not_f A)").by_eq_mp(SYM(isf_A_at), "hA")
+    isf_nA_at = SPEC(p._parse("Not_f A"), IS_FORM_AT_NOT)
+    p.have("hnnA: is_form (Not_f (Not_f A))").by_eq_mp(SYM(isf_nA_at), "hnA")
+    isf_B_at = SPEC(p._parse("B"), IS_FORM_AT_NOT)
+    p.have("hnB: is_form (Not_f B)").by_eq_mp(SYM(isf_B_at), "hB")
+    isf_nB_at = SPEC(p._parse("Not_f B"), IS_FORM_AT_NOT)
+    p.have("hnnB: is_form (Not_f (Not_f B))").by_eq_mp(SYM(isf_nB_at), "hnB")
+
+    # Step 1: DNE_IMP at A: |- ~~A -> A.
+    p.have("h1: Prov_HF (Imp_f (Not_f (Not_f A)) A)").by(
+        PROV_HF_DOUBLE_NEG_ELIM_IMP, "A", "hA"
+    )
+
+    # Step 2: TRANS_IMP of h1 and hAB: |- ~~A -> B.
+    p.have(
+        "h_T2_in: is_form (Not_f (Not_f A)) /\\ is_form A /\\ is_form B "
+        "/\\ Prov_HF (Imp_f (Not_f (Not_f A)) A) "
+        "/\\ Prov_HF (Imp_f A B)"
+    ).by_thm(
+        CONJ(
+            p.fact("hnnA"),
+            CONJ(
+                p.fact("hA"),
+                CONJ(p.fact("hB"), CONJ(p.fact("h1"), p.fact("hAB"))),
+            ),
+        )
+    )
+    p.have("h2: Prov_HF (Imp_f (Not_f (Not_f A)) B)").by(
+        PROV_HF_TRANS_IMP, "Not_f (Not_f A)", "A", "B", "h_T2_in"
+    )
+
+    # Step 3: DNI_IMP at B: |- B -> ~~B.
+    p.have("h3: Prov_HF (Imp_f B (Not_f (Not_f B)))").by(
+        PROV_HF_DOUBLE_NEG_INTRO_IMP, "B", "hB"
+    )
+
+    # Step 4: TRANS_IMP of h2 and h3: |- ~~A -> ~~B.
+    p.have(
+        "h_T4_in: is_form (Not_f (Not_f A)) /\\ is_form B "
+        "/\\ is_form (Not_f (Not_f B)) "
+        "/\\ Prov_HF (Imp_f (Not_f (Not_f A)) B) "
+        "/\\ Prov_HF (Imp_f B (Not_f (Not_f B)))"
+    ).by_thm(
+        CONJ(
+            p.fact("hnnA"),
+            CONJ(
+                p.fact("hB"),
+                CONJ(p.fact("hnnB"), CONJ(p.fact("h2"), p.fact("h3"))),
+            ),
+        )
+    )
+    p.have(
+        "h4: Prov_HF (Imp_f (Not_f (Not_f A)) (Not_f (Not_f B)))"
+    ).by(
+        PROV_HF_TRANS_IMP,
+        "Not_f (Not_f A)",
+        "B",
+        "Not_f (Not_f B)",
+        "h_T4_in",
+    )
+
+    # Step 5: N(~B, ~A): (~~A -> ~~B) -> (~B -> ~A).
+    p.have(
+        "h5: Prov_HF (Imp_f "
+        "  (Imp_f (Not_f (Not_f A)) (Not_f (Not_f B))) "
+        "  (Imp_f (Not_f B) (Not_f A)))"
+    ).by(
+        PROV_HF_N,
+        "Not_f B",
+        "Not_f A",
+        CONJ(p.fact("hnB"), p.fact("hnA")),
+    )
+
+    # Step 6: MP h4 h5 gives Prov_HF (~B -> ~A).
+    p.have(
+        "h_mp_in: Prov_HF (Imp_f (Not_f (Not_f A)) (Not_f (Not_f B))) "
+        "/\\ Prov_HF (Imp_f "
+        "    (Imp_f (Not_f (Not_f A)) (Not_f (Not_f B))) "
+        "    (Imp_f (Not_f B) (Not_f A)))"
+    ).by_thm(CONJ(p.fact("h4"), p.fact("h5")))
+    p.thus("Prov_HF (Imp_f (Not_f B) (Not_f A))").by(
+        PROV_HF_MP,
+        "Imp_f (Not_f (Not_f A)) (Not_f (Not_f B))",
+        "Imp_f (Not_f B) (Not_f A)",
+        "h_mp_in",
     )
 
 
@@ -1378,9 +1507,11 @@ if __name__ == "__main__":
     print("    PROV_HF_EX_FALSO  :", pp_thm(PROV_HF_EX_FALSO))
     print()
     print("Stage 2C (c) -- negation reasoning.")
-    print("    PROV_HF_DOUBLE_NEG_ELIM_IMP :", pp_thm(PROV_HF_DOUBLE_NEG_ELIM_IMP))
-    print("    PROV_HF_DOUBLE_NEG_ELIM     :", pp_thm(PROV_HF_DOUBLE_NEG_ELIM))
-    print("    PROV_HF_DOUBLE_NEG_INTRO    :", pp_thm(PROV_HF_DOUBLE_NEG_INTRO))
+    print("    PROV_HF_DOUBLE_NEG_ELIM_IMP  :", pp_thm(PROV_HF_DOUBLE_NEG_ELIM_IMP))
+    print("    PROV_HF_DOUBLE_NEG_ELIM      :", pp_thm(PROV_HF_DOUBLE_NEG_ELIM))
+    print("    PROV_HF_DOUBLE_NEG_INTRO_IMP :", pp_thm(PROV_HF_DOUBLE_NEG_INTRO_IMP))
+    print("    PROV_HF_DOUBLE_NEG_INTRO     :", pp_thm(PROV_HF_DOUBLE_NEG_INTRO))
+    print("    PROV_HF_CONTRAP              :", pp_thm(PROV_HF_CONTRAP))
     print()
     print("Stage 2C (d) -- conjunction / biconditional intro (STUB).")
     print("    PROV_HF_AND_INTRO :", pp_thm(PROV_HF_AND_INTRO))
