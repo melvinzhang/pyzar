@@ -1020,13 +1020,13 @@ def BIT_LT(p):
 #               = double (double (HALF 3))   [ODD 3 = T branch]
 #               = double (double 1) = 4.           (110 -> 100)
 #
-# Used by ``hf_to_qhf`` (q_repr.py) to drive the canonical low-bit-first
+# Used by ``quote_hf`` (q_repr.py) to drive the canonical low-bit-first
 # Insert_t-tower bridge from HF sets to Q-syntax. The two side conditions
 #
 #   LOW_BIT_LT   : ~(n = 0) ==> nat0_lt (low_bit n) n
 #   CLEAR_LOW_LT : ~(n = 0) ==> nat0_lt (clear_low n) n
 #
-# (the well-founded-recursion MONO obligation for ``hf_to_qhf``) are
+# (the well-founded-recursion MONO obligation for ``quote_hf``) are
 # proved below. The remaining lemmas needed by downstream representability
 # proofs (BIT_LOW_BIT, BIT_LOW_BIT_CLEAR_LOW, SET_BIT_LOW_BIT_CLEAR_LOW)
 # are added when those proofs land.
@@ -1397,16 +1397,16 @@ def CLEAR_LOW_LT(p):
 
 
 # ---------------------------------------------------------------------------
-# Step 26 -- canonical-Insert helpers for the hf_to_qhf bridge (q_repr.py).
+# Step 26 -- canonical-Insert helpers for the quote_hf bridge (q_repr.py).
 #
 # When ``i`` is strictly below the lowest set bit of ``s`` (or s = 0),
 # ``set_bit i s`` lands in the canonical low-bit decomposition with
 # ``low_bit (set_bit i s) = i`` and ``clear_low (set_bit i s) = s``. These
-# lemmas drive HF_TO_QHF_AT_INSERT_LOW: the structural Insert form of
-# hf_to_qhf at canonical inputs.
+# lemmas drive QUOTE_HF_AT_INSERT_LOW: the structural Insert form of
+# quote_hf at canonical inputs.
 #
 # Without the precondition the lemmas are inconsistent (a set with two
-# Insert-decompositions would force its hf_to_qhf image into two distinct
+# Insert-decompositions would force its quote_hf image into two distinct
 # Insert_t-trees under Insert_t injectivity).
 # ---------------------------------------------------------------------------
 
@@ -1854,7 +1854,7 @@ if __name__ == "__main__":
     print("  LOW_BIT_LT      :", pp_thm(LOW_BIT_LT))
     print("Step 25 OK -- CLEAR_LOW_LT proved.")
     print("  CLEAR_LOW_LT    :", pp_thm(CLEAR_LOW_LT))
-    print("Step 26 OK -- canonical-Insert helpers (hf_to_qhf bridge).")
+    print("Step 26 OK -- canonical-Insert helpers (quote_hf bridge).")
     print("  ODD_SET_BIT_STEP    :", pp_thm(ODD_SET_BIT_STEP))
     print("  HALF_SET_BIT_STEP   :", pp_thm(HALF_SET_BIT_STEP))
     print("  SET_BIT_NZ          :", pp_thm(SET_BIT_NZ))

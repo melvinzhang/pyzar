@@ -167,18 +167,18 @@ from hf_syntax import (
 from hf_sets import (
     In,  # noqa: F401  -- parser alias for is_substitute_step
     Pair_ord,  # noqa: F401  -- parser alias for is_substitute_step
-    Insert,  # noqa: F401  -- parser alias for hf_to_qhf bridge
-    Empty,  # noqa: F401  -- parser alias for hf_to_qhf bridge
+    Insert,  # noqa: F401  -- parser alias for quote_hf bridge
+    Empty,  # noqa: F401  -- parser alias for quote_hf bridge
     Union,  # used by TRACE_EXISTS to merge sub-traces
-    EMPTY_DEF,  # used by HF_TO_QHF_AT_EMPTY to fold Empty into 0
-    INSERT_AT,  # used by HF_TO_QHF_AT_INSERT_LOW to unfold Insert to set_bit
+    EMPTY_DEF,  # used by QUOTE_HF_AT_EMPTY to fold Empty into 0
+    INSERT_AT,  # used by QUOTE_HF_AT_INSERT_LOW to unfold Insert to set_bit
     IN_INSERT_SAME,
     IN_INSERT_DIFF,
     IN_UNION,
     NOT_IN_EMPTY,
     PAIR_ORD_INJ,
 )
-from bits import (  # noqa: E402 -- canonical low-bit decomposition for hf_to_qhf
+from bits import (  # noqa: E402 -- canonical low-bit decomposition for quote_hf
     low_bit,
     clear_low,
     LOW_BIT_LT,
@@ -189,11 +189,11 @@ from bits import (  # noqa: E402 -- canonical low-bit decomposition for hf_to_qh
     CLEAR_LOW_SET_BIT_NEW,
     SET_BIT_NZ,
 )
-from classical import (  # noqa: E402 -- COND machinery for hf_to_qhf body
+from classical import (  # noqa: E402 -- COND machinery for quote_hf body
     mk_cond,
     EXCLUDED_MIDDLE,
 )
-from tactics import EQT_INTRO, EQF_INTRO  # noqa: E402,F401  -- used in HF_TO_QHF_MONO/_AT_NZ
+from tactics import EQT_INTRO, EQF_INTRO  # noqa: E402,F401  -- used in QUOTE_HF_MONO/_AT_NZ
 from axioms import mk_select
 from axioms import dest_exists
 from tactics import (
@@ -3808,7 +3808,7 @@ def TRACE_EXISTS(p):
 # ``X``. The associated ``IS_X_REPRESENTS`` theorem says: at every input
 # where the HOL fact holds, Q proves the substituted Q-formula.
 #
-# Encoding strategy (option A -- hf_to_qhf bridge):
+# Encoding strategy (option A -- quote_hf bridge):
 #
 #   HOL HF sets are bit-encoded (``Insert i s = set_bit i s``); Q-syntax
 #   HF sets are Insert_t-tower-encoded (``Insert_t i s = Pair_ord 9
@@ -3816,13 +3816,13 @@ def TRACE_EXISTS(p):
 #   Q's HF axioms Q8-Q12 (which speak about Insert_t / Empty_t) apply
 #   to HOL-witnessed HF facts, we bridge at the goal interface via
 #
-#       hf_to_qhf : nat0 -> nat0   -- bit-encoded HF set -> Insert_t-tower.
+#       quote_hf : nat0 -> nat0   -- bit-encoded HF set -> Insert_t-tower.
 #
-#   Every HF-set input slot in a representability goal uses ``hf_to_qhf``.
+#   Every HF-set input slot in a representability goal uses ``quote_hf``.
 #   Numeric-input slots (where Q4-Q7 fire on Succ_t-towered ``numeral n``)
 #   continue to use ``numeral``. The ``SUBSTITUTE_REPRESENTS`` headline
 #   keeps ``numeral`` for the F / t / v / r slots (downstream concern);
-#   the IS_*_REPRESENTS stubs below use ``hf_to_qhf`` throughout since
+#   the IS_*_REPRESENTS stubs below use ``quote_hf`` throughout since
 #   their inputs are all HF-shaped (traces, encoded shapes, set members).
 #
 #   IS_POW2_REPRESENTS is no longer required: pow2 was a prerequisite
@@ -3837,17 +3837,17 @@ def TRACE_EXISTS(p):
 # ===========================================================================
 
 
-# B1.0 -- hf_to_qhf bridge (the encoding interface).
+# B1.0 -- quote_hf bridge (the encoding interface).
 #
 # HOL ``Insert`` (bit-encoded) and Q-syntax ``Insert_t`` (Pair_ord-tagged)
-# are different nat0 functions; ``hf_to_qhf`` recursively rebuilds an HF
+# are different nat0 functions; ``quote_hf`` recursively rebuilds an HF
 # set as an Insert_t-tower of nat0-element-encoded children. The result
 # is Insert-tower-shaped from Q's perspective, so Q8-Q10 fire on
 # membership / non-membership queries directly.
 #
 # Recursion structure (canonical low-bit-first form):
-#   hf_to_qhf 0  = Empty_t.
-#   hf_to_qhf n  = Insert_t (hf_to_qhf (low_bit n)) (hf_to_qhf (clear_low n))
+#   quote_hf 0  = Empty_t.
+#   quote_hf n  = Insert_t (quote_hf (low_bit n)) (quote_hf (clear_low n))
 #                  for n != 0.
 #       (Decomposition is deterministic: each non-empty set is split
 #        on its lowest set bit. ``low_bit n`` and ``clear_low n`` are
@@ -3861,24 +3861,24 @@ def TRACE_EXISTS(p):
 #
 # This is the *canonical low-bit-first* form: every non-empty set is
 # decomposed deterministically by its lowest set bit. The corresponding
-# recursion equation is ``HF_TO_QHF_AT_NZ`` (replaces the previous
-# opaque ``HF_TO_QHF_AT_INSERT``); a literal ``~In i s ==> hf_to_qhf
-# (Insert i s) = Insert_t (hf_to_qhf i) (hf_to_qhf s)`` for *arbitrary*
+# recursion equation is ``QUOTE_HF_AT_NZ`` (replaces the previous
+# opaque ``QUOTE_HF_AT_INSERT``); a literal ``~In i s ==> quote_hf
+# (Insert i s) = Insert_t (quote_hf i) (quote_hf s)`` for *arbitrary*
 # fresh ``i`` is HOL-inconsistent under ``Insert_t`` injectivity, so
 # downstream consumers walk the canonical structure instead.
 #
 # ``low_bit`` / ``clear_low`` are still opaque stubs (bits.py) with
 # only their MONO-relevant side conditions sorry'd. Concretising them
 # is task #7.
-_hf_to_qhf_fn_ty = parse_type("nat0 -> nat0")
-_hf_to_qhf_F_ty = parse_type("(nat0 -> nat0) -> nat0 -> nat0")
-_f_qhf = Var("f", _hf_to_qhf_fn_ty)
-_g_qhf = Var("g", _hf_to_qhf_fn_ty)
+_quote_hf_fn_ty = parse_type("nat0 -> nat0")
+_quote_hf_F_ty = parse_type("(nat0 -> nat0) -> nat0 -> nat0")
+_f_qhf = Var("f", _quote_hf_fn_ty)
+_g_qhf = Var("g", _quote_hf_fn_ty)
 _n_qhf = Var("n", nat0_ty)
 
 
-def _hf_to_qhf_body(f_t, n_t):
-    """Body of ``_hf_to_qhf_F`` at the n-applied level."""
+def _quote_hf_body(f_t, n_t):
+    """Body of ``_quote_hf_F`` at the n-applied level."""
     return mk_cond(
         mk_eq(n_t, ZERO),
         Empty_t,
@@ -3890,18 +3890,18 @@ def _hf_to_qhf_body(f_t, n_t):
     )
 
 
-_HF_TO_QHF_F_DEF = define(
-    "_hf_to_qhf_F",
-    _hf_to_qhf_F_ty,
-    mk_abs(_f_qhf, mk_abs(_n_qhf, _hf_to_qhf_body(_f_qhf, _n_qhf))),
+_QUOTE_HF_F_DEF = define(
+    "_quote_hf_F",
+    _quote_hf_F_ty,
+    mk_abs(_f_qhf, mk_abs(_n_qhf, _quote_hf_body(_f_qhf, _n_qhf))),
 )
-_HF_TO_QHF_F = mk_const("_hf_to_qhf_F", [])
+_QUOTE_HF_F = mk_const("_quote_hf_F", [])
 
 
 @proof
-def HF_TO_QHF_MONO(p):
+def QUOTE_HF_MONO(p):
     """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
-                  ==> _hf_to_qhf_F f n = _hf_to_qhf_F g n.
+                  ==> _quote_hf_F f n = _quote_hf_F g n.
 
     Value-valued MONO. Build the body equation
         ``body[f, n] = body[g, n]``
@@ -3909,14 +3909,14 @@ def HF_TO_QHF_MONO(p):
     Empty_t; F branch: f/g agree at low_bit n / clear_low n via the
     hypothesis + LOW_BIT_LT / CLEAR_LOW_LT, so by_rewrite chains them
     through the Insert_t branch). ``by_unfold`` then folds the body
-    equation back to the F-level via _HF_TO_QHF_F_DEF.
+    equation back to the F-level via _QUOTE_HF_F_DEF.
     """
     p.goal(
         "!f g n. (!k. nat0_lt k n ==> f k = g k) "
-        "==> _hf_to_qhf_F f n = _hf_to_qhf_F g n",
+        "==> _quote_hf_F f n = _quote_hf_F g n",
         types={
-            "f": _hf_to_qhf_fn_ty,
-            "g": _hf_to_qhf_fn_ty,
+            "f": _quote_hf_fn_ty,
+            "g": _quote_hf_fn_ty,
             "n": nat0_ty,
             "k": nat0_ty,
         },
@@ -3950,84 +3950,84 @@ def HF_TO_QHF_MONO(p):
                     ["hnz_eq", COND_F_NAT0, "f_lb_eq", "f_cl_eq"]
                 )
 
-    p.thus("_hf_to_qhf_F f n = _hf_to_qhf_F g n").by_unfold(
-        p.fact("body_eq"), _HF_TO_QHF_F_DEF
+    p.thus("_quote_hf_F f n = _quote_hf_F g n").by_unfold(
+        p.fact("body_eq"), _QUOTE_HF_F_DEF
     )
 
 
-HF_TO_QHF_DEF, _HF_TO_QHF_REC_RAW = define_wf_lt(
-    "hf_to_qhf",
-    _hf_to_qhf_fn_ty,
-    _HF_TO_QHF_F,
-    HF_TO_QHF_MONO,
+QUOTE_HF_DEF, _QUOTE_HF_REC_RAW = define_wf_lt(
+    "quote_hf",
+    _quote_hf_fn_ty,
+    _QUOTE_HF_F,
+    QUOTE_HF_MONO,
 )
-hf_to_qhf = mk_const("hf_to_qhf", [])
+quote_hf = mk_const("quote_hf", [])
 
-# |- !n. hf_to_qhf n =
-#        COND (n = 0) Empty_t (Insert_t (hf_to_qhf (low_bit n))
-#                                       (hf_to_qhf (clear_low n))).
-HF_TO_QHF_REC = _unfold_rec_via_F_def(_HF_TO_QHF_REC_RAW, _HF_TO_QHF_F_DEF)
+# |- !n. quote_hf n =
+#        COND (n = 0) Empty_t (Insert_t (quote_hf (low_bit n))
+#                                       (quote_hf (clear_low n))).
+QUOTE_HF_REC = _unfold_rec_via_F_def(_QUOTE_HF_REC_RAW, _QUOTE_HF_F_DEF)
 
 
 @proof
-def HF_TO_QHF_AT_EMPTY(p):
-    """|- hf_to_qhf Empty = Empty_t.
+def QUOTE_HF_AT_EMPTY(p):
+    """|- quote_hf Empty = Empty_t.
 
-    Specialise HF_TO_QHF_REC at 0; the ``(0 = 0) = T`` branch of the
+    Specialise QUOTE_HF_REC at 0; the ``(0 = 0) = T`` branch of the
     body collapses to ``Empty_t`` via COND_T_NAT0. EMPTY_DEF folds the
-    LHS from ``hf_to_qhf 0`` to ``hf_to_qhf Empty``.
+    LHS from ``quote_hf 0`` to ``quote_hf Empty``.
     """
-    p.goal("hf_to_qhf Empty = Empty_t")
+    p.goal("quote_hf Empty = Empty_t")
     p.have("zero_eq_zero: (0 = 0) = T").by_thm(EQT_INTRO(REFL(ZERO)))
-    rec_at_0 = SPEC(ZERO, HF_TO_QHF_REC)
-    # rec_at_0 : |- hf_to_qhf 0 = COND (0 = 0) Empty_t (Insert_t ...)
-    p.thus("hf_to_qhf Empty = Empty_t").by_rewrite_of(
+    rec_at_0 = SPEC(ZERO, QUOTE_HF_REC)
+    # rec_at_0 : |- quote_hf 0 = COND (0 = 0) Empty_t (Insert_t ...)
+    p.thus("quote_hf Empty = Empty_t").by_rewrite_of(
         rec_at_0, [EMPTY_DEF, "zero_eq_zero", COND_T_NAT0]
     )
 
 
 @proof
-def HF_TO_QHF_AT_NZ(p):
+def QUOTE_HF_AT_NZ(p):
     """|- !n. ~(n = 0) ==>
-              hf_to_qhf n = Insert_t (hf_to_qhf (low_bit n))
-                                     (hf_to_qhf (clear_low n)).
+              quote_hf n = Insert_t (quote_hf (low_bit n))
+                                     (quote_hf (clear_low n)).
 
-    Specialise HF_TO_QHF_REC at n; under ``~(n = 0)`` the body collapses
+    Specialise QUOTE_HF_REC at n; under ``~(n = 0)`` the body collapses
     via ``(n = 0) = F`` + COND_F_NAT0 to the Insert_t branch. This is
     the canonical low-bit decomposition equation: it replaces the
-    inconsistent ``~In i s ==> hf_to_qhf (Insert i s) = Insert_t ...``
+    inconsistent ``~In i s ==> quote_hf (Insert i s) = Insert_t ...``
     form. Downstream consumers must walk this canonical structure.
     """
     p.goal(
         "!n. ~(n = 0) ==> "
-        "hf_to_qhf n = Insert_t (hf_to_qhf (low_bit n)) (hf_to_qhf (clear_low n))"
+        "quote_hf n = Insert_t (quote_hf (low_bit n)) (quote_hf (clear_low n))"
     )
     p.fix("n")
     p.assume("hnz: ~(n = 0)")
     p.have("hnz_eq: (n = 0) = F").by(EQF_INTRO, "hnz")
-    rec_at_n = SPEC(p._parse("n"), HF_TO_QHF_REC)
-    # rec_at_n : |- hf_to_qhf n = COND (n = 0) Empty_t (Insert_t ...)
+    rec_at_n = SPEC(p._parse("n"), QUOTE_HF_REC)
+    # rec_at_n : |- quote_hf n = COND (n = 0) Empty_t (Insert_t ...)
     p.thus(
-        "hf_to_qhf n = Insert_t (hf_to_qhf (low_bit n)) (hf_to_qhf (clear_low n))"
+        "quote_hf n = Insert_t (quote_hf (low_bit n)) (quote_hf (clear_low n))"
     ).by_rewrite_of(rec_at_n, ["hnz_eq", COND_F_NAT0])
 
 
 @proof
-def HF_TO_QHF_AT_INSERT_LOW(p):
+def QUOTE_HF_AT_INSERT_LOW(p):
     """|- !i s. (s = 0 \\/ nat0_lt i (low_bit s)) ==>
-                hf_to_qhf (Insert i s) = Insert_t (hf_to_qhf i) (hf_to_qhf s).
+                quote_hf (Insert i s) = Insert_t (quote_hf i) (quote_hf s).
 
     Bridge from HOL HF Insert to Q-syntax Insert_t, in the canonical
     low-bit-first form. The precondition pins ``Insert i s = set_bit i s``
     to the canonical decomposition where ``low_bit (Insert i s) = i`` and
-    ``clear_low (Insert i s) = s``, so HF_TO_QHF_AT_NZ collapses to the
+    ``clear_low (Insert i s) = s``, so QUOTE_HF_AT_NZ collapses to the
     structural form. A precondition-free version is HOL-inconsistent under
     Insert_t injectivity (a set with two Insert decompositions would force
-    its hf_to_qhf image into two distinct Insert_t-trees).
+    its quote_hf image into two distinct Insert_t-trees).
     """
     p.goal(
         "!i s. (s = 0 \\/ nat0_lt i (low_bit s)) ==> "
-        "hf_to_qhf (Insert i s) = Insert_t (hf_to_qhf i) (hf_to_qhf s)"
+        "quote_hf (Insert i s) = Insert_t (quote_hf i) (quote_hf s)"
     )
     p.fix("i s")
     p.assume("h: s = 0 \\/ nat0_lt i (low_bit s)")
@@ -4051,16 +4051,16 @@ def HF_TO_QHF_AT_INSERT_LOW(p):
     p.have("h_cl: clear_low (Insert i s) = s").by_rewrite_of(
         "h_cl_sb", [SYM(p.fact("h_set"))]
     )
-    # Specialise HF_TO_QHF_AT_NZ at (Insert i s) and discharge the non-zero
+    # Specialise QUOTE_HF_AT_NZ at (Insert i s) and discharge the non-zero
     # side condition; rewrite the canonical args back to (i, s).
-    rec_nz = SPEC(p._parse("Insert i s"), HF_TO_QHF_AT_NZ)
+    rec_nz = SPEC(p._parse("Insert i s"), QUOTE_HF_AT_NZ)
     p.have(
-        "h_rec: hf_to_qhf (Insert i s) = "
-        "Insert_t (hf_to_qhf (low_bit (Insert i s))) "
-        "(hf_to_qhf (clear_low (Insert i s)))"
+        "h_rec: quote_hf (Insert i s) = "
+        "Insert_t (quote_hf (low_bit (Insert i s))) "
+        "(quote_hf (clear_low (Insert i s)))"
     ).by(rec_nz, "h_nz")
     p.thus(
-        "hf_to_qhf (Insert i s) = Insert_t (hf_to_qhf i) (hf_to_qhf s)"
+        "quote_hf (Insert i s) = Insert_t (quote_hf i) (quote_hf s)"
     ).by_rewrite_of("h_rec", ["h_lb", "h_cl"])
 
 
@@ -4075,26 +4075,26 @@ is_Pair_ord_internal = mk_const("is_Pair_ord_internal", [])
 @proof
 def IS_PAIR_ORD_REPRESENTS(p):
     """|- !x y. Prov_Q (substitute^3 is_Pair_ord_internal
-                          (hf_to_qhf x) var_x
-                          (hf_to_qhf y) var_y
-                          (hf_to_qhf (Pair_ord x y)) var_z).
+                          (quote_hf x) var_x
+                          (quote_hf y) var_y
+                          (quote_hf (Pair_ord x y)) var_z).
 
-    SORRY. Under the hf_to_qhf bridge: HF inputs / output are encoded
+    SORRY. Under the quote_hf bridge: HF inputs / output are encoded
     as Insert_t-towers; ``Pair_ord x y = Pair (Singleton x) (Pair x y)``
-    is itself an Insert-tower at the HOL level, and ``hf_to_qhf`` lifts
+    is itself an Insert-tower at the HOL level, and ``quote_hf`` lifts
     it pointwise to the matching Q-syntax Insert_t-tower.
 
     Body of is_Pair_ord_internal: the Q-formula expressing that var_z
     has the Kuratowski shape Insert_t (Insert_t var_x Empty_t)
     (Insert_t var_x (Insert_t var_y Empty_t)). At numerals the structural
     equality is verified by Q's reflexivity axiom + HF axioms Q8-Q10
-    walking the Insert_t-tower of (hf_to_qhf (Pair_ord x y)). ~50 lines.
+    walking the Insert_t-tower of (quote_hf (Pair_ord x y)). ~50 lines.
     """
     p.goal(
         "!x y. Prov_Q (substitute (substitute (substitute "
-        "  is_Pair_ord_internal (hf_to_qhf x) var_x) "
-        "  (hf_to_qhf y) var_y) "
-        "  (hf_to_qhf (Pair_ord x y)) var_z)"
+        "  is_Pair_ord_internal (quote_hf x) var_x) "
+        "  (quote_hf y) var_y) "
+        "  (quote_hf (Pair_ord x y)) var_z)"
     )
     p.sorry()
 
@@ -4109,31 +4109,31 @@ is_In_internal = mk_const("is_In_internal", [])
 @proof
 def IS_IN_REPRESENTS(p):
     """|- !x y. (In x y ==> Prov_Q (substitute^2 is_In_internal
-                                       (hf_to_qhf x) var_x
-                                       (hf_to_qhf y) var_y))
+                                       (quote_hf x) var_x
+                                       (quote_hf y) var_y))
               /\\ (~In x y ==> Prov_Q (Not_f (substitute^2 is_In_internal
-                                                (hf_to_qhf x) var_x
-                                                (hf_to_qhf y) var_y))).
+                                                (quote_hf x) var_x
+                                                (quote_hf y) var_y))).
 
-    SORRY. Under the hf_to_qhf bridge the body collapses to
+    SORRY. Under the quote_hf bridge the body collapses to
     ``is_In_internal := In_a var_x var_y`` and the proof reduces to
-    structural induction on the Insert-tower of ``hf_to_qhf y``:
+    structural induction on the Insert-tower of ``quote_hf y``:
       * y = Empty: NOT_IN_EMPTY ==> antecedent fails (forward); Q8
-        directly proves ``Not_f (In_a (hf_to_qhf x) Empty_t)`` (negative).
-      * y = Insert i s, ~In i s: hf_to_qhf y = Insert_t (hf_to_qhf i)
-        (hf_to_qhf s).
-          - x = i: Q9 proves In_a (hf_to_qhf i) (Insert_t ...).
-          - x != i: Q10 reduces membership to In_a (hf_to_qhf x)
-            (hf_to_qhf s); IH on s closes both directions.
+        directly proves ``Not_f (In_a (quote_hf x) Empty_t)`` (negative).
+      * y = Insert i s, ~In i s: quote_hf y = Insert_t (quote_hf i)
+        (quote_hf s).
+          - x = i: Q9 proves In_a (quote_hf i) (Insert_t ...).
+          - x != i: Q10 reduces membership to In_a (quote_hf x)
+            (quote_hf s); IH on s closes both directions.
     ~80 lines.
     """
     p.goal(
         "!x y. (In x y ==> Prov_Q (substitute (substitute "
-        "  is_In_internal (hf_to_qhf x) var_x) "
-        "  (hf_to_qhf y) var_y)) "
+        "  is_In_internal (quote_hf x) var_x) "
+        "  (quote_hf y) var_y)) "
         "/\\ (~(In x y) ==> Prov_Q (Not_f (substitute (substitute "
-        "  is_In_internal (hf_to_qhf x) var_x) "
-        "  (hf_to_qhf y) var_y)))"
+        "  is_In_internal (quote_hf x) var_x) "
+        "  (quote_hf y) var_y)))"
     )
     p.sorry()
 
@@ -4151,15 +4151,15 @@ is_substitute_step_internal = mk_const("is_substitute_step_internal", [])
 def IS_SUBSTITUTE_STEP_REPRESENTS(p):
     """|- !T t v a b. is_substitute_step T t v a b ==>
                          Prov_Q (substitute^5 is_substitute_step_internal
-                                 (hf_to_qhf T) var_T
-                                 (hf_to_qhf t) var_y
-                                 (hf_to_qhf v) var_z
-                                 (hf_to_qhf a) var_a
-                                 (hf_to_qhf b) var_b).
+                                 (quote_hf T) var_T
+                                 (quote_hf t) var_y
+                                 (quote_hf v) var_z
+                                 (quote_hf a) var_a
+                                 (quote_hf b) var_b).
 
-    SORRY. Under the hf_to_qhf bridge: every input is encoded as an
+    SORRY. Under the quote_hf bridge: every input is encoded as an
     Insert_t-tower so Q's HF axioms Q8-Q10 fire on membership checks
-    inside the trace ``hf_to_qhf T``. Body of
+    inside the trace ``quote_hf T``. Body of
     is_substitute_step_internal: 9-disjunction (Q_or_chain) mirroring
     is_substitute_step's HOL body, with each ``In (Pair_ord _ _) T``
     check expressed as ``In_a (Pair_ord_q var_a var_b) var_T`` (where
@@ -4177,11 +4177,11 @@ def IS_SUBSTITUTE_STEP_REPRESENTS(p):
         "!T t v a b. is_substitute_step T t v a b ==> "
         "Prov_Q (substitute (substitute (substitute (substitute (substitute "
         "  is_substitute_step_internal "
-        "  (hf_to_qhf T) var_T) "
-        "  (hf_to_qhf t) var_y) "
-        "  (hf_to_qhf v) var_z) "
-        "  (hf_to_qhf a) var_a) "
-        "  (hf_to_qhf b) var_b)"
+        "  (quote_hf T) var_T) "
+        "  (quote_hf t) var_y) "
+        "  (quote_hf v) var_z) "
+        "  (quote_hf a) var_a) "
+        "  (quote_hf b) var_b)"
     )
     p.sorry()
 
@@ -4203,17 +4203,17 @@ is_substitute_trace_internal = mk_const("is_substitute_trace_internal", [])
 def IS_SUBSTITUTE_TRACE_REPRESENTS(p):
     """|- !T F t v r. is_substitute_trace T F t v r ==>
                          Prov_Q (substitute^5 is_substitute_trace_internal
-                                 (hf_to_qhf T) var_T
-                                 (hf_to_qhf F) var_x
-                                 (hf_to_qhf t) var_y
-                                 (hf_to_qhf v) var_z
-                                 (hf_to_qhf r) var_w).
+                                 (quote_hf T) var_T
+                                 (quote_hf F) var_x
+                                 (quote_hf t) var_y
+                                 (quote_hf v) var_z
+                                 (quote_hf r) var_w).
 
-    SORRY. Under the hf_to_qhf bridge: combines IS_PAIR_ORD_REPRESENTS
+    SORRY. Under the quote_hf bridge: combines IS_PAIR_ORD_REPRESENTS
     (clause (i): ``In (Pair_ord F r) T`` -- structural membership in
-    the Insert_t-tower of ``hf_to_qhf T``) with IS_IN_REPRESENTS and
+    the Insert_t-tower of ``quote_hf T``) with IS_IN_REPRESENTS and
     IS_SUBSTITUTE_STEP_REPRESENTS (clause (ii): bounded forall over
-    members of ``hf_to_qhf T``). The bounded forall expands to a
+    members of ``quote_hf T``). The bounded forall expands to a
     finite conjunction over T's Insert_t-tower, each conjunct
     discharged via IS_SUBSTITUTE_STEP_REPRESENTS at the corresponding
     encoded entry. ~80 lines.
@@ -4222,11 +4222,11 @@ def IS_SUBSTITUTE_TRACE_REPRESENTS(p):
         "!T F t v r. is_substitute_trace T F t v r ==> "
         "Prov_Q (substitute (substitute (substitute (substitute (substitute "
         "  is_substitute_trace_internal "
-        "  (hf_to_qhf T) var_T) "
-        "  (hf_to_qhf F) var_x) "
-        "  (hf_to_qhf t) var_y) "
-        "  (hf_to_qhf v) var_z) "
-        "  (hf_to_qhf r) var_w)"
+        "  (quote_hf T) var_T) "
+        "  (quote_hf F) var_x) "
+        "  (quote_hf t) var_y) "
+        "  (quote_hf v) var_z) "
+        "  (quote_hf r) var_w)"
     )
     p.sorry()
 
@@ -4514,9 +4514,9 @@ if __name__ == "__main__":
     print("    IS_SUBSTITUTE_TRACE_AT :", pp_thm(IS_SUBSTITUTE_TRACE_AT))
     print("    TRACE_STEP_MONO                       :", pp_thm(TRACE_STEP_MONO))
     print("    TRACE_EXISTS (SORRY)                  :", pp_thm(TRACE_EXISTS))
-    print("    HF_TO_QHF_AT_EMPTY                    :", pp_thm(HF_TO_QHF_AT_EMPTY))
-    print("    HF_TO_QHF_AT_NZ                       :", pp_thm(HF_TO_QHF_AT_NZ))
-    print("    HF_TO_QHF_AT_INSERT_LOW               :", pp_thm(HF_TO_QHF_AT_INSERT_LOW))
+    print("    QUOTE_HF_AT_EMPTY                    :", pp_thm(QUOTE_HF_AT_EMPTY))
+    print("    QUOTE_HF_AT_NZ                       :", pp_thm(QUOTE_HF_AT_NZ))
+    print("    QUOTE_HF_AT_INSERT_LOW               :", pp_thm(QUOTE_HF_AT_INSERT_LOW))
     print("    IS_PAIR_ORD_REPRESENTS (SORRY)        :", pp_thm(IS_PAIR_ORD_REPRESENTS))
     print("    IS_IN_REPRESENTS (SORRY)              :", pp_thm(IS_IN_REPRESENTS))
     print("    IS_SUBSTITUTE_STEP_REPRESENTS (SORRY) :", pp_thm(IS_SUBSTITUTE_STEP_REPRESENTS))
