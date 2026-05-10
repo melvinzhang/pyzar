@@ -1295,14 +1295,123 @@ def PROV_HF_AND_INTRO(p):
     """|- !A B. is_form A /\\ is_form B /\\ Prov_HF A /\\ Prov_HF B
                 ==> Prov_HF (Not_f (Imp_f A (Not_f B))).
 
-    Conjunction-introduction in HF. STUB; see implementation below.
+    Conjunction-introduction in HF (encoded And_f form ``~(A -> ~B)``).
+
+    Proof outline:
+      1. K(A, A -> ~B): A -> ((A -> ~B) -> A).
+      2. MP with Prov_HF A: (A -> ~B) -> A.                       [h2]
+      3. IMP_REFL at (A -> ~B): (A -> ~B) -> (A -> ~B).
+      4. DT_MP with h2 and step 3: (A -> ~B) -> ~B.               [h3]
+      5. CONTRAP applied to h3: ~~B -> ~(A -> ~B).                 [h_contrap]
+      6. DNI applied to Prov_HF B: ~~B.                            [h_dni]
+      7. MP gives ~(A -> ~B).
     """
     p.goal(
         "!A B. is_form A /\\ is_form B /\\ Prov_HF A /\\ Prov_HF B "
         "==> Prov_HF (Not_f (Imp_f A (Not_f B)))",
         types={"A": nat0_ty, "B": nat0_ty},
     )
-    p.sorry()
+    p.fix("A B")
+    p.assume(
+        "(hA, hB, hPA, hPB): is_form A /\\ is_form B "
+        "/\\ Prov_HF A /\\ Prov_HF B"
+    )
+
+    # is_form facts: ~B, A -> ~B.
+    isf_B_at = SPEC(p._parse("B"), IS_FORM_AT_NOT)
+    p.have("hnB: is_form (Not_f B)").by_eq_mp(SYM(isf_B_at), "hB")
+    isf_A_imp_nB = SPECL(
+        [p._parse("A"), p._parse("Not_f B")], IS_FORM_AT_IMP
+    )
+    p.have("hAnB_form: is_form (Imp_f A (Not_f B))").by_eq_mp(
+        SYM(isf_A_imp_nB), CONJ(p.fact("hA"), p.fact("hnB"))
+    )
+
+    # Step 1-2: h2 = |- (A -> ~B) -> A via K(A, A -> ~B) + MP(hPA).
+    p.have(
+        "h_K1: Prov_HF (Imp_f A (Imp_f (Imp_f A (Not_f B)) A))"
+    ).by(
+        PROV_HF_K, "A", "Imp_f A (Not_f B)",
+        CONJ(p.fact("hA"), p.fact("hAnB_form")),
+    )
+    p.have(
+        "h_K1_in: Prov_HF A "
+        "/\\ Prov_HF (Imp_f A (Imp_f (Imp_f A (Not_f B)) A))"
+    ).by_thm(CONJ(p.fact("hPA"), p.fact("h_K1")))
+    p.have("h2: Prov_HF (Imp_f (Imp_f A (Not_f B)) A)").by(
+        PROV_HF_MP, "A", "Imp_f (Imp_f A (Not_f B)) A", "h_K1_in"
+    )
+
+    # Step 3: IMP_REFL at (A -> ~B).
+    p.have(
+        "h_refl: Prov_HF (Imp_f (Imp_f A (Not_f B)) (Imp_f A (Not_f B)))"
+    ).by(PROV_HF_IMP_REFL, "Imp_f A (Not_f B)", "hAnB_form")
+
+    # Step 4: DT_MP at (P := A -> ~B, X := A, Y := ~B).
+    p.have(
+        "h_dtmp_in: is_form (Imp_f A (Not_f B)) "
+        "/\\ is_form A "
+        "/\\ is_form (Not_f B) "
+        "/\\ Prov_HF (Imp_f (Imp_f A (Not_f B)) A) "
+        "/\\ Prov_HF (Imp_f (Imp_f A (Not_f B)) (Imp_f A (Not_f B)))"
+    ).by_thm(
+        CONJ(
+            p.fact("hAnB_form"),
+            CONJ(
+                p.fact("hA"),
+                CONJ(
+                    p.fact("hnB"),
+                    CONJ(p.fact("h2"), p.fact("h_refl")),
+                ),
+            ),
+        )
+    )
+    p.have(
+        "h3: Prov_HF (Imp_f (Imp_f A (Not_f B)) (Not_f B))"
+    ).by(
+        PROV_HF_DT_MP,
+        "Imp_f A (Not_f B)", "A", "Not_f B",
+        "h_dtmp_in",
+    )
+
+    # Step 5: CONTRAP on h3 gives ~~B -> ~(A -> ~B).
+    p.have(
+        "h_contrap_in: is_form (Imp_f A (Not_f B)) "
+        "/\\ is_form (Not_f B) "
+        "/\\ Prov_HF (Imp_f (Imp_f A (Not_f B)) (Not_f B))"
+    ).by_thm(
+        CONJ(
+            p.fact("hAnB_form"),
+            CONJ(p.fact("hnB"), p.fact("h3")),
+        )
+    )
+    p.have(
+        "h_contrap: Prov_HF (Imp_f (Not_f (Not_f B)) "
+        "                         (Not_f (Imp_f A (Not_f B))))"
+    ).by(
+        PROV_HF_CONTRAP, "Imp_f A (Not_f B)", "Not_f B", "h_contrap_in"
+    )
+
+    # Step 6: DNI on hPB gives ~~B.
+    p.have("h_dni_in: is_form B /\\ Prov_HF B").by_thm(
+        CONJ(p.fact("hB"), p.fact("hPB"))
+    )
+    p.have("h_dni: Prov_HF (Not_f (Not_f B))").by(
+        PROV_HF_DOUBLE_NEG_INTRO, "B", "h_dni_in"
+    )
+
+    # Step 7: MP gives ~(A -> ~B).
+    p.have(
+        "h_final_in: Prov_HF (Not_f (Not_f B)) "
+        "/\\ Prov_HF (Imp_f (Not_f (Not_f B)) "
+        "                  (Not_f (Imp_f A (Not_f B))))"
+    ).by_thm(CONJ(p.fact("h_dni"), p.fact("h_contrap")))
+    p.thus("Prov_HF (Not_f (Imp_f A (Not_f B)))").by(
+        PROV_HF_MP,
+        "Not_f (Not_f B)",
+        "Not_f (Imp_f A (Not_f B))",
+        "h_final_in",
+    )
 
 
 @proof
@@ -1398,7 +1507,14 @@ def PROV_HF_AND_ELIM_LEFT(p):
                 /\\ Prov_HF (Not_f (Imp_f A (Not_f B)))
                 ==> Prov_HF A.
 
-    Left projection of conjunction. STUB.
+    Left projection of conjunction (encoded ``~(A -> ~B)``).
+
+    Proof outline:
+      1. EX_FALSO at (A, ~B): ~A -> (A -> ~B).
+      2. CONTRAP on step 1: ~(A -> ~B) -> ~~A.
+      3. DNE_IMP at A: ~~A -> A.
+      4. TRANS_IMP of steps 2 and 3: ~(A -> ~B) -> A.
+      5. MP with the supplied Prov_HF (~(A -> ~B)): A.
     """
     p.goal(
         "!A B. is_form A /\\ is_form B "
@@ -1406,7 +1522,97 @@ def PROV_HF_AND_ELIM_LEFT(p):
         "==> Prov_HF A",
         types={"A": nat0_ty, "B": nat0_ty},
     )
-    p.sorry()
+    p.fix("A B")
+    p.assume(
+        "(hA, hB, hPand): is_form A /\\ is_form B "
+        "/\\ Prov_HF (Not_f (Imp_f A (Not_f B)))"
+    )
+
+    # is_form composites used downstream.
+    isf_A_at = SPEC(p._parse("A"), IS_FORM_AT_NOT)
+    p.have("hnA: is_form (Not_f A)").by_eq_mp(SYM(isf_A_at), "hA")
+    isf_B_at = SPEC(p._parse("B"), IS_FORM_AT_NOT)
+    p.have("hnB: is_form (Not_f B)").by_eq_mp(SYM(isf_B_at), "hB")
+    isf_A_imp_nB = SPECL(
+        [p._parse("A"), p._parse("Not_f B")], IS_FORM_AT_IMP
+    )
+    p.have("hAnB_form: is_form (Imp_f A (Not_f B))").by_eq_mp(
+        SYM(isf_A_imp_nB), CONJ(p.fact("hA"), p.fact("hnB"))
+    )
+
+    # Step 1: EX_FALSO at (A, ~B): ~A -> (A -> ~B).
+    p.have(
+        "h_ef: Prov_HF (Imp_f (Not_f A) (Imp_f A (Not_f B)))"
+    ).by(
+        PROV_HF_EX_FALSO, "A", "Not_f B",
+        CONJ(p.fact("hA"), p.fact("hnB")),
+    )
+
+    # Step 2: CONTRAP gives ~(A -> ~B) -> ~~A.
+    p.have(
+        "h_contrap_in: is_form (Not_f A) "
+        "/\\ is_form (Imp_f A (Not_f B)) "
+        "/\\ Prov_HF (Imp_f (Not_f A) (Imp_f A (Not_f B)))"
+    ).by_thm(
+        CONJ(
+            p.fact("hnA"),
+            CONJ(p.fact("hAnB_form"), p.fact("h_ef")),
+        )
+    )
+    p.have(
+        "h_contrap: Prov_HF (Imp_f (Not_f (Imp_f A (Not_f B))) "
+        "                         (Not_f (Not_f A)))"
+    ).by(
+        PROV_HF_CONTRAP, "Not_f A", "Imp_f A (Not_f B)", "h_contrap_in"
+    )
+
+    # Step 3: DNE_IMP at A: ~~A -> A.
+    p.have("h_dne: Prov_HF (Imp_f (Not_f (Not_f A)) A)").by(
+        PROV_HF_DOUBLE_NEG_ELIM_IMP, "A", "hA"
+    )
+
+    # Step 4: TRANS_IMP: ~(A -> ~B) -> A.
+    p.have(
+        "h_T_in: is_form (Not_f (Imp_f A (Not_f B))) "
+        "/\\ is_form (Not_f (Not_f A)) "
+        "/\\ is_form A "
+        "/\\ Prov_HF (Imp_f (Not_f (Imp_f A (Not_f B))) (Not_f (Not_f A))) "
+        "/\\ Prov_HF (Imp_f (Not_f (Not_f A)) A)"
+    ).by_thm(
+        CONJ(
+            # is_form ~(A -> ~B): from is_form (A -> ~B) via IS_FORM_AT_NOT.
+            EQ_MP(
+                SYM(SPEC(p._parse("Imp_f A (Not_f B)"), IS_FORM_AT_NOT)),
+                p.fact("hAnB_form"),
+            ),
+            CONJ(
+                EQ_MP(SYM(SPEC(p._parse("Not_f A"), IS_FORM_AT_NOT)),
+                      p.fact("hnA")),
+                CONJ(
+                    p.fact("hA"),
+                    CONJ(p.fact("h_contrap"), p.fact("h_dne")),
+                ),
+            ),
+        )
+    )
+    p.have(
+        "h_T: Prov_HF (Imp_f (Not_f (Imp_f A (Not_f B))) A)"
+    ).by(
+        PROV_HF_TRANS_IMP,
+        "Not_f (Imp_f A (Not_f B))",
+        "Not_f (Not_f A)",
+        "A",
+        "h_T_in",
+    )
+
+    # Step 5: MP with hPand.
+    p.have(
+        "h_final_in: Prov_HF (Not_f (Imp_f A (Not_f B))) "
+        "/\\ Prov_HF (Imp_f (Not_f (Imp_f A (Not_f B))) A)"
+    ).by_thm(CONJ(p.fact("hPand"), p.fact("h_T")))
+    p.thus("Prov_HF A").by(
+        PROV_HF_MP, "Not_f (Imp_f A (Not_f B))", "A", "h_final_in"
+    )
 
 
 @proof
@@ -1415,7 +1621,15 @@ def PROV_HF_AND_ELIM_RIGHT(p):
                 /\\ Prov_HF (Not_f (Imp_f A (Not_f B)))
                 ==> Prov_HF B.
 
-    Right projection of conjunction. STUB.
+    Right projection of conjunction. Mirrors AND_ELIM_LEFT but uses
+    K(~B, A) instead of EX_FALSO; the rest of the chain is identical.
+
+    Proof outline:
+      1. K(~B, A): ~B -> (A -> ~B).
+      2. CONTRAP on step 1: ~(A -> ~B) -> ~~B.
+      3. DNE_IMP at B: ~~B -> B.
+      4. TRANS_IMP: ~(A -> ~B) -> B.
+      5. MP with hPand: B.
     """
     p.goal(
         "!A B. is_form A /\\ is_form B "
@@ -1423,7 +1637,94 @@ def PROV_HF_AND_ELIM_RIGHT(p):
         "==> Prov_HF B",
         types={"A": nat0_ty, "B": nat0_ty},
     )
-    p.sorry()
+    p.fix("A B")
+    p.assume(
+        "(hA, hB, hPand): is_form A /\\ is_form B "
+        "/\\ Prov_HF (Not_f (Imp_f A (Not_f B)))"
+    )
+
+    # is_form composites.
+    isf_B_at = SPEC(p._parse("B"), IS_FORM_AT_NOT)
+    p.have("hnB: is_form (Not_f B)").by_eq_mp(SYM(isf_B_at), "hB")
+    isf_A_imp_nB = SPECL(
+        [p._parse("A"), p._parse("Not_f B")], IS_FORM_AT_IMP
+    )
+    p.have("hAnB_form: is_form (Imp_f A (Not_f B))").by_eq_mp(
+        SYM(isf_A_imp_nB), CONJ(p.fact("hA"), p.fact("hnB"))
+    )
+
+    # Step 1: K(~B, A): ~B -> (A -> ~B).
+    p.have(
+        "h_K: Prov_HF (Imp_f (Not_f B) (Imp_f A (Not_f B)))"
+    ).by(
+        PROV_HF_K, "Not_f B", "A",
+        CONJ(p.fact("hnB"), p.fact("hA")),
+    )
+
+    # Step 2: CONTRAP gives ~(A -> ~B) -> ~~B.
+    p.have(
+        "h_contrap_in: is_form (Not_f B) "
+        "/\\ is_form (Imp_f A (Not_f B)) "
+        "/\\ Prov_HF (Imp_f (Not_f B) (Imp_f A (Not_f B)))"
+    ).by_thm(
+        CONJ(
+            p.fact("hnB"),
+            CONJ(p.fact("hAnB_form"), p.fact("h_K")),
+        )
+    )
+    p.have(
+        "h_contrap: Prov_HF (Imp_f (Not_f (Imp_f A (Not_f B))) "
+        "                         (Not_f (Not_f B)))"
+    ).by(
+        PROV_HF_CONTRAP, "Not_f B", "Imp_f A (Not_f B)", "h_contrap_in"
+    )
+
+    # Step 3: DNE_IMP at B: ~~B -> B.
+    p.have("h_dne: Prov_HF (Imp_f (Not_f (Not_f B)) B)").by(
+        PROV_HF_DOUBLE_NEG_ELIM_IMP, "B", "hB"
+    )
+
+    # Step 4: TRANS_IMP: ~(A -> ~B) -> B.
+    p.have(
+        "h_T_in: is_form (Not_f (Imp_f A (Not_f B))) "
+        "/\\ is_form (Not_f (Not_f B)) "
+        "/\\ is_form B "
+        "/\\ Prov_HF (Imp_f (Not_f (Imp_f A (Not_f B))) (Not_f (Not_f B))) "
+        "/\\ Prov_HF (Imp_f (Not_f (Not_f B)) B)"
+    ).by_thm(
+        CONJ(
+            EQ_MP(
+                SYM(SPEC(p._parse("Imp_f A (Not_f B)"), IS_FORM_AT_NOT)),
+                p.fact("hAnB_form"),
+            ),
+            CONJ(
+                EQ_MP(SYM(SPEC(p._parse("Not_f B"), IS_FORM_AT_NOT)),
+                      p.fact("hnB")),
+                CONJ(
+                    p.fact("hB"),
+                    CONJ(p.fact("h_contrap"), p.fact("h_dne")),
+                ),
+            ),
+        )
+    )
+    p.have(
+        "h_T: Prov_HF (Imp_f (Not_f (Imp_f A (Not_f B))) B)"
+    ).by(
+        PROV_HF_TRANS_IMP,
+        "Not_f (Imp_f A (Not_f B))",
+        "Not_f (Not_f B)",
+        "B",
+        "h_T_in",
+    )
+
+    # Step 5: MP with hPand.
+    p.have(
+        "h_final_in: Prov_HF (Not_f (Imp_f A (Not_f B))) "
+        "/\\ Prov_HF (Imp_f (Not_f (Imp_f A (Not_f B))) B)"
+    ).by_thm(CONJ(p.fact("hPand"), p.fact("h_T")))
+    p.thus("Prov_HF B").by(
+        PROV_HF_MP, "Not_f (Imp_f A (Not_f B))", "B", "h_final_in"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1513,14 +1814,14 @@ if __name__ == "__main__":
     print("    PROV_HF_DOUBLE_NEG_INTRO     :", pp_thm(PROV_HF_DOUBLE_NEG_INTRO))
     print("    PROV_HF_CONTRAP              :", pp_thm(PROV_HF_CONTRAP))
     print()
-    print("Stage 2C (d) -- conjunction / biconditional intro (STUB).")
+    print("Stage 2C (d) -- conjunction / biconditional intro.")
     print("    PROV_HF_AND_INTRO :", pp_thm(PROV_HF_AND_INTRO))
     print("    PROV_HF_IFF_INTRO :", pp_thm(PROV_HF_IFF_INTRO))
     print()
     print("Stage 2C (e) -- existential intro (STUB).")
     print("    PROV_HF_EXISTS_INTRO :", pp_thm(PROV_HF_EXISTS_INTRO))
     print()
-    print("Stage 2C (f) -- conjunction elimination (STUB).")
+    print("Stage 2C (f) -- conjunction elimination.")
     print("    PROV_HF_AND_ELIM_LEFT  :", pp_thm(PROV_HF_AND_ELIM_LEFT))
     print("    PROV_HF_AND_ELIM_RIGHT :", pp_thm(PROV_HF_AND_ELIM_RIGHT))
     print()
