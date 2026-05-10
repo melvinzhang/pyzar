@@ -34,7 +34,7 @@ from parser import define, parse_type
 from axioms import mk_forall, mk_imp, mk_not, mk_and, mk_or, mk_exists
 from nat0 import nat0_ty, define_unary_0, mk_suc0, ZERO, AXIOM_3_0, AXIOM_4_0
 from nat0_order import define_wf_lt
-from proof import proof
+from proof import proof, define_with_at
 from tactics import (
     SPEC,
     SPECL,
@@ -309,20 +309,6 @@ def _subst_at_numeral(F_term, n_term):
     return mk_app(substitute, F_term, mk_app(numeral, n_term), ZERO)
 
 
-def _at1(def_th, x):
-    th = AP_THM(def_th, x)
-    th = TRANS(th, BETA_CONV(rand(th._concl)))
-    return GEN(x, th)
-
-
-def _at2(def_th, x, y):
-    th_x = AP_THM(def_th, x)
-    th_x = TRANS(th_x, BETA_CONV(rand(th_x._concl)))
-    th_xy = AP_THM(th_x, y)
-    th_xy = TRANS(th_xy, BETA_CONV(rand(th_xy._concl)))
-    return GENL([x, y], th_xy)
-
-
 # ---------------------------------------------------------------------------
 # Stage 3B (a) -- list membership ``mem_l``.
 #
@@ -568,20 +554,17 @@ _valid_step_body = mk_or(
 )
 
 
-VALID_STEP_DEF = define(
-    "valid_step",
-    parse_type("nat0 -> nat0 -> bool"),
-    mk_abs(_t_n0_vs, mk_abs(_h_n0_vs, _valid_step_body)),
-)
-valid_step = mk_const("valid_step", [])
-
-
 # Pointwise:
 #   |- !t h. valid_step t h =
 #            (is_axiom h
 #             \/ (?f1 f2. mem_l t f1 /\ mem_l t f2 /\ is_mp f1 f2 h)
 #             \/ (?f1. mem_l t f1 /\ is_gen f1 h)).
-VALID_STEP_AT = _at2(VALID_STEP_DEF, _t_n0_vs, _h_n0_vs)
+VALID_STEP_DEF, VALID_STEP_AT = define_with_at(
+    "valid_step",
+    parse_type("nat0 -> nat0 -> bool"),
+    mk_abs(_t_n0_vs, mk_abs(_h_n0_vs, _valid_step_body)),
+)
+valid_step = mk_const("valid_step", [])
 
 
 # ---------------------------------------------------------------------------
@@ -2004,14 +1987,13 @@ def MP_HAS_PROOF(p):
 # ---------------------------------------------------------------------------
 
 
-PROV_HF_DEF = define(
+# |- !n. Prov_HF n = (?p. Proof_HF p n).
+PROV_HF_DEF, PROV_HF_AT = define_with_at(
     "Prov_HF",
     parse_type("nat0 -> bool"),
     "\\n:nat0. ?p:nat0. Proof_HF p n",
 )
 Prov_HF = mk_const("Prov_HF", [])
-# |- !n. Prov_HF n = (?p. Proof_HF p n).
-PROV_HF_AT = _at1(PROV_HF_DEF, _n_n0)
 
 
 # ---------------------------------------------------------------------------
@@ -2110,19 +2092,16 @@ _neg_clause = mk_forall(
 
 _represents_pred_body = mk_and(_pos_clause, _neg_clause)
 
-REPRESENTS_PRED_DEF = define(
+# |- !F P. represents_pred F P =
+#          ((!n. P n ==> Prov_HF (substitute F (numeral n) var_x))
+#        /\ (!n. ~ P n
+#               ==> Prov_HF (Not_f (substitute F (numeral n) var_x)))).
+REPRESENTS_PRED_DEF, REPRESENTS_PRED_AT = define_with_at(
     "represents_pred",
     parse_type("nat0 -> (nat0 -> bool) -> bool"),
     mk_abs(_F_n0, mk_abs(_P_pred, _represents_pred_body)),
 )
 represents_pred = mk_const("represents_pred", [])
-
-
-# |- !F P. represents_pred F P =
-#          ((!n. P n ==> Prov_HF (substitute F (numeral n) var_x))
-#        /\ (!n. ~ P n
-#               ==> Prov_HF (Not_f (substitute F (numeral n) var_x)))).
-REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 
 
 # ---------------------------------------------------------------------------
@@ -2551,7 +2530,8 @@ _v_step = Var("v", nat0_ty)
 _T_step = Var("T", nat0_ty)
 
 
-IS_SUBSTITUTE_STEP_DEF = define(
+# Pointwise: |- !T t v a b. is_substitute_step T t v a b = body[T,t,v,a,b].
+IS_SUBSTITUTE_STEP_DEF, IS_SUBSTITUTE_STEP_AT = define_with_at(
     "is_substitute_step",
     parse_type("nat0 -> nat0 -> nat0 -> nat0 -> nat0 -> bool"),
     "\\T:nat0. \\t:nat0. \\v:nat0. \\a:nat0. \\b:nat0. "
@@ -2572,34 +2552,6 @@ IS_SUBSTITUTE_STEP_DEF = define(
     "      /\\ In (Pair_ord a1 b1) T /\\ In (Pair_ord a2 b2) T)",
 )
 is_substitute_step = mk_const("is_substitute_step", [])
-
-
-# Pointwise: |- !T t v a b. is_substitute_step T t v a b = body[T,t,v,a,b].
-def _build_is_substitute_step_at():
-    from tactics import AP_THM, BETA_CONV, TRANS, GENL
-
-    th = IS_SUBSTITUTE_STEP_DEF
-    args = [_T_step, _t_step, _v_step, _a_step, _b_step]
-    for x in args:
-        th = AP_THM(th, x)
-        th = TRANS(th, BETA_CONV(rand(th._concl)))
-    return GENL(args, th)
-
-
-IS_SUBSTITUTE_STEP_AT = _build_is_substitute_step_at()
-
-
-# Pointwise unfolding helper for n-ary curried definitions: given
-# ``def_th : c = \x1 ... xn. body``, produce
-# ``|- !x1 ... xn. c x1 ... xn = body[xi]``.
-def _at_n(def_th, args):
-    from tactics import AP_THM, BETA_CONV, TRANS, GENL
-
-    th = def_th
-    for x in args:
-        th = AP_THM(th, x)
-        th = TRANS(th, BETA_CONV(rand(th._concl)))
-    return GENL(list(args), th)
 
 
 # ---------------------------------------------------------------------------
@@ -2629,7 +2581,11 @@ _vv_n0 = Var("v", nat0_ty)
 _rr_n0 = Var("r", nat0_ty)
 
 
-IS_SUBSTITUTE_TRACE_DEF = define(
+# Pointwise: |- !T F t v r. is_substitute_trace T F t v r =
+#                          In (Pair_ord F r) T /\
+#                          (!a b. In (Pair_ord a b) T ==>
+#                                 is_substitute_step T t v a b).
+IS_SUBSTITUTE_TRACE_DEF, IS_SUBSTITUTE_TRACE_AT = define_with_at(
     "is_substitute_trace",
     parse_type("nat0 -> nat0 -> nat0 -> nat0 -> nat0 -> bool"),
     "\\T:nat0. \\F:nat0. \\t:nat0. \\v:nat0. \\r:nat0. "
@@ -2637,16 +2593,6 @@ IS_SUBSTITUTE_TRACE_DEF = define(
     "/\\ (!a b. In (Pair_ord a b) T ==> is_substitute_step T t v a b)",
 )
 is_substitute_trace = mk_const("is_substitute_trace", [])
-
-
-# Pointwise: |- !T F t v r. is_substitute_trace T F t v r =
-#                          In (Pair_ord F r) T /\
-#                          (!a b. In (Pair_ord a b) T ==>
-#                                 is_substitute_step T t v a b).
-IS_SUBSTITUTE_TRACE_AT = _at_n(
-    IS_SUBSTITUTE_TRACE_DEF,
-    [_T_n0, _F_n0, _tt_n0, _vv_n0, _rr_n0],
-)
 
 
 # String-templated 9-disjunction body of is_substitute_step, with the

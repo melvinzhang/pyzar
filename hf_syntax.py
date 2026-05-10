@@ -96,7 +96,7 @@ from hf_sets import (  # noqa: F401  -- parser aliases for Pair_ord
 )
 from nat0 import AXIOM_3_0, AXIOM_4_0
 from nat0_order import NAT0_LT_TRANS, define_wf_lt
-from proof import proof
+from proof import proof, define_with_at
 from fusion import ABS
 from classical import EXCLUDED_MIDDLE
 from tactics import (
@@ -148,7 +148,7 @@ _phi2_n0 = Var("phi2", nat0_ty)
 # chains so they normalise to closed numerical values.
 # ---------------------------------------------------------------------------
 
-VAR_T_DEF = define(
+VAR_T_DEF, VAR_T_AT = define_with_at(
     "Var_t",
     parse_type("nat0 -> nat0"),
     "\\v:nat0. Pair_ord (SUC0 (SUC0 0)) v",
@@ -160,7 +160,7 @@ Var_t = mk_const("Var_t", [])
 # Form constructors.
 # ---------------------------------------------------------------------------
 
-EQ_F_DEF = define(
+EQ_F_DEF, EQ_F_AT = define_with_at(
     "Eq_f",
     parse_type("nat0 -> nat0 -> nat0"),
     "\\t1:nat0. \\t2:nat0. "
@@ -168,14 +168,14 @@ EQ_F_DEF = define(
 )
 Eq_f = mk_const("Eq_f", [])
 
-NOT_F_DEF = define(
+NOT_F_DEF, NOT_F_AT = define_with_at(
     "Not_f",
     parse_type("nat0 -> nat0"),
     "\\phi:nat0. Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))) phi",
 )
 Not_f = mk_const("Not_f", [])
 
-IMP_F_DEF = define(
+IMP_F_DEF, IMP_F_AT = define_with_at(
     "Imp_f",
     parse_type("nat0 -> nat0 -> nat0"),
     "\\phi1:nat0. \\phi2:nat0. "
@@ -184,7 +184,7 @@ IMP_F_DEF = define(
 )
 Imp_f = mk_const("Imp_f", [])
 
-FORALL_F_DEF = define(
+FORALL_F_DEF, FORALL_F_AT = define_with_at(
     "Forall_f",
     parse_type("nat0 -> nat0 -> nat0"),
     "\\n:nat0. \\phi:nat0. "
@@ -207,7 +207,7 @@ Forall_f = mk_const("Forall_f", [])
 EMPTY_T_DEF = define("Empty_t", parse_type("nat0"), "0")
 Empty_t = mk_const("Empty_t", [])
 
-INSERT_T_DEF = define(
+INSERT_T_DEF, INSERT_T_AT = define_with_at(
     "Insert_t",
     parse_type("nat0 -> nat0 -> nat0"),
     "\\t1:nat0. \\t2:nat0. "
@@ -216,7 +216,7 @@ INSERT_T_DEF = define(
 )
 Insert_t = mk_const("Insert_t", [])
 
-IN_A_DEF = define(
+IN_A_DEF, IN_A_AT = define_with_at(
     "In_a",
     parse_type("nat0 -> nat0 -> nat0"),
     "\\t1:nat0. \\t2:nat0. "
@@ -227,41 +227,9 @@ IN_A_DEF = define(
 In_a = mk_const("In_a", [])
 
 
-# ---------------------------------------------------------------------------
-# Pointwise unfold helpers.  ``define`` returns ``name = \\args. body``;
-# we beta-reduce on each argument to get the applied form
-# ``name a1 .. ak = body[a1, .., ak]`` so downstream rewrites can
-# pattern-match the head.
-# ---------------------------------------------------------------------------
-
-
-def _at1(def_th, x):
-    from tactics import AP_THM, BETA_CONV, TRANS, GEN
-    from basics import rand
-
-    th = AP_THM(def_th, x)
-    th = TRANS(th, BETA_CONV(rand(th._concl)))
-    return GEN(x, th)
-
-
-def _at2(def_th, x, y):
-    from tactics import AP_THM, BETA_CONV, TRANS, GENL
-    from basics import rand
-
-    th_x = AP_THM(def_th, x)
-    th_x = TRANS(th_x, BETA_CONV(rand(th_x._concl)))
-    th_xy = AP_THM(th_x, y)
-    th_xy = TRANS(th_xy, BETA_CONV(rand(th_xy._concl)))
-    return GENL([x, y], th_xy)
-
-
-VAR_T_AT = _at1(VAR_T_DEF, _v_n0)
-EQ_F_AT = _at2(EQ_F_DEF, _t1_n0, _t2_n0)
-NOT_F_AT = _at1(NOT_F_DEF, _phi_n0)
-IMP_F_AT = _at2(IMP_F_DEF, _phi1_n0, _phi2_n0)
-FORALL_F_AT = _at2(FORALL_F_DEF, _n_n0, _phi_n0)
-INSERT_T_AT = _at2(INSERT_T_DEF, _t1_n0, _t2_n0)
-IN_A_AT = _at2(IN_A_DEF, _t1_n0, _t2_n0)
+# Pointwise applied forms (``VAR_T_AT`` etc.) are produced alongside the
+# defining equations above via ``define_with_at``.  Downstream rewrites
+# pattern-match on the applied head.
 
 
 # ---------------------------------------------------------------------------

@@ -94,7 +94,7 @@ from nat0 import nat0_ty
 from hf_sets import (
     PAIR_ORD_INJ,
 )
-from proof import proof
+from proof import proof, define_with_at
 from tactics import (
     SPECL,
     GEN,
@@ -152,30 +152,13 @@ _t2_n0 = Var("t2", nat0_ty)
 NIL_L_DEF = define("nil_l", parse_type("nat0"), "0")
 nil_l = mk_const("nil_l", [])
 
-CONS_L_DEF = define(
+# Pointwise: |- !h t. cons_l h t = Pair_ord (SUC0 0) (Pair_ord h t).
+CONS_L_DEF, CONS_L_AT = define_with_at(
     "cons_l",
     parse_type("nat0 -> nat0 -> nat0"),
     "\\h:nat0. \\t:nat0. Pair_ord (SUC0 0) (Pair_ord h t)",
 )
 cons_l = mk_const("cons_l", [])
-
-
-def _at1(def_th, x):
-    th = AP_THM(def_th, x)
-    th = TRANS(th, BETA_CONV(rand(th._concl)))
-    return GEN(x, th)
-
-
-def _at2(def_th, x, y):
-    th_x = AP_THM(def_th, x)
-    th_x = TRANS(th_x, BETA_CONV(rand(th_x._concl)))
-    th_xy = AP_THM(th_x, y)
-    th_xy = TRANS(th_xy, BETA_CONV(rand(th_xy._concl)))
-    return GENL([x, y], th_xy)
-
-
-# Pointwise: |- !h t. cons_l h t = Pair_ord (SUC0 0) (Pair_ord h t).
-CONS_L_AT = _at2(CONS_L_DEF, _h_n0, _t_n0)
 
 
 # Injectivity:  |- !h1 t1 h2 t2. cons_l h1 t1 = cons_l h2 t2 ==>
@@ -412,18 +395,15 @@ _q_axiom_disj = _disj_chain(
     [mk_eq(_n_n0, ax_const) for (_, ax_const, _) in HF_AXIOMS]
 )
 
-IS_HF_AXIOM_DEF = define(
+# Pointwise:
+#  |- !n. is_hf_axiom n =
+#         (n = HF1_axiom \/ n = HF2_axiom \/ ... \/ n = HF5_axiom).
+IS_HF_AXIOM_DEF, IS_HF_AXIOM_AT = define_with_at(
     "is_hf_axiom",
     parse_type("nat0 -> bool"),
     mk_abs(_n_n0, _q_axiom_disj),
 )
 is_hf_axiom = mk_const("is_hf_axiom", [])
-
-
-# Pointwise:
-#  |- !n. is_hf_axiom n =
-#         (n = HF1_axiom \/ n = HF2_axiom \/ ... \/ n = HF5_axiom).
-IS_HF_AXIOM_AT = _at1(IS_HF_AXIOM_DEF, _n_n0)
 
 
 # Each HF axiom is itself an HF axiom: |- is_hf_axiom HF{i}_axiom.
@@ -472,7 +452,8 @@ _f_n0 = Var("f", nat0_ty)
 _x_n0 = Var("x", nat0_ty)
 
 
-IS_MP_DEF = define(
+# |- !f1 f2 g. is_mp f1 f2 g = (f2 = Imp_f f1 g).
+IS_MP_DEF, IS_MP_AT = define_with_at(
     "is_mp",
     parse_type("nat0 -> nat0 -> nat0 -> bool"),
     "\\f1:nat0. \\f2:nat0. \\g:nat0. f2 = Imp_f f1 g",
@@ -480,35 +461,18 @@ IS_MP_DEF = define(
 is_mp = mk_const("is_mp", [])
 
 
-def _at3(def_th, x, y, z):
-    th = AP_THM(def_th, x)
-    th = TRANS(th, BETA_CONV(rand(th._concl)))
-    th = AP_THM(th, y)
-    th = TRANS(th, BETA_CONV(rand(th._concl)))
-    th = AP_THM(th, z)
-    th = TRANS(th, BETA_CONV(rand(th._concl)))
-    return GENL([x, y, z], th)
-
-
-# |- !f1 f2 g. is_mp f1 f2 g = (f2 = Imp_f f1 g).
-IS_MP_AT = _at3(IS_MP_DEF, _f1_n0, _f2_n0, _g_n0)
-
-
 from axioms import mk_exists  # noqa: E402 -- needed by the IS_GEN definition below
 
 
 _is_gen_body = mk_exists(_x_n0, mk_eq(_g_n0, mk_app(Forall_f, _x_n0, _f_n0)))
 
-IS_GEN_DEF = define(
+# |- !f g. is_gen f g = (?x. g = Forall_f x f).
+IS_GEN_DEF, IS_GEN_AT = define_with_at(
     "is_gen",
     parse_type("nat0 -> nat0 -> bool"),
     mk_abs(_f_n0, mk_abs(_g_n0, _is_gen_body)),
 )
 is_gen = mk_const("is_gen", [])
-
-
-# |- !f g. is_gen f g = (?x. g = Forall_f x f).
-IS_GEN_AT = _at2(IS_GEN_DEF, _f_n0, _g_n0)
 
 
 # ---------------------------------------------------------------------------
@@ -584,9 +548,10 @@ _is_K_body = _exists_chain(
         ]
     ),
 )
-IS_K_DEF = define("is_K", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_K_body))
+IS_K_DEF, IS_K_AT = define_with_at(
+    "is_K", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_K_body)
+)
 is_K = mk_const("is_K", [])
-IS_K_AT = _at1(IS_K_DEF, _n_n0)
 
 
 # is_S(n) :<=> ?A B C. is_form A /\ is_form B /\ is_form C /\
@@ -611,9 +576,10 @@ _is_S_body = _exists_chain(
         ]
     ),
 )
-IS_S_DEF = define("is_S", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_S_body))
+IS_S_DEF, IS_S_AT = define_with_at(
+    "is_S", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_S_body)
+)
 is_S = mk_const("is_S", [])
-IS_S_AT = _at1(IS_S_DEF, _n_n0)
 
 
 # is_N(n) :<=> ?A B. is_form A /\ is_form B /\
@@ -635,9 +601,10 @@ _is_N_body = _exists_chain(
         ]
     ),
 )
-IS_N_DEF = define("is_N", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_N_body))
+IS_N_DEF, IS_N_AT = define_with_at(
+    "is_N", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_N_body)
+)
 is_N = mk_const("is_N", [])
-IS_N_AT = _at1(IS_N_DEF, _n_n0)
 
 
 # is_UI(n) :<=> ?x F t. is_form F /\ is_term t /\
@@ -659,9 +626,10 @@ _is_UI_body = _exists_chain(
         ]
     ),
 )
-IS_UI_DEF = define("is_UI", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_UI_body))
+IS_UI_DEF, IS_UI_AT = define_with_at(
+    "is_UI", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_UI_body)
+)
 is_UI = mk_const("is_UI", [])
-IS_UI_AT = _at1(IS_UI_DEF, _n_n0)
 
 
 # is_Vac(n) :<=> ?x F. is_form F /\ ~(free_in F x) /\
@@ -678,9 +646,10 @@ _is_Vac_body = _exists_chain(
         ]
     ),
 )
-IS_VAC_DEF = define("is_Vac", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_Vac_body))
+IS_VAC_DEF, IS_VAC_AT = define_with_at(
+    "is_Vac", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_Vac_body)
+)
 is_Vac = mk_const("is_Vac", [])
-IS_VAC_AT = _at1(IS_VAC_DEF, _n_n0)
 
 
 # is_FaImp(n) :<=> ?x F G. is_form F /\ is_form G /\ ~(free_in F x) /\
@@ -715,11 +684,10 @@ _is_FaImp_body = _exists_chain(
         ]
     ),
 )
-IS_FaImp_DEF = define(
+IS_FaImp_DEF, IS_FaImp_AT = define_with_at(
     "is_FaImp", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_FaImp_body)
 )
 is_FaImp = mk_const("is_FaImp", [])
-IS_FaImp_AT = _at1(IS_FaImp_DEF, _n_n0)
 
 
 # is_Refl(n) :<=> ?t. is_term t /\ n = Eq_f t t.
@@ -732,11 +700,10 @@ _is_Refl_body = _exists_chain(
         ]
     ),
 )
-IS_REFL_DEF = define(
+IS_REFL_DEF, IS_REFL_AT = define_with_at(
     "is_Refl", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_Refl_body)
 )
 is_Refl = mk_const("is_Refl", [])
-IS_REFL_AT = _at1(IS_REFL_DEF, _n_n0)
 
 
 # is_Subst(n) :<=> ?x F t1 t2. is_form F /\ is_term t1 /\ is_term t2 /\
@@ -765,11 +732,10 @@ _is_Subst_body = _exists_chain(
         ]
     ),
 )
-IS_SUBST_DEF = define(
+IS_SUBST_DEF, IS_SUBST_AT = define_with_at(
     "is_Subst", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_Subst_body)
 )
 is_Subst = mk_const("is_Subst", [])
-IS_SUBST_AT = _at1(IS_SUBST_DEF, _n_n0)
 
 
 # ---------------------------------------------------------------------------
@@ -798,23 +764,21 @@ _is_logical_body = _disj_chain(
         mk_app(is_FaImp, _n_n0),
     ]
 )
-IS_LOGICAL_AXIOM_DEF = define(
+IS_LOGICAL_AXIOM_DEF, IS_LOGICAL_AXIOM_AT = define_with_at(
     "is_logical_axiom",
     parse_type("nat0 -> bool"),
     mk_abs(_n_n0, _is_logical_body),
 )
 is_logical_axiom = mk_const("is_logical_axiom", [])
-IS_LOGICAL_AXIOM_AT = _at1(IS_LOGICAL_AXIOM_DEF, _n_n0)
 
 
 _is_axiom_body = mk_or(mk_app(is_hf_axiom, _n_n0), mk_app(is_logical_axiom, _n_n0))
-IS_AXIOM_DEF = define(
+IS_AXIOM_DEF, IS_AXIOM_AT = define_with_at(
     "is_axiom",
     parse_type("nat0 -> bool"),
     mk_abs(_n_n0, _is_axiom_body),
 )
 is_axiom = mk_const("is_axiom", [])
-IS_AXIOM_AT = _at1(IS_AXIOM_DEF, _n_n0)
 
 
 # ---------------------------------------------------------------------------
