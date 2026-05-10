@@ -42,6 +42,7 @@ from tactics import (
     NOT_ELIM,
     CONTR,
     EQT_ELIM,
+    REWRITE_RULE,
 )
 
 from hf_proof import (
@@ -1303,6 +1304,141 @@ def QUOTE_HF_INJ(p):
 
 
 # ---------------------------------------------------------------------------
+# HF4_INST -- HF4 axiom (extensionality) instantiated at concrete (a, b).
+#
+# HF4_axiom (two Forall_f layers):
+#   Forall_f 0 (Forall_f (SUC0 0)
+#     (Imp_f (Forall_f (SUC0 (SUC0 0))
+#               (encoded-iff (In_a var_z var_x) (In_a var_z var_y)))
+#            (Eq_f var_x var_y))).
+#
+# Two UI steps + substitute reductions, structurally identical to
+# HF2/HF3_INST.  Stubbed (sorry) for now; the discharge follows the
+# same template (``_prov_of_hf_axiom`` + UI + reductions) but the body's
+# ∀z layer plus encoded-iff make the substitute reduction longer than
+# HF3 -- estimated ~600 lines.  We use it as a black-box lemma below.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def HF4_INST(p):
+    """|- !a b. is_term a /\\ is_term b
+                /\\ (substitute a b (SUC0 0) = a)
+                ==> Prov_HF (Imp_f
+                       (Forall_f (SUC0 (SUC0 0))
+                         (Not_f (Imp_f
+                            (Imp_f (In_a (Var_t (SUC0 (SUC0 0))) a)
+                                   (In_a (Var_t (SUC0 (SUC0 0))) b))
+                            (Not_f (Imp_f
+                               (In_a (Var_t (SUC0 (SUC0 0))) b)
+                               (In_a (Var_t (SUC0 (SUC0 0))) a))))))
+                       (Eq_f a b)).
+
+    HF4 (extensionality) instantiated at (a, b).  SORRY -- mechanical
+    extension of HF2/HF3_INST: two PROV_HF_UI steps interleaved with
+    substitute reductions through the body's ∀z + encoded-iff
+    structure.  Estimated ~600 lines.
+
+    DSL note: encoded biconditional is
+        Not_f (Imp_f (Imp_f (In z a) (In z b)) (Not_f (Imp_f (In z b) (In z a))))
+    -- the parser-level shape used by HF4_AXIOM_DEF.
+    """
+    p.goal(
+        "!a b. is_term a /\\ is_term b "
+        "/\\ (substitute a b (SUC0 0) = a) "
+        "==> Prov_HF (Imp_f "
+        "      (Forall_f (SUC0 (SUC0 0)) "
+        "        (Not_f (Imp_f "
+        "           (Imp_f (In_a (Var_t (SUC0 (SUC0 0))) a) "
+        "                  (In_a (Var_t (SUC0 (SUC0 0))) b)) "
+        "           (Not_f (Imp_f "
+        "              (In_a (Var_t (SUC0 (SUC0 0))) b) "
+        "              (In_a (Var_t (SUC0 (SUC0 0))) a)))))) "
+        "      (Eq_f a b))",
+        types={"a": nat0_ty, "b": nat0_ty},
+    )
+    p.sorry()
+
+
+# ---------------------------------------------------------------------------
+# Insert_t-injectivity lifts at Prov_HF, restricted to canonical bit-
+# decomposition of HF set values.
+#
+# In general HF, Insert is not injective (Insert a {} = Insert a {a} =
+# {a}).  Under the canonical-form precondition that the head element is
+# strictly less than every element of the tail (LOW_BIT_CLEAR_LOW_PRECOND),
+# Insert is injective in *both* arguments jointly.  These two helpers
+# encapsulate that fact at the Prov_HF level for ``quote_hf`` images;
+# they are SORRY pending the full HF4_INST + canonical-form chain
+# (each ~150 lines on top of HF4_INST).  Used by QUOTE_HF_PROV_NEQ to
+# lift bit-component inequalities to whole-quote_hf inequalities.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def QUOTE_HF_NEQ_FROM_LOW_BIT(p):
+    """|- !s t. ~(s = 0) /\\ ~(t = 0)
+                /\\ Prov_HF (Not_f (Eq_f (quote_hf (low_bit s))
+                                         (quote_hf (low_bit t))))
+                ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))).
+
+    SORRY (~150 lines on top of HF4_INST).
+
+    Outline -- under canonical form ``low_bit s ∉ clear_low s`` and
+    similarly for t, distinct heads force distinct Insert_t towers:
+
+      Suppose Insert_t (q lb_s) (q cl_s) = Insert_t (q lb_t) (q cl_t).
+      HF2 + Eq-substitutivity: q lb_s ∈ Insert_t (q lb_t) (q cl_t).
+      HF3 (cond q lb_t ≠ q lb_s, given by the input Prov_HF Not_f Eq):
+         ⟹ q lb_s ∈ q cl_t.
+      By symmetry: q lb_t ∈ q cl_s.
+      Combined with canonical-form non-membership of heads in their own
+      tails (q lb_s ∉ q cl_s, q lb_t ∉ q cl_t) and the bit-ordering
+      ``lb_s < lb_t`` or ``lb_s > lb_t`` (one direction or the other),
+      derive contradiction via HF4 contrapositively + LOW_BIT_LT.
+    """
+    p.goal(
+        "!s t. ~(s = 0) /\\ ~(t = 0) "
+        "/\\ Prov_HF (Not_f (Eq_f (quote_hf (low_bit s)) "
+        "                          (quote_hf (low_bit t)))) "
+        "==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))",
+        types={"s": nat0_ty, "t": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def QUOTE_HF_NEQ_FROM_CLEAR_LOW(p):
+    """|- !s t. ~(s = 0) /\\ ~(t = 0)
+                /\\ (low_bit s = low_bit t)
+                /\\ Prov_HF (Not_f (Eq_f (quote_hf (clear_low s))
+                                         (quote_hf (clear_low t))))
+                ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))).
+
+    SORRY (~150 lines on top of HF4_INST).
+
+    Outline -- under canonical form, with matching heads and distinct
+    tails, the Insert_t towers differ in the tail.  The proof uses
+    HF4_INST (extensionality) to reduce ``Eq_f Insert_t Insert_t``
+    membership-questionwise; canonical-form non-membership of heads in
+    tails kills the head-witness branch, so the discriminator from the
+    IH-supplied tail Prov_HF inequality lifts cleanly.
+
+    The ``low_bit s = low_bit t`` precondition lets us share the head
+    rewrite throughout the substitutivity chain.
+    """
+    p.goal(
+        "!s t. ~(s = 0) /\\ ~(t = 0) "
+        "/\\ (low_bit s = low_bit t) "
+        "/\\ Prov_HF (Not_f (Eq_f (quote_hf (clear_low s)) "
+        "                          (quote_hf (clear_low t)))) "
+        "==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))",
+        types={"s": nat0_ty, "t": nat0_ty},
+    )
+    p.sorry()
+
+
+# ---------------------------------------------------------------------------
 # QUOTE_HF_PROV_NEQ -- Prov_HF-level inequality for distinct quoted terms.
 #
 # This is the meta-result missing from the original IS_IN_REPRESENTS
@@ -1737,14 +1873,134 @@ def QUOTE_HF_PROV_NEQ(p):
                             [SYM(p.fact("h_qs")), SYM(p.fact("h_qt"))],
                         )
                     with p.case("htnz: ~(t = 0)"):
-                        # SORRY (residual): two non-zero Insert_t towers --
-                        # discrimination needs HF4_INST (extensionality)
-                        # plus a witness-construction argument.  The IH is
-                        # available at low_bit s and clear_low s, but
-                        # without HF4 we cannot discharge "Insert_t a c =
-                        # Insert_t b d ⟹ a = b ∧ c = d" at the Prov_HF
-                        # level.
-                        p.sorry()
+                        # Both non-zero.  Bit-decompose s and t.
+                        #
+                        # By INSERT_LOW_BIT_CLEAR_LOW + ~(s = t), at
+                        # least one of (low_bit s, clear_low s) and
+                        # (low_bit t, clear_low t) differs.  EXCLUDED_MIDDLE
+                        # on ``low_bit s = low_bit t``:
+                        #   * different heads      → IH on low_bit s,
+                        #                            QUOTE_HF_NEQ_FROM_LOW_BIT.
+                        #   * matching heads       → tails must differ
+                        #                            (else s = t); IH on
+                        #                            clear_low s,
+                        #                            QUOTE_HF_NEQ_FROM_CLEAR_LOW.
+                        p.have("h_lb_lt: nat0_lt (low_bit s) s").by(
+                            LOW_BIT_LT, "s", "hsnz"
+                        )
+                        p.have("h_cl_lt: nat0_lt (clear_low s) s").by(
+                            CLEAR_LOW_LT, "s", "hsnz"
+                        )
+                        with p.cases_on(
+                            EXCLUDED_MIDDLE, "low_bit s = low_bit t"
+                        ):
+                            with p.case("hlb_eq: low_bit s = low_bit t"):
+                                # Tails must differ.  Use INSERT_LOW_BIT_CLEAR_LOW
+                                # to derive ~(clear_low s = clear_low t)
+                                # from ~(s = t).
+                                p.have(
+                                    "h_recon_s: s = "
+                                    "set_bit (low_bit s) (clear_low s)"
+                                ).by(INSERT_LOW_BIT_CLEAR_LOW, "s", "hsnz")
+                                p.have(
+                                    "h_recon_t: t = "
+                                    "set_bit (low_bit t) (clear_low t)"
+                                ).by(INSERT_LOW_BIT_CLEAR_LOW, "t", "htnz")
+                                with p.cases_on(
+                                    EXCLUDED_MIDDLE,
+                                    "clear_low s = clear_low t",
+                                ):
+                                    with p.case(
+                                        "hcl_eq: clear_low s = clear_low t"
+                                    ):
+                                        # Heads + tails match → s = t,
+                                        # contradicts h_neq.
+                                        p.have("h_st: s = t").by_rewrite_of(
+                                            "h_recon_s",
+                                            [
+                                                "hlb_eq", "hcl_eq",
+                                                SYM(p.fact("h_recon_t")),
+                                            ],
+                                        )
+                                        contra = MP(
+                                            NOT_ELIM(p.fact("h_neq")),
+                                            p.fact("h_st"),
+                                        )
+                                        p.thus(
+                                            "Prov_HF (Not_f (Eq_f "
+                                            "(quote_hf s) (quote_hf t)))"
+                                        ).by_thm(
+                                            CONTR(
+                                                p._parse(
+                                                    "Prov_HF (Not_f (Eq_f "
+                                                    "(quote_hf s) "
+                                                    "(quote_hf t)))"
+                                                ),
+                                                contra,
+                                            )
+                                        )
+                                    with p.case(
+                                        "hcl_ne: ~(clear_low s = clear_low t)"
+                                    ):
+                                        # Tails differ at HOL.  IH on
+                                        # clear_low s gives Prov_HF Not_f
+                                        # Eq_f at the tails; lift via
+                                        # QUOTE_HF_NEQ_FROM_CLEAR_LOW.
+                                        p.have(
+                                            "h_tail_neq: Prov_HF (Not_f "
+                                            "(Eq_f (quote_hf (clear_low s)) "
+                                            "      (quote_hf (clear_low t))))"
+                                        ).by(
+                                            "IH",
+                                            "clear_low s",
+                                            "h_cl_lt",
+                                            "clear_low t",
+                                            "hcl_ne",
+                                        )
+                                        p.thus(
+                                            "Prov_HF (Not_f (Eq_f "
+                                            "(quote_hf s) (quote_hf t)))"
+                                        ).by(
+                                            QUOTE_HF_NEQ_FROM_CLEAR_LOW,
+                                            "s", "t",
+                                            CONJ(
+                                                p.fact("hsnz"),
+                                                CONJ(
+                                                    p.fact("htnz"),
+                                                    CONJ(
+                                                        p.fact("hlb_eq"),
+                                                        p.fact("h_tail_neq"),
+                                                    ),
+                                                ),
+                                            ),
+                                        )
+                            with p.case("hlb_ne: ~(low_bit s = low_bit t)"):
+                                # Heads differ.  IH on low_bit s.
+                                p.have(
+                                    "h_head_neq: Prov_HF (Not_f "
+                                    "(Eq_f (quote_hf (low_bit s)) "
+                                    "      (quote_hf (low_bit t))))"
+                                ).by(
+                                    "IH",
+                                    "low_bit s",
+                                    "h_lb_lt",
+                                    "low_bit t",
+                                    "hlb_ne",
+                                )
+                                p.thus(
+                                    "Prov_HF (Not_f (Eq_f "
+                                    "(quote_hf s) (quote_hf t)))"
+                                ).by(
+                                    QUOTE_HF_NEQ_FROM_LOW_BIT,
+                                    "s", "t",
+                                    CONJ(
+                                        p.fact("hsnz"),
+                                        CONJ(
+                                            p.fact("htnz"),
+                                            p.fact("h_head_neq"),
+                                        ),
+                                    ),
+                                )
 
 
 # ---------------------------------------------------------------------------
@@ -1875,8 +2131,14 @@ if __name__ == "__main__":
     print("    HF2_INST      :", pp_thm(HF2_INST))
     print("    HF3_INST      :", pp_thm(HF3_INST))
     print("    QUOTE_HF_INJ  :", pp_thm(QUOTE_HF_INJ))
+    print("    HF4_INST (SORRY)               :", pp_thm(HF4_INST))
     print(
-        "    QUOTE_HF_PROV_NEQ (partial; (s≠0,t≠0) SORRY) :",
-        pp_thm(QUOTE_HF_PROV_NEQ),
+        "    QUOTE_HF_NEQ_FROM_LOW_BIT (SORRY) :",
+        pp_thm(QUOTE_HF_NEQ_FROM_LOW_BIT),
     )
+    print(
+        "    QUOTE_HF_NEQ_FROM_CLEAR_LOW (SORRY) :",
+        pp_thm(QUOTE_HF_NEQ_FROM_CLEAR_LOW),
+    )
+    print("    QUOTE_HF_PROV_NEQ              :", pp_thm(QUOTE_HF_PROV_NEQ))
     print("    IS_IN_REPRESENTS_TH (SORRY) :", pp_thm(IS_IN_REPRESENTS_TH))
