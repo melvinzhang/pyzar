@@ -47,6 +47,7 @@ from hf_proof import (
     IS_S_AT,
     IS_N_AT,
     IS_UI_AT,
+    IS_SUBST_AT,
     is_hf_axiom,
     IS_LOGICAL_AXIOM_AT,
     IS_AXIOM_AT,
@@ -1904,23 +1905,51 @@ def PROV_HF_EXISTS_ELIM(p):
 
 @proof
 def PROV_HF_SUBST_EQ(p):
-    """|- !x F t1 t2. is_form F /\\ is_term t1 /\\ is_term t2
-                      ==> Prov_HF (Imp_f (Eq_f t1 t2)
-                                        (Imp_f (substitute F t1 x)
-                                               (substitute F t2 x))).
+    """|- !x phi t1 t2. is_form phi /\\ is_term t1 /\\ is_term t2
+                        ==> Prov_HF (Imp_f (Eq_f t1 t2)
+                                          (Imp_f (substitute phi t1 x)
+                                                 (substitute phi t2 x))).
 
-    The is_Subst axiom in MP-friendly form. STUB; analogous to
-    PROV_HF_K / PROV_HF_S / PROV_HF_N -- direct application of
-    ``_prov_of_logical`` at slot 6.
+    The is_Subst axiom schema (slot 6 of is_logical_axiom) lifted to
+    Prov_HF. Direct analogue of PROV_HF_K / PROV_HF_S / PROV_HF_N --
+    witness (x, phi, t1, t2) into the is_Subst body schema, then
+    ``_prov_of_logical`` walks the disjunction chain.
+
+    DSL friction: goal uses ``phi`` rather than ``F`` because bare
+    ``F`` resolves to the kernel False constant.
     """
     p.goal(
-        "!x F t1 t2. is_form F /\\ is_term t1 /\\ is_term t2 "
+        "!x phi t1 t2. is_form phi /\\ is_term t1 /\\ is_term t2 "
         "==> Prov_HF (Imp_f (Eq_f t1 t2) "
-        "                  (Imp_f (substitute F t1 x) "
-        "                         (substitute F t2 x)))",
-        types={"x": nat0_ty, "F": nat0_ty, "t1": nat0_ty, "t2": nat0_ty},
+        "                  (Imp_f (substitute phi t1 x) "
+        "                         (substitute phi t2 x)))",
+        types={"x": nat0_ty, "phi": nat0_ty, "t1": nat0_ty, "t2": nat0_ty},
     )
-    p.sorry()
+    p.fix("x phi t1 t2")
+    p.assume(
+        "(hphi, ht1, ht2): is_form phi /\\ is_term t1 /\\ is_term t2"
+    )
+
+    n_term = p._parse(
+        "Imp_f (Eq_f t1 t2) "
+        "      (Imp_f (substitute phi t1 x) (substitute phi t2 x))"
+    )
+    is_subst_at_n = SPEC(n_term, IS_SUBST_AT)
+
+    p.have(
+        "subst_body: ?x1 phi1 u1 u2. is_form phi1 /\\ is_term u1 /\\ is_term u2 "
+        "/\\ Imp_f (Eq_f t1 t2) "
+        "         (Imp_f (substitute phi t1 x) (substitute phi t2 x)) "
+        " = Imp_f (Eq_f u1 u2) "
+        "         (Imp_f (substitute phi1 u1 x1) (substitute phi1 u2 x1))"
+    ).by_exists(["x", "phi", "t1", "t2"], "hphi", "ht1", "ht2")
+    is_subst_th = EQ_MP(SYM(is_subst_at_n), p.fact("subst_body"))
+
+    prov_th = _prov_of_logical(p, "subst", is_subst_th, 6, n_term)
+    p.thus(
+        "Prov_HF (Imp_f (Eq_f t1 t2) "
+        "              (Imp_f (substitute phi t1 x) (substitute phi t2 x)))"
+    ).by_thm(prov_th)
 
 
 if __name__ == "__main__":
@@ -1962,5 +1991,5 @@ if __name__ == "__main__":
     print("Stage 2C (g) -- existential elimination (STUB).")
     print("    PROV_HF_EXISTS_ELIM :", pp_thm(PROV_HF_EXISTS_ELIM))
     print()
-    print("Stage 2C (h) -- substitution under equality (STUB).")
+    print("Stage 2C (h) -- substitution under equality.")
     print("    PROV_HF_SUBST_EQ :", pp_thm(PROV_HF_SUBST_EQ))
