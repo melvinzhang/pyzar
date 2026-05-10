@@ -1,25 +1,29 @@
 # ---------------------------------------------------------------------------
-# Stage B1.0(c) part 2 -- IS_IN_REPRESENTS body and prerequisites.
+# Stage 3 high-layer -- representability proofs that need the Prov_HF
+# logical toolkit from ``hf_logic`` (PROV_HF_UI, PROV_HF_AND_ELIM_*,
+# PROV_HF_CONTRAP, PROV_HF_DOUBLE_NEG_*, PROV_HF_TRANS_IMP).
 #
-# Discharges the SORRY in ``hf_repr.IS_IN_REPRESENTS`` (kept in place
-# so ``IS_SUBSTITUTE_STEP_REPRESENTS`` and downstream consumers see no
-# layout change), via a freshly proved twin ``IS_IN_REPRESENTS_TH``
-# whose statement is identical.
+# This module sits *above* ``hf_logic`` in the dependency tree. The
+# split is dictated by the cycle: ``hf_repr`` declares the Prov_HF
+# axiom and MP rule; ``hf_logic`` builds the universal-instantiation
+# and propositional toolkit on top of those; the IS_*_REPRESENTS
+# proofs need both, so they have to live downstream of hf_logic. Doing
+# the split this way (rather than monkey-patching ``hf_repr``) means
+# every IS_*_REPRESENTS lives in one place and importers see a single
+# canonical name.
 #
-# Lives downstream of ``hf_logic.py`` because the proofs need:
-#   * PROV_HF_UI / PROV_HF_UI_IMP -- universal instantiation
-#   * PROV_HF_AND_INTRO/ELIM, PROV_HF_CONTRAP, PROV_HF_DOUBLE_NEG_*,
-#     PROV_HF_TRANS_IMP -- propositional toolkit
-# all of which transitively import ``PROV_HF_AXIOM`` / ``PROV_HF_MP``
-# from ``hf_repr``. Putting these proofs back in ``hf_repr`` would
-# create a cycle.
-#
-# Build order:
+# Contents:
 #   (a) HF1_INST / HF2_INST / HF3_INST -- closed HF1-3 axioms
 #       instantiated at concrete HF-syntax terms, via PROV_HF_UI plus
 #       the substitute reduction lemmas.
-#   (b) QUOTE_HF_INJ -- HOL-level injectivity of the quoting map.
-#   (c) IS_IN_REPRESENTS_TH -- HF_INDUCTION on ``y`` with x fixed.
+#   (b) QUOTE_HF_INJ / QUOTE_HF_PROV_NEQ -- HOL-level + Prov_HF-level
+#       injectivity / inequality lifts for the quote_hf map.
+#   (c) IS_IN_REPRESENTS -- HF_INDUCTION on ``y`` with x fixed.
+#   (d) Stage-3 SORRY scaffolding (IS_SUBSTITUTE_STEP_REPRESENTS,
+#       IS_SUBSTITUTE_TRACE_REPRESENTS, SUBSTITUTE_REPRESENTS,
+#       PROV_HF_REPRESENTS, IS_FORM_PROV_HF_INTERNAL,
+#       FREE_IN_PROV_HF_INTERNAL) -- moved here so future discharges
+#       have the toolkit in scope without re-creating the cycle.
 # ---------------------------------------------------------------------------
 
 
@@ -2013,11 +2017,7 @@ def QUOTE_HF_PROV_NEQ(p):
 
 
 # ---------------------------------------------------------------------------
-# IS_IN_REPRESENTS_TH -- the discharged twin of hf_repr.IS_IN_REPRESENTS.
-#
-# Proved by HF_INDUCTION on ``y`` with ``x`` fixed. Lives here (downstream
-# of hf_logic) so the propositional Prov_HF toolkit
-# (PROV_HF_AND_ELIM_LEFT/RIGHT, PROV_HF_CONTRAP, PROV_HF_MP) is in scope.
+# IS_IN_REPRESENTS -- HF_INDUCTION on ``y`` with x fixed.
 #
 # DSL friction (recurring across this proof):
 #
@@ -2087,7 +2087,7 @@ _SUBST_V1_AT_S0 = GEN(
 
 
 @proof
-def IS_IN_REPRESENTS_TH(p):
+def IS_IN_REPRESENTS(p):
     """|- !x y. (In x y ==> Prov_HF (substitute (substitute is_In_internal
                                        (quote_hf x) idx_x)
                                        (quote_hf y) idx_y))
@@ -2637,20 +2637,248 @@ def IS_IN_REPRESENTS_TH(p):
     ).by(ind_inst, "h_conj")
 
 
-# Wire the proven theorem back into ``hf_repr.IS_IN_REPRESENTS`` so the
-# original public name resolves to the discharged proof. The
-# placeholder there starts as ``None``; we overwrite at module-load
-# time. Both names are now valid handles for the same theorem.
-import hf_repr as _hf_repr  # noqa: E402
+# ---------------------------------------------------------------------------
+# Stage-3 SORRY scaffolding moved from hf_repr.py.  Each proof needs the
+# Prov_HF logical toolkit when discharged (PROV_HF_UI for HF axiom
+# instantiation, PROV_HF_AND_ELIM_*/CONTRAP for propositional walking),
+# so they live here rather than in hf_repr to avoid the cycle.  The
+# kernel constants they mention (``is_substitute_step_internal``,
+# ``is_substitute_trace_internal``, ``substitute_internal``,
+# ``Prov_HF_internal``) are still declared in hf_repr.
+# ---------------------------------------------------------------------------
 
-_hf_repr.IS_IN_REPRESENTS = IS_IN_REPRESENTS_TH
-IS_IN_REPRESENTS = IS_IN_REPRESENTS_TH
+
+@proof
+def IS_SUBSTITUTE_STEP_REPRESENTS(p):
+    """|- !T t v a b. is_substitute_step T t v a b ==>
+                         Prov_HF (substitute^5 is_substitute_step_internal
+                                 (quote_hf T) var_T
+                                 (quote_hf t) var_y
+                                 (quote_hf v) var_z
+                                 (quote_hf a) var_a
+                                 (quote_hf b) var_b).
+
+    SORRY (thin-interface strategy).
+
+    Body of is_substitute_step_internal: a 9-disjunction (Or_f-chain)
+    mirroring ``is_substitute_step``'s HOL body; each ``In (Pair_ord _ _) T``
+    check is encoded as ``In_a (Pair_ord_q var_a var_b) var_T`` (with
+    ``Pair_ord_q`` the HF-syntax Kuratowski Insert_t-tower) and each
+    constructor pattern ``a = Var_t v`` is an Eq_f equality verified by
+    HF reflexivity on identical Insert_t-tower shapes.
+
+    Proof strategy: case-split on the 9 IS_SUBSTITUTE_STEP_DEF disjuncts.
+    Each case dispatches the matching HF-disjunct via:
+      * IS_PAIR_ORD_REPRESENTS for the Kuratowski-shape clauses;
+      * IS_IN_REPRESENTS for the trace-membership clauses;
+      * QUOTE_HF_AT_PAIR_ORD to unfold tagged HF-syntax constructors
+        (``Var_t v = Pair_ord 2 v``, ``Eq_f a b = Pair_ord 5 (Pair_ord a b)``,
+        ...). The ``~(x = y)`` side condition reduces to a closed
+        numerical inequality at each constructor (``~(2 = v)``,
+        ``~(5 = Pair_ord a b)``, ...) and is discharged once per
+        constructor.
+      * QUOTE_HF_AT_SINGLETON / QUOTE_HF_AT_EMPTY to fold the leaf
+        layers;
+      * HF axioms HF1-HF3 walking the resulting trees (no bit-level
+        reasoning -- the canonical-form precondition is consumed inside
+        the QUOTE_HF_AT_* rewrites).
+
+    ~150 lines once is_substitute_step_internal has a body and HF1-HF5
+    are available as kernel theorems.
+    """
+    p.goal(
+        "!T t v a b. is_substitute_step T t v a b ==> "
+        "Prov_HF (substitute (substitute (substitute (substitute (substitute "
+        "  is_substitute_step_internal "
+        "  (quote_hf T) idx_T) "
+        "  (quote_hf t) idx_y) "
+        "  (quote_hf v) idx_z) "
+        "  (quote_hf a) idx_a) "
+        "  (quote_hf b) idx_b)"
+    )
+    p.sorry()
+
+
+@proof
+def IS_SUBSTITUTE_TRACE_REPRESENTS(p):
+    """|- !T F t v r. is_substitute_trace T F t v r ==>
+                         Prov_HF (substitute^5 is_substitute_trace_internal
+                                 (quote_hf T) var_T
+                                 (quote_hf F) var_x
+                                 (quote_hf t) var_y
+                                 (quote_hf v) var_z
+                                 (quote_hf r) var_w).
+
+    SORRY (thin-interface strategy).
+
+    Combines the previous three stubs:
+      * IS_PAIR_ORD_REPRESENTS for clause (i) ``In (Pair_ord F r) T``,
+        which becomes a Kuratowski-shape membership claim about the
+        Insert_t-tower image of ``quote_hf T``.
+      * IS_IN_REPRESENTS for the membership atoms inside the trace.
+      * IS_SUBSTITUTE_STEP_REPRESENTS for clause (ii) ``!a b. In ... T
+        ==> is_substitute_step ...``: the HOL universal over trace
+        members corresponds to a HF-bounded forall, expanded by induction
+        on the Insert-tower of T via ``HF_INDUCTION``. Each step of the
+        induction discharges one trace entry using
+        IS_SUBSTITUTE_STEP_REPRESENTS at the corresponding ``(a, b)``.
+
+    The induction on T is the only place this proof reaches for set
+    structure; HF_INDUCTION hides the bit decomposition entirely.
+    ~80 lines once is_substitute_trace_internal has a body.
+    """
+    p.goal(
+        "!T F t v r. is_substitute_trace T F t v r ==> "
+        "Prov_HF (substitute (substitute (substitute (substitute (substitute "
+        "  is_substitute_trace_internal "
+        "  (quote_hf T) idx_T) "
+        "  (quote_hf F) idx_x) "
+        "  (quote_hf t) idx_y) "
+        "  (quote_hf v) idx_z) "
+        "  (quote_hf r) idx_w)"
+    )
+    p.sorry()
+
+
+@proof
+def SUBSTITUTE_REPRESENTS(p):
+    """|- !F t v. Prov_HF (
+              substitute (substitute (substitute (substitute
+                  substitute_internal (numeral F) var_x)
+                  (numeral t) var_y)
+                  (numeral v) var_z)
+                  (numeral (substitute F t v)) var_w).
+
+    Stage 3C(a) representability of ``substitute``. AXIOMATIZED via
+    ``p.sorry()``; see Stage 3C section comment in hf_repr.py for the
+    deferred HF-native construction:
+
+        substitute_internal := ?T. is_substitute_trace T F t v r
+
+    where ``T`` is an HF set of Pair_ord-encoded (subterm-shape,
+    output-shape) pairs, exhibited explicitly at each numeral
+    instance via TRACE_EXISTS. No sequence coding (Goedel beta /
+    Cantor pairing) and no arithmetic representability prereqs --
+    HF gives finite traces as first-class objects.
+    """
+    p.goal(
+        "!F t v. Prov_HF ("
+        "substitute (substitute (substitute (substitute "
+        "  substitute_internal (numeral F) idx_x) "
+        "  (numeral t) idx_y) "
+        "  (numeral v) idx_z) "
+        "  (numeral (substitute F t v)) idx_w)"
+    )
+    p.sorry()
+
+
+# ---------------------------------------------------------------------------
+# Stage 3D (a) -- representability of provability (AXIOMATIZED).
+#
+# Headline theorem (``PROV_HF_REPRESENTS``):
+#   |- !n. Prov_HF n <=>
+#          Prov_HF (substitute Prov_HF_internal (numeral n) var_x).
+#
+# ``Prov_HF_internal`` is a HF-formula with ``var_x`` as its sole free
+# variable, expressing "Prov_HF holds at var_x". The kernel constant
+# is declared opaque in ``hf_repr.py`` (no defining body) so
+# accidental unfolding is impossible while PROV_HF_REPRESENTS is
+# still a SORRY.
+#
+# Side conditions posted with the headline (consumed by the diagonal
+# lemma, which needs ``phi(x)`` to be a well-formed HF-formula whose
+# only free variable is ``var_x``):
+#   * ``IS_FORM_PROV_HF_INTERNAL``  : |- is_form Prov_HF_internal.
+#   * ``FREE_IN_PROV_HF_INTERNAL``  : |- !v. free_in Prov_HF_internal v
+#                                          <=> v = var_x.
+#
+# Discharge plan -- via HF1-HF5 (no Goedel-beta sequence coding).
+# ``Prov_HF`` has been collapsed in Stage 2 to ``\n. ?p. Proof_HF p n``,
+# so the HF-internal form is the existential closure
+#
+#     Prov_HF_internal(x) := ?_internal y. Proof_HF_internal(y, x).
+#
+# Under the HF strengthening (HF1-HF5, already available from
+# ``hf_proof.py``) the bottom-up construction collapses dramatically
+# relative to the textbook beta-function path (BBJ Ch. 17 / Smullyan
+# Ch. 4):
+#
+#   * ``mem_l_internal`` collapses to ``In_a`` -- proof lists are HF
+#     sets; "p has formula f" is just membership. (~5 lines vs the
+#     ~200-line list-recursion encoding in the beta-function path.)
+#   * ``valid_step_internal`` is the Sigma_0 disjunction
+#         is_axiom_internal h \/
+#         (?f1 f2. In f1 t /\ In f2 t /\ is_mp_internal f1 f2 h) \/
+#         (?f1. In f1 t /\ is_gen_internal f1 h)
+#     directly mirroring the HOL ``valid_step`` in hf_repr.py.
+#   * ``Proof_HF_internal(p, n)`` is then the conjunction over members
+#     of the HF set p -- bounded by p itself via foundation HF5 --
+#     plus a designated-head clause picking out n. Sigma_1; not
+#     recursive because the HF foundation axiom bounds the search.
+#   * ``Prov_HF_internal`` is the existential closure, encoded with
+#     ``Not_f (Forall_f var_y_idx (Not_f ...))`` since HF's only native
+#     quantifier is ``Forall_f``.
+#
+# Forward direction (HOL ``Prov_HF n`` ==> HF proves the substituted
+# form): Sigma_1 completeness for HF. Extract a Proof_HF witness via
+# PROV_HF_AT, exhibit its HF encoding as a HF-numeral, verify each
+# conjunct term-by-term (each a closed Sigma_0 fact HF decides at
+# numerals).
+#
+# Backward direction (HF proves ==> HOL): Sigma_1 soundness, which
+# lives in Stage 6 via the HF model construction (HF |= HF1-HF5 is
+# one HOL theorem citation per axiom).
+#
+# Side conditions IS_FORM and FREE_IN become routine once
+# Prov_HF_internal has its defining body -- both decided by the same
+# syntactic recursion that ``hf_syntax.py`` already covers (In_a via
+# IS_FORM_AT_IN, etc.).
+# ---------------------------------------------------------------------------
+
+
+@proof
+def PROV_HF_REPRESENTS(p):
+    """|- !n. Prov_HF n <=>
+              Prov_HF (substitute Prov_HF_internal (numeral n) var_x).
+
+    Stage 3D(a) representability of ``Prov_HF``. AXIOMATIZED via
+    ``p.sorry()``; see the Stage 3D section comment above for the
+    deferred construction (Proof_HF_internal + Sigma_1
+    completeness/soundness).
+    """
+    p.goal("!n. Prov_HF n = Prov_HF (substitute Prov_HF_internal (numeral n) idx_x)")
+    p.sorry()
+
+
+@proof
+def IS_FORM_PROV_HF_INTERNAL(p):
+    """|- is_form Prov_HF_internal.
+
+    Side condition for the diagonal lemma. AXIOMATIZED via
+    ``p.sorry()``; in the full construction, follows from the bottom-up
+    build of ``Prov_HF_internal`` from ``Proof_HF_internal`` and the
+    closure of ``is_form`` under the HF-formula constructors.
+    """
+    p.goal("is_form Prov_HF_internal")
+    p.sorry()
+
+
+@proof
+def FREE_IN_PROV_HF_INTERNAL(p):
+    """|- !v. free_in Prov_HF_internal v <=> v = var_x.
+
+    Side condition for the diagonal lemma. AXIOMATIZED via
+    ``p.sorry()``; ``var_x`` is the F-slot in the substitute-via-numeral
+    representation pattern.
+    """
+    p.goal("!v. free_in Prov_HF_internal v = (v = idx_x)")
+    p.sorry()
 
 
 if __name__ == "__main__":
     from parser import pp_thm
 
-    print("Stage B1.0(c) part 2 -- IS_IN_REPRESENTS prerequisites.")
+    print("Stage 3 high layer -- IS_IN_REPRESENTS prerequisites + body.")
     print("    IS_TERM_VAR_X :", pp_thm(IS_TERM_VAR_X))
     print("    IS_TERM_VAR_Y :", pp_thm(IS_TERM_VAR_Y))
     print("    IS_TERM_VAR_Z :", pp_thm(IS_TERM_VAR_Z))
@@ -2668,4 +2896,28 @@ if __name__ == "__main__":
         pp_thm(QUOTE_HF_NEQ_FROM_CLEAR_LOW),
     )
     print("    QUOTE_HF_PROV_NEQ              :", pp_thm(QUOTE_HF_PROV_NEQ))
-    print("    IS_IN_REPRESENTS_TH                  :", pp_thm(IS_IN_REPRESENTS_TH))
+    print("    IS_IN_REPRESENTS                       :", pp_thm(IS_IN_REPRESENTS))
+    print(
+        "    IS_SUBSTITUTE_STEP_REPRESENTS (SORRY)  :",
+        pp_thm(IS_SUBSTITUTE_STEP_REPRESENTS),
+    )
+    print(
+        "    IS_SUBSTITUTE_TRACE_REPRESENTS (SORRY) :",
+        pp_thm(IS_SUBSTITUTE_TRACE_REPRESENTS),
+    )
+    print(
+        "    SUBSTITUTE_REPRESENTS (SORRY)          :",
+        pp_thm(SUBSTITUTE_REPRESENTS),
+    )
+    print(
+        "    PROV_HF_REPRESENTS (SORRY)             :",
+        pp_thm(PROV_HF_REPRESENTS),
+    )
+    print(
+        "    IS_FORM_PROV_HF_INTERNAL (SORRY)       :",
+        pp_thm(IS_FORM_PROV_HF_INTERNAL),
+    )
+    print(
+        "    FREE_IN_PROV_HF_INTERNAL (SORRY)       :",
+        pp_thm(FREE_IN_PROV_HF_INTERNAL),
+    )
