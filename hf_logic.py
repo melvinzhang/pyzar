@@ -54,6 +54,7 @@ from hf_proof import (
 )
 from hf_repr_core import (
     PROV_HF_AXIOM,
+    PROV_HF_GEN,
     PROV_HF_MP,
 )
 
@@ -591,6 +592,125 @@ def PROV_HF_DT_MP(p):
     )
 
 
+# ---------------------------------------------------------------------------
+# Stage 2C (b''') -- DT-GEN combinator (eigenvariable form).
+#
+# Underpins ``DTChain.gen``: lifts a chain step ``A -> B(v)`` to
+# ``A -> Forall_f v B(v)`` provided ``v`` is not free in the chain
+# antecedent ``A``. Built from PROV_HF_GEN + the closed
+# FORALL-IMPLICATION-DISTRIBUTION lemma at slot
+# ``Imp_f (Forall_f v (Imp_f A B)) (Imp_f A (Forall_f v B))``.
+#
+# The distribution lemma itself remains a stub (see PROV_HF_FORALL_IMP_DIST
+# below). It is provable in HF's Hilbert calculus -- standard derivation
+# uses the deduction theorem with eigenvariable condition, which in turn
+# requires meta-induction on the Proof_HF predicate. Pyzar does not yet
+# have a Proof_HF-induction framework, so the implication form is
+# axiomatised here as a sorry'd lemma; callers consume PROV_HF_DT_GEN
+# transparently.
+#
+# Once FORALL_IMP_DIST is discharged (by structural induction on
+# Proof_HF, ~150-200 lines, or by adopting the AX6 distribution as a
+# kernel axiom and lifting through ``_prov_of_logical``), no consumer
+# needs to change.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def PROV_HF_FORALL_IMP_DIST(p):
+    """|- !v F G. is_form F /\\ is_form G /\\ ~(free_in F v)
+                  ==> Prov_HF (Imp_f (Forall_f v (Imp_f F G))
+                                    (Imp_f F (Forall_f v G))).
+
+    Closed-implication form of the FORALL-IMPLICATION-DISTRIBUTION
+    lemma (Mendelson's "generalization in implication"). When ``v`` is
+    not free in ``F``, the universal quantifier distributes through
+    the implication's consequent.
+
+    STUB. The standard derivation uses the deduction theorem with
+    eigenvariable condition, which is a meta-theorem about the Proof_HF
+    predicate. A direct closed Hilbert proof (using only K/S/N/UI/Vac/
+    GEN/MP) is not available -- the eigenvariable condition is what
+    makes the lemma sound, and that condition is meta-theoretic.
+
+    Proof options:
+      * Induction on Proof_HF: prove that any Proof_HF for ``Imp_f F G``
+        with ``v`` not free in ``F`` extends to a Proof_HF for
+        ``Imp_f F (Forall_f v G)``. ~150-200 lines but principled.
+      * Adopt as an axiom slot (AX6) in is_logical_axiom and lift via
+        ``_prov_of_logical``. Trivial once the kernel axiomatisation
+        accepts it; changes the HF axiom set.
+    """
+    p.goal(
+        "!v F G. is_form F /\\ is_form G /\\ ~(free_in F v) "
+        "==> Prov_HF (Imp_f (Forall_f v (Imp_f F G)) "
+        "                  (Imp_f F (Forall_f v G)))",
+        types={"v": nat0_ty, "F": nat0_ty, "G": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROV_HF_DT_GEN(p):
+    """|- !A B v. is_form A /\\ is_form B /\\ ~(free_in A v)
+                  /\\ Prov_HF (Imp_f A B)
+                  ==> Prov_HF (Imp_f A (Forall_f v B)).
+
+    Generalization-under-implication as a derived rule. From a Hilbert
+    proof of ``A -> B`` (where ``v`` does not appear free in ``A``),
+    derive a Hilbert proof of ``A -> Forall_f v B``. The eigenvariable
+    side condition ``~free_in A v`` is what makes generalization sound.
+
+    Three-step derivation:
+      1. PROV_HF_GEN at ``Imp_f A B``: lifts to ``Forall_f v (Imp_f A B)``.
+      2. PROV_HF_FORALL_IMP_DIST at (v, A, B): supplies the closed
+         implication ``Forall_f v (Imp_f A B) -> (A -> Forall_f v B)``.
+      3. PROV_HF_MP composes the two into ``A -> Forall_f v B``.
+
+    Bottlenecked on PROV_HF_FORALL_IMP_DIST (above); once that lemma is
+    discharged this combinator becomes unconditionally proved.
+    """
+    p.goal(
+        "!A B v. is_form A /\\ is_form B /\\ ~(free_in A v) "
+        "/\\ Prov_HF (Imp_f A B) "
+        "==> Prov_HF (Imp_f A (Forall_f v B))",
+        types={"A": nat0_ty, "B": nat0_ty, "v": nat0_ty},
+    )
+    p.fix("A B v")
+    p.assume(
+        "(hA, hB, hnf, hAB): "
+        "is_form A /\\ is_form B /\\ ~(free_in A v) "
+        "/\\ Prov_HF (Imp_f A B)"
+    )
+
+    # Step 1: GEN to wrap the implication in Forall_f v.
+    p.have(
+        "h_gen: Prov_HF (Forall_f v (Imp_f A B))"
+    ).by(PROV_HF_GEN, "Imp_f A B", "v", "hAB")
+
+    # Step 2: distribution lemma at (v, A, B).
+    p.have(
+        "h_dist: Prov_HF (Imp_f (Forall_f v (Imp_f A B)) "
+        "                      (Imp_f A (Forall_f v B)))"
+    ).by(
+        PROV_HF_FORALL_IMP_DIST, "v", "A", "B",
+        CONJ(p.fact("hA"), CONJ(p.fact("hB"), p.fact("hnf"))),
+    )
+
+    # Step 3: MP.
+    p.have(
+        "h_mp_in: Prov_HF (Forall_f v (Imp_f A B)) "
+        "/\\ Prov_HF (Imp_f (Forall_f v (Imp_f A B)) "
+        "                  (Imp_f A (Forall_f v B)))"
+    ).by_thm(CONJ(p.fact("h_gen"), p.fact("h_dist")))
+    p.thus("Prov_HF (Imp_f A (Forall_f v B))").by(
+        PROV_HF_MP,
+        "Forall_f v (Imp_f A B)",
+        "Imp_f A (Forall_f v B)",
+        "h_mp_in",
+    )
+
+
 @proof
 def PROV_HF_EX_FALSO(p):
     """|- !A B. is_form A /\\ is_form B
@@ -910,6 +1030,68 @@ class DTChain:
         ).by(PROV_HF_DT_MP, self.hyp_str, X_str_pp, Y_str, in_label)
         idx = len(self._steps)
         self._steps.append((Y_term, out_label))
+        return idx
+
+    def gen(self, i: int, v_str: str, not_free_fact: str) -> int:
+        """Generalize step ``i`` over ``v_str``: ``A -> B`` becomes ``A -> Forall_f v B``.
+
+        Eigenvariable side condition: ``v`` must not be free in the chain
+        antecedent ``A``. Caller supplies ``not_free_fact`` -- a fact
+        label whose conclusion is ``~(free_in A v)``.
+
+        Auto-registers ``is_form (Forall_f v B)`` in the chain's
+        is_form table so subsequent steps referencing the new body
+        don't have to repeat the derivation.
+
+        Implementation: PROV_HF_DT_GEN combinator (currently bottlenecked
+        on the FORALL_IMP_DIST distribution lemma -- a sorry'd kernel
+        stub; see PROV_HF_FORALL_IMP_DIST). Once that distribution is
+        discharged, callers of ``gen`` need no changes.
+        """
+        if i < 0 or i >= len(self._steps):
+            raise IndexError(f"DTChain.gen: step index {i} out of range")
+        B_term, dt_AB = self._steps[i]
+        B_str = self._term_to_str(B_term)
+        B_form = self._require_isf(B_term, B_str)
+        v_term = self.p._parse(v_str)
+
+        # Build the new body ``Forall_f v B`` and auto-register its is_form.
+        new_body = mk_app(self.p._parse("Forall_f"), v_term, B_term)
+        new_body_str = f"Forall_f ({v_str}) ({B_str})"
+        existing = self._lookup_isf(new_body)
+        if existing is None:
+            isf_at = SPECL([v_term, B_term], IS_FORM_AT_FORALL)
+            isff_label = self._fresh("isff")
+            self.p.have(
+                f"{isff_label}: is_form ({new_body_str})"
+            ).by_eq_mp(SYM(isf_at), self.p.fact(B_form))
+            self._isf_table.append((new_body, isff_label))
+
+        # Bundle preconditions and apply PROV_HF_DT_GEN.
+        in_label = self._fresh("gen_in")
+        self.p.have(
+            f"{in_label}: is_form ({self.hyp_str}) "
+            f"/\\ is_form ({B_str}) "
+            f"/\\ ~(free_in ({self.hyp_str}) ({v_str})) "
+            f"/\\ Prov_HF (Imp_f ({self.hyp_str}) ({B_str}))"
+        ).by_thm(
+            CONJ(
+                self.p.fact(self.hyp_form_fact),
+                CONJ(
+                    self.p.fact(B_form),
+                    CONJ(
+                        self.p.fact(not_free_fact),
+                        self.p.fact(dt_AB),
+                    ),
+                ),
+            )
+        )
+        out_label = self._fresh("dt_gen")
+        self.p.have(
+            f"{out_label}: Prov_HF (Imp_f ({self.hyp_str}) ({new_body_str}))"
+        ).by(PROV_HF_DT_GEN, self.hyp_str, B_str, v_str, in_label)
+        idx = len(self._steps)
+        self._steps.append((new_body, out_label))
         return idx
 
     def _term_to_str(self, term) -> str:
@@ -1885,38 +2067,33 @@ def PROV_HF_AND_ELIM_RIGHT(p):
 #   8. ~~Q -> Q                        [DNE_IMP]
 #   9. ~(!v.~P) -> Q                   [TRANS_IMP of steps 7 and 8]
 #
-# The bottleneck is step 4: the FORALL-IMPLICATION-DISTRIBUTION lemma
+# Step 4 -- the FORALL-IMPLICATION-DISTRIBUTION lemma
 #
 #     |- (!v. (F -> G)) -> (F -> !v. G)    when v not free in F.
 #
-# Direct Hilbert derivation requires several supporting pieces, none of
-# which is currently in pyzar:
+# is now packaged into the DTChain framework: ``DTChain.gen(idx, v,
+# not_free_fact)`` lifts ``A -> B(v)`` to ``A -> Forall_f v B(v)`` in
+# one step. The combinator that powers it is ``PROV_HF_DT_GEN``
+# (above), which delegates to ``PROV_HF_FORALL_IMP_DIST``.
 #
-#   (a) IDENTITY_SUBSTITUTE: ``substitute X (Var_t v) v = X`` (for any
-#       term/formula X). Needed so ``UI(v, F -> G, Var_t v)`` collapses
-#       to ``(!v.(F -> G)) -> (F -> G)`` rather than substituting v for
-#       v in a nontrivial way. ~30-50 line structural induction on X.
+# Status of the prereq stack:
 #
-#   (b) FREE_IN-tracking lemmas: ``substitute (Var_t v) (Var_t v) v =
-#       Var_t v`` (the Var_t HIT-but-trivial case), plus the Forall_f
-#       MISS case interaction. Roughly ~50 lines across the substitute
-#       constructors.
+#   (a) IDENTITY_SUBSTITUTE: ``substitute X (Var_t v) v = X``.
+#       DONE in hf_syntax.py (IDENTITY_SUBSTITUTE_TERM /
+#       IDENTITY_SUBSTITUTE).
 #
-#   (c) The distribution proof itself (~50 lines): use the Vac axiom
-#       at (v, F) giving ``F -> !v.F``, then UI(v, F -> G, Var_t v) +
-#       (a) giving ``(!v.(F -> G)) -> (F -> G)``, then chain via
-#       PROV_HF_GEN inside a deduction-theorem-style argument. The
-#       Gen step has a side condition (v not free in any open
-#       hypothesis) which the lemma's premise guarantees but which
-#       must be plumbed through the DTChain framework.
+#   (b) PROV_HF_DT_GEN combinator + DTChain.gen step. DONE here.
 #
-# Once (a)-(c) are in place, the EXISTS_ELIM body itself is short:
-# CONTRAP, GEN, distribution, CONTRAP again, DNE_IMP, TRANS_IMP. ~40
-# lines on top of the prereq stack.
+#   (c) PROV_HF_FORALL_IMP_DIST -- the underlying distribution
+#       lemma. STILL A STUB; the standard derivation needs the
+#       deduction theorem with eigenvariable condition, which is a
+#       meta-theorem about the Proof_HF predicate (induction on
+#       proof structure, ~150-200 lines), or alternatively can be
+#       adopted as an additional axiom slot (AX6).
 #
-# Total estimated cost: ~180-250 lines including the supporting
-# substitute-identity machinery. Deferred until that infrastructure
-# lands.
+# Once (c) is discharged the EXISTS_ELIM body below becomes a
+# straightforward DT chain plus CONTRAP / DNE_IMP / TRANS_IMP --
+# ~40-50 lines.
 # ---------------------------------------------------------------------------
 
 
@@ -1928,15 +2105,11 @@ def PROV_HF_EXISTS_ELIM(p):
 
     Existential-elimination as a derived rule (encoded form).
 
-    STUB. Blocked on the FORALL-IMPLICATION-DISTRIBUTION lemma
-    ``(!v. F -> G) -> (F -> !v. G)`` (when v not free in F), which
-    in turn blocks on:
-      * IDENTITY_SUBSTITUTE: ``substitute X (Var_t v) v = X``
-        (~30-50 line structural induction).
-      * Distribution proof itself via UI(Var_t v) + Vac + GEN inside
-        a DT-style argument (~50 lines).
-    See the section comment above for the full proof outline and the
-    breakdown of remaining work.
+    STUB. The DT-GEN combinator and DTChain.gen step are now in place
+    (above); the remaining bottleneck is the kernel
+    ``PROV_HF_FORALL_IMP_DIST`` distribution lemma, itself a sorry'd
+    stub. Once that lemma is discharged the body here is a short DT
+    chain (CONTRAP, gen, CONTRAP, DNE_IMP, TRANS_IMP).
     """
     p.goal(
         "!v P Q. is_form P /\\ is_form Q /\\ ~(free_in Q v) "
@@ -2024,6 +2197,10 @@ if __name__ == "__main__":
     print("    PROV_HF_HYP_DROP  :", pp_thm(PROV_HF_HYP_DROP))
     print("    PROV_HF_TRANS_IMP :", pp_thm(PROV_HF_TRANS_IMP))
     print("    PROV_HF_EX_FALSO  :", pp_thm(PROV_HF_EX_FALSO))
+    print()
+    print("Stage 2C (b''') -- DT-GEN combinator (STUB on FORALL_IMP_DIST).")
+    print("    PROV_HF_FORALL_IMP_DIST :", pp_thm(PROV_HF_FORALL_IMP_DIST))
+    print("    PROV_HF_DT_GEN          :", pp_thm(PROV_HF_DT_GEN))
     print()
     print("Stage 2C (c) -- negation reasoning.")
     print("    PROV_HF_DOUBLE_NEG_ELIM_IMP  :", pp_thm(PROV_HF_DOUBLE_NEG_ELIM_IMP))
