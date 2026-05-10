@@ -35,7 +35,11 @@ from tactics import (
     REFL,
     EQ_MP,
     CONJ,
+    CONJUNCT1,
+    CONJUNCT2,
     DISJ1,
+    NOT_ELIM,
+    CONTR,
     EQT_ELIM,
 )
 
@@ -77,7 +81,17 @@ from hf_repr import (
     PROV_HF_AXIOM,
     IS_TERM_EMPTY,
     IS_TERM_INSERT,
+    QUOTE_HF_AT_EMPTY,
+    _QUOTE_HF_AT_NZ,
 )
+from hf_sets import EMPTY_DEF
+from hf_syntax import INSERT_T_INJ, INSERT_T_NEQ_EMPTY
+from bits import (
+    INSERT_LOW_BIT_CLEAR_LOW,
+    LOW_BIT_LT,
+    CLEAR_LOW_LT,
+)
+from classical import EXCLUDED_MIDDLE
 from hf_logic import PROV_HF_UI
 
 
@@ -1107,61 +1121,176 @@ def HF3_INST(p):
 def QUOTE_HF_INJ(p):
     """|- !s t. quote_hf s = quote_hf t ==> s = t.
 
-    SORRY (~80-120 lines, all HOL-level).
+    Strong induction on ``s`` with predicate
+    ``\\s. !t. quote_hf s = quote_hf t ==> s = t``.  Inside the induction
+    body we ``fix t`` and assume the quote_hf-equation, then case-split
+    on ``s = 0`` and ``t = 0`` for four branches:
 
-    Proof outline -- strong induction on ``s`` (predicate
-    ``\\s. !t. quote_hf s = quote_hf t ==> s = t``); IH at ``u`` gives
-    ``!t'. quote_hf u = quote_hf t' ==> u = t'`` for any ``u``
-    nat0-less than s. After ``p.fix("t")`` and assuming the
-    quote_hf-equation, case-split on ``s = 0`` and (separately)
-    ``t = 0`` via EXCLUDED_MIDDLE, yielding four branches:
-
-      * (s = 0 /\\ t = 0): ``s = 0 = t`` is immediate.
-      * (s = 0 /\\ ~(t = 0)):
-            quote_hf s = Empty_t                [QUOTE_HF_AT_EMPTY +
-                                                  EMPTY_DEF on hsz]
-            quote_hf t = Insert_t (quote_hf (low_bit t))
-                                  (quote_hf (clear_low t))
-                                                [_QUOTE_HF_AT_NZ on htnz]
-        The quote_hf equation forces ``Empty_t = Insert_t _ _``, which
-        contradicts ``INSERT_T_NEQ_EMPTY``. Discharge via NOT_ELIM +
-        CONTR.
-      * (~(s = 0) /\\ t = 0): symmetric to the above (flip sides via
-        SYM on h_qeq, then run the previous case).
-      * (~(s = 0) /\\ ~(t = 0)):
-            quote_hf s = Insert_t (quote_hf (low_bit s))
-                                  (quote_hf (clear_low s))     [(*1*)]
-            quote_hf t = Insert_t (quote_hf (low_bit t))
-                                  (quote_hf (clear_low t))     [(*2*)]
-        Combine (*1*), (*2*), and h_qeq to get
-            Insert_t (quote_hf (low_bit s)) (quote_hf (clear_low s)) =
-            Insert_t (quote_hf (low_bit t)) (quote_hf (clear_low t)).
-        ``INSERT_T_INJ`` peels both sides:
-            quote_hf (low_bit s) = quote_hf (low_bit t)        [eq_lb_q]
-            quote_hf (clear_low s) = quote_hf (clear_low t)    [eq_cl_q]
-        Both sub-quantities are nat0-less than s
-        (LOW_BIT_LT, CLEAR_LOW_LT under hsnz), so the IH fires twice:
-            low_bit s = low_bit t                              [eq_lb]
-            clear_low s = clear_low t                          [eq_cl]
-        Reconstruct s and t via INSERT_LOW_BIT_CLEAR_LOW:
-            s = set_bit (low_bit s) (clear_low s)             [hsnz]
-              = set_bit (low_bit t) (clear_low t)             [eq_lb, eq_cl]
-              = t                                              [SYM htnz]
-        which closes the case.
-
-    The four-way split mirrors the structure of QUOTE_HF_AT_EMPTY +
-    _QUOTE_HF_AT_NZ. INSERT_T_INJ and INSERT_T_NEQ_EMPTY are pre-built
-    in hf_syntax.py (constructor injectivity / disjointness).
-
-    Status: deferred. The proof reduces entirely to existing primitives
-    (no SORRY underneath); marked here to keep IS_IN_REPRESENTS_TH's
-    interface clean while the hand-written reduction is filled in.
+      * (s=0 ∧ t=0)  : direct rewrite.
+      * (s=0 ∧ t≠0)  : quote_hf s reduces to Empty_t, quote_hf t reduces
+                       to Insert_t _ _; INSERT_T_NEQ_EMPTY closes via
+                       contradiction.
+      * (s≠0 ∧ t=0)  : symmetric.
+      * (s≠0 ∧ t≠0)  : both sides bit-decompose; INSERT_T_INJ peels the
+                       outer Insert_t; the IH fires twice (at low_bit s
+                       under LOW_BIT_LT and clear_low s under CLEAR_LOW_LT)
+                       to lift the quote_hf equalities to bit equalities;
+                       INSERT_LOW_BIT_CLEAR_LOW reconstructs s and t.
     """
     p.goal(
         "!s t. quote_hf s = quote_hf t ==> s = t",
         types={"s": nat0_ty, "t": nat0_ty},
     )
-    p.sorry()
+    with p.strong_induction("s", "IH"):
+        # Goal:  !t. quote_hf s = quote_hf t ==> s = t.
+        # IH:    !u. nat0_lt u s ==> !t'. quote_hf u = quote_hf t' ==> u = t'.
+        p.fix("t")
+        p.assume("h_qeq: quote_hf s = quote_hf t")
+        with p.cases_on(EXCLUDED_MIDDLE, "s = 0"):
+            with p.case("hsz: s = 0"):
+                with p.cases_on(EXCLUDED_MIDDLE, "t = 0"):
+                    with p.case("htz: t = 0"):
+                        p.thus("s = t").by_rewrite_of("hsz", ["htz"])
+                    with p.case("htnz: ~(t = 0)"):
+                        # quote_hf s reduces to Empty_t.
+                        p.have("h_qs: quote_hf s = Empty_t").by_rewrite(
+                            ["hsz", SYM(EMPTY_DEF), QUOTE_HF_AT_EMPTY]
+                        )
+                        # quote_hf t bit-decomposes into Insert_t.
+                        p.have(
+                            "h_qt: quote_hf t = "
+                            "Insert_t (quote_hf (low_bit t)) "
+                            "         (quote_hf (clear_low t))"
+                        ).by(_QUOTE_HF_AT_NZ, "t", "htnz")
+                        # h_qeq + h_qs + h_qt → Empty_t = Insert_t _ _.
+                        p.have(
+                            "h_eq_ins: Empty_t = "
+                            "Insert_t (quote_hf (low_bit t)) "
+                            "         (quote_hf (clear_low t))"
+                        ).by_rewrite_of("h_qeq", ["h_qs", "h_qt"])
+                        neq_th = SPECL(
+                            [
+                                p._parse("quote_hf (low_bit t)"),
+                                p._parse("quote_hf (clear_low t)"),
+                            ],
+                            INSERT_T_NEQ_EMPTY,
+                        )
+                        # neq_th : ~(Insert_t _ _ = Empty_t).
+                        contra = MP(
+                            NOT_ELIM(neq_th), SYM(p.fact("h_eq_ins"))
+                        )
+                        p.thus("s = t").by_thm(
+                            CONTR(p._parse("s = t"), contra)
+                        )
+            with p.case("hsnz: ~(s = 0)"):
+                with p.cases_on(EXCLUDED_MIDDLE, "t = 0"):
+                    with p.case("htz: t = 0"):
+                        # Symmetric to the (s=0, t≠0) case: flip h_qeq
+                        # and use the same INSERT_T_NEQ_EMPTY reasoning.
+                        p.have("h_qt: quote_hf t = Empty_t").by_rewrite(
+                            ["htz", SYM(EMPTY_DEF), QUOTE_HF_AT_EMPTY]
+                        )
+                        p.have(
+                            "h_qs: quote_hf s = "
+                            "Insert_t (quote_hf (low_bit s)) "
+                            "         (quote_hf (clear_low s))"
+                        ).by(_QUOTE_HF_AT_NZ, "s", "hsnz")
+                        p.have(
+                            "h_eq_ins: "
+                            "Insert_t (quote_hf (low_bit s)) "
+                            "         (quote_hf (clear_low s)) = Empty_t"
+                        ).by_rewrite_of("h_qeq", ["h_qt", "h_qs"])
+                        neq_th = SPECL(
+                            [
+                                p._parse("quote_hf (low_bit s)"),
+                                p._parse("quote_hf (clear_low s)"),
+                            ],
+                            INSERT_T_NEQ_EMPTY,
+                        )
+                        contra = MP(NOT_ELIM(neq_th), p.fact("h_eq_ins"))
+                        p.thus("s = t").by_thm(
+                            CONTR(p._parse("s = t"), contra)
+                        )
+                    with p.case("htnz: ~(t = 0)"):
+                        # Both bit-decompose; INSERT_T_INJ + IH twice.
+                        p.have(
+                            "h_qs: quote_hf s = "
+                            "Insert_t (quote_hf (low_bit s)) "
+                            "         (quote_hf (clear_low s))"
+                        ).by(_QUOTE_HF_AT_NZ, "s", "hsnz")
+                        p.have(
+                            "h_qt: quote_hf t = "
+                            "Insert_t (quote_hf (low_bit t)) "
+                            "         (quote_hf (clear_low t))"
+                        ).by(_QUOTE_HF_AT_NZ, "t", "htnz")
+                        p.have(
+                            "h_ins_eq: "
+                            "Insert_t (quote_hf (low_bit s)) "
+                            "         (quote_hf (clear_low s)) "
+                            "= Insert_t (quote_hf (low_bit t)) "
+                            "           (quote_hf (clear_low t))"
+                        ).by_rewrite_of("h_qeq", ["h_qs", "h_qt"])
+                        p.have(
+                            "h_args_eq: "
+                            "(quote_hf (low_bit s) = quote_hf (low_bit t)) "
+                            "/\\ (quote_hf (clear_low s) "
+                            "    = quote_hf (clear_low t))"
+                        ).by(
+                            INSERT_T_INJ,
+                            "quote_hf (low_bit s)",
+                            "quote_hf (clear_low s)",
+                            "quote_hf (low_bit t)",
+                            "quote_hf (clear_low t)",
+                            "h_ins_eq",
+                        )
+                        h_lb_q = CONJUNCT1(p.fact("h_args_eq"))
+                        h_cl_q = CONJUNCT2(p.fact("h_args_eq"))
+                        p.have(
+                            "h_lb_q: quote_hf (low_bit s) = quote_hf (low_bit t)"
+                        ).by_thm(h_lb_q)
+                        p.have(
+                            "h_cl_q: quote_hf (clear_low s) "
+                            "= quote_hf (clear_low t)"
+                        ).by_thm(h_cl_q)
+                        # IH twice.
+                        p.have("h_lb_lt: nat0_lt (low_bit s) s").by(
+                            LOW_BIT_LT, "s", "hsnz"
+                        )
+                        p.have("h_cl_lt: nat0_lt (clear_low s) s").by(
+                            CLEAR_LOW_LT, "s", "hsnz"
+                        )
+                        p.have(
+                            "h_lb_eq: low_bit s = low_bit t"
+                        ).by(
+                            "IH",
+                            "low_bit s",
+                            "h_lb_lt",
+                            "low_bit t",
+                            "h_lb_q",
+                        )
+                        p.have(
+                            "h_cl_eq: clear_low s = clear_low t"
+                        ).by(
+                            "IH",
+                            "clear_low s",
+                            "h_cl_lt",
+                            "clear_low t",
+                            "h_cl_q",
+                        )
+                        # Reconstruct s and t via INSERT_LOW_BIT_CLEAR_LOW.
+                        p.have(
+                            "h_recon_s: s = set_bit (low_bit s) (clear_low s)"
+                        ).by(INSERT_LOW_BIT_CLEAR_LOW, "s", "hsnz")
+                        p.have(
+                            "h_recon_t: t = set_bit (low_bit t) (clear_low t)"
+                        ).by(INSERT_LOW_BIT_CLEAR_LOW, "t", "htnz")
+                        p.thus("s = t").by_rewrite_of(
+                            "h_recon_s",
+                            [
+                                "h_lb_eq", "h_cl_eq",
+                                SYM(p.fact("h_recon_t")),
+                            ],
+                        )
 
 
 # ---------------------------------------------------------------------------
@@ -1371,6 +1500,6 @@ if __name__ == "__main__":
     print("    HF1_INST      :", pp_thm(HF1_INST))
     print("    HF2_INST      :", pp_thm(HF2_INST))
     print("    HF3_INST      :", pp_thm(HF3_INST))
-    print("    QUOTE_HF_INJ (SORRY)     :", pp_thm(QUOTE_HF_INJ))
+    print("    QUOTE_HF_INJ  :", pp_thm(QUOTE_HF_INJ))
     print("    QUOTE_HF_PROV_NEQ (SORRY):", pp_thm(QUOTE_HF_PROV_NEQ))
     print("    IS_IN_REPRESENTS_TH (SORRY) :", pp_thm(IS_IN_REPRESENTS_TH))
