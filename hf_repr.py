@@ -170,6 +170,8 @@ from hf_sets import (
     Insert,  # noqa: F401  -- parser alias for quote_hf bridge
     Empty,  # noqa: F401  -- parser alias for quote_hf bridge
     Singleton,  # noqa: F401  -- parser alias for QUOTE_HF_AT_SINGLETON
+    Pair,  # noqa: F401  -- parser alias for QUOTE_HF_AT_PAIR
+    Pair_ord,  # noqa: F401  -- parser alias for QUOTE_HF_AT_PAIR_ORD
     Union,  # used by TRACE_EXISTS to merge sub-traces
     EMPTY_DEF,  # used by QUOTE_HF_AT_EMPTY to fold Empty into 0
     INSERT_AT,  # used by QUOTE_HF_AT_INSERT_LOW to unfold Insert to set_bit
@@ -4122,6 +4124,92 @@ def QUOTE_HF_AT_SINGLETON(p):
     )
 
 
+@proof
+def QUOTE_HF_AT_PAIR(p):
+    """|- !x y. ~(x = y) ==>
+                quote_hf (Pair x y) =
+                Insert_t (quote_hf x) (Insert_t (quote_hf y) Empty_t).
+
+    SORRY (thin-interface scaffolding).
+
+    The bit-encoding of ``Pair x y`` collapses to ``Singleton x`` when
+    ``x = y``, so this rewrite is conditional on ``~(x = y)``. Discharge
+    plan:
+
+      * ``Pair x y = Insert x (Singleton y)`` (PAIR_AT).
+      * Apply QUOTE_HF_AT_INSERT_LOW. The canonical-form precondition
+        ``Singleton y = 0 \\/ nat0_lt x (low_bit (Singleton y))``
+        reduces to ``nat0_lt x y`` (after ``low_bit (Singleton y) = y``,
+        derivable from POW2_AS_SET_BIT + LOW_BIT_SET_BIT_NEW with the
+        ``s = 0`` disjunct).
+      * Case-split ``~(x = y)`` into ``nat0_lt x y`` vs ``nat0_lt y x``;
+        in the second case rewrite ``Pair x y = Pair y x`` (set
+        equality / bit-OR commutativity) before applying the previous
+        step.
+      * QUOTE_HF_AT_SINGLETON closes the inner ``quote_hf (Singleton y)``.
+
+    Used by ``QUOTE_HF_AT_PAIR_ORD`` and by Stage 3 constructor unfolds
+    that walk Pair-shaped subterms.
+    """
+    p.goal(
+        "!x y. ~(x = y) ==> "
+        "quote_hf (Pair x y) = "
+        "Insert_t (quote_hf x) (Insert_t (quote_hf y) Empty_t)"
+    )
+    p.sorry()
+
+
+@proof
+def QUOTE_HF_AT_PAIR_ORD(p):
+    """|- !x y. ~(x = y) ==>
+                quote_hf (Pair_ord x y) =
+                Insert_t (Insert_t (quote_hf x) Empty_t)
+                         (Insert_t
+                            (Insert_t (quote_hf x)
+                                      (Insert_t (quote_hf y) Empty_t))
+                            Empty_t).
+
+    SORRY (thin-interface scaffolding).
+
+    Keystone Pair_ord shape rewrite: every HF-syntax constructor
+    (``Var_t``, ``Eq_f``, ``Not_f``, ``Imp_f``, ``Forall_f``,
+    ``Insert_t``, ``In_a``) is a tagged Pair_ord at the HOL level, so
+    Stage 3 representability proofs collapse their goal terms via this
+    lemma + the constructor's defining ``_AT`` equation.
+
+    The bit-encoding collapses ``Pair_ord x x`` to ``Singleton (Singleton x)``
+    (one Insert_t layer fewer than the RHS shown), so the equation is
+    conditional on ``~(x = y)``. Discharge plan:
+
+      * ``Pair_ord x y = Pair (Singleton x) (Pair x y) =
+        Insert (Singleton x) (Singleton (Pair x y))`` (PAIR_ORD_AT,
+        PAIR_AT, SINGLETON_AS_INSERT).
+      * Apply QUOTE_HF_AT_INSERT_LOW at the outer Insert. Precondition:
+        ``nat0_lt (Singleton x) (Pair x y)``. Under ``~(x = y)``:
+        ``Pair x y`` has two distinct bits (positions x and y), and
+        ``Singleton x = pow2 x`` has only bit x; numerically
+        ``pow2 x < pow2 x | pow2 y``. This is the bit-arithmetic step
+        currently parked under SORRY.
+      * QUOTE_HF_AT_SINGLETON folds the two singleton layers; the inner
+        ``quote_hf (Pair x y)`` closes via QUOTE_HF_AT_PAIR.
+
+    Constructor-specific lemmas (QUOTE_HF_AT_VAR_T etc.) follow from a
+    one-line ``by(QUOTE_HF_AT_PAIR_ORD, ..., side_cond)`` once the tag
+    inequalities (closed numerical facts like ``~(2 = v)``) are
+    discharged.
+    """
+    p.goal(
+        "!x y. ~(x = y) ==> "
+        "quote_hf (Pair_ord x y) = "
+        "Insert_t (Insert_t (quote_hf x) Empty_t) "
+        "         (Insert_t "
+        "            (Insert_t (quote_hf x) "
+        "                      (Insert_t (quote_hf y) Empty_t)) "
+        "            Empty_t)"
+    )
+    p.sorry()
+
+
 # ---------------------------------------------------------------------------
 # Stage 3B (l) -- structural induction on HF sets.
 #
@@ -4231,21 +4319,17 @@ def IS_PAIR_ORD_REPRESENTS(p):
     Empty_t.
 
     Proof strategy:
-      * Unfold ``Pair_ord x y = Pair (Singleton x) (Pair x y)``
-        (PAIR_ORD_AT, PAIR_AT) and ``Singleton`` (SINGLETON_AS_INSERT) to
-        expose ``Pair_ord x y`` as a nested ``Insert``-tower over HOL
-        HF sets.
-      * Case-split on ``x = y`` -- when x = y the bit-encoding collapses
-        ``Pair x x = Singleton x`` and ``Pair_ord x x = Singleton (Singleton x)``,
-        so the closed-form ``quote_hf`` shape differs by one Insert_t
-        layer; otherwise ``Pair_ord x y`` decomposes into the two
-        distinct Kuratowski leaves.
-      * In each branch fold the ``Insert``-tower through
-        ``QUOTE_HF_AT_INSERT_LOW`` + ``QUOTE_HF_AT_SINGLETON`` +
-        ``QUOTE_HF_AT_EMPTY`` to land at the matching Insert_t-tower at
-        the HF-syntax level, and discharge the substituted
-        ``is_Pair_ord_internal`` body via HF's reflexivity axiom + HF1-HF3
-        walking the resulting Insert_t-tower.
+      * Case-split on ``x = y``. When x = y the bit-encoding collapses
+        ``Pair_ord x x = Singleton (Singleton x)``; otherwise ``Pair_ord
+        x y`` has the full Kuratowski two-element shape.
+      * In the ``~(x = y)`` branch, ``QUOTE_HF_AT_PAIR_ORD`` rewrites
+        ``quote_hf (Pair_ord x y)`` to a closed-form Insert_t-tower in
+        ``quote_hf x`` and ``quote_hf y``; the substituted
+        ``is_Pair_ord_internal`` body then matches via HF reflexivity
+        plus HF1-HF3 walking the Insert_t-tower.
+      * In the ``x = y`` branch use ``QUOTE_HF_AT_SINGLETON`` twice on
+        ``Pair_ord x x = Singleton (Singleton x)``; the substituted body
+        accepts the collapsed shape via the same HF axioms.
 
     No reference to ``low_bit`` / ``clear_low`` survives in the proof:
     the bit decomposition is hidden behind the quote_hf structural
@@ -4352,9 +4436,14 @@ def IS_SUBSTITUTE_STEP_REPRESENTS(p):
     Each case dispatches the matching HF-disjunct via:
       * IS_PAIR_ORD_REPRESENTS for the Kuratowski-shape clauses;
       * IS_IN_REPRESENTS for the trace-membership clauses;
-      * QUOTE_HF_AT_INSERT_LOW / QUOTE_HF_AT_SINGLETON / QUOTE_HF_AT_EMPTY
-        to align constructor terms (Var_t, Eq_f, Imp_f, Forall_f, ...)
-        with their Insert_t-tower images;
+      * QUOTE_HF_AT_PAIR_ORD to unfold tagged HF-syntax constructors
+        (``Var_t v = Pair_ord 2 v``, ``Eq_f a b = Pair_ord 5 (Pair_ord a b)``,
+        ...). The ``~(x = y)`` side condition reduces to a closed
+        numerical inequality at each constructor (``~(2 = v)``,
+        ``~(5 = Pair_ord a b)``, ...) and is discharged once per
+        constructor.
+      * QUOTE_HF_AT_SINGLETON / QUOTE_HF_AT_EMPTY to fold the leaf
+        layers;
       * HF axioms HF1-HF3 walking the resulting trees (no bit-level
         reasoning -- the canonical-form precondition is consumed inside
         the QUOTE_HF_AT_* rewrites).
@@ -4715,6 +4804,8 @@ if __name__ == "__main__":
     print("    QUOTE_HF_AT_EMPTY                    :", pp_thm(QUOTE_HF_AT_EMPTY))
     print("    QUOTE_HF_AT_INSERT_LOW               :", pp_thm(QUOTE_HF_AT_INSERT_LOW))
     print("    QUOTE_HF_AT_SINGLETON                :", pp_thm(QUOTE_HF_AT_SINGLETON))
+    print("    QUOTE_HF_AT_PAIR (SORRY)              :", pp_thm(QUOTE_HF_AT_PAIR))
+    print("    QUOTE_HF_AT_PAIR_ORD (SORRY)          :", pp_thm(QUOTE_HF_AT_PAIR_ORD))
     print("    HF_INDUCTION                          :", pp_thm(HF_INDUCTION))
     print("    IS_PAIR_ORD_REPRESENTS (SORRY)        :", pp_thm(IS_PAIR_ORD_REPRESENTS))
     print("    IS_IN_REPRESENTS (SORRY)              :", pp_thm(IS_IN_REPRESENTS))
