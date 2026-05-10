@@ -172,6 +172,7 @@ from hf_sets import (
     Singleton,  # noqa: F401  -- parser alias for QUOTE_HF_AT_SINGLETON
     Pair,  # noqa: F401  -- parser alias for QUOTE_HF_AT_PAIR
     Pair_ord,  # noqa: F401  -- parser alias for QUOTE_HF_AT_PAIR_ORD
+    vN,  # noqa: F401  -- parser alias for QUOTE_HF_AT_NUMERAL
     Union,  # used by TRACE_EXISTS to merge sub-traces
     EMPTY_DEF,  # used by QUOTE_HF_AT_EMPTY to fold Empty into 0
     INSERT_AT,  # used by QUOTE_HF_AT_INSERT_LOW to unfold Insert to set_bit
@@ -4210,6 +4211,39 @@ def QUOTE_HF_AT_PAIR_ORD(p):
     p.sorry()
 
 
+@proof
+def QUOTE_HF_AT_NUMERAL(p):
+    """|- !n. quote_hf (vN n) = numeral n.
+
+    SORRY (thin-interface scaffolding).
+
+    Bridges the bit-encoded von Neumann ordinal ``vN n`` (hf_sets.py) to
+    the HF-syntax numeral ``numeral n`` (this file). Stage 3 substitutes
+    at numeral positions via ``substitute ... (numeral n) var_x``; the
+    matching HOL inputs are vN-encoded HF sets, and this lemma collapses
+    the substitution chain to a single ``quote_hf``-free closed form.
+
+    Discharge plan: Peano induction on ``n``.
+
+      * Base (n = 0): ``vN 0 = Empty`` (VN_BASE), ``numeral 0 = Empty_t``
+        (NUMERAL_BASE), and QUOTE_HF_AT_EMPTY closes the chain.
+      * Step (n -> SUC0 n): ``vN (SUC0 n) = vN_succ (vN n) = Insert (vN n)
+        (vN n)`` (VN_STEP, VN_SUCC_AT). Apply the canonical Insert-tower
+        decomposition (via _QUOTE_HF_AT_NZ at the bit level, since the
+        ``Insert x x`` shape doesn't satisfy the QUOTE_HF_AT_INSERT_LOW
+        precondition) to land at ``Insert_t (quote_hf (vN n))
+        (quote_hf (vN n))``; the IH plus NUMERAL_STEP folds this to
+        ``numeral (SUC0 n)``.
+
+    The step case requires bit-level reasoning about ``low_bit`` and
+    ``clear_low`` of ``Insert (vN n) (vN n)``; same flavour of work
+    parked under SORRY for INSERT_LOW_BIT_CLEAR_LOW. ~20 lines once
+    those are discharged.
+    """
+    p.goal("!n. quote_hf (vN n) = numeral n")
+    p.sorry()
+
+
 # ---------------------------------------------------------------------------
 # Stage 3B (l) -- structural induction on HF sets.
 #
@@ -4806,6 +4840,7 @@ if __name__ == "__main__":
     print("    QUOTE_HF_AT_SINGLETON                :", pp_thm(QUOTE_HF_AT_SINGLETON))
     print("    QUOTE_HF_AT_PAIR (SORRY)              :", pp_thm(QUOTE_HF_AT_PAIR))
     print("    QUOTE_HF_AT_PAIR_ORD (SORRY)          :", pp_thm(QUOTE_HF_AT_PAIR_ORD))
+    print("    QUOTE_HF_AT_NUMERAL (SORRY)           :", pp_thm(QUOTE_HF_AT_NUMERAL))
     print("    HF_INDUCTION                          :", pp_thm(HF_INDUCTION))
     print("    IS_PAIR_ORD_REPRESENTS (SORRY)        :", pp_thm(IS_PAIR_ORD_REPRESENTS))
     print("    IS_IN_REPRESENTS (SORRY)              :", pp_thm(IS_IN_REPRESENTS))
