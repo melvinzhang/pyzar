@@ -3,46 +3,44 @@
 SKETCH ONLY -- this file lays out the construction; the proofs are
 stubbed with strategy comments rather than executed. The goal is to
 state and prove, as a HOL theorem, that the formalised first-order
-theory Q (Robinson arithmetic) is incomplete: there is an explicit
-sentence ``G_Q`` such that
+theory HF (Świerczkowski-style hereditarily finite set theory) is
+incomplete: there is an explicit sentence ``G_HF`` such that
 
-    |- ~ Q_proves G_Q  /\\  ~ Q_proves (Not G_Q).
+    |- ~ HF_proves G_HF  /\\  ~ HF_proves (Not G_HF).
 
 The whole development lives over ``hf_sets.py`` plus ``nat.py``.
-Axiomatic cost: zero. HOL + HF already proves the consistency of Q
-(Q has a model -- the von Neumann numerals inside HF) so the
-incompleteness statement is *unconditional*, not "if Q is consistent".
+Axiomatic cost: zero. HOL + HF already proves the consistency of HF
+(HF has a HOL-level model -- the von Neumann numerals inside HF) so the
+incompleteness statement is *unconditional*, not "if HF is consistent".
 
 ------------------------------------------------------------------
-Why Q rather than PA
+Why HF rather than PA
 ------------------------------------------------------------------
 
-Robinson's Q is the cheapest theory the incompleteness proof goes
-through. Its seven closed axioms are PA's recursion equations plus a
-"non-zero has a predecessor" clause, and *no* induction schema:
+HF (Świerczkowski 2003) is the cheapest theory the incompleteness proof
+goes through. Its five closed axioms speak about set membership and
+adjunction, with *no* induction schema:
 
-    Q1.  ~(S x = 0)
-    Q2.  S x = S y  ==>  x = y
-    Q3.  ~(x = 0)  ==>  ?y. x = S y          (predecessor)
-    Q4.  x + 0 = x
-    Q5.  x + S y = S (x + y)
-    Q6.  x * 0 = 0
-    Q7.  x * S y = x * y + x
+    HF1.  !x.       ~In x Empty
+    HF2.  !i s.     In i (Insert i s)
+    HF3.  !i j s.   ~(i = j) -> (In j (Insert i s) <-> In j s)
+    HF4.  !a b.     (!x. In x a <-> In x b) -> a = b
+    HF5.  !x y.     In x y -> ?z. y = Insert x z          (predecessor)
 
-Q is *strikingly weak*: it does not prove ``x + y = y + x``, nor
-``!x. x = 0 \\/ ?y. x = S y`` (only its numeral instances). What it
-*does* prove is enough: every primitive recursive predicate is
-representable in Q (Goedel-Bernays beta function trick), which is the
-sole hypothesis needed for the diagonal lemma. So Q is essentially
-undecidable, and the same holds for every consistent extension --
-including PA, ZFC, and HOL itself.
+HF is strong enough for arithmetisation: every primitive recursive
+predicate is representable in HF (via the von Neumann encoding of
+naturals as ordinals -- numerals are just nested Insert-towers), which
+is the sole hypothesis needed for the diagonal lemma. So HF is
+essentially undecidable, and the same holds for every consistent
+extension -- including PA, ZFC, and HOL itself.
 
-The headline theorem reads identically for Q and PA. The implementation
-is significantly cheaper for Q: the induction schema is an infinite
+The headline theorem reads identically for HF and PA. The implementation
+is significantly cheaper for HF: the induction schema is an infinite
 axiom family whose encoding-as-a-decidable-predicate is ~150 lines of
-substitution bookkeeping that we don't have to write. All of pyzar's
-downstream consumers want the metatheorem ("PA, ZFC, ... are
-incomplete"), and that follows from incompleteness of Q by the
+substitution bookkeeping that we don't have to write, and the syntactic
+grammar reduces to three term constructors (Empty/Var/Insert). All of
+pyzar's downstream consumers want the metatheorem ("PA, ZFC, ... are
+incomplete"), and that follows from incompleteness of HF by the
 essential-undecidability corollary at the end of Stage 5.
 
 ------------------------------------------------------------------
@@ -51,7 +49,7 @@ The idea (Goedel 1931; modern presentations: Smullyan, Boolos)
 
 Three ingredients:
 
-  (1) *Arithmetization.* Encode each Q term, formula, and proof as a
+  (1) *Arithmetization.* Encode each HF term, formula, and proof as a
       hereditarily finite set, hence as a natural number. With ``HF``
       this is a one-liner: terms and formulas are finite trees, which
       are HF sets, which are nums. Goedel numbering is the Ackermann
@@ -59,37 +57,37 @@ Three ingredients:
       we pick for syntax.
 
   (2) *Representation.* Define the primitive recursive predicate
-      ``Proof_Q(p, n)`` -- "the HF-encoded proof ``p`` is a Q
+      ``Proof_HF(p, n)`` -- "the HF-encoded proof ``p`` is an HF
       derivation of the formula with HF-encoding ``n``" -- as a HOL
       predicate on ``num``. Define
-            Prov_Q(n)  :<=>  ?p. Proof_Q(p, n).
-      Both ``Proof_Q`` and ``Prov_Q`` are *HOL* predicates; they are
-      not at this stage statements *inside* Q.
+            Prov_HF(n)  :<=>  ?p. Proof_HF(p, n).
+      Both ``Proof_HF`` and ``Prov_HF`` are *HOL* predicates; they are
+      not at this stage statements *inside* HF.
 
-  (3) *Diagonal lemma.* For every Q formula ``phi(x)`` with one free
+  (3) *Diagonal lemma.* For every HF formula ``phi(x)`` with one free
       variable there is a sentence ``psi`` such that
-            Q |- psi <==> phi(numeral_of(godelnum psi)).
-      Apply with ``phi(x) := Not (Prov_Q_internal x)`` to get the
-      Goedel sentence ``G_Q``:
-            Q |- G_Q <==> Not (Prov_Q_internal (numeral_of (godelnum G_Q))).
+            HF |- psi <==> phi(numeral_of(godelnum psi)).
+      Apply with ``phi(x) := Not (Prov_HF_internal x)`` to get the
+      Goedel sentence ``G_HF``:
+            HF |- G_HF <==> Not (Prov_HF_internal (numeral_of (godelnum G_HF))).
 
-The "internal" provability predicate ``Prov_Q_internal`` is the Q
-formula expressing what ``Prov_Q`` (the HOL predicate) computes -- the
+The "internal" provability predicate ``Prov_HF_internal`` is the HF
+formula expressing what ``Prov_HF`` (the HOL predicate) computes -- the
 *representability* theorem says these two coincide on standard inputs:
 
-    |- !n. Prov_Q n  <==>  Q |- Prov_Q_internal (numeral_of n).
+    |- !n. Prov_HF n  <==>  HF |- Prov_HF_internal (numeral_of n).
 
 With those two pieces, incompleteness is short:
 
-    Q |- G_Q   ==>   Prov_Q (godelnum G_Q)              (definitions)
-              ==>    Q |- Prov_Q_internal (numeral_of ...)  (representability)
-              ==>    Q |- Not G_Q                       (diagonal)
-              ==>    Q inconsistent                     (combine)
+    HF |- G_HF   ==>   Prov_HF (godelnum G_HF)              (definitions)
+              ==>    HF |- Prov_HF_internal (numeral_of ...)  (representability)
+              ==>    HF |- Not G_HF                       (diagonal)
+              ==>    HF inconsistent                     (combine)
 
-    Q |- Not G_Q   ==>  Q |- Prov_Q_internal (numeral_of ...)  (diagonal)
-                   ==>  Prov_Q (godelnum G_Q)           (Sigma_1 soundness)
-                   ==>  Q |- G_Q                        (definitions)
-                   ==>  Q inconsistent                  (combine)
+    HF |- Not G_HF   ==>  HF |- Prov_HF_internal (numeral_of ...)  (diagonal)
+                   ==>  Prov_HF (godelnum G_HF)           (Sigma_1 soundness)
+                   ==>  HF |- G_HF                        (definitions)
+                   ==>  HF inconsistent                  (combine)
 
 HOL + HF discharges the consistency hypothesis on its own (the standard
 model lives inside HF), so we conclude unconditionally.
@@ -106,38 +104,38 @@ representability theorem against that concrete choice.
 
 Two design choices:
 
-  (a) *Hilbert-style*. Q has seven equation/inequation axioms plus the
+  (a) *Hilbert-style*. HF has five closed set-theoretic axioms plus the
       standard finite list of propositional, quantifier, and equality
       axioms; rules are modus ponens and generalization. Proof = list
       of formulas, each either an axiom instance or following by a
       rule from earlier lines. Easy to encode, ugly to do real proofs
-      in. We use this because we never *do* real proofs in Q -- we
+      in. We use this because we never *do* real proofs in HF -- we
       only check that a few specific proofs exist.
 
   (b) *Natural deduction*. Cleaner proof terms; more work to encode.
       Skippable.
 
-We take (a). ``Proof_Q(p, n)`` becomes a primitive recursive predicate
-on ``num x num`` -- decidable, hence representable in Q by a Sigma_1
+We take (a). ``Proof_HF(p, n)`` becomes a primitive recursive predicate
+on ``num x num`` -- decidable, hence representable in HF by a Sigma_1
 formula. That representability is the only nontrivial arithmetization
 theorem in the file.
 
 (There is no "Sigma_1-soundness axiom" to post: HOL + HF proves
-Sigma_1 soundness of Q outright, since HF *is* the standard model.)
+Sigma_1 soundness of HF outright, since HF *is* the standard model.)
 """
 
-# Stage 1: see q_syntax.py
-# Stage 2: see q_proof.py
-# Stage 3: see q_repr.py
+# Stage 1: see hf_syntax.py
+# Stage 2: see hf_proof.py
+# Stage 3: see hf_repr.py
 
 # ---------------------------------------------------------------------------
 # Stage 4 -- the diagonal lemma.
 # ---------------------------------------------------------------------------
 #
-# Lemma (Goedel-Carnap). For every Q formula phi(x) with x as its only
+# Lemma (Goedel-Carnap). For every HF formula phi(x) with x as its only
 # free variable there is a sentence psi such that
 #
-#     |- Prov_Q (godelnum (Iff psi (phi (numeral (godelnum psi))))).
+#     |- Prov_HF (godelnum (Iff psi (phi (numeral (godelnum psi))))).
 #
 # Proof sketch:
 #   * Define the "diagonal substitution" function
@@ -146,52 +144,52 @@ Sigma_1 soundness of Q outright, since HF *is* the standard model.)
 #   * Let theta(x) := ?y. D(x, y) /\\ phi(y).
 #   * Let m := godelnum theta.
 #   * Take psi := substitute(x, numeral m, theta) = "?y. D(numeral m, y) /\\ phi(y)".
-#   * By representability of diag, Q proves D(numeral m, numeral k) iff
+#   * By representability of diag, HF proves D(numeral m, numeral k) iff
 #     k = diag(m) = godelnum psi.
-#   * Hence Q proves psi <==> phi(numeral (godelnum psi)).
+#   * Hence HF proves psi <==> phi(numeral (godelnum psi)).
 #
 # The proof is ~80 lines once Stage 3 is in place; it is the
 # *self-application* trick written out arithmetically. Nothing in it
-# uses induction, so the lemma is exactly as cheap for Q as for PA.
+# uses induction, so the lemma is exactly as cheap for HF as for PA.
 
 # ---------------------------------------------------------------------------
 # Stage 5 -- the Goedel sentence and the main theorem.
 # ---------------------------------------------------------------------------
 #
-# defn:  G_Q  :=  the diagonal-fixed-point of (Not (Prov_Q_internal x)).
+# defn:  G_HF  :=  the diagonal-fixed-point of (Not (Prov_HF_internal x)).
 #
-# Equivalently:  |- Prov_Q (godelnum (Iff G_Q (Not (Prov_Q_internal (numeral (godelnum G_Q)))))).
+# Equivalently:  |- Prov_HF (godelnum (Iff G_HF (Not (Prov_HF_internal (numeral (godelnum G_HF)))))).
 #
 # Theorem (First Incompleteness, semantic form):
 #
-#   |-  ~ Prov_Q (godelnum G_Q)  /\\  ~ Prov_Q (godelnum (Not G_Q))
+#   |-  ~ Prov_HF (godelnum G_HF)  /\\  ~ Prov_HF (godelnum (Not G_HF))
 #
 # Proof:
 #
-#   First conjunct (Q does not prove G_Q):
-#     Suppose Prov_Q (godelnum G_Q).
+#   First conjunct (HF does not prove G_HF):
+#     Suppose Prov_HF (godelnum G_HF).
 #     By representability,
-#         Prov_Q (godelnum (Prov_Q_internal (numeral (godelnum G_Q)))).
+#         Prov_HF (godelnum (Prov_HF_internal (numeral (godelnum G_HF)))).
 #     By the diagonal equivalence applied internally,
-#         Prov_Q (godelnum (Not G_Q)).
-#     Combined with the assumption, Q proves both G_Q and ~G_Q;
-#     therefore Q is inconsistent. But Q has a model in HF
-#     (Stage 6), so Q is consistent -- contradiction.
+#         Prov_HF (godelnum (Not G_HF)).
+#     Combined with the assumption, HF proves both G_HF and ~G_HF;
+#     therefore HF is inconsistent. But HF has a HOL-level model in HF
+#     (Stage 6), so HF is consistent -- contradiction.
 #
-#   Second conjunct (Q does not prove Not G_Q):
-#     Suppose Prov_Q (godelnum (Not G_Q)).
+#   Second conjunct (HF does not prove Not G_HF):
+#     Suppose Prov_HF (godelnum (Not G_HF)).
 #     By the diagonal equivalence,
-#         Prov_Q (godelnum (Prov_Q_internal (numeral (godelnum G_Q)))).
-#     The internal-provability formula is Sigma_1, and Q is Sigma_1-
-#     sound (Stage 6), so the *external* Prov_Q (godelnum G_Q) holds
+#         Prov_HF (godelnum (Prov_HF_internal (numeral (godelnum G_HF)))).
+#     The internal-provability formula is Sigma_1, and HF is Sigma_1-
+#     sound (Stage 6), so the *external* Prov_HF (godelnum G_HF) holds
 #     in HOL.
-#     Combined with the assumption, Q proves both G_Q and ~G_Q;
+#     Combined with the assumption, HF proves both G_HF and ~G_HF;
 #     contradiction with consistency.
 #
 # Corollary (Essential undecidability). Any consistent first-order
-# theory T in the language of arithmetic that *extends* Q is
-# incomplete. Proof: every Q-axiom is a T-theorem by hypothesis, so
-# Prov_Q n ==> Prov_T n; the same G_Q (or its T-internal analogue)
+# theory T in the language of HF that *extends* HF is
+# incomplete. Proof: every HF-axiom is a T-theorem by hypothesis, so
+# Prov_HF n ==> Prov_T n; the same G_HF (or its T-internal analogue)
 # witnesses incompleteness. ~50 lines on top of Stage 5. This is how
 # PA, ZFC, and HOL itself inherit incompleteness for free -- we never
 # need to repeat the construction with their own provability
@@ -205,34 +203,33 @@ Sigma_1 soundness of Q outright, since HF *is* the standard model.)
 #
 # Two facts are needed but never posted as axioms:
 #
-#   (A)  Consistency: ~ Prov_Q (godelnum (Eq Zero (Succ Zero))).
-#        Proof: HF supplies a model. The von Neumann numerals
-#               0_HF := Empty,  S_HF n := union (pair n (pair n n))
-#        satisfy each of Q1-Q7 -- one HOL theorem per axiom, mostly
-#        one-liners (Q1 from EMPTY_PROP, Q2 from successor injectivity,
-#        Q3 by case-split on Empty vs. inhabited, Q4-Q7 by unfolding
-#        the HF definitions of + and * on von Neumann numerals).
-#        Soundness of the proof system then transfers any HOL-witnessed
-#        inconsistency of Q to an inconsistency of HF, but HF is
-#        consistent (by exhibiting actual numbers). So Q is consistent.
-#        ~120 lines: model construction + one line per Q axiom.
+#   (A)  Consistency: ~ Prov_HF (godelnum (Eq Empty (Insert Empty Empty))).
+#        Proof: HF supplies a HOL-level model. The carrier is ``hf =
+#        nat0`` with Empty/Insert/In interpreted via their HOL
+#        definitions; the five HF axioms are then HOL theorems --
+#        HF1 from NOT_IN_EMPTY, HF2 from IN_INSERT_SAME, HF3 from
+#        IN_INSERT_DIFF, HF4 from bit-extensionality, HF5 from a
+#        one-step Insert-decomposition. Soundness of the proof system
+#        transfers any HOL-witnessed inconsistency of HF to an
+#        inconsistency of HOL itself, but HOL is consistent.
+#        ~120 lines: model construction + one line per HF axiom.
 #
 #        (Compare PA: each induction-schema instance is a separate
 #        soundness obligation, discharged uniformly via well-ordering
 #        of ``num``; ~30 extra lines.)
 #
-#   (B)  Sigma_1-soundness: !F. F is a Sigma_1 sentence /\\ Prov_Q F
+#   (B)  Sigma_1-soundness: !F. F is a Sigma_1 sentence /\\ Prov_HF F
 #        ==> F holds (in HOL).
 #        Proof: any Sigma_1 sentence is "?x_1 ... x_k. P(x_1, ..., x_k)"
-#        with P primitive recursive. Soundness of Q's proof rules
-#        transfers any Q-derivation to a HOL theorem; the HOL theorem
+#        with P primitive recursive. Soundness of HF's proof rules
+#        transfers any HF-derivation to a HOL theorem; the HOL theorem
 #        is the corresponding existential about ``num``. ~80 lines on
 #        top of the soundness of propositional + first-order rules.
 #
 # Both (A) and (B) are HOL theorems, not posted axioms. This is the
-# standard "the metatheory is stronger than Q" observation: HOL with
-# HF proves Con(Q) -- in fact proves Con(PA) and Con(ZFC) too, the
-# limit being TARSKI_A's inaccessibility -- so HOL knows that Q is
+# standard "the metatheory is stronger than HF" observation: HOL with
+# HF proves Con(HF) -- in fact proves Con(PA) and Con(ZFC) too, the
+# limit being TARSKI_A's inaccessibility -- so HOL knows that HF is
 # incomplete.
 
 # ---------------------------------------------------------------------------
@@ -240,9 +237,9 @@ Sigma_1 soundness of Q outright, since HF *is* the standard model.)
 # ---------------------------------------------------------------------------
 #
 # Derived from the bare HOL kernel + ``num`` + HF (no new axioms):
-#   * First incompleteness for Q: an explicit sentence G_Q, and the
-#     theorem that neither G_Q nor Not G_Q is Q-provable.
-#   * Essential undecidability: any consistent extension of Q in the
+#   * First incompleteness for HF: an explicit sentence G_HF, and the
+#     theorem that neither G_HF nor Not G_HF is HF-provable.
+#   * Essential undecidability: any consistent extension of HF in the
 #     same language is incomplete. Same proof; ~50 lines on top of
 #     Stage 5. This is the immediate corollary that gives
 #     incompleteness for PA, ZFC, and HOL itself without any extra
@@ -250,23 +247,23 @@ Sigma_1 soundness of Q outright, since HF *is* the standard model.)
 #   * Tarski's undefinability of arithmetic truth (one corollary; ~30
 #     lines once the diagonal lemma is in place).
 #   * Rosser's strengthening (replace Prov by the Rosser predicate;
-#     the same argument yields ~ Prov_Q (godelnum R_Q) /\\
-#     ~ Prov_Q (godelnum (Not R_Q)) using only consistency rather
+#     the same argument yields ~ Prov_HF (godelnum R_HF) /\\
+#     ~ Prov_HF (godelnum (Not R_HF)) using only consistency rather
 #     than Sigma_1-soundness; ~120 lines on top of Stage 5).
 #
 # Not derived here:
 #   * Second incompleteness ("T does not prove its own consistency")
 #     for any T strong enough to support the Hilbert-Bernays-Loeb
-#     derivability conditions. Q itself is *too weak* -- it cannot
+#     derivability conditions. HF itself is *too weak* -- it cannot
 #     internalise its own soundness arguments. Second incompleteness
 #     starts at PA (or, more precisely, at I-Sigma_1) and requires
 #     us to revisit Stage 2 with the induction schema. Cleanly
 #     factored as ``godel_second.py`` against an extended substrate.
 #   * Loeb's theorem and the modal logic GL: same comment as second
 #     incompleteness; downstream of it.
-#   * Anything inside Q proper: Q does not prove ``x + y = y + x``,
+#   * Anything inside HF proper: HF does not prove ``x + y = y + x``,
 #     ``x + 0 = 0 + x``, or even ``!x. x = 0 \\/ ?y. x = Succ y``.
-#     Don't try to do real arithmetic inside the formalised Q; do it
+#     Don't try to do real arithmetic inside the formalised HF; do it
 #     in HOL on ``num`` and represent the result.
 
 # ---------------------------------------------------------------------------
@@ -275,26 +272,26 @@ Sigma_1 soundness of Q outright, since HF *is* the standard model.)
 #
 # Prerequisites: ``nat.py``, ``hf_sets.py``.
 #
-#   1. ``q_syntax.py`` -- term and formula datatypes (as HF trees);
+#   1. ``hf_syntax.py`` -- term and formula datatypes (as HF trees);
 #      Goedel numbering; substitution; unique readability; free-
 #      variable analysis. ~300 lines. (Same shape as PA's syntax
 #      module; the signature is identical.)
 #
-#   2. ``q_proofs.py`` -- the seven Q axioms and the logical axioms
-#      as predicates on godelnums; ``Proof_Q``; ``Prov_Q``; closure
+#   2. ``hf_proof.py`` -- the seven HF axioms and the logical axioms
+#      as predicates on godelnums; ``Proof_HF``; ``Prov_HF``; closure
 #      rules. ~250 lines. (vs ~400 for PA, the saving coming from no
 #      induction-schema recogniser.)
 #
-#   3. ``q_repr.py`` -- representability of primitive recursive
-#      predicates, specialised to ``Proof_Q``, ``substitute``, and the
+#   3. ``hf_repr.py`` -- representability of primitive recursive
+#      predicates, specialised to ``Proof_HF``, ``substitute``, and the
 #      diagonal function, via the Goedel-Bernays beta function. Yields
-#      ``Prov_Q_internal`` and the representability theorem. ~500
+#      ``Prov_HF_internal`` and the representability theorem. ~500
 #      lines. (No saving over PA: this proof is independent of
 #      induction.)
 #
 #   4. ``godel_first.py`` (this file, fleshed out) -- diagonal lemma,
-#      ``G_Q``, the main theorem, the essential-undecidability
-#      corollary, plus the HF model of Q discharging consistency and
+#      ``G_HF``, the main theorem, the essential-undecidability
+#      corollary, plus the HF model construction discharging consistency and
 #      Sigma_1-soundness. ~400 lines.
 #
 # Total: ~1450 lines, zero new axioms, no kernel patch. (vs ~1600 for
@@ -302,18 +299,18 @@ Sigma_1 soundness of Q outright, since HF *is* the standard model.)
 #
 # Comparison: O'Connor's Coq formalisation (Goedel-Coq) is ~7k LOC;
 # Paulson's Isabelle/HOL formalisation is ~12k LOC; Harrison's HOL
-# Light formalisation of essential undecidability of Q is ~3k LOC.
+# Light formalisation of essential undecidability of HF is ~3k LOC.
 # The pyzar estimate is shorter than all of these because (i) HF
 # gives Goedel numbering for free, (ii) we inherit ``num`` arithmetic
 # from ``nat.py``, and (iii) we are happy with a single specific
-# Hilbert-style proof system over Q rather than a generic framework
+# Hilbert-style proof system over HF rather than a generic framework
 # parameterised by signature.
 #
 # Optional extensions:
 #   * ``godel_first_pa.py`` -- redo Stages 1-2 with the induction
 #     schema and re-export the same incompleteness theorem for PA.
 #     ~200 extra lines. Not strictly needed: PA-incompleteness already
-#     follows from Q-essential-undecidability via Stage 5's corollary.
+#     follows from HF-essential-undecidability via Stage 5's corollary.
 #     The standalone PA development is useful only as a stepping stone
 #     toward ``godel_second.py``, which *requires* PA's induction.
 #   * ``rosser.py`` -- the Rosser predicate variant of Stage 5; ~150
@@ -323,10 +320,10 @@ Sigma_1 soundness of Q outright, since HF *is* the standard model.)
 #
 # Recommended ordering:
 #   * Do ``hf_sets.py`` first -- this entire file rests on it.
-#   * ``q_syntax.py`` is independent of the rest of pyzar's surface
+#   * ``hf_syntax.py`` is independent of the rest of pyzar's surface
 #     theory, so it can be developed in parallel with anything else.
-#   * The four object-theory files (``q_syntax``, ``q_proofs``,
-#     ``q_repr``, ``godel_first``) form a self-contained subsystem
+#   * The four object-theory files (``hf_syntax``, ``hf_proof``,
+#     ``hf_repr``, ``godel_first``) form a self-contained subsystem
 #     that can be merged as a unit. They are imported again only if
 #     someone wants ``godel_second.py`` (which would also pull in the
 #     PA extension above).
@@ -336,20 +333,20 @@ Sigma_1 soundness of Q outright, since HF *is* the standard model.)
 # Stage 4 -- the diagonal lemma.
 # ===========================================================================
 #
-# Lemma (Goedel-Carnap). For every Q-formula ``phi`` with ``var_x`` as its
-# only free variable there exists a Q-sentence ``psi`` such that
+# Lemma (Goedel-Carnap). For every HF-formula ``phi`` with ``var_x`` as its
+# only free variable there exists an HF-sentence ``psi`` such that
 #
-#     |- Prov_Q (Iff_f psi (substitute phi (numeral psi) var_x)).
+#     |- Prov_HF (Iff_f psi (substitute phi (numeral psi) var_x)).
 #
 # Construction (BBJ Ch. 17, Smullyan Ch. 4):
 #
 #   diag : nat0 -> nat0
 #     diag(n) := substitute n (numeral n) var_x.
 #
-#   D(x, y) : Q-formula representing diag as a binary relation.
+#   D(x, y) : HF-formula representing diag as a binary relation.
 #     D(x, y) := substitute_2 substitute_internal x x var_x var_y
 #                ``y = substitute(x, x, var_x) = diag(x)`` evaluated in
-#                Q via ``substitute_internal``.
+#                HF via ``substitute_internal``.
 #                (specialised: F-slot=t-slot=x, v-slot=var_x,
 #                 result-slot=y)
 #
@@ -360,15 +357,15 @@ Sigma_1 soundness of Q outright, since HF *is* the standard model.)
 #   psi := substitute theta (numeral m) var_x.
 #
 # Then godelnum(psi) = diag(m), so when we substitute psi's numeric code
-# back, the internal D evaluates to the right value, and Q derives
+# back, the internal D evaluates to the right value, and HF derives
 #     psi  <=>  phi(numeral psi).
 #
 # AXIOMATIZED for now via ``p.sorry()``: the proof requires substantial
-# substitution-pushing in Q (~200-400 lines) and consumes the Stage 3C
+# substitution-pushing in HF (~200-400 lines) and consumes the Stage 3C
 # ``SUBSTITUTE_REPRESENTS`` axiom. Posted as ``DIAGONAL_LEMMA`` against
-# the Stage-3D side conditions ``IS_FORM_PROV_Q_INTERNAL`` /
-# ``FREE_IN_PROV_Q_INTERNAL`` so Stage 5 can apply it directly to
-# ``phi := Not_f Prov_Q_internal``.
+# the Stage-3D side conditions ``IS_FORM_PROV_HF_INTERNAL`` /
+# ``FREE_IN_PROV_HF_INTERNAL`` so Stage 5 can apply it directly to
+# ``phi := Not_f Prov_HF_internal``.
 # ===========================================================================
 
 from fusion import Var
@@ -393,9 +390,9 @@ from hf_repr import (
 
 
 # ---------------------------------------------------------------------------
-# Stage 4 (a) -- derived Q-formula connectives on godelnums.
+# Stage 4 (a) -- derived HF-formula connectives on godelnums.
 #
-# Q's primitive connectives are ``Imp_f`` and ``Not_f`` (plus ``Eq_f``,
+# HF's primitive connectives are ``Imp_f`` and ``Not_f`` (plus ``Eq_f``,
 # ``Forall_f`` for atom / quantifier). The remaining connectives are
 # defined as HOL functions building the corresponding nat0 godelnums:
 #
@@ -572,8 +569,8 @@ def SUBSTITUTE_AT_EXISTS_MISS(p):
 #   diag(n) := substitute n (numeral n) var_x
 #
 # ``diag`` is a HOL function on godelnums. Its representability inside
-# Q follows from ``SUBSTITUTE_REPRESENTS`` specialised with F=t=n,
-# v=var_x: each instance ``diag(n) = k`` is Q-provable via the
+# HF follows from ``SUBSTITUTE_REPRESENTS`` specialised with F=t=n,
+# v=var_x: each instance ``diag(n) = k`` is HF-provable via the
 # ``substitute_internal`` formula at numeral arguments.
 # ---------------------------------------------------------------------------
 
@@ -590,13 +587,13 @@ diag = mk_const("diag", [])
 
 
 # ---------------------------------------------------------------------------
-# Stage 4 (b.1) -- diag_internal: representing diag inside Q (AXIOMATIZED).
+# Stage 4 (b.1) -- diag_internal: representing diag inside HF (AXIOMATIZED).
 #
-# ``diag_internal`` is a Q-formula in two free variables (``var_x`` for
+# ``diag_internal`` is a HF-formula in two free variables (``var_x`` for
 # the input, ``var_y`` for the output) expressing the relation
 # ``var_y = diag(var_x)``. Three axioms (all sorry'd):
 #
-#   * ``DIAG_REPRESENTS``     : !n. Prov_Q (substitute_2 diag_internal
+#   * ``DIAG_REPRESENTS``     : !n. Prov_HF (substitute_2 diag_internal
 #                                              (numeral n)
 #                                              (numeral (diag n))
 #                                              var_x var_y).
@@ -606,28 +603,28 @@ diag = mk_const("diag", [])
 #
 # Justification: ``diag(n) = substitute n (numeral n) var_x`` is the
 # composition of two primitive recursive functions (substitute and
-# numeral), each representable in Q via Sigma_1 formulas. The combined
+# numeral), each representable in HF via Sigma_1 formulas. The combined
 # representation factors through ``substitute_internal`` (Stage 3C(a))
 # and ``numeral_internal`` (deferred). We axiomatize ``diag_internal``
 # directly to bypass the intermediate ``numeral_internal`` step.
 #
-# TODO -- discharge via Q + HF (preferred). The HF axioms Q8-Q12 are
+# TODO -- discharge via HF (preferred). The HF axioms HF1-HF5 are
 # already in place; build:
 #   * ``numeral_internal(x, y) := In y (Insert y Empty) /\ ...`` --
 #     numerals are concrete Pair_ord-tagged HF terms; the trace
 #     witnessing ``y = numeral x`` is an HF set of (k, numeral k)
 #     pairs for k <= x, verified by structural induction on x via
-#     foundation Q12.
+#     foundation HF5.
 #   * ``diag_internal := substitute_internal[F:=var_x, t:=numeral_internal,
 #                                            v:=var_x, r:=var_y]``
 #     -- composition of substitute_internal with numeral_internal,
-#     both Sigma_1, expressible in Q + HF without any further
+#     both Sigma_1, expressible in HF without any further
 #     sequence-coding machinery.
 #   * DIAG_REPRESENTS / DIAG_FUNCTIONAL: forward direction by
 #     exhibiting the composite trace HF set; functionality from
 #     SUBSTITUTE_REPRESENTS uniqueness + HF extensionality (Q11).
 # Estimated ~80 lines vs ~400 in the beta-function path. Depends on
-# the substitute_internal / Prov_Q_internal TODOs in q_repr.py.
+# the substitute_internal / Prov_HF_internal TODOs in hf_repr.py.
 # ---------------------------------------------------------------------------
 
 
@@ -640,14 +637,14 @@ diag_internal = mk_const("diag_internal", [])
 
 @proof
 def DIAG_REPRESENTS(p):
-    """|- !n. Prov_Q (substitute_2 diag_internal
+    """|- !n. Prov_HF (substitute_2 diag_internal
                        (numeral n) (numeral (diag n)) var_x var_y).
 
     Stage 4(b.1) representability of diag. AXIOMATIZED via
     ``p.sorry()``.
     """
     p.goal(
-        "!n. Prov_Q (substitute_2 diag_internal "
+        "!n. Prov_HF (substitute_2 diag_internal "
         "             (numeral n) (numeral (diag n)) var_x var_y)"
     )
     p.sorry()
@@ -670,7 +667,7 @@ def FREE_IN_DIAG_INTERNAL(p):
 
 @proof
 def DIAG_FUNCTIONAL(p):
-    """|- !n. Prov_Q (Forall_f (SUC0 0)
+    """|- !n. Prov_HF (Forall_f (SUC0 0)
                        (Imp_f (substitute_2 diag_internal
                                  (numeral n) var_y var_x var_y)
                               (Eq_f var_y (numeral (diag n))))).
@@ -685,7 +682,7 @@ def DIAG_FUNCTIONAL(p):
     existential witness ``y_0`` with ``numeral psi``.
     """
     p.goal(
-        "!n. Prov_Q (Forall_f (SUC0 0) "
+        "!n. Prov_HF (Forall_f (SUC0 0) "
         "             (Imp_f (substitute_2 diag_internal "
         "                      (numeral n) var_y var_x var_y) "
         "                    (Eq_f var_y (numeral (diag n)))))"
@@ -742,8 +739,8 @@ theta_of_phi = mk_const("theta_of_phi", [])
 # Stage 4 (b.3) -- HOL-level substitute / free_in / is_form lemmas.
 #
 # Five stubs the diagonal-lemma proof needs at the HOL level (not at
-# the Prov_Q level). All derivable from the SUBSTITUTE_AT_* and
-# FREE_IN_AT_* recursion equations in q_syntax by structural induction
+# the Prov_HF level). All derivable from the SUBSTITUTE_AT_* and
+# FREE_IN_AT_* recursion equations in hf_syntax by structural induction
 # on F (or by direct calculation for the concrete inequalities).
 # ---------------------------------------------------------------------------
 
@@ -768,7 +765,7 @@ def VAR_X_NEQ_SUC0_0(p):
 def VAR_Y_NEQ_VAR_X(p):
     """|- ~(var_y = var_x).
 
-    Concrete inequality between two Q-variable godelnums. From
+    Concrete inequality between two HF-variable godelnums. From
     VAR_T_INJ + ~(0 = SUC0 0) (= NAT0_NEQ_SUC0_0, derivable via NAT0
     constructor disjointness).
 
@@ -783,8 +780,8 @@ def VAR_Y_NEQ_VAR_X(p):
 def SUBSTITUTE_PRESERVES_IS_FORM(p):
     """|- !F t v. is_form F /\\ is_term t ==> is_form (substitute F t v).
 
-    Substitution into a well-formed Q-formula (replacing a variable
-    index by a well-formed Q-term) yields a well-formed Q-formula.
+    Substitution into a well-formed HF-formula (replacing a variable
+    index by a well-formed HF-term) yields a well-formed HF-formula.
     Strong induction on F using SUBSTITUTE_AT_* equations and the
     is_form constructor closure lemmas (IS_FORM_AT_EQ / NOT / IMP /
     FORALL). STUB.
@@ -831,7 +828,7 @@ def FREE_IN_SUBSTITUTE_AT_DIFFERENT_VAR(p):
 
     Used in the diagonal lemma's forward direction to discharge the
     ``~(free_in (phi[numeral psi / var_x]) (SUC0 0))`` side condition
-    of PROV_Q_EXISTS_ELIM.
+    of PROV_HF_EXISTS_ELIM.
     """
     p.goal(
         "!F t v w. ~(v = w) /\\ ~(free_in F v) /\\ ~(free_in t v) "
@@ -848,7 +845,7 @@ def FREE_IN_SUBSTITUTE_AT_DIFFERENT_VAR(p):
 #   |- !phi. is_form phi
 #         /\ (!v. free_in phi v ==> v = var_x)
 #         ==> ?psi. is_form psi
-#                 /\ Prov_Q (Iff_f psi
+#                 /\ Prov_HF (Iff_f psi
 #                            (substitute phi (numeral psi) var_x)).
 #
 # Proof sketch (deferred via p.sorry()):
@@ -857,9 +854,9 @@ def FREE_IN_SUBSTITUTE_AT_DIFFERENT_VAR(p):
 #     (specialising substitute_internal to F=t=var_x, output=var_y).
 #   * theta := Exists_f var_y (And_f D phi_at_y).
 #   * Set m := theta; psi := substitute theta (numeral m) var_x.
-#   * From SUBSTITUTE_REPRESENTS at F=t=m, derive Q proves D(numeral m,
+#   * From SUBSTITUTE_REPRESENTS at F=t=m, derive HF proves D(numeral m,
 #     numeral (diag m)).
-#   * Hence Q proves theta(numeral m) <=> phi(numeral (diag m)) =
+#   * Hence HF proves theta(numeral m) <=> phi(numeral (diag m)) =
 #     phi(numeral psi). Since psi = theta(numeral m), this is the
 #     diagonal equivalence.
 # ---------------------------------------------------------------------------
@@ -870,7 +867,7 @@ def DIAGONAL_LEMMA(p):
     """|- !phi. is_form phi
               /\\ (!v. free_in phi v ==> v = var_x)
               ==> is_form (diag (theta_of_phi phi))
-                /\\ Prov_Q (Iff_f (diag (theta_of_phi phi))
+                /\\ Prov_HF (Iff_f (diag (theta_of_phi phi))
                                   (substitute phi
                                               (numeral
                                                 (diag (theta_of_phi phi)))
@@ -885,20 +882,20 @@ def DIAGONAL_LEMMA(p):
                           var_x.
 
     The conjunction asserts both the well-formedness of psi and the
-    Q-internal diagonal equivalence.
+    HF-internal diagonal equivalence.
 
-    AXIOMATIZED via ``p.sorry()`` for the Prov_Q part; the
+    AXIOMATIZED via ``p.sorry()`` for the Prov_HF part; the
     well-formedness conjunct ultimately follows from
     ``IS_FORM_DIAG_INTERNAL`` plus closure of ``is_form`` under
     Exists_f / And_f / substitute (lemmas not yet proved).
 
-    The Prov_Q part is the heart of the diagonal lemma; its proof
+    The Prov_HF part is the heart of the diagonal lemma; its proof
     requires:
       * substitution-pushing through theta_of_phi to compute psi's
         shape (Stage 4(a.1) lemmas + a substitute-idempotence lemma);
       * DIAG_REPRESENTS at n = theta_of_phi phi to assert
-        Q proves diag_internal[var_x:=numeral m, var_y:=numeral psi];
-      * Q-internal propositional reasoning (iff-introduction,
+        HF proves diag_internal[var_x:=numeral m, var_y:=numeral psi];
+      * HF-internal propositional reasoning (iff-introduction,
         existential introduction/elimination) to derive the headline
         equivalence.
 
@@ -908,7 +905,7 @@ def DIAGONAL_LEMMA(p):
     p.goal(
         "!phi. (is_form phi /\\ (!v. free_in phi v ==> v = var_x)) ==> "
         "is_form (diag (theta_of_phi phi)) /\\ "
-        "Prov_Q (Iff_f (diag (theta_of_phi phi)) "
+        "Prov_HF (Iff_f (diag (theta_of_phi phi)) "
         "              (substitute phi "
         "                          (numeral (diag (theta_of_phi phi))) "
         "                          var_x))"
@@ -919,7 +916,7 @@ def DIAGONAL_LEMMA(p):
 if __name__ == "__main__":
     from parser import pp_thm
 
-    print("Stage 4 (a) -- derived Q-formula connectives.")
+    print("Stage 4 (a) -- derived HF-formula connectives.")
     print("    AND_F_DEF    :", pp_thm(AND_F_DEF))
     print("    OR_F_DEF     :", pp_thm(OR_F_DEF))
     print("    IFF_F_DEF    :", pp_thm(IFF_F_DEF))
@@ -955,5 +952,5 @@ if __name__ == "__main__":
         pp_thm(FREE_IN_SUBSTITUTE_AT_DIFFERENT_VAR),
     )
     print()
-    print("Stage 4 (c) -- diagonal lemma (SORRY: Prov_Q part).")
+    print("Stage 4 (c) -- diagonal lemma (SORRY: Prov_HF part).")
     print("    DIAGONAL_LEMMA :", pp_thm(DIAGONAL_LEMMA))

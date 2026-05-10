@@ -1,22 +1,22 @@
 # ---------------------------------------------------------------------------
-# Stage 3 -- representability of primitive recursive functions in Q.
+# Stage 3 -- representability of primitive recursive functions in HF.
 # ---------------------------------------------------------------------------
 #
-# A predicate P : nat0 -> bool is *represented* in Q by a Q-formula
+# A predicate P : nat0 -> bool is *represented* in HF by a-formula
 # F(x) -- with var_x as its sole free variable -- iff
 #
-#     |- !n. P n      ==> Prov_Q (substitute F (numeral n) var_x)
-#     |- !n. ~ P n    ==> Prov_Q (Not_f (substitute F (numeral n) var_x))
+#     |- !n. P n      ==> Prov_HF (substitute F (numeral n) var_x)
+#     |- !n. ~ P n    ==> Prov_HF (Not_f (substitute F (numeral n) var_x))
 #
-# A function f : nat0 -> nat0 is represented by a Q-formula F(x, y) iff
+# A function f : nat0 -> nat0 is represented by a HF-formula F(x, y) iff
 #
-#     |- !n. Prov_Q (substitute_2 F (numeral n) (numeral (f n)) var_x var_y)
-#     |- !n. Prov_Q (Forall_f var_y
+#     |- !n. Prov_HF (substitute_2 F (numeral n) (numeral (f n)) var_x var_y)
+#     |- !n. Prov_HF (Forall_f var_y
 #                      (Imp_f (substitute_2 F (numeral n) y var_x var_y)
 #                             (Eq_f y (numeral (f n))))).
 #
 # Theorem (representability). Every primitive recursive predicate /
-# function on nat0 is representable in Q.
+# function on nat0 is representable in HF.
 #
 # This is the headline weak-arithmetic result. The standard proof
 # (Boolos-Burgess-Jeffrey, "Computability and Logic" Ch. 16-17) goes:
@@ -24,18 +24,18 @@
 #   * Constants, projections, successor, addition, multiplication --
 #     direct unfolding against axioms Q4-Q7.
 #   * Composition -- substitution; routine.
-#   * Primitive recursion -- normally where induction enters. Q has no
+#   * Primitive recursion -- normally where induction enters. HF has no
 #     induction schema, so we use Goedel's beta function: a fixed
 #     ternary arithmetic predicate beta(a, b, i, y) such that for any
 #     finite sequence (y_0, ..., y_k), there exist a, b with
 #     beta(a, b, i, y_i) for each i. Construction via Chinese
-#     remainder; existence is a numeric calculation that Q proves for
+#     remainder; existence is a numeric calculation that HF proves for
 #     each numeral instance.
 #
 # In our HOL setting we don't need the full primitive recursion result
 # -- we only need representability of three specific predicates:
 #
-#   (i)   ``Proof_Q``     (decidable, hence representable; the
+#   (i)   ``Proof_HF``     (decidable, hence representable; the
 #                          formula is an explicit bounded-quantifier
 #                          encoding of the proof-checking procedure).
 #   (ii)  ``substitute``  (primitive recursive on godelnums).
@@ -46,7 +46,7 @@
 # move is to define the representing formulas *by* the HOL definitions,
 # transport through the bounded-quantifier translation, and then show
 # by induction (in the *meta*theory; HOL has it) on syntactic
-# complexity that Q proves the right characterisations. ~500 lines
+# complexity that HF proves the right characterisations. ~500 lines
 # with the beta-function lemma factored out.
 #
 # (No saving here over PA: representability is exactly as hard with
@@ -55,26 +55,26 @@
 # saving over PA was at Stage 2.)
 #
 # ------------------------------------------------------------------
-# Reconciliation with Stage 2's ``Prov_Q``:
+# Reconciliation with Stage 2's ``Prov_HF``:
 # ------------------------------------------------------------------
 #
-# Stage 2 defines ``Prov_Q`` via impredicative intersection
-# (``q_proof.PROV_Q_DEF``), not via an explicit list-based
-# ``Proof_Q``. The two are HOL-equivalent (Knaster-Tarski) but the
+# Stage 2 defines ``Prov_HF`` via impredicative intersection
+# (``hf_proof.PROV_HF_DEF``), not via an explicit list-based
+# ``Proof_HF``. The two are HOL-equivalent (Knaster-Tarski) but the
 # representability proof needs the list-based form: the diagonal
-# lemma's ``Prov_Q_internal`` formula must internalise *explicit*
-# proofs into Q's own language, so we want a Sigma_1 formula
-# ``Proof_Q_internal`` saying "p is a list of formulas, each an axiom
+# lemma's ``Prov_HF_internal`` formula must internalise *explicit*
+# proofs into HF's own language, so we want a Sigma_1 formula
+# ``Proof_HF_internal`` saying "p is a list of formulas, each an axiom
 # or following from earlier ones by MP/Gen, ending in n".
 #
 # Stage 3 therefore:
-#   (a) Builds the list-based ``Proof_Q`` predicate (HOL function)
-#       and proves ``Prov_Q n <=> ?p. Proof_Q p n`` against the
-#       Stage-2 ``Prov_Q``.
-#   (b) Defines ``Proof_Q_internal`` and ``Prov_Q_internal`` as
-#       Q-formulas.
+#   (a) Builds the list-based ``Proof_HF`` predicate (HOL function)
+#       and proves ``Prov_HF n <=> ?p. Proof_HF p n`` against the
+#       Stage-2 ``Prov_HF``.
+#   (b) Defines ``Proof_HF_internal`` and ``Prov_HF_internal`` as
+#       HF-formulas.
 #   (c) Proves the representability theorem
-#         |- !n. Prov_Q n <=> Prov_Q (godelnum (Prov_Q_internal (numeral n))).
+#         |- !n. Prov_HF n <=> Prov_HF (godelnum (Prov_HF_internal (numeral n))).
 #
 # ------------------------------------------------------------------
 # Output (eventual):
@@ -84,11 +84,11 @@
 #          (numeral n = von Neumann ordinal n -- the n'th HF numeral)
 #   defn:  represents_pred : nat0 -> (nat0 -> bool) -> bool
 #   defn:  represents_func : nat0 -> (nat0 -> nat0) -> bool
-#   defn:  Proof_Q         : nat0 -> nat0 -> bool
-#   thm:   |- !n. Prov_Q n <=> ?p. Proof_Q p n
-#   defn:  Proof_Q_internal, Prov_Q_internal : nat0 (Q-formulas)
-#   thm:   |- !n. Prov_Q n <=>
-#                Prov_Q (godelnum (Prov_Q_internal (numeral n)))
+#   defn:  Proof_HF         : nat0 -> nat0 -> bool
+#   thm:   |- !n. Prov_HF n <=> ?p. Proof_HF p n
+#   defn:  Proof_HF_internal, Prov_HF_internal : nat0 (HF-formulas)
+#   thm:   |- !n. Prov_HF n <=>
+#                Prov_HF (godelnum (Prov_HF_internal (numeral n)))
 #
 
 from fusion import Var
@@ -331,12 +331,12 @@ def IS_TERM_NUMERAL(p):
 
 # ---------------------------------------------------------------------------
 # Stage 3A (c) -- shared constants and helpers used by the Stage 3B
-# Proof_Q infrastructure and beyond.
+# Proof_HF infrastructure and beyond.
 #
 # ``substitute`` and ``Not_f`` are referenced by name from this point on;
-# the ``represents_pred`` scaffolding (which mentions ``Prov_Q``) lives
-# in Stage 3B (k) below, after ``Prov_Q`` has been defined as the
-# Sigma_1 form ``\n. ?p. Proof_Q p n``.
+# the ``represents_pred`` scaffolding (which mentions ``Prov_HF``) lives
+# in Stage 3B (k) below, after ``Prov_HF`` has been defined as the
+# Sigma_1 form ``\n. ?p. Proof_HF p n``.
 # ---------------------------------------------------------------------------
 
 
@@ -629,11 +629,11 @@ VALID_STEP_AT = _at2(VALID_STEP_DEF, _t_n0_vs, _h_n0_vs)
 
 
 # ---------------------------------------------------------------------------
-# Stage 3B (c) -- list-based provability ``Proof_Q``.
+# Stage 3B (c) -- list-based provability ``Proof_HF``.
 #
-#   Proof_Q p n  :<=>
+#   Proof_HF p n  :<=>
 #       ?h t. p = cons_l h t /\ h = n /\ valid_step t h /\
-#             (t = nil_l \/ ?h_inner. Proof_Q t h_inner).
+#             (t = nil_l \/ ?h_inner. Proof_HF t h_inner).
 #
 # A non-empty list ``p`` whose head ``h`` equals ``n``, every prefix is
 # justified by ``valid_step`` against its tail, and (via the inner
@@ -641,7 +641,7 @@ VALID_STEP_AT = _at2(VALID_STEP_DEF, _t_n0_vs, _h_n0_vs)
 # When ``p = nil_l`` the body is F (no h, t with nil_l = cons_l h t,
 # CONS_L_NEQ_NIL).
 #
-# Recursion target type is ``nat0 -> bool`` (Proof_Q : nat0 -> nat0 ->
+# Recursion target type is ``nat0 -> bool`` (Proof_HF : nat0 -> nat0 ->
 # bool, recursing on the proof list). MONO obligation: pointwise body
 # equation under fixed n, then ``ABS`` over n and ``by_unfold`` through
 # the helper-constant DEF. The recursive call ``f t h_inner`` is buried
@@ -680,7 +680,7 @@ def _proof_q_body(f_t, p_t, n_t):
     )
 
 
-_PROOF_Q_F_DEF = define(
+_PROOF_HF_F_DEF = define(
     "_proof_q_F",
     _F_pred2_ty,
     mk_abs(
@@ -690,7 +690,7 @@ _PROOF_Q_F_DEF = define(
         ),
     ),
 )
-_PROOF_Q_F = mk_const("_proof_q_F", [])
+_PROOF_HF_F = mk_const("_proof_q_F", [])
 
 
 def _proof_q_mono_body_iff(hyp_th, n_term):
@@ -768,7 +768,7 @@ def _proof_q_mono_body_iff(hyp_th, n_term):
 
 
 @proof
-def PROOF_Q_MONO(p):
+def PROOF_HF_MONO(p):
     """|- !f g p. (!k. nat0_lt k p ==> f k = g k)
     ==> _proof_q_F f p = _proof_q_F g p."""
     p.goal(
@@ -780,30 +780,30 @@ def PROOF_Q_MONO(p):
 
     body_eq = _proof_q_mono_body_iff(p.fact("hyp"), _n_n0_pq)
     abs_eq = ABS(_n_n0_pq, body_eq)
-    p.thus("_proof_q_F f p = _proof_q_F g p").by_unfold(abs_eq, _PROOF_Q_F_DEF)
+    p.thus("_proof_q_F f p = _proof_q_F g p").by_unfold(abs_eq, _PROOF_HF_F_DEF)
 
 
-PROOF_Q_DEF, _PROOF_Q_REC_RAW = define_wf_lt(
-    "Proof_Q",
+PROOF_HF_DEF, _PROOF_HF_REC_RAW = define_wf_lt(
+    "Proof_HF",
     _pred2_ty,
-    _PROOF_Q_F,
-    PROOF_Q_MONO,
+    _PROOF_HF_F,
+    PROOF_HF_MONO,
 )
-Proof_Q = mk_const("Proof_Q", [])
+Proof_HF = mk_const("Proof_HF", [])
 
 
-# |- !p. Proof_Q p =
+# |- !p. Proof_HF p =
 #         (\n. ?h t. p = cons_l h t /\ h = n /\ valid_step t h
-#                    /\ (t = nil_l \/ ?h_inner. Proof_Q t h_inner)).
-PROOF_Q_REC = _unfold_rec_via_F_def(_PROOF_Q_REC_RAW, _PROOF_Q_F_DEF)
+#                    /\ (t = nil_l \/ ?h_inner. Proof_HF t h_inner)).
+PROOF_HF_REC = _unfold_rec_via_F_def(_PROOF_HF_REC_RAW, _PROOF_HF_F_DEF)
 
 
 # Pointwise unfold:
-#   |- !p n. Proof_Q p n =
+#   |- !p n. Proof_HF p n =
 #            (?h t. p = cons_l h t /\ h = n /\ valid_step t h
-#                   /\ (t = nil_l \/ ?h_inner. Proof_Q t h_inner)).
+#                   /\ (t = nil_l \/ ?h_inner. Proof_HF t h_inner)).
 def _proof_q_rec_pw():
-    spec_p = SPEC(_p_n0_var, PROOF_Q_REC)
+    spec_p = SPEC(_p_n0_var, PROOF_HF_REC)
     ap_n = AP_THM(spec_p, _n_n0_pq)
     rhs = rand(ap_n._concl)
     beta_n = BETA_CONV(rhs)
@@ -811,26 +811,26 @@ def _proof_q_rec_pw():
     return GENL([_p_n0_var, _n_n0_pq], pw)
 
 
-PROOF_Q_REC_PW = _proof_q_rec_pw()
+PROOF_HF_REC_PW = _proof_q_rec_pw()
 
 
 # Constructor equations.
-_PROOF_Q_RHS_NIL_STR = (
+_PROOF_HF_RHS_NIL_STR = (
     "?h t. nil_l = cons_l h t /\\ h = n /\\ valid_step t h /\\ "
-    "(t = nil_l \\/ ?h_inner. Proof_Q t h_inner)"
+    "(t = nil_l \\/ ?h_inner. Proof_HF t h_inner)"
 )
 
 
 @proof
-def PROOF_Q_AT_NIL(p):
-    """|- !n. Proof_Q nil_l n = F."""
-    p.goal("!n. Proof_Q nil_l n = F")
+def PROOF_HF_AT_NIL(p):
+    """|- !n. Proof_HF nil_l n = F."""
+    p.goal("!n. Proof_HF nil_l n = F")
     p.fix("n")
 
-    rec_at = SPECL([p._parse("nil_l"), p._parse("n")], PROOF_Q_REC_PW)
+    rec_at = SPECL([p._parse("nil_l"), p._parse("n")], PROOF_HF_REC_PW)
 
-    with p.have(f"rhs_neg: ~({_PROOF_Q_RHS_NIL_STR})").proof():
-        with p.suppose(f"hex: {_PROOF_Q_RHS_NIL_STR}"):
+    with p.have(f"rhs_neg: ~({_PROOF_HF_RHS_NIL_STR})").proof():
+        with p.suppose(f"hex: {_PROOF_HF_RHS_NIL_STR}"):
             p.choose("h", "hex", eq_label="ex_t")
             p.choose("t", "ex_t", eq_label="conj_ht")
             p.split("conj_ht", "(eq_nil, _rest)")
@@ -838,35 +838,35 @@ def PROOF_Q_AT_NIL(p):
             p.have("neq: ~(cons_l h t = nil_l)").by(CONS_L_NEQ_NIL, "h", "t")
             p.absurd().by_conj("neq", "eq_swap")
 
-    p.have(f"rhs_F: ({_PROOF_Q_RHS_NIL_STR}) = F").by_thm(EQF_INTRO(p.fact("rhs_neg")))
-    p.thus("Proof_Q nil_l n = F").by_thm(TRANS(rec_at, p.fact("rhs_F")))
+    p.have(f"rhs_F: ({_PROOF_HF_RHS_NIL_STR}) = F").by_thm(EQF_INTRO(p.fact("rhs_neg")))
+    p.thus("Proof_HF nil_l n = F").by_thm(TRANS(rec_at, p.fact("rhs_F")))
 
 
 @proof
-def PROOF_Q_AT_CONS(p):
-    """|- !h t n. Proof_Q (cons_l h t) n =
+def PROOF_HF_AT_CONS(p):
+    """|- !h t n. Proof_HF (cons_l h t) n =
     (h = n /\\ valid_step t h
-     /\\ (t = nil_l \\/ ?h_inner. Proof_Q t h_inner))."""
+     /\\ (t = nil_l \\/ ?h_inner. Proof_HF t h_inner))."""
     p.goal(
-        "!h t n. Proof_Q (cons_l h t) n = "
+        "!h t n. Proof_HF (cons_l h t) n = "
         "(h = n /\\ valid_step t h "
-        "/\\ (t = nil_l \\/ ?h_inner. Proof_Q t h_inner))"
+        "/\\ (t = nil_l \\/ ?h_inner. Proof_HF t h_inner))"
     )
     p.fix("h t n")
 
-    rec_at = SPECL([p._parse("cons_l h t"), p._parse("n")], PROOF_Q_REC_PW)
+    rec_at = SPECL([p._parse("cons_l h t"), p._parse("n")], PROOF_HF_REC_PW)
     rhs_str = (
         "?h1 t1. cons_l h t = cons_l h1 t1 /\\ h1 = n /\\ "
         "valid_step t1 h1 /\\ "
-        "(t1 = nil_l \\/ ?h_inner. Proof_Q t1 h_inner)"
+        "(t1 = nil_l \\/ ?h_inner. Proof_HF t1 h_inner)"
     )
     target_str = (
-        "h = n /\\ valid_step t h /\\ (t = nil_l \\/ ?h_inner. Proof_Q t h_inner)"
+        "h = n /\\ valid_step t h /\\ (t = nil_l \\/ ?h_inner. Proof_HF t h_inner)"
     )
 
     # Forward: RHS ==> target.
     #
-    # The disjunction inner-existential (?h_inner. Proof_Q t1 h_inner)
+    # The disjunction inner-existential (?h_inner. Proof_HF t1 h_inner)
     # cannot be rewritten via ``by_rewrite_of`` on the whole disjunction
     # because the eq_t rule has non-empty asl (chained from ``hex``)
     # and the rewrite engine filters such rules under binders. Split
@@ -883,19 +883,19 @@ def PROOF_Q_AT_CONS(p):
         p.have("valid_th: valid_step t h").by_rewrite_of(
             "valid_t1", [SYM(p.fact("eq_h")), SYM(p.fact("eq_t"))]
         )
-        with p.have("disj_th: t = nil_l \\/ ?h_inner. Proof_Q t h_inner").proof():
+        with p.have("disj_th: t = nil_l \\/ ?h_inner. Proof_HF t h_inner").proof():
             with p.cases_on("disj_t1"):
                 with p.case("nil_c: t1 = nil_l"):
                     p.have("t_eq_nil: t = nil_l").by_rewrite_of(
                         "nil_c", [SYM(p.fact("eq_t"))]
                     )
-                    p.thus("t = nil_l \\/ ?h_inner. Proof_Q t h_inner").by_disj(
+                    p.thus("t = nil_l \\/ ?h_inner. Proof_HF t h_inner").by_disj(
                         "t_eq_nil"
                     )
-                with p.case("ex_c: ?h_inner. Proof_Q t1 h_inner"):
+                with p.case("ex_c: ?h_inner. Proof_HF t1 h_inner"):
                     # case auto-introduces ``h_inner`` witness with eq
-                    # fact ``h_inner_eq: Proof_Q t1 h_inner``.
-                    p.have("pq_at_t: Proof_Q t h_inner").by_rewrite_of(
+                    # fact ``h_inner_eq: Proof_HF t1 h_inner``.
+                    p.have("pq_at_t: Proof_HF t h_inner").by_rewrite_of(
                         "h_inner_eq", [SYM(p.fact("eq_t"))]
                     )
                     p.disj_witness("h_inner", "pq_at_t")
@@ -928,7 +928,7 @@ def PROOF_Q_AT_CONS(p):
                     mk_app(valid_step, t1_var, h_t),
                     mk_or(
                         mk_eq(t1_var, nil_l),
-                        mk_exists(_h_inner_pq, mk_app(Proof_Q, t1_var, _h_inner_pq)),
+                        mk_exists(_h_inner_pq, mk_app(Proof_HF, t1_var, _h_inner_pq)),
                     ),
                 ),
             ),
@@ -944,7 +944,7 @@ def PROOF_Q_AT_CONS(p):
                     mk_app(valid_step, t1_var, h1_var),
                     mk_or(
                         mk_eq(t1_var, nil_l),
-                        mk_exists(_h_inner_pq, mk_app(Proof_Q, t1_var, _h_inner_pq)),
+                        mk_exists(_h_inner_pq, mk_app(Proof_HF, t1_var, _h_inner_pq)),
                     ),
                 ),
             ),
@@ -955,9 +955,9 @@ def PROOF_Q_AT_CONS(p):
 
     p.have(f"iff: ({rhs_str}) = ({target_str})").by_iff("fwd", "rev")
     p.thus(
-        "Proof_Q (cons_l h t) n = "
+        "Proof_HF (cons_l h t) n = "
         "(h = n /\\ valid_step t h "
-        "/\\ (t = nil_l \\/ ?h_inner. Proof_Q t h_inner))"
+        "/\\ (t = nil_l \\/ ?h_inner. Proof_HF t h_inner))"
     ).by_thm(TRANS(rec_at, p.fact("iff")))
 
 
@@ -976,14 +976,14 @@ def PROOF_Q_AT_CONS(p):
 #                                  /\ r = cons_l h (f t q)).
 #
 # The MONO obligation reuses ``_mono_iff_value_binary_pw_step`` from
-# ``q_syntax`` for the cons disjunct (only the tail recurses, so
+# ``hf_syntax`` for the cons disjunct (only the tail recurses, so
 # ``recurses_l=False``, with size lemma ``NAT0_LT_CONS_L_TAIL``); the
 # nil disjunct is non-recursive and falls through ``REFL``.
 #
 # Used in Stage 3B (e) to combine two proof-list witnesses (one ending
 # at ``f``, one ending at ``Imp_f f g``) into a single longer list that
-# witnesses ``Proof_Q``-derivability of ``g``: the ``Prov_Q ==> ?p.
-# Proof_Q p n`` direction needs to verify the MP closure clause, which
+# witnesses ``Proof_HF``-derivability of ``g``: the ``Prov_HF ==> ?p.
+# Proof_HF p n`` direction needs to verify the MP closure clause, which
 # is precisely this combine step.
 # ---------------------------------------------------------------------------
 
@@ -1320,15 +1320,15 @@ def APPEND_L_AT_CONS(p):
 # ---------------------------------------------------------------------------
 # Stage 3B (e) -- membership preservation under append.
 #
-#   |- !p1 h1. Proof_Q p1 h1 ==>
+#   |- !p1 h1. Proof_HF p1 h1 ==>
 #       !p2 f. (mem_l p1 f \/ mem_l p2 f) ==> mem_l (append_l p1 p2) f.
 #
-# In words: if ``p1`` is a Q-proof (so it has the cons-of-nil-terminated
+# In words: if ``p1`` is a HF-proof (so it has the cons-of-nil-terminated
 # shape recursively) then every element of ``p1`` and of ``p2`` is an
-# element of the concatenation. Strong induction on ``p1``: PROOF_Q_AT
+# element of the concatenation. Strong induction on ``p1``: PROOF_HF_AT
 # unpacks ``p1 = cons_l hd tl``; the recursion either bottoms out at
 # ``tl = nil_l`` (where ``append_l nil_l p2 = p2`` directly) or proceeds
-# with ``Proof_Q tl h_inner`` (where the IH applies at ``tl`` and the
+# with ``Proof_HF tl h_inner`` (where the IH applies at ``tl`` and the
 # disjunction is preserved through the cons-front element).
 #
 # Encoding via a disjunction in the consequent dodges the OR-associativity
@@ -1341,25 +1341,25 @@ def APPEND_L_AT_CONS(p):
 
 @proof
 def MEM_L_APPEND_PRESERVES(p):
-    """|- !p1 h1. Proof_Q p1 h1 ==>
+    """|- !p1 h1. Proof_HF p1 h1 ==>
     !p2 f. (mem_l p1 f \\/ mem_l p2 f)
            ==> mem_l (append_l p1 p2) f."""
     p.goal(
-        "!p1. !h1. Proof_Q p1 h1 ==> "
+        "!p1. !h1. Proof_HF p1 h1 ==> "
         "!p2 f. (mem_l p1 f \\/ mem_l p2 f) "
         "==> mem_l (append_l p1 p2) f"
     )
     with p.strong_induction("p1", "IH"):
         p.fix("h1")
-        p.assume("pq: Proof_Q p1 h1")
+        p.assume("pq: Proof_HF p1 h1")
         p.fix("p2 f")
         p.assume("hd: mem_l p1 f \\/ mem_l p2 f")
 
         # Unfold pq to extract p1 = cons_l hd_v tl, hd_v = h1, etc.
-        rec_pq = SPECL([p._parse("p1"), p._parse("h1")], PROOF_Q_REC_PW)
+        rec_pq = SPECL([p._parse("p1"), p._parse("h1")], PROOF_HF_REC_PW)
         body_str = (
             "?h t. p1 = cons_l h t /\\ h = h1 /\\ valid_step t h "
-            "/\\ (t = nil_l \\/ ?h_inner. Proof_Q t h_inner)"
+            "/\\ (t = nil_l \\/ ?h_inner. Proof_HF t h_inner)"
         )
         p.have(f"body: {body_str}").by_eq_mp(rec_pq, "pq")
         p.choose("hd_v", "body", eq_label="ex_t")
@@ -1420,7 +1420,7 @@ def MEM_L_APPEND_PRESERVES(p):
                             "mem_app_cons", [SYM(p.fact("app_eq"))]
                         )
                     with p.case("mem_in_tl: mem_l tl f"):
-                        # tl is nil or has Proof_Q; in nil case mem_l = F.
+                        # tl is nil or has Proof_HF; in nil case mem_l = F.
                         with p.cases_on("tail_disj"):
                             with p.case("tnil: tl = nil_l"):
                                 p.have("mem_nil: mem_l nil_l f").by_rewrite_of(
@@ -1434,8 +1434,8 @@ def MEM_L_APPEND_PRESERVES(p):
                                         p.fact("F_th"),
                                     )
                                 )
-                            with p.case("tex: ?h_inner. Proof_Q tl h_inner"):
-                                # h_inner_eq: Proof_Q tl h_inner.
+                            with p.case("tex: ?h_inner. Proof_HF tl h_inner"):
+                                # h_inner_eq: Proof_HF tl h_inner.
                                 # Apply IH at tl with disjunct
                                 # (mem_l tl f \/ mem_l p2 f).
                                 p.have("ih_disj: mem_l tl f \\/ mem_l p2 f").by_disj(
@@ -1496,7 +1496,7 @@ def MEM_L_APPEND_PRESERVES(p):
                             "mem_app_cons",
                             [SYM(p.fact("app_eq"))],
                         )
-                    with p.case("tex: ?h_inner. Proof_Q tl h_inner"):
+                    with p.case("tex: ?h_inner. Proof_HF tl h_inner"):
                         p.have("ih_disj: mem_l tl f \\/ mem_l p2 f").by_disj("from2")
                         p.have("mem_app_tl: mem_l (append_l tl p2) f").by(
                             "IH",
@@ -1592,45 +1592,45 @@ def VALID_STEP_PRESERVES(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 3B (g) -- ``Proof_Q`` is preserved under list concatenation.
+# Stage 3B (g) -- ``Proof_HF`` is preserved under list concatenation.
 #
-#   |- !p1 h1. Proof_Q p1 h1 ==>
-#       !p2 h2. Proof_Q p2 h2 ==> Proof_Q (append_l p1 p2) h1.
+#   |- !p1 h1. Proof_HF p1 h1 ==>
+#       !p2 h2. Proof_HF p2 h2 ==> Proof_HF (append_l p1 p2) h1.
 #
-# Strong induction on ``p1``. Unpack ``Proof_Q p1 h1`` to
+# Strong induction on ``p1``. Unpack ``Proof_HF p1 h1`` to
 # ``p1 = cons_l hd tl`` and case-split on the inner tail disjunct:
 #
 #   * ``tl = nil_l``: ``append_l p1 p2 = cons_l hd p2``. The membership
 #     premise is vacuous (``mem_l nil_l _ = F``) so ``valid_step nil_l hd
 #     ==> valid_step p2 hd`` discharges trivially via
-#     ``VALID_STEP_PRESERVES``. Tail-of-tail disjunct uses ``Proof_Q p2 h2``.
+#     ``VALID_STEP_PRESERVES``. Tail-of-tail disjunct uses ``Proof_HF p2 h2``.
 #
-#   * ``Proof_Q tl h_inner``: IH at ``tl`` gives
-#     ``Proof_Q (append_l tl p2) h_inner``; ``MEM_L_APPEND_PRESERVES`` (with
+#   * ``Proof_HF tl h_inner``: IH at ``tl`` gives
+#     ``Proof_HF (append_l tl p2) h_inner``; ``MEM_L_APPEND_PRESERVES`` (with
 #     ``mem_l tl f \\/ mem_l p2 f`` ⇒ ``mem_l (append_l tl p2) f``) lifts
 #     ``valid_step tl hd`` into ``valid_step (append_l tl p2) hd``.
 # ---------------------------------------------------------------------------
 
 
 @proof
-def PROOF_Q_APPEND(p):
-    """|- !p1 h1 p2 h2. Proof_Q p1 h1 ==> Proof_Q p2 h2
-    ==> Proof_Q (append_l p1 p2) h1."""
+def PROOF_HF_APPEND(p):
+    """|- !p1 h1 p2 h2. Proof_HF p1 h1 ==> Proof_HF p2 h2
+    ==> Proof_HF (append_l p1 p2) h1."""
     p.goal(
-        "!p1. !h1. Proof_Q p1 h1 ==> "
-        "!p2 h2. Proof_Q p2 h2 "
-        "==> Proof_Q (append_l p1 p2) h1"
+        "!p1. !h1. Proof_HF p1 h1 ==> "
+        "!p2 h2. Proof_HF p2 h2 "
+        "==> Proof_HF (append_l p1 p2) h1"
     )
     with p.strong_induction("p1", "IH"):
         p.fix("h1")
-        p.assume("pq1: Proof_Q p1 h1")
+        p.assume("pq1: Proof_HF p1 h1")
         p.fix("p2 h2")
-        p.assume("pq2: Proof_Q p2 h2")
+        p.assume("pq2: Proof_HF p2 h2")
 
-        rec_pq1 = SPECL([p._parse("p1"), p._parse("h1")], PROOF_Q_REC_PW)
+        rec_pq1 = SPECL([p._parse("p1"), p._parse("h1")], PROOF_HF_REC_PW)
         body_str = (
             "?h t. p1 = cons_l h t /\\ h = h1 /\\ valid_step t h "
-            "/\\ (t = nil_l \\/ ?h_inner. Proof_Q t h_inner)"
+            "/\\ (t = nil_l \\/ ?h_inner. Proof_HF t h_inner)"
         )
         p.have(f"body: {body_str}").by_eq_mp(rec_pq1, "pq1")
         p.choose("hd", "body", eq_label="ex_t")
@@ -1652,7 +1652,7 @@ def PROOF_Q_APPEND(p):
 
         target_eq = SPECL(
             [p._parse("hd"), p._parse("append_l tl p2"), p._parse("h1")],
-            PROOF_Q_AT_CONS,
+            PROOF_HF_AT_CONS,
         )
 
         with p.cases_on("tail_disj"):
@@ -1691,40 +1691,40 @@ def PROOF_Q_APPEND(p):
                     vs_eq, "valid_p2"
                 )
 
-                # Proof_Q p2 h2 lifts to Proof_Q (append_l tl p2) h2.
+                # Proof_HF p2 h2 lifts to Proof_HF (append_l tl p2) h2.
                 pq_eq = AP_THM(
-                    AP_TERM(Proof_Q, p.fact("app_tl_eq_p2")),
+                    AP_TERM(Proof_HF, p.fact("app_tl_eq_p2")),
                     p._parse("h2"),
                 )
-                p.have("pq_app: Proof_Q (append_l tl p2) h2").by_eq_mp(pq_eq, "pq2")
-                p.have("ex_app: ?h_inner. Proof_Q (append_l tl p2) h_inner").by_witness(
+                p.have("pq_app: Proof_HF (append_l tl p2) h2").by_eq_mp(pq_eq, "pq2")
+                p.have("ex_app: ?h_inner. Proof_HF (append_l tl p2) h_inner").by_witness(
                     "h2", "pq_app"
                 )
                 p.have(
                     "tail_app_disj: "
                     "(append_l tl p2) = nil_l "
-                    "\\/ ?h_inner. Proof_Q (append_l tl p2) h_inner"
+                    "\\/ ?h_inner. Proof_HF (append_l tl p2) h_inner"
                 ).by_disj("ex_app")
 
                 p.have(
                     "target_body: hd = h1 /\\ "
                     "valid_step (append_l tl p2) hd /\\ "
                     "((append_l tl p2) = nil_l "
-                    "\\/ ?h_inner. Proof_Q (append_l tl p2) h_inner)"
+                    "\\/ ?h_inner. Proof_HF (append_l tl p2) h_inner)"
                 ).by_thm(
                     CONJ(
                         p.fact("hd_eq_h1"),
                         CONJ(p.fact("valid_app"), p.fact("tail_app_disj")),
                     )
                 )
-                p.have("pq_cons: Proof_Q (cons_l hd (append_l tl p2)) h1").by_eq_mp(
+                p.have("pq_cons: Proof_HF (cons_l hd (append_l tl p2)) h1").by_eq_mp(
                     SYM(target_eq), "target_body"
                 )
-                p.thus("Proof_Q (append_l p1 p2) h1").by_rewrite_of(
+                p.thus("Proof_HF (append_l p1 p2) h1").by_rewrite_of(
                     "pq_cons", [SYM(p.fact("app_eq"))]
                 )
 
-            with p.case("tex: ?h_inner. Proof_Q tl h_inner"):
+            with p.case("tex: ?h_inner. Proof_HF tl h_inner"):
                 with p.have(
                     "preserve: !f. mem_l tl f ==> mem_l (append_l tl p2) f"
                 ).proof():
@@ -1750,49 +1750,49 @@ def PROOF_Q_APPEND(p):
                     "valid_th",
                 )
 
-                p.have("pq_app: Proof_Q (append_l tl p2) h_inner").by(
+                p.have("pq_app: Proof_HF (append_l tl p2) h_inner").by(
                     "IH", "tl", "lt_tl_p1", "h_inner", "h_inner_eq", "p2", "h2", "pq2"
                 )
 
-                p.have("ex_app: ?h_inner. Proof_Q (append_l tl p2) h_inner").by_witness(
+                p.have("ex_app: ?h_inner. Proof_HF (append_l tl p2) h_inner").by_witness(
                     "h_inner", "pq_app"
                 )
                 p.have(
                     "tail_app_disj: "
                     "(append_l tl p2) = nil_l "
-                    "\\/ ?h_inner. Proof_Q (append_l tl p2) h_inner"
+                    "\\/ ?h_inner. Proof_HF (append_l tl p2) h_inner"
                 ).by_disj("ex_app")
 
                 p.have(
                     "target_body: hd = h1 /\\ "
                     "valid_step (append_l tl p2) hd /\\ "
                     "((append_l tl p2) = nil_l "
-                    "\\/ ?h_inner. Proof_Q (append_l tl p2) h_inner)"
+                    "\\/ ?h_inner. Proof_HF (append_l tl p2) h_inner)"
                 ).by_thm(
                     CONJ(
                         p.fact("hd_eq_h1"),
                         CONJ(p.fact("valid_app"), p.fact("tail_app_disj")),
                     )
                 )
-                p.have("pq_cons: Proof_Q (cons_l hd (append_l tl p2)) h1").by_eq_mp(
+                p.have("pq_cons: Proof_HF (cons_l hd (append_l tl p2)) h1").by_eq_mp(
                     SYM(target_eq), "target_body"
                 )
-                p.thus("Proof_Q (append_l p1 p2) h1").by_rewrite_of(
+                p.thus("Proof_HF (append_l p1 p2) h1").by_rewrite_of(
                     "pq_cons", [SYM(p.fact("app_eq"))]
                 )
 
 
 # ---------------------------------------------------------------------------
-# (DELETED) Forward direction of an old Prov_Q / Proof_Q equivalence.
+# (DELETED) Forward direction of an old Prov_HF / Proof_HF equivalence.
 #
 # An earlier draft proved
-#   |- !p f. mem_l p f ==> (?h. Proof_Q p h) ==> Prov_Q f
+#   |- !p f. mem_l p f ==> (?h. Proof_HF p h) ==> Prov_HF f
 # by strong induction on the proof list, then derived the convenience
-# corollary ``PROOF_Q_PROVES : !p n. Proof_Q p n ==> Prov_Q n``. Both
-# were needed only because ``Prov_Q`` was originally defined
-# impredicatively in q_proof.py and had to be bridged to the list-based
-# ``Proof_Q``. After collapsing ``Prov_Q := \n. ?p. Proof_Q p n``
-# (defined later in this file via the Sigma_1 form), ``PROOF_Q_PROVES``
+# corollary ``PROOF_HF_PROVES : !p n. Proof_HF p n ==> Prov_HF n``. Both
+# were needed only because ``Prov_HF`` was originally defined
+# impredicatively in hf_proof.py and had to be bridged to the list-based
+# ``Proof_HF``. After collapsing ``Prov_HF := \n. ?p. Proof_HF p n``
+# (defined later in this file via the Sigma_1 form), ``PROOF_HF_PROVES``
 # becomes ``EXISTS_INTRO`` and the strong-induction argument is no
 # longer needed for any downstream consumer. Both lemmas are retired.
 # ---------------------------------------------------------------------------
@@ -1800,20 +1800,20 @@ def PROOF_Q_APPEND(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 3B (h) -- ``Proof_Q p h ==> mem_l p h`` (head is its own member).
+# Stage 3B (h) -- ``Proof_HF p h ==> mem_l p h`` (head is its own member).
 # ---------------------------------------------------------------------------
 
 
 @proof
-def PROOF_Q_HEAD_MEM(p):
-    """|- !p1 h1. Proof_Q p1 h1 ==> mem_l p1 h1."""
-    p.goal("!p1 h1. Proof_Q p1 h1 ==> mem_l p1 h1")
+def PROOF_HF_HEAD_MEM(p):
+    """|- !p1 h1. Proof_HF p1 h1 ==> mem_l p1 h1."""
+    p.goal("!p1 h1. Proof_HF p1 h1 ==> mem_l p1 h1")
     p.fix("p1 h1")
-    p.assume("pq: Proof_Q p1 h1")
-    rec_pq = SPECL([p._parse("p1"), p._parse("h1")], PROOF_Q_REC_PW)
+    p.assume("pq: Proof_HF p1 h1")
+    rec_pq = SPECL([p._parse("p1"), p._parse("h1")], PROOF_HF_REC_PW)
     body_str = (
         "?h t. p1 = cons_l h t /\\ h = h1 /\\ valid_step t h "
-        "/\\ (t = nil_l \\/ ?h_inner. Proof_Q t h_inner)"
+        "/\\ (t = nil_l \\/ ?h_inner. Proof_HF t h_inner)"
     )
     p.have(f"body: {body_str}").by_eq_mp(rec_pq, "pq")
     p.choose("hd", "body", eq_label="ex_t")
@@ -1832,19 +1832,19 @@ def PROOF_Q_HEAD_MEM(p):
 
 # ---------------------------------------------------------------------------
 # Stage 3B (i) -- the three admissibility clauses for the
-# impredicative ``Prov_Q``, lifted to ``\n. ?p. Proof_Q p n``.
+# impredicative ``Prov_HF``, lifted to ``\n. ?p. Proof_HF p n``.
 # ---------------------------------------------------------------------------
 
 
 @proof
 def AXIOM_HAS_PROOF(p):
-    """|- !m. is_axiom m ==> ?p. Proof_Q p m.
+    """|- !m. is_axiom m ==> ?p. Proof_HF p m.
 
     Witness: ``cons_l m nil_l``. Validity: ``valid_step nil_l m``
     follows directly from ``is_axiom m`` via the axiom disjunct;
     tail disjunct collapses to ``nil_l = nil_l``.
     """
-    p.goal("!m. is_axiom m ==> ?p. Proof_Q p m")
+    p.goal("!m. is_axiom m ==> ?p. Proof_HF p m")
     p.fix("m")
     p.assume("ax: is_axiom m")
 
@@ -1857,47 +1857,47 @@ def AXIOM_HAS_PROOF(p):
     )
     p.have(f"vd: {vd_str}").by_disj("ax")
     p.have("valid_th: valid_step nil_l m").by_eq_mp(SYM(valid_at), "vd")
-    p.have("tail_disj: nil_l = nil_l \\/ ?h_inner. Proof_Q nil_l h_inner").by_disj(
+    p.have("tail_disj: nil_l = nil_l \\/ ?h_inner. Proof_HF nil_l h_inner").by_disj(
         REFL(nil_l)
     )
 
     target_eq = SPECL(
         [p._parse("m"), nil_l, p._parse("m")],
-        PROOF_Q_AT_CONS,
+        PROOF_HF_AT_CONS,
     )
     p.have(
         "target_body: m = m /\\ valid_step nil_l m "
         "/\\ (nil_l = nil_l "
-        "\\/ ?h_inner. Proof_Q nil_l h_inner)"
+        "\\/ ?h_inner. Proof_HF nil_l h_inner)"
     ).by_thm(
         CONJ(
             REFL(p._parse("m")),
             CONJ(p.fact("valid_th"), p.fact("tail_disj")),
         )
     )
-    p.have("pq_witness: Proof_Q (cons_l m nil_l) m").by_eq_mp(
+    p.have("pq_witness: Proof_HF (cons_l m nil_l) m").by_eq_mp(
         SYM(target_eq), "target_body"
     )
-    p.thus("?p. Proof_Q p m").by_witness("cons_l m nil_l", "pq_witness")
+    p.thus("?p. Proof_HF p m").by_witness("cons_l m nil_l", "pq_witness")
 
 
 @proof
 def GEN_HAS_PROOF(p):
-    """|- !f x. (?p1. Proof_Q p1 f) ==>
-                ?p. Proof_Q p (Forall_f x f).
+    """|- !f x. (?p1. Proof_HF p1 f) ==>
+                ?p. Proof_HF p (Forall_f x f).
 
     Witness: ``cons_l (Forall_f x f) p1``. Validity: Gen disjunct of
     ``valid_step p1 (Forall_f x f)`` with member ``f`` (head of ``p1``)
     and ``is_gen f (Forall_f x f)`` (witness ``x`` for the inner
     existential). Tail disjunct: right with witness ``f`` (since
-    ``Proof_Q p1 f``).
+    ``Proof_HF p1 f``).
     """
-    p.goal("!f x. (?p1. Proof_Q p1 f) ==> ?p. Proof_Q p (Forall_f x f)")
+    p.goal("!f x. (?p1. Proof_HF p1 f) ==> ?p. Proof_HF p (Forall_f x f)")
     p.fix("f x")
-    p.assume("pq_ex: ?p1. Proof_Q p1 f")
+    p.assume("pq_ex: ?p1. Proof_HF p1 f")
     p.choose("p1", "pq_ex", eq_label="pq1")
 
-    p.have("mem_p1_f: mem_l p1 f").by(PROOF_Q_HEAD_MEM, "p1", "f", "pq1")
+    p.have("mem_p1_f: mem_l p1 f").by(PROOF_HF_HEAD_MEM, "p1", "f", "pq1")
 
     # is_gen f (Forall_f x f): ?y. Forall_f x f = Forall_f y f, witness y := x.
     is_gen_at = SPECL([p._parse("f"), p._parse("Forall_f x f")], IS_GEN_AT)
@@ -1921,63 +1921,63 @@ def GEN_HAS_PROOF(p):
     p.have(f"vd: {vd_str}").by_disj("gen_ex")
     p.have("valid_th: valid_step p1 (Forall_f x f)").by_eq_mp(SYM(valid_at), "vd")
 
-    # Tail disjunct: ?h_inner. Proof_Q p1 h_inner with witness f.
-    p.have("tail_ex: ?h_inner. Proof_Q p1 h_inner").by_witness("f", "pq1")
-    p.have("tail_disj: p1 = nil_l \\/ ?h_inner. Proof_Q p1 h_inner").by_disj("tail_ex")
+    # Tail disjunct: ?h_inner. Proof_HF p1 h_inner with witness f.
+    p.have("tail_ex: ?h_inner. Proof_HF p1 h_inner").by_witness("f", "pq1")
+    p.have("tail_disj: p1 = nil_l \\/ ?h_inner. Proof_HF p1 h_inner").by_disj("tail_ex")
 
     fa_t = p._parse("Forall_f x f")
     target_eq = SPECL(
         [fa_t, p._parse("p1"), fa_t],
-        PROOF_Q_AT_CONS,
+        PROOF_HF_AT_CONS,
     )
     p.have(
         "target_body: Forall_f x f = Forall_f x f "
         "/\\ valid_step p1 (Forall_f x f) "
         "/\\ (p1 = nil_l "
-        "\\/ ?h_inner. Proof_Q p1 h_inner)"
+        "\\/ ?h_inner. Proof_HF p1 h_inner)"
     ).by_thm(
         CONJ(
             REFL(fa_t),
             CONJ(p.fact("valid_th"), p.fact("tail_disj")),
         )
     )
-    p.have("pq_witness: Proof_Q (cons_l (Forall_f x f) p1) (Forall_f x f)").by_eq_mp(
+    p.have("pq_witness: Proof_HF (cons_l (Forall_f x f) p1) (Forall_f x f)").by_eq_mp(
         SYM(target_eq), "target_body"
     )
-    p.thus("?p. Proof_Q p (Forall_f x f)").by_witness(
+    p.thus("?p. Proof_HF p (Forall_f x f)").by_witness(
         "cons_l (Forall_f x f) p1", "pq_witness"
     )
 
 
 @proof
 def MP_HAS_PROOF(p):
-    """|- !f g. (?p1. Proof_Q p1 f) /\\ (?p2. Proof_Q p2 (Imp_f f g))
-                 ==> ?p. Proof_Q p g.
+    """|- !f g. (?p1. Proof_HF p1 f) /\\ (?p2. Proof_HF p2 (Imp_f f g))
+                 ==> ?p. Proof_HF p g.
 
     Witness: ``cons_l g (append_l p2 p1)``. Validity: MP disjunct
     with ``f1 := f``, ``f2 := Imp_f f g`` -- both members of
     ``append_l p2 p1`` via ``MEM_L_APPEND_PRESERVES`` (lifting
     ``mem_l p2 (Imp_f f g)`` and ``mem_l p1 f``). Tail disjunct:
-    ``Proof_Q (append_l p2 p1) (Imp_f f g)`` from ``PROOF_Q_APPEND``.
+    ``Proof_HF (append_l p2 p1) (Imp_f f g)`` from ``PROOF_HF_APPEND``.
     """
     p.goal(
-        "!f g. (?p1. Proof_Q p1 f) /\\ "
-        "(?p2. Proof_Q p2 (Imp_f f g)) "
-        "==> ?p. Proof_Q p g"
+        "!f g. (?p1. Proof_HF p1 f) /\\ "
+        "(?p2. Proof_HF p2 (Imp_f f g)) "
+        "==> ?p. Proof_HF p g"
     )
     p.fix("f g")
-    p.assume("(pq1_ex, pq2_ex): (?p1. Proof_Q p1 f) /\\ (?p2. Proof_Q p2 (Imp_f f g))")
+    p.assume("(pq1_ex, pq2_ex): (?p1. Proof_HF p1 f) /\\ (?p2. Proof_HF p2 (Imp_f f g))")
     p.choose("p1", "pq1_ex", eq_label="pq1")
     p.choose("p2", "pq2_ex", eq_label="pq2")
 
     # Members.
-    p.have("mem_p1_f: mem_l p1 f").by(PROOF_Q_HEAD_MEM, "p1", "f", "pq1")
+    p.have("mem_p1_f: mem_l p1 f").by(PROOF_HF_HEAD_MEM, "p1", "f", "pq1")
     p.have("mem_p2_imp: mem_l p2 (Imp_f f g)").by(
-        PROOF_Q_HEAD_MEM, "p2", "Imp_f f g", "pq2"
+        PROOF_HF_HEAD_MEM, "p2", "Imp_f f g", "pq2"
     )
 
     # Lift via MEM_L_APPEND_PRESERVES with (p1' := p2, p2' := p1):
-    #   Proof_Q p2 (Imp_f f g) ==> (mem_l p2 a \/ mem_l p1 a) ==>
+    #   Proof_HF p2 (Imp_f f g) ==> (mem_l p2 a \/ mem_l p1 a) ==>
     #     mem_l (append_l p2 p1) a.
     p.have("disj_imp: mem_l p2 (Imp_f f g) \\/ mem_l p1 (Imp_f f g)").by_disj(
         "mem_p2_imp"
@@ -2022,41 +2022,41 @@ def MP_HAS_PROOF(p):
     p.have(f"vd: {vd_str}").by_disj("mp_ex")
     p.have("valid_th: valid_step (append_l p2 p1) g").by_eq_mp(SYM(valid_at), "vd")
 
-    # Tail disjunction: ?h_inner. Proof_Q (append_l p2 p1) h_inner via
-    # PROOF_Q_APPEND with witness Imp_f f g.
-    p.have("pq_app: Proof_Q (append_l p2 p1) (Imp_f f g)").by(
-        PROOF_Q_APPEND, "p2", "Imp_f f g", "pq2", "p1", "f", "pq1"
+    # Tail disjunction: ?h_inner. Proof_HF (append_l p2 p1) h_inner via
+    # PROOF_HF_APPEND with witness Imp_f f g.
+    p.have("pq_app: Proof_HF (append_l p2 p1) (Imp_f f g)").by(
+        PROOF_HF_APPEND, "p2", "Imp_f f g", "pq2", "p1", "f", "pq1"
     )
-    p.have("tail_ex: ?h_inner. Proof_Q (append_l p2 p1) h_inner").by_witness(
+    p.have("tail_ex: ?h_inner. Proof_HF (append_l p2 p1) h_inner").by_witness(
         "Imp_f f g", "pq_app"
     )
     p.have(
         "tail_disj: (append_l p2 p1) = nil_l "
-        "\\/ ?h_inner. Proof_Q (append_l p2 p1) h_inner"
+        "\\/ ?h_inner. Proof_HF (append_l p2 p1) h_inner"
     ).by_disj("tail_ex")
 
-    target_eq = SPECL([g_t, app_t, g_t], PROOF_Q_AT_CONS)
+    target_eq = SPECL([g_t, app_t, g_t], PROOF_HF_AT_CONS)
     p.have(
         "target_body: g = g "
         "/\\ valid_step (append_l p2 p1) g "
         "/\\ ((append_l p2 p1) = nil_l "
-        "\\/ ?h_inner. Proof_Q (append_l p2 p1) h_inner)"
+        "\\/ ?h_inner. Proof_HF (append_l p2 p1) h_inner)"
     ).by_thm(
         CONJ(
             REFL(g_t),
             CONJ(p.fact("valid_th"), p.fact("tail_disj")),
         )
     )
-    p.have("pq_witness: Proof_Q (cons_l g (append_l p2 p1)) g").by_eq_mp(
+    p.have("pq_witness: Proof_HF (cons_l g (append_l p2 p1)) g").by_eq_mp(
         SYM(target_eq), "target_body"
     )
-    p.thus("?p. Proof_Q p g").by_witness("cons_l g (append_l p2 p1)", "pq_witness")
+    p.thus("?p. Proof_HF p g").by_witness("cons_l g (append_l p2 p1)", "pq_witness")
 
 
 # ---------------------------------------------------------------------------
-# Stage 3B (j) -- Sigma_1 definition of Prov_Q.
+# Stage 3B (j) -- Sigma_1 definition of Prov_HF.
 #
-#   Prov_Q n  :<=>  ?p. Proof_Q p n.
+#   Prov_HF n  :<=>  ?p. Proof_HF p n.
 #
 # This is the canonical form: provability is the existence of an
 # explicit list-of-formulas proof. The closure rules under axioms,
@@ -2065,107 +2065,107 @@ def MP_HAS_PROOF(p):
 # ---------------------------------------------------------------------------
 
 
-PROV_Q_DEF = define(
-    "Prov_Q",
+PROV_HF_DEF = define(
+    "Prov_HF",
     parse_type("nat0 -> bool"),
-    "\\n:nat0. ?p:nat0. Proof_Q p n",
+    "\\n:nat0. ?p:nat0. Proof_HF p n",
 )
-Prov_Q = mk_const("Prov_Q", [])
-# |- !n. Prov_Q n = (?p. Proof_Q p n).
-PROV_Q_AT = _at1(PROV_Q_DEF, _n_n0)
+Prov_HF = mk_const("Prov_HF", [])
+# |- !n. Prov_HF n = (?p. Proof_HF p n).
+PROV_HF_AT = _at1(PROV_HF_DEF, _n_n0)
 
 
 # ---------------------------------------------------------------------------
 # Stage 3B (k) -- closure rules.
 #
-#   (1) |- !n. is_axiom n ==> Prov_Q n.
-#   (2) |- !f g. Prov_Q f /\ Prov_Q (Imp_f f g) ==> Prov_Q g.
-#   (3) |- !f x. Prov_Q f ==> Prov_Q (Forall_f x f).
+#   (1) |- !n. is_axiom n ==> Prov_HF n.
+#   (2) |- !f g. Prov_HF f /\ Prov_HF (Imp_f f g) ==> Prov_HF g.
+#   (3) |- !f x. Prov_HF f ==> Prov_HF (Forall_f x f).
 #
 # Each one is the corresponding *_HAS_PROOF lemma packaged through
-# PROV_Q_AT (which folds ``?p. Proof_Q p _`` into ``Prov_Q _``).
+# PROV_HF_AT (which folds ``?p. Proof_HF p _`` into ``Prov_HF _``).
 # ---------------------------------------------------------------------------
 
 
 @proof
-def PROV_Q_AXIOM(p):
-    """|- !n. is_axiom n ==> Prov_Q n."""
-    p.goal("!n. is_axiom n ==> Prov_Q n")
+def PROV_HF_AXIOM(p):
+    """|- !n. is_axiom n ==> Prov_HF n."""
+    p.goal("!n. is_axiom n ==> Prov_HF n")
     p.fix("n")
     p.assume("ax: is_axiom n")
-    p.have("ex: ?p. Proof_Q p n").by(AXIOM_HAS_PROOF, "n", "ax")
-    pq_at_n = SPEC(p._parse("n"), PROV_Q_AT)
-    p.thus("Prov_Q n").by_eq_mp(SYM(pq_at_n), "ex")
+    p.have("ex: ?p. Proof_HF p n").by(AXIOM_HAS_PROOF, "n", "ax")
+    pq_at_n = SPEC(p._parse("n"), PROV_HF_AT)
+    p.thus("Prov_HF n").by_eq_mp(SYM(pq_at_n), "ex")
 
 
 @proof
-def PROV_Q_MP(p):
-    """|- !f g. Prov_Q f /\\ Prov_Q (Imp_f f g) ==> Prov_Q g."""
-    p.goal("!f g. (Prov_Q f /\\ Prov_Q (Imp_f f g)) ==> Prov_Q g")
+def PROV_HF_MP(p):
+    """|- !f g. Prov_HF f /\\ Prov_HF (Imp_f f g) ==> Prov_HF g."""
+    p.goal("!f g. (Prov_HF f /\\ Prov_HF (Imp_f f g)) ==> Prov_HF g")
     p.fix("f g")
-    p.assume("(pf, pfg): Prov_Q f /\\ Prov_Q (Imp_f f g)")
-    pq_at_f = SPEC(p._parse("f"), PROV_Q_AT)
-    pq_at_fg = SPEC(p._parse("Imp_f f g"), PROV_Q_AT)
-    pq_at_g = SPEC(p._parse("g"), PROV_Q_AT)
-    p.have("ex_f: ?p. Proof_Q p f").by_eq_mp(pq_at_f, "pf")
-    p.have("ex_fg: ?p. Proof_Q p (Imp_f f g)").by_eq_mp(pq_at_fg, "pfg")
-    p.have("ex_g: ?p. Proof_Q p g").by(
+    p.assume("(pf, pfg): Prov_HF f /\\ Prov_HF (Imp_f f g)")
+    pq_at_f = SPEC(p._parse("f"), PROV_HF_AT)
+    pq_at_fg = SPEC(p._parse("Imp_f f g"), PROV_HF_AT)
+    pq_at_g = SPEC(p._parse("g"), PROV_HF_AT)
+    p.have("ex_f: ?p. Proof_HF p f").by_eq_mp(pq_at_f, "pf")
+    p.have("ex_fg: ?p. Proof_HF p (Imp_f f g)").by_eq_mp(pq_at_fg, "pfg")
+    p.have("ex_g: ?p. Proof_HF p g").by(
         MP_HAS_PROOF, "f", "g", CONJ(p.fact("ex_f"), p.fact("ex_fg"))
     )
-    p.thus("Prov_Q g").by_eq_mp(SYM(pq_at_g), "ex_g")
+    p.thus("Prov_HF g").by_eq_mp(SYM(pq_at_g), "ex_g")
 
 
 @proof
-def PROV_Q_GEN(p):
-    """|- !f x. Prov_Q f ==> Prov_Q (Forall_f x f)."""
-    p.goal("!f x. Prov_Q f ==> Prov_Q (Forall_f x f)")
+def PROV_HF_GEN(p):
+    """|- !f x. Prov_HF f ==> Prov_HF (Forall_f x f)."""
+    p.goal("!f x. Prov_HF f ==> Prov_HF (Forall_f x f)")
     p.fix("f x")
-    p.assume("pf: Prov_Q f")
-    pq_at_f = SPEC(p._parse("f"), PROV_Q_AT)
-    pq_at_fx = SPEC(p._parse("Forall_f x f"), PROV_Q_AT)
-    p.have("ex_f: ?p. Proof_Q p f").by_eq_mp(pq_at_f, "pf")
-    p.have("ex_fx: ?p. Proof_Q p (Forall_f x f)").by(
+    p.assume("pf: Prov_HF f")
+    pq_at_f = SPEC(p._parse("f"), PROV_HF_AT)
+    pq_at_fx = SPEC(p._parse("Forall_f x f"), PROV_HF_AT)
+    p.have("ex_f: ?p. Proof_HF p f").by_eq_mp(pq_at_f, "pf")
+    p.have("ex_fx: ?p. Proof_HF p (Forall_f x f)").by(
         GEN_HAS_PROOF, "f", "x", "ex_f"
     )
-    p.thus("Prov_Q (Forall_f x f)").by_eq_mp(SYM(pq_at_fx), "ex_fx")
+    p.thus("Prov_HF (Forall_f x f)").by_eq_mp(SYM(pq_at_fx), "ex_fx")
 
 
 # ---------------------------------------------------------------------------
-# Stage 3B (l) -- the equivalence ``Prov_Q n <=> ?p. Proof_Q p n``.
+# Stage 3B (l) -- the equivalence ``Prov_HF n <=> ?p. Proof_HF p n``.
 #
-# It is the defining equation, packaged via ``PROV_Q_AT``. Kept under
+# It is the defining equation, packaged via ``PROV_HF_AT``. Kept under
 # the historic name so downstream code that imports
-# ``PROV_Q_IFF_PROOF_Q`` keeps working.
+# ``PROV_HF_IFF_PROOF_HF`` keeps working.
 # ---------------------------------------------------------------------------
 
 
-PROV_Q_IFF_PROOF_Q = PROV_Q_AT
+PROV_HF_IFF_PROOF_HF = PROV_HF_AT
 
 
 # ---------------------------------------------------------------------------
 # Stage 3B (m) -- representability scaffolding.
 #
 # A unary predicate ``P : nat0 -> bool`` is *represented* by a
-# Q-formula ``F`` (a nat0 godelnum, taken to be a Q-formula whose only
+# HF-formula ``F`` (a nat0 godelnum, taken to be a HF-formula whose only
 # free variable is ``var_x``) iff:
 #
-#   * (positive)  !n. P n      ==> Prov_Q (substitute F (numeral n) var_x).
-#   * (negative)  !n. ~ P n    ==> Prov_Q (Not_f (substitute F (numeral n) var_x)).
+#   * (positive)  !n. P n      ==> Prov_HF (substitute F (numeral n) var_x).
+#   * (negative)  !n. ~ P n    ==> Prov_HF (Not_f (substitute F (numeral n) var_x)).
 #
 # We package the conjunction of the two conditions as
-# ``represents_pred F P``. Defined here, after ``Prov_Q``.
+# ``represents_pred F P``. Defined here, after ``Prov_HF``.
 # ---------------------------------------------------------------------------
 
 
 _pos_clause = mk_forall(
     _n_n0,
-    mk_imp(mk_app(_P_pred, _n_n0), mk_app(Prov_Q, _subst_at_numeral(_F_n0, _n_n0))),
+    mk_imp(mk_app(_P_pred, _n_n0), mk_app(Prov_HF, _subst_at_numeral(_F_n0, _n_n0))),
 )
 _neg_clause = mk_forall(
     _n_n0,
     mk_imp(
         mk_not(mk_app(_P_pred, _n_n0)),
-        mk_app(Prov_Q, mk_app(Not_f, _subst_at_numeral(_F_n0, _n_n0))),
+        mk_app(Prov_HF, mk_app(Not_f, _subst_at_numeral(_F_n0, _n_n0))),
     ),
 )
 
@@ -2180,9 +2180,9 @@ represents_pred = mk_const("represents_pred", [])
 
 
 # |- !F P. represents_pred F P =
-#          ((!n. P n ==> Prov_Q (substitute F (numeral n) var_x))
+#          ((!n. P n ==> Prov_HF (substitute F (numeral n) var_x))
 #        /\ (!n. ~ P n
-#               ==> Prov_Q (Not_f (substitute F (numeral n) var_x)))).
+#               ==> Prov_HF (Not_f (substitute F (numeral n) var_x)))).
 REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 
 
@@ -2190,19 +2190,19 @@ REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 # Stage 3C (a) -- representability of ``substitute`` (AXIOMATIZED).
 #
 # Headline theorem (``SUBSTITUTE_REPRESENTS``):
-#   |- !F t v. Prov_Q (
+#   |- !F t v. Prov_HF (
 #         substitute (substitute (substitute (substitute
 #             substitute_internal (numeral F) var_x)
 #             (numeral t) var_y)
 #             (numeral v) var_z)
 #             (numeral (substitute F t v)) var_w).
 #
-# ``substitute_internal`` is a Q-formula in four free variables -- ``var_x``
+# ``substitute_internal`` is a HF-formula in four free variables -- ``var_x``
 # (F-slot), ``var_y`` (t-slot), ``var_z`` (v-slot), ``var_w`` (result-slot)
 # -- expressing the relation "substitute(F, t, v) = r".
 #
 # The standard textbook proof requires:
-#   * a finite-sequence coding device inside Q (Goedel's beta function
+#   * a finite-sequence coding device inside HF (Goedel's beta function
 #     via Chinese remainder, or Cantor pairing via division/mod);
 #   * external structural induction on F using the Stage-1 SUBSTITUTE_AT_*
 #     equations.
@@ -2210,7 +2210,7 @@ REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 # Why a single fixed Sigma_1 formula is required, not a HOL-recursive
 # family: the diagonal lemma (Stage 3D) forms the Goedel sentence by
 # substituting a numeric godelnum into a *single fixed* internal-provability
-# formula. Without ``substitute_internal`` as one fixed Q-formula, no
+# formula. Without ``substitute_internal`` as one fixed HF-formula, no
 # ``D(x, y)`` represents the diagonal function and the fixed-point
 # construction collapses (analysis recorded for posterity, do not
 # re-explore).
@@ -2227,9 +2227,9 @@ REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 # induction on F (~1500 lines of new infrastructure including the arith.
 # representability prerequisites for ``add``, ``times``, ``mod``).
 #
-# TODO -- discharge via Q + HF (preferred over the beta-function path).
-# The HF primitives (Insert_t / In_a / Empty_t) and axioms Q8-Q12 are
-# already in place (q_syntax.py, q_proof.py). Define
+# TODO -- discharge via HF (preferred over the beta-function path).
+# The HF primitives (Insert_t / In_a / Empty_t) and axioms HF1-HF5 are
+# already in place (hf_syntax.py, hf_proof.py). Define
 # ``substitute_internal`` as the Sigma_1 predicate
 #     ?T. is_substitute_trace T F t v r
 # where T : nat0 is an HF set of (subterm-shape, output-shape) pairs
@@ -2239,18 +2239,18 @@ REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 #        matching substitute's SUBSTITUTE_AT_* equations -- a bounded
 #        conjunction over its members via In, decoded by Pair_ord
 #        projection.
-# Q proves substitute_internal at every numeral instance by exhibiting
+# HF proves substitute_internal at every numeral instance by exhibiting
 # the trace HF set explicitly (|F|-many closed Pair_ord numerals);
 # verification conjuncts are decidable equalities + In-membership
-# facts, all Sigma_0 in Q + HF. Estimated ~150 lines vs ~1500 for the
-# beta-function path. The structural recognisers in q_syntax.py
+# facts, all Sigma_0 in HF. Estimated ~150 lines vs ~1500 for the
+# beta-function path. The structural recognisers in hf_syntax.py
 # (is_term, is_form, free_in, substitute) already cover Insert_t and
 # In_a, so this can be attempted directly.
 #
 # Progress (2026-05-09):
 #   * Union added to hf_sets.py (Stage 3 cont.) with IN_UNION.
 #   * var_T (Var_t 4) and var_a..var_f2 (Var_t 5..15) added as the
-#     internal Q-variable indices used by the trace-encoding formula.
+#     internal HF-variable indices used by the trace-encoding formula.
 #   * is_substitute_step (HOL) and is_substitute_trace (HOL) defined,
 #     with pointwise unfolding lemmas IS_SUBSTITUTE_STEP_AT and
 #     IS_SUBSTITUTE_TRACE_AT.
@@ -2258,7 +2258,7 @@ REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 #     is_substitute_step (the foundation for binary trace assembly via
 #     ``Insert (Pair_ord F r) (Union T1 T2)``).
 #   * Q_and / Q_or / Q_exists / Q_imp / ... Python-level helpers for
-#     building Q-formulas compositionally (Q has only Forall_f / Imp_f
+#     building HF-formulas compositionally (HF has only Forall_f / Imp_f
 #     / Not_f / Eq_f as primitives -- these macros suppress the
 #     bookkeeping bloat of explicit Not_f/Imp_f trees).
 #   * TRACE_EXISTS stated under syntactic precondition (is_term F \/
@@ -2271,17 +2271,17 @@ REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 #
 # Remaining significant scope (B1-B3):
 #
-#   B1 (Q-encoding):  is_substitute_step_internal as a closed Q-formula
+#   B1 (HF-encoding):  is_substitute_step_internal as a closed HF-formula
 #     blocks on Sigma_1 representability of ``Pair_ord`` and ``In``
-#     (neither is in Q's primitive vocabulary -- ``Pair_ord`` is an
+#     (neither is in HF's primitive vocabulary -- ``Pair_ord`` is an
 #     HF helper, ``In`` is bit-extraction). Each disjunct of
 #     is_substitute_step references ``In (Pair_ord _ _) T`` and
 #     constructor patterns ``a = Var_t v / Plus_t a1 a2 / ...`` which
-#     all involve ``Pair_ord`` (since each Q-syntax constructor
+#     all involve ``Pair_ord`` (since each HF-syntax constructor
 #     unfolds to a ``Pair_ord``-prefixed encoding). Without
 #     representing-formula constants ``is_Pair_ord_internal``,
 #     ``is_In_internal`` (or inlined Sigma_1-equivalent expansions),
-#     the Q-formula cannot be spelled out. Each representability
+#     the HF-formula cannot be spelled out. Each representability
 #     proof is its own ~50-100 line construction (size lemmas, strict
 #     monotonicity, the Sigma_0 verification at numerals).
 #
@@ -2290,9 +2290,9 @@ REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 #     in isolation; blocked on B1.
 #
 #   B3 (SUBSTITUTE_REPRESENTS proof):  Combines TRACE_EXISTS (A4) with
-#     B1's Q-encoding, exhibiting the trace HF set T and discharging
-#     each disjunct's Sigma_0 verification using Q + HF axioms. Blocks
-#     on A4 + B1 + B2; itself ~200-300 lines (mostly Q-axiom citations).
+#     B1's HF-encoding, exhibiting the trace HF set T and discharging
+#     each disjunct's Sigma_0 verification using HF axioms. Blocks
+#     on A4 + B1 + B2; itself ~200-300 lines (mostly HF-axiom citations).
 #
 # Total remaining estimate after foundations: ~500-1000 lines, plus
 # the Pair_ord / In representability prerequisites (~200 lines).
@@ -2303,7 +2303,7 @@ VAR_W_DEF = define("var_w", parse_type("nat0"), "Var_t (SUC0 (SUC0 (SUC0 0)))")
 var_w = mk_const("var_w", [])
 
 
-# var_T -- Q-internal bound variable for the existentially-quantified HF
+# var_T -- HF-internal bound variable for the existentially-quantified HF
 # trace set inside ``substitute_internal``. Index 4 (SUC0^4 0); the four
 # free slots var_x/y/z/w (indices 0..3) are reserved for the input/output
 # pair (F, t, v, r).
@@ -2315,7 +2315,7 @@ VAR_T_DEF = define(
 var_T = mk_const("var_T", [])
 
 
-# Additional Q-internal variables for the body of is_substitute_trace_internal:
+# Additional HF-internal variables for the body of is_substitute_trace_internal:
 #   var_a, var_b           -- the "!a b. ..." outer for-all binders.
 #   var_s1, var_s2         -- Succ_t / Not_f sub-shape existentials.
 #   var_wq                 -- Var_t-miss / Forall_f-* index existentials
@@ -2323,7 +2323,7 @@ var_T = mk_const("var_T", [])
 #   var_a1, var_a2,        -- binary-constructor sub-shape existentials.
 #   var_b1, var_b2
 #   var_f1, var_f2         -- Forall_f-miss body existentials.
-# Indices 5..14 of the Q-variable namespace.
+# Indices 5..14 of the HF-variable namespace.
 def _var_q_def(name, idx):
     suc = "0"
     for _ in range(idx):
@@ -2355,22 +2355,22 @@ VAR_F2_DEF = _var_q_def("var_f2", 15)
 var_f2 = mk_const("var_f2", [])
 
 
-# Q-encoding macros at the Python level. Q has only Forall_f, Imp_f, Not_f,
-# Eq_f as primitives -- everything else is hand-encoded. Build Q-formulas
+# HF-encoding macros at the Python level. HF has only Forall_f, Imp_f, Not_f,
+# Eq_f as primitives -- everything else is hand-encoded. Build HF-formulas
 # compositionally rather than spelling out the Not_f/Imp_f/Forall_f tree
-# literally (which would balloon any large Q-formula by 10x).
+# literally (which would balloon any large HF-formula by 10x).
 def Q_and(a, b):
-    """Q's /\\ as Not_f (Imp_f a (Not_f b))."""
+    """HF's /\\ as Not_f (Imp_f a (Not_f b))."""
     return mk_app(Not_f, mk_app(Imp_f, a, mk_app(Not_f, b)))
 
 
 def Q_or(a, b):
-    """Q's \\/ as Imp_f (Not_f a) b."""
+    """HF's \\/ as Imp_f (Not_f a) b."""
     return mk_app(Imp_f, mk_app(Not_f, a), b)
 
 
 def Q_imp(a, b):
-    """Q's ==> -- Imp_f a b."""
+    """HF's ==> -- Imp_f a b."""
     return mk_app(Imp_f, a, b)
 
 
@@ -2387,12 +2387,12 @@ def Q_neq(a, b):
 
 
 def Q_forall(idx, body):
-    """Q's !x. body  --  Forall_f idx body  (idx is the raw nat0 index)."""
+    """HF's !x. body  --  Forall_f idx body  (idx is the raw nat0 index)."""
     return mk_app(Forall_f, idx, body)
 
 
 def Q_exists(idx, body):
-    """Q's ?x. body  --  Not_f (Forall_f idx (Not_f body))."""
+    """HF's ?x. body  --  Not_f (Forall_f idx (Not_f body))."""
     return Q_not(Q_forall(idx, Q_not(body)))
 
 
@@ -2417,7 +2417,7 @@ def Q_or_chain(*xs):
 
 
 def Q_exists_chain(idxs, body):
-    """Nested Q-exists ``?idx0 idx1 ... . body``."""
+    """Nested HF-exists ``?idx0 idx1 ... . body``."""
     out = body
     for idx in reversed(idxs):
         out = Q_exists(idx, out)
@@ -2437,7 +2437,7 @@ def _idx_term(k):
 
 
 # ---------------------------------------------------------------------------
-# Substitute-pushing lemmas for the Q-encoding macros.
+# Substitute-pushing lemmas for the HF-encoding macros.
 #
 # Q_not / Q_imp / Q_eq / Q_forall coincide with their primitive HOL
 # constructors (Not_f / Imp_f / Eq_f / Forall_f), so the existing
@@ -2458,7 +2458,7 @@ def _idx_term(k):
 
 
 @proof
-def SUBSTITUTE_Q_AND(p):
+def SUBSTITUTE_AND(p):
     """|- !a b new_t v.
             substitute (Not_f (Imp_f a (Not_f b))) new_t v
             = Not_f (Imp_f (substitute a new_t v)
@@ -2482,7 +2482,7 @@ def SUBSTITUTE_Q_AND(p):
 
 
 @proof
-def SUBSTITUTE_Q_OR(p):
+def SUBSTITUTE_OR(p):
     """|- !a b new_t v.
             substitute (Imp_f (Not_f a) b) new_t v
             = Imp_f (Not_f (substitute a new_t v))
@@ -2506,7 +2506,7 @@ def SUBSTITUTE_Q_OR(p):
 
 
 @proof
-def SUBSTITUTE_Q_NEQ(p):
+def SUBSTITUTE_NEQ(p):
     """|- !a b new_t v.
             substitute (Not_f (Eq_f a b)) new_t v
             = Not_f (Eq_f (substitute a new_t v)
@@ -2530,7 +2530,7 @@ def SUBSTITUTE_Q_NEQ(p):
 
 
 @proof
-def SUBSTITUTE_Q_EXISTS_HIT(p):
+def SUBSTITUTE_EXISTS_HIT(p):
     """|- !idx body new_t v. v = idx ==>
             substitute (Not_f (Forall_f idx (Not_f body))) new_t v
             = Not_f (Forall_f idx (Not_f body)).
@@ -2563,7 +2563,7 @@ def SUBSTITUTE_Q_EXISTS_HIT(p):
 
 
 @proof
-def SUBSTITUTE_Q_EXISTS_MISS(p):
+def SUBSTITUTE_EXISTS_MISS(p):
     """|- !idx body new_t v. ~(v = idx) ==>
             substitute (Not_f (Forall_f idx (Not_f body))) new_t v
             = Not_f (Forall_f idx (Not_f (substitute body new_t v))).
@@ -2626,7 +2626,7 @@ _idx_f2 = _idx_term(15)
 #     Insert_t / In_a, and Forall_f miss) require the corresponding
 #     sub-shape pairs to be in T, witnessed via In (Pair_ord _ _) T.
 #
-# This predicate is the HOL counterpart of the Q-formula
+# This predicate is the HOL counterpart of the HF-formula
 # ``is_substitute_trace_internal`` to be encoded in Stage B1; the trace
 # existence lemma in Stage A4 builds an HF set T satisfying
 # ``In_a (Pair_ord F r) T /\ !a b. In (Pair_ord a b) T ==>
@@ -3802,18 +3802,18 @@ def TRACE_EXISTS(p):
 
 
 # ===========================================================================
-# Stubs for the Q-encoding side (B1).
+# Stubs for the HF-encoding side (B1).
 #
-# Each ``is_X_internal`` is the Q-formula encoding of the HOL predicate
+# Each ``is_X_internal`` is the HF-formula encoding of the HOL predicate
 # ``X``. The associated ``IS_X_REPRESENTS`` theorem says: at every input
-# where the HOL fact holds, Q proves the substituted Q-formula.
+# where the HOL fact holds, HF proves the substituted HF-formula.
 #
 # Encoding strategy (option A -- quote_hf bridge):
 #
-#   HOL HF sets are bit-encoded (``Insert i s = set_bit i s``); Q-syntax
+#   HOL HF sets are bit-encoded (``Insert i s = set_bit i s``); HF-syntax
 #   HF sets are Insert_t-tower-encoded (``Insert_t i s = Pair_ord 9
 #   (Pair_ord i s)``). The two are different nat0 functions. To make
-#   Q's HF axioms Q8-Q12 (which speak about Insert_t / Empty_t) apply
+#   HF's axioms HF1-HF5 (which speak about Insert_t / Empty_t) apply
 #   to HOL-witnessed HF facts, we bridge at the goal interface via
 #
 #       quote_hf : nat0 -> nat0   -- bit-encoded HF set -> Insert_t-tower.
@@ -3827,8 +3827,8 @@ def TRACE_EXISTS(p):
 #
 #   IS_POW2_REPRESENTS is no longer required: pow2 was a prerequisite
 #   only for the bit-extraction trace formula (option B); under the
-#   bridge, Pair_ord and In are represented directly via Q's HF axioms
-#   without internalising bit arithmetic in Q.
+#   bridge, Pair_ord and In are represented directly via HF's axioms
+#   without internalising bit arithmetic in HF.
 #
 # All ``is_X_internal`` constants are declared opaque (``new_constant``,
 # no defining body) and SORRY'd to allow downstream construction to
@@ -3839,10 +3839,10 @@ def TRACE_EXISTS(p):
 
 # B1.0 -- quote_hf bridge (the encoding interface).
 #
-# HOL ``Insert`` (bit-encoded) and Q-syntax ``Insert_t`` (Pair_ord-tagged)
+# HOL ``Insert`` (bit-encoded) and HF-syntax ``Insert_t`` (Pair_ord-tagged)
 # are different nat0 functions; ``quote_hf`` recursively rebuilds an HF
 # set as an Insert_t-tower of nat0-element-encoded children. The result
-# is Insert-tower-shaped from Q's perspective, so Q8-Q10 fire on
+# is Insert-tower-shaped from HF's perspective, so HF1-HF3 fire on
 # membership / non-membership queries directly.
 #
 # Recursion structure (canonical low-bit-first form):
@@ -4017,7 +4017,7 @@ def QUOTE_HF_AT_INSERT_LOW(p):
     """|- !i s. (s = 0 \\/ nat0_lt i (low_bit s)) ==>
                 quote_hf (Insert i s) = Insert_t (quote_hf i) (quote_hf s).
 
-    Bridge from HOL HF Insert to Q-syntax Insert_t, in the canonical
+    Bridge from HOL HF Insert to HF-syntax Insert_t, in the canonical
     low-bit-first form. The precondition pins ``Insert i s = set_bit i s``
     to the canonical decomposition where ``low_bit (Insert i s) = i`` and
     ``clear_low (Insert i s) = s``, so QUOTE_HF_AT_NZ collapses to the
@@ -4066,7 +4066,7 @@ def QUOTE_HF_AT_INSERT_LOW(p):
 
 # B1.0 (b) -- Pair_ord representability.
 # Needed for the trace HF set: the trace consists of Pair_ord-encoded
-# (sub-shape, output-shape) entries, and Q must prove each entry's shape
+# (sub-shape, output-shape) entries, and HF must prove each entry's shape
 # at numerals.
 new_constant("is_Pair_ord_internal", nat0_ty)
 is_Pair_ord_internal = mk_const("is_Pair_ord_internal", [])
@@ -4074,7 +4074,7 @@ is_Pair_ord_internal = mk_const("is_Pair_ord_internal", [])
 
 @proof
 def IS_PAIR_ORD_REPRESENTS(p):
-    """|- !x y. Prov_Q (substitute^3 is_Pair_ord_internal
+    """|- !x y. Prov_HF (substitute^3 is_Pair_ord_internal
                           (quote_hf x) var_x
                           (quote_hf y) var_y
                           (quote_hf (Pair_ord x y)) var_z).
@@ -4082,16 +4082,16 @@ def IS_PAIR_ORD_REPRESENTS(p):
     SORRY. Under the quote_hf bridge: HF inputs / output are encoded
     as Insert_t-towers; ``Pair_ord x y = Pair (Singleton x) (Pair x y)``
     is itself an Insert-tower at the HOL level, and ``quote_hf`` lifts
-    it pointwise to the matching Q-syntax Insert_t-tower.
+    it pointwise to the matching HF-syntax Insert_t-tower.
 
-    Body of is_Pair_ord_internal: the Q-formula expressing that var_z
+    Body of is_Pair_ord_internal: the HF-formula expressing that var_z
     has the Kuratowski shape Insert_t (Insert_t var_x Empty_t)
     (Insert_t var_x (Insert_t var_y Empty_t)). At numerals the structural
-    equality is verified by Q's reflexivity axiom + HF axioms Q8-Q10
+    equality is verified by HF's reflexivity axiom + HF axioms HF1-HF3
     walking the Insert_t-tower of (quote_hf (Pair_ord x y)). ~50 lines.
     """
     p.goal(
-        "!x y. Prov_Q (substitute (substitute (substitute "
+        "!x y. Prov_HF (substitute (substitute (substitute "
         "  is_Pair_ord_internal (quote_hf x) var_x) "
         "  (quote_hf y) var_y) "
         "  (quote_hf (Pair_ord x y)) var_z)"
@@ -4108,10 +4108,10 @@ is_In_internal = mk_const("is_In_internal", [])
 
 @proof
 def IS_IN_REPRESENTS(p):
-    """|- !x y. (In x y ==> Prov_Q (substitute^2 is_In_internal
+    """|- !x y. (In x y ==> Prov_HF (substitute^2 is_In_internal
                                        (quote_hf x) var_x
                                        (quote_hf y) var_y))
-              /\\ (~In x y ==> Prov_Q (Not_f (substitute^2 is_In_internal
+              /\\ (~In x y ==> Prov_HF (Not_f (substitute^2 is_In_internal
                                                 (quote_hf x) var_x
                                                 (quote_hf y) var_y))).
 
@@ -4128,18 +4128,18 @@ def IS_IN_REPRESENTS(p):
     ~80 lines.
     """
     p.goal(
-        "!x y. (In x y ==> Prov_Q (substitute (substitute "
+        "!x y. (In x y ==> Prov_HF (substitute (substitute "
         "  is_In_internal (quote_hf x) var_x) "
         "  (quote_hf y) var_y)) "
-        "/\\ (~(In x y) ==> Prov_Q (Not_f (substitute (substitute "
+        "/\\ (~(In x y) ==> Prov_HF (Not_f (substitute (substitute "
         "  is_In_internal (quote_hf x) var_x) "
         "  (quote_hf y) var_y)))"
     )
     p.sorry()
 
 
-# B1.1 -- Q-encoding of is_substitute_step.
-# 9-disjunct Q-formula matching the HOL ``is_substitute_step``. Free
+# B1.1 -- HF-encoding of is_substitute_step.
+# 9-disjunct HF-formula matching the HOL ``is_substitute_step``. Free
 # vars: var_T (trace), var_y (t), var_z (v), var_a (a), var_b (b).
 # Composes IS_PAIR_ORD_REPRESENTS + IS_IN_REPRESENTS for the In-checks
 # inside each recursive disjunct.
@@ -4150,7 +4150,7 @@ is_substitute_step_internal = mk_const("is_substitute_step_internal", [])
 @proof
 def IS_SUBSTITUTE_STEP_REPRESENTS(p):
     """|- !T t v a b. is_substitute_step T t v a b ==>
-                         Prov_Q (substitute^5 is_substitute_step_internal
+                         Prov_HF (substitute^5 is_substitute_step_internal
                                  (quote_hf T) var_T
                                  (quote_hf t) var_y
                                  (quote_hf v) var_z
@@ -4158,24 +4158,24 @@ def IS_SUBSTITUTE_STEP_REPRESENTS(p):
                                  (quote_hf b) var_b).
 
     SORRY. Under the quote_hf bridge: every input is encoded as an
-    Insert_t-tower so Q's HF axioms Q8-Q10 fire on membership checks
+    Insert_t-tower so HF's axioms HF1-HF3 fire on membership checks
     inside the trace ``quote_hf T``. Body of
     is_substitute_step_internal: 9-disjunction (Q_or_chain) mirroring
     is_substitute_step's HOL body, with each ``In (Pair_ord _ _) T``
     check expressed as ``In_a (Pair_ord_q var_a var_b) var_T`` (where
-    Pair_ord_q is the Q-syntax Kuratowski Insert_t-tower) and
-    constructor patterns ``a = Var_t v`` etc. expressed as Q-formula
-    Eq_f equalities verified by Q's reflexivity axiom on identical
+    Pair_ord_q is the HF-syntax Kuratowski Insert_t-tower) and
+    constructor patterns ``a = Var_t v`` etc. expressed as HF-formula
+    Eq_f equalities verified by HF's reflexivity axiom on identical
     Insert_t-tower shapes.
 
     Proof strategy: case-split on the IS_SUBSTITUTE_STEP_DEF disjunct;
-    in each case dispatch the corresponding Q-disjunct's witness using
-    IS_PAIR_ORD_REPRESENTS, IS_IN_REPRESENTS, and Q-axiom citations on
+    in each case dispatch the corresponding HF-disjunct's witness using
+    IS_PAIR_ORD_REPRESENTS, IS_IN_REPRESENTS, and HF-axiom citations on
     Insert_t-towers. ~150 lines.
     """
     p.goal(
         "!T t v a b. is_substitute_step T t v a b ==> "
-        "Prov_Q (substitute (substitute (substitute (substitute (substitute "
+        "Prov_HF (substitute (substitute (substitute (substitute (substitute "
         "  is_substitute_step_internal "
         "  (quote_hf T) var_T) "
         "  (quote_hf t) var_y) "
@@ -4186,14 +4186,14 @@ def IS_SUBSTITUTE_STEP_REPRESENTS(p):
     p.sorry()
 
 
-# B1.2 -- Q-encoding of is_substitute_trace.
+# B1.2 -- HF-encoding of is_substitute_trace.
 # Free vars: var_T (trace), var_x (F), var_y (t), var_z (v), var_w (r).
 # Body: the conjunction
 #   In (Pair_ord var_x var_w) var_T
 #   /\ (Forall_f var_a (Forall_f var_b
 #         (In (Pair_ord var_a var_b) var_T ==>
 #          is_substitute_step_internal[var_T, var_y, var_z, var_a, var_b])))
-# at the Q level. The single bound-variable forall is over (var_a, var_b),
+# at the HF level. The single bound-variable forall is over (var_a, var_b),
 # matching the HOL definition's ``!a b. ...``.
 new_constant("is_substitute_trace_internal", nat0_ty)
 is_substitute_trace_internal = mk_const("is_substitute_trace_internal", [])
@@ -4202,7 +4202,7 @@ is_substitute_trace_internal = mk_const("is_substitute_trace_internal", [])
 @proof
 def IS_SUBSTITUTE_TRACE_REPRESENTS(p):
     """|- !T F t v r. is_substitute_trace T F t v r ==>
-                         Prov_Q (substitute^5 is_substitute_trace_internal
+                         Prov_HF (substitute^5 is_substitute_trace_internal
                                  (quote_hf T) var_T
                                  (quote_hf F) var_x
                                  (quote_hf t) var_y
@@ -4220,7 +4220,7 @@ def IS_SUBSTITUTE_TRACE_REPRESENTS(p):
     """
     p.goal(
         "!T F t v r. is_substitute_trace T F t v r ==> "
-        "Prov_Q (substitute (substitute (substitute (substitute (substitute "
+        "Prov_HF (substitute (substitute (substitute (substitute (substitute "
         "  is_substitute_trace_internal "
         "  (quote_hf T) var_T) "
         "  (quote_hf F) var_x) "
@@ -4239,7 +4239,7 @@ substitute_internal = mk_const("substitute_internal", [])
 
 @proof
 def SUBSTITUTE_REPRESENTS(p):
-    """|- !F t v. Prov_Q (
+    """|- !F t v. Prov_HF (
               substitute (substitute (substitute (substitute
                   substitute_internal (numeral F) var_x)
                   (numeral t) var_y)
@@ -4251,7 +4251,7 @@ def SUBSTITUTE_REPRESENTS(p):
     construction (Cantor pairing or beta function + induction on F).
     """
     p.goal(
-        "!F t v. Prov_Q ("
+        "!F t v. Prov_HF ("
         "substitute (substitute (substitute (substitute "
         "  substitute_internal (numeral F) var_x) "
         "  (numeral t) var_y) "
@@ -4264,12 +4264,12 @@ def SUBSTITUTE_REPRESENTS(p):
 # ---------------------------------------------------------------------------
 # Stage 3D (a) -- representability of provability (AXIOMATIZED).
 #
-# Headline theorem (``PROV_Q_REPRESENTS``):
-#   |- !n. Prov_Q n <=>
-#          Prov_Q (substitute Prov_Q_internal (numeral n) var_x).
+# Headline theorem (``PROV_HF_REPRESENTS``):
+#   |- !n. Prov_HF n <=>
+#          Prov_HF (substitute Prov_HF_internal (numeral n) var_x).
 #
-# ``Prov_Q_internal`` is a Q-formula with ``var_x`` as its sole free
-# variable, expressing the relation "Prov_Q holds at var_x".
+# ``Prov_HF_internal`` is a HF-formula with ``var_x`` as its sole free
+# variable, expressing the relation "Prov_HF holds at var_x".
 #
 # The standard textbook construction (BBJ Ch. 17, Smullyan Ch. 4) goes
 # bottom-up:
@@ -4280,47 +4280,47 @@ def SUBSTITUTE_REPRESENTS(p):
 #                                ``is_axiom_internal``,
 #                                ``is_mp_internal``,
 #                                ``is_gen_internal``)
-#   * ``Proof_Q_internal``  -- representability of HOL ``Proof_Q``
+#   * ``Proof_HF_internal``  -- representability of HOL ``Proof_HF``
 #                                (recursive over the proof list;
 #                                requires sequence coding via beta or
-#                                Cantor pairing inside Q)
-#   * ``Prov_Q_internal``   -- existential closure
-#                                ?_internal var_y. Proof_Q_internal,
-#                                where ``?_internal`` is encoded in Q
+#                                Cantor pairing inside HF)
+#   * ``Prov_HF_internal``   -- existential closure
+#                                ?_internal var_y. Proof_HF_internal,
+#                                where ``?_internal`` is encoded in HF
 #                                as ``Not_f (Forall_f (var_y_idx)
-#                                (Not_f ...))`` since Q's only native
+#                                (Not_f ...))`` since HF's only native
 #                                quantifier is ``Forall_f``.
 #
-# Forward direction (HOL ``Prov_Q n`` ==> Q proves
-# ``Prov_Q_internal``-substituted): Sigma_1 completeness for Q (any true
-# Sigma_1 sentence is Q-provable). Computed externally via
-# ``PROV_Q_IFF_PROOF_Q`` to extract a witness ``p``, then witnessed
+# Forward direction (HOL ``Prov_HF n`` ==> HF proves
+# ``Prov_HF_internal``-substituted): Sigma_1 completeness for HF (any true
+# Sigma_1 sentence is HF-provable). Computed externally via
+# ``PROV_HF_IFF_PROOF_HF`` to extract a witness ``p``, then witnessed
 # internally.
 #
-# Backward direction (Q proves ==> HOL): Sigma_1 soundness for Q,
+# Backward direction (HF proves ==> HOL): Sigma_1 soundness for HF,
 # which lives in Stage 6 via the HF model construction.
 #
-# AXIOMATIZED for now: ``Prov_Q_internal`` is declared opaque
+# AXIOMATIZED for now: ``Prov_HF_internal`` is declared opaque
 # (``new_constant``, no defining body) and the headline theorem +
 # diagonal-lemma side conditions (``is_form``, ``free_in``) are closed
 # via ``p.sorry()``. The opaque declaration prevents accidental
 # unfolding.
 #
 # Side conditions posted with the headline:
-#   * ``IS_FORM_PROV_Q_INTERNAL``  : |- is_form Prov_Q_internal.
-#   * ``FREE_IN_PROV_Q_INTERNAL``  : |- !v. free_in Prov_Q_internal v
+#   * ``IS_FORM_PROV_HF_INTERNAL``  : |- is_form Prov_HF_internal.
+#   * ``FREE_IN_PROV_HF_INTERNAL``  : |- !v. free_in Prov_HF_internal v
 #                                          <=> v = var_x.
 # Both are required by the diagonal lemma (Stage 4): ``phi(x)`` must be
-# a well-formed Q-formula whose only free variable is ``var_x``.
+# a well-formed HF-formula whose only free variable is ``var_x``.
 #
 # Also defines ``substitute_2`` as a HOL helper for the diagonal lemma:
 #   substitute_2 F a b vx vy := substitute (substitute F a vx) b vy.
 #
-# TODO -- discharge via Q + HF (preferred). Prov_Q has been collapsed
-# to ``\n. ?p. Proof_Q p n``, so the Q-internal form is the existential
+# TODO -- discharge via HF (preferred). Prov_HF has been collapsed
+# to ``\n. ?p. Proof_HF p n``, so the HF-internal form is the existential
 # closure
-#   Prov_Q_internal(x) := ?_internal y. Proof_Q_internal(y, x).
-# Under the HF strengthening (axioms Q8-Q12, already in q_proof.py):
+#   Prov_HF_internal(x) := ?_internal y. Proof_HF_internal(y, x).
+# Under the HF strengthening (axioms HF1-HF5, already in hf_proof.py):
 #
 #   * ``mem_l_internal`` collapses to ``In_a`` -- proof lists are HF
 #     sets; "p has formula f" is just membership. (~5 lines vs the
@@ -4330,21 +4330,21 @@ def SUBSTITUTE_REPRESENTS(p):
 #         (?f1 f2. In f1 t /\ In f2 t /\ is_mp_internal f1 f2 h) \/
 #         (?f1. In f1 t /\ is_gen_internal f1 h)
 #     directly mirroring the HOL ``valid_step`` in this file.
-#   * ``Proof_Q_internal(p, n)`` is then the conjunction over members
-#     of the HF set p -- bounded by p itself via foundation Q12 --
+#   * ``Proof_HF_internal(p, n)`` is then the conjunction over members
+#     of the HF set p -- bounded by p itself via foundation HF5 --
 #     plus a designated-head clause picking out n. Sigma_1; not
 #     recursive because the HF foundation axiom bounds the search.
-#   * Forward direction of PROV_Q_REPRESENTS: extract a Proof_Q
-#     witness via PROV_Q_AT, exhibit its HF encoding as a Q-numeral,
+#   * Forward direction of PROV_HF_REPRESENTS: extract a Proof_HF
+#     witness via PROV_HF_AT, exhibit its HF encoding as a HF-numeral,
 #     verify the conjuncts term-by-term (each one a closed Sigma_0
-#     fact Q proves at numerals).
-#   * Backward direction (Q proves ==> HOL): Stage 6 HF |= (Q + Q8-Q12)
+#     fact HF proves at numerals).
+#   * Backward direction (HF proves ==> HOL): Stage 6 HF |= (HF1-HF5)
 #     is one HOL theorem citation per axiom.
 #
 # Side conditions IS_FORM and FREE_IN become routine once
-# Prov_Q_internal has its defining body, both decided by the same
+# Prov_HF_internal has its defining body, both decided by the same
 # syntactic recursion that verifies is_form for the connectives in
-# q_syntax.py (which already covers In_a via IS_FORM_AT_IN).
+# hf_syntax.py (which already covers In_a via IS_FORM_AT_IN).
 # ---------------------------------------------------------------------------
 
 
@@ -4386,47 +4386,47 @@ substitute_2 = mk_const("substitute_2", [])
 
 
 # Opaque: no defining body. Stage 3D will replace this with the
-# bottom-up construction (Proof_Q_internal then existential closure).
-new_constant("Prov_Q_internal", nat0_ty)
-Prov_Q_internal = mk_const("Prov_Q_internal", [])
+# bottom-up construction (Proof_HF_internal then existential closure).
+new_constant("Prov_HF_internal", nat0_ty)
+Prov_HF_internal = mk_const("Prov_HF_internal", [])
 
 
 @proof
-def PROV_Q_REPRESENTS(p):
-    """|- !n. Prov_Q n <=>
-              Prov_Q (substitute Prov_Q_internal (numeral n) var_x).
+def PROV_HF_REPRESENTS(p):
+    """|- !n. Prov_HF n <=>
+              Prov_HF (substitute Prov_HF_internal (numeral n) var_x).
 
-    Stage 3D(a) representability of ``Prov_Q``. AXIOMATIZED via
+    Stage 3D(a) representability of ``Prov_HF``. AXIOMATIZED via
     ``p.sorry()``; see Stage 3D section comment for the deferred
-    construction (Proof_Q_internal + Sigma_1 completeness/soundness).
+    construction (Proof_HF_internal + Sigma_1 completeness/soundness).
     """
-    p.goal("!n. Prov_Q n = Prov_Q (substitute Prov_Q_internal (numeral n) var_x)")
+    p.goal("!n. Prov_HF n = Prov_HF (substitute Prov_HF_internal (numeral n) var_x)")
     p.sorry()
 
 
 @proof
-def IS_FORM_PROV_Q_INTERNAL(p):
-    """|- is_form Prov_Q_internal.
+def IS_FORM_PROV_HF_INTERNAL(p):
+    """|- is_form Prov_HF_internal.
 
     Side condition for the diagonal lemma. AXIOMATIZED via
     ``p.sorry()``; in the full construction, follows from the bottom-up
-    build of ``Prov_Q_internal`` from ``Proof_Q_internal`` and the
-    closure of ``is_form`` under the Q-formula constructors.
+    build of ``Prov_HF_internal`` from ``Proof_HF_internal`` and the
+    closure of ``is_form`` under the HF-formula constructors.
     """
-    p.goal("is_form Prov_Q_internal")
+    p.goal("is_form Prov_HF_internal")
     p.sorry()
 
 
 @proof
-def FREE_IN_PROV_Q_INTERNAL(p):
-    """|- !v. free_in Prov_Q_internal v <=> v = var_x.
+def FREE_IN_PROV_HF_INTERNAL(p):
+    """|- !v. free_in Prov_HF_internal v <=> v = var_x.
 
     Side condition for the diagonal lemma. AXIOMATIZED via
     ``p.sorry()``; ``var_x`` is the F-slot in the substitute-via-numeral
     representation pattern.
     """
     p.goal(
-        "!v. free_in Prov_Q_internal v = (v = var_x)",
+        "!v. free_in Prov_HF_internal v = (v = var_x)",
     )
     p.sorry()
 
@@ -4457,12 +4457,12 @@ if __name__ == "__main__":
     print("    VALID_STEP_DEF :", pp_thm(VALID_STEP_DEF))
     print("    VALID_STEP_AT  :", pp_thm(VALID_STEP_AT))
     print()
-    print("Stage 3B (c) -- list-based Proof_Q.")
-    print("    PROOF_Q_DEF      :", pp_thm(PROOF_Q_DEF))
-    print("    PROOF_Q_REC      :", pp_thm(PROOF_Q_REC))
-    print("    PROOF_Q_REC_PW   :", pp_thm(PROOF_Q_REC_PW))
-    print("    PROOF_Q_AT_NIL   :", pp_thm(PROOF_Q_AT_NIL))
-    print("    PROOF_Q_AT_CONS  :", pp_thm(PROOF_Q_AT_CONS))
+    print("Stage 3B (c) -- list-based Proof_HF.")
+    print("    PROOF_HF_DEF      :", pp_thm(PROOF_HF_DEF))
+    print("    PROOF_HF_REC      :", pp_thm(PROOF_HF_REC))
+    print("    PROOF_HF_REC_PW   :", pp_thm(PROOF_HF_REC_PW))
+    print("    PROOF_HF_AT_NIL   :", pp_thm(PROOF_HF_AT_NIL))
+    print("    PROOF_HF_AT_CONS  :", pp_thm(PROOF_HF_AT_CONS))
     print()
     print("Stage 3B (d) -- list concatenation append_l.")
     print("    APPEND_L_DEF     :", pp_thm(APPEND_L_DEF))
@@ -4473,21 +4473,21 @@ if __name__ == "__main__":
     print("Stage 3B (e-g) -- preservation lemmas.")
     print("    MEM_L_APPEND_PRESERVES :", pp_thm(MEM_L_APPEND_PRESERVES))
     print("    VALID_STEP_PRESERVES   :", pp_thm(VALID_STEP_PRESERVES))
-    print("    PROOF_Q_APPEND         :", pp_thm(PROOF_Q_APPEND))
-    print("    PROOF_Q_HEAD_MEM       :", pp_thm(PROOF_Q_HEAD_MEM))
+    print("    PROOF_HF_APPEND         :", pp_thm(PROOF_HF_APPEND))
+    print("    PROOF_HF_HEAD_MEM       :", pp_thm(PROOF_HF_HEAD_MEM))
     print()
     print("Stage 3B (i) -- proof witnesses for the closure rules.")
     print("    AXIOM_HAS_PROOF   :", pp_thm(AXIOM_HAS_PROOF))
     print("    GEN_HAS_PROOF     :", pp_thm(GEN_HAS_PROOF))
     print("    MP_HAS_PROOF      :", pp_thm(MP_HAS_PROOF))
     print()
-    print("Stage 3B (j-l) -- Sigma_1 Prov_Q and closure rules.")
-    print("    PROV_Q_DEF         :", pp_thm(PROV_Q_DEF))
-    print("    PROV_Q_AT          :", pp_thm(PROV_Q_AT))
-    print("    PROV_Q_AXIOM       :", pp_thm(PROV_Q_AXIOM))
-    print("    PROV_Q_MP          :", pp_thm(PROV_Q_MP))
-    print("    PROV_Q_GEN         :", pp_thm(PROV_Q_GEN))
-    print("    PROV_Q_IFF_PROOF_Q :", pp_thm(PROV_Q_IFF_PROOF_Q))
+    print("Stage 3B (j-l) -- Sigma_1 Prov_HF and closure rules.")
+    print("    PROV_HF_DEF         :", pp_thm(PROV_HF_DEF))
+    print("    PROV_HF_AT          :", pp_thm(PROV_HF_AT))
+    print("    PROV_HF_AXIOM       :", pp_thm(PROV_HF_AXIOM))
+    print("    PROV_HF_MP          :", pp_thm(PROV_HF_MP))
+    print("    PROV_HF_GEN         :", pp_thm(PROV_HF_GEN))
+    print("    PROV_HF_IFF_PROOF_HF :", pp_thm(PROV_HF_IFF_PROOF_HF))
     print()
     print("Stage 3B (m) -- representability scaffolding.")
     print("    REPRESENTS_PRED_DEF :", pp_thm(REPRESENTS_PRED_DEF))
@@ -4525,6 +4525,6 @@ if __name__ == "__main__":
     print()
     print("Stage 3D (a) -- representability of provability (SORRY).")
     print("    SUBSTITUTE_2_DEF        :", pp_thm(SUBSTITUTE_2_DEF))
-    print("    PROV_Q_REPRESENTS       :", pp_thm(PROV_Q_REPRESENTS))
-    print("    IS_FORM_PROV_Q_INTERNAL :", pp_thm(IS_FORM_PROV_Q_INTERNAL))
-    print("    FREE_IN_PROV_Q_INTERNAL :", pp_thm(FREE_IN_PROV_Q_INTERNAL))
+    print("    PROV_HF_REPRESENTS       :", pp_thm(PROV_HF_REPRESENTS))
+    print("    IS_FORM_PROV_HF_INTERNAL :", pp_thm(IS_FORM_PROV_HF_INTERNAL))
+    print("    FREE_IN_PROV_HF_INTERNAL :", pp_thm(FREE_IN_PROV_HF_INTERNAL))

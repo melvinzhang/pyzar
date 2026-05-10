@@ -3,7 +3,7 @@
 SKETCH ONLY -- this file lays out the construction; the proofs are
 stubbed with strategy comments rather than executed. Scope is set by
 the immediate downstream consumer ``godel_first.py``: we build only as
-much HF as it needs (encoding for the syntax of Q + a model of Q).
+much HF as it needs (encoding for the syntax of HF and its model).
 The general ZF constructors (Pow, Repl, Sep) are noted but deferred to
 a follow-up file -- ``godel_first.py`` does not call them.
 
@@ -57,7 +57,7 @@ subtype later -- it is a syntactic refactor, not a proof rewrite.
 #                         1-150 over the formalised ZF surface.
 #                         ~250 lines.
 #   * ``hf_arith.py``  -- ``rep`` on the vN image as an actual nat0
-#                         function (HOL-level, not Q-internal),
+#                         function (HOL-level, not HF-internal),
 #                         giving the PA <-> ZF-Inf transport
 #                         concretely. ~150 lines. Strictly nice-to-
 #                         have; godel_first.py does not call it.
@@ -200,9 +200,9 @@ def IN_EXT(p):
 # Stage 3 -- HF constructors needed by godel_first.py.
 #
 # Scope is set by what godel_first.py Stage 1 actually consumes for
-# encoding Q syntax as HF trees: Empty, Insert, Singleton, Pair, and
+# encoding HF syntax as HF trees: Empty, Insert, Singleton, Pair, and
 # the ordered Kuratowski pair Pair_ord (for (index, value) tuple entries).
-# Stage 4's Q-model construction sits on top of Insert (vN_succ x =
+# Stage 4's HF-model construction sits on top of Insert (vN_succ x =
 # Insert x x) and does not need Union, Pow, Repl, Sep, or a derived
 # Foundation rule. Pow / Repl / Sep are still deferred:
 #
@@ -210,15 +210,15 @@ def IN_EXT(p):
 #               bit-OR ``Union a b`` via well-founded recursion on
 #               HALF a; the membership characterisation is IN_UNION.
 #               Stage 4 still uses ``Insert x x`` for vN_succ; Union
-#               is required by downstream code (q_repr.py) that needs
+#               is required by downstream code (hf_repr.py) that needs
 #               to combine HF-set traces in the substitute representability
 #               proof.
 #   * Pow, Repl, Sep  -- general ZF constructors; defer to a future
 #               ``hf_zf.py`` if a consumer wants full ZF surface.
 #   * Foundation as a derived rule -- a one-liner via BIT_LT + nat0
 #               well-ordering, but unused by godel_first.py (the
-#               Q-consistency argument needs the positive fact that
-#               HF models Q, not Foundation).
+#               HF-consistency argument needs the positive fact that
+#               HF has a HOL-level model, not Foundation).
 #   * Refutation of Infinity -- nice corollary, also unused here.
 #
 # What is proved below:
@@ -499,10 +499,10 @@ def IN_PAIR_ORD(p):
 # ---------------------------------------------------------------------------
 # Stage 3 (cont.) -- structural lemmas for ``Pair_ord``.
 #
-# These two lemmas drive the encoding work in ``q_syntax.py``:
+# These two lemmas drive the encoding work in ``hf_syntax.py``:
 #
 #   PAIR_ORD_INJ   -- Kuratowski ordered-pair injectivity, the basis
-#                     for Q-constructor injectivity and disjointness.
+#                     for HF-constructor injectivity and disjointness.
 #   NAT0_LT_PAIR_ORD_L / _R -- size lemmas that say each component of
 #                     a ``Pair_ord`` lies strictly below it under
 #                     ``nat0_lt``.  These chain through a constructor's
@@ -1241,24 +1241,22 @@ def IN_UNION(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 4 -- a model of Q inside HF.   (used by godel_first.py Stage 6)
+# Stage 4 -- canonical vN embedding + Peano facts on nat0.
 # ---------------------------------------------------------------------------
 #
-# This is the *only* substantive client of Stage 3 from
-# godel_first.py: the model construction that discharges the
-# consistency assumption.
-#
-# We split Stage 4 into two pieces:
+# Two pieces:
 #
 #   (a) The canonical von Neumann embedding vN : nat0 -> hf, with
 #       its successor and the injectivity / nonzeroness lemmas. This
 #       is the "right" embedding of N into HF and is independently
-#       useful for syntax-encoding work in godel_first.py Stage 1
-#       (every numeral has a canonical HF representation).
+#       useful for syntax-encoding work (every numeral has a canonical
+#       HF representation).
 #
-#   (b) The Q-model interpretation. Carrier = hf = nat0; the symbols
-#       are 0 ↦ Empty, S ↦ SUC0, + ↦ n0plus, * ↦ n0times. Q1-Q7
-#       reduce to Peano facts on nat0. See the design note below.
+#   (b) Peano-arithmetic facts on nat0. ``SUC0`` / ``n0plus`` /
+#       ``n0times`` satisfy the seven Peano equations (PEANO_1..PEANO_7
+#       below). Originally these mirrored Robinson's Q1-Q7 as the
+#       HF-model interpretation; after the switch to pure HF as the
+#       object theory the equations stand on their own.
 #
 # ---------- (a) The canonical vN embedding ----------
 #
@@ -1301,47 +1299,29 @@ def IN_UNION(p):
 #     predecessor since vN_succ y = set_bit y y ≠ 2 for every y).
 #     One-step nat0 induction.    ~10 lines.
 #
-# ---------- (b) The Q-model interpretation ----------
-#
-# Design note (deviation from the original sketch). The original sketch
-# proposed interpreting Q's S as ``vN_succ`` and defining
-# ``vN_plus x y := vN ((rep x) + (rep y))`` via a partial inverse
-# ``rep`` of vN. Two problems with that path:
-#
-#   1. Q4's universal closure ``!x. plus(x, 0) = x`` becomes
-#      ``vN(rep x) = x``, which holds only on the image of vN.
-#   2. Q5's universal closure refers to ``vN_succ y`` for arbitrary
-#      y:hf, so vN_plus must be definable for all y; outside the image
-#      of vN_succ (which is most of hf), satisfying Q5 needs a
-#      well-founded predecessor extraction (SELECT + recursion).
-#
-# Both go away by picking SUC0 instead of vN_succ as the model's
-# successor. The carrier is unchanged (hf = nat0), so HF still "supplies
-# the model" in the godel_first.py Stage 6 sense, and Q4-Q7 become
-# direct Peano equations:
+# ---------- (b) Peano arithmetic on nat0 ----------
 #
 #   defn:  n0plus  : nat0 -> nat0 -> nat0   (Peano + on nat0)
 #          n0times : nat0 -> nat0 -> nat0   (Peano * on nat0)
 #     defined via define_recursive_0 by recursion on the second arg.
 #
-#   thm:   Q1_HF :  |- !n.   ~(SUC0 n = Empty)
-#          Q2_HF :  |- !m n. SUC0 m = SUC0 n ==> m = n
-#          Q3_HF :  |- !x.   ~(x = Empty) ==> ?y. x = SUC0 y
-#          Q4_HF :  |- !x.   n0plus x Empty = x
-#          Q5_HF :  |- !x y. n0plus x (SUC0 y) = SUC0 (n0plus x y)
-#          Q6_HF :  |- !x.   n0times x Empty = Empty
-#          Q7_HF :  |- !x y. n0times x (SUC0 y) = n0plus (n0times x y) x
+#   thm:   PEANO_1 :  |- !n.   ~(SUC0 n = Empty)
+#          PEANO_2 :  |- !m n. SUC0 m = SUC0 n ==> m = n
+#          PEANO_3 :  |- !x.   ~(x = Empty) ==> ?y. x = SUC0 y
+#          PEANO_4 :  |- !x.   n0plus x Empty = x
+#          PEANO_5 :  |- !x y. n0plus x (SUC0 y) = SUC0 (n0plus x y)
+#          PEANO_6 :  |- !x.   n0times x Empty = Empty
+#          PEANO_7 :  |- !x y. n0times x (SUC0 y) = n0plus (n0times x y) x
 #
-#     Q1 reduces to AXIOM_3_0 modulo EMPTY_DEF; Q2 is AXIOM_4_0
-#     verbatim; Q3 is one nat0 induction; Q4-Q7 are the BASE/STEP
-#     theorems returned by define_recursive_0 modulo EMPTY_DEF.
-#     ~50 lines total for the seven lemmas + the two recursive
-#     definitions.
+#     PEANO_1 reduces to AXIOM_3_0 modulo EMPTY_DEF; PEANO_2 is
+#     AXIOM_4_0 verbatim; PEANO_3 is one nat0 induction; PEANO_4..7
+#     are the BASE/STEP theorems returned by define_recursive_0
+#     modulo EMPTY_DEF. ~50 lines total for the seven lemmas plus the
+#     two recursive definitions.
 #
-# The vN/vN_succ block above remains in the file because godel_first.py
-# Stage 1 wants the canonical vN embedding for syntax encoding (each
-# numeral that appears inside a Q-formula gets a definite HF code via
-# vN). It is *not* used as the Q-model's successor.
+# The vN/vN_succ block above is consumed by godel_first.py Stage 1 for
+# syntax encoding: each numeral that appears inside an HF-formula gets
+# a definite HF code via vN.
 
 VN_SUCC_DEF = define(
     "vN_succ",
@@ -1555,7 +1535,7 @@ def VN_PRED(p):
 
 
 # ---------------------------------------------------------------------------
-# Q-model interpretation.
+# HF-model interpretation.
 #
 # The carrier is hf = nat0. Interpretations:
 #
@@ -1606,7 +1586,7 @@ n0times = mk_const("n0times", [])
 
 
 @proof
-def Q1_HF(p):
+def PEANO_1(p):
     p.goal("!n. ~(SUC0 n = Empty)")
     p.fix("n")
     with p.suppose("h: SUC0 n = Empty"):
@@ -1622,7 +1602,7 @@ def Q1_HF(p):
 
 
 @proof
-def Q2_HF(p):
+def PEANO_2(p):
     p.goal("!m n. SUC0 m = SUC0 n ==> m = n")
     p.fix("m n")
     p.assume("h: SUC0 m = SUC0 n")
@@ -1637,7 +1617,7 @@ def Q2_HF(p):
 
 
 @proof
-def Q3_HF(p):
+def PEANO_3(p):
     from fusion import REFL
 
     p.goal("!x. ~(x = Empty) ==> ?y. x = SUC0 y")
@@ -1658,7 +1638,7 @@ def Q3_HF(p):
 
 
 @proof
-def Q4_HF(p):
+def PEANO_4(p):
     p.goal("!x. n0plus x Empty = x")
     p.fix("x")
     p.thus("n0plus x Empty = x").by_rewrite([EMPTY_DEF, N0PLUS_BASE])
@@ -1670,7 +1650,7 @@ def Q4_HF(p):
 
 
 @proof
-def Q5_HF(p):
+def PEANO_5(p):
     p.goal("!x y. n0plus x (SUC0 y) = SUC0 (n0plus x y)")
     p.fix("x y")
     p.thus("n0plus x (SUC0 y) = SUC0 (n0plus x y)").by_rewrite([N0PLUS_STEP])
@@ -1682,7 +1662,7 @@ def Q5_HF(p):
 
 
 @proof
-def Q6_HF(p):
+def PEANO_6(p):
     p.goal("!x. n0times x Empty = Empty")
     p.fix("x")
     p.thus("n0times x Empty = Empty").by_rewrite([EMPTY_DEF, N0TIMES_BASE])
@@ -1694,7 +1674,7 @@ def Q6_HF(p):
 
 
 @proof
-def Q7_HF(p):
+def PEANO_7(p):
     p.goal("!x y. n0times x (SUC0 y) = n0plus (n0times x y) x")
     p.fix("x y")
     p.thus("n0times x (SUC0 y) = n0plus (n0times x y) x").by_rewrite([N0TIMES_STEP])
@@ -1759,15 +1739,15 @@ if __name__ == "__main__":
     print("  VN_SUCC_INJ     :", pp_thm(VN_SUCC_INJ))
     print("  VN_INJ          :", pp_thm(VN_INJ))
     print("  VN_PRED         :", pp_thm(VN_PRED))
-    print("Stage 4 -- Q-axiom lemmas in the HF model.")
+    print("Stage 4 -- HF-axiom lemmas in the HF model.")
     print("  N0PLUS_BASE     :", pp_thm(N0PLUS_BASE))
     print("  N0PLUS_STEP     :", pp_thm(N0PLUS_STEP))
     print("  N0TIMES_BASE    :", pp_thm(N0TIMES_BASE))
     print("  N0TIMES_STEP    :", pp_thm(N0TIMES_STEP))
-    print("  Q1_HF           :", pp_thm(Q1_HF))
-    print("  Q2_HF           :", pp_thm(Q2_HF))
-    print("  Q3_HF           :", pp_thm(Q3_HF))
-    print("  Q4_HF           :", pp_thm(Q4_HF))
-    print("  Q5_HF           :", pp_thm(Q5_HF))
-    print("  Q6_HF           :", pp_thm(Q6_HF))
-    print("  Q7_HF           :", pp_thm(Q7_HF))
+    print("  PEANO_1           :", pp_thm(PEANO_1))
+    print("  PEANO_2           :", pp_thm(PEANO_2))
+    print("  PEANO_3           :", pp_thm(PEANO_3))
+    print("  PEANO_4           :", pp_thm(PEANO_4))
+    print("  PEANO_5           :", pp_thm(PEANO_5))
+    print("  PEANO_6           :", pp_thm(PEANO_6))
+    print("  PEANO_7           :", pp_thm(PEANO_7))

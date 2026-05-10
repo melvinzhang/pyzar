@@ -9,11 +9,11 @@
 #
 # Non-logical axioms (HF; five closed formulas, signature: In_a /
 # Insert_t / Empty_t / Eq_f added in hf_syntax.py):
-#   Q8.  !x.       ~In x Empty
-#   Q9.  !i s.     In i (Insert i s)
-#   Q10. !i j s.   ~(i = j) -> (In j (Insert i s) <-> In j s)
-#   Q11. !a b.     (!x. In x a <-> In x b) -> a = b
-#   Q12. !x y.     In x y -> ?z. y = Insert x z          (HF predecessor)
+#   HF1.  !x.       ~In x Empty
+#   HF2.  !i s.     In i (Insert i s)
+#   HF3. !i j s.   ~(i = j) -> (In j (Insert i s) <-> In j s)
+#   HF4. !a b.     (!x. In x a <-> In x b) -> a = b
+#   HF5. !x y.     In x y -> ?z. y = Insert x z          (HF predecessor)
 #
 # Robinson arithmetic axioms Q1-Q7 were removed 2026-05-10. Pure HF is
 # the cleanest object theory for incompleteness (Świerczkowski 2003);
@@ -25,7 +25,7 @@
 # Stage 2A (foundations):
 #   * List encoding on nat0 (proofs are lists of formula godelnums).
 #   * The five HF axioms as concrete encoded nat0 terms.
-#   * ``is_q_axiom``: decidable recogniser for the five HF axioms
+#   * ``is_hf_axiom``: decidable recogniser for the five HF axioms
 #     (name retained for now to limit refactor blast radius).
 #
 # Stage 2B (proof system):
@@ -36,29 +36,29 @@
 #     ``is_Vac`` (quantifier; ``is_Vac`` carries a ``free_in`` side
 #     condition); ``is_Refl``, ``is_Subst`` (equality). The
 #     quantifier and equality schemas reuse ``substitute`` and
-#     ``free_in`` from ``q_syntax``.
+#     ``free_in`` from ``hf_syntax``.
 #   * ``is_logical_axiom`` (disjunction over the seven schemas) and
-#     ``is_axiom = is_q_axiom \/ is_logical_axiom``.
+#     ``is_axiom = is_hf_axiom \/ is_logical_axiom``.
 #   * ``NAT0_LT_CONS_L_HEAD`` / ``NAT0_LT_CONS_L_TAIL``: list size
 #     lemmas needed for any future well-founded recursion on lists.
-#   * ``Prov_Q``: provability predicate, defined as the impredicative
+#   * ``Prov_HF``: provability predicate, defined as the impredicative
 #     intersection of all sets closed under the inference rules:
-#         Prov_Q n  :<=>  !P:nat0->bool.
+#         Prov_HF n  :<=>  !P:nat0->bool.
 #                          ( (!m. is_axiom m ==> P m)
 #                          /\ (!f g. P f /\ P (Imp_f f g) ==> P g)
 #                          /\ (!f x. P f ==> P (Forall_f x f)) )
 #                          ==> P n.
 #   * Closure rules:
-#         |- !n. is_axiom n ==> Prov_Q n.                  (PROV_Q_AXIOM)
-#         |- !f g. Prov_Q f /\ Prov_Q (Imp_f f g)
-#                  ==> Prov_Q g.                           (PROV_Q_MP)
-#         |- !f x. Prov_Q f ==> Prov_Q (Forall_f x f).     (PROV_Q_GEN)
+#         |- !n. is_axiom n ==> Prov_HF n.                  (PROV_HF_AXIOM)
+#         |- !f g. Prov_HF f /\ Prov_HF (Imp_f f g)
+#                  ==> Prov_HF g.                           (PROV_HF_MP)
+#         |- !f x. Prov_HF f ==> Prov_HF (Forall_f x f).     (PROV_HF_GEN)
 #
-# Design note -- why ``Prov_Q`` via impredicative intersection rather
-# than the textbook ``?p. Proof_Q(p, n)``:
+# Design note -- why ``Prov_HF`` via impredicative intersection rather
+# than the textbook ``?p. Proof_HF(p, n)``:
 #
-# The ``godel_first.py`` blueprint specifies ``Prov_Q(n) :<=> ?p.
-# Proof_Q(p, n)`` where ``Proof_Q`` is the list-based proof checker.
+# The ``godel_first.py`` blueprint specifies ``Prov_HF(n) :<=> ?p.
+# Proof_HF(p, n)`` where ``Proof_HF`` is the list-based proof checker.
 # In HOL the two definitions are provably equivalent (Knaster-Tarski:
 # the impredicative intersection is the least fixed point of the
 # closure operator, which agrees with the inductively generated set
@@ -66,19 +66,19 @@
 #
 #   (1) The closure rules (axiom inclusion, MP, generalisation) drop
 #       out by direct specialisation -- no recursion, no MONO.
-#   (2) A list-based ``Proof_Q`` would require ``mem_l`` (list
+#   (2) A list-based ``Proof_HF`` would require ``mem_l`` (list
 #       membership) defined via ``define_wf_lt``, which carries a
 #       non-trivial MONO obligation under existential binders -- the
 #       per-(h, t) iff has to use ``NAT0_LT_CONS_L_TAIL`` to discharge
 #       the recursive call after CHOOSE'ing the cons witness.
 #   (3) Stage 4 (diagonal lemma) and Stage 5 (the main incompleteness
-#       theorem) only consume the closure rules and ``PROV_Q_AT``; they
+#       theorem) only consume the closure rules and ``PROV_HF_AT``; they
 #       never inspect an explicit proof witness.
 #
-# A list-based ``Proof_Q`` *is* needed in Stage 3 for representability
-# -- the diagonal lemma's ``Prov_Q_internal`` formula must internalise
-# explicit proofs into Q's own language. We build it there against
-# this ``Prov_Q``, not as a defining predicate.
+# A list-based ``Proof_HF`` *is* needed in Stage 3 for representability
+# -- the diagonal lemma's ``Prov_HF_internal`` formula must internalise
+# explicit proofs into HF's own language. We build it there against
+# this ``Prov_HF``, not as a defining predicate.
 
 # ---------------------------------------------------------------------------
 # Imports.
@@ -115,7 +115,7 @@ from hf_syntax import (
 )
 
 # The HF primitives Empty_t, Insert_t, In_a are referenced by name from
-# parser strings in this file; importing q_syntax above is sufficient
+# parser strings in this file; importing hf_syntax above is sufficient
 # to register them as kernel constants.
 
 
@@ -198,7 +198,7 @@ def CONS_L_INJ(p):
 # Disjointness with nil:  |- !h t. ~(cons_l h t = nil_l).
 #
 # Direct: cons_l h t = Pair_ord (SUC0 0) (Pair_ord h t) and nil_l = 0;
-# Pair_ord _ _ != 0 from ``_NEQ_PAIR_ORD_ZERO`` (q_syntax).
+# Pair_ord _ _ != 0 from ``_NEQ_PAIR_ORD_ZERO`` (hf_syntax).
 
 
 from hf_syntax import _NEQ_PAIR_ORD_ZERO  # noqa: E402 -- imported just before CONS_L_NEQ_NIL
@@ -221,7 +221,7 @@ def CONS_L_NEQ_NIL(p):
 
 
 # ---------------------------------------------------------------------------
-# Variable-index conventions for the Q axioms.
+# Variable-index conventions for the HF axioms.
 #
 # The axioms below use two object-language variable slots; we choose
 # nat0 indices 0 and SUC0 0:
@@ -239,13 +239,13 @@ var_x = mk_const("var_x", [])
 VAR_Y_DEF = define("var_y", parse_type("nat0"), "Var_t (SUC0 0)")
 var_y = mk_const("var_y", [])
 
-# Third bound-variable slot, used by the Q + HF axioms (Q10, Q11, Q12).
+# Third bound-variable slot, used by the HF axioms (HF3, HF4, HF5).
 VAR_Z_DEF = define("var_z", parse_type("nat0"), "Var_t (SUC0 (SUC0 0))")
 var_z = mk_const("var_z", [])
 
 
 # ---------------------------------------------------------------------------
-# HF axioms Q8-Q12 (Świerczkowski-style: HF as the object theory).
+# HF axioms HF1-HF5 (Świerczkowski-style: HF as the object theory).
 #
 # These mirror the HOL theorems ``NOT_IN_EMPTY``, ``IN_INSERT_SAME``,
 # ``IN_INSERT_DIFF``, ``IN_EXT`` from ``hf_sets.py``, plus a "predecessor"
@@ -266,31 +266,31 @@ var_z = mk_const("var_z", [])
 # ---------------------------------------------------------------------------
 
 
-# Q8.  !x. ~In x Empty
-Q8_AXIOM_DEF = define(
-    "Q8_axiom",
+# HF1.  !x. ~In x Empty
+HF1_AXIOM_DEF = define(
+    "HF1_axiom",
     parse_type("nat0"),
     "Forall_f 0 (Not_f (In_a var_x Empty_t))",
 )
-Q8_axiom = mk_const("Q8_axiom", [])
+HF1_axiom = mk_const("HF1_axiom", [])
 
 
-# Q9.  !x y. In x (Insert x y)        ("i in Insert i s" with i=x, s=y)
-Q9_AXIOM_DEF = define(
-    "Q9_axiom",
+# HF2.  !x y. In x (Insert x y)        ("i in Insert i s" with i=x, s=y)
+HF2_AXIOM_DEF = define(
+    "HF2_axiom",
     parse_type("nat0"),
     "Forall_f 0 (Forall_f (SUC0 0) (In_a var_x (Insert_t var_x var_y)))",
 )
-Q9_axiom = mk_const("Q9_axiom", [])
+HF2_axiom = mk_const("HF2_axiom", [])
 
 
-# Q10. !x y z. ~(x = y) -> (In y (Insert x z) <-> In y z)
+# HF3. !x y z. ~(x = y) -> (In y (Insert x z) <-> In y z)
 # Iff body desugared:
 #   A <-> B  :=  ~( (A -> B) -> ~(B -> A) )
 # where A = In_a var_y (Insert_t var_x var_z),
 #       B = In_a var_y var_z.
-Q10_AXIOM_DEF = define(
-    "Q10_axiom",
+HF3_AXIOM_DEF = define(
+    "HF3_axiom",
     parse_type("nat0"),
     "Forall_f 0 (Forall_f (SUC0 0) (Forall_f (SUC0 (SUC0 0)) "
     "(Imp_f (Not_f (Eq_f var_x var_y)) "
@@ -299,14 +299,14 @@ Q10_AXIOM_DEF = define(
     "(Not_f (Imp_f (In_a var_y var_z) (In_a var_y (Insert_t var_x var_z))))"
     ")))))",
 )
-Q10_axiom = mk_const("Q10_axiom", [])
+HF3_axiom = mk_const("HF3_axiom", [])
 
 
-# Q11. !a b. (!x. In x a <-> In x b) -> a = b
+# HF4. !a b. (!x. In x a <-> In x b) -> a = b
 # (a, b, x) -> (var_x, var_y, var_z).
 # Inner iff: Not_f (Imp_f (Imp_f (In z a) (In z b)) (Not_f (Imp_f (In z b) (In z a))))
-Q11_AXIOM_DEF = define(
-    "Q11_axiom",
+HF4_AXIOM_DEF = define(
+    "HF4_axiom",
     parse_type("nat0"),
     "Forall_f 0 (Forall_f (SUC0 0) "
     "(Imp_f "
@@ -317,32 +317,32 @@ Q11_AXIOM_DEF = define(
     "))) "
     "(Eq_f var_x var_y)))",
 )
-Q11_axiom = mk_const("Q11_axiom", [])
+HF4_axiom = mk_const("HF4_axiom", [])
 
 
-# Q12. !x y. In x y -> ?z. y = Insert x z          (HF predecessor)
+# HF5. !x y. In x y -> ?z. y = Insert x z          (HF predecessor)
 # Every member can be removed: if x is in y, then y was constructed by
 # inserting x into some smaller HF set. Encoded as ~!z. ~(y = Insert x z).
 # This replaces the previous arithmetic form ``In x y -> nat0_lt x y``,
 # which leaned on Plus_t / Succ_t. The HF-native version is provable
 # from extensionality + adjunction inside the standard HF model.
-Q12_AXIOM_DEF = define(
-    "Q12_axiom",
+HF5_AXIOM_DEF = define(
+    "HF5_axiom",
     parse_type("nat0"),
     "Forall_f 0 (Forall_f (SUC0 0) "
     "(Imp_f (In_a var_x var_y) "
     "(Not_f (Forall_f (SUC0 (SUC0 0)) "
     "(Not_f (Eq_f var_y (Insert_t var_x var_z)))))))",
 )
-Q12_axiom = mk_const("Q12_axiom", [])
+HF5_axiom = mk_const("HF5_axiom", [])
 
 
-Q_AXIOMS = [
-    ("Q8_axiom", Q8_axiom, Q8_AXIOM_DEF),
-    ("Q9_axiom", Q9_axiom, Q9_AXIOM_DEF),
-    ("Q10_axiom", Q10_axiom, Q10_AXIOM_DEF),
-    ("Q11_axiom", Q11_axiom, Q11_AXIOM_DEF),
-    ("Q12_axiom", Q12_axiom, Q12_AXIOM_DEF),
+HF_AXIOMS = [
+    ("HF1_axiom", HF1_axiom, HF1_AXIOM_DEF),
+    ("HF2_axiom", HF2_axiom, HF2_AXIOM_DEF),
+    ("HF3_axiom", HF3_axiom, HF3_AXIOM_DEF),
+    ("HF4_axiom", HF4_axiom, HF4_AXIOM_DEF),
+    ("HF5_axiom", HF5_axiom, HF5_AXIOM_DEF),
 ]
 
 
@@ -384,12 +384,12 @@ Q_AXIOMS = [
 
 
 # ---------------------------------------------------------------------------
-# is_q_axiom -- decidable recogniser for the five HF axioms.
+# is_hf_axiom -- decidable recogniser for the five HF axioms.
 #
-#   is_q_axiom n  :<=>  n = Q8_axiom \/ ... \/ n = Q12_axiom
+#   is_hf_axiom n  :<=>  n = HF1_axiom \/ ... \/ n = HF5_axiom
 #
 # No recursion -- a 5-fold disjunction of equalities with closed nat0
-# numerals. Decidable trivially. Name retained as ``is_q_axiom`` to
+# numerals. Decidable trivially. Name retained as ``is_hf_axiom`` to
 # limit the refactor diff; will rename to ``is_hf_axiom`` later.
 # ---------------------------------------------------------------------------
 
@@ -406,31 +406,31 @@ def _disj_chain(eqs):
 
 
 _q_axiom_disj = _disj_chain(
-    [mk_eq(_n_n0, ax_const) for (_, ax_const, _) in Q_AXIOMS]
+    [mk_eq(_n_n0, ax_const) for (_, ax_const, _) in HF_AXIOMS]
 )
 
-IS_Q_AXIOM_DEF = define(
-    "is_q_axiom",
+IS_HF_AXIOM_DEF = define(
+    "is_hf_axiom",
     parse_type("nat0 -> bool"),
     mk_abs(_n_n0, _q_axiom_disj),
 )
-is_q_axiom = mk_const("is_q_axiom", [])
+is_hf_axiom = mk_const("is_hf_axiom", [])
 
 
 # Pointwise:
-#  |- !n. is_q_axiom n =
-#         (n = Q1_axiom \/ n = Q2_axiom \/ ... \/ n = Q7_axiom).
-IS_Q_AXIOM_AT = _at1(IS_Q_AXIOM_DEF, _n_n0)
+#  |- !n. is_hf_axiom n =
+#         (n = HF1_axiom \/ n = HF2_axiom \/ ... \/ n = HF5_axiom).
+IS_HF_AXIOM_AT = _at1(IS_HF_AXIOM_DEF, _n_n0)
 
 
-# Each Q axiom is itself a Q axiom: |- is_q_axiom Q{i}_axiom.
+# Each HF axiom is itself an HF axiom: |- is_hf_axiom HF{i}_axiom.
 # Use direct disjunction-introduction.
 def _prove_q_axiom_holds(name, axiom_const, position):
-    """|- is_q_axiom name_axiom -- discharge by DISJ at position.
+    """|- is_hf_axiom name_axiom -- discharge by DISJ at position.
 
-    ``position`` is 1-indexed (1..len(Q_AXIOMS)).
+    ``position`` is 1-indexed (1..len(HF_AXIOMS)).
     """
-    eq_chain = [mk_eq(axiom_const, ax_const) for (_, ax_const, _) in Q_AXIOMS]
+    eq_chain = [mk_eq(axiom_const, ax_const) for (_, ax_const, _) in HF_AXIOMS]
     idx = position - 1
     th = REFL(axiom_const)  # |- axiom_const = axiom_const
     if idx < len(eq_chain) - 1:
@@ -438,13 +438,13 @@ def _prove_q_axiom_holds(name, axiom_const, position):
         th = DISJ1(th, right_tail)
     for j in range(idx - 1, -1, -1):
         th = DISJ2(eq_chain[j], th)
-    spec = SPECL([axiom_const], IS_Q_AXIOM_AT)  # |- is_q_axiom ax = body
+    spec = SPECL([axiom_const], IS_HF_AXIOM_AT)  # |- is_hf_axiom ax = body
     return EQ_MP(SYM(spec), th)
 
 
-IS_Q_AXIOM_HOLDS = {
+IS_HF_AXIOM_HOLDS = {
     name: _prove_q_axiom_holds(name, ax_const, i + 1)
-    for i, (name, ax_const, _) in enumerate(Q_AXIOMS)
+    for i, (name, ax_const, _) in enumerate(HF_AXIOMS)
 }
 
 
@@ -736,7 +736,7 @@ IS_SUBST_AT = _at1(IS_SUBST_DEF, _n_n0)
 #                              is_UI n \/ is_Vac n \/
 #                              is_Refl n \/ is_Subst n.
 #
-#   is_axiom(n)          :<=>  is_q_axiom n \/ is_logical_axiom n.
+#   is_axiom(n)          :<=>  is_hf_axiom n \/ is_logical_axiom n.
 # ---------------------------------------------------------------------------
 
 
@@ -760,7 +760,7 @@ is_logical_axiom = mk_const("is_logical_axiom", [])
 IS_LOGICAL_AXIOM_AT = _at1(IS_LOGICAL_AXIOM_DEF, _n_n0)
 
 
-_is_axiom_body = mk_or(mk_app(is_q_axiom, _n_n0), mk_app(is_logical_axiom, _n_n0))
+_is_axiom_body = mk_or(mk_app(is_hf_axiom, _n_n0), mk_app(is_logical_axiom, _n_n0))
 IS_AXIOM_DEF = define(
     "is_axiom",
     parse_type("nat0 -> bool"),
@@ -777,7 +777,7 @@ IS_AXIOM_AT = _at1(IS_AXIOM_DEF, _n_n0)
 #   |- !h t. nat0_lt t (cons_l h t).
 #
 # Each is a two-layer descent through PAIR_ORD chained via NAT0_LT_TRANS.
-# Same pattern as the constructor size lemmas in q_syntax.py.
+# Same pattern as the constructor size lemmas in hf_syntax.py.
 # ---------------------------------------------------------------------------
 
 
@@ -828,24 +828,24 @@ def NAT0_LT_CONS_L_TAIL(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 2B (e) -- Prov_Q is defined in q_repr.py.
+# Stage 2B (e) -- Prov_HF is defined in hf_repr.py.
 #
-#   Prov_Q n  :<=>  ?p. Proof_Q p n.
+#   Prov_HF n  :<=>  ?p. Proof_HF p n.
 #
 # The Sigma_1 form is the canonical one: it makes provability a witness
 # predicate (every provable formula has an explicit list-of-formulas
 # proof), and matches the shape that the diagonal lemma's internal
 # provability formula will internalise. The closure lemmas
-# ``PROV_Q_AXIOM``, ``PROV_Q_MP``, ``PROV_Q_GEN`` are derived from the
+# ``PROV_HF_AXIOM``, ``PROV_HF_MP``, ``PROV_HF_GEN`` are derived from the
 # explicit proof-list constructions ``AXIOM_HAS_PROOF``,
-# ``MP_HAS_PROOF``, ``GEN_HAS_PROOF`` in q_repr.py.
+# ``MP_HAS_PROOF``, ``GEN_HAS_PROOF`` in hf_repr.py.
 #
-# Historical note: an earlier draft defined ``Prov_Q`` via impredicative
-# intersection (``!P. (closure clauses) ==> P n``) here in q_proof.py,
-# before ``Proof_Q`` was available. That definition was equivalent
-# (Knaster-Tarski) but redundant once the list-based ``Proof_Q`` was
+# Historical note: an earlier draft defined ``Prov_HF`` via impredicative
+# intersection (``!P. (closure clauses) ==> P n``) here in hf_proof.py,
+# before ``Proof_HF`` was available. That definition was equivalent
+# (Knaster-Tarski) but redundant once the list-based ``Proof_HF`` was
 # built. The audit found that nothing downstream used the impredicative
-# shape essentially -- every consumer treats ``Prov_Q`` as a black box
+# shape essentially -- every consumer treats ``Prov_HF`` as a black box
 # closed under axiom/MP/Gen -- so we collapsed to the single Sigma_1
 # definition.
 # ---------------------------------------------------------------------------
@@ -867,15 +867,15 @@ if __name__ == "__main__":
     print("    VAR_Z_DEF      :", pp_thm(VAR_Z_DEF))
     print()
     print("Stage 2 (c) -- the five HF axioms (encoded).")
-    for name, _ax, def_th in Q_AXIOMS:
+    for name, _ax, def_th in HF_AXIOMS:
         print(f"    {name:<10} :", pp_thm(def_th))
     print()
-    print("Stage 2 (d) -- is_q_axiom recogniser.")
-    print("    IS_Q_AXIOM_DEF :", pp_thm(IS_Q_AXIOM_DEF))
-    print("    IS_Q_AXIOM_AT  :", pp_thm(IS_Q_AXIOM_AT))
+    print("Stage 2 (d) -- is_hf_axiom recogniser.")
+    print("    IS_HF_AXIOM_DEF :", pp_thm(IS_HF_AXIOM_DEF))
+    print("    IS_HF_AXIOM_AT  :", pp_thm(IS_HF_AXIOM_AT))
     print("    Each axiom is recognised:")
-    for name, _, _ in Q_AXIOMS:
-        print(f"      is_q_axiom {name:<10}:", pp_thm(IS_Q_AXIOM_HOLDS[name]))
+    for name, _, _ in HF_AXIOMS:
+        print(f"      is_hf_axiom {name:<10}:", pp_thm(IS_HF_AXIOM_HOLDS[name]))
     print()
     print("Stage 2B (a) -- modus ponens / generalisation predicates.")
     print("    IS_MP_AT       :", pp_thm(IS_MP_AT))
@@ -898,4 +898,4 @@ if __name__ == "__main__":
     print("    NAT0_LT_CONS_L_HEAD :", pp_thm(NAT0_LT_CONS_L_HEAD))
     print("    NAT0_LT_CONS_L_TAIL :", pp_thm(NAT0_LT_CONS_L_TAIL))
     print()
-    print("Stage 2B (e) -- Prov_Q is defined in q_repr.py via ?p. Proof_Q p n.")
+    print("Stage 2B (e) -- Prov_HF is defined in hf_repr.py via ?p. Proof_HF p n.")

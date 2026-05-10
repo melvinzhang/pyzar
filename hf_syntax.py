@@ -452,7 +452,7 @@ NAT0_LT_FORALL_F_R = _proof_lt_binary_right(
     "NAT0_LT_FORALL_F_R", "n", "phi", "Forall_f", FORALL_F_AT, _FORALL_F_TAG
 )
 
-# Q + HF size lemmas (tags 9, 10).
+# HF size lemmas (tags 9, 10).
 _INSERT_T_TAG = "SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))))"
 _IN_A_TAG = "SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))))))"
 NAT0_LT_INSERT_T_L = _proof_lt_binary_left(
@@ -2278,7 +2278,7 @@ IS_TERM_AT_INSERT = derive_rec_eq(IS_TERM_REC, "Insert_t", ["t1", "t2"])
 
 
 # ---------------------------------------------------------------------------
-# Stage 1 (b): is_form -- "encodes a Q formula" predicate.
+# Stage 1 (b): is_form -- "encodes an HF formula" predicate.
 #
 # Body shape:
 #   F is_form n :=
@@ -2779,7 +2779,7 @@ if __name__ == "__main__":
     print()
     print("Stage 1 -- MONO helpers (per-disjunct iffs).")
     # Smoke test: build a fake hypothesis ASSUME(!k. nat0_lt k n ==> f k = g k)
-    # and exercise both helpers against the q_syntax constructors.
+    # and exercise both helpers against the hf_syntax constructors.
     from axioms import mk_forall, mk_imp
     from basics import mk_app as _mk_app
 

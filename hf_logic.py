@@ -1,20 +1,20 @@
 # ---------------------------------------------------------------------------
-# Stage 2C -- Q-internal logic.
+# Stage 2C -- HF-internal logic.
 # ---------------------------------------------------------------------------
 #
-# Build first-order logical reasoning *inside* Q from the seven axiom
+# Build first-order logical reasoning *inside* HF from the seven axiom
 # schemas (K, S, N, UI, Vac, Refl, Subst) plus MP and Gen. Each lemma
-# in this file derives a standard meta-theorem -- "Q proves X" -- as a
-# HOL theorem about ``Prov_Q``.
+# in this file derives a standard meta-theorem -- "HF proves X" -- as a
+# HOL theorem about ``Prov_HF``.
 #
 # Layered build-up:
 #
-#   (a) axiom-instance specializations      PROV_Q_K, PROV_Q_S, PROV_Q_N
-#   (b) basic propositional reasoning       PROV_Q_IMP_REFL,
-#                                           PROV_Q_HYP_DROP,
-#                                           PROV_Q_TRANS_IMP
-#   (c) conjunction / iff                   PROV_Q_AND_INTRO,
-#                                           PROV_Q_IFF_INTRO
+#   (a) axiom-instance specializations      PROV_HF_K, PROV_HF_S, PROV_HF_N
+#   (b) basic propositional reasoning       PROV_HF_IMP_REFL,
+#                                           PROV_HF_HYP_DROP,
+#                                           PROV_HF_TRANS_IMP
+#   (c) conjunction / iff                   PROV_HF_AND_INTRO,
+#                                           PROV_HF_IFF_INTRO
 #
 # Consumed by the diagonal lemma (Stage 4) and the Goedel-sentence main
 # theorem (Stage 5).
@@ -43,21 +43,21 @@ from hf_proof import (
     IS_K_AT,
     IS_S_AT,
     IS_N_AT,
-    is_q_axiom,
+    is_hf_axiom,
     IS_LOGICAL_AXIOM_AT,
     IS_AXIOM_AT,
 )
 from hf_repr import (
-    PROV_Q_AXIOM,
-    PROV_Q_MP,
+    PROV_HF_AXIOM,
+    PROV_HF_MP,
 )
 
 
 # ---------------------------------------------------------------------------
 # Helper: lift ``|- is_K n`` (or is_S / is_N) through the disjunction
-# chain into ``|- Prov_Q n``.
+# chain into ``|- Prov_HF n``.
 #
-# Chain:  is_<X> n  ->  is_logical_axiom n  ->  is_axiom n  ->  Prov_Q n.
+# Chain:  is_<X> n  ->  is_logical_axiom n  ->  is_axiom n  ->  Prov_HF n.
 #
 # is_<X> sits as one disjunct in IS_LOGICAL_AXIOM_AT's right-associated
 # 7-way OR. is_logical_axiom sits as the right disjunct of IS_AXIOM_AT.
@@ -67,10 +67,10 @@ from hf_repr import (
 
 
 def _prov_of_logical(p, name, slot_th, slot_idx, n_term):
-    """Lift ``slot_th : {} |- is_<X> n_term`` to ``|- Prov_Q n_term``.
+    """Lift ``slot_th : {} |- is_<X> n_term`` to ``|- Prov_HF n_term``.
 
     Posts intermediate facts ``{name}_logical`` and ``{name}_axiom``
-    in scope; returns the final Prov_Q theorem (also posted under
+    in scope; returns the final Prov_HF theorem (also posted under
     ``{name}_prov``).
     """
     # Build the right-associated 7-way disjunction at n_term:
@@ -146,14 +146,14 @@ def _prov_of_logical(p, name, slot_th, slot_idx, n_term):
     # is_logical_th : |- is_logical_axiom n_term
 
     is_axiom_at = SPEC(n_term, IS_AXIOM_AT)
-    # is_axiom_at : |- is_axiom n = is_q_axiom n \/ is_logical_axiom n
-    q_axiom_part = mk_app(is_q_axiom, n_term)
+    # is_axiom_at : |- is_axiom n = is_hf_axiom n \/ is_logical_axiom n
+    q_axiom_part = mk_app(is_hf_axiom, n_term)
     is_axiom_th = EQ_MP(SYM(is_axiom_at), DISJ2(q_axiom_part, is_logical_th))
     # is_axiom_th : |- is_axiom n_term
 
-    # Apply PROV_Q_AXIOM at n_term.
-    prov_q_axiom_at_n = SPEC(n_term, PROV_Q_AXIOM)
-    # prov_q_axiom_at_n : |- is_axiom n ==> Prov_Q n
+    # Apply PROV_HF_AXIOM at n_term.
+    prov_q_axiom_at_n = SPEC(n_term, PROV_HF_AXIOM)
+    # prov_q_axiom_at_n : |- is_axiom n ==> Prov_HF n
     prov_q_th = MP(prov_q_axiom_at_n, is_axiom_th)
     return prov_q_th
 
@@ -164,14 +164,14 @@ def _prov_of_logical(p, name, slot_th, slot_idx, n_term):
 
 
 @proof
-def PROV_Q_K(p):
+def PROV_HF_K(p):
     """|- !A B. is_form A /\\ is_form B
-                ==> Prov_Q (Imp_f A (Imp_f B A)).
+                ==> Prov_HF (Imp_f A (Imp_f B A)).
 
     The K schema instance, lifted through the disjunction chain.
     """
     p.goal(
-        "!A B. is_form A /\\ is_form B ==> Prov_Q (Imp_f A (Imp_f B A))",
+        "!A B. is_form A /\\ is_form B ==> Prov_HF (Imp_f A (Imp_f B A))",
         types={"A": nat0_ty, "B": nat0_ty},
     )
     p.fix("A B")
@@ -188,13 +188,13 @@ def PROV_Q_K(p):
     # is_k_th : {} |- is_K (Imp_f A (Imp_f B A))
 
     prov_q_th = _prov_of_logical(p, "k", is_k_th, 0, n_term)
-    p.thus("Prov_Q (Imp_f A (Imp_f B A))").by_thm(prov_q_th)
+    p.thus("Prov_HF (Imp_f A (Imp_f B A))").by_thm(prov_q_th)
 
 
 @proof
-def PROV_Q_S(p):
+def PROV_HF_S(p):
     """|- !A B C. is_form A /\\ is_form B /\\ is_form C
-                  ==> Prov_Q (Imp_f (Imp_f A (Imp_f B C))
+                  ==> Prov_HF (Imp_f (Imp_f A (Imp_f B C))
                                     (Imp_f (Imp_f A B)
                                            (Imp_f A C))).
 
@@ -202,7 +202,7 @@ def PROV_Q_S(p):
     """
     p.goal(
         "!A B C. is_form A /\\ is_form B /\\ is_form C ==> "
-        "Prov_Q (Imp_f (Imp_f A (Imp_f B C)) "
+        "Prov_HF (Imp_f (Imp_f A (Imp_f B C)) "
         "              (Imp_f (Imp_f A B) (Imp_f A C)))",
         types={"A": nat0_ty, "B": nat0_ty, "C": nat0_ty},
     )
@@ -222,22 +222,22 @@ def PROV_Q_S(p):
 
     prov_q_th = _prov_of_logical(p, "s", is_s_th, 1, n_term)
     p.thus(
-        "Prov_Q (Imp_f (Imp_f A (Imp_f B C)) "
+        "Prov_HF (Imp_f (Imp_f A (Imp_f B C)) "
         "              (Imp_f (Imp_f A B) (Imp_f A C)))"
     ).by_thm(prov_q_th)
 
 
 @proof
-def PROV_Q_N(p):
+def PROV_HF_N(p):
     """|- !A B. is_form A /\\ is_form B
-                ==> Prov_Q (Imp_f (Imp_f (Not_f B) (Not_f A))
+                ==> Prov_HF (Imp_f (Imp_f (Not_f B) (Not_f A))
                                   (Imp_f A B)).
 
     The N schema instance (contraposition).
     """
     p.goal(
         "!A B. is_form A /\\ is_form B ==> "
-        "Prov_Q (Imp_f (Imp_f (Not_f B) (Not_f A)) (Imp_f A B))",
+        "Prov_HF (Imp_f (Imp_f (Not_f B) (Not_f A)) (Imp_f A B))",
         types={"A": nat0_ty, "B": nat0_ty},
     )
     p.fix("A B")
@@ -254,7 +254,7 @@ def PROV_Q_N(p):
     is_n_th = EQ_MP(SYM(is_n_at_n), p.fact("nbody"))
 
     prov_q_th = _prov_of_logical(p, "n", is_n_th, 2, n_term)
-    p.thus("Prov_Q (Imp_f (Imp_f (Not_f B) (Not_f A)) (Imp_f A B))").by_thm(prov_q_th)
+    p.thus("Prov_HF (Imp_f (Imp_f (Not_f B) (Not_f A)) (Imp_f A B))").by_thm(prov_q_th)
 
 
 # ---------------------------------------------------------------------------
@@ -263,8 +263,8 @@ def PROV_Q_N(p):
 
 
 @proof
-def PROV_Q_IMP_REFL(p):
-    """|- !A. is_form A ==> Prov_Q (Imp_f A A).
+def PROV_HF_IMP_REFL(p):
+    """|- !A. is_form A ==> Prov_HF (Imp_f A A).
 
     Standard Mendelson derivation:
       1. K at (A, Imp_f A A): A -> ((A -> A) -> A)
@@ -275,7 +275,7 @@ def PROV_Q_IMP_REFL(p):
       5. MP(2, 4):            A -> A
     """
     p.goal(
-        "!A. is_form A ==> Prov_Q (Imp_f A A)",
+        "!A. is_form A ==> Prov_HF (Imp_f A A)",
         types={"A": nat0_ty},
     )
     p.fix("A")
@@ -297,29 +297,29 @@ def PROV_Q_IMP_REFL(p):
     )
 
     # Step 1: K at (A, Imp_f A A).
-    p.have("k1: Prov_Q (Imp_f A (Imp_f (Imp_f A A) A))").by(
-        PROV_Q_K, "A", "Imp_f A A", "hA_AA"
+    p.have("k1: Prov_HF (Imp_f A (Imp_f (Imp_f A A) A))").by(
+        PROV_HF_K, "A", "Imp_f A A", "hA_AA"
     )
 
     # Step 2: K at (A, A).
-    p.have("k2: Prov_Q (Imp_f A (Imp_f A A))").by(PROV_Q_K, "A", "A", "hA_A")
+    p.have("k2: Prov_HF (Imp_f A (Imp_f A A))").by(PROV_HF_K, "A", "A", "hA_A")
 
     # Step 3: S at (A, A -> A, A).
     p.have(
-        "s1: Prov_Q (Imp_f (Imp_f A (Imp_f (Imp_f A A) A)) "
+        "s1: Prov_HF (Imp_f (Imp_f A (Imp_f (Imp_f A A) A)) "
         "                  (Imp_f (Imp_f A (Imp_f A A)) "
         "                         (Imp_f A A)))"
-    ).by(PROV_Q_S, "A", "Imp_f A A", "A", "h_S_conj")
+    ).by(PROV_HF_S, "A", "Imp_f A A", "A", "h_S_conj")
 
     # Step 4: MP(k1, s1) -> mp1.
     p.have(
-        "k1_s1: Prov_Q (Imp_f A (Imp_f (Imp_f A A) A)) /\\ "
-        "             Prov_Q (Imp_f (Imp_f A (Imp_f (Imp_f A A) A)) "
+        "k1_s1: Prov_HF (Imp_f A (Imp_f (Imp_f A A) A)) /\\ "
+        "             Prov_HF (Imp_f (Imp_f A (Imp_f (Imp_f A A) A)) "
         "                           (Imp_f (Imp_f A (Imp_f A A)) "
         "                                  (Imp_f A A)))"
     ).by_thm(CONJ(p.fact("k1"), p.fact("s1")))
-    p.have("mp1: Prov_Q (Imp_f (Imp_f A (Imp_f A A)) (Imp_f A A))").by(
-        PROV_Q_MP,
+    p.have("mp1: Prov_HF (Imp_f (Imp_f A (Imp_f A A)) (Imp_f A A))").by(
+        PROV_HF_MP,
         "Imp_f A (Imp_f (Imp_f A A) A)",
         "Imp_f (Imp_f A (Imp_f A A)) (Imp_f A A)",
         "k1_s1",
@@ -327,65 +327,65 @@ def PROV_Q_IMP_REFL(p):
 
     # Step 5: MP(k2, mp1).
     p.have(
-        "k2_mp1: Prov_Q (Imp_f A (Imp_f A A)) /\\ "
-        "        Prov_Q (Imp_f (Imp_f A (Imp_f A A)) (Imp_f A A))"
+        "k2_mp1: Prov_HF (Imp_f A (Imp_f A A)) /\\ "
+        "        Prov_HF (Imp_f (Imp_f A (Imp_f A A)) (Imp_f A A))"
     ).by_thm(CONJ(p.fact("k2"), p.fact("mp1")))
-    p.thus("Prov_Q (Imp_f A A)").by(
-        PROV_Q_MP, "Imp_f A (Imp_f A A)", "Imp_f A A", "k2_mp1"
+    p.thus("Prov_HF (Imp_f A A)").by(
+        PROV_HF_MP, "Imp_f A (Imp_f A A)", "Imp_f A A", "k2_mp1"
     )
 
 
 @proof
-def PROV_Q_HYP_DROP(p):
-    """|- !A B. is_form A /\\ is_form B /\\ Prov_Q B
-                ==> Prov_Q (Imp_f A B).
+def PROV_HF_HYP_DROP(p):
+    """|- !A B. is_form A /\\ is_form B /\\ Prov_HF B
+                ==> Prov_HF (Imp_f A B).
 
-    "Drop a hypothesis": from a Q-theorem ``B`` derive ``A -> B`` for
+    "Drop a hypothesis": from a HF-theorem ``B`` derive ``A -> B`` for
     any well-formed ``A``. One MP through K at (B, A): K gives
-    ``B -> (A -> B)``; MP with ``Prov_Q B`` yields ``Prov_Q (A -> B)``.
+    ``B -> (A -> B)``; MP with ``Prov_HF B`` yields ``Prov_HF (A -> B)``.
     """
     p.goal(
-        "!A B. is_form A /\\ is_form B /\\ Prov_Q B ==> Prov_Q (Imp_f A B)",
+        "!A B. is_form A /\\ is_form B /\\ Prov_HF B ==> Prov_HF (Imp_f A B)",
         types={"A": nat0_ty, "B": nat0_ty},
     )
     p.fix("A B")
-    p.assume("(hA, hB, hPB): is_form A /\\ is_form B /\\ Prov_Q B")
+    p.assume("(hA, hB, hPB): is_form A /\\ is_form B /\\ Prov_HF B")
 
-    # K at (B, A): Prov_Q (Imp_f B (Imp_f A B)).
+    # K at (B, A): Prov_HF (Imp_f B (Imp_f A B)).
     p.have("hB_A: is_form B /\\ is_form A").by_thm(CONJ(p.fact("hB"), p.fact("hA")))
-    p.have("k_BA: Prov_Q (Imp_f B (Imp_f A B))").by(PROV_Q_K, "B", "A", "hB_A")
+    p.have("k_BA: Prov_HF (Imp_f B (Imp_f A B))").by(PROV_HF_K, "B", "A", "hB_A")
 
-    # MP(hPB, k_BA): Prov_Q (Imp_f A B).
-    p.have("mp_in: Prov_Q B /\\ Prov_Q (Imp_f B (Imp_f A B))").by_thm(
+    # MP(hPB, k_BA): Prov_HF (Imp_f A B).
+    p.have("mp_in: Prov_HF B /\\ Prov_HF (Imp_f B (Imp_f A B))").by_thm(
         CONJ(p.fact("hPB"), p.fact("k_BA"))
     )
-    p.thus("Prov_Q (Imp_f A B)").by(PROV_Q_MP, "B", "Imp_f A B", "mp_in")
+    p.thus("Prov_HF (Imp_f A B)").by(PROV_HF_MP, "B", "Imp_f A B", "mp_in")
 
 
 @proof
-def PROV_Q_TRANS_IMP(p):
+def PROV_HF_TRANS_IMP(p):
     """|- !A B C. is_form A /\\ is_form B /\\ is_form C
-                  /\\ Prov_Q (Imp_f A B) /\\ Prov_Q (Imp_f B C)
-                  ==> Prov_Q (Imp_f A C).
+                  /\\ Prov_HF (Imp_f A B) /\\ Prov_HF (Imp_f B C)
+                  ==> Prov_HF (Imp_f A C).
 
-    Transitivity of Q-implication. Standard route:
-      1. HYP_DROP on Prov_Q (Imp_f B C) with hyp A:
-            Prov_Q (Imp_f A (Imp_f B C)).
+    Transitivity of HF-implication. Standard route:
+      1. HYP_DROP on Prov_HF (Imp_f B C) with hyp A:
+            Prov_HF (Imp_f A (Imp_f B C)).
       2. S at (A, B, C):
-            Prov_Q ((A -> (B -> C)) -> ((A -> B) -> (A -> C))).
-      3. MP twice yields Prov_Q (Imp_f A C).
+            Prov_HF ((A -> (B -> C)) -> ((A -> B) -> (A -> C))).
+      3. MP twice yields Prov_HF (Imp_f A C).
     """
     p.goal(
         "!A B C. is_form A /\\ is_form B /\\ is_form C "
-        "/\\ Prov_Q (Imp_f A B) /\\ Prov_Q (Imp_f B C) "
-        "==> Prov_Q (Imp_f A C)",
+        "/\\ Prov_HF (Imp_f A B) /\\ Prov_HF (Imp_f B C) "
+        "==> Prov_HF (Imp_f A C)",
         types={"A": nat0_ty, "B": nat0_ty, "C": nat0_ty},
     )
     p.fix("A B C")
     p.assume(
         "(hA, hB, hC, hAB, hBC): "
         "is_form A /\\ is_form B /\\ is_form C "
-        "/\\ Prov_Q (Imp_f A B) /\\ Prov_Q (Imp_f B C)"
+        "/\\ Prov_HF (Imp_f A B) /\\ Prov_HF (Imp_f B C)"
     )
 
     # is_form (Imp_f B C) for HYP_DROP.
@@ -395,11 +395,11 @@ def PROV_Q_TRANS_IMP(p):
     )
 
     # Step 1: HYP_DROP gives A -> (B -> C).
-    p.have("hyp_in: is_form A /\\ is_form (Imp_f B C) /\\ Prov_Q (Imp_f B C)").by_thm(
+    p.have("hyp_in: is_form A /\\ is_form (Imp_f B C) /\\ Prov_HF (Imp_f B C)").by_thm(
         CONJ(p.fact("hA"), CONJ(p.fact("hBC_form"), p.fact("hBC")))
     )
-    p.have("p1: Prov_Q (Imp_f A (Imp_f B C))").by(
-        PROV_Q_HYP_DROP, "A", "Imp_f B C", "hyp_in"
+    p.have("p1: Prov_HF (Imp_f A (Imp_f B C))").by(
+        PROV_HF_HYP_DROP, "A", "Imp_f B C", "hyp_in"
     )
 
     # Step 2: S at (A, B, C).
@@ -407,38 +407,38 @@ def PROV_Q_TRANS_IMP(p):
         CONJ(p.fact("hA"), CONJ(p.fact("hB"), p.fact("hC")))
     )
     p.have(
-        "p2: Prov_Q (Imp_f (Imp_f A (Imp_f B C)) "
+        "p2: Prov_HF (Imp_f (Imp_f A (Imp_f B C)) "
         "                  (Imp_f (Imp_f A B) (Imp_f A C)))"
-    ).by(PROV_Q_S, "A", "B", "C", "h_S_conj")
+    ).by(PROV_HF_S, "A", "B", "C", "h_S_conj")
 
-    # Step 3a: MP(p1, p2): Prov_Q ((A -> B) -> (A -> C)).
+    # Step 3a: MP(p1, p2): Prov_HF ((A -> B) -> (A -> C)).
     p.have(
-        "mp_a: Prov_Q (Imp_f A (Imp_f B C)) /\\ "
-        "      Prov_Q (Imp_f (Imp_f A (Imp_f B C)) "
+        "mp_a: Prov_HF (Imp_f A (Imp_f B C)) /\\ "
+        "      Prov_HF (Imp_f (Imp_f A (Imp_f B C)) "
         "                    (Imp_f (Imp_f A B) (Imp_f A C)))"
     ).by_thm(CONJ(p.fact("p1"), p.fact("p2")))
-    p.have("p3: Prov_Q (Imp_f (Imp_f A B) (Imp_f A C))").by(
-        PROV_Q_MP, "Imp_f A (Imp_f B C)", "Imp_f (Imp_f A B) (Imp_f A C)", "mp_a"
+    p.have("p3: Prov_HF (Imp_f (Imp_f A B) (Imp_f A C))").by(
+        PROV_HF_MP, "Imp_f A (Imp_f B C)", "Imp_f (Imp_f A B) (Imp_f A C)", "mp_a"
     )
 
-    # Step 3b: MP(hAB, p3): Prov_Q (Imp_f A C).
+    # Step 3b: MP(hAB, p3): Prov_HF (Imp_f A C).
     p.have(
-        "mp_b: Prov_Q (Imp_f A B) /\\       Prov_Q (Imp_f (Imp_f A B) (Imp_f A C))"
+        "mp_b: Prov_HF (Imp_f A B) /\\       Prov_HF (Imp_f (Imp_f A B) (Imp_f A C))"
     ).by_thm(CONJ(p.fact("hAB"), p.fact("p3")))
-    p.thus("Prov_Q (Imp_f A C)").by(PROV_Q_MP, "Imp_f A B", "Imp_f A C", "mp_b")
+    p.thus("Prov_HF (Imp_f A C)").by(PROV_HF_MP, "Imp_f A B", "Imp_f A C", "mp_b")
 
 
 @proof
-def PROV_Q_EX_FALSO(p):
+def PROV_HF_EX_FALSO(p):
     """|- !A B. is_form A /\\ is_form B
-                ==> Prov_Q (Imp_f (Not_f A) (Imp_f A B)).
+                ==> Prov_HF (Imp_f (Not_f A) (Imp_f A B)).
 
     "Ex falso quodlibet" / Mendelson Lemma 1.10(a).
     Direct chain: ``K`` gives ``~A -> (~B -> ~A)``; ``N`` at (A, B)
     gives ``(~B -> ~A) -> (A -> B)``; TRANS_IMP composes them.
     """
     p.goal(
-        "!A B. is_form A /\\ is_form B ==> Prov_Q (Imp_f (Not_f A) (Imp_f A B))",
+        "!A B. is_form A /\\ is_form B ==> Prov_HF (Imp_f (Not_f A) (Imp_f A B))",
         types={"A": nat0_ty, "B": nat0_ty},
     )
     p.fix("A B")
@@ -464,13 +464,13 @@ def PROV_Q_EX_FALSO(p):
     p.have("h_K_in: is_form (Not_f A) /\\ is_form (Not_f B)").by_thm(
         CONJ(p.fact("hNA"), p.fact("hNB"))
     )
-    p.have("k1: Prov_Q (Imp_f (Not_f A) (Imp_f (Not_f B) (Not_f A)))").by(
-        PROV_Q_K, "Not_f A", "Not_f B", "h_K_in"
+    p.have("k1: Prov_HF (Imp_f (Not_f A) (Imp_f (Not_f B) (Not_f A)))").by(
+        PROV_HF_K, "Not_f A", "Not_f B", "h_K_in"
     )
 
     # N at (A, B): (~B -> ~A) -> (A -> B).
-    p.have("n1: Prov_Q (Imp_f (Imp_f (Not_f B) (Not_f A)) (Imp_f A B))").by(
-        PROV_Q_N, "A", "B", CONJ(p.fact("hA"), p.fact("hB"))
+    p.have("n1: Prov_HF (Imp_f (Imp_f (Not_f B) (Not_f A)) (Imp_f A B))").by(
+        PROV_HF_N, "A", "B", CONJ(p.fact("hA"), p.fact("hB"))
     )
 
     # TRANS_IMP: ~A -> (~B -> ~A), (~B -> ~A) -> (A -> B), so ~A -> (A -> B).
@@ -478,8 +478,8 @@ def PROV_Q_EX_FALSO(p):
         "h_T_conj: is_form (Not_f A) "
         "/\\ is_form (Imp_f (Not_f B) (Not_f A)) "
         "/\\ is_form (Imp_f A B) "
-        "/\\ Prov_Q (Imp_f (Not_f A) (Imp_f (Not_f B) (Not_f A))) "
-        "/\\ Prov_Q (Imp_f (Imp_f (Not_f B) (Not_f A)) (Imp_f A B))"
+        "/\\ Prov_HF (Imp_f (Not_f A) (Imp_f (Not_f B) (Not_f A))) "
+        "/\\ Prov_HF (Imp_f (Imp_f (Not_f B) (Not_f A)) (Imp_f A B))"
     ).by_thm(
         CONJ(
             p.fact("hNA"),
@@ -489,8 +489,8 @@ def PROV_Q_EX_FALSO(p):
             ),
         )
     )
-    p.thus("Prov_Q (Imp_f (Not_f A) (Imp_f A B))").by(
-        PROV_Q_TRANS_IMP,
+    p.thus("Prov_HF (Imp_f (Not_f A) (Imp_f A B))").by(
+        PROV_HF_TRANS_IMP,
         "Not_f A",
         "Imp_f (Not_f B) (Not_f A)",
         "Imp_f A B",
@@ -510,26 +510,26 @@ def PROV_Q_EX_FALSO(p):
 
 
 @proof
-def PROV_Q_DOUBLE_NEG_INTRO(p):
-    """|- !A. is_form A /\\ Prov_Q A ==> Prov_Q (Not_f (Not_f A)).
+def PROV_HF_DOUBLE_NEG_INTRO(p):
+    """|- !A. is_form A /\\ Prov_HF A ==> Prov_HF (Not_f (Not_f A)).
 
     Mendelson Lemma 1.11(a). STUB; see implementation below.
     """
     p.goal(
-        "!A. is_form A /\\ Prov_Q A ==> Prov_Q (Not_f (Not_f A))",
+        "!A. is_form A /\\ Prov_HF A ==> Prov_HF (Not_f (Not_f A))",
         types={"A": nat0_ty},
     )
     p.sorry()
 
 
 @proof
-def PROV_Q_DOUBLE_NEG_ELIM(p):
-    """|- !A. is_form A /\\ Prov_Q (Not_f (Not_f A)) ==> Prov_Q A.
+def PROV_HF_DOUBLE_NEG_ELIM(p):
+    """|- !A. is_form A /\\ Prov_HF (Not_f (Not_f A)) ==> Prov_HF A.
 
     Mendelson Lemma 1.11(b). STUB; see implementation below.
     """
     p.goal(
-        "!A. is_form A /\\ Prov_Q (Not_f (Not_f A)) ==> Prov_Q A",
+        "!A. is_form A /\\ Prov_HF (Not_f (Not_f A)) ==> Prov_HF A",
         types={"A": nat0_ty},
     )
     p.sorry()
@@ -538,7 +538,7 @@ def PROV_Q_DOUBLE_NEG_ELIM(p):
 # ---------------------------------------------------------------------------
 # Stage 2C (d) -- conjunction and biconditional introduction.
 #
-# Encoded forms (since Q's primitives are Imp_f / Not_f only):
+# Encoded forms (since HF's primitives are Imp_f / Not_f only):
 #   And_f A B  =  Not_f (Imp_f A (Not_f B))
 #   Iff_f A B  =  Not_f (Imp_f (Imp_f A B) (Not_f (Imp_f B A)))
 #                          (= And_f (Imp_f A B) (Imp_f B A))
@@ -546,35 +546,35 @@ def PROV_Q_DOUBLE_NEG_ELIM(p):
 
 
 @proof
-def PROV_Q_AND_INTRO(p):
-    """|- !A B. is_form A /\\ is_form B /\\ Prov_Q A /\\ Prov_Q B
-                ==> Prov_Q (Not_f (Imp_f A (Not_f B))).
+def PROV_HF_AND_INTRO(p):
+    """|- !A B. is_form A /\\ is_form B /\\ Prov_HF A /\\ Prov_HF B
+                ==> Prov_HF (Not_f (Imp_f A (Not_f B))).
 
-    Conjunction-introduction in Q. STUB; see implementation below.
+    Conjunction-introduction in HF. STUB; see implementation below.
     """
     p.goal(
-        "!A B. is_form A /\\ is_form B /\\ Prov_Q A /\\ Prov_Q B "
-        "==> Prov_Q (Not_f (Imp_f A (Not_f B)))",
+        "!A B. is_form A /\\ is_form B /\\ Prov_HF A /\\ Prov_HF B "
+        "==> Prov_HF (Not_f (Imp_f A (Not_f B)))",
         types={"A": nat0_ty, "B": nat0_ty},
     )
     p.sorry()
 
 
 @proof
-def PROV_Q_IFF_INTRO(p):
+def PROV_HF_IFF_INTRO(p):
     """|- !A B. is_form A /\\ is_form B
-                /\\ Prov_Q (Imp_f A B) /\\ Prov_Q (Imp_f B A)
-                ==> Prov_Q (Not_f (Imp_f (Imp_f A B)
+                /\\ Prov_HF (Imp_f A B) /\\ Prov_HF (Imp_f B A)
+                ==> Prov_HF (Not_f (Imp_f (Imp_f A B)
                                           (Not_f (Imp_f B A)))).
 
-    Biconditional-introduction in Q. Direct application of AND_INTRO at
+    Biconditional-introduction in HF. Direct application of AND_INTRO at
     the two implication directions: the conjunction of (A->B) and
     (B->A) is exactly the encoded biconditional.
     """
     p.goal(
         "!A B. is_form A /\\ is_form B "
-        "/\\ Prov_Q (Imp_f A B) /\\ Prov_Q (Imp_f B A) "
-        "==> Prov_Q (Not_f (Imp_f (Imp_f A B) "
+        "/\\ Prov_HF (Imp_f A B) /\\ Prov_HF (Imp_f B A) "
+        "==> Prov_HF (Not_f (Imp_f (Imp_f A B) "
         "                         (Not_f (Imp_f B A))))",
         types={"A": nat0_ty, "B": nat0_ty},
     )
@@ -582,7 +582,7 @@ def PROV_Q_IFF_INTRO(p):
     p.assume(
         "(hA, hB, hAB, hBA): "
         "is_form A /\\ is_form B "
-        "/\\ Prov_Q (Imp_f A B) /\\ Prov_Q (Imp_f B A)"
+        "/\\ Prov_HF (Imp_f A B) /\\ Prov_HF (Imp_f B A)"
     )
 
     # is_form (Imp_f A B), is_form (Imp_f B A) for AND_INTRO.
@@ -598,12 +598,12 @@ def PROV_Q_IFF_INTRO(p):
     # AND_INTRO at (Imp_f A B, Imp_f B A) gives the encoded And_f form.
     p.have(
         "and_in: is_form (Imp_f A B) /\\ is_form (Imp_f B A) "
-        "        /\\ Prov_Q (Imp_f A B) /\\ Prov_Q (Imp_f B A)"
+        "        /\\ Prov_HF (Imp_f A B) /\\ Prov_HF (Imp_f B A)"
     ).by_thm(
         CONJ(p.fact("hABf"), CONJ(p.fact("hBAf"), CONJ(p.fact("hAB"), p.fact("hBA"))))
     )
-    p.thus("Prov_Q (Not_f (Imp_f (Imp_f A B) (Not_f (Imp_f B A))))").by(
-        PROV_Q_AND_INTRO, "Imp_f A B", "Imp_f B A", "and_in"
+    p.thus("Prov_HF (Not_f (Imp_f (Imp_f A B) (Not_f (Imp_f B A))))").by(
+        PROV_HF_AND_INTRO, "Imp_f A B", "Imp_f B A", "and_in"
     )
 
 
@@ -612,24 +612,24 @@ def PROV_Q_IFF_INTRO(p):
 #
 # Exists_f x F = Not_f (Forall_f x (Not_f F)).
 #
-# Standard derivation: from a witness ``Prov_Q (substitute F t x)``,
+# Standard derivation: from a witness ``Prov_HF (substitute F t x)``,
 # combine with the UI axiom (specialised at the negation) and N to
-# derive ``Prov_Q (Not_f (Forall_f x (Not_f F)))``.
+# derive ``Prov_HF (Not_f (Forall_f x (Not_f F)))``.
 # ---------------------------------------------------------------------------
 
 
 @proof
-def PROV_Q_EXISTS_INTRO(p):
-    """|- !x F t. is_form F /\\ is_term t /\\ Prov_Q (substitute F t x)
-                  ==> Prov_Q (Not_f (Forall_f x (Not_f F))).
+def PROV_HF_EXISTS_INTRO(p):
+    """|- !x F t. is_form F /\\ is_term t /\\ Prov_HF (substitute F t x)
+                  ==> Prov_HF (Not_f (Forall_f x (Not_f F))).
 
-    Existential-introduction in Q (encoded form). STUB; see
+    Existential-introduction in HF (encoded form). STUB; see
     implementation below.
     """
     p.goal(
         "!x F t. is_form F /\\ is_term t /\\ "
-        "Prov_Q (substitute F t x) "
-        "==> Prov_Q (Not_f (Forall_f x (Not_f F)))",
+        "Prov_HF (substitute F t x) "
+        "==> Prov_HF (Not_f (Forall_f x (Not_f F)))",
         types={"x": nat0_ty, "F": nat0_ty, "t": nat0_ty},
     )
     p.sorry()
@@ -640,42 +640,42 @@ def PROV_Q_EXISTS_INTRO(p):
 #
 # And_f A B = Not_f (Imp_f A (Not_f B)). Given the encoded form, the
 # standard projections are:
-#   ELIM_LEFT  : Prov_Q (~(A -> ~B)) ==> Prov_Q A
-#   ELIM_RIGHT : Prov_Q (~(A -> ~B)) ==> Prov_Q B
+#   ELIM_LEFT  : Prov_HF (~(A -> ~B)) ==> Prov_HF A
+#   ELIM_RIGHT : Prov_HF (~(A -> ~B)) ==> Prov_HF B
 #
 # Each goes through DOUBLE_NEG_ELIM + N + S manipulation.
 # ---------------------------------------------------------------------------
 
 
 @proof
-def PROV_Q_AND_ELIM_LEFT(p):
+def PROV_HF_AND_ELIM_LEFT(p):
     """|- !A B. is_form A /\\ is_form B
-                /\\ Prov_Q (Not_f (Imp_f A (Not_f B)))
-                ==> Prov_Q A.
+                /\\ Prov_HF (Not_f (Imp_f A (Not_f B)))
+                ==> Prov_HF A.
 
     Left projection of conjunction. STUB.
     """
     p.goal(
         "!A B. is_form A /\\ is_form B "
-        "/\\ Prov_Q (Not_f (Imp_f A (Not_f B))) "
-        "==> Prov_Q A",
+        "/\\ Prov_HF (Not_f (Imp_f A (Not_f B))) "
+        "==> Prov_HF A",
         types={"A": nat0_ty, "B": nat0_ty},
     )
     p.sorry()
 
 
 @proof
-def PROV_Q_AND_ELIM_RIGHT(p):
+def PROV_HF_AND_ELIM_RIGHT(p):
     """|- !A B. is_form A /\\ is_form B
-                /\\ Prov_Q (Not_f (Imp_f A (Not_f B)))
-                ==> Prov_Q B.
+                /\\ Prov_HF (Not_f (Imp_f A (Not_f B)))
+                ==> Prov_HF B.
 
     Right projection of conjunction. STUB.
     """
     p.goal(
         "!A B. is_form A /\\ is_form B "
-        "/\\ Prov_Q (Not_f (Imp_f A (Not_f B))) "
-        "==> Prov_Q B",
+        "/\\ Prov_HF (Not_f (Imp_f A (Not_f B))) "
+        "==> Prov_HF B",
         types={"A": nat0_ty, "B": nat0_ty},
     )
     p.sorry()
@@ -685,28 +685,28 @@ def PROV_Q_AND_ELIM_RIGHT(p):
 # Stage 2C (g) -- existential elimination (∃-elim).
 #
 # Hilbert formulation as a derivable rule:
-#   If ``Prov_Q (Imp_f P Q)`` and ``v`` is not free in ``Q``,
-#   then ``Prov_Q (Imp_f (Exists_f v P) Q)``.
+#   If ``Prov_HF (Imp_f P Q)`` and ``v`` is not free in ``Q``,
+#   then ``Prov_HF (Imp_f (Exists_f v P) Q)``.
 #
 # Encoded form (Exists_f v P = Not_f (Forall_f v (Not_f P))):
-#   Prov_Q (Imp_f (Not_f (Forall_f v (Not_f P))) Q).
+#   Prov_HF (Imp_f (Not_f (Forall_f v (Not_f P))) Q).
 #
 # Standard derivation: contrapositive via N axiom + Gen + Vac.
 # ---------------------------------------------------------------------------
 
 
 @proof
-def PROV_Q_EXISTS_ELIM(p):
+def PROV_HF_EXISTS_ELIM(p):
     """|- !v P Q. is_form P /\\ is_form Q /\\ ~(free_in Q v)
-                  /\\ Prov_Q (Imp_f P Q)
-                  ==> Prov_Q (Imp_f (Not_f (Forall_f v (Not_f P))) Q).
+                  /\\ Prov_HF (Imp_f P Q)
+                  ==> Prov_HF (Imp_f (Not_f (Forall_f v (Not_f P))) Q).
 
     Existential-elimination as a derived rule (encoded form). STUB.
     """
     p.goal(
         "!v P Q. is_form P /\\ is_form Q /\\ ~(free_in Q v) "
-        "/\\ Prov_Q (Imp_f P Q) "
-        "==> Prov_Q (Imp_f (Not_f (Forall_f v (Not_f P))) Q)",
+        "/\\ Prov_HF (Imp_f P Q) "
+        "==> Prov_HF (Imp_f (Not_f (Forall_f v (Not_f P))) Q)",
         types={"v": nat0_ty, "P": nat0_ty, "Q": nat0_ty},
     )
     p.sorry()
@@ -716,27 +716,27 @@ def PROV_Q_EXISTS_ELIM(p):
 # Stage 2C (h) -- substitution under equality (Subst axiom in MP form).
 #
 # The is_Subst axiom schema, lifted through the disjunction chain to
-# Prov_Q (slot 6 of is_logical_axiom). Direct analogue of PROV_Q_K /
-# PROV_Q_S / PROV_Q_N -- could be filled in immediately by the same
+# Prov_HF (slot 6 of is_logical_axiom). Direct analogue of PROV_HF_K /
+# PROV_HF_S / PROV_HF_N -- could be filled in immediately by the same
 # pattern (kept as a stub here only because the body's witness building
 # is the same boilerplate).
 # ---------------------------------------------------------------------------
 
 
 @proof
-def PROV_Q_SUBST_EQ(p):
+def PROV_HF_SUBST_EQ(p):
     """|- !x F t1 t2. is_form F /\\ is_term t1 /\\ is_term t2
-                      ==> Prov_Q (Imp_f (Eq_f t1 t2)
+                      ==> Prov_HF (Imp_f (Eq_f t1 t2)
                                         (Imp_f (substitute F t1 x)
                                                (substitute F t2 x))).
 
     The is_Subst axiom in MP-friendly form. STUB; analogous to
-    PROV_Q_K / PROV_Q_S / PROV_Q_N -- direct application of
+    PROV_HF_K / PROV_HF_S / PROV_HF_N -- direct application of
     ``_prov_of_logical`` at slot 6.
     """
     p.goal(
         "!x F t1 t2. is_form F /\\ is_term t1 /\\ is_term t2 "
-        "==> Prov_Q (Imp_f (Eq_f t1 t2) "
+        "==> Prov_HF (Imp_f (Eq_f t1 t2) "
         "                  (Imp_f (substitute F t1 x) "
         "                         (substitute F t2 x)))",
         types={"x": nat0_ty, "F": nat0_ty, "t1": nat0_ty, "t2": nat0_ty},
@@ -748,33 +748,33 @@ if __name__ == "__main__":
     from parser import pp_thm
 
     print("Stage 2C (a) -- axiom-instance specializations.")
-    print("    PROV_Q_K :", pp_thm(PROV_Q_K))
-    print("    PROV_Q_S :", pp_thm(PROV_Q_S))
-    print("    PROV_Q_N :", pp_thm(PROV_Q_N))
+    print("    PROV_HF_K :", pp_thm(PROV_HF_K))
+    print("    PROV_HF_S :", pp_thm(PROV_HF_S))
+    print("    PROV_HF_N :", pp_thm(PROV_HF_N))
     print()
     print("Stage 2C (b) -- basic propositional reasoning.")
-    print("    PROV_Q_IMP_REFL  :", pp_thm(PROV_Q_IMP_REFL))
-    print("    PROV_Q_HYP_DROP  :", pp_thm(PROV_Q_HYP_DROP))
-    print("    PROV_Q_TRANS_IMP :", pp_thm(PROV_Q_TRANS_IMP))
-    print("    PROV_Q_EX_FALSO  :", pp_thm(PROV_Q_EX_FALSO))
+    print("    PROV_HF_IMP_REFL  :", pp_thm(PROV_HF_IMP_REFL))
+    print("    PROV_HF_HYP_DROP  :", pp_thm(PROV_HF_HYP_DROP))
+    print("    PROV_HF_TRANS_IMP :", pp_thm(PROV_HF_TRANS_IMP))
+    print("    PROV_HF_EX_FALSO  :", pp_thm(PROV_HF_EX_FALSO))
     print()
     print("Stage 2C (c) -- negation reasoning (STUB).")
-    print("    PROV_Q_DOUBLE_NEG_INTRO :", pp_thm(PROV_Q_DOUBLE_NEG_INTRO))
-    print("    PROV_Q_DOUBLE_NEG_ELIM  :", pp_thm(PROV_Q_DOUBLE_NEG_ELIM))
+    print("    PROV_HF_DOUBLE_NEG_INTRO :", pp_thm(PROV_HF_DOUBLE_NEG_INTRO))
+    print("    PROV_HF_DOUBLE_NEG_ELIM  :", pp_thm(PROV_HF_DOUBLE_NEG_ELIM))
     print()
     print("Stage 2C (d) -- conjunction / biconditional intro (STUB).")
-    print("    PROV_Q_AND_INTRO :", pp_thm(PROV_Q_AND_INTRO))
-    print("    PROV_Q_IFF_INTRO :", pp_thm(PROV_Q_IFF_INTRO))
+    print("    PROV_HF_AND_INTRO :", pp_thm(PROV_HF_AND_INTRO))
+    print("    PROV_HF_IFF_INTRO :", pp_thm(PROV_HF_IFF_INTRO))
     print()
     print("Stage 2C (e) -- existential intro (STUB).")
-    print("    PROV_Q_EXISTS_INTRO :", pp_thm(PROV_Q_EXISTS_INTRO))
+    print("    PROV_HF_EXISTS_INTRO :", pp_thm(PROV_HF_EXISTS_INTRO))
     print()
     print("Stage 2C (f) -- conjunction elimination (STUB).")
-    print("    PROV_Q_AND_ELIM_LEFT  :", pp_thm(PROV_Q_AND_ELIM_LEFT))
-    print("    PROV_Q_AND_ELIM_RIGHT :", pp_thm(PROV_Q_AND_ELIM_RIGHT))
+    print("    PROV_HF_AND_ELIM_LEFT  :", pp_thm(PROV_HF_AND_ELIM_LEFT))
+    print("    PROV_HF_AND_ELIM_RIGHT :", pp_thm(PROV_HF_AND_ELIM_RIGHT))
     print()
     print("Stage 2C (g) -- existential elimination (STUB).")
-    print("    PROV_Q_EXISTS_ELIM :", pp_thm(PROV_Q_EXISTS_ELIM))
+    print("    PROV_HF_EXISTS_ELIM :", pp_thm(PROV_HF_EXISTS_ELIM))
     print()
     print("Stage 2C (h) -- substitution under equality (STUB).")
-    print("    PROV_Q_SUBST_EQ :", pp_thm(PROV_Q_SUBST_EQ))
+    print("    PROV_HF_SUBST_EQ :", pp_thm(PROV_HF_SUBST_EQ))
