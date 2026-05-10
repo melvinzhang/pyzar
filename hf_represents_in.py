@@ -34,6 +34,7 @@ from tactics import (
     SYM,
     REFL,
     EQ_MP,
+    TRANS,
     CONJ,
     CONJUNCT1,
     CONJUNCT2,
@@ -92,7 +93,15 @@ from bits import (
     CLEAR_LOW_LT,
 )
 from classical import EXCLUDED_MIDDLE
-from hf_logic import PROV_HF_UI
+from hf_logic import (
+    PROV_HF_UI,
+    PROV_HF_SUBST_EQ,
+    PROV_HF_HYP_DROP,
+    PROV_HF_DT_MP,
+    PROV_HF_CONTRAP,
+    PROV_HF_DOUBLE_NEG_INTRO,
+)
+from hf_repr import IS_TERM_QUOTE_HF, SUBSTITUTE_QUOTE_HF, PROV_HF_MP
 
 
 _t_n0 = Var("t", nat0_ty)
@@ -1305,72 +1314,437 @@ def QUOTE_HF_INJ(p):
 # ---------------------------------------------------------------------------
 
 
+def _empty_neq_insert_quotes(p, lb_label, cl_label, nz_label, dir_left_zero):
+    """Build Prov_HF (Not_f (Eq_f Empty_t (Insert_t (q lb) (q cl)))) (when
+    ``dir_left_zero=True``) or Prov_HF (Not_f (Eq_f (Insert_t (q lb) (q cl))
+    Empty_t)) (when ``dir_left_zero=False``).
+
+    Discrimination via HF1 + HF2 + PROV_HF_SUBST_EQ.  ``lb_label`` /
+    ``cl_label`` name HOL nat0 *expressions* whose ``quote_hf`` images
+    fill the Insert_t slots (e.g. ``"low_bit t"`` and ``"clear_low t"``).
+    ``nz_label`` names a fact ``~(<x> = 0)`` for the variable whose
+    nonzero-decomposition produces the Insert_t (used only in
+    ``_QUOTE_HF_AT_NZ``-flavoured downstream chains; here it is not
+    consumed -- caller provides the bit-decomposition by other means).
+
+    Returns the desired Prov_HF Not_f Eq_f fact under the label
+    ``h_qhf_neq``.
+    """
+    A = f"quote_hf ({lb_label})"
+    B = f"quote_hf ({cl_label})"
+    insert_AB = f"Insert_t ({A}) ({B})"
+    if dir_left_zero:
+        eq_term = f"Eq_f Empty_t ({insert_AB})"
+        t1, t2 = "Empty_t", insert_AB
+    else:
+        eq_term = f"Eq_f ({insert_AB}) Empty_t"
+        t1, t2 = insert_AB, "Empty_t"
+
+    # is_term proofs.
+    p.have(f"h_t_lb: is_term ({A})").by(IS_TERM_QUOTE_HF, lb_label)
+    p.have(f"h_t_cl: is_term ({B})").by(IS_TERM_QUOTE_HF, cl_label)
+    p.have(f"h_t_ins: is_term ({insert_AB})").by(
+        IS_TERM_INSERT, A, B, CONJ(p.fact("h_t_lb"), p.fact("h_t_cl")),
+    )
+    p.have("h_t_empty: is_term Empty_t").by_thm(IS_TERM_EMPTY)
+    is_term_v0 = EQT_ELIM(SPEC(ZERO, IS_TERM_AT_VAR))
+    p.have("h_t_v0: is_term (Var_t 0)").by_thm(is_term_v0)
+
+    # is_form proofs (for the Prov_HF toolkit).
+    is_form_in_a_v0 = EQ_MP(
+        SYM(SPECL([p._parse(A), p._parse("Var_t 0")], IS_FORM_AT_IN)),
+        CONJ(p.fact("h_t_lb"), p.fact("h_t_v0")),
+    )
+    p.have(f"h_f_in_a_v0: is_form (In_a ({A}) (Var_t 0))").by_thm(
+        is_form_in_a_v0
+    )
+    is_form_phi = EQ_MP(
+        SYM(SPEC(p._parse(f"In_a ({A}) (Var_t 0)"), IS_FORM_AT_NOT)),
+        is_form_in_a_v0,
+    )
+    p.have(
+        f"h_f_phi: is_form (Not_f (In_a ({A}) (Var_t 0)))"
+    ).by_thm(is_form_phi)
+
+    # PROV_HF_SUBST_EQ at (0, Not_f (In_a A (Var_t 0)), t1, t2):
+    #   Prov_HF (Imp_f (Eq_f t1 t2) (Imp_f phi[t1/0] phi[t2/0])).
+    p.have(
+        f"h_subst_eq: Prov_HF (Imp_f ({eq_term}) "
+        f"(Imp_f (substitute (Not_f (In_a ({A}) (Var_t 0))) ({t1}) 0) "
+        f"       (substitute (Not_f (In_a ({A}) (Var_t 0))) ({t2}) 0)))"
+    ).by(
+        PROV_HF_SUBST_EQ, "0",
+        f"Not_f (In_a ({A}) (Var_t 0))", t1, t2,
+        CONJ(
+            p.fact("h_f_phi"),
+            CONJ(
+                p.fact("h_t_empty") if t1 == "Empty_t" else p.fact("h_t_ins"),
+                p.fact("h_t_ins") if t2 == insert_AB else p.fact("h_t_empty"),
+            ),
+        ),
+    )
+
+    # Reduce the substitutes symbolically.
+    # substitute (Not_f (In_a A (Var_t 0))) T 0
+    #   = Not_f (In_a (substitute A T 0) (substitute (Var_t 0) T 0))
+    #   = Not_f (In_a A T)             [SUBSTITUTE_QUOTE_HF on A; HIT for Var_t 0]
+    subst_v0_at_0_t1 = MP(
+        SPECL([ZERO, p._parse(t1), ZERO], SUBSTITUTE_AT_VAR_HIT),
+        REFL(ZERO),
+    )
+    subst_v0_at_0_t2 = MP(
+        SPECL([ZERO, p._parse(t2), ZERO], SUBSTITUTE_AT_VAR_HIT),
+        REFL(ZERO),
+    )
+    p.have(
+        f"h_imp_phi_phi: Prov_HF (Imp_f ({eq_term}) "
+        f"(Imp_f (Not_f (In_a ({A}) ({t1}))) "
+        f"       (Not_f (In_a ({A}) ({t2})))))"
+    ).by_rewrite_of(
+        "h_subst_eq",
+        [
+            SUBSTITUTE_AT_NOT, SUBSTITUTE_AT_IN,
+            SUBSTITUTE_QUOTE_HF, SUBSTITUTE_AT_EMPTY,
+            SUBSTITUTE_AT_INSERT,
+            subst_v0_at_0_t1, subst_v0_at_0_t2,
+        ],
+    )
+
+    # HF1_INST gives Prov_HF (Not_f (In_a A Empty_t)).
+    # HF2_INST gives Prov_HF (In_a A (Insert_t A B))  (under the
+    # substitute-stability precond, vacuous for quote_hf images).
+    p.have(
+        f"h_hf1: Prov_HF (Not_f (In_a ({A}) Empty_t))"
+    ).by(HF1_INST, A, "h_t_lb")
+
+    # substitute (q lb) (q cl) (SUC0 0) = q lb -- precond for HF2_INST.
+    p.have(
+        f"h_subst_qhf_lb: substitute ({A}) ({B}) (SUC0 0) = ({A})"
+    ).by(SUBSTITUTE_QUOTE_HF, lb_label, B, "SUC0 0")
+    p.have(
+        f"h_hf2: Prov_HF (In_a ({A}) (Insert_t ({A}) ({B})))"
+    ).by(
+        HF2_INST, A, B,
+        CONJ(
+            p.fact("h_t_lb"),
+            CONJ(p.fact("h_t_cl"), p.fact("h_subst_qhf_lb")),
+        ),
+    )
+
+    # is_form for the toolkit calls.
+    is_form_in_A_emp = EQ_MP(
+        SYM(SPECL([p._parse(A), p._parse("Empty_t")], IS_FORM_AT_IN)),
+        CONJ(p.fact("h_t_lb"), p.fact("h_t_empty")),
+    )
+    p.have(f"h_f_in_A_emp: is_form (In_a ({A}) Empty_t)").by_thm(
+        is_form_in_A_emp
+    )
+    is_form_not_in_A_emp = EQ_MP(
+        SYM(SPEC(p._parse(f"In_a ({A}) Empty_t"), IS_FORM_AT_NOT)),
+        is_form_in_A_emp,
+    )
+    p.have(
+        f"h_f_not_in_A_emp: is_form (Not_f (In_a ({A}) Empty_t))"
+    ).by_thm(is_form_not_in_A_emp)
+
+    is_form_in_A_ins = EQ_MP(
+        SYM(SPECL([p._parse(A), p._parse(insert_AB)], IS_FORM_AT_IN)),
+        CONJ(p.fact("h_t_lb"), p.fact("h_t_ins")),
+    )
+    p.have(f"h_f_in_A_ins: is_form (In_a ({A}) ({insert_AB}))").by_thm(
+        is_form_in_A_ins
+    )
+    is_form_not_in_A_ins = EQ_MP(
+        SYM(SPEC(p._parse(f"In_a ({A}) ({insert_AB})"), IS_FORM_AT_NOT)),
+        is_form_in_A_ins,
+    )
+    p.have(
+        f"h_f_not_in_A_ins: is_form (Not_f (In_a ({A}) ({insert_AB})))"
+    ).by_thm(is_form_not_in_A_ins)
+
+    # is_form (Eq_f t1 t2) -- the discriminator equation.
+    from hf_syntax import IS_FORM_AT_EQ
+    is_form_eq = EQ_MP(
+        SYM(SPECL([p._parse(t1), p._parse(t2)], IS_FORM_AT_EQ)),
+        CONJ(
+            p.fact("h_t_empty") if t1 == "Empty_t" else p.fact("h_t_ins"),
+            p.fact("h_t_ins") if t2 == insert_AB else p.fact("h_t_empty"),
+        ),
+    )
+    p.have(f"h_f_eq: is_form ({eq_term})").by_thm(is_form_eq)
+
+    # HYP_DROP h_hf1 under hyp (Eq_f t1 t2):
+    #   Prov_HF (Imp_f (Eq_f t1 t2) (Not_f (In_a A Empty_t))).
+    p.have(
+        f"h_drop_hf1: Prov_HF (Imp_f ({eq_term}) "
+        f"(Not_f (In_a ({A}) Empty_t)))"
+    ).by(
+        PROV_HF_HYP_DROP,
+        eq_term, f"Not_f (In_a ({A}) Empty_t)",
+        CONJ(
+            p.fact("h_f_eq"),
+            CONJ(p.fact("h_f_not_in_A_emp"), p.fact("h_hf1")),
+        ),
+    )
+
+    # The (Empty side) operand of the inner Imp_f phi[t1/0] = Not_f (In_a A
+    # Empty_t) only when t1 = Empty_t (dir_left_zero=True); otherwise t1 =
+    # Insert_t A B and the corresponding inner premise is Not_f (In_a A
+    # (Insert_t A B)).  We therefore branch the DT_MP shape on direction.
+    if dir_left_zero:
+        # h_imp_phi_phi : Imp_f Eq (Imp_f (Not_f (In A Empty)) (Not_f (In A Insert))).
+        # h_drop_hf1    : Imp_f Eq (Not_f (In A Empty)).
+        # PROV_HF_DT_MP : Imp_f Eq (Not_f (In A Insert)).
+        p.have(
+            f"h_imp_eq_neg_ins: Prov_HF (Imp_f ({eq_term}) "
+            f"(Not_f (In_a ({A}) ({insert_AB}))))"
+        ).by(
+            PROV_HF_DT_MP,
+            eq_term, f"Not_f (In_a ({A}) Empty_t)",
+            f"Not_f (In_a ({A}) ({insert_AB}))",
+            CONJ(
+                p.fact("h_f_eq"),
+                CONJ(
+                    p.fact("h_f_not_in_A_emp"),
+                    CONJ(
+                        p.fact("h_f_not_in_A_ins"),
+                        CONJ(p.fact("h_drop_hf1"), p.fact("h_imp_phi_phi")),
+                    ),
+                ),
+            ),
+        )
+        # PROV_HF_CONTRAP at (Eq, Not_f (In A Insert)):
+        #   need Prov_HF (Not_f (Not_f (In A Insert))) -- DNI(h_hf2).
+        p.have(
+            f"h_dni_hf2: Prov_HF (Not_f (Not_f (In_a ({A}) ({insert_AB}))))"
+        ).by(
+            PROV_HF_DOUBLE_NEG_INTRO,
+            f"In_a ({A}) ({insert_AB})",
+            CONJ(p.fact("h_f_in_A_ins"), p.fact("h_hf2")),
+        )
+        # PROV_HF_CONTRAP gives the *implication* (¬B → ¬A); MP with
+        # ``h_dni_hf2`` (Prov_HF (Not_f (Not_f In_a A Insert))) finishes.
+        p.have(
+            f"h_contrap: Prov_HF (Imp_f "
+            f"(Not_f (Not_f (In_a ({A}) ({insert_AB})))) "
+            f"(Not_f ({eq_term})))"
+        ).by(
+            PROV_HF_CONTRAP,
+            eq_term, f"Not_f (In_a ({A}) ({insert_AB}))",
+            CONJ(
+                p.fact("h_f_eq"),
+                CONJ(
+                    p.fact("h_f_not_in_A_ins"),
+                    p.fact("h_imp_eq_neg_ins"),
+                ),
+            ),
+        )
+        p.have(f"h_qhf_neq: Prov_HF (Not_f ({eq_term}))").by(
+            PROV_HF_MP,
+            f"Not_f (Not_f (In_a ({A}) ({insert_AB})))",
+            f"Not_f ({eq_term})",
+            CONJ(p.fact("h_dni_hf2"), p.fact("h_contrap")),
+        )
+    else:
+        # Symmetric: t1 = Insert, t2 = Empty.  Use the *positive* phi
+        # variant -- HF2_INST gives In_a A (Insert), and after substitutivity
+        # the implication chain delivers In_a A Empty, which contradicts
+        # HF1_INST.  We re-derive the chain from PROV_HF_SUBST_EQ at the
+        # positive phi (In_a A (Var_t 0)) instead.
+        is_form_phi_pos = is_form_in_a_v0  # already proved
+        p.have(
+            f"h_subst_eq_pos: Prov_HF (Imp_f ({eq_term}) "
+            f"(Imp_f (substitute (In_a ({A}) (Var_t 0)) ({t1}) 0) "
+            f"       (substitute (In_a ({A}) (Var_t 0)) ({t2}) 0)))"
+        ).by(
+            PROV_HF_SUBST_EQ, "0",
+            f"In_a ({A}) (Var_t 0)", t1, t2,
+            CONJ(
+                p.fact("h_f_in_a_v0"),
+                CONJ(p.fact("h_t_ins"), p.fact("h_t_empty")),
+            ),
+        )
+        p.have(
+            f"h_imp_phi_phi_pos: Prov_HF (Imp_f ({eq_term}) "
+            f"(Imp_f (In_a ({A}) ({t1})) "
+            f"       (In_a ({A}) ({t2}))))"
+        ).by_rewrite_of(
+            "h_subst_eq_pos",
+            [
+                SUBSTITUTE_AT_IN,
+                SUBSTITUTE_QUOTE_HF, SUBSTITUTE_AT_EMPTY,
+                SUBSTITUTE_AT_INSERT,
+                subst_v0_at_0_t1, subst_v0_at_0_t2,
+            ],
+        )
+        # HYP_DROP h_hf2 under hyp (Eq_f Insert Empty):
+        p.have(
+            f"h_drop_hf2: Prov_HF (Imp_f ({eq_term}) "
+            f"(In_a ({A}) ({insert_AB})))"
+        ).by(
+            PROV_HF_HYP_DROP,
+            eq_term, f"In_a ({A}) ({insert_AB})",
+            CONJ(
+                p.fact("h_f_eq"),
+                CONJ(p.fact("h_f_in_A_ins"), p.fact("h_hf2")),
+            ),
+        )
+        # DT_MP gives Imp_f Eq (In A Empty).
+        p.have(
+            f"h_imp_eq_in_emp: Prov_HF (Imp_f ({eq_term}) "
+            f"(In_a ({A}) Empty_t))"
+        ).by(
+            PROV_HF_DT_MP,
+            eq_term, f"In_a ({A}) ({insert_AB})",
+            f"In_a ({A}) Empty_t",
+            CONJ(
+                p.fact("h_f_eq"),
+                CONJ(
+                    p.fact("h_f_in_A_ins"),
+                    CONJ(
+                        p.fact("h_f_in_A_emp"),
+                        CONJ(p.fact("h_drop_hf2"), p.fact("h_imp_phi_phi_pos")),
+                    ),
+                ),
+            ),
+        )
+        # PROV_HF_CONTRAP at (Eq, In A Empty) -- implication form.
+        p.have(
+            f"h_contrap: Prov_HF (Imp_f "
+            f"(Not_f (In_a ({A}) Empty_t)) "
+            f"(Not_f ({eq_term})))"
+        ).by(
+            PROV_HF_CONTRAP,
+            eq_term, f"In_a ({A}) Empty_t",
+            CONJ(
+                p.fact("h_f_eq"),
+                CONJ(
+                    p.fact("h_f_in_A_emp"),
+                    p.fact("h_imp_eq_in_emp"),
+                ),
+            ),
+        )
+        p.have(f"h_qhf_neq: Prov_HF (Not_f ({eq_term}))").by(
+            PROV_HF_MP,
+            f"Not_f (In_a ({A}) Empty_t)",
+            f"Not_f ({eq_term})",
+            CONJ(p.fact("h_hf1"), p.fact("h_contrap")),
+        )
+
+
 @proof
 def QUOTE_HF_PROV_NEQ(p):
     """|- !s t. ~(s = t) ==>
                 Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))).
 
-    SORRY (~120-160 lines, the deepest sub-proof in the IS_IN_REPRESENTS
-    chain).
+    Strong induction on ``s``.  Four-way case-split on (s=0)/(t=0):
 
-    Why this is needed -- the ``x != i`` branch of IS_IN_REPRESENTS
-    needs to lift the *HOL-level* inequality ``~(i = x)`` into a *Prov_HF*
-    fact ``Prov_HF (Not_f (Eq_f (quote_hf i) (quote_hf x)))`` to
-    discharge HF3's antecedent. PROV_HF_REFL only delivers
-    ``Prov_HF (Eq_f t t)``; nothing in the propositional Prov_HF toolkit
-    bridges HOL inequality to Prov_HF inequality without an explicit
-    structural induction.
+      * (s=0 ∧ t=0):     contradicts ~(s = t).
+      * (s=0 ∧ t≠0):     quote_hf s = Empty_t, quote_hf t = Insert_t _ _.
+                         Discriminate via HF1_INST (¬In Empty) + HF2_INST
+                         (In a (Insert a b)) + PROV_HF_SUBST_EQ + the
+                         propositional toolkit (HYP_DROP, DT_MP, CONTRAP,
+                         DNI).  ``_empty_neq_insert_quotes`` does the heavy
+                         lifting.
+      * (s≠0 ∧ t=0):     symmetric.
+      * (s≠0 ∧ t≠0):     SORRY (residual gap).  Requires HF4_INST
+                         (extensionality) plus a witness-construction
+                         argument: pick a discriminating element of
+                         (Insert_t a c) ∆ (Insert_t b d) and run
+                         HF4 contrapositively.  Estimated ~250-400 lines
+                         of additional infrastructure (HF4_INST itself,
+                         plus an ``Insert_t`` injectivity lemma at the
+                         Prov_HF level).
 
-    Proof outline -- strong induction on ``max(s, t)`` (HOL-side; we
-    shift to ``s`` after a SYM-flip so the smaller of the two indexes
-    the induction). Cases via EXCLUDED_MIDDLE on ``s = 0`` and ``t = 0``:
-
-      * (s = 0 /\\ t = 0): contradicts ``~(s = t)``.
-      * (s = 0 /\\ ~(t = 0)):
-            quote_hf s = Empty_t                  [QUOTE_HF_AT_EMPTY]
-            quote_hf t = Insert_t (quote_hf (low_bit t))
-                                  (quote_hf (clear_low t))
-                                                  [_QUOTE_HF_AT_NZ]
-        Reduce to ``Prov_HF (Not_f (Eq_f Empty_t (Insert_t _ _)))`` --
-        a closed inequality of two distinct HF-syntax shapes.
-        Provable from HF1 + HF2:
-            HF1_INST(quote_hf low_bit_t):
-                Prov_HF (Not_f (In_a (quote_hf low_bit_t) Empty_t))
-            HF2_INST(quote_hf low_bit_t, quote_hf clear_low_t, ...):
-                Prov_HF (In_a (quote_hf low_bit_t)
-                              (Insert_t (quote_hf low_bit_t)
-                                         (quote_hf clear_low_t)))
-        If Empty_t = Insert_t _ _ at the Prov_HF level (assumed via
-        contradiction), then In_a (quote_hf low_bit_t) Empty_t would
-        hold, contradicting HF1. Lift via PROV_HF_CONTRAP +
-        PROV_HF_SUBST_EQ.
-
-      * (~(s = 0) /\\ t = 0): symmetric.
-
-      * (~(s = 0) /\\ ~(t = 0)):
-        Two sub-cases on whether the ``low_bit``s match:
-          - low_bit s = low_bit t: then clear_low s != clear_low t
-            (otherwise s = t by INSERT_LOW_BIT_CLEAR_LOW). IH at
-            (clear_low s, clear_low t) gives Prov_HF inequality of
-            their quotes, then HF4 (extensionality) lifts the tail
-            inequality to whole-Insert_t inequality.
-          - low_bit s != low_bit t: similar IH at the heads, then
-            HF2_INST + HF1_INST contrapositively distinguishes the two
-            sets via membership of the smaller head.
-
-    HF4_INST (extensionality) is itself a fresh derived rule, ~80 lines.
-    The full chain (this proof + HF3_INST + HF4_INST + QUOTE_HF_INJ) is
-    ~400 lines of new theory.
-
-    Status: deferred. Expected discharge via the structural induction
-    above; no SORRY beneath once HF3_INST and HF4_INST are built.
+    Why the (s=0)-cases work without HF4 -- they reduce to discriminating
+    Empty_t from Insert_t _ _, which HF1 + HF2 + PROV_HF_SUBST_EQ already
+    decide.  The (s≠0, t≠0) case has to discriminate two Insert_t towers
+    with potentially distinct heads or tails; HF1 + HF2 + HF3 alone do
+    not suffice (HF3 reduces ``a ∈ Insert_t b d`` to ``a ∈ d`` under
+    ``a ≠ b``, which leaves the membership question recursive without
+    an extensionality fixpoint).
     """
     p.goal(
         "!s t. ~(s = t) ==> "
         "Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))",
         types={"s": nat0_ty, "t": nat0_ty},
     )
-    p.sorry()
+    with p.strong_induction("s", "IH"):
+        p.fix("t")
+        p.assume("h_neq: ~(s = t)")
+        with p.cases_on(EXCLUDED_MIDDLE, "s = 0"):
+            with p.case("hsz: s = 0"):
+                with p.cases_on(EXCLUDED_MIDDLE, "t = 0"):
+                    with p.case("htz: t = 0"):
+                        # Both 0 contradicts ~(s = t).
+                        from fusion import ASSUME
+                        from tactics import DISCH, NOT_INTRO, NOT_ELIM
+                        eq_st = TRANS(p.fact("hsz"), SYM(p.fact("htz")))
+                        contra = MP(NOT_ELIM(p.fact("h_neq")), eq_st)
+                        p.thus(
+                            "Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))"
+                        ).by_thm(
+                            CONTR(
+                                p._parse(
+                                    "Prov_HF (Not_f (Eq_f "
+                                    "(quote_hf s) (quote_hf t)))"
+                                ),
+                                contra,
+                            )
+                        )
+                    with p.case("htnz: ~(t = 0)"):
+                        # quote_hf s = Empty_t, quote_hf t = Insert_t (q lb_t) (q cl_t).
+                        p.have("h_qs: quote_hf s = Empty_t").by_rewrite(
+                            ["hsz", SYM(EMPTY_DEF), QUOTE_HF_AT_EMPTY]
+                        )
+                        p.have(
+                            "h_qt: quote_hf t = "
+                            "Insert_t (quote_hf (low_bit t)) "
+                            "         (quote_hf (clear_low t))"
+                        ).by(_QUOTE_HF_AT_NZ, "t", "htnz")
+                        # Build the Empty_t-on-the-left discriminator.
+                        _empty_neq_insert_quotes(
+                            p, "low_bit t", "clear_low t", "htnz",
+                            dir_left_zero=True,
+                        )
+                        p.thus(
+                            "Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))"
+                        ).by_rewrite_of(
+                            "h_qhf_neq",
+                            [SYM(p.fact("h_qs")), SYM(p.fact("h_qt"))],
+                        )
+            with p.case("hsnz: ~(s = 0)"):
+                with p.cases_on(EXCLUDED_MIDDLE, "t = 0"):
+                    with p.case("htz: t = 0"):
+                        # Symmetric: quote_hf t = Empty_t, quote_hf s = Insert_t _ _.
+                        p.have("h_qt: quote_hf t = Empty_t").by_rewrite(
+                            ["htz", SYM(EMPTY_DEF), QUOTE_HF_AT_EMPTY]
+                        )
+                        p.have(
+                            "h_qs: quote_hf s = "
+                            "Insert_t (quote_hf (low_bit s)) "
+                            "         (quote_hf (clear_low s))"
+                        ).by(_QUOTE_HF_AT_NZ, "s", "hsnz")
+                        # Build the Empty_t-on-the-right discriminator.
+                        _empty_neq_insert_quotes(
+                            p, "low_bit s", "clear_low s", "hsnz",
+                            dir_left_zero=False,
+                        )
+                        p.thus(
+                            "Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))"
+                        ).by_rewrite_of(
+                            "h_qhf_neq",
+                            [SYM(p.fact("h_qs")), SYM(p.fact("h_qt"))],
+                        )
+                    with p.case("htnz: ~(t = 0)"):
+                        # SORRY (residual): two non-zero Insert_t towers --
+                        # discrimination needs HF4_INST (extensionality)
+                        # plus a witness-construction argument.  The IH is
+                        # available at low_bit s and clear_low s, but
+                        # without HF4 we cannot discharge "Insert_t a c =
+                        # Insert_t b d ⟹ a = b ∧ c = d" at the Prov_HF
+                        # level.
+                        p.sorry()
 
 
 # ---------------------------------------------------------------------------
@@ -1501,5 +1875,8 @@ if __name__ == "__main__":
     print("    HF2_INST      :", pp_thm(HF2_INST))
     print("    HF3_INST      :", pp_thm(HF3_INST))
     print("    QUOTE_HF_INJ  :", pp_thm(QUOTE_HF_INJ))
-    print("    QUOTE_HF_PROV_NEQ (SORRY):", pp_thm(QUOTE_HF_PROV_NEQ))
+    print(
+        "    QUOTE_HF_PROV_NEQ (partial; (s≠0,t≠0) SORRY) :",
+        pp_thm(QUOTE_HF_PROV_NEQ),
+    )
     print("    IS_IN_REPRESENTS_TH (SORRY) :", pp_thm(IS_IN_REPRESENTS_TH))
