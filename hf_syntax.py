@@ -3080,6 +3080,296 @@ def SUBSTITUTE_PRESERVES_IS_FORM(p):
                 )
 
 
+# ---------------------------------------------------------------------------
+# Stage 1 (e) -- identity substitution.
+#
+#   |- !s v. is_term s ==> substitute s (Var_t v) v = s.
+#   |- !phi v. is_form phi ==> substitute phi (Var_t v) v = phi.
+#
+# Substituting variable ``v`` with its own encoding ``Var_t v`` is the
+# identity on well-formed terms / formulas. Substrate for the
+# FORALL-IMPLICATION-DISTRIBUTION lemma (which feeds PROV_HF_EXISTS_ELIM
+# in hf_logic.py): UI at the term ``Var_t v`` collapses
+# ``substitute (F -> G) (Var_t v) v`` to ``F -> G`` so the
+# DT-transformed Hilbert chain can use it under the assumption
+# ``!v.(F -> G)``.
+#
+# Strong induction mirroring SUBSTITUTE_PRESERVES_IS_TERM /
+# IS_FORM. Each calc chain rewrites the encoded constructor, applies
+# the matching SUBSTITUTE_AT_*, lifts via AP_TERM / by_cong on
+# constructor congruence, and folds back through SYM of the
+# constructor-equation fact.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def IDENTITY_SUBSTITUTE_TERM(p):
+    """|- !s v. is_term s ==> substitute s (Var_t v) v = s.
+
+    Strong induction on ``s``; case-split via IS_TERM_REC. Var_t HIT
+    (v = x) collapses to ``Var_t v = Var_t x = s`` via AP_TERM
+    congruence on ``Var_t``; Var_t MISS (~(v = x)) leaves
+    ``substitute (Var_t x) (Var_t v) v = Var_t x`` directly. Insert_t
+    chains the IH on each child.
+    """
+    p.goal(
+        "!s. !v. is_term s ==> substitute s (Var_t v) v = s",
+        types={"s": nat0_ty, "v": nat0_ty},
+    )
+    with p.strong_induction("s", "IH"):
+        p.fix("v")
+        p.assume("h_s: is_term s")
+        rec_at_s = SPEC(p._parse("s"), IS_TERM_REC)
+        p.have(
+            "h_disj: s = Empty_t \\/ (?x. s = Var_t x) "
+            "\\/ (?a b. s = Insert_t a b /\\ is_term a /\\ is_term b)"
+        ).by_eq_mp(rec_at_s, "h_s")
+
+        with p.cases_on("h_disj"):
+            # --- Empty_t ---
+            with p.case("c_empty: s = Empty_t"):
+                with p.calc("substitute s (Var_t v) v", thus=True) as c:
+                    c.step("= substitute Empty_t (Var_t v) v").by_rewrite(
+                        ["c_empty"]
+                    )
+                    c.step("= Empty_t").by(
+                        SUBSTITUTE_AT_EMPTY, "Var_t v", "v"
+                    )
+                    c.step("= s").by_thm(SYM(p.fact("c_empty")))
+
+            # --- Var_t x ---
+            with p.case("c_var: ?x. s = Var_t x"):
+                with p.cases_on(EXCLUDED_MIDDLE, "v = x"):
+                    with p.case("hit: v = x"):
+                        with p.calc(
+                            "substitute s (Var_t v) v", thus=True
+                        ) as c:
+                            c.step("= substitute (Var_t x) (Var_t v) v").by_rewrite(
+                                ["x_eq"]
+                            )
+                            c.step("= Var_t v").by(
+                                SUBSTITUTE_AT_VAR_HIT,
+                                "x", "Var_t v", "v", "hit",
+                            )
+                            # Var_t v = Var_t x via AP_TERM(Var_t, hit).
+                            c.step("= Var_t x").by_cong("Var_t", "hit")
+                            c.step("= s").by_thm(SYM(p.fact("x_eq")))
+                    with p.case("miss: ~(v = x)"):
+                        with p.calc(
+                            "substitute s (Var_t v) v", thus=True
+                        ) as c:
+                            c.step("= substitute (Var_t x) (Var_t v) v").by_rewrite(
+                                ["x_eq"]
+                            )
+                            c.step("= Var_t x").by(
+                                SUBSTITUTE_AT_VAR_MISS,
+                                "x", "Var_t v", "v", "miss",
+                            )
+                            c.step("= s").by_thm(SYM(p.fact("x_eq")))
+
+            # --- Insert_t a b ---
+            with p.case(
+                "c_ins: ?a b. s = Insert_t a b /\\ is_term a /\\ is_term b"
+            ):
+                p.choose("b", "a_eq")
+                p.split("b_eq", "(s_eq, h_a, h_b)")
+                p.have("lt_a: nat0_lt a s").by_rewrite_of(
+                    SPECL([p._parse("a"), p._parse("b")], NAT0_LT_INSERT_T_L),
+                    ["s_eq"],
+                )
+                p.have("lt_b: nat0_lt b s").by_rewrite_of(
+                    SPECL([p._parse("a"), p._parse("b")], NAT0_LT_INSERT_T_R),
+                    ["s_eq"],
+                )
+                p.have("ih_a: substitute a (Var_t v) v = a").by(
+                    "IH", "a", "lt_a", "v", "h_a",
+                )
+                p.have("ih_b: substitute b (Var_t v) v = b").by(
+                    "IH", "b", "lt_b", "v", "h_b",
+                )
+                with p.calc("substitute s (Var_t v) v", thus=True) as c:
+                    c.step("= substitute (Insert_t a b) (Var_t v) v").by_rewrite(
+                        ["s_eq"]
+                    )
+                    c.step(
+                        "= Insert_t (substitute a (Var_t v) v) "
+                        "(substitute b (Var_t v) v)"
+                    ).by(SUBSTITUTE_AT_INSERT, "a", "b", "Var_t v", "v")
+                    c.step("= Insert_t a b").by_cong("Insert_t", "ih_a", "ih_b")
+                    c.step("= s").by_thm(SYM(p.fact("s_eq")))
+
+
+@proof
+def IDENTITY_SUBSTITUTE(p):
+    """|- !phi v. is_form phi ==> substitute phi (Var_t v) v = phi.
+
+    Strong induction on ``phi`` via IS_FORM_REC. Atomic-formula cases
+    (Eq_f, In_a) delegate to IDENTITY_SUBSTITUTE_TERM on each
+    subterm; compound cases (Not_f, Imp_f, Forall_f-MISS) chain the
+    IH on subforms; Forall_f-HIT (v = a) is immediate since
+    ``substitute (Forall_f a b) (Var_t v) v = Forall_f a b`` already.
+    """
+    p.goal(
+        "!phi. !v. is_form phi ==> substitute phi (Var_t v) v = phi",
+        types={"phi": nat0_ty, "v": nat0_ty},
+    )
+    with p.strong_induction("phi", "IH"):
+        p.fix("v")
+        p.assume("h_phi: is_form phi")
+        rec_at_phi = SPEC(p._parse("phi"), IS_FORM_REC)
+        p.have(
+            "h_disj: (?a b. phi = Eq_f a b /\\ is_term a /\\ is_term b) "
+            "\\/ (?x. phi = Not_f x /\\ is_form x) "
+            "\\/ (?a b. phi = Imp_f a b /\\ is_form a /\\ is_form b) "
+            "\\/ (?a b. phi = Forall_f a b /\\ is_form b) "
+            "\\/ (?a b. phi = In_a a b /\\ is_term a /\\ is_term b)"
+        ).by_eq_mp(rec_at_phi, "h_phi")
+
+        with p.cases_on("h_disj"):
+            # --- Eq_f a b ---
+            with p.case(
+                "c_eq: ?a b. phi = Eq_f a b /\\ is_term a /\\ is_term b"
+            ):
+                p.choose("b", "a_eq")
+                p.split("b_eq", "(phi_eq, h_a, h_b)")
+                p.have("ih_a: substitute a (Var_t v) v = a").by(
+                    IDENTITY_SUBSTITUTE_TERM, "a", "v", "h_a",
+                )
+                p.have("ih_b: substitute b (Var_t v) v = b").by(
+                    IDENTITY_SUBSTITUTE_TERM, "b", "v", "h_b",
+                )
+                with p.calc("substitute phi (Var_t v) v", thus=True) as c:
+                    c.step("= substitute (Eq_f a b) (Var_t v) v").by_rewrite(
+                        ["phi_eq"]
+                    )
+                    c.step(
+                        "= Eq_f (substitute a (Var_t v) v) "
+                        "(substitute b (Var_t v) v)"
+                    ).by(SUBSTITUTE_AT_EQ, "a", "b", "Var_t v", "v")
+                    c.step("= Eq_f a b").by_cong("Eq_f", "ih_a", "ih_b")
+                    c.step("= phi").by_thm(SYM(p.fact("phi_eq")))
+
+            # --- Not_f x ---
+            with p.case("c_not: ?x. phi = Not_f x /\\ is_form x"):
+                p.split("x_eq", "(phi_eq, h_x)")
+                p.have("lt_x: nat0_lt x phi").by_rewrite_of(
+                    SPEC(p._parse("x"), NAT0_LT_NOT_F), ["phi_eq"]
+                )
+                p.have("ih_x: substitute x (Var_t v) v = x").by(
+                    "IH", "x", "lt_x", "v", "h_x",
+                )
+                with p.calc("substitute phi (Var_t v) v", thus=True) as c:
+                    c.step("= substitute (Not_f x) (Var_t v) v").by_rewrite(
+                        ["phi_eq"]
+                    )
+                    c.step("= Not_f (substitute x (Var_t v) v)").by(
+                        SUBSTITUTE_AT_NOT, "x", "Var_t v", "v"
+                    )
+                    c.step("= Not_f x").by_cong("Not_f", "ih_x")
+                    c.step("= phi").by_thm(SYM(p.fact("phi_eq")))
+
+            # --- Imp_f a b ---
+            with p.case(
+                "c_imp: ?a b. phi = Imp_f a b /\\ is_form a /\\ is_form b"
+            ):
+                p.choose("b", "a_eq")
+                p.split("b_eq", "(phi_eq, h_a, h_b)")
+                p.have("lt_a: nat0_lt a phi").by_rewrite_of(
+                    SPECL([p._parse("a"), p._parse("b")], NAT0_LT_IMP_F_L),
+                    ["phi_eq"],
+                )
+                p.have("lt_b: nat0_lt b phi").by_rewrite_of(
+                    SPECL([p._parse("a"), p._parse("b")], NAT0_LT_IMP_F_R),
+                    ["phi_eq"],
+                )
+                p.have("ih_a: substitute a (Var_t v) v = a").by(
+                    "IH", "a", "lt_a", "v", "h_a",
+                )
+                p.have("ih_b: substitute b (Var_t v) v = b").by(
+                    "IH", "b", "lt_b", "v", "h_b",
+                )
+                with p.calc("substitute phi (Var_t v) v", thus=True) as c:
+                    c.step("= substitute (Imp_f a b) (Var_t v) v").by_rewrite(
+                        ["phi_eq"]
+                    )
+                    c.step(
+                        "= Imp_f (substitute a (Var_t v) v) "
+                        "(substitute b (Var_t v) v)"
+                    ).by(SUBSTITUTE_AT_IMP, "a", "b", "Var_t v", "v")
+                    c.step("= Imp_f a b").by_cong("Imp_f", "ih_a", "ih_b")
+                    c.step("= phi").by_thm(SYM(p.fact("phi_eq")))
+
+            # --- Forall_f a b (HIT v=a is trivial; MISS recurses on b) ---
+            with p.case("c_fa: ?a b. phi = Forall_f a b /\\ is_form b"):
+                p.choose("b", "a_eq")
+                p.split("b_eq", "(phi_eq, h_b)")
+                with p.cases_on(EXCLUDED_MIDDLE, "v = a"):
+                    with p.case("hit: v = a"):
+                        with p.calc(
+                            "substitute phi (Var_t v) v", thus=True
+                        ) as c:
+                            c.step("= substitute (Forall_f a b) (Var_t v) v").by_rewrite(
+                                ["phi_eq"]
+                            )
+                            c.step("= Forall_f a b").by(
+                                SUBSTITUTE_AT_FORALL_HIT,
+                                "a", "b", "Var_t v", "v", "hit",
+                            )
+                            c.step("= phi").by_thm(SYM(p.fact("phi_eq")))
+                    with p.case("miss: ~(v = a)"):
+                        p.have("lt_b: nat0_lt b phi").by_rewrite_of(
+                            SPECL(
+                                [p._parse("a"), p._parse("b")],
+                                NAT0_LT_FORALL_F_R,
+                            ),
+                            ["phi_eq"],
+                        )
+                        p.have("ih_b: substitute b (Var_t v) v = b").by(
+                            "IH", "b", "lt_b", "v", "h_b",
+                        )
+                        with p.calc(
+                            "substitute phi (Var_t v) v", thus=True
+                        ) as c:
+                            c.step("= substitute (Forall_f a b) (Var_t v) v").by_rewrite(
+                                ["phi_eq"]
+                            )
+                            c.step(
+                                "= Forall_f a (substitute b (Var_t v) v)"
+                            ).by(
+                                SUBSTITUTE_AT_FORALL_MISS,
+                                "a", "b", "Var_t v", "v", "miss",
+                            )
+                            # Forall_f a (substitute b ...) = Forall_f a b
+                            # via AP_TERM(Forall_f a, ih_b).
+                            c.step("= Forall_f a b").by_cong(
+                                p._parse("Forall_f a"), "ih_b"
+                            )
+                            c.step("= phi").by_thm(SYM(p.fact("phi_eq")))
+
+            # --- In_a a b ---
+            with p.case(
+                "c_in: ?a b. phi = In_a a b /\\ is_term a /\\ is_term b"
+            ):
+                p.choose("b", "a_eq")
+                p.split("b_eq", "(phi_eq, h_a, h_b)")
+                p.have("ih_a: substitute a (Var_t v) v = a").by(
+                    IDENTITY_SUBSTITUTE_TERM, "a", "v", "h_a",
+                )
+                p.have("ih_b: substitute b (Var_t v) v = b").by(
+                    IDENTITY_SUBSTITUTE_TERM, "b", "v", "h_b",
+                )
+                with p.calc("substitute phi (Var_t v) v", thus=True) as c:
+                    c.step("= substitute (In_a a b) (Var_t v) v").by_rewrite(
+                        ["phi_eq"]
+                    )
+                    c.step(
+                        "= In_a (substitute a (Var_t v) v) "
+                        "(substitute b (Var_t v) v)"
+                    ).by(SUBSTITUTE_AT_IN, "a", "b", "Var_t v", "v")
+                    c.step("= In_a a b").by_cong("In_a", "ih_a", "ih_b")
+                    c.step("= phi").by_thm(SYM(p.fact("phi_eq")))
+
+
 if __name__ == "__main__":
     from parser import pp_thm
 
@@ -3254,4 +3544,14 @@ if __name__ == "__main__":
     print(
         "    SUBSTITUTE_PRESERVES_IS_FORM :",
         pp_thm(SUBSTITUTE_PRESERVES_IS_FORM),
+    )
+    print()
+    print("Stage 1 (e) -- identity substitution.")
+    print(
+        "    IDENTITY_SUBSTITUTE_TERM :",
+        pp_thm(IDENTITY_SUBSTITUTE_TERM),
+    )
+    print(
+        "    IDENTITY_SUBSTITUTE      :",
+        pp_thm(IDENTITY_SUBSTITUTE),
     )
