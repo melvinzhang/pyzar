@@ -43,6 +43,7 @@ from hf_proof import (
     IS_K_AT,
     IS_S_AT,
     IS_N_AT,
+    IS_UI_AT,
     is_hf_axiom,
     IS_LOGICAL_AXIOM_AT,
     IS_AXIOM_AT,
@@ -258,6 +259,66 @@ def PROV_HF_N(p):
 
 
 # ---------------------------------------------------------------------------
+# Stage 2C (a') -- universal instantiation as a derived rule.
+#
+# Given ``Prov_HF (Forall_f x F)``, the UI logical-axiom schema (slot 3)
+# witnesses ``Prov_HF (Imp_f (Forall_f x F) (substitute F t x))`` for any
+# term ``t`` and form ``F``; one MP yields ``Prov_HF (substitute F t x)``.
+# Required for instantiating closed HF1-HF5 axioms at concrete arguments.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def PROV_HF_UI(p):
+    """|- !x phi t. is_form phi /\\ is_term t /\\ Prov_HF (Forall_f x phi)
+                    ==> Prov_HF (substitute phi t x).
+
+    Universal instantiation. Witnesses (x, phi, t) into the is_UI body
+    schema, lifts the resulting ``is_UI (Imp_f (Forall_f x phi) ...)`` to
+    Prov_HF via ``_prov_of_logical`` at slot 3, then PROV_HF_MP discharges
+    the implication using the supplied ``Prov_HF (Forall_f x phi)``.
+
+    DSL friction note (dsl_spec.md cross-ref): the goal text uses ``phi``
+    rather than ``F`` because ``F`` is the kernel False constant
+    (``from axioms import F``) and the parser preferentially resolves bare
+    ``F`` to the constant rather than a fresh binder, even with
+    ``types={"F": nat0_ty}`` declared.
+    """
+    p.goal(
+        "!x phi t. is_form phi /\\ is_term t /\\ Prov_HF (Forall_f x phi) "
+        "==> Prov_HF (substitute phi t x)",
+        types={"x": nat0_ty, "phi": nat0_ty, "t": nat0_ty},
+    )
+    p.fix("x phi t")
+    p.assume(
+        "(hphi, ht, hPF): is_form phi /\\ is_term t /\\ Prov_HF (Forall_f x phi)"
+    )
+
+    n_term = p._parse("Imp_f (Forall_f x phi) (substitute phi t x)")
+    is_ui_at_n = SPEC(n_term, IS_UI_AT)
+
+    # Witness ?x1 phi1 t1. is_form phi1 /\ is_term t1 /\ n_term = ...
+    p.have(
+        "ui_body: ?x1 phi1 t1. is_form phi1 /\\ is_term t1 /\\ "
+        "       Imp_f (Forall_f x phi) (substitute phi t x) "
+        "       = Imp_f (Forall_f x1 phi1) (substitute phi1 t1 x1)"
+    ).by_exists(["x", "phi", "t"], "hphi", "ht")
+    is_ui_th = EQ_MP(SYM(is_ui_at_n), p.fact("ui_body"))
+    # is_ui_th : |- is_UI (Imp_f (Forall_f x phi) (substitute phi t x))
+
+    prov_imp = _prov_of_logical(p, "ui", is_ui_th, 3, n_term)
+    # prov_imp : |- Prov_HF (Imp_f (Forall_f x phi) (substitute phi t x))
+
+    p.have(
+        "h_mp_in: Prov_HF (Forall_f x phi) /\\ "
+        "         Prov_HF (Imp_f (Forall_f x phi) (substitute phi t x))"
+    ).by_thm(CONJ(p.fact("hPF"), prov_imp))
+    p.thus("Prov_HF (substitute phi t x)").by(
+        PROV_HF_MP, "Forall_f x phi", "substitute phi t x", "h_mp_in"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Stage 2C (b) -- basic propositional reasoning.
 # ---------------------------------------------------------------------------
 
@@ -428,6 +489,82 @@ def PROV_HF_TRANS_IMP(p):
     p.thus("Prov_HF (Imp_f A C)").by(PROV_HF_MP, "Imp_f A B", "Imp_f A C", "mp_b")
 
 
+# ---------------------------------------------------------------------------
+# Stage 2C (b') -- deduction-theorem combinator.
+#
+# PROV_HF_DT_MP is the "MP through a hypothesis": from ``A -> X`` and
+# ``A -> (X -> Y)`` derive ``A -> Y``. One application of S(A, X, Y)
+# plus two MPs.
+#
+# Together with PROV_HF_HYP_DROP (DT_AXIOM: dropping a fact ``X`` to
+# ``A -> X``) and PROV_HF_IMP_REFL (DT_HYP: ``A -> A``), this gives the
+# three combinators needed to mechanically transform a Hilbert-style
+# proof of ``B`` from hypothesis ``A`` into ``Prov_HF (Imp_f A B)``,
+# without explicit deduction-theorem reflection.
+#
+# Consumers: PROV_HF_DOUBLE_NEG_ELIM (8-step DT proof), PROV_HF_CONTRAP,
+# PROV_HF_AND_*, ...
+# ---------------------------------------------------------------------------
+
+
+@proof
+def PROV_HF_DT_MP(p):
+    """|- !A X Y. is_form A /\\ is_form X /\\ is_form Y
+                  /\\ Prov_HF (Imp_f A X)
+                  /\\ Prov_HF (Imp_f A (Imp_f X Y))
+                  ==> Prov_HF (Imp_f A Y).
+
+    Deduction-theorem MP combinator. From DT-prefixed forms of two
+    Hilbert steps, produce the DT-prefixed form of their MP. One S(A,
+    X, Y) instance plus two MPs.
+    """
+    p.goal(
+        "!A X Y. is_form A /\\ is_form X /\\ is_form Y "
+        "/\\ Prov_HF (Imp_f A X) "
+        "/\\ Prov_HF (Imp_f A (Imp_f X Y)) "
+        "==> Prov_HF (Imp_f A Y)",
+        types={"A": nat0_ty, "X": nat0_ty, "Y": nat0_ty},
+    )
+    p.fix("A X Y")
+    p.assume(
+        "(hA, hX, hY, hAX, hAXY): "
+        "is_form A /\\ is_form X /\\ is_form Y "
+        "/\\ Prov_HF (Imp_f A X) "
+        "/\\ Prov_HF (Imp_f A (Imp_f X Y))"
+    )
+
+    # S at (A, X, Y): (A -> (X -> Y)) -> ((A -> X) -> (A -> Y)).
+    p.have("h_S_conj: is_form A /\\ is_form X /\\ is_form Y").by_thm(
+        CONJ(p.fact("hA"), CONJ(p.fact("hX"), p.fact("hY")))
+    )
+    p.have(
+        "s1: Prov_HF (Imp_f (Imp_f A (Imp_f X Y)) "
+        "                  (Imp_f (Imp_f A X) (Imp_f A Y)))"
+    ).by(PROV_HF_S, "A", "X", "Y", "h_S_conj")
+
+    # MP(hAXY, s1): (A -> X) -> (A -> Y).
+    p.have(
+        "mp1_in: Prov_HF (Imp_f A (Imp_f X Y)) /\\ "
+        "        Prov_HF (Imp_f (Imp_f A (Imp_f X Y)) "
+        "                      (Imp_f (Imp_f A X) (Imp_f A Y)))"
+    ).by_thm(CONJ(p.fact("hAXY"), p.fact("s1")))
+    p.have("mp1: Prov_HF (Imp_f (Imp_f A X) (Imp_f A Y))").by(
+        PROV_HF_MP,
+        "Imp_f A (Imp_f X Y)",
+        "Imp_f (Imp_f A X) (Imp_f A Y)",
+        "mp1_in",
+    )
+
+    # MP(hAX, mp1): A -> Y.
+    p.have(
+        "mp2_in: Prov_HF (Imp_f A X) /\\ "
+        "        Prov_HF (Imp_f (Imp_f A X) (Imp_f A Y))"
+    ).by_thm(CONJ(p.fact("hAX"), p.fact("mp1")))
+    p.thus("Prov_HF (Imp_f A Y)").by(
+        PROV_HF_MP, "Imp_f A X", "Imp_f A Y", "mp2_in"
+    )
+
+
 @proof
 def PROV_HF_EX_FALSO(p):
     """|- !A B. is_form A /\\ is_form B
@@ -526,13 +663,390 @@ def PROV_HF_DOUBLE_NEG_INTRO(p):
 def PROV_HF_DOUBLE_NEG_ELIM(p):
     """|- !A. is_form A /\\ Prov_HF (Not_f (Not_f A)) ==> Prov_HF A.
 
-    Mendelson Lemma 1.11(b). STUB; see implementation below.
+    Mendelson Lemma 1.11(a): double-negation elimination. Derives the
+    implication ``~~A -> A`` via an 8-step DT-transformed Hilbert
+    proof, then MPs with the supplied ``Prov_HF (~~A)`` hypothesis.
+
+    Hilbert proof (under hypothesis ~~A):
+      1. ~~A                          [hyp]
+      2. ~~A -> (~~~~A -> ~~A)        [K(~~A, ~~~~A)]
+      3. ~~~~A -> ~~A                  [MP 1, 2]
+      4. (~~~~A -> ~~A) -> (~A -> ~~~A) [N(~A, ~~~A)]
+      5. ~A -> ~~~A                    [MP 3, 4]
+      6. (~A -> ~~~A) -> (~~A -> A)    [N(~~A, A)]
+      7. ~~A -> A                      [MP 5, 6]
+      8. A                             [MP 1, 7]
+
+    DT transformation: each step gets ``~~A ->`` prefix; K/N-axiom
+    steps wrap via PROV_HF_HYP_DROP, MP steps combine via
+    PROV_HF_DT_MP.
     """
     p.goal(
         "!A. is_form A /\\ Prov_HF (Not_f (Not_f A)) ==> Prov_HF A",
         types={"A": nat0_ty},
     )
-    p.sorry()
+    p.fix("A")
+    p.assume("(hA, hPnnA): is_form A /\\ Prov_HF (Not_f (Not_f A))")
+
+    # is_form chain: nA, nnA, n3A, n4A. Each step uses IS_FORM_AT_NOT.
+    isf_A = SPEC(p._parse("A"), IS_FORM_AT_NOT)
+    p.have("hnA: is_form (Not_f A)").by_eq_mp(SYM(isf_A), "hA")
+    isf_nA = SPEC(p._parse("Not_f A"), IS_FORM_AT_NOT)
+    p.have("hnnA: is_form (Not_f (Not_f A))").by_eq_mp(SYM(isf_nA), "hnA")
+    isf_nnA = SPEC(p._parse("Not_f (Not_f A)"), IS_FORM_AT_NOT)
+    p.have(
+        "hn3A: is_form (Not_f (Not_f (Not_f A)))"
+    ).by_eq_mp(SYM(isf_nnA), "hnnA")
+    isf_n3A = SPEC(p._parse("Not_f (Not_f (Not_f A))"), IS_FORM_AT_NOT)
+    p.have(
+        "hn4A: is_form (Not_f (Not_f (Not_f (Not_f A))))"
+    ).by_eq_mp(SYM(isf_n3A), "hn3A")
+
+    # is_form composites for Imp_f bodies referenced in DT_MP X/Y slots.
+    isf_imp_n4A_nnA = SPECL(
+        [p._parse("Not_f (Not_f (Not_f (Not_f A)))"),
+         p._parse("Not_f (Not_f A)")],
+        IS_FORM_AT_IMP,
+    )
+    p.have(
+        "hImp_n4A_nnA: is_form (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) "
+        "                            (Not_f (Not_f A)))"
+    ).by_eq_mp(SYM(isf_imp_n4A_nnA), CONJ(p.fact("hn4A"), p.fact("hnnA")))
+
+    isf_imp_nA_n3A = SPECL(
+        [p._parse("Not_f A"),
+         p._parse("Not_f (Not_f (Not_f A))")],
+        IS_FORM_AT_IMP,
+    )
+    p.have(
+        "hImp_nA_n3A: is_form (Imp_f (Not_f A) "
+        "                           (Not_f (Not_f (Not_f A))))"
+    ).by_eq_mp(SYM(isf_imp_nA_n3A), CONJ(p.fact("hnA"), p.fact("hn3A")))
+
+    isf_imp_nnA_A = SPECL(
+        [p._parse("Not_f (Not_f A)"), p._parse("A")], IS_FORM_AT_IMP
+    )
+    p.have(
+        "hImp_nnA_A: is_form (Imp_f (Not_f (Not_f A)) A)"
+    ).by_eq_mp(SYM(isf_imp_nnA_A), CONJ(p.fact("hnnA"), p.fact("hA")))
+
+    # === Hilbert step 2: K(nnA, n4A): nnA -> (n4A -> nnA).
+    p.have(
+        "h_K2_in: is_form (Not_f (Not_f A)) "
+        "/\\ is_form (Not_f (Not_f (Not_f (Not_f A))))"
+    ).by_thm(CONJ(p.fact("hnnA"), p.fact("hn4A")))
+    p.have(
+        "hilb2: Prov_HF (Imp_f (Not_f (Not_f A)) "
+        "                     (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) "
+        "                            (Not_f (Not_f A))))"
+    ).by(
+        PROV_HF_K,
+        "Not_f (Not_f A)",
+        "Not_f (Not_f (Not_f (Not_f A)))",
+        "h_K2_in",
+    )
+
+    # === Hilbert step 4: N(~A, ~~~A): (n4A -> nnA) -> (nA -> n3A).
+    p.have(
+        "hilb4: Prov_HF (Imp_f (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) "
+        "                            (Not_f (Not_f A))) "
+        "                     (Imp_f (Not_f A) "
+        "                            (Not_f (Not_f (Not_f A)))))"
+    ).by(
+        PROV_HF_N,
+        "Not_f A",
+        "Not_f (Not_f (Not_f A))",
+        CONJ(p.fact("hnA"), p.fact("hn3A")),
+    )
+
+    # === Hilbert step 6: N(nnA, A): (nA -> n3A) -> (nnA -> A).
+    p.have(
+        "hilb6: Prov_HF (Imp_f (Imp_f (Not_f A) "
+        "                            (Not_f (Not_f (Not_f A)))) "
+        "                     (Imp_f (Not_f (Not_f A)) A))"
+    ).by(
+        PROV_HF_N,
+        "Not_f (Not_f A)",
+        "A",
+        CONJ(p.fact("hnnA"), p.fact("hA")),
+    )
+
+    # === DT step 1: nnA -> nnA (= PROV_HF_IMP_REFL at nnA).
+    p.have(
+        "dt1: Prov_HF (Imp_f (Not_f (Not_f A)) (Not_f (Not_f A)))"
+    ).by(PROV_HF_IMP_REFL, "Not_f (Not_f A)", "hnnA")
+
+    # is_form for K's body (Imp_f n4A nnA), needed by HYP_DROP/DT_MP.
+    # Already have hImp_n4A_nnA.
+
+    # === DT step 2: nnA -> (nnA -> (n4A -> nnA)) via HYP_DROP at nnA on hilb2.
+    isf_imp_nnA_then_K = SPECL(
+        [p._parse("Not_f (Not_f A)"),
+         p._parse("Imp_f (Not_f (Not_f (Not_f (Not_f A)))) (Not_f (Not_f A))")],
+        IS_FORM_AT_IMP,
+    )
+    p.have(
+        "hImp_nnA_then_K: is_form (Imp_f (Not_f (Not_f A)) "
+        "                              (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) "
+        "                                     (Not_f (Not_f A))))"
+    ).by_eq_mp(
+        SYM(isf_imp_nnA_then_K),
+        CONJ(p.fact("hnnA"), p.fact("hImp_n4A_nnA")),
+    )
+    p.have(
+        "dt2_in: is_form (Not_f (Not_f A)) "
+        "/\\ is_form (Imp_f (Not_f (Not_f A)) "
+        "                  (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) "
+        "                         (Not_f (Not_f A)))) "
+        "/\\ Prov_HF (Imp_f (Not_f (Not_f A)) "
+        "                  (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) "
+        "                         (Not_f (Not_f A))))"
+    ).by_thm(
+        CONJ(
+            p.fact("hnnA"),
+            CONJ(p.fact("hImp_nnA_then_K"), p.fact("hilb2")),
+        )
+    )
+    p.have(
+        "dt2: Prov_HF (Imp_f (Not_f (Not_f A)) "
+        "                   (Imp_f (Not_f (Not_f A)) "
+        "                          (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) "
+        "                                 (Not_f (Not_f A)))))"
+    ).by(
+        PROV_HF_HYP_DROP,
+        "Not_f (Not_f A)",
+        "Imp_f (Not_f (Not_f A)) "
+        "      (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) (Not_f (Not_f A)))",
+        "dt2_in",
+    )
+
+    # === DT step 3: nnA -> (n4A -> nnA) via DT_MP(nnA, nnA, n4A->nnA).
+    p.have(
+        "dt3_in: is_form (Not_f (Not_f A)) "
+        "/\\ is_form (Not_f (Not_f A)) "
+        "/\\ is_form (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) (Not_f (Not_f A))) "
+        "/\\ Prov_HF (Imp_f (Not_f (Not_f A)) (Not_f (Not_f A))) "
+        "/\\ Prov_HF (Imp_f (Not_f (Not_f A)) "
+        "                  (Imp_f (Not_f (Not_f A)) "
+        "                         (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) "
+        "                                (Not_f (Not_f A)))))"
+    ).by_thm(
+        CONJ(
+            p.fact("hnnA"),
+            CONJ(
+                p.fact("hnnA"),
+                CONJ(
+                    p.fact("hImp_n4A_nnA"),
+                    CONJ(p.fact("dt1"), p.fact("dt2")),
+                ),
+            ),
+        )
+    )
+    p.have(
+        "dt3: Prov_HF (Imp_f (Not_f (Not_f A)) "
+        "                   (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) "
+        "                          (Not_f (Not_f A))))"
+    ).by(
+        PROV_HF_DT_MP,
+        "Not_f (Not_f A)",
+        "Not_f (Not_f A)",
+        "Imp_f (Not_f (Not_f (Not_f (Not_f A)))) (Not_f (Not_f A))",
+        "dt3_in",
+    )
+
+    # === DT step 4: nnA -> ((n4A -> nnA) -> (nA -> n3A)) via HYP_DROP on hilb4.
+    isf_imp_X_to_NA_n3A = SPECL(
+        [p._parse("Imp_f (Not_f (Not_f (Not_f (Not_f A)))) (Not_f (Not_f A))"),
+         p._parse("Imp_f (Not_f A) (Not_f (Not_f (Not_f A)))")],
+        IS_FORM_AT_IMP,
+    )
+    p.have(
+        "hImp_K_to_nA_n3A: is_form (Imp_f "
+        "  (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) (Not_f (Not_f A))) "
+        "  (Imp_f (Not_f A) (Not_f (Not_f (Not_f A)))))"
+    ).by_eq_mp(
+        SYM(isf_imp_X_to_NA_n3A),
+        CONJ(p.fact("hImp_n4A_nnA"), p.fact("hImp_nA_n3A")),
+    )
+    p.have(
+        "dt4_in: is_form (Not_f (Not_f A)) "
+        "/\\ is_form (Imp_f "
+        "    (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) (Not_f (Not_f A))) "
+        "    (Imp_f (Not_f A) (Not_f (Not_f (Not_f A))))) "
+        "/\\ Prov_HF (Imp_f "
+        "    (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) (Not_f (Not_f A))) "
+        "    (Imp_f (Not_f A) (Not_f (Not_f (Not_f A)))))"
+    ).by_thm(
+        CONJ(
+            p.fact("hnnA"),
+            CONJ(p.fact("hImp_K_to_nA_n3A"), p.fact("hilb4")),
+        )
+    )
+    p.have(
+        "dt4: Prov_HF (Imp_f (Not_f (Not_f A)) "
+        "                   (Imp_f "
+        "                     (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) "
+        "                            (Not_f (Not_f A))) "
+        "                     (Imp_f (Not_f A) "
+        "                            (Not_f (Not_f (Not_f A))))))"
+    ).by(
+        PROV_HF_HYP_DROP,
+        "Not_f (Not_f A)",
+        "Imp_f (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) (Not_f (Not_f A))) "
+        "      (Imp_f (Not_f A) (Not_f (Not_f (Not_f A))))",
+        "dt4_in",
+    )
+
+    # === DT step 5: nnA -> (nA -> n3A) via DT_MP(nnA, n4A->nnA, nA->n3A).
+    p.have(
+        "dt5_in: is_form (Not_f (Not_f A)) "
+        "/\\ is_form (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) (Not_f (Not_f A))) "
+        "/\\ is_form (Imp_f (Not_f A) (Not_f (Not_f (Not_f A)))) "
+        "/\\ Prov_HF (Imp_f (Not_f (Not_f A)) "
+        "                  (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) "
+        "                         (Not_f (Not_f A)))) "
+        "/\\ Prov_HF (Imp_f (Not_f (Not_f A)) "
+        "                  (Imp_f "
+        "                    (Imp_f (Not_f (Not_f (Not_f (Not_f A)))) "
+        "                           (Not_f (Not_f A))) "
+        "                    (Imp_f (Not_f A) "
+        "                           (Not_f (Not_f (Not_f A))))))"
+    ).by_thm(
+        CONJ(
+            p.fact("hnnA"),
+            CONJ(
+                p.fact("hImp_n4A_nnA"),
+                CONJ(
+                    p.fact("hImp_nA_n3A"),
+                    CONJ(p.fact("dt3"), p.fact("dt4")),
+                ),
+            ),
+        )
+    )
+    p.have(
+        "dt5: Prov_HF (Imp_f (Not_f (Not_f A)) "
+        "                   (Imp_f (Not_f A) "
+        "                          (Not_f (Not_f (Not_f A)))))"
+    ).by(
+        PROV_HF_DT_MP,
+        "Not_f (Not_f A)",
+        "Imp_f (Not_f (Not_f (Not_f (Not_f A)))) (Not_f (Not_f A))",
+        "Imp_f (Not_f A) (Not_f (Not_f (Not_f A)))",
+        "dt5_in",
+    )
+
+    # === DT step 6: nnA -> ((nA -> n3A) -> (nnA -> A)) via HYP_DROP on hilb6.
+    isf_imp_n_to_n_to_A = SPECL(
+        [p._parse("Imp_f (Not_f A) (Not_f (Not_f (Not_f A)))"),
+         p._parse("Imp_f (Not_f (Not_f A)) A")],
+        IS_FORM_AT_IMP,
+    )
+    p.have(
+        "hImp_naN3a_to_nnAA: is_form (Imp_f "
+        "  (Imp_f (Not_f A) (Not_f (Not_f (Not_f A)))) "
+        "  (Imp_f (Not_f (Not_f A)) A))"
+    ).by_eq_mp(
+        SYM(isf_imp_n_to_n_to_A),
+        CONJ(p.fact("hImp_nA_n3A"), p.fact("hImp_nnA_A")),
+    )
+    p.have(
+        "dt6_in: is_form (Not_f (Not_f A)) "
+        "/\\ is_form (Imp_f "
+        "    (Imp_f (Not_f A) (Not_f (Not_f (Not_f A)))) "
+        "    (Imp_f (Not_f (Not_f A)) A)) "
+        "/\\ Prov_HF (Imp_f "
+        "    (Imp_f (Not_f A) (Not_f (Not_f (Not_f A)))) "
+        "    (Imp_f (Not_f (Not_f A)) A))"
+    ).by_thm(
+        CONJ(
+            p.fact("hnnA"),
+            CONJ(p.fact("hImp_naN3a_to_nnAA"), p.fact("hilb6")),
+        )
+    )
+    p.have(
+        "dt6: Prov_HF (Imp_f (Not_f (Not_f A)) "
+        "                   (Imp_f "
+        "                     (Imp_f (Not_f A) (Not_f (Not_f (Not_f A)))) "
+        "                     (Imp_f (Not_f (Not_f A)) A)))"
+    ).by(
+        PROV_HF_HYP_DROP,
+        "Not_f (Not_f A)",
+        "Imp_f (Imp_f (Not_f A) (Not_f (Not_f (Not_f A)))) "
+        "      (Imp_f (Not_f (Not_f A)) A)",
+        "dt6_in",
+    )
+
+    # === DT step 7: nnA -> (nnA -> A) via DT_MP(nnA, nA->n3A, nnA->A).
+    p.have(
+        "dt7_in: is_form (Not_f (Not_f A)) "
+        "/\\ is_form (Imp_f (Not_f A) (Not_f (Not_f (Not_f A)))) "
+        "/\\ is_form (Imp_f (Not_f (Not_f A)) A) "
+        "/\\ Prov_HF (Imp_f (Not_f (Not_f A)) "
+        "                  (Imp_f (Not_f A) "
+        "                         (Not_f (Not_f (Not_f A))))) "
+        "/\\ Prov_HF (Imp_f (Not_f (Not_f A)) "
+        "                  (Imp_f "
+        "                    (Imp_f (Not_f A) (Not_f (Not_f (Not_f A)))) "
+        "                    (Imp_f (Not_f (Not_f A)) A)))"
+    ).by_thm(
+        CONJ(
+            p.fact("hnnA"),
+            CONJ(
+                p.fact("hImp_nA_n3A"),
+                CONJ(
+                    p.fact("hImp_nnA_A"),
+                    CONJ(p.fact("dt5"), p.fact("dt6")),
+                ),
+            ),
+        )
+    )
+    p.have(
+        "dt7: Prov_HF (Imp_f (Not_f (Not_f A)) "
+        "                   (Imp_f (Not_f (Not_f A)) A))"
+    ).by(
+        PROV_HF_DT_MP,
+        "Not_f (Not_f A)",
+        "Imp_f (Not_f A) (Not_f (Not_f (Not_f A)))",
+        "Imp_f (Not_f (Not_f A)) A",
+        "dt7_in",
+    )
+
+    # === DT step 8: nnA -> A via DT_MP(nnA, nnA, A) from dt1 and dt7.
+    p.have(
+        "dt8_in: is_form (Not_f (Not_f A)) "
+        "/\\ is_form (Not_f (Not_f A)) "
+        "/\\ is_form A "
+        "/\\ Prov_HF (Imp_f (Not_f (Not_f A)) (Not_f (Not_f A))) "
+        "/\\ Prov_HF (Imp_f (Not_f (Not_f A)) "
+        "                  (Imp_f (Not_f (Not_f A)) A))"
+    ).by_thm(
+        CONJ(
+            p.fact("hnnA"),
+            CONJ(
+                p.fact("hnnA"),
+                CONJ(
+                    p.fact("hA"),
+                    CONJ(p.fact("dt1"), p.fact("dt7")),
+                ),
+            ),
+        )
+    )
+    p.have(
+        "dt8: Prov_HF (Imp_f (Not_f (Not_f A)) A)"
+    ).by(
+        PROV_HF_DT_MP,
+        "Not_f (Not_f A)",
+        "Not_f (Not_f A)",
+        "A",
+        "dt8_in",
+    )
+
+    # Final: MP dt8 with hPnnA.
+    p.have(
+        "h_final_mp: Prov_HF (Not_f (Not_f A)) "
+        "/\\ Prov_HF (Imp_f (Not_f (Not_f A)) A)"
+    ).by_thm(CONJ(p.fact("hPnnA"), p.fact("dt8")))
+    p.thus("Prov_HF A").by(PROV_HF_MP, "Not_f (Not_f A)", "A", "h_final_mp")
 
 
 # ---------------------------------------------------------------------------
@@ -751,6 +1265,9 @@ if __name__ == "__main__":
     print("    PROV_HF_K :", pp_thm(PROV_HF_K))
     print("    PROV_HF_S :", pp_thm(PROV_HF_S))
     print("    PROV_HF_N :", pp_thm(PROV_HF_N))
+    print()
+    print("Stage 2C (a') -- universal instantiation.")
+    print("    PROV_HF_UI :", pp_thm(PROV_HF_UI))
     print()
     print("Stage 2C (b) -- basic propositional reasoning.")
     print("    PROV_HF_IMP_REFL  :", pp_thm(PROV_HF_IMP_REFL))

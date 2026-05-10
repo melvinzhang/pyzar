@@ -4988,7 +4988,16 @@ def IS_PAIR_ORD_REPRESENTS(p):
 # B1.0 (c) -- In representability.
 # Needed by every disjunct of is_substitute_step (which references
 # ``In (Pair_ord _ _) T``) and by is_substitute_trace clause (i).
-new_constant("is_In_internal", nat0_ty)
+#
+# Body: ``In_a var_x var_y`` -- the syntactic HF membership atom.
+# Substituting (quote_hf x, quote_hf y) into (var_x, var_y) yields the
+# concrete membership claim ``In_a (quote_hf x) (quote_hf y)`` whose
+# Prov_HF status mirrors HOL ``In x y``.
+IS_IN_INTERNAL_DEF = define(
+    "is_In_internal",
+    nat0_ty,
+    "In_a var_x var_y",
+)
 is_In_internal = mk_const("is_In_internal", [])
 
 
@@ -5175,8 +5184,16 @@ def SUBSTITUTE_REPRESENTS(p):
                   (numeral (substitute F t v)) var_w).
 
     Stage 3C(a) representability of ``substitute``. AXIOMATIZED via
-    ``p.sorry()``; see Stage 3C section comment for the deferred
-    construction (Cantor pairing or beta function + induction on F).
+    ``p.sorry()``; see Stage 3C section comment (B1-B3) for the
+    deferred HF-native construction:
+
+        substitute_internal := ?T. is_substitute_trace T F t v r
+
+    where ``T`` is an HF set of Pair_ord-encoded (subterm-shape,
+    output-shape) pairs, exhibited explicitly at each numeral
+    instance via TRACE_EXISTS. No sequence coding (Goedel beta /
+    Cantor pairing) and no arithmetic representability prereqs --
+    HF gives finite traces as first-class objects.
     """
     p.goal(
         "!F t v. Prov_HF ("
