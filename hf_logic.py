@@ -1871,7 +1871,52 @@ def PROV_HF_AND_ELIM_RIGHT(p):
 # Encoded form (Exists_f v P = Not_f (Forall_f v (Not_f P))):
 #   Prov_HF (Imp_f (Not_f (Forall_f v (Not_f P))) Q).
 #
-# Standard derivation: contrapositive via N axiom + Gen + Vac.
+# Proof outline (assuming the missing infrastructure below):
+#   1. P -> Q                          [premise]
+#   2. ~Q -> ~P                        [CONTRAP]
+#   3. !v. (~Q -> ~P)                  [PROV_HF_GEN]
+#   4. (!v. (~Q -> ~P)) -> (~Q -> !v.~P)
+#                                       [forall-impl distribution; v not
+#                                        free in ~Q since v not free in Q]
+#   5. ~Q -> !v.~P                     [MP 3, 4]
+#   6. ~~Q -> ~~(!v.~P)                [DNI both sides] -- can be skipped if
+#                                       we go directly via CONTRAP next
+#   7. ~(!v.~P) -> ~~Q                 [CONTRAP on step 5]
+#   8. ~~Q -> Q                        [DNE_IMP]
+#   9. ~(!v.~P) -> Q                   [TRANS_IMP of steps 7 and 8]
+#
+# The bottleneck is step 4: the FORALL-IMPLICATION-DISTRIBUTION lemma
+#
+#     |- (!v. (F -> G)) -> (F -> !v. G)    when v not free in F.
+#
+# Direct Hilbert derivation requires several supporting pieces, none of
+# which is currently in pyzar:
+#
+#   (a) IDENTITY_SUBSTITUTE: ``substitute X (Var_t v) v = X`` (for any
+#       term/formula X). Needed so ``UI(v, F -> G, Var_t v)`` collapses
+#       to ``(!v.(F -> G)) -> (F -> G)`` rather than substituting v for
+#       v in a nontrivial way. ~30-50 line structural induction on X.
+#
+#   (b) FREE_IN-tracking lemmas: ``substitute (Var_t v) (Var_t v) v =
+#       Var_t v`` (the Var_t HIT-but-trivial case), plus the Forall_f
+#       MISS case interaction. Roughly ~50 lines across the substitute
+#       constructors.
+#
+#   (c) The distribution proof itself (~50 lines): use the Vac axiom
+#       at (v, F) giving ``F -> !v.F``, then UI(v, F -> G, Var_t v) +
+#       (a) giving ``(!v.(F -> G)) -> (F -> G)``, then chain via
+#       PROV_HF_GEN inside a deduction-theorem-style argument. The
+#       Gen step has a side condition (v not free in any open
+#       hypothesis) which the lemma's premise guarantees but which
+#       must be plumbed through the DTChain framework.
+#
+# Once (a)-(c) are in place, the EXISTS_ELIM body itself is short:
+# CONTRAP, GEN, distribution, CONTRAP again, DNE_IMP, TRANS_IMP. ~40
+# lines on top of the prereq stack.
+#
+# Total estimated cost: ~180-250 lines including the supporting
+# substitute-identity machinery. Deferred until that infrastructure
+# lands.
 # ---------------------------------------------------------------------------
 
 
@@ -1881,7 +1926,17 @@ def PROV_HF_EXISTS_ELIM(p):
                   /\\ Prov_HF (Imp_f P Q)
                   ==> Prov_HF (Imp_f (Not_f (Forall_f v (Not_f P))) Q).
 
-    Existential-elimination as a derived rule (encoded form). STUB.
+    Existential-elimination as a derived rule (encoded form).
+
+    STUB. Blocked on the FORALL-IMPLICATION-DISTRIBUTION lemma
+    ``(!v. F -> G) -> (F -> !v. G)`` (when v not free in F), which
+    in turn blocks on:
+      * IDENTITY_SUBSTITUTE: ``substitute X (Var_t v) v = X``
+        (~30-50 line structural induction).
+      * Distribution proof itself via UI(Var_t v) + Vac + GEN inside
+        a DT-style argument (~50 lines).
+    See the section comment above for the full proof outline and the
+    breakdown of remaining work.
     """
     p.goal(
         "!v P Q. is_form P /\\ is_form Q /\\ ~(free_in Q v) "
