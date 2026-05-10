@@ -172,11 +172,14 @@ from hf_sets import (
     Singleton,  # noqa: F401  -- parser alias for QUOTE_HF_AT_SINGLETON
     Pair,  # noqa: F401  -- parser alias for QUOTE_HF_AT_PAIR
     Pair_ord,  # noqa: F401  -- parser alias for QUOTE_HF_AT_PAIR_ORD
-    vN,  # noqa: F401  -- parser alias for QUOTE_HF_AT_NUMERAL
     Union,  # used by TRACE_EXISTS to merge sub-traces
     EMPTY_DEF,  # used by QUOTE_HF_AT_EMPTY to fold Empty into 0
     INSERT_AT,  # used by QUOTE_HF_AT_INSERT_LOW to unfold Insert to set_bit
     SINGLETON_AS_INSERT,  # quote_hf Singleton bridge
+    LOW_BIT_SINGLETON,  # quote_hf Pair / Pair_ord bridge
+    SINGLETON_LT_PAIR,  # quote_hf Pair_ord bridge (sorry'd helper)
+    PAIR_AT,  # used by QUOTE_HF_AT_PAIR to unfold Pair to Insert
+    PAIR_ORD_AT,  # used by QUOTE_HF_AT_PAIR_ORD to unfold Pair_ord
     IN_INSERT_SAME,
     IN_INSERT_DIFF,
     IN_UNION,
@@ -4127,42 +4130,49 @@ def QUOTE_HF_AT_SINGLETON(p):
 
 @proof
 def QUOTE_HF_AT_PAIR(p):
-    """|- !x y. ~(x = y) ==>
+    """|- !x y. nat0_lt x y ==>
                 quote_hf (Pair x y) =
                 Insert_t (quote_hf x) (Insert_t (quote_hf y) Empty_t).
 
-    SORRY (thin-interface scaffolding).
+    Pair x y = Insert x (Singleton y) (PAIR_AT). QUOTE_HF_AT_INSERT_LOW
+    precondition ``Singleton y = 0 \\/ nat0_lt x (low_bit (Singleton y))``
+    collapses to ``nat0_lt x y`` via LOW_BIT_SINGLETON. The recursive
+    call on ``Singleton y`` is folded by QUOTE_HF_AT_SINGLETON.
 
-    The bit-encoding of ``Pair x y`` collapses to ``Singleton x`` when
-    ``x = y``, so this rewrite is conditional on ``~(x = y)``. Discharge
-    plan:
-
-      * ``Pair x y = Insert x (Singleton y)`` (PAIR_AT).
-      * Apply QUOTE_HF_AT_INSERT_LOW. The canonical-form precondition
-        ``Singleton y = 0 \\/ nat0_lt x (low_bit (Singleton y))``
-        reduces to ``nat0_lt x y`` (after ``low_bit (Singleton y) = y``,
-        derivable from POW2_AS_SET_BIT + LOW_BIT_SET_BIT_NEW with the
-        ``s = 0`` disjunct).
-      * Case-split ``~(x = y)`` into ``nat0_lt x y`` vs ``nat0_lt y x``;
-        in the second case rewrite ``Pair x y = Pair y x`` (set
-        equality / bit-OR commutativity) before applying the previous
-        step.
-      * QUOTE_HF_AT_SINGLETON closes the inner ``quote_hf (Singleton y)``.
-
-    Used by ``QUOTE_HF_AT_PAIR_ORD`` and by Stage 3 constructor unfolds
-    that walk Pair-shaped subterms.
+    The unconditional version is HOL-inconsistent: ``Pair x x =
+    Singleton x`` collapses to a one-layer Insert_t-tower, while the
+    RHS shown is a two-layer tower; the side condition ``nat0_lt x y``
+    rules this case out.
     """
+    from tactics import SYM
+
     p.goal(
-        "!x y. ~(x = y) ==> "
+        "!x y. nat0_lt x y ==> "
         "quote_hf (Pair x y) = "
         "Insert_t (quote_hf x) (Insert_t (quote_hf y) Empty_t)"
     )
-    p.sorry()
+    p.fix("x y")
+    p.assume("hxy: nat0_lt x y")
+    with p.have(
+        "h_pre: Singleton y = 0 \\/ nat0_lt x (low_bit (Singleton y))"
+    ).proof():
+        p.have(
+            "hxly: nat0_lt x (low_bit (Singleton y))"
+        ).by_rewrite_of("hxy", [LOW_BIT_SINGLETON])
+        p.disj("hxly")
+    p.have(
+        "h_at: quote_hf (Insert x (Singleton y)) = "
+        "Insert_t (quote_hf x) (quote_hf (Singleton y))"
+    ).by(QUOTE_HF_AT_INSERT_LOW, "x", "Singleton y", "h_pre")
+    p.thus(
+        "quote_hf (Pair x y) = "
+        "Insert_t (quote_hf x) (Insert_t (quote_hf y) Empty_t)"
+    ).by_rewrite([PAIR_AT, "h_at", QUOTE_HF_AT_SINGLETON])
 
 
 @proof
 def QUOTE_HF_AT_PAIR_ORD(p):
-    """|- !x y. ~(x = y) ==>
+    """|- !x y. nat0_lt x y ==>
                 quote_hf (Pair_ord x y) =
                 Insert_t (Insert_t (quote_hf x) Empty_t)
                          (Insert_t
@@ -4170,37 +4180,30 @@ def QUOTE_HF_AT_PAIR_ORD(p):
                                       (Insert_t (quote_hf y) Empty_t))
                             Empty_t).
 
-    SORRY (thin-interface scaffolding).
-
     Keystone Pair_ord shape rewrite: every HF-syntax constructor
     (``Var_t``, ``Eq_f``, ``Not_f``, ``Imp_f``, ``Forall_f``,
     ``Insert_t``, ``In_a``) is a tagged Pair_ord at the HOL level, so
     Stage 3 representability proofs collapse their goal terms via this
-    lemma + the constructor's defining ``_AT`` equation.
+    lemma + the constructor's defining ``_AT`` equation, picking the
+    tag-vs-arg ordering that satisfies the precondition.
 
-    The bit-encoding collapses ``Pair_ord x x`` to ``Singleton (Singleton x)``
-    (one Insert_t layer fewer than the RHS shown), so the equation is
-    conditional on ``~(x = y)``. Discharge plan:
+    Proof: ``Pair_ord x y = Insert (Singleton x) (Singleton (Pair x y))``
+    (PAIR_ORD_AT, PAIR_AT, SINGLETON_AS_INSERT). Apply
+    QUOTE_HF_AT_INSERT_LOW at the outer Insert with side condition
+    ``nat0_lt (Singleton x) (low_bit (Singleton (Pair x y)))`` =
+    ``nat0_lt (Singleton x) (Pair x y)`` (LOW_BIT_SINGLETON), which is
+    SINGLETON_LT_PAIR under ``nat0_lt x y``. The inner Pair x y is
+    folded via QUOTE_HF_AT_PAIR; the singletons via QUOTE_HF_AT_SINGLETON.
 
-      * ``Pair_ord x y = Pair (Singleton x) (Pair x y) =
-        Insert (Singleton x) (Singleton (Pair x y))`` (PAIR_ORD_AT,
-        PAIR_AT, SINGLETON_AS_INSERT).
-      * Apply QUOTE_HF_AT_INSERT_LOW at the outer Insert. Precondition:
-        ``nat0_lt (Singleton x) (Pair x y)``. Under ``~(x = y)``:
-        ``Pair x y`` has two distinct bits (positions x and y), and
-        ``Singleton x = pow2 x`` has only bit x; numerically
-        ``pow2 x < pow2 x | pow2 y``. This is the bit-arithmetic step
-        currently parked under SORRY.
-      * QUOTE_HF_AT_SINGLETON folds the two singleton layers; the inner
-        ``quote_hf (Pair x y)`` closes via QUOTE_HF_AT_PAIR.
-
-    Constructor-specific lemmas (QUOTE_HF_AT_VAR_T etc.) follow from a
-    one-line ``by(QUOTE_HF_AT_PAIR_ORD, ..., side_cond)`` once the tag
-    inequalities (closed numerical facts like ``~(2 = v)``) are
-    discharged.
+    The unconditional version is HOL-inconsistent: ``Pair_ord x x =
+    Singleton (Singleton x)`` collapses to a one-layer-deeper Insert_t-
+    tower, while the RHS shown is the full Kuratowski two-element
+    tower.
     """
+    from tactics import SYM
+
     p.goal(
-        "!x y. ~(x = y) ==> "
+        "!x y. nat0_lt x y ==> "
         "quote_hf (Pair_ord x y) = "
         "Insert_t (Insert_t (quote_hf x) Empty_t) "
         "         (Insert_t "
@@ -4208,40 +4211,57 @@ def QUOTE_HF_AT_PAIR_ORD(p):
         "                      (Insert_t (quote_hf y) Empty_t)) "
         "            Empty_t)"
     )
-    p.sorry()
-
-
-@proof
-def QUOTE_HF_AT_NUMERAL(p):
-    """|- !n. quote_hf (vN n) = numeral n.
-
-    SORRY (thin-interface scaffolding).
-
-    Bridges the bit-encoded von Neumann ordinal ``vN n`` (hf_sets.py) to
-    the HF-syntax numeral ``numeral n`` (this file). Stage 3 substitutes
-    at numeral positions via ``substitute ... (numeral n) var_x``; the
-    matching HOL inputs are vN-encoded HF sets, and this lemma collapses
-    the substitution chain to a single ``quote_hf``-free closed form.
-
-    Discharge plan: Peano induction on ``n``.
-
-      * Base (n = 0): ``vN 0 = Empty`` (VN_BASE), ``numeral 0 = Empty_t``
-        (NUMERAL_BASE), and QUOTE_HF_AT_EMPTY closes the chain.
-      * Step (n -> SUC0 n): ``vN (SUC0 n) = vN_succ (vN n) = Insert (vN n)
-        (vN n)`` (VN_STEP, VN_SUCC_AT). Apply the canonical Insert-tower
-        decomposition (via _QUOTE_HF_AT_NZ at the bit level, since the
-        ``Insert x x`` shape doesn't satisfy the QUOTE_HF_AT_INSERT_LOW
-        precondition) to land at ``Insert_t (quote_hf (vN n))
-        (quote_hf (vN n))``; the IH plus NUMERAL_STEP folds this to
-        ``numeral (SUC0 n)``.
-
-    The step case requires bit-level reasoning about ``low_bit`` and
-    ``clear_low`` of ``Insert (vN n) (vN n)``; same flavour of work
-    parked under SORRY for INSERT_LOW_BIT_CLEAR_LOW. ~20 lines once
-    those are discharged.
-    """
-    p.goal("!n. quote_hf (vN n) = numeral n")
-    p.sorry()
+    p.fix("x y")
+    p.assume("hxy: nat0_lt x y")
+    # Outer-Insert precondition: nat0_lt (Singleton x) (low_bit (Singleton (Pair x y))).
+    p.have(
+        "h_lt_sp: nat0_lt (Singleton x) (Pair x y)"
+    ).by(SINGLETON_LT_PAIR, "x", "y", "hxy")
+    with p.have(
+        "h_pre: Singleton (Pair x y) = 0 "
+        "\\/ nat0_lt (Singleton x) (low_bit (Singleton (Pair x y)))"
+    ).proof():
+        p.have(
+            "h_lt: nat0_lt (Singleton x) (low_bit (Singleton (Pair x y)))"
+        ).by_rewrite_of("h_lt_sp", [LOW_BIT_SINGLETON])
+        p.disj("h_lt")
+    p.have(
+        "h_outer: quote_hf (Insert (Singleton x) (Singleton (Pair x y))) = "
+        "Insert_t (quote_hf (Singleton x)) (quote_hf (Singleton (Pair x y)))"
+    ).by(
+        QUOTE_HF_AT_INSERT_LOW,
+        "Singleton x",
+        "Singleton (Pair x y)",
+        "h_pre",
+    )
+    p.have(
+        "h_pair: quote_hf (Pair x y) = "
+        "Insert_t (quote_hf x) (Insert_t (quote_hf y) Empty_t)"
+    ).by(QUOTE_HF_AT_PAIR, "x", "y", "hxy")
+    # Pair_ord x y = Pair (Singleton x) (Pair x y) [PAIR_ORD_AT]
+    #              = Insert (Singleton x) (Singleton (Pair x y))
+    #                [PAIR_AT at outer + SINGLETON_AS_INSERT].
+    with p.calc(
+        "quote_hf (Pair_ord x y)", thus=True
+    ) as c:
+        c.step(
+            "= quote_hf (Insert (Singleton x) (Singleton (Pair x y)))"
+        ).by_rewrite([PAIR_ORD_AT, PAIR_AT, SINGLETON_AS_INSERT])
+        c.step(
+            "= Insert_t (quote_hf (Singleton x)) "
+            "           (quote_hf (Singleton (Pair x y)))"
+        ).by_thm(p.fact("h_outer"))
+        c.step(
+            "= Insert_t (Insert_t (quote_hf x) Empty_t) "
+            "           (Insert_t (quote_hf (Pair x y)) Empty_t)"
+        ).by_rewrite([QUOTE_HF_AT_SINGLETON])
+        c.step(
+            "= Insert_t (Insert_t (quote_hf x) Empty_t) "
+            "           (Insert_t "
+            "              (Insert_t (quote_hf x) "
+            "                        (Insert_t (quote_hf y) Empty_t)) "
+            "              Empty_t)"
+        ).by_rewrite(["h_pair"])
 
 
 # ---------------------------------------------------------------------------
@@ -4838,9 +4858,8 @@ if __name__ == "__main__":
     print("    QUOTE_HF_AT_EMPTY                    :", pp_thm(QUOTE_HF_AT_EMPTY))
     print("    QUOTE_HF_AT_INSERT_LOW               :", pp_thm(QUOTE_HF_AT_INSERT_LOW))
     print("    QUOTE_HF_AT_SINGLETON                :", pp_thm(QUOTE_HF_AT_SINGLETON))
-    print("    QUOTE_HF_AT_PAIR (SORRY)              :", pp_thm(QUOTE_HF_AT_PAIR))
-    print("    QUOTE_HF_AT_PAIR_ORD (SORRY)          :", pp_thm(QUOTE_HF_AT_PAIR_ORD))
-    print("    QUOTE_HF_AT_NUMERAL (SORRY)           :", pp_thm(QUOTE_HF_AT_NUMERAL))
+    print("    QUOTE_HF_AT_PAIR                      :", pp_thm(QUOTE_HF_AT_PAIR))
+    print("    QUOTE_HF_AT_PAIR_ORD                  :", pp_thm(QUOTE_HF_AT_PAIR_ORD))
     print("    HF_INDUCTION                          :", pp_thm(HF_INDUCTION))
     print("    IS_PAIR_ORD_REPRESENTS (SORRY)        :", pp_thm(IS_PAIR_ORD_REPRESENTS))
     print("    IS_IN_REPRESENTS (SORRY)              :", pp_thm(IS_IN_REPRESENTS))

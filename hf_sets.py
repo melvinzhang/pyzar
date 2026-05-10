@@ -262,7 +262,12 @@ from bits import (  # noqa: E402 -- needs nat0_lt parser alias registered above
     BIT_AT_POW2_SAME,
     BIT_AT_POW2_DIFF,
     POW2_AS_SET_BIT,
+    LOW_BIT_SET_BIT_NEW,
+    SET_BIT_GT_NEW,
+    POW2_LT_MONO,
 )
+from nat0_order import NAT0_LT_TRANS, NAT0_LT_NOT_REFL  # noqa: E402
+from tactics import REFL, DISJ1  # noqa: E402
 
 
 _i_n0 = Var("i", nat0_ty)
@@ -375,6 +380,28 @@ def SINGLETON_AS_INSERT(p):
     )
 
 
+# Lemma: |- !i. low_bit (Singleton i) = i.
+#
+# Singleton i = pow2 i = set_bit i 0; the s = 0 disjunct of
+# LOW_BIT_SET_BIT_NEW's precondition discharges trivially, leaving
+# low_bit (set_bit i 0) = i.
+@proof
+def LOW_BIT_SINGLETON(p):
+    """|- !i. low_bit (Singleton i) = i."""
+    from tactics import SYM
+
+    p.goal("!i. low_bit (Singleton i) = i")
+    p.fix("i")
+    with p.have("h_pre: 0 = 0 \\/ nat0_lt i (low_bit 0)").proof():
+        p.disj(REFL(ZERO))
+    p.have("lb_sb: low_bit (set_bit i 0) = i").by(
+        LOW_BIT_SET_BIT_NEW, "i", "0", "h_pre"
+    )
+    p.thus("low_bit (Singleton i) = i").by_rewrite_of(
+        "lb_sb", [SINGLETON_AT, POW2_AS_SET_BIT]
+    )
+
+
 # Lemma: |- !x y. In y (Singleton x) = (y = x).
 # Case-split on y = x; in each case both sides reduce to the same boolean.
 @proof
@@ -470,6 +497,71 @@ def IN_PAIR(p):
                     p.thus("z = a \\/ z = b").by_disj("hzb")
                 p.thus("(z = a \\/ z = b) = (z = b)").by_iff("fwd", "rev")
             p.thus("In z (Pair a b) = (z = a \\/ z = b)").by_rewrite(["h_lhs", "h_rhs"])
+
+
+# Lemma: |- !x y. nat0_lt x y ==> nat0_lt (Singleton x) (Pair x y).
+#
+# Bit-arithmetic helper for ``hf_repr.QUOTE_HF_AT_PAIR_ORD``. Composes
+# POW2_LT_MONO (nat0_lt x y ==> nat0_lt (pow2 x) (pow2 y)) with
+# SET_BIT_GT_NEW at the outer set_bit x (pow2 y) layer. Specifically:
+#
+#   * Pair x y = Insert x (Singleton y) = set_bit x (pow2 y)
+#     [PAIR_AT, INSERT_AT, SINGLETON_AT].
+#   * bit x (pow2 y) = F under x != y (BIT_AT_POW2_DIFF; ~(x = y) follows
+#     from nat0_lt x y via NAT0_LT_NOT_REFL).
+#   * SET_BIT_GT_NEW: nat0_lt (pow2 y) (set_bit x (pow2 y)) =
+#     nat0_lt (pow2 y) (Pair x y).
+#   * POW2_LT_MONO: nat0_lt (pow2 x) (pow2 y) under nat0_lt x y.
+#   * NAT0_LT_TRANS chains the two halves.
+@proof
+def SINGLETON_LT_PAIR(p):
+    """|- !x y. nat0_lt x y ==> nat0_lt (Singleton x) (Pair x y)."""
+    from tactics import EQF_INTRO, SYM, EQF_ELIM
+
+    p.goal("!x y. nat0_lt x y ==> nat0_lt (Singleton x) (Pair x y)")
+    p.fix("x y")
+    p.assume("hxy: nat0_lt x y")
+    # x != y (asymmetry / irreflexivity of nat0_lt).
+    with p.have("hne: ~(x = y)").proof():
+        with p.suppose("h_eq: x = y"):
+            p.have("h_lt_self: nat0_lt y y").by_rewrite_of(
+                "hxy", ["h_eq"]
+            )
+            p.have("h_not_lt: ~(nat0_lt y y)").by(NAT0_LT_NOT_REFL, "y")
+            p.absurd().by_conj("h_not_lt", "h_lt_self")
+    # bit x (pow2 y) = F.
+    p.have("h_bit_F: bit x (pow2 y) = F").by(
+        BIT_AT_POW2_DIFF, "y", "x", "hne"
+    )
+    p.have("h_not_bit: ~(bit x (pow2 y))").by_thm(EQF_ELIM(p.fact("h_bit_F")))
+    # Pair x y = set_bit x (pow2 y).
+    p.have(
+        "h_pair_eq: Pair x y = set_bit x (pow2 y)"
+    ).by_rewrite([PAIR_AT, INSERT_AT, SINGLETON_AT])
+    # SET_BIT_GT_NEW: nat0_lt (pow2 y) (set_bit x (pow2 y)).
+    p.have(
+        "h_p2y_lt_pair: nat0_lt (pow2 y) (set_bit x (pow2 y))"
+    ).by(SET_BIT_GT_NEW, "x", "pow2 y", "h_not_bit")
+    # POW2_LT_MONO: nat0_lt (pow2 x) (pow2 y).
+    p.have(
+        "h_p2x_lt_p2y: nat0_lt (pow2 x) (pow2 y)"
+    ).by(POW2_LT_MONO, "x", "y", "hxy")
+    # Chain.
+    p.have(
+        "h_p2x_lt_pair: nat0_lt (pow2 x) (set_bit x (pow2 y))"
+    ).by(
+        NAT0_LT_TRANS,
+        "pow2 x",
+        "pow2 y",
+        "set_bit x (pow2 y)",
+        "h_p2x_lt_p2y",
+        "h_p2y_lt_pair",
+    )
+    p.thus(
+        "nat0_lt (Singleton x) (Pair x y)"
+    ).by_rewrite_of(
+        "h_p2x_lt_pair", [SINGLETON_AT, p.fact("h_pair_eq")]
+    )
 
 
 # ---------------------------------------------------------------------------
