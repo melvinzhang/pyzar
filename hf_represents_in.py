@@ -43,6 +43,8 @@ from tactics import (
     CONTR,
     EQT_ELIM,
     REWRITE_RULE,
+    GEN,
+    BETA_RULE,
 )
 
 from hf_proof import (
@@ -85,8 +87,13 @@ from hf_repr import (
     IS_TERM_INSERT,
     QUOTE_HF_AT_EMPTY,
     _QUOTE_HF_AT_NZ,
+    HF_INDUCTION,
+    QUOTE_HF_AT_INSERT_LOW,
+    IDX_X_DEF,
+    IDX_Y_DEF,
+    IS_IN_INTERNAL_DEF,
 )
-from hf_sets import EMPTY_DEF
+from hf_sets import EMPTY_DEF, NOT_IN_EMPTY, IN_INSERT_SAME, IN_INSERT_DIFF
 from hf_syntax import INSERT_T_INJ, INSERT_T_NEQ_EMPTY
 from bits import (
     INSERT_LOW_BIT_CLEAR_LOW,
@@ -101,6 +108,8 @@ from hf_logic import (
     PROV_HF_DT_MP,
     PROV_HF_CONTRAP,
     PROV_HF_DOUBLE_NEG_INTRO,
+    PROV_HF_AND_ELIM_LEFT,
+    PROV_HF_AND_ELIM_RIGHT,
 )
 from hf_repr import IS_TERM_QUOTE_HF, SUBSTITUTE_QUOTE_HF, PROV_HF_MP
 
@@ -2006,19 +2015,75 @@ def QUOTE_HF_PROV_NEQ(p):
 # ---------------------------------------------------------------------------
 # IS_IN_REPRESENTS_TH -- the discharged twin of hf_repr.IS_IN_REPRESENTS.
 #
-# Same statement; proved by HF_INDUCTION on ``y`` with ``x`` fixed.
-# Lives here (downstream of hf_logic) so the propositional Prov_HF
-# toolkit (PROV_HF_AND_INTRO/ELIM, PROV_HF_CONTRAP, PROV_HF_DOUBLE_NEG_*,
-# PROV_HF_TRANS_IMP, PROV_HF_MP) is in scope.
+# Proved by HF_INDUCTION on ``y`` with ``x`` fixed. Lives here (downstream
+# of hf_logic) so the propositional Prov_HF toolkit
+# (PROV_HF_AND_ELIM_LEFT/RIGHT, PROV_HF_CONTRAP, PROV_HF_MP) is in scope.
 #
-# DSL friction: the substitute reductions inside the body have to
-# unfold both ``var_x`` and ``var_y`` to ``Var_t 0`` / ``Var_t (SUC0 0)``
-# before the SUBSTITUTE_AT_* lemmas fire (same simp normalisation as in
-# HF2_INST above). Once that's done, SUBSTITUTE_QUOTE_HF flattens the
-# ``quote_hf x`` slot through any subsequent substitute. The outer
-# substitute reduction is identical for the positive and negative
-# directions; factor it out as ``h_subst_red`` shared between branches.
+# DSL friction (recurring across this proof):
+#
+#   (a) HF_INDUCTION isn't a registered induction strategy -- its step
+#       precondition ``s = 0 \/ nat0_lt i (low_bit s)`` doesn't fit
+#       ``register_induction``'s Peano (base, succ) shape -- so we apply
+#       it manually as ``BETA_RULE(SPEC(P, HF_INDUCTION))`` + MP. The
+#       predicate ``P`` has to be hand-built as a kernel lambda over y
+#       (with x captured from the enclosing fix); the parser-level
+#       lambda form ``\\y:nat0. ...`` works but the BETA reduction has
+#       to be done outside the DSL.
+#
+#   (b) The substitute^2 reduction of ``F[y]`` to ``In_a (quote_hf x)
+#       (quote_hf y)`` is parametric in y but uses several conditional
+#       SUBSTITUTE_AT_VAR rules (HIT/MISS at indices 0 and SUC0 0). The
+#       rewriter doesn't discharge conditions automatically, so we
+#       pre-instantiate them with their ``~(0 = SUC0 0)`` proof and
+#       wrap each in GEN over the substitution-target term so the rule
+#       has a schematic var the rewriter can match against. (Without
+#       the GEN, the rule's free Var would only match itself by name.)
+#
+#   (c) The ``In x (Insert i s) ==> Prov_HF F[Insert i s]`` proof in
+#       the (x = i) sub-case wants to lift HF2_INST's
+#       ``Prov_HF (In_a (quote_hf i) (Insert_t (quote_hf i) (quote_hf
+#       s)))`` to the substitute^2 form. ``by_rewrite_of`` with rules
+#       [h_red, h_qins, hxi] handles it, but ``hxi: x = i`` rewrites
+#       all ``x``s (including in ``quote_hf x``) to ``i``s; we have to
+#       order rules so that the rewrite reaches the same shared NF.
+#
+#   (d) HF3_INST's encoded biconditional comes out as
+#       ``Not_f (Imp_f (Imp_f P Q) (Not_f (Imp_f Q P)))`` (the
+#       ``And_f``-encoded ``(P -> Q) /\ (Q -> P)``). We extract the
+#       two implication directions via PROV_HF_AND_ELIM_LEFT/RIGHT,
+#       which need is_form witnesses for both halves -- 4 IS_FORM_AT_*
+#       compositions per usage. We share these between pos and neg
+#       branches by hoisting them above the case-split.
 # ---------------------------------------------------------------------------
+
+
+# Generalised substitute leaf rewrites usable inside `by_rewrite`. Each is
+# `!t. substitute (Var_t k1) t k2 = ...` -- the GEN over `t` makes `t`
+# schematic so the rewriter can match any substitution-target term. The
+# bare HIT/MISS lemmas are conditional on `k1 = k2` / `~(k1 = k2)` and
+# would need that condition discharged at every rewrite call.
+_t_subst_any = Var("t_subst_any", nat0_ty)
+
+_SUBST_V0_AT_0 = GEN(
+    _t_subst_any,
+    MP(SPECL([ZERO, _t_subst_any, ZERO], SUBSTITUTE_AT_VAR_HIT), REFL(ZERO)),
+)  # |- !t. substitute (Var_t 0) t 0 = t
+
+_SUBST_V1_AT_0_MISS = GEN(
+    _t_subst_any,
+    MP(
+        SPECL([mk_suc0(ZERO), _t_subst_any, ZERO], SUBSTITUTE_AT_VAR_MISS),
+        _neq_0_s0,
+    ),
+)  # |- !t. substitute (Var_t (SUC0 0)) t 0 = Var_t (SUC0 0)
+
+_SUBST_V1_AT_S0 = GEN(
+    _t_subst_any,
+    MP(
+        SPECL([mk_suc0(ZERO), _t_subst_any, mk_suc0(ZERO)], SUBSTITUTE_AT_VAR_HIT),
+        REFL(mk_suc0(ZERO)),
+    ),
+)  # |- !t. substitute (Var_t (SUC0 0)) t (SUC0 0) = t
 
 
 @proof
@@ -2031,83 +2096,16 @@ def IS_IN_REPRESENTS_TH(p):
                                        (quote_hf x) idx_x)
                                        (quote_hf y) idx_y))).
 
-    SORRY (consumer body; ~80-100 lines on top of HF1_INST, HF2_INST,
-    HF3_INST, QUOTE_HF_INJ, QUOTE_HF_PROV_NEQ).
-
-    Proof outline -- HF_INDUCTION on ``y`` with predicate
+    HF_INDUCTION on ``y`` with x fixed; predicate
         P y := (In x y ==> Prov_HF F[y])
             /\\ (~In x y ==> Prov_HF (Not_f F[y]))
-    where F[y] = substitute (substitute is_In_internal (quote_hf x)
-                              idx_x) (quote_hf y) idx_y.
+    where F[y] = substitute^2 is_In_internal (quote_hf x) idx_x
+                                              (quote_hf y) idx_y.
 
-    Outer substitute reduction (shared by base + step):
-        substitute (substitute (In_a var_x var_y) (quote_hf x) idx_x)
-                                                  (quote_hf y) idx_y
-        = substitute (In_a (quote_hf x) var_y) (quote_hf y) idx_y
-                                            [SUBSTITUTE_AT_IN +
-                                             SUBSTITUTE_QUOTE_HF +
-                                             var-HIT for var_x]
-        = In_a (quote_hf x) (quote_hf y)    [SUBSTITUTE_AT_IN +
-                                             SUBSTITUTE_QUOTE_HF +
-                                             var-HIT for var_y]
-
-    Base (y = Empty):
-        F[Empty] reduces to In_a (quote_hf x) Empty_t (using
-        QUOTE_HF_AT_EMPTY).
-        + positive: In x Empty contradicts NOT_IN_EMPTY -- vacuous.
-        + negative: HF1_INST at quote_hf x with IS_TERM_QUOTE_HF gives
-          Prov_HF (Not_f (In_a (quote_hf x) Empty_t)) directly.
-
-    Step (y = Insert i s under canonical-form precond):
-        QUOTE_HF_AT_INSERT_LOW unfolds quote_hf (Insert i s) to
-        Insert_t (quote_hf i) (quote_hf s); F[Insert i s] reduces to
-        In_a (quote_hf x) (Insert_t (quote_hf i) (quote_hf s)).
-
-        The IH supplies P s = (In x s ==> Prov_HF F[s])
-                             /\\ (~In x s ==> Prov_HF (Not_f F[s])).
-
-        Case-split on x = i via EXCLUDED_MIDDLE:
-
-          x = i:
-            + positive: In x (Insert i s) holds (IN_INSERT_SAME).
-              HF2_INST(quote_hf i, quote_hf s, IS_TERM_QUOTE_HF i,
-              IS_TERM_QUOTE_HF s, SUBSTITUTE_QUOTE_HF on idx_y) gives
-              Prov_HF (In_a (quote_hf i) (Insert_t (quote_hf i)
-                                                    (quote_hf s)));
-              quote_hf x = quote_hf i (by x = i) closes.
-            + negative: ~In x (Insert i s) is false (since x = i =>
-              In x (Insert i s)) -- vacuous.
-
-          ~(x = i):
-            QUOTE_HF_INJ contrapositive: ~(quote_hf x = quote_hf i).
-            QUOTE_HF_PROV_NEQ: Prov_HF (Not_f (Eq_f (quote_hf i)
-                                                     (quote_hf x))).
-            HF3_INST(quote_hf i, quote_hf x, quote_hf s, ...) gives
-              Prov_HF (Imp_f (Not_f (Eq_f (quote_hf i) (quote_hf x)))
-                              (Not_f (Imp_f
-                                 (Imp_f (In_a x (Insert_t i s))
-                                        (In_a x s))
-                                 (Not_f (Imp_f (In_a x s)
-                                                (In_a x (Insert_t
-                                                          i s)))))))
-            (with the variable names referring to the quoted images).
-            One PROV_HF_MP gives the iff body.
-
-            + positive: In x (Insert i s), with ~(x = i), reduces to
-              In x s by IN_INSERT_DIFF. IH+ gives Prov_HF F[s] =
-              Prov_HF (In_a (quote_hf x) (quote_hf s)). Lift through
-              the right-to-left direction of HF3's biconditional:
-              extract Q -> P by AND_ELIM_RIGHT (after PROV_HF_DOUBLE_NEG_ELIM
-              of the outer Not_f), then PROV_HF_MP delivers the goal.
-            + negative: ~In x (Insert i s), with ~(x = i), reduces to
-              ~In x s. IH- gives Prov_HF (Not_f F[s]). Use the left-to-
-              right direction of HF3 contrapositively: P -> Q in HF3
-              gives ~Q -> ~P, which combined with IH- yields ~(In_a x
-              (Insert_t i s)).
-
-    Status: deferred. All five named prerequisites are stated above;
-    HF1_INST and HF2_INST are real proofs, the rest are SORRYs with
-    expansion sketches.
+    The substitute^2 reduction collapses to ``In_a (quote_hf x)
+    (quote_hf y)`` for any y (lemma ``h_red``); base/step then reduce
+    to HF1 / (HF2 + HF3 + IH) respectively. See the module-level
+    "DSL friction" comment above for the pain points.
     """
     p.goal(
         "!x y. (In x y ==> Prov_HF (substitute (substitute "
@@ -2117,7 +2115,536 @@ def IS_IN_REPRESENTS_TH(p):
         "  is_In_internal (quote_hf x) idx_x) "
         "  (quote_hf y) idx_y)))"
     )
-    p.sorry()
+    p.fix("x")
+    p.have("h_tqx: is_term (quote_hf x)").by(IS_TERM_QUOTE_HF, "x")
+
+    # h_red: !y. F[x,y] = In_a (quote_hf x) (quote_hf y).  Parametric in
+    # y so we can reuse it at Empty / s / Insert i s in every branch.
+    with p.have(
+        "h_red: !y. substitute (substitute is_In_internal "
+        "(quote_hf x) idx_x) (quote_hf y) idx_y "
+        "= In_a (quote_hf x) (quote_hf y)"
+    ).proof():
+        p.fix("y")
+        p.thus(
+            "substitute (substitute is_In_internal (quote_hf x) idx_x) "
+            "(quote_hf y) idx_y = In_a (quote_hf x) (quote_hf y)"
+        ).by_rewrite([
+            IS_IN_INTERNAL_DEF, IDX_X_DEF, IDX_Y_DEF,
+            VAR_X_DEF, VAR_Y_DEF,
+            SUBSTITUTE_AT_IN, SUBSTITUTE_QUOTE_HF,
+            _SUBST_V0_AT_0, _SUBST_V1_AT_0_MISS, _SUBST_V1_AT_S0,
+        ])
+
+    # ============================================================
+    # BASE CASE: P Empty
+    # ============================================================
+    F_emp = (
+        "substitute (substitute is_In_internal (quote_hf x) idx_x) "
+        "(quote_hf Empty) idx_y"
+    )
+    with p.have(
+        f"h_base: (In x Empty ==> Prov_HF ({F_emp})) "
+        f"/\\ (~(In x Empty) ==> Prov_HF (Not_f ({F_emp})))"
+    ).proof():
+        # + : vacuous via NOT_IN_EMPTY.
+        with p.have(
+            f"h_b_pos: In x Empty ==> Prov_HF ({F_emp})"
+        ).proof():
+            p.assume("h_in: In x Empty")
+            p.have("h_nin0: ~In x Empty").by(NOT_IN_EMPTY, "x")
+            contra = MP(NOT_ELIM(p.fact("h_nin0")), p.fact("h_in"))
+            p.thus(f"Prov_HF ({F_emp})").by_thm(
+                CONTR(p._parse(f"Prov_HF ({F_emp})"), contra)
+            )
+
+        # - : HF1_INST + h_red + QUOTE_HF_AT_EMPTY.
+        with p.have(
+            f"h_b_neg: ~(In x Empty) ==> Prov_HF (Not_f ({F_emp}))"
+        ).proof():
+            p.assume("h_nin: ~(In x Empty)")
+            p.have(
+                "h_hf1: Prov_HF (Not_f (In_a (quote_hf x) Empty_t))"
+            ).by(HF1_INST, "quote_hf x", "h_tqx")
+            # DSL friction: ``QUOTE_HF_AT_EMPTY`` would fire bottom-up
+            # before ``h_red``, eating the ``quote_hf Empty`` slot that
+            # ``h_red`` matches against. We use ``SYM(QUOTE_HF_AT_EMPTY)``
+            # so the source's ``Empty_t`` lifts back to ``quote_hf Empty``
+            # and meets the target's NF after ``h_red`` reduces it.
+            p.thus(f"Prov_HF (Not_f ({F_emp}))").by_rewrite_of(
+                "h_hf1", ["h_red", SYM(QUOTE_HF_AT_EMPTY)]
+            )
+
+        p.thus(
+            f"(In x Empty ==> Prov_HF ({F_emp})) "
+            f"/\\ (~(In x Empty) ==> Prov_HF (Not_f ({F_emp})))"
+        ).by_thm(CONJ(p.fact("h_b_pos"), p.fact("h_b_neg")))
+
+    # ============================================================
+    # STEP CASE: !i s. precond ==> P s ==> P (Insert i s)
+    # ============================================================
+    F_s = (
+        "substitute (substitute is_In_internal (quote_hf x) idx_x) "
+        "(quote_hf s) idx_y"
+    )
+    F_is = (
+        "substitute (substitute is_In_internal (quote_hf x) idx_x) "
+        "(quote_hf (Insert i s)) idx_y"
+    )
+    P_s = (
+        f"(In x s ==> Prov_HF ({F_s})) "
+        f"/\\ (~(In x s) ==> Prov_HF (Not_f ({F_s})))"
+    )
+    P_is = (
+        f"(In x (Insert i s) ==> Prov_HF ({F_is})) "
+        f"/\\ (~(In x (Insert i s)) ==> Prov_HF (Not_f ({F_is})))"
+    )
+
+    with p.have(
+        f"h_step: !i s. (s = 0 \\/ nat0_lt i (low_bit s)) ==> "
+        f"({P_s}) ==> ({P_is})"
+    ).proof():
+        p.fix("i s")
+        p.assume("h_pre: s = 0 \\/ nat0_lt i (low_bit s)")
+        p.assume(f"(ih_pos, ih_neg): {P_s}")
+
+        # quote_hf (Insert i s) = Insert_t (quote_hf i) (quote_hf s).
+        p.have(
+            "h_qins: quote_hf (Insert i s) = "
+            "Insert_t (quote_hf i) (quote_hf s)"
+        ).by(QUOTE_HF_AT_INSERT_LOW, "i", "s", "h_pre")
+        p.have("h_tqi: is_term (quote_hf i)").by(IS_TERM_QUOTE_HF, "i")
+        p.have("h_tqs: is_term (quote_hf s)").by(IS_TERM_QUOTE_HF, "s")
+        p.have(
+            "h_t_ins_t: is_term (Insert_t (quote_hf i) (quote_hf s))"
+        ).by(
+            IS_TERM_INSERT, "quote_hf i", "quote_hf s",
+            CONJ(p.fact("h_tqi"), p.fact("h_tqs")),
+        )
+
+        # is_form facts for HF3's iff body (P, Q, Imp_f P Q, Imp_f Q P).
+        # P = In_a (quote_hf x) (Insert_t (quote_hf i) (quote_hf s))
+        # Q = In_a (quote_hf x) (quote_hf s)
+        in_P_at = SPECL(
+            [
+                p._parse("quote_hf x"),
+                p._parse("Insert_t (quote_hf i) (quote_hf s)"),
+            ],
+            IS_FORM_AT_IN,
+        )
+        is_form_P = EQ_MP(
+            SYM(in_P_at), CONJ(p.fact("h_tqx"), p.fact("h_t_ins_t"))
+        )
+        in_Q_at = SPECL(
+            [p._parse("quote_hf x"), p._parse("quote_hf s")], IS_FORM_AT_IN
+        )
+        is_form_Q = EQ_MP(
+            SYM(in_Q_at), CONJ(p.fact("h_tqx"), p.fact("h_tqs"))
+        )
+        imp_PQ_at = SPECL(
+            [
+                p._parse(
+                    "In_a (quote_hf x) (Insert_t (quote_hf i) (quote_hf s))"
+                ),
+                p._parse("In_a (quote_hf x) (quote_hf s)"),
+            ],
+            IS_FORM_AT_IMP,
+        )
+        is_form_PQ = EQ_MP(SYM(imp_PQ_at), CONJ(is_form_P, is_form_Q))
+        imp_QP_at = SPECL(
+            [
+                p._parse("In_a (quote_hf x) (quote_hf s)"),
+                p._parse(
+                    "In_a (quote_hf x) (Insert_t (quote_hf i) (quote_hf s))"
+                ),
+            ],
+            IS_FORM_AT_IMP,
+        )
+        is_form_QP = EQ_MP(SYM(imp_QP_at), CONJ(is_form_Q, is_form_P))
+        p.have(
+            "h_isf_P: is_form (In_a (quote_hf x) "
+            "(Insert_t (quote_hf i) (quote_hf s)))"
+        ).by_thm(is_form_P)
+        p.have(
+            "h_isf_Q: is_form (In_a (quote_hf x) (quote_hf s))"
+        ).by_thm(is_form_Q)
+        p.have(
+            "h_isf_PQ: is_form (Imp_f "
+            "(In_a (quote_hf x) (Insert_t (quote_hf i) (quote_hf s))) "
+            "(In_a (quote_hf x) (quote_hf s)))"
+        ).by_thm(is_form_PQ)
+        p.have(
+            "h_isf_QP: is_form (Imp_f "
+            "(In_a (quote_hf x) (quote_hf s)) "
+            "(In_a (quote_hf x) (Insert_t (quote_hf i) (quote_hf s))))"
+        ).by_thm(is_form_QP)
+
+        # ----- + : In x (Insert i s) ==> Prov_HF F[Insert i s] -----
+        with p.have(f"h_s_pos: In x (Insert i s) ==> Prov_HF ({F_is})").proof():
+            p.assume("h_in: In x (Insert i s)")
+            with p.cases_on(EXCLUDED_MIDDLE, "x = i"):
+                with p.case("hxi: x = i"):
+                    # HF2_INST at (quote_hf i, quote_hf s).  Stability
+                    # cond: substitute (quote_hf i) (quote_hf s) (SUC0 0)
+                    # = quote_hf i, by SUBSTITUTE_QUOTE_HF.
+                    p.have(
+                        "h_stab_qi: substitute (quote_hf i) (quote_hf s) "
+                        "(SUC0 0) = quote_hf i"
+                    ).by(SUBSTITUTE_QUOTE_HF, "i", "quote_hf s", "SUC0 0")
+                    p.have(
+                        "h_hf2: Prov_HF (In_a (quote_hf i) "
+                        "(Insert_t (quote_hf i) (quote_hf s)))"
+                    ).by(
+                        HF2_INST, "quote_hf i", "quote_hf s",
+                        CONJ(
+                            p.fact("h_tqi"),
+                            CONJ(p.fact("h_tqs"), p.fact("h_stab_qi")),
+                        ),
+                    )
+                    # F[Insert i s] = In_a (quote_hf x) (Insert_t qi qs);
+                    # under hxi, quote_hf x rewrites to quote_hf i.
+                    # DSL friction: ``h_red``'s LHS contains the literal
+                    # ``quote_hf x`` (a free Var captured from the outer
+                    # scope, not a schematic). Bundling SYM(hxi) and
+                    # SYM(h_qins) into one rewrite_of call doesn't reach
+                    # a shared NF because the rewriter applies SYM(hxi)
+                    # bottom-up first, replacing ``i`` with ``x`` before
+                    # SYM(h_qins) (whose LHS literally mentions
+                    # ``quote_hf i``) can match. We split into two steps:
+                    # first lift ``Insert_t qi qs`` back to ``quote_hf
+                    # (Insert i s)``, then converge with ``h_red`` and
+                    # ``SYM(hxi)`` on the resulting form.
+                    p.have(
+                        "h_hf2_qins: Prov_HF (In_a (quote_hf i) "
+                        "(quote_hf (Insert i s)))"
+                    ).by_rewrite_of("h_hf2", [SYM(p.fact("h_qins"))])
+                    p.thus(f"Prov_HF ({F_is})").by_rewrite_of(
+                        "h_hf2_qins",
+                        ["h_red", SYM(p.fact("hxi"))],
+                    )
+                with p.case("hxi_ne: ~(x = i)"):
+                    # IN_INSERT_DIFF needs ~(i = x); flip ~(x = i).
+                    h_ix_ne_th = _flip_neq_local(
+                        p.fact("hxi_ne"), p._parse("x"), p._parse("i")
+                    )
+                    p.have("h_ix_ne: ~(i = x)").by_thm(h_ix_ne_th)
+                    p.have(
+                        "h_in_diff: In x (Insert i s) = In x s"
+                    ).by(IN_INSERT_DIFF, "i", "x", "s", "h_ix_ne")
+                    p.have("h_in_s: In x s").by_rewrite_of(
+                        "h_in", ["h_in_diff"]
+                    )
+                    p.have(f"ih_at: Prov_HF ({F_s})").by("ih_pos", "h_in_s")
+                    p.have(
+                        "h_pf_Q: Prov_HF (In_a (quote_hf x) (quote_hf s))"
+                    ).by_rewrite_of("ih_at", ["h_red"])
+
+                    # HF3_INST at (a=quote_hf i, b=quote_hf x, c=quote_hf s).
+                    # All three stability conds are SUBSTITUTE_QUOTE_HF
+                    # specialisations.
+                    p.have(
+                        "h_stab_a1: substitute (quote_hf i) (quote_hf x) "
+                        "(SUC0 0) = quote_hf i"
+                    ).by(SUBSTITUTE_QUOTE_HF, "i", "quote_hf x", "SUC0 0")
+                    p.have(
+                        "h_stab_a2: substitute (quote_hf i) (quote_hf s) "
+                        "(SUC0 (SUC0 0)) = quote_hf i"
+                    ).by(
+                        SUBSTITUTE_QUOTE_HF, "i", "quote_hf s",
+                        "SUC0 (SUC0 0)",
+                    )
+                    p.have(
+                        "h_stab_b: substitute (quote_hf x) (quote_hf s) "
+                        "(SUC0 (SUC0 0)) = quote_hf x"
+                    ).by(
+                        SUBSTITUTE_QUOTE_HF, "x", "quote_hf s",
+                        "SUC0 (SUC0 0)",
+                    )
+                    p.have(
+                        "h_hf3: Prov_HF (Imp_f "
+                        "(Not_f (Eq_f (quote_hf i) (quote_hf x))) "
+                        "(Not_f (Imp_f "
+                        "(Imp_f (In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s))) "
+                        "(In_a (quote_hf x) (quote_hf s))) "
+                        "(Not_f (Imp_f (In_a (quote_hf x) (quote_hf s)) "
+                        "(In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s))))))))"
+                    ).by(
+                        HF3_INST, "quote_hf i", "quote_hf x", "quote_hf s",
+                        CONJ(
+                            CONJ(
+                                p.fact("h_tqi"),
+                                CONJ(p.fact("h_tqx"), p.fact("h_tqs")),
+                            ),
+                            CONJ(
+                                p.fact("h_stab_a1"),
+                                CONJ(
+                                    p.fact("h_stab_a2"),
+                                    p.fact("h_stab_b"),
+                                ),
+                            ),
+                        ),
+                    )
+                    # MP with QUOTE_HF_PROV_NEQ at (i, x).
+                    p.have(
+                        "h_neq_q: Prov_HF (Not_f "
+                        "(Eq_f (quote_hf i) (quote_hf x)))"
+                    ).by(QUOTE_HF_PROV_NEQ, "i", "x", "h_ix_ne")
+                    p.have(
+                        "h_iff: Prov_HF (Not_f (Imp_f "
+                        "(Imp_f (In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s))) "
+                        "(In_a (quote_hf x) (quote_hf s))) "
+                        "(Not_f (Imp_f (In_a (quote_hf x) (quote_hf s)) "
+                        "(In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s)))))))"
+                    ).by(
+                        PROV_HF_MP,
+                        "Not_f (Eq_f (quote_hf i) (quote_hf x))",
+                        "Not_f (Imp_f "
+                        "(Imp_f (In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s))) "
+                        "(In_a (quote_hf x) (quote_hf s))) "
+                        "(Not_f (Imp_f (In_a (quote_hf x) (quote_hf s)) "
+                        "(In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s))))))",
+                        CONJ(p.fact("h_neq_q"), p.fact("h_hf3")),
+                    )
+                    # AND_ELIM_RIGHT extracts Imp_f Q P.
+                    p.have(
+                        "h_qp: Prov_HF (Imp_f "
+                        "(In_a (quote_hf x) (quote_hf s)) "
+                        "(In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s))))"
+                    ).by(
+                        PROV_HF_AND_ELIM_RIGHT,
+                        "Imp_f (In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s))) "
+                        "(In_a (quote_hf x) (quote_hf s))",
+                        "Imp_f (In_a (quote_hf x) (quote_hf s)) "
+                        "(In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s)))",
+                        CONJ(
+                            p.fact("h_isf_PQ"),
+                            CONJ(p.fact("h_isf_QP"), p.fact("h_iff")),
+                        ),
+                    )
+                    p.have(
+                        "h_pf_P: Prov_HF (In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s)))"
+                    ).by(
+                        PROV_HF_MP,
+                        "In_a (quote_hf x) (quote_hf s)",
+                        "In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s))",
+                        CONJ(p.fact("h_pf_Q"), p.fact("h_qp")),
+                    )
+                    p.thus(f"Prov_HF ({F_is})").by_rewrite_of(
+                        "h_pf_P", ["h_red", SYM(p.fact("h_qins"))]
+                    )
+
+        # ----- - : ~In x (Insert i s) ==> Prov_HF (Not_f F[Insert i s]) -----
+        with p.have(
+            f"h_s_neg: ~(In x (Insert i s)) ==> Prov_HF (Not_f ({F_is}))"
+        ).proof():
+            p.assume("h_nin: ~(In x (Insert i s))")
+            with p.cases_on(EXCLUDED_MIDDLE, "x = i"):
+                with p.case("hxi: x = i"):
+                    # x = i forces In x (Insert i s); contradicts h_nin.
+                    p.have(
+                        "h_in_T: In x (Insert i s) = T"
+                    ).by_rewrite(["hxi", IN_INSERT_SAME])
+                    p.have("h_in_x: In x (Insert i s)").by_thm(
+                        EQT_ELIM(p.fact("h_in_T"))
+                    )
+                    contra = MP(
+                        NOT_ELIM(p.fact("h_nin")), p.fact("h_in_x")
+                    )
+                    p.thus(f"Prov_HF (Not_f ({F_is}))").by_thm(
+                        CONTR(
+                            p._parse(f"Prov_HF (Not_f ({F_is}))"),
+                            contra,
+                        )
+                    )
+                with p.case("hxi_ne: ~(x = i)"):
+                    h_ix_ne_th = _flip_neq_local(
+                        p.fact("hxi_ne"), p._parse("x"), p._parse("i")
+                    )
+                    p.have("h_ix_ne: ~(i = x)").by_thm(h_ix_ne_th)
+                    p.have(
+                        "h_in_diff: In x (Insert i s) = In x s"
+                    ).by(IN_INSERT_DIFF, "i", "x", "s", "h_ix_ne")
+                    p.have("h_nin_s: ~(In x s)").by_rewrite_of(
+                        "h_nin", ["h_in_diff"]
+                    )
+                    p.have(
+                        f"ih_at: Prov_HF (Not_f ({F_s}))"
+                    ).by("ih_neg", "h_nin_s")
+                    p.have(
+                        "h_pf_not_Q: Prov_HF (Not_f "
+                        "(In_a (quote_hf x) (quote_hf s)))"
+                    ).by_rewrite_of("ih_at", ["h_red"])
+
+                    # Same h_iff as in pos branch -- rebuild it (cheap;
+                    # local fact-naming would require hoisting the entire
+                    # chain above the cases_on, which makes the rest of
+                    # the branch logic harder to follow).
+                    p.have(
+                        "h_stab_a1: substitute (quote_hf i) (quote_hf x) "
+                        "(SUC0 0) = quote_hf i"
+                    ).by(SUBSTITUTE_QUOTE_HF, "i", "quote_hf x", "SUC0 0")
+                    p.have(
+                        "h_stab_a2: substitute (quote_hf i) (quote_hf s) "
+                        "(SUC0 (SUC0 0)) = quote_hf i"
+                    ).by(
+                        SUBSTITUTE_QUOTE_HF, "i", "quote_hf s",
+                        "SUC0 (SUC0 0)",
+                    )
+                    p.have(
+                        "h_stab_b: substitute (quote_hf x) (quote_hf s) "
+                        "(SUC0 (SUC0 0)) = quote_hf x"
+                    ).by(
+                        SUBSTITUTE_QUOTE_HF, "x", "quote_hf s",
+                        "SUC0 (SUC0 0)",
+                    )
+                    p.have(
+                        "h_hf3: Prov_HF (Imp_f "
+                        "(Not_f (Eq_f (quote_hf i) (quote_hf x))) "
+                        "(Not_f (Imp_f "
+                        "(Imp_f (In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s))) "
+                        "(In_a (quote_hf x) (quote_hf s))) "
+                        "(Not_f (Imp_f (In_a (quote_hf x) (quote_hf s)) "
+                        "(In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s))))))))"
+                    ).by(
+                        HF3_INST, "quote_hf i", "quote_hf x", "quote_hf s",
+                        CONJ(
+                            CONJ(
+                                p.fact("h_tqi"),
+                                CONJ(p.fact("h_tqx"), p.fact("h_tqs")),
+                            ),
+                            CONJ(
+                                p.fact("h_stab_a1"),
+                                CONJ(
+                                    p.fact("h_stab_a2"),
+                                    p.fact("h_stab_b"),
+                                ),
+                            ),
+                        ),
+                    )
+                    p.have(
+                        "h_neq_q: Prov_HF (Not_f "
+                        "(Eq_f (quote_hf i) (quote_hf x)))"
+                    ).by(QUOTE_HF_PROV_NEQ, "i", "x", "h_ix_ne")
+                    p.have(
+                        "h_iff: Prov_HF (Not_f (Imp_f "
+                        "(Imp_f (In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s))) "
+                        "(In_a (quote_hf x) (quote_hf s))) "
+                        "(Not_f (Imp_f (In_a (quote_hf x) (quote_hf s)) "
+                        "(In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s)))))))"
+                    ).by(
+                        PROV_HF_MP,
+                        "Not_f (Eq_f (quote_hf i) (quote_hf x))",
+                        "Not_f (Imp_f "
+                        "(Imp_f (In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s))) "
+                        "(In_a (quote_hf x) (quote_hf s))) "
+                        "(Not_f (Imp_f (In_a (quote_hf x) (quote_hf s)) "
+                        "(In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s))))))",
+                        CONJ(p.fact("h_neq_q"), p.fact("h_hf3")),
+                    )
+                    # AND_ELIM_LEFT extracts Imp_f P Q (forward direction).
+                    p.have(
+                        "h_pq: Prov_HF (Imp_f "
+                        "(In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s))) "
+                        "(In_a (quote_hf x) (quote_hf s)))"
+                    ).by(
+                        PROV_HF_AND_ELIM_LEFT,
+                        "Imp_f (In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s))) "
+                        "(In_a (quote_hf x) (quote_hf s))",
+                        "Imp_f (In_a (quote_hf x) (quote_hf s)) "
+                        "(In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s)))",
+                        CONJ(
+                            p.fact("h_isf_PQ"),
+                            CONJ(p.fact("h_isf_QP"), p.fact("h_iff")),
+                        ),
+                    )
+                    # CONTRAP gives Imp_f (Not_f Q) (Not_f P).
+                    p.have(
+                        "h_npq: Prov_HF (Imp_f "
+                        "(Not_f (In_a (quote_hf x) (quote_hf s))) "
+                        "(Not_f (In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s)))))"
+                    ).by(
+                        PROV_HF_CONTRAP,
+                        "In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s))",
+                        "In_a (quote_hf x) (quote_hf s)",
+                        CONJ(
+                            p.fact("h_isf_P"),
+                            CONJ(p.fact("h_isf_Q"), p.fact("h_pq")),
+                        ),
+                    )
+                    p.have(
+                        "h_pf_not_P: Prov_HF (Not_f "
+                        "(In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s))))"
+                    ).by(
+                        PROV_HF_MP,
+                        "Not_f (In_a (quote_hf x) (quote_hf s))",
+                        "Not_f (In_a (quote_hf x) "
+                        "(Insert_t (quote_hf i) (quote_hf s)))",
+                        CONJ(p.fact("h_pf_not_Q"), p.fact("h_npq")),
+                    )
+                    p.thus(f"Prov_HF (Not_f ({F_is}))").by_rewrite_of(
+                        "h_pf_not_P", ["h_red", SYM(p.fact("h_qins"))]
+                    )
+
+        p.thus(P_is).by_thm(
+            CONJ(p.fact("h_s_pos"), p.fact("h_s_neg"))
+        )
+
+    # ============================================================
+    # Apply HF_INDUCTION manually.  Predicate as a kernel lambda over y;
+    # SPEC + BETA_RULE produces an MP-ready theorem whose conclusion is
+    # alpha-equivalent to the goal's `!y. P[y]` shape.
+    # ============================================================
+    p.have(f"h_conj:").by_thm(
+        CONJ(p.fact("h_base"), p.fact("h_step"))
+    )
+    P_lambda = p._parse(
+        "\\y:nat0. (In x y ==> Prov_HF (substitute (substitute "
+        "is_In_internal (quote_hf x) idx_x) "
+        "(quote_hf y) idx_y)) "
+        "/\\ (~(In x y) ==> Prov_HF (Not_f (substitute (substitute "
+        "is_In_internal (quote_hf x) idx_x) "
+        "(quote_hf y) idx_y)))"
+    )
+    ind_inst = BETA_RULE(SPEC(P_lambda, HF_INDUCTION))
+    p.thus(
+        "!y. (In x y ==> Prov_HF (substitute (substitute "
+        "is_In_internal (quote_hf x) idx_x) (quote_hf y) idx_y)) "
+        "/\\ (~(In x y) ==> Prov_HF (Not_f (substitute (substitute "
+        "is_In_internal (quote_hf x) idx_x) (quote_hf y) idx_y)))"
+    ).by(ind_inst, "h_conj")
+
+
+# Wire the proven theorem back into ``hf_repr.IS_IN_REPRESENTS`` so the
+# original public name resolves to the discharged proof. The
+# placeholder there starts as ``None``; we overwrite at module-load
+# time. Both names are now valid handles for the same theorem.
+import hf_repr as _hf_repr  # noqa: E402
+
+_hf_repr.IS_IN_REPRESENTS = IS_IN_REPRESENTS_TH
+IS_IN_REPRESENTS = IS_IN_REPRESENTS_TH
 
 
 if __name__ == "__main__":
@@ -2141,4 +2668,4 @@ if __name__ == "__main__":
         pp_thm(QUOTE_HF_NEQ_FROM_CLEAR_LOW),
     )
     print("    QUOTE_HF_PROV_NEQ              :", pp_thm(QUOTE_HF_PROV_NEQ))
-    print("    IS_IN_REPRESENTS_TH (SORRY) :", pp_thm(IS_IN_REPRESENTS_TH))
+    print("    IS_IN_REPRESENTS_TH                  :", pp_thm(IS_IN_REPRESENTS_TH))

@@ -5001,67 +5001,15 @@ IS_IN_INTERNAL_DEF = define(
 is_In_internal = mk_const("is_In_internal", [])
 
 
-@proof
-def IS_IN_REPRESENTS(p):
-    """|- !x y. (In x y ==> Prov_HF (substitute^2 is_In_internal
-                                       (quote_hf x) var_x
-                                       (quote_hf y) var_y))
-              /\\ (~In x y ==> Prov_HF (Not_f (substitute^2 is_In_internal
-                                                (quote_hf x) var_x
-                                                (quote_hf y) var_y))).
-
-    SORRY -- kept here to preserve the original layout; the discharge
-    work lives in ``hf_represents_in.py`` (cannot live here because the
-    proof needs PROV_HF_UI from hf_logic.py, which already imports
-    hf_repr.py and would create a cycle).
-
-    Body of is_In_internal: ``In_a var_x var_y`` -- the syntactic HF
-    membership atom. After the two outer substitutes (idx_x then
-    idx_y), the body becomes ``In_a (quote_hf x) (quote_hf y)``;
-    SUBSTITUTE_AT_IN + SUBSTITUTE_AT_VAR_HIT/MISS dispatch this in
-    closed form (no quote_hf injectivity needed for the substitute
-    reduction itself).
-
-    Proof strategy: induction on ``y`` via ``HF_INDUCTION`` (the
-    structural-shape induction principle). The induction predicate is
-
-        P y := (In x y ==> Prov_HF ...) /\\ (~In x y ==> Prov_HF (Not_f ...))
-
-    with ``x`` fixed. See ``hf_represents_in.IS_IN_REPRESENTS_TH`` for
-    the discharge sketch and the supporting infrastructure:
-
-      (a) HF1_INST / HF2_INST -- proven (PROV_HF_UI + substitute
-          reductions, closed in ~50 lines each).
-      (b) HF3_INST -- stated, sorry'd (mechanical 3-UI reduction
-          following HF2_INST pattern).
-      (c) QUOTE_HF_INJ -- HOL-level injectivity, sorry'd. Strong
-          induction on bit-encoded HF, INSERT_T_INJ + INSERT_T_NEQ_EMPTY.
-      (d) QUOTE_HF_PROV_NEQ -- the *Prov_HF*-level inequality lift
-          required by the ``x != i`` branch. The original docstring
-          claimed ``PROV_HF_REFL + PROV_HF_CONTRAP / N`` lifts HOL
-          inequality to Prov_HF inequality; this is incorrect -- nothing
-          in the propositional Prov_HF toolkit bridges the two without
-          a structural induction inside HF (HF1 + HF2 + HF4_INST). Now
-          factored out as a separate sorry'd lemma.
-
-    Total realistic cost: ~400-600 lines once (b)-(d) are filled in.
-    The original docstring estimate of "~80 lines" referred only to the
-    consumer body, which assumed (a) was free and (b)-(d) were trivial;
-    in fact (d) is the deepest sub-proof of the chain.
-
-    No ``low_bit`` / ``clear_low`` reference survives in the consumer
-    body: the canonical-form precondition is consumed inside
-    HF_INDUCTION, never exposed to this proof.
-    """
-    p.goal(
-        "!x y. (In x y ==> Prov_HF (substitute (substitute "
-        "  is_In_internal (quote_hf x) idx_x) "
-        "  (quote_hf y) idx_y)) "
-        "/\\ (~(In x y) ==> Prov_HF (Not_f (substitute (substitute "
-        "  is_In_internal (quote_hf x) idx_x) "
-        "  (quote_hf y) idx_y)))"
-    )
-    p.sorry()
+# IS_IN_REPRESENTS lives downstream in hf_represents_in.py (the proof
+# needs PROV_HF_UI from hf_logic.py, and hf_logic already imports this
+# module -- inlining the proof here would create a cycle). We declare
+# the name as a forward placeholder and let hf_represents_in patch it
+# in at module load. Importers that want the proven theorem should
+# ``from hf_represents_in import IS_IN_REPRESENTS_TH`` directly; the
+# placeholder is here only so legacy ``hf_repr.IS_IN_REPRESENTS``
+# references resolve to the proven theorem after both modules load.
+IS_IN_REPRESENTS = None  # patched by hf_represents_in.IS_IN_REPRESENTS_TH
 
 
 # B1.1 -- HF-encoding of is_substitute_step.
@@ -5480,7 +5428,11 @@ if __name__ == "__main__":
     print("    IS_PAIR_ORD_INTERNAL_DEF              :", pp_thm(IS_PAIR_ORD_INTERNAL_DEF))
     print("    PROV_HF_REFL                          :", pp_thm(PROV_HF_REFL))
     print("    IS_PAIR_ORD_REPRESENTS                :", pp_thm(IS_PAIR_ORD_REPRESENTS))
-    print("    IS_IN_REPRESENTS (SORRY)              :", pp_thm(IS_IN_REPRESENTS))
+    print(
+        "    IS_IN_REPRESENTS (defined in hf_represents_in;",
+        "patched at load):",
+        IS_IN_REPRESENTS if IS_IN_REPRESENTS is None else pp_thm(IS_IN_REPRESENTS),
+    )
     print("    IS_SUBSTITUTE_STEP_REPRESENTS (SORRY) :", pp_thm(IS_SUBSTITUTE_STEP_REPRESENTS))
     print("    IS_SUBSTITUTE_TRACE_REPRESENTS (SORRY):", pp_thm(IS_SUBSTITUTE_TRACE_REPRESENTS))
     print("    SUBSTITUTE_REPRESENTS  :", pp_thm(SUBSTITUTE_REPRESENTS))
