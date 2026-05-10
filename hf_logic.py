@@ -48,6 +48,7 @@ from hf_proof import (
     IS_N_AT,
     IS_UI_AT,
     IS_SUBST_AT,
+    IS_FaImp_AT,
     is_hf_axiom,
     IS_LOGICAL_AXIOM_AT,
     IS_AXIOM_AT,
@@ -66,9 +67,9 @@ from hf_repr_core import (
 # Chain:  is_<X> n  ->  is_logical_axiom n  ->  is_axiom n  ->  Prov_HF n.
 #
 # is_<X> sits as one disjunct in IS_LOGICAL_AXIOM_AT's right-associated
-# 7-way OR. is_logical_axiom sits as the right disjunct of IS_AXIOM_AT.
+# 8-way OR. is_logical_axiom sits as the right disjunct of IS_AXIOM_AT.
 # Caller specifies which logical-axiom slot via ``slot``: 0=K, 1=S,
-# 2=N, 3=UI, 4=Vac, 5=Refl, 6=Subst.
+# 2=N, 3=UI, 4=Vac, 5=Refl, 6=Subst, 7=FaImp.
 # ---------------------------------------------------------------------------
 
 
@@ -79,11 +80,11 @@ def _prov_of_logical(p, name, slot_th, slot_idx, n_term):
     in scope; returns the final Prov_HF theorem (also posted under
     ``{name}_prov``).
     """
-    # Build the right-associated 7-way disjunction at n_term:
+    # Build the right-associated 8-way disjunction at n_term:
     #   is_K n \/ is_S n \/ is_N n \/ is_UI n \/ is_Vac n \/
-    #            is_Refl n \/ is_Subst n.
+    #            is_Refl n \/ is_Subst n \/ is_FaImp n.
     is_logical_at = SPEC(n_term, IS_LOGICAL_AXIOM_AT)
-    # is_logical_at : |- is_logical_axiom n = <7-disjunction>
+    # is_logical_at : |- is_logical_axiom n = <8-disjunction>
     rhs_disj = rand(is_logical_at._concl)
     # Walk into rhs_disj at slot_idx, peeling DISJ1/DISJ2 layers.
     # The disjunction is right-associated: D0 \/ (D1 \/ (D2 \/ ...))
@@ -598,56 +599,65 @@ def PROV_HF_DT_MP(p):
 # Underpins ``DTChain.gen``: lifts a chain step ``A -> B(v)`` to
 # ``A -> Forall_f v B(v)`` provided ``v`` is not free in the chain
 # antecedent ``A``. Built from PROV_HF_GEN + the closed
-# FORALL-IMPLICATION-DISTRIBUTION lemma at slot
+# FORALL-IMPLICATION-DISTRIBUTION lemma (Mendelson's K6) at slot
 # ``Imp_f (Forall_f v (Imp_f A B)) (Imp_f A (Forall_f v B))``.
 #
-# The distribution lemma itself remains a stub (see PROV_HF_FORALL_IMP_DIST
-# below). It is provable in HF's Hilbert calculus -- standard derivation
-# uses the deduction theorem with eigenvariable condition, which in turn
-# requires meta-induction on the Proof_HF predicate. Pyzar does not yet
-# have a Proof_HF-induction framework, so the implication form is
-# axiomatised here as a sorry'd lemma; callers consume PROV_HF_DT_GEN
-# transparently.
-#
-# Once FORALL_IMP_DIST is discharged (by structural induction on
-# Proof_HF, ~150-200 lines, or by adopting the AX6 distribution as a
-# kernel axiom and lifting through ``_prov_of_logical``), no consumer
-# needs to change.
+# The distribution lemma is adopted as an axiom slot (``is_FaImp``,
+# slot 7 of ``is_logical_axiom``); pyzar's HF calculus thus extends
+# Świerczkowski's K/S/N/UI/Vac/Refl/Subst with K6, matching
+# Mendelson's first-order Hilbert axiomatisation. Soundness is
+# unchanged (K6 is a valid first-order schema); the trade-off is one
+# more disjunct in the axiom-recogniser.
 # ---------------------------------------------------------------------------
 
 
 @proof
 def PROV_HF_FORALL_IMP_DIST(p):
-    """|- !v F G. is_form F /\\ is_form G /\\ ~(free_in F v)
-                  ==> Prov_HF (Imp_f (Forall_f v (Imp_f F G))
-                                    (Imp_f F (Forall_f v G))).
+    """|- !v phi psi. is_form phi /\\ is_form psi /\\ ~(free_in phi v)
+                      ==> Prov_HF (Imp_f (Forall_f v (Imp_f phi psi))
+                                        (Imp_f phi (Forall_f v psi))).
 
     Closed-implication form of the FORALL-IMPLICATION-DISTRIBUTION
-    lemma (Mendelson's "generalization in implication"). When ``v`` is
-    not free in ``F``, the universal quantifier distributes through
-    the implication's consequent.
+    lemma (Mendelson's K6 / "generalisation in implication"): when
+    ``v`` is not free in ``phi``, the universal binder distributes
+    through the implication's consequent.
 
-    STUB. The standard derivation uses the deduction theorem with
-    eigenvariable condition, which is a meta-theorem about the Proof_HF
-    predicate. A direct closed Hilbert proof (using only K/S/N/UI/Vac/
-    GEN/MP) is not available -- the eigenvariable condition is what
-    makes the lemma sound, and that condition is meta-theoretic.
+    Lifted through ``_prov_of_logical`` at slot 7 (is_FaImp); the
+    existential body is witnessed at (v, phi, psi) directly.
 
-    Proof options:
-      * Induction on Proof_HF: prove that any Proof_HF for ``Imp_f F G``
-        with ``v`` not free in ``F`` extends to a Proof_HF for
-        ``Imp_f F (Forall_f v G)``. ~150-200 lines but principled.
-      * Adopt as an axiom slot (AX6) in is_logical_axiom and lift via
-        ``_prov_of_logical``. Trivial once the kernel axiomatisation
-        accepts it; changes the HF axiom set.
+    DSL friction: goal binders use ``phi`` / ``psi`` rather than ``F``
+    / ``G`` -- bare ``F`` resolves to the kernel False constant and
+    the parser does not reliably accept the override via ``types=``.
     """
     p.goal(
-        "!v F G. is_form F /\\ is_form G /\\ ~(free_in F v) "
-        "==> Prov_HF (Imp_f (Forall_f v (Imp_f F G)) "
-        "                  (Imp_f F (Forall_f v G)))",
-        types={"v": nat0_ty, "F": nat0_ty, "G": nat0_ty},
+        "!v phi psi. is_form phi /\\ is_form psi /\\ ~(free_in phi v) "
+        "==> Prov_HF (Imp_f (Forall_f v (Imp_f phi psi)) "
+        "                  (Imp_f phi (Forall_f v psi)))",
+        types={"v": nat0_ty, "phi": nat0_ty, "psi": nat0_ty},
     )
-    p.sorry()
+    p.fix("v phi psi")
+    p.assume(
+        "(hphi, hpsi, hnf): is_form phi /\\ is_form psi /\\ ~(free_in phi v)"
+    )
+
+    n_term = p._parse(
+        "Imp_f (Forall_f v (Imp_f phi psi)) (Imp_f phi (Forall_f v psi))"
+    )
+    is_faimp_at_n = SPEC(n_term, IS_FaImp_AT)
+
+    p.have(
+        "faimp_body: ?x F1 G1. is_form F1 /\\ is_form G1 "
+        "/\\ ~(free_in F1 x) "
+        "/\\ Imp_f (Forall_f v (Imp_f phi psi)) (Imp_f phi (Forall_f v psi)) "
+        "= Imp_f (Forall_f x (Imp_f F1 G1)) (Imp_f F1 (Forall_f x G1))"
+    ).by_exists(["v", "phi", "psi"], "hphi", "hpsi", "hnf")
+    is_faimp_th = EQ_MP(SYM(is_faimp_at_n), p.fact("faimp_body"))
+
+    prov_imp = _prov_of_logical(p, "faimp", is_faimp_th, 7, n_term)
+    p.thus(
+        "Prov_HF (Imp_f (Forall_f v (Imp_f phi psi)) "
+        "              (Imp_f phi (Forall_f v psi)))"
+    ).by_thm(prov_imp)
 
 
 @proof
@@ -666,9 +676,6 @@ def PROV_HF_DT_GEN(p):
       2. PROV_HF_FORALL_IMP_DIST at (v, A, B): supplies the closed
          implication ``Forall_f v (Imp_f A B) -> (A -> Forall_f v B)``.
       3. PROV_HF_MP composes the two into ``A -> Forall_f v B``.
-
-    Bottlenecked on PROV_HF_FORALL_IMP_DIST (above); once that lemma is
-    discharged this combinator becomes unconditionally proved.
     """
     p.goal(
         "!A B v. is_form A /\\ is_form B /\\ ~(free_in A v) "
@@ -1043,10 +1050,8 @@ class DTChain:
         is_form table so subsequent steps referencing the new body
         don't have to repeat the derivation.
 
-        Implementation: PROV_HF_DT_GEN combinator (currently bottlenecked
-        on the FORALL_IMP_DIST distribution lemma -- a sorry'd kernel
-        stub; see PROV_HF_FORALL_IMP_DIST). Once that distribution is
-        discharged, callers of ``gen`` need no changes.
+        Implementation: PROV_HF_DT_GEN combinator (which delegates to
+        PROV_HF_GEN + PROV_HF_FORALL_IMP_DIST + PROV_HF_MP).
         """
         if i < 0 or i >= len(self._steps):
             raise IndexError(f"DTChain.gen: step index {i} out of range")
@@ -2085,15 +2090,12 @@ def PROV_HF_AND_ELIM_RIGHT(p):
 #   (b) PROV_HF_DT_GEN combinator + DTChain.gen step. DONE here.
 #
 #   (c) PROV_HF_FORALL_IMP_DIST -- the underlying distribution
-#       lemma. STILL A STUB; the standard derivation needs the
-#       deduction theorem with eigenvariable condition, which is a
-#       meta-theorem about the Proof_HF predicate (induction on
-#       proof structure, ~150-200 lines), or alternatively can be
-#       adopted as an additional axiom slot (AX6).
+#       lemma. DONE via the AX6 axiom slot (``is_FaImp`` / slot 7 in
+#       ``is_logical_axiom``); see hf_proof.py.
 #
-# Once (c) is discharged the EXISTS_ELIM body below becomes a
-# straightforward DT chain plus CONTRAP / DNE_IMP / TRANS_IMP --
-# ~40-50 lines.
+# All prereqs in place; the EXISTS_ELIM body below remains a stub
+# pending the actual ~40-50 line DT chain (CONTRAP, gen, CONTRAP,
+# DNE_IMP, TRANS_IMP).
 # ---------------------------------------------------------------------------
 
 
@@ -2105,11 +2107,10 @@ def PROV_HF_EXISTS_ELIM(p):
 
     Existential-elimination as a derived rule (encoded form).
 
-    STUB. The DT-GEN combinator and DTChain.gen step are now in place
-    (above); the remaining bottleneck is the kernel
-    ``PROV_HF_FORALL_IMP_DIST`` distribution lemma, itself a sorry'd
-    stub. Once that lemma is discharged the body here is a short DT
-    chain (CONTRAP, gen, CONTRAP, DNE_IMP, TRANS_IMP).
+    STUB. All prereqs (IDENTITY_SUBSTITUTE, PROV_HF_DT_GEN /
+    DTChain.gen, PROV_HF_FORALL_IMP_DIST via the AX6 axiom slot) are
+    in place; the body here is a short DT chain (CONTRAP, gen,
+    CONTRAP, DNE_IMP, TRANS_IMP) that has not yet been written out.
     """
     p.goal(
         "!v P Q. is_form P /\\ is_form Q /\\ ~(free_in Q v) "
@@ -2198,7 +2199,7 @@ if __name__ == "__main__":
     print("    PROV_HF_TRANS_IMP :", pp_thm(PROV_HF_TRANS_IMP))
     print("    PROV_HF_EX_FALSO  :", pp_thm(PROV_HF_EX_FALSO))
     print()
-    print("Stage 2C (b''') -- DT-GEN combinator (STUB on FORALL_IMP_DIST).")
+    print("Stage 2C (b''') -- DT-GEN combinator (AX6 / FaImp slot).")
     print("    PROV_HF_FORALL_IMP_DIST :", pp_thm(PROV_HF_FORALL_IMP_DIST))
     print("    PROV_HF_DT_GEN          :", pp_thm(PROV_HF_DT_GEN))
     print()

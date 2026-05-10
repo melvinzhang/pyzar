@@ -31,13 +31,16 @@
 # Stage 2B (proof system):
 #   * ``is_mp``, ``is_gen``: modus-ponens / generalisation predicates
 #     on godelnums.
-#   * Seven logical-axiom schemas as sigma_1 predicates: ``is_K``,
+#   * Eight logical-axiom schemas as sigma_1 predicates: ``is_K``,
 #     ``is_S``, ``is_N`` (Mendelson propositional); ``is_UI``,
-#     ``is_Vac`` (quantifier; ``is_Vac`` carries a ``free_in`` side
-#     condition); ``is_Refl``, ``is_Subst`` (equality). The
-#     quantifier and equality schemas reuse ``substitute`` and
-#     ``free_in`` from ``hf_syntax``.
-#   * ``is_logical_axiom`` (disjunction over the seven schemas) and
+#     ``is_Vac``, ``is_FaImp`` (quantifier; ``is_Vac`` and
+#     ``is_FaImp`` carry ``free_in`` side conditions); ``is_Refl``,
+#     ``is_Subst`` (equality). The quantifier and equality schemas
+#     reuse ``substitute`` and ``free_in`` from ``hf_syntax``.
+#     ``is_FaImp`` is Mendelson's K6 -- ``!v.(F -> G) -> (F -> !v.G)``
+#     when ``v`` not free in ``F`` -- adopted to make
+#     PROV_HF_DT_GEN / DTChain.gen unconditionally proved.
+#   * ``is_logical_axiom`` (disjunction over the eight schemas) and
 #     ``is_axiom = is_hf_axiom \/ is_logical_axiom``.
 #   * ``NAT0_LT_CONS_L_HEAD`` / ``NAT0_LT_CONS_L_TAIL``: list size
 #     lemmas needed for any future well-founded recursion on lists.
@@ -543,6 +546,7 @@ _t_pf_n0 = Var("t", nat0_ty)
 _t1_pf_n0 = Var("t1", nat0_ty)
 _t2_pf_n0 = Var("t2", nat0_ty)
 _x_pf_n0 = Var("x", nat0_ty)
+_G_pf_n0 = Var("G", nat0_ty)
 
 
 def _and_chain(props):
@@ -679,6 +683,45 @@ is_Vac = mk_const("is_Vac", [])
 IS_VAC_AT = _at1(IS_VAC_DEF, _n_n0)
 
 
+# is_FaImp(n) :<=> ?x F G. is_form F /\ is_form G /\ ~(free_in F x) /\
+#                          n = Imp_f (Forall_f x (Imp_f F G))
+#                                    (Imp_f F (Forall_f x G)).
+#
+# Mendelson's K6 / "generalisation in implication" axiom: when ``x`` is
+# not free in ``F``, the universal binder distributes through the
+# implication's consequent. Strictly stronger than Świerczkowski's
+# K/S/N/UI/Vac/Refl/Subst (a Hilbert-Bernays meta-theorem there); we
+# adopt it as a kernel axiom so PROV_HF_DT_GEN -- and therefore
+# DTChain.gen -- becomes unconditionally proved.
+_is_FaImp_body = _exists_chain(
+    [_x_pf_n0, _F_n0, _G_pf_n0],
+    _and_chain(
+        [
+            _isf(_F_n0),
+            _isf(_G_pf_n0),
+            _mk_not(mk_app(free_in, _F_n0, _x_pf_n0)),
+            mk_eq(
+                _n_n0,
+                mk_app(
+                    Imp_f,
+                    mk_app(Forall_f, _x_pf_n0, mk_app(Imp_f, _F_n0, _G_pf_n0)),
+                    mk_app(
+                        Imp_f,
+                        _F_n0,
+                        mk_app(Forall_f, _x_pf_n0, _G_pf_n0),
+                    ),
+                ),
+            ),
+        ]
+    ),
+)
+IS_FaImp_DEF = define(
+    "is_FaImp", parse_type("nat0 -> bool"), mk_abs(_n_n0, _is_FaImp_body)
+)
+is_FaImp = mk_const("is_FaImp", [])
+IS_FaImp_AT = _at1(IS_FaImp_DEF, _n_n0)
+
+
 # is_Refl(n) :<=> ?t. is_term t /\ n = Eq_f t t.
 _is_Refl_body = _exists_chain(
     [_t_pf_n0],
@@ -734,9 +777,12 @@ IS_SUBST_AT = _at1(IS_SUBST_DEF, _n_n0)
 #
 #   is_logical_axiom(n)  :<=>  is_K n \/ is_S n \/ is_N n \/
 #                              is_UI n \/ is_Vac n \/
-#                              is_Refl n \/ is_Subst n.
+#                              is_Refl n \/ is_Subst n \/ is_FaImp n.
 #
 #   is_axiom(n)          :<=>  is_hf_axiom n \/ is_logical_axiom n.
+#
+# Slot indices consumed by ``hf_logic._prov_of_logical``:
+#   0=K, 1=S, 2=N, 3=UI, 4=Vac, 5=Refl, 6=Subst, 7=FaImp.
 # ---------------------------------------------------------------------------
 
 
@@ -749,6 +795,7 @@ _is_logical_body = _disj_chain(
         mk_app(is_Vac, _n_n0),
         mk_app(is_Refl, _n_n0),
         mk_app(is_Subst, _n_n0),
+        mk_app(is_FaImp, _n_n0),
     ]
 )
 IS_LOGICAL_AXIOM_DEF = define(
@@ -889,6 +936,7 @@ if __name__ == "__main__":
     print("    IS_VAC_AT      :", pp_thm(IS_VAC_AT))
     print("    IS_REFL_AT     :", pp_thm(IS_REFL_AT))
     print("    IS_SUBST_AT    :", pp_thm(IS_SUBST_AT))
+    print("    IS_FaImp_AT    :", pp_thm(IS_FaImp_AT))
     print()
     print("Stage 2B (c) -- is_logical_axiom and is_axiom.")
     print("    IS_LOGICAL_AXIOM_AT :", pp_thm(IS_LOGICAL_AXIOM_AT))
