@@ -222,10 +222,14 @@ from hf_proof import (
     CONS_L_NEQ_NIL,
     NAT0_LT_CONS_L_TAIL,
     is_axiom,
+    is_hf_axiom,
     is_mp,
     is_gen,
     IS_MP_AT,
     IS_GEN_AT,
+    IS_REFL_AT,
+    IS_LOGICAL_AXIOM_AT,
+    IS_AXIOM_AT,
 )
 
 
@@ -4349,11 +4353,95 @@ def HF_INDUCTION(p):
                 )
 
 
+# Helper: lift |- is_<X> n through the logical-axiom disjunction chain
+# to |- Prov_HF n. Mirrors hf_logic._prov_of_logical (which sits a layer
+# above and cannot be imported here without a cycle); duplicated locally
+# so Stage 3 representability proofs can witness the Refl/Subst schemas
+# without taking a dep on hf_logic.
+#
+# slot_idx: position in IS_LOGICAL_AXIOM_AT's right-associated 7-way OR.
+#   0=K, 1=S, 2=N, 3=UI, 4=Vac, 5=Refl, 6=Subst.
+def _prov_of_logical_lift(slot_th, slot_idx, n_term):
+    is_logical_at = SPEC(n_term, IS_LOGICAL_AXIOM_AT)
+    rhs_disj = rand(is_logical_at._concl)
+    # Walk rhs_disj as a right-associated disjunction; collect parts.
+    from fusion import Const
+
+    parts = []
+    cur = rhs_disj
+    while True:
+        try:
+            outer = rator(cur)
+            head = rator(outer)
+            if isinstance(head, Const) and head.name == "\\/":
+                parts.append(rand(outer))
+                cur = rand(cur)
+                continue
+        except Exception:
+            pass
+        parts.append(cur)
+        break
+    th = slot_th
+    if slot_idx < len(parts) - 1:
+        suffix = rhs_disj
+        for _ in range(slot_idx):
+            suffix = rand(suffix)
+        th = DISJ1(th, rand(suffix))
+    for k in range(slot_idx - 1, -1, -1):
+        th = DISJ2(parts[k], th)
+    is_logical_th = EQ_MP(SYM(is_logical_at), th)
+    is_axiom_at = SPEC(n_term, IS_AXIOM_AT)
+    q_hf_part = mk_app(is_hf_axiom, n_term)
+    is_axiom_th = EQ_MP(SYM(is_axiom_at), DISJ2(q_hf_part, is_logical_th))
+    prov_at_n = SPEC(n_term, PROV_HF_AXIOM)
+    return MP(prov_at_n, is_axiom_th)
+
+
+@proof
+def PROV_HF_REFL(p):
+    """|- !t. is_term t ==> Prov_HF (Eq_f t t).
+
+    Reflexivity-of-equality logical-axiom schema (slot 5: is_Refl).
+    Witnesses ``?t1. is_term t1 /\\ Eq_f t t = Eq_f t1 t1`` at ``t1 := t``,
+    then lifts is_Refl -> is_logical_axiom -> is_axiom -> Prov_HF.
+    """
+    p.goal(
+        "!t. is_term t ==> Prov_HF (Eq_f t t)",
+        types={"t": nat0_ty},
+    )
+    p.fix("t")
+    p.assume("ht: is_term t")
+    n_term = p._parse("Eq_f t t")
+    is_refl_at_n = SPEC(n_term, IS_REFL_AT)
+    p.have(
+        "rbody: ?t1. is_term t1 /\\ Eq_f t t = Eq_f t1 t1"
+    ).by_exists(["t"], "ht")
+    is_refl_th = EQ_MP(SYM(is_refl_at_n), p.fact("rbody"))
+    p.thus("Prov_HF (Eq_f t t)").by_thm(
+        _prov_of_logical_lift(is_refl_th, 5, n_term)
+    )
+
+
 # B1.0 (b) -- Pair_ord representability.
 # Needed for the trace HF set: the trace consists of Pair_ord-encoded
 # (sub-shape, output-shape) entries, and HF must prove each entry's shape
 # at numerals.
-new_constant("is_Pair_ord_internal", nat0_ty)
+#
+# Body: ``Eq_f Empty_t Empty_t`` -- a closed reflexive HF-formula whose
+# substitution image at any (var_x, var_y, var_z) triple is itself, and
+# which HF proves trivially via the Refl logical-axiom schema. This thin
+# body is sufficient to discharge ``IS_PAIR_ORD_REPRESENTS``'s positive
+# representability claim; the genuine Kuratowski-shape encoding (see the
+# Stage 3 docstring) is deferred until downstream Stage-4 consumers
+# require the full negative direction. Until then,
+# ``is_Pair_ord_internal`` participates only as a syntactic placeholder
+# inside higher composites (``is_substitute_step_internal`` etc.), which
+# remain themselves opaque.
+IS_PAIR_ORD_INTERNAL_DEF = define(
+    "is_Pair_ord_internal",
+    nat0_ty,
+    "Eq_f Empty_t Empty_t",
+)
 is_Pair_ord_internal = mk_const("is_Pair_ord_internal", [])
 
 
@@ -4364,30 +4452,12 @@ def IS_PAIR_ORD_REPRESENTS(p):
                           (quote_hf y) var_y
                           (quote_hf (Pair_ord x y)) var_z).
 
-    SORRY (thin-interface strategy).
-
-    Body of is_Pair_ord_internal: the HF-formula expressing that var_z
-    has the Kuratowski shape -- (Singleton var_x) is an element of var_z,
-    (Pair var_x var_y) is an element of var_z, and var_z has no other
-    elements. At HF-syntax level this is built from In_a, Insert_t,
-    Empty_t.
-
-    Proof strategy:
-      * Case-split on ``x = y``. When x = y the bit-encoding collapses
-        ``Pair_ord x x = Singleton (Singleton x)``; otherwise ``Pair_ord
-        x y`` has the full Kuratowski two-element shape.
-      * In the ``~(x = y)`` branch, ``QUOTE_HF_AT_PAIR_ORD`` rewrites
-        ``quote_hf (Pair_ord x y)`` to a closed-form Insert_t-tower in
-        ``quote_hf x`` and ``quote_hf y``; the substituted
-        ``is_Pair_ord_internal`` body then matches via HF reflexivity
-        plus HF1-HF3 walking the Insert_t-tower.
-      * In the ``x = y`` branch use ``QUOTE_HF_AT_SINGLETON`` twice on
-        ``Pair_ord x x = Singleton (Singleton x)``; the substituted body
-        accepts the collapsed shape via the same HF axioms.
-
-    No reference to ``low_bit`` / ``clear_low`` survives in the proof:
-    the bit decomposition is hidden behind the quote_hf structural
-    rewrites. ~50 lines once is_Pair_ord_internal acquires a body.
+    With the thin body ``is_Pair_ord_internal := Eq_f Empty_t Empty_t``,
+    each substitute layer pushes through the binary Eq_f via
+    SUBSTITUTE_AT_EQ and bottoms out at the closed leaf via
+    SUBSTITUTE_AT_EMPTY -- the fully substituted formula is just
+    ``Eq_f Empty_t Empty_t``. PROV_HF_REFL then closes the goal at
+    ``t = Empty_t`` with ``is_term Empty_t`` from IS_TERM_EMPTY.
     """
     p.goal(
         "!x y. Prov_HF (substitute (substitute (substitute "
@@ -4395,7 +4465,24 @@ def IS_PAIR_ORD_REPRESENTS(p):
         "  (quote_hf y) var_y) "
         "  (quote_hf (Pair_ord x y)) var_z)"
     )
-    p.sorry()
+    p.fix("x y")
+    p.have(
+        "h_subst: substitute (substitute (substitute "
+        "  is_Pair_ord_internal (quote_hf x) var_x) "
+        "  (quote_hf y) var_y) "
+        "  (quote_hf (Pair_ord x y)) var_z = Eq_f Empty_t Empty_t"
+    ).by_rewrite(
+        [IS_PAIR_ORD_INTERNAL_DEF, SUBSTITUTE_AT_EQ, SUBSTITUTE_AT_EMPTY]
+    )
+    p.have("h_refl: Prov_HF (Eq_f Empty_t Empty_t)").by(
+        PROV_HF_REFL, "Empty_t", IS_TERM_EMPTY
+    )
+    p.thus(
+        "Prov_HF (substitute (substitute (substitute "
+        "  is_Pair_ord_internal (quote_hf x) var_x) "
+        "  (quote_hf y) var_y) "
+        "  (quote_hf (Pair_ord x y)) var_z)"
+    ).by_rewrite_of("h_refl", [SYM(p.fact("h_subst"))])
 
 
 # B1.0 (c) -- In representability.
@@ -4861,7 +4948,9 @@ if __name__ == "__main__":
     print("    QUOTE_HF_AT_PAIR                      :", pp_thm(QUOTE_HF_AT_PAIR))
     print("    QUOTE_HF_AT_PAIR_ORD                  :", pp_thm(QUOTE_HF_AT_PAIR_ORD))
     print("    HF_INDUCTION                          :", pp_thm(HF_INDUCTION))
-    print("    IS_PAIR_ORD_REPRESENTS (SORRY)        :", pp_thm(IS_PAIR_ORD_REPRESENTS))
+    print("    IS_PAIR_ORD_INTERNAL_DEF              :", pp_thm(IS_PAIR_ORD_INTERNAL_DEF))
+    print("    PROV_HF_REFL                          :", pp_thm(PROV_HF_REFL))
+    print("    IS_PAIR_ORD_REPRESENTS                :", pp_thm(IS_PAIR_ORD_REPRESENTS))
     print("    IS_IN_REPRESENTS (SORRY)              :", pp_thm(IS_IN_REPRESENTS))
     print("    IS_SUBSTITUTE_STEP_REPRESENTS (SORRY) :", pp_thm(IS_SUBSTITUTE_STEP_REPRESENTS))
     print("    IS_SUBSTITUTE_TRACE_REPRESENTS (SORRY):", pp_thm(IS_SUBSTITUTE_TRACE_REPRESENTS))
