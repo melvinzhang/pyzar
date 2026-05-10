@@ -375,12 +375,12 @@ from nat0 import nat0_ty
 from proof import proof
 from tactics import SPECL, MP
 from hf_syntax import (
-    Not_f,
-    Imp_f,
-    Forall_f,
-    SUBSTITUTE_AT_NOT,
-    SUBSTITUTE_AT_IMP,
-    SUBSTITUTE_AT_FORALL_MISS,
+    Not_f,  # noqa: F401  -- re-exported for downstream callers
+    Imp_f,  # noqa: F401  -- re-exported for downstream callers
+    Forall_f,  # noqa: F401  -- re-exported for downstream callers
+    SUBSTITUTE_AT_NOT,  # noqa: F401  -- re-exported
+    SUBSTITUTE_AT_IMP,  # noqa: F401  -- re-exported
+    SUBSTITUTE_AT_FORALL_MISS,  # noqa: F401  -- re-exported
     SUBSTITUTE_PRESERVES_IS_FORM,
 )
 from hf_proof import var_x, var_y
@@ -388,180 +388,34 @@ from hf_repr_core import (
     numeral,
     substitute,
 )
+from hf_connectives import (
+    AND_F_DEF,
+    AND_F_AT,
+    And_f,
+    OR_F_DEF,
+    OR_F_AT,
+    Or_f,
+    IFF_F_DEF,
+    IFF_F_AT,
+    Iff_f,
+    EXISTS_F_DEF,
+    EXISTS_F_AT,
+    Exists_f,
+    SUBSTITUTE_AT_AND,
+    SUBSTITUTE_AT_OR,
+    SUBSTITUTE_AT_IFF,
+    SUBSTITUTE_AT_EXISTS_MISS,
+)
 
 
 # ---------------------------------------------------------------------------
 # Stage 4 (a) -- derived HF-formula connectives on godelnums.
 #
-# HF's primitive connectives are ``Imp_f`` and ``Not_f`` (plus ``Eq_f``,
-# ``Forall_f`` for atom / quantifier). The remaining connectives are
-# defined as HOL functions building the corresponding nat0 godelnums:
-#
-#   And_f a b    := Not_f (Imp_f a (Not_f b))
-#   Or_f a b     := Imp_f (Not_f a) b
-#   Iff_f a b    := And_f (Imp_f a b) (Imp_f b a)
-#   Exists_f v f := Not_f (Forall_f v (Not_f f))
+# Connectives ``And_f`` / ``Or_f`` / ``Iff_f`` / ``Exists_f`` and their
+# substitute-distribution lemmas live in ``hf_connectives.py`` (loaded
+# above ``hf_repr_thms``) so the Stage-3 representability proofs can
+# refer to them.  This file just re-exports.
 # ---------------------------------------------------------------------------
-
-
-_a_n0 = Var("a", nat0_ty)
-_b_n0 = Var("b", nat0_ty)
-_v_n0 = Var("v", nat0_ty)
-_f_n0 = Var("f", nat0_ty)
-
-
-AND_F_DEF = define(
-    "And_f",
-    parse_type("nat0 -> nat0 -> nat0"),
-    mk_abs(
-        _a_n0, mk_abs(_b_n0, mk_app(Not_f, mk_app(Imp_f, _a_n0, mk_app(Not_f, _b_n0))))
-    ),
-)
-And_f = mk_const("And_f", [])
-
-
-OR_F_DEF = define(
-    "Or_f",
-    parse_type("nat0 -> nat0 -> nat0"),
-    mk_abs(_a_n0, mk_abs(_b_n0, mk_app(Imp_f, mk_app(Not_f, _a_n0), _b_n0))),
-)
-Or_f = mk_const("Or_f", [])
-
-
-IFF_F_DEF = define(
-    "Iff_f",
-    parse_type("nat0 -> nat0 -> nat0"),
-    mk_abs(
-        _a_n0,
-        mk_abs(
-            _b_n0,
-            mk_app(And_f, mk_app(Imp_f, _a_n0, _b_n0), mk_app(Imp_f, _b_n0, _a_n0)),
-        ),
-    ),
-)
-Iff_f = mk_const("Iff_f", [])
-
-
-EXISTS_F_DEF = define(
-    "Exists_f",
-    parse_type("nat0 -> nat0 -> nat0"),
-    mk_abs(
-        _v_n0,
-        mk_abs(_f_n0, mk_app(Not_f, mk_app(Forall_f, _v_n0, mk_app(Not_f, _f_n0)))),
-    ),
-)
-Exists_f = mk_const("Exists_f", [])
-
-
-# Pointwise-applied form of each connective definition: useful as a
-# rewrite rule (REWRITE_PROVE doesn't beta-reduce, so the bare DEF
-# theorems don't fire under an applied And_f / Or_f / Iff_f).
-from tactics import AP_THM, BETA_CONV, TRANS as _TRANS_, GENL  # noqa: E402 -- needed only after definitions above
-from basics import rand  # noqa: E402 -- paired with the lazy tactics import above
-
-
-def _at2(def_th, x, y):
-    th_x = AP_THM(def_th, x)
-    th_x = _TRANS_(th_x, BETA_CONV(rand(th_x._concl)))
-    th_xy = AP_THM(th_x, y)
-    th_xy = _TRANS_(th_xy, BETA_CONV(rand(th_xy._concl)))
-    return GENL([x, y], th_xy)
-
-
-# |- !a b. And_f a b = Not_f (Imp_f a (Not_f b)).
-AND_F_AT = _at2(AND_F_DEF, _a_n0, _b_n0)
-# |- !a b. Or_f a b = Imp_f (Not_f a) b.
-OR_F_AT = _at2(OR_F_DEF, _a_n0, _b_n0)
-# |- !a b. Iff_f a b = And_f (Imp_f a b) (Imp_f b a).
-IFF_F_AT = _at2(IFF_F_DEF, _a_n0, _b_n0)
-# |- !v f. Exists_f v f = Not_f (Forall_f v (Not_f f)).
-EXISTS_F_AT = _at2(EXISTS_F_DEF, _v_n0, _f_n0)
-
-
-# ---------------------------------------------------------------------------
-# Stage 4 (a.1) -- substitution-pushing lemmas for derived connectives.
-#
-# substitute distributes over And_f / Or_f / Iff_f unconditionally and
-# over Exists_f under the side condition ``~(v = bvar)`` (mirroring
-# Forall_f). Each is a one-line ``by_rewrite`` chain through the
-# connective's defining equation + the primitive substitute equations
-# from hf_syntax.
-# ---------------------------------------------------------------------------
-
-
-@proof
-def SUBSTITUTE_AT_AND(p):
-    """|- !a b t v. substitute (And_f a b) t v
-    = And_f (substitute a t v) (substitute b t v)."""
-    p.goal(
-        "!a b t v. substitute (And_f a b) t v = "
-        "And_f (substitute a t v) (substitute b t v)"
-    )
-    p.fix("a b t v")
-    p.thus(
-        "substitute (And_f a b) t v = And_f (substitute a t v) (substitute b t v)"
-    ).by_rewrite([AND_F_AT, SUBSTITUTE_AT_NOT, SUBSTITUTE_AT_IMP])
-
-
-@proof
-def SUBSTITUTE_AT_OR(p):
-    """|- !a b t v. substitute (Or_f a b) t v
-    = Or_f (substitute a t v) (substitute b t v)."""
-    p.goal(
-        "!a b t v. substitute (Or_f a b) t v = "
-        "Or_f (substitute a t v) (substitute b t v)"
-    )
-    p.fix("a b t v")
-    p.thus(
-        "substitute (Or_f a b) t v = Or_f (substitute a t v) (substitute b t v)"
-    ).by_rewrite([OR_F_AT, SUBSTITUTE_AT_NOT, SUBSTITUTE_AT_IMP])
-
-
-@proof
-def SUBSTITUTE_AT_IFF(p):
-    """|- !a b t v. substitute (Iff_f a b) t v
-    = Iff_f (substitute a t v) (substitute b t v)."""
-    p.goal(
-        "!a b t v. substitute (Iff_f a b) t v = "
-        "Iff_f (substitute a t v) (substitute b t v)"
-    )
-    p.fix("a b t v")
-    p.thus(
-        "substitute (Iff_f a b) t v = Iff_f (substitute a t v) (substitute b t v)"
-    ).by_rewrite(
-        [
-            IFF_F_AT,
-            AND_F_AT,
-            SUBSTITUTE_AT_NOT,
-            SUBSTITUTE_AT_IMP,
-        ]
-    )
-
-
-@proof
-def SUBSTITUTE_AT_EXISTS_MISS(p):
-    """|- !w body t v. ~(v = w) ==>
-            substitute (Exists_f w body) t v
-            = Exists_f w (substitute body t v).
-
-    Capture-avoidance side condition: the bound variable index ``w`` of
-    the existential must not be the variable being substituted.
-    """
-    p.goal(
-        "!w body t v. ~(v = w) ==> "
-        "substitute (Exists_f w body) t v = "
-        "Exists_f w (substitute body t v)"
-    )
-    p.fix("w body t v")
-    p.assume("hne: ~(v = w)")
-    forall_miss_at = SPECL(
-        [p._parse("w"), p._parse("Not_f body"), p._parse("t"), p._parse("v")],
-        SUBSTITUTE_AT_FORALL_MISS,
-    )
-    forall_miss_app = MP(forall_miss_at, p.fact("hne"))
-    p.thus(
-        "substitute (Exists_f w body) t v = Exists_f w (substitute body t v)"
-    ).by_rewrite([EXISTS_F_AT, SUBSTITUTE_AT_NOT, forall_miss_app])
 
 
 # ---------------------------------------------------------------------------
