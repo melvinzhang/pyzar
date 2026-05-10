@@ -169,9 +169,11 @@ from hf_sets import (
     Pair_ord,  # noqa: F401  -- parser alias for is_substitute_step
     Insert,  # noqa: F401  -- parser alias for quote_hf bridge
     Empty,  # noqa: F401  -- parser alias for quote_hf bridge
+    Singleton,  # noqa: F401  -- parser alias for QUOTE_HF_AT_SINGLETON
     Union,  # used by TRACE_EXISTS to merge sub-traces
     EMPTY_DEF,  # used by QUOTE_HF_AT_EMPTY to fold Empty into 0
     INSERT_AT,  # used by QUOTE_HF_AT_INSERT_LOW to unfold Insert to set_bit
+    SINGLETON_AS_INSERT,  # quote_hf Singleton bridge
     IN_INSERT_SAME,
     IN_INSERT_DIFF,
     IN_UNION,
@@ -3861,7 +3863,7 @@ def TRACE_EXISTS(p):
 #
 # This is the *canonical low-bit-first* form: every non-empty set is
 # decomposed deterministically by its lowest set bit. The corresponding
-# recursion equation is ``QUOTE_HF_AT_NZ`` (replaces the previous
+# recursion equation is ``_QUOTE_HF_AT_NZ`` (replaces the previous
 # opaque ``QUOTE_HF_AT_INSERT``); a literal ``~In i s ==> quote_hf
 # (Insert i s) = Insert_t (quote_hf i) (quote_hf s)`` for *arbitrary*
 # fresh ``i`` is HOL-inconsistent under ``Insert_t`` injectivity, so
@@ -3969,6 +3971,22 @@ quote_hf = mk_const("quote_hf", [])
 QUOTE_HF_REC = _unfold_rec_via_F_def(_QUOTE_HF_REC_RAW, _QUOTE_HF_F_DEF)
 
 
+# --------------------------------------------------------------------------
+# Stage 3 contract -- the public quote_hf interface.
+#
+# Stage 3 representability stubs interact with quote_hf through exactly
+# two equations: ``QUOTE_HF_AT_EMPTY`` and ``QUOTE_HF_AT_INSERT_LOW``
+# (plus the derived structural rewrites in section "Stage 3B (l)"
+# below: SINGLETON / PAIR / PAIR_ORD).
+#
+# The bit-level recursion equation ``_QUOTE_HF_AT_NZ`` is internal --
+# it exposes ``low_bit`` / ``clear_low``, which Stage 3 proofs must
+# never reference. ``_QUOTE_HF_F_DEF``, ``QUOTE_HF_MONO``,
+# ``QUOTE_HF_DEF``, and ``QUOTE_HF_REC`` are likewise private to the
+# definition site.
+# --------------------------------------------------------------------------
+
+
 @proof
 def QUOTE_HF_AT_EMPTY(p):
     """|- quote_hf Empty = Empty_t.
@@ -3987,16 +4005,21 @@ def QUOTE_HF_AT_EMPTY(p):
 
 
 @proof
-def QUOTE_HF_AT_NZ(p):
+def _QUOTE_HF_AT_NZ(p):
     """|- !n. ~(n = 0) ==>
               quote_hf n = Insert_t (quote_hf (low_bit n))
                                      (quote_hf (clear_low n)).
+
+    INTERNAL — exposes the bit-level low_bit / clear_low recursion.
+    Stage 3 consumers should use ``QUOTE_HF_AT_INSERT_LOW`` (and the
+    derived structural rewrites in section "Stage 3B (l)") instead;
+    those keep the user-facing surface free of bit-decomposition.
 
     Specialise QUOTE_HF_REC at n; under ``~(n = 0)`` the body collapses
     via ``(n = 0) = F`` + COND_F_NAT0 to the Insert_t branch. This is
     the canonical low-bit decomposition equation: it replaces the
     inconsistent ``~In i s ==> quote_hf (Insert i s) = Insert_t ...``
-    form. Downstream consumers must walk this canonical structure.
+    form. Downstream consumers walk this via QUOTE_HF_AT_INSERT_LOW.
     """
     p.goal(
         "!n. ~(n = 0) ==> "
@@ -4020,7 +4043,7 @@ def QUOTE_HF_AT_INSERT_LOW(p):
     Bridge from HOL HF Insert to HF-syntax Insert_t, in the canonical
     low-bit-first form. The precondition pins ``Insert i s = set_bit i s``
     to the canonical decomposition where ``low_bit (Insert i s) = i`` and
-    ``clear_low (Insert i s) = s``, so QUOTE_HF_AT_NZ collapses to the
+    ``clear_low (Insert i s) = s``, so _QUOTE_HF_AT_NZ collapses to the
     structural form. A precondition-free version is HOL-inconsistent under
     Insert_t injectivity (a set with two Insert decompositions would force
     its quote_hf image into two distinct Insert_t-trees).
@@ -4051,9 +4074,9 @@ def QUOTE_HF_AT_INSERT_LOW(p):
     p.have("h_cl: clear_low (Insert i s) = s").by_rewrite_of(
         "h_cl_sb", [SYM(p.fact("h_set"))]
     )
-    # Specialise QUOTE_HF_AT_NZ at (Insert i s) and discharge the non-zero
+    # Specialise _QUOTE_HF_AT_NZ at (Insert i s) and discharge the non-zero
     # side condition; rewrite the canonical args back to (i, s).
-    rec_nz = SPEC(p._parse("Insert i s"), QUOTE_HF_AT_NZ)
+    rec_nz = SPEC(p._parse("Insert i s"), _QUOTE_HF_AT_NZ)
     p.have(
         "h_rec: quote_hf (Insert i s) = "
         "Insert_t (quote_hf (low_bit (Insert i s))) "
@@ -4062,6 +4085,39 @@ def QUOTE_HF_AT_INSERT_LOW(p):
     p.thus(
         "quote_hf (Insert i s) = Insert_t (quote_hf i) (quote_hf s)"
     ).by_rewrite_of("h_rec", ["h_lb", "h_cl"])
+
+
+# ---------------------------------------------------------------------------
+# Stage 3B (l) -- quote_hf structural rewrites.
+#
+# Derived shape equations layered on top of QUOTE_HF_AT_INSERT_LOW. Each
+# tells the user what ``quote_hf`` does to a derived HF-set shape
+# (Singleton / Pair / ...) without ever mentioning the bit
+# decomposition (low_bit / clear_low). Stage 3 representability stubs
+# rewrite at the top of these and then never reach for _QUOTE_HF_AT_NZ.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def QUOTE_HF_AT_SINGLETON(p):
+    """|- !x. quote_hf (Singleton x) = Insert_t (quote_hf x) Empty_t.
+
+    ``Singleton x = Insert x Empty`` (SINGLETON_AS_INSERT) collapses the
+    LHS via QUOTE_HF_AT_INSERT_LOW with precondition ``Empty = 0`` (left
+    disjunct, EMPTY_DEF). The recursive call on ``Empty`` is closed by
+    QUOTE_HF_AT_EMPTY.
+    """
+    p.goal("!x. quote_hf (Singleton x) = Insert_t (quote_hf x) Empty_t")
+    p.fix("x")
+    with p.have("h_pre: Empty = 0 \\/ nat0_lt x (low_bit Empty)").proof():
+        p.disj(EMPTY_DEF)
+    p.have(
+        "h_at: quote_hf (Insert x Empty) = "
+        "Insert_t (quote_hf x) (quote_hf Empty)"
+    ).by(QUOTE_HF_AT_INSERT_LOW, "x", "Empty", "h_pre")
+    p.thus("quote_hf (Singleton x) = Insert_t (quote_hf x) Empty_t").by_rewrite(
+        [SINGLETON_AS_INSERT, "h_at", QUOTE_HF_AT_EMPTY]
+    )
 
 
 # B1.0 (b) -- Pair_ord representability.
@@ -4515,8 +4571,8 @@ if __name__ == "__main__":
     print("    TRACE_STEP_MONO                       :", pp_thm(TRACE_STEP_MONO))
     print("    TRACE_EXISTS (SORRY)                  :", pp_thm(TRACE_EXISTS))
     print("    QUOTE_HF_AT_EMPTY                    :", pp_thm(QUOTE_HF_AT_EMPTY))
-    print("    QUOTE_HF_AT_NZ                       :", pp_thm(QUOTE_HF_AT_NZ))
     print("    QUOTE_HF_AT_INSERT_LOW               :", pp_thm(QUOTE_HF_AT_INSERT_LOW))
+    print("    QUOTE_HF_AT_SINGLETON                :", pp_thm(QUOTE_HF_AT_SINGLETON))
     print("    IS_PAIR_ORD_REPRESENTS (SORRY)        :", pp_thm(IS_PAIR_ORD_REPRESENTS))
     print("    IS_IN_REPRESENTS (SORRY)              :", pp_thm(IS_IN_REPRESENTS))
     print("    IS_SUBSTITUTE_STEP_REPRESENTS (SORRY) :", pp_thm(IS_SUBSTITUTE_STEP_REPRESENTS))

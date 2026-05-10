@@ -773,6 +773,42 @@ SET_BIT_BASE_AT, SET_BIT_STEP_AT = _prove_set_bit_at()
 
 
 # ---------------------------------------------------------------------------
+# Lemma:  |- !i. pow2 i = set_bit i 0.
+#
+# Both sides obey the same nat0-recursion: at i = 0, both reduce to SUC0 0
+# (pow2 via POW2_BASE; set_bit via SET_BIT_BASE_AT + HALF_BASE + DOUBLE_BASE).
+# At SUC0 i, both reduce to ``double <recursive call>`` (pow2 via POW2_STEP;
+# set_bit via SET_BIT_STEP_AT + ODD_BASE + COND_F_NAT0 + HALF_BASE), so a
+# Peano induction on i closes the equation.
+#
+# Used by ``hf_sets.SINGLETON_AS_INSERT`` to bridge the pow2-flavoured
+# ``Singleton`` definition to the bit-flavoured ``Insert``.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def POW2_AS_SET_BIT(p):
+    """|- !i. pow2 i = set_bit i 0."""
+    p.goal("!i. pow2 i = set_bit i 0")
+    with p.induction("i"):
+        with p.base():
+            p.thus("pow2 0 = set_bit 0 0").by_rewrite(
+                [POW2_BASE, SET_BIT_BASE_AT, HALF_BASE, DOUBLE_BASE]
+            )
+        with p.step("IH"):
+            p.thus("pow2 (SUC0 i) = set_bit (SUC0 i) 0").by_rewrite(
+                [
+                    POW2_STEP,
+                    SET_BIT_STEP_AT,
+                    ODD_BASE,
+                    COND_F_NAT0,
+                    HALF_BASE,
+                    "IH",
+                ]
+            )
+
+
+# ---------------------------------------------------------------------------
 # Lemma:  |- !i n. bit i (set_bit i n) = T.
 #
 # Induction on i.  Base: bit 0 (SUC0 (double (HALF n))) = ODD (SUC0 (double X))

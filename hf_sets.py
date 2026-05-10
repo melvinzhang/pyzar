@@ -261,6 +261,7 @@ from bits import (  # noqa: E402 -- needs nat0_lt parser alias registered above
     BIT_AT_SET_BIT_DIFF,
     BIT_AT_POW2_SAME,
     BIT_AT_POW2_DIFF,
+    POW2_AS_SET_BIT,
 )
 
 
@@ -356,6 +357,22 @@ def _prove_singleton_at():
 
 
 SINGLETON_AT = _prove_singleton_at()
+
+
+# Lemma: |- !x. Singleton x = Insert x Empty.
+#
+# Bridges the pow2-flavoured ``Singleton`` to the bit-flavoured
+# ``Insert``. Used by ``hf_repr.QUOTE_HF_AT_SINGLETON`` (and Stage 3
+# representability stubs) to fold ``Singleton x`` into a one-step
+# ``Insert``-tower over ``Empty``.
+@proof
+def SINGLETON_AS_INSERT(p):
+    """|- !x. Singleton x = Insert x Empty."""
+    p.goal("!x. Singleton x = Insert x Empty")
+    p.fix("x")
+    p.thus("Singleton x = Insert x Empty").by_rewrite(
+        [SINGLETON_AT, POW2_AS_SET_BIT, EMPTY_DEF, INSERT_AT]
+    )
 
 
 # Lemma: |- !x y. In y (Singleton x) = (y = x).
