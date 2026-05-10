@@ -190,6 +190,8 @@ from bits import (  # noqa: E402 -- canonical low-bit decomposition for quote_hf
     LOW_BIT_SET_BIT_NEW,
     CLEAR_LOW_SET_BIT_NEW,
     SET_BIT_NZ,
+    INSERT_LOW_BIT_CLEAR_LOW,
+    LOW_BIT_CLEAR_LOW_PRECOND,
 )
 from classical import (  # noqa: E402 -- COND machinery for quote_hf body
     mk_cond,
@@ -4120,6 +4122,91 @@ def QUOTE_HF_AT_SINGLETON(p):
     )
 
 
+# ---------------------------------------------------------------------------
+# Stage 3B (l) -- structural induction on HF sets.
+#
+# The keystone of the thin-bridge layer. Stage 3 representability proofs
+# proceed by induction on the Insert-tower shape of the HF set; this
+# principle packages the bit-level recursion of ``quote_hf`` into a
+# user-facing form whose only references to bits.py are inside the
+# canonical-form precondition (``s = 0 \\/ nat0_lt i (low_bit s)``).
+# Consumers do NOT need to reach for ``low_bit`` / ``clear_low`` again
+# in their own proofs.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def HF_INDUCTION(p):
+    """|- !P. P Empty
+              /\\ (!i s. (s = 0 \\/ nat0_lt i (low_bit s))
+                         ==> P s ==> P (Insert i s))
+              ==> !s. P s.
+
+    Strong induction on ``s`` via ``nat0_lt``. In the ``s = 0`` branch
+    ``P s`` collapses to ``P Empty`` via EMPTY_DEF and the base case
+    discharges. In the ``s != 0`` branch:
+
+      * ``s = set_bit (low_bit s) (clear_low s)`` (INSERT_LOW_BIT_CLEAR_LOW),
+        i.e. ``s = Insert (low_bit s) (clear_low s)`` after INSERT_AT.
+      * The canonical-form precondition ``clear_low s = 0 \\/
+        nat0_lt (low_bit s) (low_bit (clear_low s))`` holds
+        (LOW_BIT_CLEAR_LOW_PRECOND).
+      * ``CLEAR_LOW_LT`` gives ``nat0_lt (clear_low s) s``, so the IH
+        fires at ``clear_low s`` to yield ``P (clear_low s)``.
+      * The step assumption then produces
+        ``P (Insert (low_bit s) (clear_low s)) = P s``.
+    """
+    p.goal(
+        "!P. P Empty "
+        "/\\ (!i s. (s = 0 \\/ nat0_lt i (low_bit s)) "
+        "          ==> P s ==> P (Insert i s)) "
+        "==> !s. P s",
+        types={
+            "P": parse_type("nat0 -> bool"),
+            "s": nat0_ty,
+            "i": nat0_ty,
+        },
+    )
+    p.fix("P")
+    p.assume(
+        "(base, step): "
+        "P Empty "
+        "/\\ (!i s. (s = 0 \\/ nat0_lt i (low_bit s)) "
+        "          ==> P s ==> P (Insert i s))"
+    )
+    with p.strong_induction("s", "IH"):
+        with p.cases_on(EXCLUDED_MIDDLE, "s = 0"):
+            with p.case("hz: s = 0"):
+                p.thus("P s").by_rewrite_of("base", ["hz", EMPTY_DEF])
+            with p.case("hnz: ~(s = 0)"):
+                p.have(
+                    "h_recon_sb: s = set_bit (low_bit s) (clear_low s)"
+                ).by(INSERT_LOW_BIT_CLEAR_LOW, "s", "hnz")
+                p.have(
+                    "h_in_sb: Insert (low_bit s) (clear_low s) "
+                    "= set_bit (low_bit s) (clear_low s)"
+                ).by(INSERT_AT, "low_bit s", "clear_low s")
+                p.have(
+                    "h_recon: s = Insert (low_bit s) (clear_low s)"
+                ).by_rewrite_of("h_recon_sb", [SYM(p.fact("h_in_sb"))])
+                p.have(
+                    "h_pre: clear_low s = 0 "
+                    "\\/ nat0_lt (low_bit s) (low_bit (clear_low s))"
+                ).by(LOW_BIT_CLEAR_LOW_PRECOND, "s", "hnz")
+                p.have("h_cl_lt: nat0_lt (clear_low s) s").by(
+                    CLEAR_LOW_LT, "s", "hnz"
+                )
+                p.have("p_cl: P (clear_low s)").by(
+                    "IH", "clear_low s", "h_cl_lt"
+                )
+                p.have(
+                    "p_ins: P (Insert (low_bit s) (clear_low s))"
+                ).by("step", "low_bit s", "clear_low s", "h_pre", "p_cl")
+                p.thus("P s").by_rewrite_of(
+                    "p_ins", [SYM(p.fact("h_recon"))]
+                )
+
+
 # B1.0 (b) -- Pair_ord representability.
 # Needed for the trace HF set: the trace consists of Pair_ord-encoded
 # (sub-shape, output-shape) entries, and HF must prove each entry's shape
@@ -4573,6 +4660,7 @@ if __name__ == "__main__":
     print("    QUOTE_HF_AT_EMPTY                    :", pp_thm(QUOTE_HF_AT_EMPTY))
     print("    QUOTE_HF_AT_INSERT_LOW               :", pp_thm(QUOTE_HF_AT_INSERT_LOW))
     print("    QUOTE_HF_AT_SINGLETON                :", pp_thm(QUOTE_HF_AT_SINGLETON))
+    print("    HF_INDUCTION                          :", pp_thm(HF_INDUCTION))
     print("    IS_PAIR_ORD_REPRESENTS (SORRY)        :", pp_thm(IS_PAIR_ORD_REPRESENTS))
     print("    IS_IN_REPRESENTS (SORRY)              :", pp_thm(IS_IN_REPRESENTS))
     print("    IS_SUBSTITUTE_STEP_REPRESENTS (SORRY) :", pp_thm(IS_SUBSTITUTE_STEP_REPRESENTS))

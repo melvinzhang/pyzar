@@ -1825,6 +1825,62 @@ def CLEAR_LOW_SET_BIT_NEW(p):
             )
 
 
+# ---------------------------------------------------------------------------
+# Bit-level reconstruction (SORRY).
+#
+# Two facts about the canonical low-bit decomposition that downstream
+# consumers (notably ``hf_repr.HF_INDUCTION``) need:
+#
+#   * INSERT_LOW_BIT_CLEAR_LOW: every nonzero ``s`` is recovered as
+#     ``set_bit (low_bit s) (clear_low s)``. Proved by BIT_EXTENSIONALITY
+#     once the auxiliary ``BIT_LOW_BIT`` (bit (low_bit s) s = T for
+#     s != 0) and ``BIT_CLEAR_LOW_DIFF`` (bit i (clear_low s) = bit i s
+#     when i != low_bit s) are in place; both are routine inductions on
+#     the LOW_BIT_AT / CLEAR_LOW_AT recursion equations.
+#
+#   * LOW_BIT_CLEAR_LOW_PRECOND: the canonical-form invariant pushes
+#     down through ``clear_low`` -- after stripping the lowest bit, the
+#     new lowest bit (if any) is strictly above the old one. Used to
+#     discharge the structural-induction step of HF_INDUCTION without
+#     re-deriving the canonical-form precondition each time.
+#
+# Both are AXIOMATIZED via ``p.sorry()`` for now. Discharging them is
+# the bit-level work outlined in the ``BIT_LOW_BIT,
+# BIT_LOW_BIT_CLEAR_LOW, SET_BIT_LOW_BIT_CLEAR_LOW`` parenthetical in
+# the low_bit / clear_low section header above.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def INSERT_LOW_BIT_CLEAR_LOW(p):
+    """|- !s. ~(s = 0) ==> s = set_bit (low_bit s) (clear_low s).
+
+    SORRY. Bit-extensionality reconstruction of ``s`` from its low_bit /
+    clear_low decomposition. Discharge plan: prove BIT_LOW_BIT
+    (``bit (low_bit s) s = T``) and BIT_CLEAR_LOW_DIFF / BIT_CLEAR_LOW_SAME
+    (the bit-pattern of ``clear_low s`` is that of ``s`` with the low
+    bit cleared), then close via BIT_EXTENSIONALITY.
+    """
+    p.goal("!s. ~(s = 0) ==> s = set_bit (low_bit s) (clear_low s)")
+    p.sorry()
+
+
+@proof
+def LOW_BIT_CLEAR_LOW_PRECOND(p):
+    """|- !s. ~(s = 0) ==>
+              clear_low s = 0 \\/ nat0_lt (low_bit s) (low_bit (clear_low s)).
+
+    SORRY. Canonical-form invariant: the low_bit of ``clear_low s`` (if
+    nonzero) is strictly above the low_bit of ``s``. Used by HF_INDUCTION
+    to discharge the structural-step precondition.
+    """
+    p.goal(
+        "!s. ~(s = 0) ==> "
+        "clear_low s = 0 \\/ nat0_lt (low_bit s) (low_bit (clear_low s))"
+    )
+    p.sorry()
+
+
 if __name__ == "__main__":
     from parser import pp_thm
 
