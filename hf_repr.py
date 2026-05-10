@@ -5013,8 +5013,11 @@ def IS_IN_REPRESENTS(p):
     SORRY (thin-interface strategy).
 
     Body of is_In_internal: ``In_a var_x var_y`` -- the syntactic HF
-    membership atom. At HF level the substituted body is
-    ``In_a (quote_hf x) (quote_hf y)``.
+    membership atom. After the two outer substitutes (idx_x then
+    idx_y), the body becomes ``In_a (quote_hf x) (quote_hf y)``;
+    SUBSTITUTE_AT_IN + SUBSTITUTE_AT_VAR_HIT/MISS dispatch this in
+    closed form (no quote_hf injectivity needed for the substitute
+    reduction itself).
 
     Proof strategy: induction on ``y`` via ``HF_INDUCTION`` (the
     structural-shape induction principle). The induction predicate is
@@ -5027,21 +5030,68 @@ def IS_IN_REPRESENTS(p):
         rules out the antecedent); negative direction discharges
         ``Prov_HF (Not_f (In_a (quote_hf x) Empty_t))`` directly via
         QUOTE_HF_AT_EMPTY plus HF's empty-set axiom (HF1: nothing is in
-        Empty_t).
+        Empty_t), instantiated at the witness term ``quote_hf x``.
 
       * Step (y = Insert i s under the canonical-form precondition):
         ``QUOTE_HF_AT_INSERT_LOW`` unfolds ``quote_hf (Insert i s)`` to
         ``Insert_t (quote_hf i) (quote_hf s)``. Case-split on ``x = i``:
-          - x = i: HF2 (membership in Insert_t same-element) closes
-            the positive case; negative case is vacuous.
+          - x = i: HF2 (membership in Insert_t same-element) at
+            ``(quote_hf i, quote_hf s)`` closes the positive case;
+            the negative case is vacuous (HOL-level ``In x (Insert i s)``
+            holds because x = i).
           - x != i: HF3 reduces membership in Insert_t to membership in
-            the tail; the IH on ``s`` (delivered by HF_INDUCTION) closes
-            both directions.
+            the tail; both directions follow from the IH on ``s``
+            delivered by HF_INDUCTION.
 
-    No ``low_bit`` / ``clear_low`` reference survives: the canonical-form
-    precondition is consumed inside HF_INDUCTION, never exposed to this
-    proof. ~80 lines once is_In_internal acquires a body and HF1-HF3 are
-    available as kernel theorems.
+    Missing supporting infrastructure (status as of 2026-05-10):
+
+      (a) HF1_INST / HF2_INST / HF3_INST: derived rules instantiating
+          the closed HF1-HF3 axioms (hf_proof.py:270-302) at concrete
+          HF-syntax terms via the universal-instantiation chain.
+          Typical shapes:
+            HF1_INST: |- !t. is_term t ==> Prov_HF (Not_f (In_a t Empty_t))
+            HF2_INST: |- !t u. is_term t /\\ is_term u
+                              ==> Prov_HF (In_a t (Insert_t t u))
+            HF3_INST: |- !t u w. is_term t /\\ is_term u /\\ is_term w
+                                /\\ Prov_HF (Not_f (Eq_f t u))
+                                ==> Prov_HF (encoded biconditional ...)
+          Each requires PROV_HF_UI_IMP applied k times (one per
+          forall-binder of the closed axiom), with substitute
+          reductions threaded through SUBSTITUTE_AT_NOT /
+          SUBSTITUTE_AT_IN / SUBSTITUTE_AT_INSERT / SUBSTITUTE_AT_EMPTY
+          / SUBSTITUTE_AT_VAR_HIT/MISS. ~80-150 lines per axiom.
+          These are derived rules at the HOL level; no further sorry
+          should be needed once they're built (they reduce to the
+          existing closed HF axioms + UI_IMP + substitute equations,
+          all of which are present).
+
+      (b) QUOTE_HF_INJ: |- !s t. quote_hf s = quote_hf t ==> s = t
+          (HOL-level injectivity of the quoting map). Required for
+          the x != i case to lift HOL-level ``~(i = x)`` to
+          ``Prov_HF (Not_f (Eq_f (quote_hf i) (quote_hf x)))`` --
+          first via injectivity contrapositive (``quote_hf i =
+          quote_hf x ==> i = x``, contrapose to ``~(i = x) ==>
+          ~(quote_hf i = quote_hf x)``), then via PROV_HF_REFL +
+          PROV_HF_CONTRAP / N to lift the inequality into Prov_HF.
+          Proof: strong induction on bit-encoded HF using
+          INSERT_T injectivity + canonical-form preconditions. ~80-
+          120 lines.
+
+      (c) The IS_IN_REPRESENTS body itself: ~60-80 lines on top of
+          (a)+(b). Uses HF_INDUCTION (already proved), HOL EXCLUDED_MIDDLE
+          for the x = i case-split, and the propositional Prov_HF toolkit
+          (PROV_HF_AND_INTRO/ELIM, PROV_HF_CONTRAP, PROV_HF_DOUBLE_NEG_*,
+          PROV_HF_TRANS_IMP, PROV_HF_MP) -- all already discharged in
+          hf_logic.py.
+
+    Total realistic cost: ~250-400 lines once (a) and (b) are in place.
+    The original docstring estimate of "~80 lines" referred only to the
+    consumer body in (c); the HF1-3 instantiation chain and quote_hf
+    injectivity were assumed available but were never built.
+
+    No ``low_bit`` / ``clear_low`` reference survives in the consumer
+    body: the canonical-form precondition is consumed inside
+    HF_INDUCTION, never exposed to this proof.
     """
     p.goal(
         "!x y. (In x y ==> Prov_HF (substitute (substitute "
