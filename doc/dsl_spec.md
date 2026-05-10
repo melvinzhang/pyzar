@@ -465,6 +465,16 @@ extend the active simp set, used silently by every subsequent
 frame. Frame-scoped: a sub-block can extend without affecting the
 surrounding proof.
 
+### `define_with_at(name, ty, body, ...)`
+
+Module-level. Wraps `parser.define`: returns `(DEF, AT)` where
+`DEF: |- C = \x1 ... \xn. body` and
+`AT: |- !x1 ... xn. C x1 ... xn = body[xi]`. Strips outer abstractions
+and beta-reduces stepwise, then `GENL`s the args. For a nullary
+definition (no leading `\`), `AT` coincides with `DEF`. Removes the
+`AP_THM` + `BETA_CONV` + `TRANS` + `GENL` boilerplate that lift sites
+otherwise repeat per definition.
+
 ### Simp-aware bridges
 
 `simp_aconv`, `simp_match`, `simp_normalize`, `simp_norm_fact`,

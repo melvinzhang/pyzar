@@ -80,10 +80,12 @@ from axioms import (
 from tactics import (
     SPEC,
     GEN,
+    GENL,
     DISCH,
     MP,
     MP_LIST,
     DISJ_CASES,
+    BETA_CONV,
     BETA_NORM,
     SYM,
     AP_TERM,
@@ -111,6 +113,7 @@ from tactics import (
     _term_match,
 )
 from parser import (
+    define,
     parse,
     parse_label,
     parse_label_or_bare,
@@ -167,6 +170,31 @@ def register_disj_unfolder(op_name, unfold_fn):
     """Register a disjunction-shape unfolder for ``op_name``:
     ``unfold_fn(a, b) -> |- (op_name a b) = (left \\/ right)``."""
     register_relation(RelationDef(op_name, "disj", unfold_fn))
+
+
+def define_with_at(name, ty, body, *, sig=None, infix=None, prefix=False, **bindings):
+    """Like :func:`parser.define`, but also derives the applied form
+    ``|- !x1 ... xn. C x1 ... xn = body[xi]`` by stripping outer
+    abstractions and beta-reducing each application step. Returns
+    ``(DEF, AT)`` -- the defining equation and the applied form, in
+    that order.
+
+    Removes per-constant ``_at2`` boilerplate at lift / definition sites.
+    For a nullary definition (body has no leading abstractions), ``AT``
+    coincides with ``DEF``.
+    """
+    def_th = define(name, ty, body, sig=sig, infix=infix, prefix=prefix, **bindings)
+    th = def_th
+    args = []
+    while isinstance(rand(th._concl), Abs):
+        rhs = rand(th._concl)
+        v = variant(args, rhs.bvar)
+        th = AP_THM(th, v)
+        th = TRANS(th, BETA_CONV(rand(th._concl)))
+        args.append(v)
+    if args:
+        th = GENL(args, th)
+    return def_th, th
 
 
 # Contradiction-finder registry: each entry maps an unordered pair of
