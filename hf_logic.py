@@ -52,7 +52,7 @@ from hf_proof import (
     IS_LOGICAL_AXIOM_AT,
     IS_AXIOM_AT,
 )
-from hf_repr import (
+from hf_repr_core import (
     PROV_HF_AXIOM,
     PROV_HF_MP,
 )

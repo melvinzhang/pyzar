@@ -5004,7 +5004,7 @@ is_In_internal = mk_const("is_In_internal", [])
 # IS_IN_REPRESENTS, IS_SUBSTITUTE_STEP_REPRESENTS,
 # IS_SUBSTITUTE_TRACE_REPRESENTS, SUBSTITUTE_REPRESENTS,
 # PROV_HF_REPRESENTS, IS_FORM_PROV_HF_INTERNAL, FREE_IN_PROV_HF_INTERNAL
-# all live in ``hf_represents.py`` (the high layer). Their proofs need
+# all live in ``hf_repr_thms.py`` (the high layer). Their proofs need
 # the Prov_HF logical toolkit from ``hf_logic`` (PROV_HF_UI etc.), and
 # ``hf_logic`` already imports this module -- inlining them here would
 # cycle. The kernel constants and ``define``s those proofs reference
@@ -5022,7 +5022,7 @@ new_constant("is_substitute_step_internal", nat0_ty)
 is_substitute_step_internal = mk_const("is_substitute_step_internal", [])
 
 
-# IS_SUBSTITUTE_STEP_REPRESENTS body lives in hf_represents.py.
+# IS_SUBSTITUTE_STEP_REPRESENTS body lives in hf_repr_thms.py.
 
 
 # B1.2 -- HF-encoding of is_substitute_trace.
@@ -5038,7 +5038,7 @@ new_constant("is_substitute_trace_internal", nat0_ty)
 is_substitute_trace_internal = mk_const("is_substitute_trace_internal", [])
 
 
-# IS_SUBSTITUTE_TRACE_REPRESENTS body lives in hf_represents.py.
+# IS_SUBSTITUTE_TRACE_REPRESENTS body lives in hf_repr_thms.py.
 
 
 # Opaque: no defining body. Stage 3C will replace this with a definition
@@ -5047,7 +5047,7 @@ new_constant("substitute_internal", nat0_ty)
 substitute_internal = mk_const("substitute_internal", [])
 
 
-# SUBSTITUTE_REPRESENTS body lives in hf_represents.py.
+# SUBSTITUTE_REPRESENTS body lives in hf_repr_thms.py.
 
 
 # ---------------------------------------------------------------------------
@@ -5060,7 +5060,7 @@ substitute_internal = mk_const("substitute_internal", [])
 # (``substitute_2``). The theorems that mention them
 # (PROV_HF_REPRESENTS, IS_FORM_PROV_HF_INTERNAL,
 # FREE_IN_PROV_HF_INTERNAL), along with the construction strategy
-# and discharge sketch, live in ``hf_represents.py`` (the high
+# and discharge sketch, live in ``hf_repr_thms.py`` (the high
 # layer, where the Prov_HF logical toolkit from ``hf_logic`` is in
 # scope).
 # ---------------------------------------------------------------------------
@@ -5110,7 +5110,7 @@ Prov_HF_internal = mk_const("Prov_HF_internal", [])
 
 
 # PROV_HF_REPRESENTS, IS_FORM_PROV_HF_INTERNAL, FREE_IN_PROV_HF_INTERNAL
-# bodies all live in hf_represents.py.
+# bodies all live in hf_repr_thms.py.
 
 
 if __name__ == "__main__":
@@ -5213,7 +5213,7 @@ if __name__ == "__main__":
         "IS_SUBSTITUTE_*_REPRESENTS,",
     )
     print("     PROV_HF_REPRESENTS, IS_FORM_PROV_HF_INTERNAL,")
-    print("     FREE_IN_PROV_HF_INTERNAL -- live in hf_represents.py.)")
+    print("     FREE_IN_PROV_HF_INTERNAL -- live in hf_repr_thms.py.)")
     print()
     print("Stage 3D (a) -- substitute_2 helper (used by diagonal lemma).")
     print("    SUBSTITUTE_2_DEF        :", pp_thm(SUBSTITUTE_2_DEF))

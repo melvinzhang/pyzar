@@ -126,7 +126,7 @@ Sigma_1 soundness of HF outright, since HF *is* the standard model.)
 
 # Stage 1: see hf_syntax.py
 # Stage 2: see hf_proof.py
-# Stage 3: see hf_repr.py
+# Stage 3: see hf_repr_core.py
 
 # ---------------------------------------------------------------------------
 # Stage 4 -- the diagonal lemma.
@@ -282,7 +282,7 @@ Sigma_1 soundness of HF outright, since HF *is* the standard model.)
 #      rules. ~250 lines. (vs ~400 for PA, the saving coming from no
 #      induction-schema recogniser.)
 #
-#   3. ``hf_repr.py`` -- representability of primitive recursive
+#   3. ``hf_repr_core.py`` -- representability of primitive recursive
 #      predicates, specialised to ``Proof_HF``, ``substitute``, and the
 #      diagonal function, via the Goedel-Bernays beta function. Yields
 #      ``Prov_HF_internal`` and the representability theorem. ~500
@@ -384,7 +384,7 @@ from hf_syntax import (
     SUBSTITUTE_PRESERVES_IS_FORM,
 )
 from hf_proof import var_x, var_y
-from hf_repr import (
+from hf_repr_core import (
     numeral,
     substitute,
 )
@@ -625,7 +625,7 @@ diag = mk_const("diag", [])
 #     exhibiting the composite trace HF set; functionality from
 #     SUBSTITUTE_REPRESENTS uniqueness + HF extensionality (Q11).
 # Estimated ~80 lines vs ~400 in the beta-function path. Depends on
-# the substitute_internal / Prov_HF_internal TODOs in hf_repr.py.
+# the substitute_internal / Prov_HF_internal TODOs in hf_repr_core.py.
 # ---------------------------------------------------------------------------
 
 

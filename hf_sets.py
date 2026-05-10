@@ -210,7 +210,7 @@ def IN_EXT(p):
 #               bit-OR ``Union a b`` via well-founded recursion on
 #               HALF a; the membership characterisation is IN_UNION.
 #               Stage 4 still uses ``Insert x x`` for vN_succ; Union
-#               is required by downstream code (hf_repr.py) that needs
+#               is required by downstream code (hf_repr_core.py) that needs
 #               to combine HF-set traces in the substitute representability
 #               proof.
 #   * Pow, Repl, Sep  -- general ZF constructors; defer to a future

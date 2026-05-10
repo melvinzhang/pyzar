@@ -85,7 +85,7 @@ from hf_syntax import (
     IS_FORM_AT_FORALL,
     IS_TERM_AT_VAR,
 )
-from hf_repr import (
+from hf_repr_core import (
     PROV_HF_AXIOM,
     IS_TERM_EMPTY,
     IS_TERM_INSERT,
@@ -115,7 +115,7 @@ from hf_logic import (
     PROV_HF_AND_ELIM_LEFT,
     PROV_HF_AND_ELIM_RIGHT,
 )
-from hf_repr import IS_TERM_QUOTE_HF, SUBSTITUTE_QUOTE_HF, PROV_HF_MP
+from hf_repr_core import IS_TERM_QUOTE_HF, SUBSTITUTE_QUOTE_HF, PROV_HF_MP
 
 
 _t_n0 = Var("t", nat0_ty)
@@ -2638,7 +2638,7 @@ def IS_IN_REPRESENTS(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage-3 SORRY scaffolding moved from hf_repr.py.  Each proof needs the
+# Stage-3 SORRY scaffolding moved from hf_repr_core.py.  Each proof needs the
 # Prov_HF logical toolkit when discharged (PROV_HF_UI for HF axiom
 # instantiation, PROV_HF_AND_ELIM_*/CONTRAP for propositional walking),
 # so they live here rather than in hf_repr to avoid the cycle.  The
@@ -2750,7 +2750,7 @@ def SUBSTITUTE_REPRESENTS(p):
                   (numeral (substitute F t v)) var_w).
 
     Stage 3C(a) representability of ``substitute``. AXIOMATIZED via
-    ``p.sorry()``; see Stage 3C section comment in hf_repr.py for the
+    ``p.sorry()``; see Stage 3C section comment in hf_repr_core.py for the
     deferred HF-native construction:
 
         substitute_internal := ?T. is_substitute_trace T F t v r
@@ -2781,7 +2781,7 @@ def SUBSTITUTE_REPRESENTS(p):
 #
 # ``Prov_HF_internal`` is a HF-formula with ``var_x`` as its sole free
 # variable, expressing "Prov_HF holds at var_x". The kernel constant
-# is declared opaque in ``hf_repr.py`` (no defining body) so
+# is declared opaque in ``hf_repr_core.py`` (no defining body) so
 # accidental unfolding is impossible while PROV_HF_REPRESENTS is
 # still a SORRY.
 #
@@ -2810,7 +2810,7 @@ def SUBSTITUTE_REPRESENTS(p):
 #         is_axiom_internal h \/
 #         (?f1 f2. In f1 t /\ In f2 t /\ is_mp_internal f1 f2 h) \/
 #         (?f1. In f1 t /\ is_gen_internal f1 h)
-#     directly mirroring the HOL ``valid_step`` in hf_repr.py.
+#     directly mirroring the HOL ``valid_step`` in hf_repr_core.py.
 #   * ``Proof_HF_internal(p, n)`` is then the conjunction over members
 #     of the HF set p -- bounded by p itself via foundation HF5 --
 #     plus a designated-head clause picking out n. Sigma_1; not

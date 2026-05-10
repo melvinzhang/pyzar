@@ -369,7 +369,7 @@ HF_AXIOMS = [
 #
 # TODO -- follow-up work at Stage 3C/3D:
 #
-#   * Rewrite the *_internal predicates in hf_repr.py against the HF
+#   * Rewrite the *_internal predicates in hf_repr_core.py against the HF
 #     primitives:
 #       - mem_l_internal collapses to In_a (list-as-HF-set).
 #       - substitute_internal: Sigma_1 over an HF trace set of
@@ -828,7 +828,7 @@ def NAT0_LT_CONS_L_TAIL(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 2B (e) -- Prov_HF is defined in hf_repr.py.
+# Stage 2B (e) -- Prov_HF is defined in hf_repr_core.py.
 #
 #   Prov_HF n  :<=>  ?p. Proof_HF p n.
 #
@@ -838,7 +838,7 @@ def NAT0_LT_CONS_L_TAIL(p):
 # provability formula will internalise. The closure lemmas
 # ``PROV_HF_AXIOM``, ``PROV_HF_MP``, ``PROV_HF_GEN`` are derived from the
 # explicit proof-list constructions ``AXIOM_HAS_PROOF``,
-# ``MP_HAS_PROOF``, ``GEN_HAS_PROOF`` in hf_repr.py.
+# ``MP_HAS_PROOF``, ``GEN_HAS_PROOF`` in hf_repr_core.py.
 #
 # Historical note: an earlier draft defined ``Prov_HF`` via impredicative
 # intersection (``!P. (closure clauses) ==> P n``) here in hf_proof.py,
@@ -898,4 +898,4 @@ if __name__ == "__main__":
     print("    NAT0_LT_CONS_L_HEAD :", pp_thm(NAT0_LT_CONS_L_HEAD))
     print("    NAT0_LT_CONS_L_TAIL :", pp_thm(NAT0_LT_CONS_L_TAIL))
     print()
-    print("Stage 2B (e) -- Prov_HF is defined in hf_repr.py via ?p. Proof_HF p n.")
+    print("Stage 2B (e) -- Prov_HF is defined in hf_repr_core.py via ?p. Proof_HF p n.")
