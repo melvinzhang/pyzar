@@ -4222,16 +4222,34 @@ def IS_PAIR_ORD_REPRESENTS(p):
                           (quote_hf y) var_y
                           (quote_hf (Pair_ord x y)) var_z).
 
-    SORRY. Under the quote_hf bridge: HF inputs / output are encoded
-    as Insert_t-towers; ``Pair_ord x y = Pair (Singleton x) (Pair x y)``
-    is itself an Insert-tower at the HOL level, and ``quote_hf`` lifts
-    it pointwise to the matching HF-syntax Insert_t-tower.
+    SORRY (thin-interface strategy).
 
     Body of is_Pair_ord_internal: the HF-formula expressing that var_z
-    has the Kuratowski shape Insert_t (Insert_t var_x Empty_t)
-    (Insert_t var_x (Insert_t var_y Empty_t)). At numerals the structural
-    equality is verified by HF's reflexivity axiom + HF axioms HF1-HF3
-    walking the Insert_t-tower of (quote_hf (Pair_ord x y)). ~50 lines.
+    has the Kuratowski shape -- (Singleton var_x) is an element of var_z,
+    (Pair var_x var_y) is an element of var_z, and var_z has no other
+    elements. At HF-syntax level this is built from In_a, Insert_t,
+    Empty_t.
+
+    Proof strategy:
+      * Unfold ``Pair_ord x y = Pair (Singleton x) (Pair x y)``
+        (PAIR_ORD_AT, PAIR_AT) and ``Singleton`` (SINGLETON_AS_INSERT) to
+        expose ``Pair_ord x y`` as a nested ``Insert``-tower over HOL
+        HF sets.
+      * Case-split on ``x = y`` -- when x = y the bit-encoding collapses
+        ``Pair x x = Singleton x`` and ``Pair_ord x x = Singleton (Singleton x)``,
+        so the closed-form ``quote_hf`` shape differs by one Insert_t
+        layer; otherwise ``Pair_ord x y`` decomposes into the two
+        distinct Kuratowski leaves.
+      * In each branch fold the ``Insert``-tower through
+        ``QUOTE_HF_AT_INSERT_LOW`` + ``QUOTE_HF_AT_SINGLETON`` +
+        ``QUOTE_HF_AT_EMPTY`` to land at the matching Insert_t-tower at
+        the HF-syntax level, and discharge the substituted
+        ``is_Pair_ord_internal`` body via HF's reflexivity axiom + HF1-HF3
+        walking the resulting Insert_t-tower.
+
+    No reference to ``low_bit`` / ``clear_low`` survives in the proof:
+    the bit decomposition is hidden behind the quote_hf structural
+    rewrites. ~50 lines once is_Pair_ord_internal acquires a body.
     """
     p.goal(
         "!x y. Prov_HF (substitute (substitute (substitute "
@@ -4258,17 +4276,38 @@ def IS_IN_REPRESENTS(p):
                                                 (quote_hf x) var_x
                                                 (quote_hf y) var_y))).
 
-    SORRY. Under the quote_hf bridge the body collapses to
-    ``is_In_internal := In_a var_x var_y`` and the proof reduces to
-    structural induction on the Insert-tower of ``quote_hf y``:
-      * y = Empty: NOT_IN_EMPTY ==> antecedent fails (forward); Q8
-        directly proves ``Not_f (In_a (quote_hf x) Empty_t)`` (negative).
-      * y = Insert i s, ~In i s: quote_hf y = Insert_t (quote_hf i)
-        (quote_hf s).
-          - x = i: Q9 proves In_a (quote_hf i) (Insert_t ...).
-          - x != i: Q10 reduces membership to In_a (quote_hf x)
-            (quote_hf s); IH on s closes both directions.
-    ~80 lines.
+    SORRY (thin-interface strategy).
+
+    Body of is_In_internal: ``In_a var_x var_y`` -- the syntactic HF
+    membership atom. At HF level the substituted body is
+    ``In_a (quote_hf x) (quote_hf y)``.
+
+    Proof strategy: induction on ``y`` via ``HF_INDUCTION`` (the
+    structural-shape induction principle). The induction predicate is
+
+        P y := (In x y ==> Prov_HF ...) /\\ (~In x y ==> Prov_HF (Not_f ...))
+
+    with ``x`` fixed. The two HF_INDUCTION obligations are:
+
+      * Base (y = Empty): forward direction is vacuous (NOT_IN_EMPTY
+        rules out the antecedent); negative direction discharges
+        ``Prov_HF (Not_f (In_a (quote_hf x) Empty_t))`` directly via
+        QUOTE_HF_AT_EMPTY plus HF's empty-set axiom (HF1: nothing is in
+        Empty_t).
+
+      * Step (y = Insert i s under the canonical-form precondition):
+        ``QUOTE_HF_AT_INSERT_LOW`` unfolds ``quote_hf (Insert i s)`` to
+        ``Insert_t (quote_hf i) (quote_hf s)``. Case-split on ``x = i``:
+          - x = i: HF2 (membership in Insert_t same-element) closes
+            the positive case; negative case is vacuous.
+          - x != i: HF3 reduces membership in Insert_t to membership in
+            the tail; the IH on ``s`` (delivered by HF_INDUCTION) closes
+            both directions.
+
+    No ``low_bit`` / ``clear_low`` reference survives: the canonical-form
+    precondition is consumed inside HF_INDUCTION, never exposed to this
+    proof. ~80 lines once is_In_internal acquires a body and HF1-HF3 are
+    available as kernel theorems.
     """
     p.goal(
         "!x y. (In x y ==> Prov_HF (substitute (substitute "
@@ -4300,21 +4339,28 @@ def IS_SUBSTITUTE_STEP_REPRESENTS(p):
                                  (quote_hf a) var_a
                                  (quote_hf b) var_b).
 
-    SORRY. Under the quote_hf bridge: every input is encoded as an
-    Insert_t-tower so HF's axioms HF1-HF3 fire on membership checks
-    inside the trace ``quote_hf T``. Body of
-    is_substitute_step_internal: 9-disjunction (Q_or_chain) mirroring
-    is_substitute_step's HOL body, with each ``In (Pair_ord _ _) T``
-    check expressed as ``In_a (Pair_ord_q var_a var_b) var_T`` (where
-    Pair_ord_q is the HF-syntax Kuratowski Insert_t-tower) and
-    constructor patterns ``a = Var_t v`` etc. expressed as HF-formula
-    Eq_f equalities verified by HF's reflexivity axiom on identical
-    Insert_t-tower shapes.
+    SORRY (thin-interface strategy).
 
-    Proof strategy: case-split on the IS_SUBSTITUTE_STEP_DEF disjunct;
-    in each case dispatch the corresponding HF-disjunct's witness using
-    IS_PAIR_ORD_REPRESENTS, IS_IN_REPRESENTS, and HF-axiom citations on
-    Insert_t-towers. ~150 lines.
+    Body of is_substitute_step_internal: a 9-disjunction (Or_f-chain)
+    mirroring ``is_substitute_step``'s HOL body; each ``In (Pair_ord _ _) T``
+    check is encoded as ``In_a (Pair_ord_q var_a var_b) var_T`` (with
+    ``Pair_ord_q`` the HF-syntax Kuratowski Insert_t-tower) and each
+    constructor pattern ``a = Var_t v`` is an Eq_f equality verified by
+    HF reflexivity on identical Insert_t-tower shapes.
+
+    Proof strategy: case-split on the 9 IS_SUBSTITUTE_STEP_DEF disjuncts.
+    Each case dispatches the matching HF-disjunct via:
+      * IS_PAIR_ORD_REPRESENTS for the Kuratowski-shape clauses;
+      * IS_IN_REPRESENTS for the trace-membership clauses;
+      * QUOTE_HF_AT_INSERT_LOW / QUOTE_HF_AT_SINGLETON / QUOTE_HF_AT_EMPTY
+        to align constructor terms (Var_t, Eq_f, Imp_f, Forall_f, ...)
+        with their Insert_t-tower images;
+      * HF axioms HF1-HF3 walking the resulting trees (no bit-level
+        reasoning -- the canonical-form precondition is consumed inside
+        the QUOTE_HF_AT_* rewrites).
+
+    ~150 lines once is_substitute_step_internal has a body and HF1-HF5
+    are available as kernel theorems.
     """
     p.goal(
         "!T t v a b. is_substitute_step T t v a b ==> "
@@ -4352,14 +4398,23 @@ def IS_SUBSTITUTE_TRACE_REPRESENTS(p):
                                  (quote_hf v) var_z
                                  (quote_hf r) var_w).
 
-    SORRY. Under the quote_hf bridge: combines IS_PAIR_ORD_REPRESENTS
-    (clause (i): ``In (Pair_ord F r) T`` -- structural membership in
-    the Insert_t-tower of ``quote_hf T``) with IS_IN_REPRESENTS and
-    IS_SUBSTITUTE_STEP_REPRESENTS (clause (ii): bounded forall over
-    members of ``quote_hf T``). The bounded forall expands to a
-    finite conjunction over T's Insert_t-tower, each conjunct
-    discharged via IS_SUBSTITUTE_STEP_REPRESENTS at the corresponding
-    encoded entry. ~80 lines.
+    SORRY (thin-interface strategy).
+
+    Combines the previous three stubs:
+      * IS_PAIR_ORD_REPRESENTS for clause (i) ``In (Pair_ord F r) T``,
+        which becomes a Kuratowski-shape membership claim about the
+        Insert_t-tower image of ``quote_hf T``.
+      * IS_IN_REPRESENTS for the membership atoms inside the trace.
+      * IS_SUBSTITUTE_STEP_REPRESENTS for clause (ii) ``!a b. In ... T
+        ==> is_substitute_step ...``: the HOL universal over trace
+        members corresponds to a HF-bounded forall, expanded by induction
+        on the Insert-tower of T via ``HF_INDUCTION``. Each step of the
+        induction discharges one trace entry using
+        IS_SUBSTITUTE_STEP_REPRESENTS at the corresponding ``(a, b)``.
+
+    The induction on T is the only place this proof reaches for set
+    structure; HF_INDUCTION hides the bit decomposition entirely.
+    ~80 lines once is_substitute_trace_internal has a body.
     """
     p.goal(
         "!T F t v r. is_substitute_trace T F t v r ==> "
