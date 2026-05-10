@@ -26,6 +26,7 @@ from axioms import T, F, mk_not, bool_ty
 from nat0 import (
     nat0_ty,
     ZERO,
+    SUC0,
     mk_suc0,
     define_unary_0,
 )
@@ -1826,43 +1827,356 @@ def CLEAR_LOW_SET_BIT_NEW(p):
 
 
 # ---------------------------------------------------------------------------
-# Bit-level reconstruction (SORRY).
+# Bit-level reconstruction.
 #
 # Two facts about the canonical low-bit decomposition that downstream
 # consumers (notably ``hf_repr.HF_INDUCTION``) need:
 #
 #   * INSERT_LOW_BIT_CLEAR_LOW: every nonzero ``s`` is recovered as
-#     ``set_bit (low_bit s) (clear_low s)``. Proved by BIT_EXTENSIONALITY
-#     once the auxiliary ``BIT_LOW_BIT`` (bit (low_bit s) s = T for
-#     s != 0) and ``BIT_CLEAR_LOW_DIFF`` (bit i (clear_low s) = bit i s
-#     when i != low_bit s) are in place; both are routine inductions on
-#     the LOW_BIT_AT / CLEAR_LOW_AT recursion equations.
+#     ``set_bit (low_bit s) (clear_low s)``. Proved via BIT_EXTENSIONALITY
+#     using BIT_LOW_BIT (``bit (low_bit s) s = T`` for s != 0) and
+#     BIT_CLEAR_LOW_DIFF (``bit i (clear_low s) = bit i s`` when
+#     i != low_bit s), both inductions on the LOW_BIT_AT / CLEAR_LOW_AT
+#     recursion.
 #
 #   * LOW_BIT_CLEAR_LOW_PRECOND: the canonical-form invariant pushes
 #     down through ``clear_low`` -- after stripping the lowest bit, the
 #     new lowest bit (if any) is strictly above the old one. Used to
 #     discharge the structural-induction step of HF_INDUCTION without
 #     re-deriving the canonical-form precondition each time.
-#
-# Both are AXIOMATIZED via ``p.sorry()`` for now. Discharging them is
-# the bit-level work outlined in the ``BIT_LOW_BIT,
-# BIT_LOW_BIT_CLEAR_LOW, SET_BIT_LOW_BIT_CLEAR_LOW`` parenthetical in
-# the low_bit / clear_low section header above.
 # ---------------------------------------------------------------------------
+
+
+# |- !s. ~(s = 0) ==> bit (low_bit s) s = T.
+#
+# Strong induction on s. ODD case: low_bit s = 0 and bit 0 s = ODD s = T.
+# ~ODD case: low_bit s = SUC0 (low_bit (HALF s)); BIT_STEP_AT collapses
+# bit (SUC0 ...) s to bit ... (HALF s); HALF s != 0 (else RECONSTRUCT
+# forces s = 0 via the ~ODD branch), so the IH at HALF s closes.
+@proof
+def BIT_LOW_BIT(p):
+    """|- !s. ~(s = 0) ==> bit (low_bit s) s = T."""
+    from tactics import EQT_INTRO, EQF_INTRO
+
+    p.goal("!s. ~(s = 0) ==> bit (low_bit s) s = T")
+    with p.strong_induction("s", "IH"):
+        p.assume("hnz: ~(s = 0)")
+        p.have("hnz_eq: (s = 0) = F").by_thm(EQF_INTRO(p.fact("hnz")))
+        p.have(
+            "lb_s: low_bit s = COND_nat0 (s = 0) 0 "
+            "(COND_nat0 (ODD s) 0 (SUC0 (low_bit (HALF s))))"
+        ).by(LOW_BIT_AT, "s")
+        with p.cases_on(EXCLUDED_MIDDLE, "ODD s"):
+            with p.case("hO: ODD s"):
+                p.have("hO_eq: ODD s = T").by_thm(EQT_INTRO(p.fact("hO")))
+                p.have("lb_zero: low_bit s = 0").by_rewrite_of(
+                    "lb_s", ["hnz_eq", "hO_eq", COND_F_NAT0, COND_T_NAT0]
+                )
+                p.thus("bit (low_bit s) s = T").by_rewrite(
+                    ["lb_zero", BIT_BASE, "hO_eq"]
+                )
+            with p.case("hF: ~(ODD s)"):
+                p.have("hF_eq: ODD s = F").by_thm(EQF_INTRO(p.fact("hF")))
+                with p.have("hh_nz: ~(HALF s = 0)").proof():
+                    with p.suppose("hh_z: HALF s = 0"):
+                        p.have(
+                            "recon: s = COND_nat0 (ODD s) "
+                            "(SUC0 (double (HALF s))) (double (HALF s))"
+                        ).by(RECONSTRUCT, "s")
+                        p.have("s_zero: s = 0").by_rewrite_of(
+                            "recon", ["hF_eq", "hh_z", COND_F_NAT0, DOUBLE_BASE]
+                        )
+                        p.absurd().by_conj("hnz", "s_zero")
+                p.have(
+                    "lb_eq: low_bit s = SUC0 (low_bit (HALF s))"
+                ).by_rewrite_of("lb_s", ["hnz_eq", "hF_eq", COND_F_NAT0])
+                p.have("hh_lt: nat0_lt (HALF s) s").by(HALF_LT_NZ, "s", "hnz")
+                p.have(
+                    "ih_at: bit (low_bit (HALF s)) (HALF s) = T"
+                ).by("IH", "HALF s", "hh_lt", "hh_nz")
+                p.thus("bit (low_bit s) s = T").by_rewrite(
+                    ["lb_eq", BIT_STEP_AT, "ih_at"]
+                )
+
+
+# |- !s i. ~(i = low_bit s) ==> bit i (clear_low s) = bit i s.
+#
+# Strong induction on s; case-split on s = 0 / ~(s = 0), then on
+# ODD s, then on i = 0 / i = SUC0 j. The clear_low recursion mirrors
+# the bit recursion modulo a double-on-step, so HALF_DOUBLE / ODD_DOUBLE
+# close all branches with at most one IH application at HALF s.
+@proof
+def BIT_CLEAR_LOW_DIFF(p):
+    """|- !s i. ~(i = low_bit s) ==> bit i (clear_low s) = bit i s."""
+    from tactics import EQT_INTRO, EQF_INTRO, AP_TERM, REFL, SPEC
+
+    p.goal("!s i. ~(i = low_bit s) ==> bit i (clear_low s) = bit i s")
+    # |- clear_low 0 = 0, used in the s = 0 case to rewrite the LHS
+    # *after* hsz has substituted s -> 0 in the goal.
+    cl_at_zero_raw = SPEC(ZERO, CLEAR_LOW_AT)
+    with p.strong_induction("s", "IH"):
+        p.fix("i")
+        p.assume("hni: ~(i = low_bit s)")
+        p.have(
+            "lb_s: low_bit s = COND_nat0 (s = 0) 0 "
+            "(COND_nat0 (ODD s) 0 (SUC0 (low_bit (HALF s))))"
+        ).by(LOW_BIT_AT, "s")
+        p.have(
+            "cl_s: clear_low s = COND_nat0 (s = 0) 0 "
+            "(COND_nat0 (ODD s) (double (HALF s)) "
+            "                   (double (clear_low (HALF s))))"
+        ).by(CLEAR_LOW_AT, "s")
+        with p.cases_on(EXCLUDED_MIDDLE, "s = 0"):
+            with p.case("hsz: s = 0"):
+                p.have("cl_at_zero: clear_low 0 = 0").by_rewrite_of(
+                    cl_at_zero_raw, [EQT_INTRO(REFL(ZERO)), COND_T_NAT0]
+                )
+                p.thus("bit i (clear_low s) = bit i s").by_rewrite(
+                    ["hsz", "cl_at_zero"]
+                )
+            with p.case("hsnz: ~(s = 0)"):
+                p.have("hsnz_eq: (s = 0) = F").by_thm(EQF_INTRO(p.fact("hsnz")))
+                with p.cases_on(EXCLUDED_MIDDLE, "ODD s"):
+                    with p.case("hO: ODD s"):
+                        p.have("hO_eq: ODD s = T").by_thm(EQT_INTRO(p.fact("hO")))
+                        p.have("lb_zero: low_bit s = 0").by_rewrite_of(
+                            "lb_s", ["hsnz_eq", "hO_eq", COND_F_NAT0, COND_T_NAT0]
+                        )
+                        p.have(
+                            "cl_eq: clear_low s = double (HALF s)"
+                        ).by_rewrite_of(
+                            "cl_s", ["hsnz_eq", "hO_eq", COND_F_NAT0, COND_T_NAT0]
+                        )
+                        p.have("hni_zero: ~(i = 0)").by_rewrite_of(
+                            "hni", ["lb_zero"]
+                        )
+                        with p.cases_on(EXCLUDED_MIDDLE, "i = 0"):
+                            with p.case("hiz: i = 0"):
+                                p.absurd().by_conj("hni_zero", "hiz")
+                            with p.case("hinz: ~(i = 0)"):
+                                p.have("ipred: ?j. i = SUC0 j").by(
+                                    NAT0_NEQ_ZERO_PRED, "i", "hinz"
+                                )
+                                p.choose("j", "ipred")
+                                p.thus(
+                                    "bit i (clear_low s) = bit i s"
+                                ).by_rewrite(
+                                    ["j_eq", "cl_eq", BIT_STEP_AT, HALF_DOUBLE]
+                                )
+                    with p.case("hF: ~(ODD s)"):
+                        p.have("hF_eq: ODD s = F").by_thm(EQF_INTRO(p.fact("hF")))
+                        p.have(
+                            "lb_eq: low_bit s = SUC0 (low_bit (HALF s))"
+                        ).by_rewrite_of(
+                            "lb_s", ["hsnz_eq", "hF_eq", COND_F_NAT0]
+                        )
+                        p.have(
+                            "cl_eq: clear_low s = double (clear_low (HALF s))"
+                        ).by_rewrite_of(
+                            "cl_s", ["hsnz_eq", "hF_eq", COND_F_NAT0]
+                        )
+                        with p.cases_on(EXCLUDED_MIDDLE, "i = 0"):
+                            with p.case("hiz: i = 0"):
+                                p.thus(
+                                    "bit i (clear_low s) = bit i s"
+                                ).by_rewrite(
+                                    [
+                                        "hiz",
+                                        "cl_eq",
+                                        BIT_BASE,
+                                        ODD_DOUBLE,
+                                        "hF_eq",
+                                    ]
+                                )
+                            with p.case("hinz: ~(i = 0)"):
+                                p.have("ipred: ?j. i = SUC0 j").by(
+                                    NAT0_NEQ_ZERO_PRED, "i", "hinz"
+                                )
+                                p.choose("j", "ipred")
+                                p.have(
+                                    "hni_sub: "
+                                    "~(SUC0 j = SUC0 (low_bit (HALF s)))"
+                                ).by_rewrite_of("hni", ["j_eq", "lb_eq"])
+                                with p.have(
+                                    "hnj: ~(j = low_bit (HALF s))"
+                                ).proof():
+                                    with p.suppose(
+                                        "hj_eq: j = low_bit (HALF s)"
+                                    ):
+                                        p.have(
+                                            "hsj_eq: SUC0 j = "
+                                            "SUC0 (low_bit (HALF s))"
+                                        ).by_thm(
+                                            AP_TERM(SUC0, p.fact("hj_eq"))
+                                        )
+                                        p.absurd().by_conj(
+                                            "hni_sub", "hsj_eq"
+                                        )
+                                with p.cases_on(EXCLUDED_MIDDLE, "HALF s = 0"):
+                                    with p.case("hhz: HALF s = 0"):
+                                        p.have(
+                                            "recon: s = COND_nat0 (ODD s) "
+                                            "(SUC0 (double (HALF s))) "
+                                            "(double (HALF s))"
+                                        ).by(RECONSTRUCT, "s")
+                                        p.have("s_zero: s = 0").by_rewrite_of(
+                                            "recon",
+                                            [
+                                                "hF_eq",
+                                                "hhz",
+                                                COND_F_NAT0,
+                                                DOUBLE_BASE,
+                                            ],
+                                        )
+                                        p.absurd().by_conj("hsnz", "s_zero")
+                                    with p.case("hhnz: ~(HALF s = 0)"):
+                                        p.have(
+                                            "hh_lt: nat0_lt (HALF s) s"
+                                        ).by(HALF_LT_NZ, "s", "hsnz")
+                                        p.have(
+                                            "ih_at: bit j (clear_low (HALF s)) "
+                                            "= bit j (HALF s)"
+                                        ).by(
+                                            "IH", "HALF s", "hh_lt", "j", "hnj"
+                                        )
+                                        p.thus(
+                                            "bit i (clear_low s) = bit i s"
+                                        ).by_rewrite(
+                                            [
+                                                "j_eq",
+                                                "cl_eq",
+                                                BIT_STEP_AT,
+                                                HALF_DOUBLE,
+                                                "ih_at",
+                                            ]
+                                        )
 
 
 @proof
 def INSERT_LOW_BIT_CLEAR_LOW(p):
     """|- !s. ~(s = 0) ==> s = set_bit (low_bit s) (clear_low s).
 
-    SORRY. Bit-extensionality reconstruction of ``s`` from its low_bit /
-    clear_low decomposition. Discharge plan: prove BIT_LOW_BIT
-    (``bit (low_bit s) s = T``) and BIT_CLEAR_LOW_DIFF / BIT_CLEAR_LOW_SAME
-    (the bit-pattern of ``clear_low s`` is that of ``s`` with the low
-    bit cleared), then close via BIT_EXTENSIONALITY.
+    Bit-extensionality reconstruction. ``BIT_LOW_BIT`` covers the
+    ``i = low_bit s`` slot (both sides hold T); ``BIT_CLEAR_LOW_DIFF``
+    covers the ``i != low_bit s`` slots (set_bit leaves them at
+    clear_low s = s).
     """
+    from tactics import SYM
+
     p.goal("!s. ~(s = 0) ==> s = set_bit (low_bit s) (clear_low s)")
-    p.sorry()
+    p.fix("s")
+    p.assume("hnz: ~(s = 0)")
+    with p.have(
+        "h_bits: !i. bit i s = bit i (set_bit (low_bit s) (clear_low s))"
+    ).proof():
+        p.fix("i")
+        with p.cases_on(EXCLUDED_MIDDLE, "i = low_bit s"):
+            with p.case("heq: i = low_bit s"):
+                p.have("h_bls: bit (low_bit s) s = T").by(
+                    BIT_LOW_BIT, "s", "hnz"
+                )
+                p.have("h_lhs: bit i s = T").by_rewrite_of(
+                    "h_bls", [SYM(p.fact("heq"))]
+                )
+                p.have(
+                    "h_rhs: bit i (set_bit (low_bit s) (clear_low s)) = T"
+                ).by_rewrite(["heq", BIT_AT_SET_BIT_SAME])
+                p.thus(
+                    "bit i s = bit i (set_bit (low_bit s) (clear_low s))"
+                ).by_rewrite(["h_lhs", "h_rhs"])
+            with p.case("hne: ~(i = low_bit s)"):
+                with p.have("hne_sym: ~(low_bit s = i)").proof():
+                    with p.suppose("h_eq: low_bit s = i"):
+                        p.have("h_eq_rev: i = low_bit s").by_thm(
+                            SYM(p.fact("h_eq"))
+                        )
+                        p.absurd().by_conj("hne", "h_eq_rev")
+                p.have(
+                    "h_set: bit i (set_bit (low_bit s) (clear_low s)) "
+                    "= bit i (clear_low s)"
+                ).by(
+                    BIT_AT_SET_BIT_DIFF,
+                    "low_bit s",
+                    "i",
+                    "clear_low s",
+                    "hne_sym",
+                )
+                p.have("h_cl: bit i (clear_low s) = bit i s").by(
+                    BIT_CLEAR_LOW_DIFF, "s", "i", "hne"
+                )
+                p.thus(
+                    "bit i s = bit i (set_bit (low_bit s) (clear_low s))"
+                ).by_rewrite(["h_set", "h_cl"])
+    p.thus("s = set_bit (low_bit s) (clear_low s)").by(
+        BIT_EXTENSIONALITY,
+        "s",
+        "set_bit (low_bit s) (clear_low s)",
+        "h_bits",
+    )
+
+
+# |- !y. ~(y = 0) ==> ~(double y = 0).
+#
+# y != 0 has a Peano predecessor (NAT0_NEQ_ZERO_PRED), so DOUBLE_STEP
+# unfolds ``double y`` to ``SUC0 (SUC0 (double n))`` which is non-zero by
+# AXIOM_3_0.
+@proof
+def DOUBLE_NZ(p):
+    """|- !y. ~(y = 0) ==> ~(double y = 0)."""
+    from tactics import SYM
+    from nat0 import AXIOM_3_0
+
+    p.goal("!y. ~(y = 0) ==> ~(double y = 0)")
+    p.fix("y")
+    p.assume("hy: ~(y = 0)")
+    with p.suppose("hd_zero: double y = 0"):
+        p.have("pred: ?n. y = SUC0 n").by(NAT0_NEQ_ZERO_PRED, "y", "hy")
+        p.choose("n", "pred")
+        p.have(
+            "dy_eq: double y = SUC0 (SUC0 (double n))"
+        ).by_rewrite(["n_eq", DOUBLE_STEP])
+        p.have(
+            "h_zero: SUC0 (SUC0 (double n)) = 0"
+        ).by_rewrite_of("hd_zero", [SYM(p.fact("dy_eq"))])
+        p.have(
+            "h_nz: ~(SUC0 (SUC0 (double n)) = 0)"
+        ).by(AXIOM_3_0, "SUC0 (double n)")
+        p.absurd().by_conj("h_nz", "h_zero")
+
+
+# |- !y. ~(y = 0) ==> low_bit (double y) = SUC0 (low_bit y).
+#
+# LOW_BIT_AT applied to ``double y``: the (double y = 0) branch is
+# excluded by DOUBLE_NZ, ODD_DOUBLE = F kills the second COND, and
+# HALF_DOUBLE folds ``HALF (double y)`` back to ``y``.
+@proof
+def LOW_BIT_DOUBLE_NZ(p):
+    """|- !y. ~(y = 0) ==> low_bit (double y) = SUC0 (low_bit y)."""
+    from tactics import EQF_INTRO
+
+    p.goal("!y. ~(y = 0) ==> low_bit (double y) = SUC0 (low_bit y)")
+    p.fix("y")
+    p.assume("hy: ~(y = 0)")
+    p.have("hd_nz: ~(double y = 0)").by(DOUBLE_NZ, "y", "hy")
+    p.have("hd_nz_eq: (double y = 0) = F").by_thm(EQF_INTRO(p.fact("hd_nz")))
+    p.have("hodd_dy: ODD (double y) = F").by_rewrite(
+        [ODD_DOUBLE]  # ODD (double y) -> F directly
+    )
+    p.have(
+        "lb_at: low_bit (double y) = COND_nat0 (double y = 0) 0 "
+        "(COND_nat0 (ODD (double y)) 0 (SUC0 (low_bit (HALF (double y)))))"
+    ).by(LOW_BIT_AT, "double y")
+    p.thus(
+        "low_bit (double y) = SUC0 (low_bit y)"
+    ).by_rewrite_of(
+        "lb_at",
+        [
+            "hd_nz_eq",
+            "hodd_dy",
+            COND_F_NAT0,
+            HALF_DOUBLE,
+        ],
+    )
 
 
 @proof
@@ -1870,19 +2184,195 @@ def LOW_BIT_CLEAR_LOW_PRECOND(p):
     """|- !s. ~(s = 0) ==>
               clear_low s = 0 \\/ nat0_lt (low_bit s) (low_bit (clear_low s)).
 
-    SORRY. Canonical-form invariant: the low_bit of ``clear_low s`` (if
-    nonzero) is strictly above the low_bit of ``s``. Used by HF_INDUCTION
-    to discharge the structural-step precondition.
+    Canonical-form invariant: the low_bit of ``clear_low s`` (if
+    nonzero) is strictly above the low_bit of ``s``. Used by
+    ``hf_repr.HF_INDUCTION`` to discharge the structural-step
+    precondition.
+
+    Strong induction on ``s``; case-split on ODD s.
+      * ODD s: low_bit s = 0; clear_low s = double (HALF s). If HALF s
+        = 0 the first disjunct holds (clear_low s = 0); otherwise the
+        second disjunct reduces to nat0_lt 0 (SUC0 (low_bit (HALF s))),
+        immediate by NAT0_LT_0_SUC0.
+      * ~ODD s: low_bit s = SUC0 (low_bit (HALF s)); clear_low s =
+        double (clear_low (HALF s)). HALF s != 0 (else RECONSTRUCT
+        forces s = 0), so the IH at HALF s fires. Either clear_low
+        (HALF s) = 0 (then clear_low s = double 0 = 0, first disjunct);
+        or nat0_lt (low_bit (HALF s)) (low_bit (clear_low (HALF s))),
+        and NAT0_LT_SUC0_MONO lifts to the SUC0-of-both-sides form.
     """
+    from tactics import EQT_INTRO, EQF_INTRO, REFL, SYM
+
     p.goal(
         "!s. ~(s = 0) ==> "
         "clear_low s = 0 \\/ nat0_lt (low_bit s) (low_bit (clear_low s))"
     )
-    p.sorry()
+    with p.strong_induction("s", "IH"):
+        p.assume("hsnz: ~(s = 0)")
+        p.have("hsnz_eq: (s = 0) = F").by_thm(EQF_INTRO(p.fact("hsnz")))
+        p.have(
+            "lb_s: low_bit s = COND_nat0 (s = 0) 0 "
+            "(COND_nat0 (ODD s) 0 (SUC0 (low_bit (HALF s))))"
+        ).by(LOW_BIT_AT, "s")
+        p.have(
+            "cl_s: clear_low s = COND_nat0 (s = 0) 0 "
+            "(COND_nat0 (ODD s) (double (HALF s)) "
+            "                   (double (clear_low (HALF s))))"
+        ).by(CLEAR_LOW_AT, "s")
+        with p.cases_on(EXCLUDED_MIDDLE, "ODD s"):
+            with p.case("hO: ODD s"):
+                p.have("hO_eq: ODD s = T").by_thm(EQT_INTRO(p.fact("hO")))
+                p.have("lb_zero: low_bit s = 0").by_rewrite_of(
+                    "lb_s", ["hsnz_eq", "hO_eq", COND_F_NAT0, COND_T_NAT0]
+                )
+                p.have(
+                    "cl_eq: clear_low s = double (HALF s)"
+                ).by_rewrite_of(
+                    "cl_s", ["hsnz_eq", "hO_eq", COND_F_NAT0, COND_T_NAT0]
+                )
+                with p.cases_on(EXCLUDED_MIDDLE, "HALF s = 0"):
+                    with p.case("hhz: HALF s = 0"):
+                        p.have("cl_zero: clear_low s = 0").by_rewrite_of(
+                            "cl_eq", ["hhz", DOUBLE_BASE]
+                        )
+                        p.disj("cl_zero")
+                    with p.case("hhnz: ~(HALF s = 0)"):
+                        p.have(
+                            "lb_dh: low_bit (double (HALF s)) "
+                            "= SUC0 (low_bit (HALF s))"
+                        ).by(LOW_BIT_DOUBLE_NZ, "HALF s", "hhnz")
+                        p.have(
+                            "lb_cl_eq: low_bit (clear_low s) "
+                            "= SUC0 (low_bit (HALF s))"
+                        ).by_rewrite_of("lb_dh", [SYM(p.fact("cl_eq"))])
+                        p.have(
+                            "lt_0_suc: nat0_lt 0 (SUC0 (low_bit (HALF s)))"
+                        ).by(NAT0_LT_0_SUC0, "low_bit (HALF s)")
+                        p.have(
+                            "lt_lb: nat0_lt (low_bit s) (low_bit (clear_low s))"
+                        ).by_rewrite_of(
+                            "lt_0_suc",
+                            [SYM(p.fact("lb_zero")), SYM(p.fact("lb_cl_eq"))],
+                        )
+                        p.disj("lt_lb")
+            with p.case("hF: ~(ODD s)"):
+                p.have("hF_eq: ODD s = F").by_thm(EQF_INTRO(p.fact("hF")))
+                p.have(
+                    "lb_eq: low_bit s = SUC0 (low_bit (HALF s))"
+                ).by_rewrite_of(
+                    "lb_s", ["hsnz_eq", "hF_eq", COND_F_NAT0]
+                )
+                p.have(
+                    "cl_eq: clear_low s = double (clear_low (HALF s))"
+                ).by_rewrite_of(
+                    "cl_s", ["hsnz_eq", "hF_eq", COND_F_NAT0]
+                )
+                with p.have("hh_nz: ~(HALF s = 0)").proof():
+                    with p.suppose("hh_z: HALF s = 0"):
+                        p.have(
+                            "recon: s = COND_nat0 (ODD s) "
+                            "(SUC0 (double (HALF s))) (double (HALF s))"
+                        ).by(RECONSTRUCT, "s")
+                        p.have("s_zero: s = 0").by_rewrite_of(
+                            "recon",
+                            [
+                                "hF_eq",
+                                "hh_z",
+                                COND_F_NAT0,
+                                DOUBLE_BASE,
+                            ],
+                        )
+                        p.absurd().by_conj("hsnz", "s_zero")
+                p.have("hh_lt: nat0_lt (HALF s) s").by(
+                    HALF_LT_NZ, "s", "hsnz"
+                )
+                p.have(
+                    "ih_at: clear_low (HALF s) = 0 "
+                    "\\/ nat0_lt (low_bit (HALF s)) "
+                    "            (low_bit (clear_low (HALF s)))"
+                ).by("IH", "HALF s", "hh_lt", "hh_nz")
+                with p.cases_on("ih_at"):
+                    with p.case("h_clh_zero: clear_low (HALF s) = 0"):
+                        p.have("cl_zero: clear_low s = 0").by_rewrite_of(
+                            "cl_eq", ["h_clh_zero", DOUBLE_BASE]
+                        )
+                        p.disj("cl_zero")
+                    with p.case(
+                        "h_lt_h: nat0_lt (low_bit (HALF s)) "
+                        "(low_bit (clear_low (HALF s)))"
+                    ):
+                        # Derive ~(clear_low (HALF s) = 0): otherwise
+                        # low_bit 0 = 0 collapses h_lt_h to nat0_lt _ 0,
+                        # contradicting NAT0_NOT_LT_ZERO.
+                        with p.have(
+                            "h_clh_nz: ~(clear_low (HALF s) = 0)"
+                        ).proof():
+                            with p.suppose(
+                                "h_clh_z: clear_low (HALF s) = 0"
+                            ):
+                                p.have(
+                                    "lb_at_z: low_bit 0 = COND_nat0 (0 = 0) 0 "
+                                    "(COND_nat0 (ODD 0) 0 "
+                                    "(SUC0 (low_bit (HALF 0))))"
+                                ).by(LOW_BIT_AT, "0")
+                                p.have(
+                                    "z_eq_T: (0 = 0) = T"
+                                ).by_thm(EQT_INTRO(REFL(ZERO)))
+                                p.have("lb_zero: low_bit 0 = 0").by_rewrite_of(
+                                    "lb_at_z", ["z_eq_T", COND_T_NAT0]
+                                )
+                                p.have(
+                                    "h_lt_zero: nat0_lt (low_bit (HALF s)) 0"
+                                ).by_rewrite_of(
+                                    "h_lt_h",
+                                    ["h_clh_z", "lb_zero"],
+                                )
+                                p.have(
+                                    "h_not_lt: ~(nat0_lt (low_bit (HALF s)) 0)"
+                                ).by(NAT0_NOT_LT_ZERO, "low_bit (HALF s)")
+                                p.absurd().by_conj("h_not_lt", "h_lt_zero")
+                        # SUC0-monotonicity lifts h_lt_h.
+                        p.have(
+                            "h_lt_suc: nat0_lt "
+                            "(SUC0 (low_bit (HALF s))) "
+                            "(SUC0 (low_bit (clear_low (HALF s))))"
+                        ).by(
+                            NAT0_LT_SUC0_MONO,
+                            "low_bit (HALF s)",
+                            "low_bit (clear_low (HALF s))",
+                            "h_lt_h",
+                        )
+                        # SUC0 (low_bit (clear_low (HALF s))) =
+                        #   low_bit (double (clear_low (HALF s)))
+                        #   [LOW_BIT_DOUBLE_NZ, h_clh_nz]
+                        #   = low_bit (clear_low s) [SYM cl_eq].
+                        p.have(
+                            "lb_dch: low_bit (double (clear_low (HALF s))) "
+                            "= SUC0 (low_bit (clear_low (HALF s)))"
+                        ).by(LOW_BIT_DOUBLE_NZ, "clear_low (HALF s)", "h_clh_nz")
+                        p.have(
+                            "lt_lb: nat0_lt (low_bit s) (low_bit (clear_low s))"
+                        ).by_rewrite_of(
+                            "h_lt_suc",
+                            [
+                                SYM(p.fact("lb_eq")),
+                                SYM(p.fact("lb_dch")),
+                                SYM(p.fact("cl_eq")),
+                            ],
+                        )
+                        p.disj("lt_lb")
 
 
 if __name__ == "__main__":
     from parser import pp_thm
+
+    print("Step 0 OK -- bit-level reconstruction (formerly SORRY).")
+    print("  BIT_LOW_BIT             :", pp_thm(BIT_LOW_BIT))
+    print("  BIT_CLEAR_LOW_DIFF      :", pp_thm(BIT_CLEAR_LOW_DIFF))
+    print("  INSERT_LOW_BIT_CLEAR_LOW:", pp_thm(INSERT_LOW_BIT_CLEAR_LOW))
+    print("  DOUBLE_NZ               :", pp_thm(DOUBLE_NZ))
+    print("  LOW_BIT_DOUBLE_NZ       :", pp_thm(LOW_BIT_DOUBLE_NZ))
+    print("  LOW_BIT_CLEAR_LOW_PRECOND:", pp_thm(LOW_BIT_CLEAR_LOW_PRECOND))
 
     print("Step 1 OK -- double defined.")
     print("  DOUBLE_BASE  :", pp_thm(DOUBLE_BASE))
