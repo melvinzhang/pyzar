@@ -1,58 +1,43 @@
 # ---------------------------------------------------------------------------
-# Stage 1 -- syntax of Q encoded as HF.
+# Stage 1 -- syntax of HF (Świerczkowski's grammar) encoded as nat0.
 # ---------------------------------------------------------------------------
 #
-# Q's signature: 0, S, +, *, =, plus first-order connectives and
-# quantifiers. We pick an inductive grammar:
+# Świerczkowski's signature for HF: empty set, set-insertion, membership,
+# equality, plus first-order connectives and quantifiers:
 #
-#   Term  ::=  Zero | Succ Term | Var num | Plus Term Term | Times Term Term
-#   Form  ::=  Eq Term Term | Not Form | Imp Form Form | Forall num Form
+#   Term  ::=  Empty | Var num | Insert Term Term
+#   Form  ::=  Eq Term Term | In Term Term
+#           |  Not Form | Imp Form Form | Forall num Form
 #
 # (And, Or, Exists, Iff are sugar.) Each constructor has an arity; encode
-# a node ``Constructor(arg1, ..., argk)`` as the HF set
-#
-#   { 0 |-> tag, 1 |-> arg1, ..., k |-> argk }
-#
-# i.e. an ordered tuple stored as the HF set of (index, value) pairs.
-# Tags are small naturals: Zero = 0, Succ = 1, Var = 2, Plus = 3, etc.
-#
-# Goedel numbering is then literally ``rep_hf`` from ``hf_sets.py``.
-# ``godelnum : term + form -> num`` is a one-line composition of the
-# encoding above with ``rep_hf``.
-#
-# Standard lemmas (all by structural induction or by the unique-readability
-# theorem for HF tuples):
-#
-#   |- !t1 t2. godelnum t1 = godelnum t2 ==> t1 = t2          (injectivity)
-#   |- decidable: "is this num the godelnum of a well-formed term/form?"
-#   |- substitute(x, t, F) is primitive recursive on godelnums
+# a node ``Constructor(arg1, ..., argk)`` as nested ``Pair_ord`` layers
+# with a unique tag at slot 0.
 
-r"""Syntax of Robinson's Q encoded as nat0 (Stage 1 of ``godel_first.py``).
+r"""Syntax of HF encoded as nat0 (Stage 1 of ``godel_first.py``).
 
 ------------------------------------------------------------------
-Encoding (option 2: flat pairing)
+Encoding (flat pairing)
 ------------------------------------------------------------------
 
-Q's signature: 0, S, +, *, =, plus first-order connectives and
-quantifiers. We pick an inductive grammar:
+Term/Form grammar (Świerczkowski 2003):
 
-    Term  ::=  Zero | Succ Term | Var num | Plus Term Term | Times Term Term
-    Form  ::=  Eq Term Term | Not Form | Imp Form Form | Forall num Form
+    Term  ::=  Empty | Var num | Insert Term Term
+    Form  ::=  Eq Term Term | In Term Term
+            |  Not Form | Imp Form Form | Forall num Form
 
 The encoding flattens each constructor onto ``Pair_ord`` from
 ``hf_sets.py`` (the Kuratowski ordered pair, which is itself a nat0):
 
-    Zero_t            :=  0
-    Succ_t t          :=  Pair_ord 1 t
+    Empty_t           :=  0
     Var_t  v          :=  Pair_ord 2 v
-    Plus_t  t1 t2     :=  Pair_ord 3 (Pair_ord t1 t2)
-    Times_t t1 t2     :=  Pair_ord 4 (Pair_ord t1 t2)
     Eq_f    t1 t2     :=  Pair_ord 5 (Pair_ord t1 t2)
     Not_f   F         :=  Pair_ord 6 F
     Imp_f   F1 F2     :=  Pair_ord 7 (Pair_ord F1 F2)
     Forall_f n F      :=  Pair_ord 8 (Pair_ord n F)
+    Insert_t t1 t2    :=  Pair_ord 9 (Pair_ord t1 t2)
+    In_a   t1 t2      :=  Pair_ord 10 (Pair_ord t1 t2)
 
-Tags 0-8 are distinct nat0 numerals; arity-2 constructors curry their
+Tags are distinct nat0 numerals; arity-2 constructors curry their
 two arguments through a second ``Pair_ord``. The encoding is strictly
 shallower than a "tagged tuple" HF-set encoding (one or two
 ``Pair_ord`` layers vs. a ``Pair`` of ``Pair_ord (slot, value)``
@@ -66,9 +51,9 @@ Two universal lemmas drive everything below:
         |- !a b. nat0_lt a (Pair_ord a b)
         |- !a b. nat0_lt b (Pair_ord a b).
 
-Constructor injectivity (e.g. ``Succ_t a = Succ_t b ==> a = b``)
+Constructor injectivity (e.g. ``Insert_t a b = Insert_t c d ==> a=c /\ b=d``)
 unfolds to one or two applications of PAIR_ORD_INJ; size lemmas
-(e.g. ``nat0_lt t (Succ_t t)``) are one or two applications of the
+(e.g. ``nat0_lt t1 (Insert_t t1 t2)``) are one or two applications of the
 NAT0_LT_PAIR_ORD pair, chained via ``NAT0_LT_TRANS``. Disjointness
 between distinct constructors follows from PAIR_ORD_INJ at slot 0
 and tag-numeral inequalities (``~(SUC0 (SUC0 0) = SUC0 0)`` etc.).
@@ -158,19 +143,9 @@ _phi2_n0 = Var("phi2", nat0_ty)
 # Term constructors.
 #
 # Each constructor wraps its arguments in one or two ``Pair_ord`` layers
-# with a unique tag at slot 0. Tags are nat0 numerals 0..8 written as
-# SUC0 chains so they normalise to closed numerical values.
+# with a unique tag at slot 0. Tags are nat0 numerals written as SUC0
+# chains so they normalise to closed numerical values.
 # ---------------------------------------------------------------------------
-
-ZERO_T_DEF = define("Zero_t", parse_type("nat0"), "0")
-Zero_t = mk_const("Zero_t", [])
-
-SUCC_T_DEF = define(
-    "Succ_t",
-    parse_type("nat0 -> nat0"),
-    "\\t:nat0. Pair_ord (SUC0 0) t",
-)
-Succ_t = mk_const("Succ_t", [])
 
 VAR_T_DEF = define(
     "Var_t",
@@ -178,20 +153,6 @@ VAR_T_DEF = define(
     "\\v:nat0. Pair_ord (SUC0 (SUC0 0)) v",
 )
 Var_t = mk_const("Var_t", [])
-
-PLUS_T_DEF = define(
-    "Plus_t",
-    parse_type("nat0 -> nat0 -> nat0"),
-    "\\t1:nat0. \\t2:nat0. Pair_ord (SUC0 (SUC0 (SUC0 0))) (Pair_ord t1 t2)",
-)
-Plus_t = mk_const("Plus_t", [])
-
-TIMES_T_DEF = define(
-    "Times_t",
-    parse_type("nat0 -> nat0 -> nat0"),
-    "\\t1:nat0. \\t2:nat0. Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord t1 t2)",
-)
-Times_t = mk_const("Times_t", [])
 
 
 # ---------------------------------------------------------------------------
@@ -233,17 +194,16 @@ Forall_f = mk_const("Forall_f", [])
 
 
 # ---------------------------------------------------------------------------
-# Q + HF primitives -- Insert_t, In_a (fresh tags 9, 10); Empty_t aliases
-# Zero_t. See q_proof.py's Q + HF design-notes block (after the Q8-Q12
-# axiom encodings) for the rationale. The structural recognisers below
+# HF primitives -- Empty_t (nullary base, encoded as 0), Insert_t (set
+# adjunction), In_a (membership). The structural recognisers below
 # (is_term, is_form, free_in, substitute) all carry matching disjuncts
-# and AT-equations for the new constructors:
-#   * is_term recognises Insert_t (binary recursive).
+# and AT-equations for these constructors:
+#   * is_term recognises Empty_t (atomic) and Insert_t (binary recursive).
 #   * is_form recognises In_a (atomic; both slots checked via is_term).
-#   * free_in / substitute have AT-equations for both.
+#   * free_in / substitute have AT-equations for all of them.
 # ---------------------------------------------------------------------------
 
-EMPTY_T_DEF = define("Empty_t", parse_type("nat0"), "Zero_t")
+EMPTY_T_DEF = define("Empty_t", parse_type("nat0"), "0")
 Empty_t = mk_const("Empty_t", [])
 
 INSERT_T_DEF = define(
@@ -294,10 +254,7 @@ def _at2(def_th, x, y):
     return GENL([x, y], th_xy)
 
 
-SUCC_T_AT = _at1(SUCC_T_DEF, _t_n0)
 VAR_T_AT = _at1(VAR_T_DEF, _v_n0)
-PLUS_T_AT = _at2(PLUS_T_DEF, _t1_n0, _t2_n0)
-TIMES_T_AT = _at2(TIMES_T_DEF, _t1_n0, _t2_n0)
 EQ_F_AT = _at2(EQ_F_DEF, _t1_n0, _t2_n0)
 NOT_F_AT = _at1(NOT_F_DEF, _phi_n0)
 IMP_F_AT = _at2(IMP_F_DEF, _phi1_n0, _phi2_n0)
@@ -358,20 +315,6 @@ def GODELNUM_INJ(p):
 # Helper: |- nat0_lt arg (Pair_ord tag arg) for a fixed tag.
 # Caller passes a SPECL-instantiated NAT0_LT_PAIR_ORD_R as ``th``.
 # (The proofs below just inline the SPECL.)
-
-
-@proof
-def NAT0_LT_SUCC_T(p):
-    """|- !t. nat0_lt t (Succ_t t)."""
-    from tactics import SYM, SPEC
-
-    p.goal("!t. nat0_lt t (Succ_t t)")
-    p.fix("t")
-    succ_at_t = SPEC(p._parse("t"), SUCC_T_AT)
-    # nat0_lt t (Pair_ord (SUC0 0) t).
-    p.have("h: nat0_lt t (Pair_ord (SUC0 0) t)").by(NAT0_LT_PAIR_ORD_R, "SUC0 0", "t")
-    # Fold to Succ_t t.
-    p.thus("nat0_lt t (Succ_t t)").by_rewrite_of("h", [SYM(succ_at_t)])
 
 
 @proof
@@ -485,25 +428,11 @@ def _proof_lt_binary_right(thm_name, var_l, var_r, ctor_name, ctor_at, tag_str):
 
 
 # Tag literals for each binary constructor.
-_PLUS_T_TAG = "SUC0 (SUC0 (SUC0 0))"
-_TIMES_T_TAG = "SUC0 (SUC0 (SUC0 (SUC0 0)))"
 _EQ_F_TAG = "SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))"
 _IMP_F_TAG = "SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))"
 _FORALL_F_TAG = "SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))))"
 
 
-NAT0_LT_PLUS_T_L = _proof_lt_binary_left(
-    "NAT0_LT_PLUS_T_L", "t1", "t2", "Plus_t", PLUS_T_AT, _PLUS_T_TAG
-)
-NAT0_LT_PLUS_T_R = _proof_lt_binary_right(
-    "NAT0_LT_PLUS_T_R", "t1", "t2", "Plus_t", PLUS_T_AT, _PLUS_T_TAG
-)
-NAT0_LT_TIMES_T_L = _proof_lt_binary_left(
-    "NAT0_LT_TIMES_T_L", "t1", "t2", "Times_t", TIMES_T_AT, _TIMES_T_TAG
-)
-NAT0_LT_TIMES_T_R = _proof_lt_binary_right(
-    "NAT0_LT_TIMES_T_R", "t1", "t2", "Times_t", TIMES_T_AT, _TIMES_T_TAG
-)
 NAT0_LT_EQ_F_L = _proof_lt_binary_left(
     "NAT0_LT_EQ_F_L", "t1", "t2", "Eq_f", EQ_F_AT, _EQ_F_TAG
 )
@@ -548,25 +477,6 @@ NAT0_LT_IN_A_R = _proof_lt_binary_right(
 # Binary: C a b = Pair_ord tag (Pair_ord a b), so applying PAIR_ORD_INJ
 #         twice yields a1 = a2 /\ b1 = b2.
 # ---------------------------------------------------------------------------
-
-
-@proof
-def SUCC_T_INJ(p):
-    """|- !a b. Succ_t a = Succ_t b ==> a = b."""
-    from tactics import SPEC, CONJUNCT2
-
-    p.goal("!a b. Succ_t a = Succ_t b ==> a = b")
-    p.fix("a b")
-    p.assume("h: Succ_t a = Succ_t b")
-    succ_a = SPEC(p._parse("a"), SUCC_T_AT)
-    succ_b = SPEC(p._parse("b"), SUCC_T_AT)
-    p.have("h_po: Pair_ord (SUC0 0) a = Pair_ord (SUC0 0) b").by_rewrite_of(
-        "h", [succ_a, succ_b]
-    )
-    p.have("h_inj: SUC0 0 = SUC0 0 /\\ a = b").by(
-        PAIR_ORD_INJ, "SUC0 0", "a", "SUC0 0", "b", "h_po"
-    )
-    p.thus("a = b").by_thm(CONJUNCT2(p.fact("h_inj")))
 
 
 @proof
@@ -654,12 +564,6 @@ def _proof_binary_inj(
     return _THM
 
 
-PLUS_T_INJ = _proof_binary_inj(
-    "PLUS_T_INJ", "a1", "a2", "b1", "b2", "Plus_t", PLUS_T_AT, _PLUS_T_TAG
-)
-TIMES_T_INJ = _proof_binary_inj(
-    "TIMES_T_INJ", "a1", "a2", "b1", "b2", "Times_t", TIMES_T_AT, _TIMES_T_TAG
-)
 EQ_F_INJ = _proof_binary_inj(
     "EQ_F_INJ", "a1", "a2", "b1", "b2", "Eq_f", EQ_F_AT, _EQ_F_TAG
 )
@@ -688,11 +592,11 @@ IN_A_INJ = _proof_binary_inj(
 # Constructor disjointness.
 #
 # Two cases:
-#   (i)  Zero_t (= 0) vs any C(args). Each non-zero constructor is
+#   (i)  Empty_t (= 0) vs any C(args). Each non-empty constructor is
 #        ``Pair_ord tag (...)``, and ``In (Singleton tag) (Pair_ord
 #        tag (...))`` holds (left disjunct of IN_PAIR_ORD); membership
 #        forbids ``In _ 0`` (IN_ZERO), so the code is non-zero.
-#   (ii) Two non-zero constructors with distinct tags. Apply
+#   (ii) Two non-empty constructors with distinct tags. Apply
 #        PAIR_ORD_INJ at slot 0 and contradict via tag-numeral
 #        inequality.
 #
@@ -786,8 +690,8 @@ def _prove_tag_neq(thm_name, m, n):
     return _THM
 
 
-# Tag inequalities for pairs (m, n) with m < n in {0..8}. We build all
-# 36 once; each is ~5-10 lines through _prove_tag_neq's loop.
+# Tag inequalities for pairs (m, n) with m < n in {0..10}. We build them
+# all once; each is ~5-10 lines through _prove_tag_neq's loop.
 
 _TAG_NEQS = {}
 for _m in range(11):
@@ -796,22 +700,23 @@ for _m in range(11):
 
 
 # ---------------------------------------------------------------------------
-# "Constructor C ≠ 0" disjointness lemmas.  Each non-zero constructor's
-# code is a Pair_ord, and Pair_ord _ _ ≠ 0 by _NEQ_PAIR_ORD_ZERO.
+# "Constructor C ≠ Empty_t" disjointness lemmas. Each non-empty
+# constructor's code is a Pair_ord, and Pair_ord _ _ ≠ 0 by
+# _NEQ_PAIR_ORD_ZERO.
 # ---------------------------------------------------------------------------
 
 
-def _proof_ctor_neq_zero_unary(thm_name, var, ctor_name, ctor_at, tag_str):
+def _proof_ctor_neq_empty_unary(thm_name, var, ctor_name, ctor_at, tag_str):
     @proof
     def _THM(p):
         from tactics import SPEC
 
-        p.goal(f"!{var}. ~({ctor_name} {var} = Zero_t)")
+        p.goal(f"!{var}. ~({ctor_name} {var} = Empty_t)")
         p.fix(var)
         ctor_inst = SPEC(p._parse(var), ctor_at)
-        with p.suppose(f"h: {ctor_name} {var} = Zero_t"):
+        with p.suppose(f"h: {ctor_name} {var} = Empty_t"):
             p.have(f"h_po: Pair_ord ({tag_str}) {var} = 0").by_rewrite_of(
-                "h", [ctor_inst, ZERO_T_DEF]
+                "h", [ctor_inst, EMPTY_T_DEF]
             )
             p.have(f"h_neg: ~(Pair_ord ({tag_str}) {var} = 0)").by(
                 _NEQ_PAIR_ORD_ZERO, f"({tag_str})", var
@@ -821,18 +726,18 @@ def _proof_ctor_neq_zero_unary(thm_name, var, ctor_name, ctor_at, tag_str):
     return _THM
 
 
-def _proof_ctor_neq_zero_binary(thm_name, var_l, var_r, ctor_name, ctor_at, tag_str):
+def _proof_ctor_neq_empty_binary(thm_name, var_l, var_r, ctor_name, ctor_at, tag_str):
     @proof
     def _THM(p):
         from tactics import SPECL
 
-        p.goal(f"!{var_l} {var_r}. ~({ctor_name} {var_l} {var_r} = Zero_t)")
+        p.goal(f"!{var_l} {var_r}. ~({ctor_name} {var_l} {var_r} = Empty_t)")
         p.fix(f"{var_l} {var_r}")
         ctor_inst = SPECL([p._parse(var_l), p._parse(var_r)], ctor_at)
-        with p.suppose(f"h: {ctor_name} {var_l} {var_r} = Zero_t"):
+        with p.suppose(f"h: {ctor_name} {var_l} {var_r} = Empty_t"):
             p.have(
                 f"h_po: Pair_ord ({tag_str}) (Pair_ord {var_l} {var_r}) = 0"
-            ).by_rewrite_of("h", [ctor_inst, ZERO_T_DEF])
+            ).by_rewrite_of("h", [ctor_inst, EMPTY_T_DEF])
             p.have(f"h_neg: ~(Pair_ord ({tag_str}) (Pair_ord {var_l} {var_r}) = 0)").by(
                 _NEQ_PAIR_ORD_ZERO,
                 f"({tag_str})",
@@ -843,40 +748,30 @@ def _proof_ctor_neq_zero_binary(thm_name, var_l, var_r, ctor_name, ctor_at, tag_
     return _THM
 
 
-_SUCC_T_TAG = "SUC0 0"
 _VAR_T_TAG = "SUC0 (SUC0 0)"
 _NOT_F_TAG = "SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))"
 
 
-SUCC_T_NEQ_ZERO = _proof_ctor_neq_zero_unary(
-    "SUCC_T_NEQ_ZERO", "t", "Succ_t", SUCC_T_AT, _SUCC_T_TAG
+VAR_T_NEQ_EMPTY = _proof_ctor_neq_empty_unary(
+    "VAR_T_NEQ_EMPTY", "v", "Var_t", VAR_T_AT, _VAR_T_TAG
 )
-VAR_T_NEQ_ZERO = _proof_ctor_neq_zero_unary(
-    "VAR_T_NEQ_ZERO", "v", "Var_t", VAR_T_AT, _VAR_T_TAG
+NOT_F_NEQ_EMPTY = _proof_ctor_neq_empty_unary(
+    "NOT_F_NEQ_EMPTY", "phi", "Not_f", NOT_F_AT, _NOT_F_TAG
 )
-NOT_F_NEQ_ZERO = _proof_ctor_neq_zero_unary(
-    "NOT_F_NEQ_ZERO", "phi", "Not_f", NOT_F_AT, _NOT_F_TAG
+EQ_F_NEQ_EMPTY = _proof_ctor_neq_empty_binary(
+    "EQ_F_NEQ_EMPTY", "t1", "t2", "Eq_f", EQ_F_AT, _EQ_F_TAG
 )
-PLUS_T_NEQ_ZERO = _proof_ctor_neq_zero_binary(
-    "PLUS_T_NEQ_ZERO", "t1", "t2", "Plus_t", PLUS_T_AT, _PLUS_T_TAG
+IMP_F_NEQ_EMPTY = _proof_ctor_neq_empty_binary(
+    "IMP_F_NEQ_EMPTY", "phi1", "phi2", "Imp_f", IMP_F_AT, _IMP_F_TAG
 )
-TIMES_T_NEQ_ZERO = _proof_ctor_neq_zero_binary(
-    "TIMES_T_NEQ_ZERO", "t1", "t2", "Times_t", TIMES_T_AT, _TIMES_T_TAG
+FORALL_F_NEQ_EMPTY = _proof_ctor_neq_empty_binary(
+    "FORALL_F_NEQ_EMPTY", "n", "phi", "Forall_f", FORALL_F_AT, _FORALL_F_TAG
 )
-EQ_F_NEQ_ZERO = _proof_ctor_neq_zero_binary(
-    "EQ_F_NEQ_ZERO", "t1", "t2", "Eq_f", EQ_F_AT, _EQ_F_TAG
+INSERT_T_NEQ_EMPTY = _proof_ctor_neq_empty_binary(
+    "INSERT_T_NEQ_EMPTY", "t1", "t2", "Insert_t", INSERT_T_AT, _INSERT_T_TAG
 )
-IMP_F_NEQ_ZERO = _proof_ctor_neq_zero_binary(
-    "IMP_F_NEQ_ZERO", "phi1", "phi2", "Imp_f", IMP_F_AT, _IMP_F_TAG
-)
-FORALL_F_NEQ_ZERO = _proof_ctor_neq_zero_binary(
-    "FORALL_F_NEQ_ZERO", "n", "phi", "Forall_f", FORALL_F_AT, _FORALL_F_TAG
-)
-INSERT_T_NEQ_ZERO = _proof_ctor_neq_zero_binary(
-    "INSERT_T_NEQ_ZERO", "t1", "t2", "Insert_t", INSERT_T_AT, _INSERT_T_TAG
-)
-IN_A_NEQ_ZERO = _proof_ctor_neq_zero_binary(
-    "IN_A_NEQ_ZERO", "t1", "t2", "In_a", IN_A_AT, _IN_A_TAG
+IN_A_NEQ_EMPTY = _proof_ctor_neq_empty_binary(
+    "IN_A_NEQ_EMPTY", "t1", "t2", "In_a", IN_A_AT, _IN_A_TAG
 )
 
 
@@ -896,10 +791,7 @@ def _ctor_decl(ctor_name, ctor_at, tag_idx, vars_, tag_str):
 
 
 _CTORS = {
-    "Succ_t": _ctor_decl("Succ_t", SUCC_T_AT, 1, ["t"], _SUCC_T_TAG),
     "Var_t": _ctor_decl("Var_t", VAR_T_AT, 2, ["v"], _VAR_T_TAG),
-    "Plus_t": _ctor_decl("Plus_t", PLUS_T_AT, 3, ["t1", "t2"], _PLUS_T_TAG),
-    "Times_t": _ctor_decl("Times_t", TIMES_T_AT, 4, ["t1", "t2"], _TIMES_T_TAG),
     "Eq_f": _ctor_decl("Eq_f", EQ_F_AT, 5, ["t1", "t2"], _EQ_F_TAG),
     "Not_f": _ctor_decl("Not_f", NOT_F_AT, 6, ["phi"], _NOT_F_TAG),
     "Imp_f": _ctor_decl("Imp_f", IMP_F_AT, 7, ["phi1", "phi2"], _IMP_F_TAG),
@@ -979,10 +871,7 @@ def _proof_ctor_disjoint(thm_name, ctor1_name, ctor2_name):
 # ``CTOR1_NEQ_CTOR2`` for each ordered pair (lexicographic by tag).
 
 _CTOR_NAMES = [
-    "Succ_t",
     "Var_t",
-    "Plus_t",
-    "Times_t",
     "Eq_f",
     "Not_f",
     "Imp_f",
@@ -1650,7 +1539,7 @@ def _select_collapse_eq(K_t, r_var):
 # with REC of shape ``|- !n. F n = body[F, n]``, where each body disjunct
 # has one of the q-syntax shapes:
 #
-#   (n = K)                                  -- nullary base (e.g. Zero_t)
+#   (n = K)                                  -- nullary base (e.g. Empty_t)
 #   (?x. n = C x /\ F x)                     -- unary recursive
 #   (?x. n = C x)                            -- unary non-recursive (Var_t)
 #   (?a b. n = C a b /\ F a /\ F b)          -- binary recursive
@@ -1667,25 +1556,19 @@ def _select_collapse_eq(K_t, r_var):
 # ---------------------------------------------------------------------------
 
 
-# Lookup tables: NEQ_ZERO and INJ lemmas indexed by constructor name.
-_CTOR_NEQ_ZERO = {
-    "Succ_t": SUCC_T_NEQ_ZERO,
-    "Var_t": VAR_T_NEQ_ZERO,
-    "Plus_t": PLUS_T_NEQ_ZERO,
-    "Times_t": TIMES_T_NEQ_ZERO,
-    "Eq_f": EQ_F_NEQ_ZERO,
-    "Not_f": NOT_F_NEQ_ZERO,
-    "Imp_f": IMP_F_NEQ_ZERO,
-    "Forall_f": FORALL_F_NEQ_ZERO,
-    "Insert_t": INSERT_T_NEQ_ZERO,
-    "In_a": IN_A_NEQ_ZERO,
+# Lookup tables: NEQ_EMPTY and INJ lemmas indexed by constructor name.
+_CTOR_NEQ_EMPTY = {
+    "Var_t": VAR_T_NEQ_EMPTY,
+    "Eq_f": EQ_F_NEQ_EMPTY,
+    "Not_f": NOT_F_NEQ_EMPTY,
+    "Imp_f": IMP_F_NEQ_EMPTY,
+    "Forall_f": FORALL_F_NEQ_EMPTY,
+    "Insert_t": INSERT_T_NEQ_EMPTY,
+    "In_a": IN_A_NEQ_EMPTY,
 }
 _CTOR_INJ = {
-    "Succ_t": SUCC_T_INJ,
     "Var_t": VAR_T_INJ,
     "Not_f": NOT_F_INJ,
-    "Plus_t": PLUS_T_INJ,
-    "Times_t": TIMES_T_INJ,
     "Eq_f": EQ_F_INJ,
     "Imp_f": IMP_F_INJ,
     "Forall_f": FORALL_F_INJ,
@@ -1710,7 +1593,7 @@ def _disjunct_ctor_name(disj):
     """Identify the head constructor named in a body disjunct.
 
     Recognises:
-      - ``n = Zero_t`` -> "Zero_t"
+      - ``n = Empty_t`` -> "Empty_t"
       - ``?args. n = C args (/\\ ...)`` -> name of C (looked up in _CTORS).
     Returns the ctor name, plus the tail of the dest_exists chain (the
     inner conjunction body or the bare equation).
@@ -1869,12 +1752,12 @@ def _disjunct_eq_match_binary(disj, target_app, target_args, inj_lemma):
 
 def _ctor_neq_lemma(ctor_a_name, ctor_b_name):
     """Look up ``|- !args1 args2. ~(ctor_a args1 = ctor_b args2)`` from
-    the precomputed registry (``CTOR_DISJOINTNESS`` + ``_NEQ_ZERO`` family)."""
-    if ctor_a_name == "Zero_t":
-        # ~(Zero_t = ctor_b args). Symmetric to ctor_b's NEQ_ZERO.
-        return ("rev", _CTOR_NEQ_ZERO[ctor_b_name])
-    if ctor_b_name == "Zero_t":
-        return ("fwd", _CTOR_NEQ_ZERO[ctor_a_name])
+    the precomputed registry (``CTOR_DISJOINTNESS`` + ``_NEQ_EMPTY`` family)."""
+    if ctor_a_name == "Empty_t":
+        # ~(Empty_t = ctor_b args). Symmetric to ctor_b's NEQ_EMPTY.
+        return ("rev", _CTOR_NEQ_EMPTY[ctor_b_name])
+    if ctor_b_name == "Empty_t":
+        return ("fwd", _CTOR_NEQ_EMPTY[ctor_a_name])
     if (ctor_a_name, ctor_b_name) in CTOR_DISJOINTNESS:
         return ("fwd", CTOR_DISJOINTNESS[(ctor_a_name, ctor_b_name)])
     if (ctor_b_name, ctor_a_name) in CTOR_DISJOINTNESS:
@@ -2048,20 +1931,20 @@ def derive_rec_eq_select(REC, target_ctor_name, var_names, extra_arg_vars):
     where ``R`` is the matching disjunct's r-value (with witnesses
     instantiated to the constructor args).
 
-    Supports nullary constructors via ``target_ctor_name = "Zero_t"`` and
+    Supports nullary constructors via ``target_ctor_name = "Empty_t"`` and
     ``var_names = []``; the matching disjunct is then a non-existential
-    conjunction (``Zero_t = Zero_t /\\ rest``). Conditional matched rests
+    conjunction (``Empty_t = Empty_t /\\ rest``). Conditional matched rests
     (``(cond /\\ r = T) \\/ (~cond /\\ r = E)``, used by ``Var_t`` and
     ``Forall_f`` in substitute) need ``derive_rec_eq_select_cond``.
     """
-    if target_ctor_name == "Zero_t":
+    if target_ctor_name == "Empty_t":
         if var_names:
             raise ValueError(
-                "derive_rec_eq_select: Zero_t is nullary; var_names must be empty"
+                "derive_rec_eq_select: Empty_t is nullary; var_names must be empty"
             )
         target_arity = 0
         target_args = []
-        target_app = Zero_t
+        target_app = Empty_t
     else:
         if target_ctor_name not in _CTORS:
             raise ValueError(f"derive_rec_eq_select: unknown ctor {target_ctor_name!r}")
@@ -2309,15 +2192,13 @@ def derive_rec_eq_select_cond(REC, target_ctor_name, var_names, extra_arg_vars):
 
 
 # ---------------------------------------------------------------------------
-# Stage 1 (b): is_term -- "encodes a Q term" predicate.
+# Stage 1 (b): is_term -- "encodes an HF term" predicate.
 #
 # Body shape:
 #   F is_term n  :=
-#        n = Zero_t
-#     \/ ?x. n = Succ_t x /\ is_term x
+#        n = Empty_t
 #     \/ ?x. n = Var_t x
-#     \/ ?a b. n = Plus_t a b /\ is_term a /\ is_term b
-#     \/ ?a b. n = Times_t a b /\ is_term a /\ is_term b
+#     \/ ?a b. n = Insert_t a b /\ is_term a /\ is_term b
 #
 # The body is registered as constant ``_is_term_F`` so the MONO theorem
 # can speak about it by name. After ``define_wf_lt`` returns the raw
@@ -2340,11 +2221,8 @@ _IS_TERM_F_DEF = define(
     "_is_term_F",
     _F_pred_ty,
     "\\f:nat0->bool. \\n:nat0. "
-    "n = Zero_t \\/ "
-    "(?x. n = Succ_t x /\\ f x) \\/ "
+    "n = Empty_t \\/ "
     "(?x. n = Var_t x) \\/ "
-    "(?a b. n = Plus_t a b /\\ f a /\\ f b) \\/ "
-    "(?a b. n = Times_t a b /\\ f a /\\ f b) \\/ "
     "(?a b. n = Insert_t a b /\\ f a /\\ f b)",
 )
 _IS_TERM_F = mk_const("_is_term_F", [])
@@ -2362,17 +2240,12 @@ def IS_TERM_MONO(p):
     p.assume("h: !k. nat0_lt k n ==> f k = g k")
 
     h_th = p.fact("h")
-    eq_zero = REFL(p._parse("n = Zero_t"))
-    eq_succ = mono_iff_unary_step(Succ_t, NAT0_LT_SUCC_T, h_th)
+    eq_empty = REFL(p._parse("n = Empty_t"))
     eq_var = REFL(p._parse("?x. n = Var_t x"))
-    eq_plus = mono_iff_binary_step(Plus_t, NAT0_LT_PLUS_T_L, NAT0_LT_PLUS_T_R, h_th)
-    eq_times = mono_iff_binary_step(Times_t, NAT0_LT_TIMES_T_L, NAT0_LT_TIMES_T_R, h_th)
     eq_insert = mono_iff_binary_step(
         Insert_t, NAT0_LT_INSERT_T_L, NAT0_LT_INSERT_T_R, h_th
     )
-    body_eq = or_chain_collapse(
-        [eq_zero, eq_succ, eq_var, eq_plus, eq_times, eq_insert]
-    )
+    body_eq = or_chain_collapse([eq_empty, eq_var, eq_insert])
 
     p.thus("_is_term_F f n = _is_term_F g n").by_unfold(body_eq, _IS_TERM_F_DEF)
 
@@ -2400,10 +2273,7 @@ IS_TERM_REC = _unfold_rec_via_F_def(_IS_TERM_REC_RAW, _IS_TERM_F_DEF)
 
 
 # Constructor recursion equations.
-IS_TERM_AT_SUCC = derive_rec_eq(IS_TERM_REC, "Succ_t", ["t"])
 IS_TERM_AT_VAR = derive_rec_eq(IS_TERM_REC, "Var_t", ["v"])
-IS_TERM_AT_PLUS = derive_rec_eq(IS_TERM_REC, "Plus_t", ["t1", "t2"])
-IS_TERM_AT_TIMES = derive_rec_eq(IS_TERM_REC, "Times_t", ["t1", "t2"])
 IS_TERM_AT_INSERT = derive_rec_eq(IS_TERM_REC, "Insert_t", ["t1", "t2"])
 
 
@@ -2477,17 +2347,16 @@ IS_FORM_AT_IN = derive_rec_eq(IS_FORM_REC, "In_a", ["t1", "t2"])
 # ---------------------------------------------------------------------------
 # Stage 1 (c): free_in -- "variable index v occurs free in encoded n".
 #
-# Body shape (eight disjuncts; Zero_t falls through to ``F`` because no
-# disjunct head matches it):
+# Body shape (Empty_t falls through to ``F`` because no disjunct head
+# matches it):
 #   F free_in n  :=  \v.
-#        ?x. n = Succ_t x /\ free_in x v
-#     \/ ?x. n = Var_t x /\ v = x
-#     \/ ?a b. n = Plus_t a b /\ (free_in a v \/ free_in b v)
-#     \/ ?a b. n = Times_t a b /\ (free_in a v \/ free_in b v)
+#        ?x. n = Var_t x /\ v = x
 #     \/ ?a b. n = Eq_f a b /\ (free_in a v \/ free_in b v)
 #     \/ ?x. n = Not_f x /\ free_in x v
 #     \/ ?a b. n = Imp_f a b /\ (free_in a v \/ free_in b v)
 #     \/ ?a b. n = Forall_f a b /\ ~(v = a) /\ free_in b v
+#     \/ ?a b. n = Insert_t a b /\ (free_in a v \/ free_in b v)
+#     \/ ?a b. n = In_a a b /\ (free_in a v \/ free_in b v)
 #
 # free_in : nat0 -> (nat0 -> bool); the recursion target type is
 # ``A = nat0 -> bool`` so MONO is a function-equality. We prove the body
@@ -2507,10 +2376,7 @@ _FREE_IN_F_DEF = define(
     "_free_in_F",
     _F_pred2_ty,
     "\\f:nat0->nat0->bool. \\n:nat0. \\v:nat0. "
-    "(?x. n = Succ_t x /\\ f x v) \\/ "
     "(?x. n = Var_t x /\\ v = x) \\/ "
-    "(?a b. n = Plus_t a b /\\ (f a v \\/ f b v)) \\/ "
-    "(?a b. n = Times_t a b /\\ (f a v \\/ f b v)) \\/ "
     "(?a b. n = Eq_f a b /\\ (f a v \\/ f b v)) \\/ "
     "(?x. n = Not_f x /\\ f x v) \\/ "
     "(?a b. n = Imp_f a b /\\ (f a v \\/ f b v)) \\/ "
@@ -2539,14 +2405,7 @@ def FREE_IN_MONO(p):
 
     h_th = p.fact("h")
 
-    eq_succ = mono_iff_unary_pw_step(Succ_t, NAT0_LT_SUCC_T, h_th, _v_n0)
     eq_var = REFL(p._parse("?x. n = Var_t x /\\ v = x"))
-    eq_plus = mono_iff_binary_disj_pw_step(
-        Plus_t, NAT0_LT_PLUS_T_L, NAT0_LT_PLUS_T_R, h_th, _v_n0
-    )
-    eq_times = mono_iff_binary_disj_pw_step(
-        Times_t, NAT0_LT_TIMES_T_L, NAT0_LT_TIMES_T_R, h_th, _v_n0
-    )
     eq_eq = mono_iff_binary_disj_pw_step(
         Eq_f, NAT0_LT_EQ_F_L, NAT0_LT_EQ_F_R, h_th, _v_n0
     )
@@ -2563,10 +2422,7 @@ def FREE_IN_MONO(p):
     )
     body_eq = or_chain_collapse(
         [
-            eq_succ,
             eq_var,
-            eq_plus,
-            eq_times,
             eq_eq,
             eq_not,
             eq_imp,
@@ -2593,10 +2449,7 @@ FREE_IN_REC = _unfold_rec_via_F_def(_FREE_IN_REC_RAW, _FREE_IN_F_DEF)
 
 
 # Constructor recursion equations (pointwise).
-FREE_IN_AT_SUCC = derive_rec_eq_pw(FREE_IN_REC, "Succ_t", ["t"])
 FREE_IN_AT_VAR = derive_rec_eq_pw(FREE_IN_REC, "Var_t", ["w"])
-FREE_IN_AT_PLUS = derive_rec_eq_pw(FREE_IN_REC, "Plus_t", ["t1", "t2"])
-FREE_IN_AT_TIMES = derive_rec_eq_pw(FREE_IN_REC, "Times_t", ["t1", "t2"])
 FREE_IN_AT_EQ = derive_rec_eq_pw(FREE_IN_REC, "Eq_f", ["t1", "t2"])
 FREE_IN_AT_NOT = derive_rec_eq_pw(FREE_IN_REC, "Not_f", ["phi"])
 FREE_IN_AT_IMP = derive_rec_eq_pw(FREE_IN_REC, "Imp_f", ["phi1", "phi2"])
@@ -2618,15 +2471,10 @@ FREE_IN_AT_IN = derive_rec_eq_pw(FREE_IN_REC, "In_a", ["t1", "t2"])
 # Body shape:
 #   F substitute n  :=  \new_t v.
 #       @r.
-#            (n = Zero_t /\ r = Zero_t)
-#         \/ (?x. n = Succ_t x /\ r = Succ_t (sub x new_t v))
+#            (n = Empty_t /\ r = Empty_t)
 #         \/ (?x. n = Var_t x
 #                 /\ ((v = x  /\ r = new_t)
 #                  \/ (~(v = x) /\ r = Var_t x)))
-#         \/ (?a b. n = Plus_t a b
-#                 /\ r = Plus_t (sub a new_t v) (sub b new_t v))
-#         \/ (?a b. n = Times_t a b
-#                 /\ r = Times_t (sub a new_t v) (sub b new_t v))
 #         \/ (?a b. n = Eq_f a b
 #                 /\ r = Eq_f (sub a new_t v) (sub b new_t v))
 #         \/ (?x. n = Not_f x /\ r = Not_f (sub x new_t v))
@@ -2635,14 +2483,18 @@ FREE_IN_AT_IN = derive_rec_eq_pw(FREE_IN_REC, "In_a", ["t1", "t2"])
 #         \/ (?a b. n = Forall_f a b
 #                 /\ ((v = a   /\ r = Forall_f a b)
 #                  \/ (~(v = a) /\ r = Forall_f a (sub b new_t v))))
+#         \/ (?a b. n = Insert_t a b
+#                 /\ r = Insert_t (sub a new_t v) (sub b new_t v))
+#         \/ (?a b. n = In_a a b
+#                 /\ r = In_a (sub a new_t v) (sub b new_t v))
 #   where ``sub k new_t v`` is shorthand for ``f k new_t v``.
 #
 # A : ``nat0 -> nat0 -> nat0`` (curry new_t and v under the recursion target).
 #
 # Output:
 #   * SUBSTITUTE_MONO, SUBSTITUTE_DEF, SUBSTITUTE_REC.
-#   * Seven non-conditional rec equations (Zero_t, Succ_t, Plus_t,
-#     Times_t, Eq_f, Not_f, Imp_f) via ``derive_rec_eq_select``.
+#   * Seven non-conditional rec equations (Empty_t, Eq_f, Not_f, Imp_f,
+#     Insert_t, In_a) via ``derive_rec_eq_select``.
 #   * Four conditional rec equations for Var_t and Forall_f via
 #     ``derive_rec_eq_select_cond`` (each constructor yields a HIT
 #     branch ``cond ==> rhs = then_K`` and a MISS branch
@@ -2663,12 +2515,9 @@ _SUBSTITUTE_F_DEF = define(
     "_substitute_F",
     _F_pred3_ty,
     "\\f:nat0->nat0->nat0->nat0. \\n:nat0. \\new_t:nat0. \\v:nat0. @r:nat0. "
-    "(n = Zero_t /\\ r = Zero_t) \\/ "
-    "(?x. n = Succ_t x /\\ r = Succ_t (f x new_t v)) \\/ "
+    "(n = Empty_t /\\ r = Empty_t) \\/ "
     "(?x. n = Var_t x /\\ "
     "((v = x /\\ r = new_t) \\/ (~(v = x) /\\ r = Var_t x))) \\/ "
-    "(?a b. n = Plus_t a b /\\ r = Plus_t (f a new_t v) (f b new_t v)) \\/ "
-    "(?a b. n = Times_t a b /\\ r = Times_t (f a new_t v) (f b new_t v)) \\/ "
     "(?a b. n = Eq_f a b /\\ r = Eq_f (f a new_t v) (f b new_t v)) \\/ "
     "(?x. n = Not_f x /\\ r = Not_f (f x new_t v)) \\/ "
     "(?a b. n = Imp_f a b /\\ r = Imp_f (f a new_t v) (f b new_t v)) \\/ "
@@ -2705,15 +2554,7 @@ def SUBSTITUTE_MONO(p):
     args = [_new_t_n0, _v_n0]
 
     n_t = p._parse("n")
-    eq_zero = REFL(mk_and(mk_eq(n_t, Zero_t), mk_eq(_r_n0, Zero_t)))
-    eq_succ = mono_iff_value_unary_pw_step(
-        Succ_t,
-        NAT0_LT_SUCC_T,
-        h_th,
-        args,
-        _r_n0,
-        lambda t: mk_app(Succ_t, t),
-    )
+    eq_empty = REFL(mk_and(mk_eq(n_t, Empty_t), mk_eq(_r_n0, Empty_t)))
     eq_var = REFL(
         mk_exists(
             _x_n0,
@@ -2727,24 +2568,6 @@ def SUBSTITUTE_MONO(p):
                 ),
             ),
         )
-    )
-    eq_plus = mono_iff_value_binary_pw_step(
-        Plus_t,
-        NAT0_LT_PLUS_T_L,
-        NAT0_LT_PLUS_T_R,
-        h_th,
-        args,
-        _r_n0,
-        lambda a, b: mk_app(Plus_t, a, b),
-    )
-    eq_times = mono_iff_value_binary_pw_step(
-        Times_t,
-        NAT0_LT_TIMES_T_L,
-        NAT0_LT_TIMES_T_R,
-        h_th,
-        args,
-        _r_n0,
-        lambda a, b: mk_app(Times_t, a, b),
     )
     eq_eq = mono_iff_value_binary_pw_step(
         Eq_f,
@@ -2800,11 +2623,8 @@ def SUBSTITUTE_MONO(p):
 
     body_eq = or_chain_collapse(
         [
-            eq_zero,
-            eq_succ,
+            eq_empty,
             eq_var,
-            eq_plus,
-            eq_times,
             eq_eq,
             eq_not,
             eq_imp,
@@ -2840,33 +2660,15 @@ SUBSTITUTE_REC = _unfold_rec_via_F_def(_SUBSTITUTE_REC_RAW, _SUBSTITUTE_F_DEF)
 
 # Constructor recursion equations.
 #
-# Seven cases reduce to a single ``r = K`` shape and use
+# Six cases reduce to a single ``r = K`` shape and use
 # ``derive_rec_eq_select``. The two conditional cases (Var_t and
 # Forall_f) collapse to ``(cond /\ r = T) \/ (~cond /\ r = E)`` and
 # use ``derive_rec_eq_select_cond`` to produce a pair of conditional
 # rec equations (``cond ==> rhs = T`` and ``~cond ==> rhs = E``).
-SUBSTITUTE_AT_ZERO = derive_rec_eq_select(
+SUBSTITUTE_AT_EMPTY = derive_rec_eq_select(
     SUBSTITUTE_REC,
-    "Zero_t",
+    "Empty_t",
     [],
-    [_new_t_n0, _v_n0],
-)
-SUBSTITUTE_AT_SUCC = derive_rec_eq_select(
-    SUBSTITUTE_REC,
-    "Succ_t",
-    ["t"],
-    [_new_t_n0, _v_n0],
-)
-SUBSTITUTE_AT_PLUS = derive_rec_eq_select(
-    SUBSTITUTE_REC,
-    "Plus_t",
-    ["t1", "t2"],
-    [_new_t_n0, _v_n0],
-)
-SUBSTITUTE_AT_TIMES = derive_rec_eq_select(
-    SUBSTITUTE_REC,
-    "Times_t",
-    ["t1", "t2"],
     [_new_t_n0, _v_n0],
 )
 SUBSTITUTE_AT_EQ = derive_rec_eq_select(
@@ -2920,15 +2722,8 @@ if __name__ == "__main__":
 
     print("Stage 1 (a) -- term/form datatype + godelnum injectivity.")
     print("  Term constructors:")
-    print("    ZERO_T_DEF    :", pp_thm(ZERO_T_DEF))
-    print("    SUCC_T_DEF    :", pp_thm(SUCC_T_DEF))
-    print("    SUCC_T_AT     :", pp_thm(SUCC_T_AT))
     print("    VAR_T_DEF     :", pp_thm(VAR_T_DEF))
     print("    VAR_T_AT      :", pp_thm(VAR_T_AT))
-    print("    PLUS_T_DEF    :", pp_thm(PLUS_T_DEF))
-    print("    PLUS_T_AT     :", pp_thm(PLUS_T_AT))
-    print("    TIMES_T_DEF   :", pp_thm(TIMES_T_DEF))
-    print("    TIMES_T_AT    :", pp_thm(TIMES_T_AT))
     print("  Form constructors:")
     print("    EQ_F_DEF      :", pp_thm(EQ_F_DEF))
     print("    EQ_F_AT       :", pp_thm(EQ_F_AT))
@@ -2938,7 +2733,7 @@ if __name__ == "__main__":
     print("    IMP_F_AT      :", pp_thm(IMP_F_AT))
     print("    FORALL_F_DEF  :", pp_thm(FORALL_F_DEF))
     print("    FORALL_F_AT   :", pp_thm(FORALL_F_AT))
-    print("  Q + HF primitives:")
+    print("  HF primitives:")
     print("    EMPTY_T_DEF   :", pp_thm(EMPTY_T_DEF))
     print("    INSERT_T_DEF  :", pp_thm(INSERT_T_DEF))
     print("    INSERT_T_AT   :", pp_thm(INSERT_T_AT))
@@ -2951,14 +2746,9 @@ if __name__ == "__main__":
     print()
     print("Stage 1 -- size lemmas (foundation for define_wf_lt MONO proofs).")
     print("  Unary constructors:")
-    print("    NAT0_LT_SUCC_T  :", pp_thm(NAT0_LT_SUCC_T))
     print("    NAT0_LT_VAR_T   :", pp_thm(NAT0_LT_VAR_T))
     print("    NAT0_LT_NOT_F   :", pp_thm(NAT0_LT_NOT_F))
     print("  Binary constructors (left / right slot):")
-    print("    NAT0_LT_PLUS_T_L  :", pp_thm(NAT0_LT_PLUS_T_L))
-    print("    NAT0_LT_PLUS_T_R  :", pp_thm(NAT0_LT_PLUS_T_R))
-    print("    NAT0_LT_TIMES_T_L :", pp_thm(NAT0_LT_TIMES_T_L))
-    print("    NAT0_LT_TIMES_T_R :", pp_thm(NAT0_LT_TIMES_T_R))
     print("    NAT0_LT_EQ_F_L    :", pp_thm(NAT0_LT_EQ_F_L))
     print("    NAT0_LT_EQ_F_R    :", pp_thm(NAT0_LT_EQ_F_R))
     print("    NAT0_LT_IMP_F_L   :", pp_thm(NAT0_LT_IMP_F_L))
@@ -2968,31 +2758,23 @@ if __name__ == "__main__":
     print()
     print("Stage 1 -- constructor injectivity.")
     print("  Unary:")
-    print("    SUCC_T_INJ    :", pp_thm(SUCC_T_INJ))
     print("    VAR_T_INJ     :", pp_thm(VAR_T_INJ))
     print("    NOT_F_INJ     :", pp_thm(NOT_F_INJ))
     print("  Binary:")
-    print("    PLUS_T_INJ    :", pp_thm(PLUS_T_INJ))
-    print("    TIMES_T_INJ   :", pp_thm(TIMES_T_INJ))
     print("    EQ_F_INJ      :", pp_thm(EQ_F_INJ))
     print("    IMP_F_INJ     :", pp_thm(IMP_F_INJ))
     print("    FORALL_F_INJ  :", pp_thm(FORALL_F_INJ))
     print()
     print("Stage 1 -- constructor disjointness.")
-    print("  Each non-zero constructor C: !args. ~(C args = Zero_t):")
-    print("    SUCC_T_NEQ_ZERO   :", pp_thm(SUCC_T_NEQ_ZERO))
-    print("    VAR_T_NEQ_ZERO    :", pp_thm(VAR_T_NEQ_ZERO))
-    print("    NOT_F_NEQ_ZERO    :", pp_thm(NOT_F_NEQ_ZERO))
-    print("    PLUS_T_NEQ_ZERO   :", pp_thm(PLUS_T_NEQ_ZERO))
-    print("    TIMES_T_NEQ_ZERO  :", pp_thm(TIMES_T_NEQ_ZERO))
-    print("    EQ_F_NEQ_ZERO     :", pp_thm(EQ_F_NEQ_ZERO))
-    print("    IMP_F_NEQ_ZERO    :", pp_thm(IMP_F_NEQ_ZERO))
-    print("    FORALL_F_NEQ_ZERO :", pp_thm(FORALL_F_NEQ_ZERO))
+    print("  Each non-empty constructor C: !args. ~(C args = Empty_t):")
+    print("    VAR_T_NEQ_EMPTY    :", pp_thm(VAR_T_NEQ_EMPTY))
+    print("    NOT_F_NEQ_EMPTY    :", pp_thm(NOT_F_NEQ_EMPTY))
+    print("    EQ_F_NEQ_EMPTY     :", pp_thm(EQ_F_NEQ_EMPTY))
+    print("    IMP_F_NEQ_EMPTY    :", pp_thm(IMP_F_NEQ_EMPTY))
+    print("    FORALL_F_NEQ_EMPTY :", pp_thm(FORALL_F_NEQ_EMPTY))
     print(
         f"  Pairwise distinct-tag disjointness: {len(CTOR_DISJOINTNESS)} lemmas, e.g."
     )
-    print("    SUCC_T_NEQ_VAR_T  :", pp_thm(CTOR_DISJOINTNESS[("Succ_t", "Var_t")]))
-    print("    PLUS_T_NEQ_TIMES_T:", pp_thm(CTOR_DISJOINTNESS[("Plus_t", "Times_t")]))
     print("    EQ_F_NEQ_FORALL_F :", pp_thm(CTOR_DISJOINTNESS[("Eq_f", "Forall_f")]))
     print()
     print("Stage 1 -- MONO helpers (per-disjunct iffs).")
@@ -3015,45 +2797,35 @@ if __name__ == "__main__":
             ),
         )
     )
-    _IFF_SUCC_T = mono_iff_unary_step(Succ_t, NAT0_LT_SUCC_T, _smoke_hyp)
-    _IFF_PLUS_T = mono_iff_binary_step(
-        Plus_t,
-        NAT0_LT_PLUS_T_L,
-        NAT0_LT_PLUS_T_R,
+    _IFF_NOT_F = mono_iff_unary_step(Not_f, NAT0_LT_NOT_F, _smoke_hyp)
+    _IFF_INSERT_T = mono_iff_binary_step(
+        Insert_t,
+        NAT0_LT_INSERT_T_L,
+        NAT0_LT_INSERT_T_R,
         _smoke_hyp,
     )
-    print("  unary  (Succ_t):", pp_thm(_IFF_SUCC_T))
-    print("  binary (Plus_t):", pp_thm(_IFF_PLUS_T))
+    print("  unary  (Not_f)    :", pp_thm(_IFF_NOT_F))
+    print("  binary (Insert_t) :", pp_thm(_IFF_INSERT_T))
     print()
     print("Stage 1 -- derive_rec_eq smoke test (synthetic recursive body).")
     # Synthetic predicate F : nat0 -> bool with body matching is_term shape.
     _F_pred = Var("F", parse_type("nat0 -> bool"))
     _n_var = Var("n", nat0_ty)
-    _t_smoke = Var("t", nat0_ty)
     _v_smoke = Var("v", nat0_ty)
     _a_smoke = Var("a", nat0_ty)
     _b_smoke = Var("b", nat0_ty)
     _body = mk_or(
-        mk_eq(_n_var, Zero_t),
+        mk_eq(_n_var, Empty_t),
         mk_or(
+            mk_exists(_v_smoke, mk_eq(_n_var, _mk_app(Var_t, _v_smoke))),
             mk_exists(
-                _t_smoke,
-                mk_and(
-                    mk_eq(_n_var, _mk_app(Succ_t, _t_smoke)),
-                    _mk_app(_F_pred, _t_smoke),
-                ),
-            ),
-            mk_or(
-                mk_exists(_v_smoke, mk_eq(_n_var, _mk_app(Var_t, _v_smoke))),
+                _a_smoke,
                 mk_exists(
-                    _a_smoke,
-                    mk_exists(
-                        _b_smoke,
+                    _b_smoke,
+                    mk_and(
+                        mk_eq(_n_var, _mk_app(Insert_t, _a_smoke, _b_smoke)),
                         mk_and(
-                            mk_eq(_n_var, _mk_app(Plus_t, _a_smoke, _b_smoke)),
-                            mk_and(
-                                _mk_app(_F_pred, _a_smoke), _mk_app(_F_pred, _b_smoke)
-                            ),
+                            _mk_app(_F_pred, _a_smoke), _mk_app(_F_pred, _b_smoke)
                         ),
                     ),
                 ),
@@ -3061,22 +2833,17 @@ if __name__ == "__main__":
         ),
     )
     _fake_REC = ASSUME(mk_forall(_n_var, mk_eq(_mk_app(_F_pred, _n_var), _body)))
-    _REC_SUCC = derive_rec_eq(_fake_REC, "Succ_t", ["t"])
     _REC_VAR = derive_rec_eq(_fake_REC, "Var_t", ["v"])
-    _REC_PLUS = derive_rec_eq(_fake_REC, "Plus_t", ["a", "b"])
-    print("  REC at Succ_t :", pp_thm(_REC_SUCC))
-    print("  REC at Var_t  :", pp_thm(_REC_VAR))
-    print("  REC at Plus_t :", pp_thm(_REC_PLUS))
+    _REC_INSERT = derive_rec_eq(_fake_REC, "Insert_t", ["a", "b"])
+    print("  REC at Var_t    :", pp_thm(_REC_VAR))
+    print("  REC at Insert_t :", pp_thm(_REC_INSERT))
     print()
     print("Stage 1 (b) -- is_term predicate.")
     print("    _IS_TERM_F_DEF :", pp_thm(_IS_TERM_F_DEF))
     print("    IS_TERM_MONO   :", pp_thm(IS_TERM_MONO))
     print("    IS_TERM_DEF    :", pp_thm(IS_TERM_DEF))
     print("    IS_TERM_REC    :", pp_thm(IS_TERM_REC))
-    print("    IS_TERM_AT_SUCC  :", pp_thm(IS_TERM_AT_SUCC))
     print("    IS_TERM_AT_VAR   :", pp_thm(IS_TERM_AT_VAR))
-    print("    IS_TERM_AT_PLUS  :", pp_thm(IS_TERM_AT_PLUS))
-    print("    IS_TERM_AT_TIMES :", pp_thm(IS_TERM_AT_TIMES))
     print("    IS_TERM_AT_INSERT:", pp_thm(IS_TERM_AT_INSERT))
     print()
     print("Stage 1 (b) -- is_form predicate.")
@@ -3093,10 +2860,7 @@ if __name__ == "__main__":
     print("    FREE_IN_MONO   :", pp_thm(FREE_IN_MONO))
     print("    FREE_IN_DEF    :", pp_thm(FREE_IN_DEF))
     print("    FREE_IN_REC    :", pp_thm(FREE_IN_REC))
-    print("    FREE_IN_AT_SUCC   :", pp_thm(FREE_IN_AT_SUCC))
     print("    FREE_IN_AT_VAR    :", pp_thm(FREE_IN_AT_VAR))
-    print("    FREE_IN_AT_PLUS   :", pp_thm(FREE_IN_AT_PLUS))
-    print("    FREE_IN_AT_TIMES  :", pp_thm(FREE_IN_AT_TIMES))
     print("    FREE_IN_AT_EQ     :", pp_thm(FREE_IN_AT_EQ))
     print("    FREE_IN_AT_NOT    :", pp_thm(FREE_IN_AT_NOT))
     print("    FREE_IN_AT_IMP    :", pp_thm(FREE_IN_AT_IMP))
@@ -3108,12 +2872,9 @@ if __name__ == "__main__":
     print("    SUBSTITUTE_MONO         :", pp_thm(SUBSTITUTE_MONO))
     print("    SUBSTITUTE_DEF          :", pp_thm(SUBSTITUTE_DEF))
     print("    SUBSTITUTE_REC          :", pp_thm(SUBSTITUTE_REC))
-    print("    SUBSTITUTE_AT_ZERO      :", pp_thm(SUBSTITUTE_AT_ZERO))
-    print("    SUBSTITUTE_AT_SUCC      :", pp_thm(SUBSTITUTE_AT_SUCC))
+    print("    SUBSTITUTE_AT_EMPTY     :", pp_thm(SUBSTITUTE_AT_EMPTY))
     print("    SUBSTITUTE_AT_VAR_HIT   :", pp_thm(SUBSTITUTE_AT_VAR_HIT))
     print("    SUBSTITUTE_AT_VAR_MISS  :", pp_thm(SUBSTITUTE_AT_VAR_MISS))
-    print("    SUBSTITUTE_AT_PLUS      :", pp_thm(SUBSTITUTE_AT_PLUS))
-    print("    SUBSTITUTE_AT_TIMES     :", pp_thm(SUBSTITUTE_AT_TIMES))
     print("    SUBSTITUTE_AT_EQ        :", pp_thm(SUBSTITUTE_AT_EQ))
     print("    SUBSTITUTE_AT_NOT       :", pp_thm(SUBSTITUTE_AT_NOT))
     print("    SUBSTITUTE_AT_IMP       :", pp_thm(SUBSTITUTE_AT_IMP))

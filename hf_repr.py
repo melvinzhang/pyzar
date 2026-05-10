@@ -81,7 +81,7 @@
 # ------------------------------------------------------------------
 #
 #   defn:  numeral : nat0 -> nat0
-#          (numeral n = Succ_t^n Zero_t -- the n'th Q numeral)
+#          (numeral n = von Neumann ordinal n -- the n'th HF numeral)
 #   defn:  represents_pred : nat0 -> (nat0 -> bool) -> bool
 #   defn:  represents_func : nat0 -> (nat0 -> nat0) -> bool
 #   defn:  Proof_Q         : nat0 -> nat0 -> bool
@@ -128,11 +128,7 @@ from fusion import ASSUME, ABS
 from basics import mk_eq
 
 from hf_syntax import (
-    Zero_t,  # noqa: F401  -- parser alias for is_substitute_step (legacy)
-    Succ_t,  # noqa: F401  -- parser alias for is_substitute_step (legacy)
     Var_t,  # noqa: F401  -- parser alias for is_substitute_step
-    Plus_t,  # noqa: F401  -- parser alias for is_substitute_step (legacy)
-    Times_t,  # noqa: F401  -- parser alias for is_substitute_step (legacy)
     Eq_f,  # noqa: F401  -- parser alias for is_substitute_step
     Not_f,  # noqa: F401  -- parser alias for is_substitute_step
     Imp_f,  # noqa: F401  -- parser alias for is_substitute_step
@@ -143,12 +139,9 @@ from hf_syntax import (
     IS_TERM_REC,
     IS_FORM_REC,
     IS_TERM_AT_INSERT,
-    SUBSTITUTE_AT_ZERO,
-    SUBSTITUTE_AT_SUCC,
+    SUBSTITUTE_AT_EMPTY,
     SUBSTITUTE_AT_VAR_HIT,
     SUBSTITUTE_AT_VAR_MISS,
-    SUBSTITUTE_AT_PLUS,
-    SUBSTITUTE_AT_TIMES,
     SUBSTITUTE_AT_INSERT,
     SUBSTITUTE_AT_NOT,
     SUBSTITUTE_AT_IMP,
@@ -156,12 +149,7 @@ from hf_syntax import (
     SUBSTITUTE_AT_FORALL_HIT,
     SUBSTITUTE_AT_FORALL_MISS,
     SUBSTITUTE_AT_IN,
-    NAT0_LT_SUCC_T,
     NAT0_LT_NOT_F,
-    NAT0_LT_PLUS_T_L,
-    NAT0_LT_PLUS_T_R,
-    NAT0_LT_TIMES_T_L,
-    NAT0_LT_TIMES_T_R,
     NAT0_LT_INSERT_T_L,
     NAT0_LT_INSERT_T_R,
     NAT0_LT_EQ_F_L,
@@ -274,10 +262,9 @@ numeral = mk_const("numeral", [])
 #   |- !n. is_term (numeral n).
 #
 # Direct induction on n. The base case ``is_term Empty_t`` follows from
-# IS_TERM_REC's Empty/Zero-base disjunct (Empty_t = 0 = Zero_t in the
-# legacy encoding). The step case uses IS_TERM_AT_INSERT applied to the
-# diagonal pair ``(numeral n, numeral n)`` with the inductive
-# hypothesis used twice.
+# IS_TERM_REC's leftmost disjunct ``n = Empty_t`` via REFL. The step
+# case uses IS_TERM_AT_INSERT applied to the diagonal pair
+# ``(numeral n, numeral n)`` with the inductive hypothesis used twice.
 # ---------------------------------------------------------------------------
 
 
@@ -288,25 +275,20 @@ is_term = mk_const("is_term", [])
 def IS_TERM_EMPTY(p):
     """|- is_term Empty_t.
 
-    Empty_t = Zero_t in hf_syntax's current encoding, so this collapses
-    to ``is_term Zero_t``. From IS_TERM_REC at Zero_t the body's
-    leftmost disjunct ``Zero_t = Zero_t`` is reflexive; lift via DISJ1
-    and EQ_MP through SYM.
+    From IS_TERM_REC at Empty_t the body's leftmost disjunct
+    ``Empty_t = Empty_t`` is reflexive; lift via DISJ1 and EQ_MP
+    through SYM.
     """
     p.goal("is_term Empty_t")
 
-    rec_at_zero = SPEC(Zero_t, IS_TERM_REC)
-    rhs = rand(rec_at_zero._concl)
-    refl_zero = REFL(Zero_t)
+    rec_at_empty = SPEC(Empty_t, IS_TERM_REC)
+    rhs = rand(rec_at_empty._concl)
+    refl_empty = REFL(Empty_t)
     from basics import rand as _rand
 
     rest = _rand(rhs)
-    rhs_th = DISJ1(refl_zero, rest)
-    is_term_zero = EQ_MP(SYM(rec_at_zero), rhs_th)  # |- is_term Zero_t
-    # Empty_t and Zero_t are definitionally equal: Empty_t := Zero_t.
-    from hf_syntax import EMPTY_T_DEF
-
-    p.thus("is_term Empty_t").by_rewrite_of(is_term_zero, [SYM(EMPTY_T_DEF)])
+    rhs_th = DISJ1(refl_empty, rest)
+    p.thus("is_term Empty_t").by_eq_mp(SYM(rec_at_empty), rhs_th)
 
 
 @proof
@@ -2636,13 +2618,13 @@ _idx_f2 = _idx_term(15)
 # is_substitute_step T t v a b -- "(a, b) is a valid substitute clause".
 #
 # Sigma_0 (decidable) HOL predicate. Holds iff the pair (a, b) matches one
-# of the 13 SUBSTITUTE_AT_* clauses with respect to the substitution
+# of the 9 SUBSTITUTE_AT_* clauses with respect to the substitution
 # parameters (t, v) and a trace HF set T:
-#   * Constant-shape clauses (Zero_t, Var_t at v, Var_t off v, Forall_f
+#   * Constant-shape clauses (Empty_t, Var_t at v, Var_t off v, Forall_f
 #     hit) require no trace consultations -- b is determined by a alone.
-#   * Recursive clauses (Succ_t / Not_f, the binary constructors, and
-#     Forall_f miss) require the corresponding sub-shape pairs to be in T,
-#     witnessed via In (Pair_ord _ _) T.
+#   * Recursive clauses (Not_f, the binary constructors Eq_f / Imp_f /
+#     Insert_t / In_a, and Forall_f miss) require the corresponding
+#     sub-shape pairs to be in T, witnessed via In (Pair_ord _ _) T.
 #
 # This predicate is the HOL counterpart of the Q-formula
 # ``is_substitute_trace_internal`` to be encoded in Stage B1; the trace
@@ -2662,14 +2644,9 @@ IS_SUBSTITUTE_STEP_DEF = define(
     "is_substitute_step",
     parse_type("nat0 -> nat0 -> nat0 -> nat0 -> nat0 -> bool"),
     "\\T:nat0. \\t:nat0. \\v:nat0. \\a:nat0. \\b:nat0. "
-    "(a = Zero_t /\\ b = Zero_t) "
-    "\\/ (?s1 s2. a = Succ_t s1 /\\ b = Succ_t s2 /\\ In (Pair_ord s1 s2) T) "
+    "(a = Empty_t /\\ b = Empty_t) "
     "\\/ (a = Var_t v /\\ b = t) "
     "\\/ (?w. a = Var_t w /\\ ~(w = v) /\\ b = Var_t w) "
-    "\\/ (?a1 a2 b1 b2. a = Plus_t a1 a2 /\\ b = Plus_t b1 b2 "
-    "      /\\ In (Pair_ord a1 b1) T /\\ In (Pair_ord a2 b2) T) "
-    "\\/ (?a1 a2 b1 b2. a = Times_t a1 a2 /\\ b = Times_t b1 b2 "
-    "      /\\ In (Pair_ord a1 b1) T /\\ In (Pair_ord a2 b2) T) "
     "\\/ (?a1 a2 b1 b2. a = Eq_f a1 a2 /\\ b = Eq_f b1 b2 "
     "      /\\ In (Pair_ord a1 b1) T /\\ In (Pair_ord a2 b2) T) "
     "\\/ (?s1 s2. a = Not_f s1 /\\ b = Not_f s2 /\\ In (Pair_ord s1 s2) T) "
@@ -2761,20 +2738,14 @@ IS_SUBSTITUTE_TRACE_AT = _at_n(
 )
 
 
-# String-templated 13-disjunction body of is_substitute_step, with the
+# String-templated 9-disjunction body of is_substitute_step, with the
 # trace HF set ``T`` substituted in. Used by TRACE_STEP_MONO so the same
 # disjunction can be referenced under both T1 and T2 without copy-paste.
 def _is_step_body(T):
     return (
-        f"(a = Zero_t /\\ b = Zero_t) "
-        f"\\/ (?s1 s2. a = Succ_t s1 /\\ b = Succ_t s2 "
-        f"      /\\ In (Pair_ord s1 s2) {T}) "
+        f"(a = Empty_t /\\ b = Empty_t) "
         f"\\/ (a = Var_t v /\\ b = t) "
         f"\\/ (?w. a = Var_t w /\\ ~(w = v) /\\ b = Var_t w) "
-        f"\\/ (?a1 a2 b1 b2. a = Plus_t a1 a2 /\\ b = Plus_t b1 b2 "
-        f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T}) "
-        f"\\/ (?a1 a2 b1 b2. a = Times_t a1 a2 /\\ b = Times_t b1 b2 "
-        f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T}) "
         f"\\/ (?a1 a2 b1 b2. a = Eq_f a1 a2 /\\ b = Eq_f b1 b2 "
         f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T}) "
         f"\\/ (?s1 s2. a = Not_f s1 /\\ b = Not_f s2 "
@@ -2819,25 +2790,9 @@ def TRACE_STEP_MONO(p):
 
     with p.have(f"hd2: {body_T2}").proof():
         with p.cases_on("hd1"):
-            # 1. Zero_t (atomic).
-            with p.case("c1: a = Zero_t /\\ b = Zero_t"):
+            # 1. Empty_t (atomic).
+            with p.case("c1: a = Empty_t /\\ b = Empty_t"):
                 p.thus(body_T2).by_disj("c1")
-            # 2. Succ_t (unary recursive).
-            with p.case(
-                "c2: ?s1 s2. a = Succ_t s1 /\\ b = Succ_t s2 "
-                "/\\ In (Pair_ord s1 s2) T1"
-            ):
-                # case auto-chooses outer s1; s1_eq: ?s2. body[s1, s2].
-                p.choose("s2", "s1_eq")
-                p.split("s2_eq", "(c2a, c2b, c2_in1)")
-                p.have("c2_in2: In (Pair_ord s1 s2) T2").by(
-                    "hsub", "Pair_ord s1 s2", "c2_in1"
-                )
-                p.have(
-                    "c2d: ?s1 s2. a = Succ_t s1 /\\ b = Succ_t s2 "
-                    "/\\ In (Pair_ord s1 s2) T2"
-                ).by_exists(["s1", "s2"], "c2a", "c2b", "c2_in2")
-                p.thus(body_T2).by_disj("c2d")
             # 3. Var_t hit (atomic).
             with p.case("c3: a = Var_t v /\\ b = t"):
                 p.thus(body_T2).by_disj("c3")
@@ -2846,52 +2801,6 @@ def TRACE_STEP_MONO(p):
                 "c4: ?w. a = Var_t w /\\ ~(w = v) /\\ b = Var_t w"
             ):
                 p.thus(body_T2).by_disj("c4")
-            # 5. Plus_t (binary recursive).
-            with p.case(
-                "c5: ?a1 a2 b1 b2. a = Plus_t a1 a2 /\\ b = Plus_t b1 b2 "
-                "/\\ In (Pair_ord a1 b1) T1 /\\ In (Pair_ord a2 b2) T1"
-            ):
-                p.choose("a2", "a1_eq")
-                p.choose("b1", "a2_eq")
-                p.choose("b2", "b1_eq")
-                p.split("b2_eq", "(c5a, c5b, c5_in1, c5_in2)")
-                p.have("c5_in1_T2: In (Pair_ord a1 b1) T2").by(
-                    "hsub", "Pair_ord a1 b1", "c5_in1"
-                )
-                p.have("c5_in2_T2: In (Pair_ord a2 b2) T2").by(
-                    "hsub", "Pair_ord a2 b2", "c5_in2"
-                )
-                p.have(
-                    "c5d: ?a1 a2 b1 b2. a = Plus_t a1 a2 /\\ b = Plus_t b1 b2 "
-                    "/\\ In (Pair_ord a1 b1) T2 /\\ In (Pair_ord a2 b2) T2"
-                ).by_exists(
-                    ["a1", "a2", "b1", "b2"],
-                    "c5a", "c5b", "c5_in1_T2", "c5_in2_T2",
-                )
-                p.thus(body_T2).by_disj("c5d")
-            # 6. Times_t (binary recursive).
-            with p.case(
-                "c6: ?a1 a2 b1 b2. a = Times_t a1 a2 /\\ b = Times_t b1 b2 "
-                "/\\ In (Pair_ord a1 b1) T1 /\\ In (Pair_ord a2 b2) T1"
-            ):
-                p.choose("a2", "a1_eq")
-                p.choose("b1", "a2_eq")
-                p.choose("b2", "b1_eq")
-                p.split("b2_eq", "(c6a, c6b, c6_in1, c6_in2)")
-                p.have("c6_in1_T2: In (Pair_ord a1 b1) T2").by(
-                    "hsub", "Pair_ord a1 b1", "c6_in1"
-                )
-                p.have("c6_in2_T2: In (Pair_ord a2 b2) T2").by(
-                    "hsub", "Pair_ord a2 b2", "c6_in2"
-                )
-                p.have(
-                    "c6d: ?a1 a2 b1 b2. a = Times_t a1 a2 /\\ b = Times_t b1 b2 "
-                    "/\\ In (Pair_ord a1 b1) T2 /\\ In (Pair_ord a2 b2) T2"
-                ).by_exists(
-                    ["a1", "a2", "b1", "b2"],
-                    "c6a", "c6b", "c6_in1_T2", "c6_in2_T2",
-                )
-                p.thus(body_T2).by_disj("c6d")
             # 7. Eq_f (binary recursive).
             with p.case(
                 "c7: ?a1 a2 b1 b2. a = Eq_f a1 a2 /\\ b = Eq_f b1 b2 "
@@ -3329,12 +3238,12 @@ def _do_binary_case(
     p, ctor, subst_at_lemma, lt_l_lemma, lt_r_lemma, step_body, *,
     sub_t_label="is_term", child_or="is_term"
 ):
-    """Close a binary constructor case (Plus_t/Times_t/Insert_t/Eq_f/
-    Imp_f/In_a). The case has auto-introduced ``a`` and registered
+    """Close a binary constructor case (Insert_t/Eq_f/Imp_f/In_a). The
+    case has auto-introduced ``a`` and registered
     ``a_eq: ?b. phi = ctor a b /\\ <child_or> a /\\ <child_or> b``.
 
     ``child_or`` is the predicate guarding the children: ``is_term`` for
-    Plus_t/Times_t/Insert_t/Eq_f/In_a, ``is_form`` for Imp_f.
+    Insert_t/Eq_f/In_a, ``is_form`` for Imp_f.
     """
     p.choose("b", "a_eq")
     p.split("b_eq", "(phi_eq, h_a_pred, h_b_pred)")
@@ -3425,7 +3334,7 @@ _do_binary_form_case = _do_binary_case
 
 
 def _do_unary_form_case(p, ctor, subst_at_lemma, lt_lemma, step_body):
-    """Close a unary constructor case (Succ_t / Not_f). Auto-introduced
+    """Close a unary constructor case (Not_f). Auto-introduced
     ``x`` plus ``x_eq: phi = ctor x /\\ <pred> x``."""
     p.split("x_eq", "(phi_eq, h_xp)")
     p.have(f"lt_x: nat0_lt x phi").by_rewrite_of(
@@ -3642,7 +3551,7 @@ def TRACE_EXISTS(p):
             "==> is_substitute_step Empty t v a b"
         ).by(EMPTY_TRACE_VALIDITY, "t", "v")
 
-        # Helper: 13-disjunction body of is_substitute_step at the
+        # Helper: 9-disjunction body of is_substitute_step at the
         # headline pair (phi, substitute phi t v) -- i.e. the result of
         # applying IS_SUBSTITUTE_STEP_AT and substituting a := phi,
         # b := substitute phi t v.
@@ -3651,15 +3560,9 @@ def TRACE_EXISTS(p):
             B = "(substitute phi t v)"
             T = f"({T})"
             return (
-                f"({A} = Zero_t /\\ {B} = Zero_t) "
-                f"\\/ (?s1 s2. {A} = Succ_t s1 /\\ {B} = Succ_t s2 "
-                f"      /\\ In (Pair_ord s1 s2) {T}) "
+                f"({A} = Empty_t /\\ {B} = Empty_t) "
                 f"\\/ ({A} = Var_t v /\\ {B} = t) "
                 f"\\/ (?w. {A} = Var_t w /\\ ~(w = v) /\\ {B} = Var_t w) "
-                f"\\/ (?a1 a2 b1 b2. {A} = Plus_t a1 a2 /\\ {B} = Plus_t b1 b2 "
-                f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T}) "
-                f"\\/ (?a1 a2 b1 b2. {A} = Times_t a1 a2 /\\ {B} = Times_t b1 b2 "
-                f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T}) "
                 f"\\/ (?a1 a2 b1 b2. {A} = Eq_f a1 a2 /\\ {B} = Eq_f b1 b2 "
                 f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T}) "
                 f"\\/ (?s1 s2. {A} = Not_f s1 /\\ {B} = Not_f s2 "
@@ -3681,32 +3584,29 @@ def TRACE_EXISTS(p):
             # =========================================================
             with p.case("ht: is_term phi"):
                 ht_disj_str = (
-                    "phi = Zero_t "
-                    "\\/ (?x. phi = Succ_t x /\\ is_term x) "
+                    "phi = Empty_t "
                     "\\/ (?x. phi = Var_t x) "
-                    "\\/ (?a b. phi = Plus_t a b /\\ is_term a /\\ is_term b) "
-                    "\\/ (?a b. phi = Times_t a b /\\ is_term a /\\ is_term b) "
                     "\\/ (?a b. phi = Insert_t a b /\\ is_term a /\\ is_term b)"
                 )
                 rec_at_phi = SPEC(p._parse("phi"), IS_TERM_REC)
                 p.have(f"ht_disj: {ht_disj_str}").by_eq_mp(rec_at_phi, "ht")
 
                 with p.cases_on("ht_disj"):
-                    # --- Zero_t ---
-                    with p.case("c_zero: phi = Zero_t"):
+                    # --- Empty_t ---
+                    with p.case("c_empty: phi = Empty_t"):
                         merged = (
                             "Insert (Pair_ord phi (substitute phi t v)) "
                             "(Union Empty Empty)"
                         )
-                        # substitute phi t v = Zero_t.
+                        # substitute phi t v = Empty_t.
                         p.have(
-                            "h_subst: substitute phi t v = Zero_t"
-                        ).by_rewrite(["c_zero", SUBSTITUTE_AT_ZERO])
-                        # Disjunct 1: phi = Zero_t /\ substitute phi t v = Zero_t.
+                            "h_subst: substitute phi t v = Empty_t"
+                        ).by_rewrite(["c_empty", SUBSTITUTE_AT_EMPTY])
+                        # Disjunct 1: phi = Empty_t /\ substitute phi t v = Empty_t.
                         p.have(
-                            "h_clause: phi = Zero_t "
-                            "/\\ substitute phi t v = Zero_t"
-                        ).by_thm(CONJ(p.fact("c_zero"), p.fact("h_subst")))
+                            "h_clause: phi = Empty_t "
+                            "/\\ substitute phi t v = Empty_t"
+                        ).by_thm(CONJ(p.fact("c_empty"), p.fact("h_subst")))
                         # by_disj on a conjunction-typed leaf works -- the
                         # disjunction's leaf is exactly this conjunction.
                         p.have(
@@ -3724,94 +3624,6 @@ def TRACE_EXISTS(p):
                             "phi", "substitute phi t v",
                             "t", "v", "Empty", "Empty",
                             "hev", "hev", "h_step",
-                        )
-                        p.thus(
-                            "?T. is_substitute_trace T phi t v (substitute phi t v)"
-                        ).by_witness(merged, "h_trace")
-
-                    # --- Succ_t (unary) ---
-                    with p.case("c_succ: ?x. phi = Succ_t x /\\ is_term x"):
-                        # Auto-chooses x; x_eq: phi = Succ_t x /\ is_term x.
-                        p.split("x_eq", "(phi_eq, h_xt)")
-                        p.have("lt_x: nat0_lt x phi").by_rewrite_of(
-                            SPEC(p._parse("x"), NAT0_LT_SUCC_T), ["phi_eq"]
-                        )
-                        p.have("hor_x: is_term x \\/ is_form x").by_disj("h_xt")
-                        p.have(
-                            "hT1_ex: ?T. is_substitute_trace T x t v "
-                            "(substitute x t v)"
-                        ).by("IH", "x", "lt_x", "t", "v", "hor_x")
-                        p.choose("T1", "hT1_ex", eq_label="hT1_eq")
-                        rec_T1 = SPECL(
-                            [
-                                p._parse("T1"),
-                                p._parse("x"),
-                                p._parse("t"),
-                                p._parse("v"),
-                                p._parse("substitute x t v"),
-                            ],
-                            IS_SUBSTITUTE_TRACE_AT,
-                        )
-                        p.have(
-                            "hT1_body: In (Pair_ord x (substitute x t v)) T1 "
-                            "/\\ (!a b. In (Pair_ord a b) T1 "
-                            "==> is_substitute_step T1 t v a b)"
-                        ).by_eq_mp(rec_T1, "hT1_eq")
-                        p.split("hT1_body", "(hT1_head, hT1_valid)")
-                        # substitute phi t v = Succ_t (substitute x t v).
-                        p.have(
-                            "h_subst: substitute phi t v "
-                            "= Succ_t (substitute x t v)"
-                        ).by_rewrite(["phi_eq", SUBSTITUTE_AT_SUCC])
-                        merged = (
-                            "Insert (Pair_ord phi (substitute phi t v)) "
-                            "(Union T1 Empty)"
-                        )
-                        # In (Pair_ord x (substitute x t v)) merged.
-                        with p.have(
-                            f"h_in_sub: In (Pair_ord x (substitute x t v)) "
-                            f"({merged})"
-                        ).proof():
-                            p.have(
-                                "h_in_un: In (Pair_ord x (substitute x t v)) "
-                                "(Union T1 Empty)"
-                            ).by(
-                                IN_UNION_LEFT, "T1", "Empty",
-                                "Pair_ord x (substitute x t v)", "hT1_head",
-                            )
-                            p.thus(
-                                f"In (Pair_ord x (substitute x t v)) ({merged})"
-                            ).by(
-                                IN_INSERT_GROW,
-                                "Pair_ord phi (substitute phi t v)",
-                                "Union T1 Empty",
-                                "Pair_ord x (substitute x t v)",
-                                "h_in_un",
-                            )
-                        # Disjunct 2: ?s1 s2. a=Succ_t s1 /\ b=Succ_t s2 /\ In...
-                        p.have(
-                            "h_disj_step: ?s1 s2. phi = Succ_t s1 "
-                            "/\\ substitute phi t v = Succ_t s2 "
-                            f"/\\ In (Pair_ord s1 s2) ({merged})"
-                        ).by_exists(
-                            ["x", "substitute x t v"],
-                            "phi_eq", "h_subst", "h_in_sub",
-                        )
-                        p.have(
-                            f"h_body: {step_body(merged)}"
-                        ).by_disj("h_disj_step")
-                        p.have(
-                            f"h_step: is_substitute_step ({merged}) "
-                            f"t v phi (substitute phi t v)"
-                        ).by_rewrite_of("h_body", [IS_SUBSTITUTE_STEP_AT])
-                        p.have(
-                            f"h_trace: is_substitute_trace ({merged}) "
-                            f"phi t v (substitute phi t v)"
-                        ).by(
-                            TRACE_EXTEND_BIN,
-                            "phi", "substitute phi t v",
-                            "t", "v", "T1", "Empty",
-                            "hT1_valid", "hev", "h_step",
                         )
                         p.thus(
                             "?T. is_substitute_trace T phi t v (substitute phi t v)"
@@ -3929,24 +3741,6 @@ def TRACE_EXISTS(p):
                                     "(substitute phi t v)"
                                 ).by_witness(merged, "h_trace")
 
-                    # --- Plus_t (binary) ---
-                    with p.case(
-                        "c_plus: ?a b. phi = Plus_t a b "
-                        "/\\ is_term a /\\ is_term b"
-                    ):
-                        _do_binary_term_case(
-                            p, "Plus_t", SUBSTITUTE_AT_PLUS,
-                            NAT0_LT_PLUS_T_L, NAT0_LT_PLUS_T_R, step_body,
-                        )
-                    # --- Times_t (binary) ---
-                    with p.case(
-                        "c_times: ?a b. phi = Times_t a b "
-                        "/\\ is_term a /\\ is_term b"
-                    ):
-                        _do_binary_term_case(
-                            p, "Times_t", SUBSTITUTE_AT_TIMES,
-                            NAT0_LT_TIMES_T_L, NAT0_LT_TIMES_T_R, step_body,
-                        )
                     # --- Insert_t (binary) ---
                     with p.case(
                         "c_insert: ?a b. phi = Insert_t a b "
@@ -4345,7 +4139,7 @@ def IS_IN_REPRESENTS(p):
 
 
 # B1.1 -- Q-encoding of is_substitute_step.
-# 13-disjunct Q-formula matching the HOL ``is_substitute_step``. Free
+# 9-disjunct Q-formula matching the HOL ``is_substitute_step``. Free
 # vars: var_T (trace), var_y (t), var_z (v), var_a (a), var_b (b).
 # Composes IS_PAIR_ORD_REPRESENTS + IS_IN_REPRESENTS for the In-checks
 # inside each recursive disjunct.
@@ -4366,7 +4160,7 @@ def IS_SUBSTITUTE_STEP_REPRESENTS(p):
     SORRY. Under the hf_to_qhf bridge: every input is encoded as an
     Insert_t-tower so Q's HF axioms Q8-Q10 fire on membership checks
     inside the trace ``hf_to_qhf T``. Body of
-    is_substitute_step_internal: 13-disjunction (Q_or_chain) mirroring
+    is_substitute_step_internal: 9-disjunction (Q_or_chain) mirroring
     is_substitute_step's HOL body, with each ``In (Pair_ord _ _) T``
     check expressed as ``In_a (Pair_ord_q var_a var_b) var_T`` (where
     Pair_ord_q is the Q-syntax Kuratowski Insert_t-tower) and
@@ -4715,7 +4509,7 @@ if __name__ == "__main__":
     print("    VAR_F1_DEF              :", pp_thm(VAR_F1_DEF))
     print("    VAR_F2_DEF              :", pp_thm(VAR_F2_DEF))
     print("    IS_SUBSTITUTE_STEP_DEF :", pp_thm(IS_SUBSTITUTE_STEP_DEF))
-    print("    IS_SUBSTITUTE_STEP_AT  : <13-disjunct body>")
+    print("    IS_SUBSTITUTE_STEP_AT  : <9-disjunct body>")
     print("    IS_SUBSTITUTE_TRACE_DEF:", pp_thm(IS_SUBSTITUTE_TRACE_DEF))
     print("    IS_SUBSTITUTE_TRACE_AT :", pp_thm(IS_SUBSTITUTE_TRACE_AT))
     print("    TRACE_STEP_MONO                       :", pp_thm(TRACE_STEP_MONO))
