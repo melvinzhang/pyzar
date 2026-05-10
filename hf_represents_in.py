@@ -61,11 +61,15 @@ from hf_syntax import (
     SUBSTITUTE_AT_IN,
     SUBSTITUTE_AT_EMPTY,
     SUBSTITUTE_AT_INSERT,
+    SUBSTITUTE_AT_EQ,
+    SUBSTITUTE_AT_IMP,
     SUBSTITUTE_AT_VAR_HIT,
     SUBSTITUTE_AT_VAR_MISS,
     SUBSTITUTE_AT_FORALL_MISS,
     IS_FORM_AT_NOT,
     IS_FORM_AT_IN,
+    IS_FORM_AT_IMP,
+    IS_FORM_AT_EQ,
     IS_FORM_AT_FORALL,
     IS_TERM_AT_VAR,
 )
@@ -438,6 +442,132 @@ _neq_ss0_s0 = _flip_neq_local(
 )
 
 
+_a_n0 = Var("a", nat0_ty)
+_b_n0 = Var("b", nat0_ty)
+_c_n0 = Var("c", nat0_ty)
+
+_idx0 = ZERO
+_idx1 = mk_suc0(ZERO)
+_idx2 = mk_suc0(mk_suc0(ZERO))
+
+
+# Parser-syntax helpers: HF3's body has 9 var-leaf occurrences and
+# parens nest 10 layers deep, easy to miscount manually.  We compose
+# strings via these helpers so parens stay balanced.
+_VS0 = "(Var_t 0)"
+_VS1 = "(Var_t (SUC0 0))"
+_VS2 = "(Var_t (SUC0 (SUC0 0)))"
+
+
+def _body3_at(x, y, z):
+    """The HF3 body B0 with var_x/y/z replaced by the parser-syntax
+    strings ``x``, ``y``, ``z`` (each must be its own parser-bracketed
+    term).
+    """
+    return (
+        f"(Imp_f (Not_f (Eq_f {x} {y})) "
+        f"(Not_f (Imp_f "
+        f"(Imp_f (In_a {y} (Insert_t {x} {z})) (In_a {y} {z})) "
+        f"(Not_f (Imp_f (In_a {y} {z}) "
+        f"(In_a {y} (Insert_t {x} {z})))))))"
+    )
+
+
+def _subst_var_hit(idx, term):
+    """|- substitute (Var_t idx) term idx = term."""
+    return MP(SPECL([idx, term, idx], SUBSTITUTE_AT_VAR_HIT), REFL(idx))
+
+
+def _subst_var_miss(idx_var, term, idx_subst, neq_th):
+    """|- substitute (Var_t idx_var) term idx_subst = Var_t idx_var.
+
+    Requires ``neq_th : ~(idx_subst = idx_var)``.
+    """
+    return MP(
+        SPECL([idx_var, term, idx_subst], SUBSTITUTE_AT_VAR_MISS), neq_th
+    )
+
+
+def _subst_forall_miss(fa_idx, body, term, subst_idx, neq_th):
+    """|- substitute (Forall_f fa_idx body) term subst_idx
+            = Forall_f fa_idx (substitute body term subst_idx).
+
+    Requires ``neq_th : ~(subst_idx = fa_idx)``.
+    """
+    return MP(
+        SPECL(
+            [fa_idx, body, term, subst_idx], SUBSTITUTE_AT_FORALL_MISS
+        ),
+        neq_th,
+    )
+
+
+# B0 = innermost HF3 body (with var_x/y/z folded). _B0_text returns the
+# string form for parsing; the parser unfolds var_x/y/z to Var_t 0/1/2
+# inside the proof simp pass.
+def _B0_text():
+    return (
+        "Imp_f (Not_f (Eq_f var_x var_y)) "
+        "(Not_f (Imp_f "
+        "(Imp_f (In_a var_y (Insert_t var_x var_z)) (In_a var_y var_z)) "
+        "(Not_f (Imp_f (In_a var_y var_z) "
+        "              (In_a var_y (Insert_t var_x var_z))))))"
+    )
+
+
+def _B1_text():
+    return "Forall_f (SUC0 (SUC0 0)) (" + _B0_text() + ")"
+
+
+def _B2_text():
+    return "Forall_f (SUC0 0) (" + _B1_text() + ")"
+
+
+# Unfolded body forms (with Var_t 0/1/2 instead of var_x/y/z) -- needed
+# to instantiate FORALL_MISS at the simp-normalised shape.
+def _B0_unfolded(p):
+    return p._parse(
+        "Imp_f (Not_f (Eq_f (Var_t 0) (Var_t (SUC0 0)))) "
+        "(Not_f (Imp_f "
+        "(Imp_f (In_a (Var_t (SUC0 0)) "
+        "             (Insert_t (Var_t 0) (Var_t (SUC0 (SUC0 0))))) "
+        "       (In_a (Var_t (SUC0 0)) (Var_t (SUC0 (SUC0 0))))) "
+        "(Not_f (Imp_f (In_a (Var_t (SUC0 0)) (Var_t (SUC0 (SUC0 0)))) "
+        "              (In_a (Var_t (SUC0 0)) "
+        "                    (Insert_t (Var_t 0) "
+        "                              (Var_t (SUC0 (SUC0 0))))))))) "
+    )
+
+
+def _B1_unfolded(p):
+    return p._parse(
+        "Forall_f (SUC0 (SUC0 0)) ("
+        "Imp_f (Not_f (Eq_f (Var_t 0) (Var_t (SUC0 0)))) "
+        "(Not_f (Imp_f "
+        "(Imp_f (In_a (Var_t (SUC0 0)) "
+        "             (Insert_t (Var_t 0) (Var_t (SUC0 (SUC0 0))))) "
+        "       (In_a (Var_t (SUC0 0)) (Var_t (SUC0 (SUC0 0))))) "
+        "(Not_f (Imp_f (In_a (Var_t (SUC0 0)) (Var_t (SUC0 (SUC0 0)))) "
+        "              (In_a (Var_t (SUC0 0)) "
+        "                    (Insert_t (Var_t 0) "
+        "                              (Var_t (SUC0 (SUC0 0)))))))))) "
+    )
+
+
+# Body shape after UI1 (var_x replaced with `a`).
+def _B0_at_a(p):
+    return p._parse(
+        "Imp_f (Not_f (Eq_f a (Var_t (SUC0 0)))) "
+        "(Not_f (Imp_f "
+        "(Imp_f (In_a (Var_t (SUC0 0)) "
+        "             (Insert_t a (Var_t (SUC0 (SUC0 0))))) "
+        "       (In_a (Var_t (SUC0 0)) (Var_t (SUC0 (SUC0 0))))) "
+        "(Not_f (Imp_f (In_a (Var_t (SUC0 0)) (Var_t (SUC0 (SUC0 0)))) "
+        "              (In_a (Var_t (SUC0 0)) "
+        "                    (Insert_t a (Var_t (SUC0 (SUC0 0))))))))) "
+    )
+
+
 @proof
 def HF3_INST(p):
     """|- !a b c. is_term a /\\ is_term b /\\ is_term c
@@ -451,55 +581,16 @@ def HF3_INST(p):
                                               (In_a b (Insert_t a c))))))).
 
     HF3.  !x y z. ~(x = y) -> (In y (Insert x z) <-> In y z), instantiated
-    at (a, b, c). The encoded biconditional spells out as
-        ~ ((P -> Q) -> ~(Q -> P))
+    at (a, b, c). Encoded biconditional spells out as
+        Imp_f (Not_f (Eq_f a b))
+              (Not_f (Imp_f (Imp_f P Q) (Not_f (Imp_f Q P))))
     where P := In_a b (Insert_t a c) and Q := In_a b c.
 
-    SORRY (mechanical, ~150 lines on top of HF1/HF2_INST).
-
-    Proof outline -- three UI steps with substitute reductions:
-
-      Step 1. Lift |- is_hf_axiom HF3_axiom to |- Prov_HF HF3_axiom via
-              ``_prov_of_hf_axiom``, then unfold HF3_AXIOM_DEF.
-
-      Step 2. Build ``is_form`` for each Forall_f layer's body, bottom-up
-              from IS_TERM_VAR_{X,Y,Z}, IS_FORM_AT_{EQ,NOT,IMP,IN,FORALL}.
-              Three layers (B0 = innermost body, B1 = Forall_f (SUC0 SUC0 0)
-              B0, B2 = Forall_f (SUC0 0) B1) -- ~30 lines of CONJ chains.
-
-      Step 3. UI 1 at (0, B2, a): PROV_HF_UI peels the outermost Forall_f
-              and yields ``Prov_HF (substitute B2 a 0)``. Reduce
-              symbolically:
-                * SUBSTITUTE_AT_FORALL_MISS (cond ~(0 = SUC0 0),
-                  ~(0 = SUC0 (SUC0 0))) walks past the two inner Forall_f's;
-                * SUBSTITUTE_AT_{IMP,NOT,EQ,IN,INSERT} push through B0;
-                * leaf rewrites: var_x → a (HIT), var_y unchanged (MISS),
-                  var_z unchanged (MISS).
-              Result: ``Prov_HF (Forall_f (SUC0 0) (Forall_f (SUC0 SUC0 0)
-              B0[a/var_x]))``.
-
-      Step 4. UI 2 at (SUC0 0, B1[a/var_x], b): same pattern. The
-              outer FORALL_MISS at SUC0 (SUC0 0) ≠ SUC0 0 walks past the
-              innermost Forall_f, then leaf rewrites: substitute(a, b,
-              SUC0 0) = a (precond h_ab); var_y → b (HIT); var_z
-              unchanged (MISS).
-              Result: ``Prov_HF (Forall_f (SUC0 SUC0 0) B0[a/var_x,
-              b/var_y])``.
-
-      Step 5. UI 3 at (SUC0 SUC0 0, B0[a/var_x, b/var_y], c): leaf
-              rewrites: substitute(a, c, SUC0 SUC0 0) = a (precond
-              h_ac); substitute(b, c, SUC0 SUC0 0) = b (precond h_bc);
-              var_z → c (HIT).
-              Result: the desired closed-form Imp_f tree.
-
-    Each FORALL_MISS firing requires a specialised conditional rewrite
-    (the unconditional form is built by MP'ing the AT-equation with the
-    matching index inequality from {_neq_0_s0, _neq_0_ss0, _neq_s0_ss0}).
-    The structure mirrors HF2_INST -- only the body is bigger.
-
-    Status: deferred. Marked SORRY for now so downstream IS_IN_REPRESENTS
-    work can proceed with a clean interface; mechanically expandable
-    via the same ``by_rewrite_of`` discipline used in HF2_INST.
+    Three PROV_HF_UI steps interleaved with substitute reductions
+    (FORALL_MISS at the bound-var inequalities, IMP/NOT/EQ/IN/INSERT
+    push-through, VAR_HIT at the substitution-target leaf, VAR_MISS at
+    the other two leaves, and the three precond stability rewrites
+    h_ab / h_ac / h_bc to keep the previously-substituted slots fixed).
     """
     p.goal(
         "!a b c. (is_term a /\\ is_term b /\\ is_term c) "
@@ -513,7 +604,498 @@ def HF3_INST(p):
         "                              (In_a b (Insert_t a c)))))))",
         types={"a": nat0_ty, "b": nat0_ty, "c": nat0_ty},
     )
-    p.sorry()
+    p.fix("a b c")
+    p.assume(
+        "((ha, hb, hc), h_ab, h_ac, h_bc): "
+        "(is_term a /\\ is_term b /\\ is_term c) "
+        "/\\ (substitute a b (SUC0 0) = a) "
+        "/\\ (substitute a c (SUC0 (SUC0 0)) = a) "
+        "/\\ (substitute b c (SUC0 (SUC0 0)) = b)"
+    )
+
+    # Step 1: |- Prov_HF HF3_axiom unfolded.
+    prov_h3_raw = _prov_of_hf_axiom(HF3_axiom)
+    p.have(
+        "h_prov_3a: Prov_HF (Forall_f 0 (" + _B2_text() + "))"
+    ).by_rewrite_of(prov_h3_raw, [HF3_AXIOM_DEF])
+
+    # Step 2: is_form for each layer (B0, B1, B2) -- with var_x/y/z
+    # folded; the rewriter handles the unfold during simp normalisation.
+    # is_term (Insert_t var_x var_z).
+    is_term_insert_xz = MP(
+        SPECL([var_x, var_z], IS_TERM_INSERT),
+        CONJ(IS_TERM_VAR_X, IS_TERM_VAR_Z),
+    )
+    # is_form (Eq_f var_x var_y).
+    eq_xy_at = SPECL([var_x, var_y], IS_FORM_AT_EQ)
+    is_form_eq_xy = EQ_MP(
+        SYM(eq_xy_at), CONJ(IS_TERM_VAR_X, IS_TERM_VAR_Y)
+    )
+    # is_form (Not_f (Eq_f var_x var_y)).
+    not_eq_at = SPEC(p._parse("Eq_f var_x var_y"), IS_FORM_AT_NOT)
+    is_form_not_eq_xy = EQ_MP(SYM(not_eq_at), is_form_eq_xy)
+    # is_form (In_a var_y (Insert_t var_x var_z)).
+    in_y_xz_at = SPECL(
+        [var_y, p._parse("Insert_t var_x var_z")], IS_FORM_AT_IN
+    )
+    is_form_in_y_xz = EQ_MP(
+        SYM(in_y_xz_at), CONJ(IS_TERM_VAR_Y, is_term_insert_xz)
+    )
+    # is_form (In_a var_y var_z).
+    in_y_z_at = SPECL([var_y, var_z], IS_FORM_AT_IN)
+    is_form_in_y_z = EQ_MP(
+        SYM(in_y_z_at), CONJ(IS_TERM_VAR_Y, IS_TERM_VAR_Z)
+    )
+    # is_form (Imp_f (In_a y (Insert x z)) (In_a y z)).
+    imp_pq_at = SPECL(
+        [
+            p._parse("In_a var_y (Insert_t var_x var_z)"),
+            p._parse("In_a var_y var_z"),
+        ],
+        IS_FORM_AT_IMP,
+    )
+    is_form_imp_pq = EQ_MP(
+        SYM(imp_pq_at), CONJ(is_form_in_y_xz, is_form_in_y_z)
+    )
+    # is_form (Imp_f (In_a y z) (In_a y (Insert x z))).
+    imp_qp_at = SPECL(
+        [
+            p._parse("In_a var_y var_z"),
+            p._parse("In_a var_y (Insert_t var_x var_z)"),
+        ],
+        IS_FORM_AT_IMP,
+    )
+    is_form_imp_qp = EQ_MP(
+        SYM(imp_qp_at), CONJ(is_form_in_y_z, is_form_in_y_xz)
+    )
+    # is_form (Not_f (Imp_f Q P)).
+    not_imp_qp_at = SPEC(
+        p._parse(
+            "Imp_f (In_a var_y var_z) (In_a var_y (Insert_t var_x var_z))"
+        ),
+        IS_FORM_AT_NOT,
+    )
+    is_form_not_imp_qp = EQ_MP(SYM(not_imp_qp_at), is_form_imp_qp)
+    # is_form (Imp_f (Imp_f P Q) (Not_f (Imp_f Q P))).
+    imp_outer_at = SPECL(
+        [
+            p._parse(
+                "Imp_f (In_a var_y (Insert_t var_x var_z)) "
+                "      (In_a var_y var_z)"
+            ),
+            p._parse(
+                "Not_f (Imp_f (In_a var_y var_z) "
+                "             (In_a var_y (Insert_t var_x var_z)))"
+            ),
+        ],
+        IS_FORM_AT_IMP,
+    )
+    is_form_imp_outer = EQ_MP(
+        SYM(imp_outer_at),
+        CONJ(is_form_imp_pq, is_form_not_imp_qp),
+    )
+    # is_form (Not_f (Imp_f ... ...)).
+    not_imp_outer_at = SPEC(
+        p._parse(
+            "Imp_f "
+            "(Imp_f (In_a var_y (Insert_t var_x var_z)) "
+            "       (In_a var_y var_z)) "
+            "(Not_f (Imp_f (In_a var_y var_z) "
+            "              (In_a var_y (Insert_t var_x var_z))))"
+        ),
+        IS_FORM_AT_NOT,
+    )
+    is_form_not_imp_outer = EQ_MP(
+        SYM(not_imp_outer_at), is_form_imp_outer
+    )
+    # is_form B0.
+    imp_top_at = SPECL(
+        [
+            p._parse("Not_f (Eq_f var_x var_y)"),
+            p._parse(
+                "Not_f (Imp_f "
+                "(Imp_f (In_a var_y (Insert_t var_x var_z)) "
+                "       (In_a var_y var_z)) "
+                "(Not_f (Imp_f (In_a var_y var_z) "
+                "              (In_a var_y (Insert_t var_x var_z)))))"
+            ),
+        ],
+        IS_FORM_AT_IMP,
+    )
+    is_form_B0 = EQ_MP(
+        SYM(imp_top_at),
+        CONJ(is_form_not_eq_xy, is_form_not_imp_outer),
+    )
+    # is_form B1 = is_form (Forall_f (SUC0 SUC0 0) B0).
+    fa_B0_at = SPECL(
+        [_idx2, p._parse(_B0_text())], IS_FORM_AT_FORALL,
+    )
+    is_form_B1 = EQ_MP(SYM(fa_B0_at), is_form_B0)
+    # is_form B2 = is_form (Forall_f (SUC0 0) B1).
+    fa_B1_at = SPECL(
+        [_idx1, p._parse(_B1_text())], IS_FORM_AT_FORALL,
+    )
+    is_form_B2 = EQ_MP(SYM(fa_B1_at), is_form_B1)
+
+    p.have("h_is_form_B2: is_form (" + _B2_text() + ")").by_thm(is_form_B2)
+
+    # Substitute leaf rules at idx 0 (subst target = 0).
+    subst_v0_at_0 = _subst_var_hit(_idx0, _a_n0)
+    subst_v1_at_0 = _subst_var_miss(_idx1, _a_n0, _idx0, _neq_0_s0)
+    subst_v2_at_0 = _subst_var_miss(_idx2, _a_n0, _idx0, _neq_0_ss0)
+
+    # FORALL_MISS at subst_idx = 0 -- conditional on bound idx ≠ 0.
+    fa_miss_b1_at_0 = _subst_forall_miss(
+        _idx1, _B1_unfolded(p), _a_n0, _idx0, _neq_0_s0
+    )
+    # The inner Forall_f wraps B0; FORALL_MISS at SUC0 SUC0 0 ≠ 0.
+    fa_miss_b0_at_0 = _subst_forall_miss(
+        _idx2, _B0_unfolded(p), _a_n0, _idx0, _neq_0_ss0
+    )
+
+    # ---- UI 1 (substitute a for var_x = Var_t 0) ----
+    body_after_ui1 = _body3_at("a", _VS1, _VS2)
+    forall_v2_body_after_ui1 = f"(Forall_f (SUC0 (SUC0 0)) {body_after_ui1})"
+    full_after_ui1 = f"(Forall_f (SUC0 0) {forall_v2_body_after_ui1})"
+
+    p.have(
+        "h_ui1: Prov_HF (substitute (" + _B2_text() + ") a 0)"
+    ).by(
+        PROV_HF_UI, "0", _B2_text(), "a",
+        CONJ(
+            p.fact("h_is_form_B2"),
+            CONJ(p.fact("ha"), p.fact("h_prov_3a")),
+        ),
+    )
+    p.have(
+        f"h_ui1_red: Prov_HF {full_after_ui1}"
+    ).by_rewrite_of(
+        "h_ui1",
+        [
+            VAR_X_DEF, VAR_Y_DEF, VAR_Z_DEF,
+            fa_miss_b1_at_0, fa_miss_b0_at_0,
+            SUBSTITUTE_AT_IMP, SUBSTITUTE_AT_NOT,
+            SUBSTITUTE_AT_EQ, SUBSTITUTE_AT_IN, SUBSTITUTE_AT_INSERT,
+            subst_v0_at_0, subst_v1_at_0, subst_v2_at_0,
+        ],
+    )
+
+    # ---- UI 2 (substitute b for var_y = Var_t (SUC0 0)) ----
+    # Need is_form of the body Forall_f (SUC0 (SUC0 0)) B0[a/var_x].
+    # Build it manually from is_term a + leaf is_term facts.
+    is_term_v1 = EQT_ELIM(SPEC(_idx1, IS_TERM_AT_VAR))
+    is_term_v2 = EQT_ELIM(SPEC(_idx2, IS_TERM_AT_VAR))
+    # is_term (Insert_t a (Var_t (SUC0 (SUC0 0)))).
+    is_term_insert_av2 = MP(
+        SPECL([_a_n0, p._parse("Var_t (SUC0 (SUC0 0))")], IS_TERM_INSERT),
+        CONJ(p.fact("ha"), is_term_v2),
+    )
+    # is_form (Eq_f a (Var_t (SUC0 0))).
+    eq_av1_at = SPECL(
+        [_a_n0, p._parse("Var_t (SUC0 0)")], IS_FORM_AT_EQ,
+    )
+    is_form_eq_av1 = EQ_MP(
+        SYM(eq_av1_at), CONJ(p.fact("ha"), is_term_v1)
+    )
+    is_form_not_eq_av1 = EQ_MP(
+        SYM(SPEC(p._parse("Eq_f a (Var_t (SUC0 0))"), IS_FORM_AT_NOT)),
+        is_form_eq_av1,
+    )
+    # is_form (In_a (Var_t (SUC0 0)) (Insert_t a (Var_t (SUC0 (SUC0 0))))).
+    in_v1_av2_at = SPECL(
+        [
+            p._parse("Var_t (SUC0 0)"),
+            p._parse("Insert_t a (Var_t (SUC0 (SUC0 0)))"),
+        ],
+        IS_FORM_AT_IN,
+    )
+    is_form_in_v1_av2 = EQ_MP(
+        SYM(in_v1_av2_at), CONJ(is_term_v1, is_term_insert_av2)
+    )
+    # is_form (In_a (Var_t (SUC0 0)) (Var_t (SUC0 (SUC0 0)))).
+    in_v1_v2_at = SPECL(
+        [
+            p._parse("Var_t (SUC0 0)"),
+            p._parse("Var_t (SUC0 (SUC0 0))"),
+        ],
+        IS_FORM_AT_IN,
+    )
+    is_form_in_v1_v2 = EQ_MP(
+        SYM(in_v1_v2_at), CONJ(is_term_v1, is_term_v2)
+    )
+    is_form_imp_pq_a = EQ_MP(
+        SYM(SPECL(
+            [
+                p._parse(
+                    "In_a (Var_t (SUC0 0)) "
+                    "(Insert_t a (Var_t (SUC0 (SUC0 0))))"
+                ),
+                p._parse(
+                    "In_a (Var_t (SUC0 0)) (Var_t (SUC0 (SUC0 0)))"
+                ),
+            ],
+            IS_FORM_AT_IMP,
+        )),
+        CONJ(is_form_in_v1_av2, is_form_in_v1_v2),
+    )
+    is_form_imp_qp_a = EQ_MP(
+        SYM(SPECL(
+            [
+                p._parse(
+                    "In_a (Var_t (SUC0 0)) (Var_t (SUC0 (SUC0 0)))"
+                ),
+                p._parse(
+                    "In_a (Var_t (SUC0 0)) "
+                    "(Insert_t a (Var_t (SUC0 (SUC0 0))))"
+                ),
+            ],
+            IS_FORM_AT_IMP,
+        )),
+        CONJ(is_form_in_v1_v2, is_form_in_v1_av2),
+    )
+    is_form_not_imp_qp_a = EQ_MP(
+        SYM(SPEC(
+            p._parse(
+                "Imp_f (In_a (Var_t (SUC0 0)) (Var_t (SUC0 (SUC0 0)))) "
+                "      (In_a (Var_t (SUC0 0)) "
+                "            (Insert_t a (Var_t (SUC0 (SUC0 0)))))"
+            ),
+            IS_FORM_AT_NOT,
+        )),
+        is_form_imp_qp_a,
+    )
+    is_form_imp_outer_a = EQ_MP(
+        SYM(SPECL(
+            [
+                p._parse(
+                    "Imp_f (In_a (Var_t (SUC0 0)) "
+                    "             (Insert_t a (Var_t (SUC0 (SUC0 0))))) "
+                    "      (In_a (Var_t (SUC0 0)) "
+                    "             (Var_t (SUC0 (SUC0 0))))"
+                ),
+                p._parse(
+                    "Not_f (Imp_f "
+                    "(In_a (Var_t (SUC0 0)) (Var_t (SUC0 (SUC0 0)))) "
+                    "(In_a (Var_t (SUC0 0)) "
+                    "      (Insert_t a (Var_t (SUC0 (SUC0 0))))))"
+                ),
+            ],
+            IS_FORM_AT_IMP,
+        )),
+        CONJ(is_form_imp_pq_a, is_form_not_imp_qp_a),
+    )
+    is_form_not_imp_outer_a = EQ_MP(
+        SYM(SPEC(
+            p._parse(
+                "Imp_f "
+                "(Imp_f (In_a (Var_t (SUC0 0)) "
+                "             (Insert_t a (Var_t (SUC0 (SUC0 0))))) "
+                "       (In_a (Var_t (SUC0 0)) "
+                "             (Var_t (SUC0 (SUC0 0))))) "
+                "(Not_f (Imp_f "
+                "(In_a (Var_t (SUC0 0)) (Var_t (SUC0 (SUC0 0)))) "
+                "(In_a (Var_t (SUC0 0)) "
+                "      (Insert_t a (Var_t (SUC0 (SUC0 0)))))))"
+            ),
+            IS_FORM_AT_NOT,
+        )),
+        is_form_imp_outer_a,
+    )
+    is_form_B0_at_a = EQ_MP(
+        SYM(SPECL(
+            [
+                p._parse("Not_f (Eq_f a (Var_t (SUC0 0)))"),
+                p._parse(
+                    "Not_f (Imp_f "
+                    "(Imp_f (In_a (Var_t (SUC0 0)) "
+                    "             (Insert_t a (Var_t (SUC0 (SUC0 0))))) "
+                    "       (In_a (Var_t (SUC0 0)) "
+                    "             (Var_t (SUC0 (SUC0 0))))) "
+                    "(Not_f (Imp_f "
+                    "(In_a (Var_t (SUC0 0)) (Var_t (SUC0 (SUC0 0)))) "
+                    "(In_a (Var_t (SUC0 0)) "
+                    "      (Insert_t a (Var_t (SUC0 (SUC0 0)))))))) "
+                ),
+            ],
+            IS_FORM_AT_IMP,
+        )),
+        CONJ(is_form_not_eq_av1, is_form_not_imp_outer_a),
+    )
+    # is_form (Forall_f (SUC0 SUC0 0) B0[a/var_x]).
+    is_form_B1_at_a = EQ_MP(
+        SYM(SPECL([_idx2, _B0_at_a(p)], IS_FORM_AT_FORALL)),
+        is_form_B0_at_a,
+    )
+    p.have(
+        f"h_is_form_B1_a: is_form {forall_v2_body_after_ui1}"
+    ).by_thm(is_form_B1_at_a)
+
+    # FORALL_MISS at subst_idx = SUC0 0 -- conditional on bound idx ≠ SUC0 0.
+    fa_miss_b0_at_s0 = _subst_forall_miss(
+        _idx2, _B0_at_a(p), _b_n0, _idx1, _neq_s0_ss0
+    )
+    # Substitute leaf rules at idx SUC0 0.
+    subst_v1_at_s0 = _subst_var_hit(_idx1, _b_n0)
+    subst_v2_at_s0 = _subst_var_miss(_idx2, _b_n0, _idx1, _neq_s0_ss0)
+
+    body_after_ui2 = _body3_at("a", "b", _VS2)
+    forall_v2_body_after_ui2 = f"(Forall_f (SUC0 (SUC0 0)) {body_after_ui2})"
+
+    p.have(
+        f"h_ui2: Prov_HF (substitute {forall_v2_body_after_ui1} b (SUC0 0))"
+    ).by(
+        PROV_HF_UI, "SUC0 0", forall_v2_body_after_ui1, "b",
+        CONJ(
+            p.fact("h_is_form_B1_a"),
+            CONJ(p.fact("hb"), p.fact("h_ui1_red")),
+        ),
+    )
+
+    p.have(
+        f"h_ui2_red: Prov_HF {forall_v2_body_after_ui2}"
+    ).by_rewrite_of(
+        "h_ui2",
+        [
+            fa_miss_b0_at_s0,
+            SUBSTITUTE_AT_IMP, SUBSTITUTE_AT_NOT,
+            SUBSTITUTE_AT_EQ, SUBSTITUTE_AT_IN, SUBSTITUTE_AT_INSERT,
+            subst_v1_at_s0, subst_v2_at_s0,
+            "h_ab",
+        ],
+    )
+
+    # ---- UI 3 (substitute c for var_z = Var_t (SUC0 SUC0 0)) ----
+    # is_form of B0[a/var_x, b/var_y].
+    # is_term (Insert_t a (Var_t (SUC0 (SUC0 0)))).
+    # is_form (Eq_f a b).
+    is_form_eq_ab = EQ_MP(
+        SYM(SPECL([_a_n0, _b_n0], IS_FORM_AT_EQ)),
+        CONJ(p.fact("ha"), p.fact("hb")),
+    )
+    is_form_not_eq_ab = EQ_MP(
+        SYM(SPEC(p._parse("Eq_f a b"), IS_FORM_AT_NOT)),
+        is_form_eq_ab,
+    )
+    # is_form (In_a b (Insert_t a (Var_t (SUC0 (SUC0 0))))).
+    is_form_in_b_av2 = EQ_MP(
+        SYM(SPECL(
+            [_b_n0, p._parse("Insert_t a (Var_t (SUC0 (SUC0 0)))")],
+            IS_FORM_AT_IN,
+        )),
+        CONJ(p.fact("hb"), is_term_insert_av2),
+    )
+    # is_form (In_a b (Var_t (SUC0 (SUC0 0)))).
+    is_form_in_b_v2 = EQ_MP(
+        SYM(SPECL(
+            [_b_n0, p._parse("Var_t (SUC0 (SUC0 0))")],
+            IS_FORM_AT_IN,
+        )),
+        CONJ(p.fact("hb"), is_term_v2),
+    )
+    is_form_imp_pq_ab = EQ_MP(
+        SYM(SPECL(
+            [
+                p._parse("In_a b (Insert_t a (Var_t (SUC0 (SUC0 0))))"),
+                p._parse("In_a b (Var_t (SUC0 (SUC0 0)))"),
+            ],
+            IS_FORM_AT_IMP,
+        )),
+        CONJ(is_form_in_b_av2, is_form_in_b_v2),
+    )
+    is_form_imp_qp_ab = EQ_MP(
+        SYM(SPECL(
+            [
+                p._parse("In_a b (Var_t (SUC0 (SUC0 0)))"),
+                p._parse("In_a b (Insert_t a (Var_t (SUC0 (SUC0 0))))"),
+            ],
+            IS_FORM_AT_IMP,
+        )),
+        CONJ(is_form_in_b_v2, is_form_in_b_av2),
+    )
+    is_form_not_imp_qp_ab = EQ_MP(
+        SYM(SPEC(
+            p._parse(
+                "Imp_f (In_a b (Var_t (SUC0 (SUC0 0)))) "
+                "      (In_a b (Insert_t a (Var_t (SUC0 (SUC0 0)))))"
+            ),
+            IS_FORM_AT_NOT,
+        )),
+        is_form_imp_qp_ab,
+    )
+    is_form_imp_outer_ab = EQ_MP(
+        SYM(SPECL(
+            [
+                p._parse(
+                    "Imp_f "
+                    "(In_a b (Insert_t a (Var_t (SUC0 (SUC0 0))))) "
+                    "(In_a b (Var_t (SUC0 (SUC0 0))))"
+                ),
+                p._parse(
+                    "Not_f (Imp_f (In_a b (Var_t (SUC0 (SUC0 0)))) "
+                    "             (In_a b (Insert_t a (Var_t (SUC0 (SUC0 0))))))"
+                ),
+            ],
+            IS_FORM_AT_IMP,
+        )),
+        CONJ(is_form_imp_pq_ab, is_form_not_imp_qp_ab),
+    )
+    is_form_not_imp_outer_ab = EQ_MP(
+        SYM(SPEC(
+            p._parse(
+                "Imp_f "
+                "(Imp_f (In_a b (Insert_t a (Var_t (SUC0 (SUC0 0))))) "
+                "       (In_a b (Var_t (SUC0 (SUC0 0))))) "
+                "(Not_f (Imp_f (In_a b (Var_t (SUC0 (SUC0 0)))) "
+                "              (In_a b (Insert_t a (Var_t (SUC0 (SUC0 0)))))))"
+            ),
+            IS_FORM_AT_NOT,
+        )),
+        is_form_imp_outer_ab,
+    )
+    is_form_B0_at_ab = EQ_MP(
+        SYM(SPECL(
+            [
+                p._parse("Not_f (Eq_f a b)"),
+                p._parse(
+                    "Not_f (Imp_f "
+                    "(Imp_f (In_a b (Insert_t a (Var_t (SUC0 (SUC0 0))))) "
+                    "       (In_a b (Var_t (SUC0 (SUC0 0))))) "
+                    "(Not_f (Imp_f (In_a b (Var_t (SUC0 (SUC0 0)))) "
+                    "              (In_a b (Insert_t a (Var_t (SUC0 (SUC0 0))))))))"
+                ),
+            ],
+            IS_FORM_AT_IMP,
+        )),
+        CONJ(is_form_not_eq_ab, is_form_not_imp_outer_ab),
+    )
+    p.have(
+        f"h_is_form_B0_ab: is_form {body_after_ui2}"
+    ).by_thm(is_form_B0_at_ab)
+
+    # Leaf rules at idx SUC0 SUC0 0.
+    subst_v2_at_ss0 = _subst_var_hit(_idx2, _c_n0)
+
+    body_final = _body3_at("a", "b", "c")
+
+    p.have(
+        f"h_ui3: Prov_HF (substitute {body_after_ui2} c (SUC0 (SUC0 0)))"
+    ).by(
+        PROV_HF_UI, "SUC0 (SUC0 0)", body_after_ui2, "c",
+        CONJ(
+            p.fact("h_is_form_B0_ab"),
+            CONJ(p.fact("hc"), p.fact("h_ui2_red")),
+        ),
+    )
+
+    p.thus(f"Prov_HF {body_final}").by_rewrite_of(
+        "h_ui3",
+        [
+            SUBSTITUTE_AT_IMP, SUBSTITUTE_AT_NOT,
+            SUBSTITUTE_AT_EQ, SUBSTITUTE_AT_IN, SUBSTITUTE_AT_INSERT,
+            subst_v2_at_ss0,
+            "h_ac", "h_bc",
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -788,7 +1370,7 @@ if __name__ == "__main__":
     print("    IS_TERM_VAR_Z :", pp_thm(IS_TERM_VAR_Z))
     print("    HF1_INST      :", pp_thm(HF1_INST))
     print("    HF2_INST      :", pp_thm(HF2_INST))
-    print("    HF3_INST (SORRY)         :", pp_thm(HF3_INST))
+    print("    HF3_INST      :", pp_thm(HF3_INST))
     print("    QUOTE_HF_INJ (SORRY)     :", pp_thm(QUOTE_HF_INJ))
     print("    QUOTE_HF_PROV_NEQ (SORRY):", pp_thm(QUOTE_HF_PROV_NEQ))
     print("    IS_IN_REPRESENTS_TH (SORRY) :", pp_thm(IS_IN_REPRESENTS_TH))
