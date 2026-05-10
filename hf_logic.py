@@ -36,6 +36,7 @@ from tactics import (
 )
 
 from hf_syntax import (
+    FREE_IN_AT_NOT,
     IS_FORM_AT_FORALL,
     IS_FORM_AT_IMP,
     IS_FORM_AT_NOT,
@@ -2105,12 +2106,19 @@ def PROV_HF_EXISTS_ELIM(p):
                   /\\ Prov_HF (Imp_f P Q)
                   ==> Prov_HF (Imp_f (Not_f (Forall_f v (Not_f P))) Q).
 
-    Existential-elimination as a derived rule (encoded form).
+    Existential-elimination (encoded form: ``Exists_f v P =
+    Not_f (Forall_f v (Not_f P))``). Six-step Hilbert chain on top of
+    the prereq stack:
 
-    STUB. All prereqs (IDENTITY_SUBSTITUTE, PROV_HF_DT_GEN /
-    DTChain.gen, PROV_HF_FORALL_IMP_DIST via the AX6 axiom slot) are
-    in place; the body here is a short DT chain (CONTRAP, gen,
-    CONTRAP, DNE_IMP, TRANS_IMP) that has not yet been written out.
+      1. P -> Q                                    [premise hPQ]
+      2. ~Q -> ~P                                  [CONTRAP]
+      3. ~Q -> !v.~P                               [DT_GEN; v not free in ~Q]
+      4. ~(!v.~P) -> ~~Q                           [CONTRAP]
+      5. ~~Q -> Q                                  [DNE_IMP]
+      6. ~(!v.~P) -> Q                             [TRANS_IMP of 4 and 5]
+
+    The eigenvariable hypothesis ``~free_in (Not_f Q) v`` for step 3
+    follows from the lemma's ``~free_in Q v`` premise via FREE_IN_AT_NOT.
     """
     p.goal(
         "!v P Q. is_form P /\\ is_form Q /\\ ~(free_in Q v) "
@@ -2118,7 +2126,107 @@ def PROV_HF_EXISTS_ELIM(p):
         "==> Prov_HF (Imp_f (Not_f (Forall_f v (Not_f P))) Q)",
         types={"v": nat0_ty, "P": nat0_ty, "Q": nat0_ty},
     )
-    p.sorry()
+    p.fix("v P Q")
+    p.assume(
+        "(hP, hQ, hnfQ, hPQ): is_form P /\\ is_form Q "
+        "/\\ ~(free_in Q v) /\\ Prov_HF (Imp_f P Q)"
+    )
+
+    # is_form derivations for every subterm we'll touch.
+    isf_at_NotP = SPEC(p._parse("P"), IS_FORM_AT_NOT)
+    p.have("hNotP: is_form (Not_f P)").by_eq_mp(SYM(isf_at_NotP), "hP")
+    isf_at_NotQ = SPEC(p._parse("Q"), IS_FORM_AT_NOT)
+    p.have("hNotQ: is_form (Not_f Q)").by_eq_mp(SYM(isf_at_NotQ), "hQ")
+    isf_at_Fa = SPECL(
+        [p._parse("v"), p._parse("Not_f P")], IS_FORM_AT_FORALL
+    )
+    p.have(
+        "hFa: is_form (Forall_f v (Not_f P))"
+    ).by_eq_mp(SYM(isf_at_Fa), "hNotP")
+    isf_at_NotFa = SPEC(p._parse("Forall_f v (Not_f P)"), IS_FORM_AT_NOT)
+    p.have(
+        "hNotFa: is_form (Not_f (Forall_f v (Not_f P)))"
+    ).by_eq_mp(SYM(isf_at_NotFa), "hFa")
+    isf_at_NotNotQ = SPEC(p._parse("Not_f Q"), IS_FORM_AT_NOT)
+    p.have(
+        "hNotNotQ: is_form (Not_f (Not_f Q))"
+    ).by_eq_mp(SYM(isf_at_NotNotQ), "hNotQ")
+
+    # Lift the eigenvariable side condition through Not_f via FREE_IN_AT_NOT:
+    #   free_in (Not_f Q) v = free_in Q v, so ~free_in Q v gives
+    #   ~free_in (Not_f Q) v.
+    fi_at_NotQ = SPECL(
+        [p._parse("Q"), p._parse("v")], FREE_IN_AT_NOT
+    )
+    p.have(
+        "hnfNotQ: ~(free_in (Not_f Q) v)"
+    ).by_rewrite_of("hnfQ", [SYM(fi_at_NotQ)])
+
+    # Step 2: CONTRAP on hPQ.
+    p.have(
+        "h_contrap1: Prov_HF (Imp_f (Not_f Q) (Not_f P))"
+    ).by(
+        PROV_HF_CONTRAP, "P", "Q",
+        CONJ(p.fact("hP"), CONJ(p.fact("hQ"), p.fact("hPQ"))),
+    )
+
+    # Step 3: DT_GEN -- ~Q -> !v.~P.
+    p.have(
+        "h_dt_gen: Prov_HF (Imp_f (Not_f Q) (Forall_f v (Not_f P)))"
+    ).by(
+        PROV_HF_DT_GEN, "Not_f Q", "Not_f P", "v",
+        CONJ(
+            p.fact("hNotQ"),
+            CONJ(
+                p.fact("hNotP"),
+                CONJ(p.fact("hnfNotQ"), p.fact("h_contrap1")),
+            ),
+        ),
+    )
+
+    # Step 4: CONTRAP on h_dt_gen -- ~(!v.~P) -> ~~Q.
+    p.have(
+        "h_contrap2: Prov_HF (Imp_f (Not_f (Forall_f v (Not_f P))) "
+        "                          (Not_f (Not_f Q)))"
+    ).by(
+        PROV_HF_CONTRAP, "Not_f Q", "Forall_f v (Not_f P)",
+        CONJ(p.fact("hNotQ"), CONJ(p.fact("hFa"), p.fact("h_dt_gen"))),
+    )
+
+    # Step 5: DNE_IMP at Q.
+    p.have(
+        "h_dne: Prov_HF (Imp_f (Not_f (Not_f Q)) Q)"
+    ).by(PROV_HF_DOUBLE_NEG_ELIM_IMP, "Q", "hQ")
+
+    # Step 6: TRANS_IMP composes 4 and 5.
+    p.have(
+        "h_trans_in: is_form (Not_f (Forall_f v (Not_f P))) "
+        "/\\ is_form (Not_f (Not_f Q)) "
+        "/\\ is_form Q "
+        "/\\ Prov_HF (Imp_f (Not_f (Forall_f v (Not_f P))) "
+        "                  (Not_f (Not_f Q))) "
+        "/\\ Prov_HF (Imp_f (Not_f (Not_f Q)) Q)"
+    ).by_thm(
+        CONJ(
+            p.fact("hNotFa"),
+            CONJ(
+                p.fact("hNotNotQ"),
+                CONJ(
+                    p.fact("hQ"),
+                    CONJ(p.fact("h_contrap2"), p.fact("h_dne")),
+                ),
+            ),
+        )
+    )
+    p.thus(
+        "Prov_HF (Imp_f (Not_f (Forall_f v (Not_f P))) Q)"
+    ).by(
+        PROV_HF_TRANS_IMP,
+        "Not_f (Forall_f v (Not_f P))",
+        "Not_f (Not_f Q)",
+        "Q",
+        "h_trans_in",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2221,7 +2329,7 @@ if __name__ == "__main__":
     print("    PROV_HF_AND_ELIM_LEFT  :", pp_thm(PROV_HF_AND_ELIM_LEFT))
     print("    PROV_HF_AND_ELIM_RIGHT :", pp_thm(PROV_HF_AND_ELIM_RIGHT))
     print()
-    print("Stage 2C (g) -- existential elimination (STUB).")
+    print("Stage 2C (g) -- existential elimination.")
     print("    PROV_HF_EXISTS_ELIM :", pp_thm(PROV_HF_EXISTS_ELIM))
     print()
     print("Stage 2C (h) -- substitution under equality.")
