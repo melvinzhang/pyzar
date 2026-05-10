@@ -377,7 +377,7 @@ from parser import define, parse_type
 from nat0 import nat0_ty
 from proof import proof
 from tactics import SPECL, MP
-from q_syntax import (
+from hf_syntax import (
     Not_f,
     Imp_f,
     Forall_f,
@@ -385,8 +385,8 @@ from q_syntax import (
     SUBSTITUTE_AT_IMP,
     SUBSTITUTE_AT_FORALL_MISS,
 )
-from q_proof import var_x, var_y
-from q_repr import (
+from hf_proof import var_x, var_y
+from hf_repr import (
     numeral,
     substitute,
 )
@@ -487,7 +487,7 @@ EXISTS_F_AT = _at2(EXISTS_F_DEF, _v_n0, _f_n0)
 # over Exists_f under the side condition ``~(v = bvar)`` (mirroring
 # Forall_f). Each is a one-line ``by_rewrite`` chain through the
 # connective's defining equation + the primitive substitute equations
-# from q_syntax.
+# from hf_syntax.
 # ---------------------------------------------------------------------------
 
 

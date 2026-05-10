@@ -127,22 +127,22 @@ from axioms import F
 from fusion import ASSUME, ABS
 from basics import mk_eq
 
-from q_syntax import (
-    Zero_t,
-    Succ_t,
+from hf_syntax import (
+    Zero_t,  # noqa: F401  -- parser alias for is_substitute_step (legacy)
+    Succ_t,  # noqa: F401  -- parser alias for is_substitute_step (legacy)
     Var_t,  # noqa: F401  -- parser alias for is_substitute_step
-    Plus_t,  # noqa: F401  -- parser alias for is_substitute_step
-    Times_t,  # noqa: F401  -- parser alias for is_substitute_step
+    Plus_t,  # noqa: F401  -- parser alias for is_substitute_step (legacy)
+    Times_t,  # noqa: F401  -- parser alias for is_substitute_step (legacy)
     Eq_f,  # noqa: F401  -- parser alias for is_substitute_step
     Not_f,  # noqa: F401  -- parser alias for is_substitute_step
     Imp_f,  # noqa: F401  -- parser alias for is_substitute_step
     Forall_f,  # noqa: F401  -- parser alias for is_substitute_step
     Insert_t,
-    Empty_t,  # noqa: F401  -- used in _hf_to_qhf_body
+    Empty_t,
     In_a,  # noqa: F401  -- parser alias for is_substitute_step
     IS_TERM_REC,
     IS_FORM_REC,
-    IS_TERM_AT_SUCC,
+    IS_TERM_AT_INSERT,
     SUBSTITUTE_AT_ZERO,
     SUBSTITUTE_AT_SUCC,
     SUBSTITUTE_AT_VAR_HIT,
@@ -215,7 +215,7 @@ from tactics import (
     REWRITE_RULE,
 )
 from fusion import vsubst, aty, DEDUCT_ANTISYM_RULE, new_constant
-from q_proof import (
+from hf_proof import (
     var_x,
     VAR_Z_DEF,
     nil_l,
@@ -232,15 +232,20 @@ from q_proof import (
 
 
 # ---------------------------------------------------------------------------
-# Stage 3A (a) -- the numeral function.
+# Stage 3A (a) -- the numeral function (von Neumann ordinals).
 #
-#   numeral 0          =  Zero_t.
-#   numeral (SUC0 n)   =  Succ_t (numeral n).
+#   numeral 0          =  Empty_t.
+#   numeral (SUC0 n)   =  Insert_t (numeral n) (numeral n).
 #
-# Defined by primitive recursion on nat0 via ``define_unary_0``. The
-# resulting term ``numeral n`` is a closed Q-term encoding the n'th
-# successor of Zero (i.e. the standard von Neumann numeral encoded
-# through Stage 1's term constructors).
+# Following Świerczkowski (2003), numerals are encoded as von Neumann
+# ordinals inside HF: 0 := empty set, n+1 := n ∪ {n}, and ``n ∪ {n}``
+# is exactly ``Insert n n`` in the HF Insert-as-adjoin convention. This
+# replaces the previous Robinson-flavoured ``Succ^n Zero`` encoding (Q1-Q7
+# stripped 2026-05-10).
+#
+# ``numeral n`` is a closed HF-term; its Goedel number is itself a
+# closed nat0 numeral (a deeply nested Pair_ord tree) under hf_syntax's
+# Pair_ord-flat encoding.
 # ---------------------------------------------------------------------------
 
 
@@ -248,15 +253,15 @@ _n_n0 = Var("n", nat0_ty)
 _a_n0 = Var("a", nat0_ty)
 
 
-# Step body: \k a. Succ_t a.  (k unused; the new value is just Succ_t
-# applied to the recursive result.)
-_h_numeral = mk_abs(_n_n0, mk_abs(_a_n0, mk_app(Succ_t, _a_n0)))
+# Step body: \k a. Insert_t a a.  (k unused; the new value is the von
+# Neumann successor of the recursive result.)
+_h_numeral = mk_abs(_n_n0, mk_abs(_a_n0, mk_app(Insert_t, _a_n0, _a_n0)))
 
 
 NUMERAL_BASE, NUMERAL_STEP = define_unary_0(
     "numeral",
     parse_type("nat0 -> nat0"),
-    Zero_t,
+    Empty_t,
     _h_numeral,
     result_ty=nat0_ty,
 )
@@ -264,15 +269,15 @@ numeral = mk_const("numeral", [])
 
 
 # ---------------------------------------------------------------------------
-# Stage 3A (b) -- IS_TERM_NUMERAL: every numeral is a well-formed Q term.
+# Stage 3A (b) -- IS_TERM_NUMERAL: every numeral is a well-formed HF term.
 #
 #   |- !n. is_term (numeral n).
 #
-# Direct induction on n. The base case is a single application of
-# IS_TERM_REC at Zero_t (the leftmost disjunct collapses to REFL).
-# The step case uses IS_TERM_AT_SUCC (the Succ_t-recursion equation
-# from Stage 1) with witness ``numeral n`` and the inductive
-# hypothesis.
+# Direct induction on n. The base case ``is_term Empty_t`` follows from
+# IS_TERM_REC's Empty/Zero-base disjunct (Empty_t = 0 = Zero_t in the
+# legacy encoding). The step case uses IS_TERM_AT_INSERT applied to the
+# diagonal pair ``(numeral n, numeral n)`` with the inductive
+# hypothesis used twice.
 # ---------------------------------------------------------------------------
 
 
@@ -280,43 +285,42 @@ is_term = mk_const("is_term", [])
 
 
 @proof
-def IS_TERM_ZERO(p):
-    """|- is_term Zero_t.
+def IS_TERM_EMPTY(p):
+    """|- is_term Empty_t.
 
-    From IS_TERM_REC at Zero_t, the body's leftmost disjunct
-    ``Zero_t = Zero_t`` is reflexive; lift to the iff RHS by DISJ1
+    Empty_t = Zero_t in hf_syntax's current encoding, so this collapses
+    to ``is_term Zero_t``. From IS_TERM_REC at Zero_t the body's
+    leftmost disjunct ``Zero_t = Zero_t`` is reflexive; lift via DISJ1
     and EQ_MP through SYM.
     """
-    p.goal("is_term Zero_t")
+    p.goal("is_term Empty_t")
 
     rec_at_zero = SPEC(Zero_t, IS_TERM_REC)
-    # rec_at_zero : |- is_term Zero_t = (Zero_t = Zero_t \/ ...rest)
     rhs = rand(rec_at_zero._concl)
-    # rhs has shape: (Zero_t = Zero_t) \/ rest
-    refl_zero = REFL(Zero_t)  # |- Zero_t = Zero_t
+    refl_zero = REFL(Zero_t)
     from basics import rand as _rand
 
-    # Extract the right disjunct of rhs.
-    # rhs is ((Zero_t = Zero_t) \/ rest); its rator is `Or (Zero_t=Zero_t)`,
-    # its rand is `rest`.
     rest = _rand(rhs)
-    rhs_th = DISJ1(refl_zero, rest)  # |- (Zero_t = Zero_t) \/ rest
-    p.thus("is_term Zero_t").by_eq_mp(SYM(rec_at_zero), rhs_th)
+    rhs_th = DISJ1(refl_zero, rest)
+    is_term_zero = EQ_MP(SYM(rec_at_zero), rhs_th)  # |- is_term Zero_t
+    # Empty_t and Zero_t are definitionally equal: Empty_t := Zero_t.
+    from hf_syntax import EMPTY_T_DEF
+
+    p.thus("is_term Empty_t").by_rewrite_of(is_term_zero, [SYM(EMPTY_T_DEF)])
 
 
 @proof
-def IS_TERM_SUCC(p):
-    """|- !t. is_term t ==> is_term (Succ_t t).
+def IS_TERM_INSERT(p):
+    """|- !t1 t2. is_term t1 /\\ is_term t2 ==> is_term (Insert_t t1 t2).
 
-    ``IS_TERM_AT_SUCC`` from Stage 1 already simplifies the
-    Succ-disjunct of the body to the bare ``is_term t``: |- !t.
-    is_term (Succ_t t) = is_term t. So this lemma is one EQ_MP step.
+    ``IS_TERM_AT_INSERT`` from Stage 1 reduces the Insert-disjunct of the
+    body to ``is_term t1 /\\ is_term t2``; one EQ_MP step.
     """
-    p.goal("!t. is_term t ==> is_term (Succ_t t)")
-    p.fix("t")
-    p.assume("ih: is_term t")
-    at_succ_t = SPEC(p._parse("t"), IS_TERM_AT_SUCC)
-    p.thus("is_term (Succ_t t)").by_eq_mp(SYM(at_succ_t), "ih")
+    p.goal("!t1 t2. is_term t1 /\\ is_term t2 ==> is_term (Insert_t t1 t2)")
+    p.fix("t1 t2")
+    p.assume("ih: is_term t1 /\\ is_term t2")
+    at_insert = SPECL([p._parse("t1"), p._parse("t2")], IS_TERM_AT_INSERT)
+    p.thus("is_term (Insert_t t1 t2)").by_eq_mp(SYM(at_insert), "ih")
 
 
 @proof
@@ -326,19 +330,20 @@ def IS_TERM_NUMERAL(p):
     p.fix("n")
     with p.induction("n"):
         with p.base():
-            p.have("eq0: numeral 0 = Zero_t").by_thm(NUMERAL_BASE)
+            p.have("eq0: numeral 0 = Empty_t").by_thm(NUMERAL_BASE)
             p.thus("is_term (numeral 0)").by_rewrite_of(
-                IS_TERM_ZERO, [SYM(p.fact("eq0"))]
+                IS_TERM_EMPTY, [SYM(p.fact("eq0"))]
             )
         with p.step("IH"):
-            p.have("eq_step: numeral (SUC0 n) = Succ_t (numeral n)").by(
-                NUMERAL_STEP, "n"
-            )
-            p.have("succ_term: is_term (Succ_t (numeral n))").by(
-                IS_TERM_SUCC, "numeral n", "IH"
-            )
+            p.have(
+                "eq_step: numeral (SUC0 n) = Insert_t (numeral n) (numeral n)"
+            ).by(NUMERAL_STEP, "n")
+            ih_pair = CONJ(p.fact("IH"), p.fact("IH"))
+            p.have(
+                "ins_term: is_term (Insert_t (numeral n) (numeral n))"
+            ).by(IS_TERM_INSERT, "numeral n", "numeral n", ih_pair)
             p.thus("is_term (numeral (SUC0 n))").by_rewrite_of(
-                "succ_term", [SYM(p.fact("eq_step"))]
+                "ins_term", [SYM(p.fact("eq_step"))]
             )
 
 
@@ -1207,7 +1212,7 @@ def APPEND_L_AT_NIL(p):
     sel_const = mk_const("@", [(nat0_ty, aty)])
     sel_eq = AP_TERM(sel_const, abs_eq)
 
-    from q_syntax import _select_collapse_eq
+    from hf_syntax import _select_collapse_eq
 
     collapse = _select_collapse_eq(q_t, _r_n0_app)
     full_eq = TRANS(body_at, TRANS(sel_eq, collapse))
@@ -1322,7 +1327,7 @@ def APPEND_L_AT_CONS(p):
     sel_const = mk_const("@", [(nat0_ty, aty)])
     sel_eq = AP_TERM(sel_const, abs_eq)
 
-    from q_syntax import _select_collapse_eq
+    from hf_syntax import _select_collapse_eq
 
     target_K = mk_app(cons_l, h_t, mk_app(append_l, t_t, q_t))
     collapse = _select_collapse_eq(target_K, _r_n0_app)
@@ -4639,9 +4644,12 @@ if __name__ == "__main__":
     print("    NUMERAL_BASE :", pp_thm(NUMERAL_BASE))
     print("    NUMERAL_STEP :", pp_thm(NUMERAL_STEP))
     print()
+    print("    (Numerals encode as von Neumann ordinals: 0 := Empty_t,")
+    print("     n+1 := Insert_t n n.)")
+    print()
     print("Stage 3A (b) -- IS_TERM_NUMERAL.")
-    print("    IS_TERM_ZERO     :", pp_thm(IS_TERM_ZERO))
-    print("    IS_TERM_SUCC     :", pp_thm(IS_TERM_SUCC))
+    print("    IS_TERM_EMPTY    :", pp_thm(IS_TERM_EMPTY))
+    print("    IS_TERM_INSERT   :", pp_thm(IS_TERM_INSERT))
     print("    IS_TERM_NUMERAL  :", pp_thm(IS_TERM_NUMERAL))
     print()
     print("Stage 3B (a) -- list membership ``mem_l``.")

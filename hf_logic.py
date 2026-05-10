@@ -35,11 +35,11 @@ from tactics import (
     SYM,
 )
 
-from q_syntax import (
+from hf_syntax import (
     IS_FORM_AT_IMP,
     IS_FORM_AT_NOT,
 )
-from q_proof import (
+from hf_proof import (
     IS_K_AT,
     IS_S_AT,
     IS_N_AT,
@@ -47,7 +47,7 @@ from q_proof import (
     IS_LOGICAL_AXIOM_AT,
     IS_AXIOM_AT,
 )
-from q_repr import (
+from hf_repr import (
     PROV_Q_AXIOM,
     PROV_Q_MP,
 )
