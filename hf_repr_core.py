@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# Stage 3 -- representability of primitive recursive functions in HF.
+# Stage 3 -- representability in HF.
 # ---------------------------------------------------------------------------
 #
 # A predicate P : nat0 -> bool is *represented* in HF by a-formula
@@ -15,80 +15,17 @@
 #                      (Imp_f (substitute_2 F (numeral n) y var_x var_y)
 #                             (Eq_f y (numeral (f n))))).
 #
-# Theorem (representability). Every primitive recursive predicate /
-# function on nat0 is representable in HF.
+# We need representability of three specific predicates:
 #
-# This is the headline weak-arithmetic result. The standard proof
-# (Boolos-Burgess-Jeffrey, "Computability and Logic" Ch. 16-17) goes:
-#
-#   * Constants, projections, successor, addition, multiplication --
-#     direct unfolding against axioms Q4-Q7.
-#   * Composition -- substitution; routine.
-#   * Primitive recursion -- normally where induction enters. HF has no
-#     induction schema, so we use Goedel's beta function: a fixed
-#     ternary arithmetic predicate beta(a, b, i, y) such that for any
-#     finite sequence (y_0, ..., y_k), there exist a, b with
-#     beta(a, b, i, y_i) for each i. Construction via Chinese
-#     remainder; existence is a numeric calculation that HF proves for
-#     each numeral instance.
-#
-# In our HOL setting we don't need the full primitive recursion result
-# -- we only need representability of three specific predicates:
-#
-#   (i)   ``Proof_HF``     (decidable, hence representable; the
-#                          formula is an explicit bounded-quantifier
-#                          encoding of the proof-checking procedure).
+#   (i)   ``Proof_HF``     (the list-based proof-checking predicate).
 #   (ii)  ``substitute``  (primitive recursive on godelnums).
-#   (iii) ``godelnum``    (degenerate -- just identity on encoded syntax;
-#                          its numeral image is what matters).
+#   (iii) ``godelnum``    (identity on encoded syntax; its numeral
+#                          image is what matters).
 #
-# Each of these is several pages in textbook treatments. The slick HOL
-# move is to define the representing formulas *by* the HOL definitions,
-# transport through the bounded-quantifier translation, and then show
-# by induction (in the *meta*theory; HOL has it) on syntactic
-# complexity that HF proves the right characterisations. ~500 lines
-# with the beta-function lemma factored out.
-#
-# (No saving here over PA: representability is exactly as hard with
-# induction as without it; the beta-function trick was invented
-# precisely so that the proof would not depend on induction. The
-# saving over PA was at Stage 2.)
-#
-# ------------------------------------------------------------------
-# Reconciliation with Stage 2's ``Prov_HF``:
-# ------------------------------------------------------------------
-#
-# Stage 2 defines ``Prov_HF`` via impredicative intersection
-# (``hf_proof.PROV_HF_DEF``), not via an explicit list-based
-# ``Proof_HF``. The two are HOL-equivalent (Knaster-Tarski) but the
-# representability proof needs the list-based form: the diagonal
-# lemma's ``Prov_HF_internal`` formula must internalise *explicit*
-# proofs into HF's own language, so we want a Sigma_1 formula
-# ``Proof_HF_internal`` saying "p is a list of formulas, each an axiom
-# or following from earlier ones by MP/Gen, ending in n".
-#
-# Stage 3 therefore:
-#   (a) Builds the list-based ``Proof_HF`` predicate (HOL function)
-#       and proves ``Prov_HF n <=> ?p. Proof_HF p n`` against the
-#       Stage-2 ``Prov_HF``.
-#   (b) Defines ``Proof_HF_internal`` and ``Prov_HF_internal`` as
-#       HF-formulas.
-#   (c) Proves the representability theorem
-#         |- !n. Prov_HF n <=> Prov_HF (godelnum (Prov_HF_internal (numeral n))).
-#
-# ------------------------------------------------------------------
-# Output (eventual):
-# ------------------------------------------------------------------
-#
-#   defn:  numeral : nat0 -> nat0
-#          (numeral n = von Neumann ordinal n -- the n'th HF numeral)
-#   defn:  represents_pred : nat0 -> (nat0 -> bool) -> bool
-#   defn:  represents_func : nat0 -> (nat0 -> nat0) -> bool
-#   defn:  Proof_HF         : nat0 -> nat0 -> bool
-#   thm:   |- !n. Prov_HF n <=> ?p. Proof_HF p n
-#   defn:  Proof_HF_internal, Prov_HF_internal : nat0 (HF-formulas)
-#   thm:   |- !n. Prov_HF n <=>
-#                Prov_HF (godelnum (Prov_HF_internal (numeral n)))
+# This file builds the list-based ``Proof_HF`` predicate, defines
+# ``Prov_HF n :<=> ?p. Proof_HF p n`` (Sigma_1), and lays the kernel
+# constants for the substitute/Prov_HF representability proofs whose
+# bodies live in ``hf_repr_thms.py``.
 #
 
 from fusion import Var
@@ -177,7 +114,7 @@ from hf_sets import (
     INSERT_AT,  # used by QUOTE_HF_AT_INSERT_LOW to unfold Insert to set_bit
     SINGLETON_AS_INSERT,  # quote_hf Singleton bridge
     LOW_BIT_SINGLETON,  # quote_hf Pair / Pair_ord bridge
-    SINGLETON_LT_PAIR,  # quote_hf Pair_ord bridge (sorry'd helper)
+    SINGLETON_LT_PAIR,  # quote_hf Pair_ord bridge
     PAIR_AT,  # used by QUOTE_HF_AT_PAIR to unfold Pair to Insert
     PAIR_ORD_AT,  # used by QUOTE_HF_AT_PAIR_ORD to unfold Pair_ord
     IN_INSERT_SAME,
@@ -245,9 +182,7 @@ from hf_proof import (
 #
 # Following Świerczkowski (2003), numerals are encoded as von Neumann
 # ordinals inside HF: 0 := empty set, n+1 := n ∪ {n}, and ``n ∪ {n}``
-# is exactly ``Insert n n`` in the HF Insert-as-adjoin convention. This
-# replaces the previous Robinson-flavoured ``Succ^n Zero`` encoding (Q1-Q7
-# stripped 2026-05-10).
+# is exactly ``Insert n n`` in the HF Insert-as-adjoin convention.
 #
 # ``numeral n`` is a closed HF-term; its Goedel number is itself a
 # closed nat0 numeral (a deeply nested Pair_ord tree) under hf_syntax's
@@ -1804,23 +1739,6 @@ def PROOF_HF_APPEND(p):
 
 
 # ---------------------------------------------------------------------------
-# (DELETED) Forward direction of an old Prov_HF / Proof_HF equivalence.
-#
-# An earlier draft proved
-#   |- !p f. mem_l p f ==> (?h. Proof_HF p h) ==> Prov_HF f
-# by strong induction on the proof list, then derived the convenience
-# corollary ``PROOF_HF_PROVES : !p n. Proof_HF p n ==> Prov_HF n``. Both
-# were needed only because ``Prov_HF`` was originally defined
-# impredicatively in hf_proof.py and had to be bridged to the list-based
-# ``Proof_HF``. After collapsing ``Prov_HF := \n. ?p. Proof_HF p n``
-# (defined later in this file via the Sigma_1 form), ``PROOF_HF_PROVES``
-# becomes ``EXISTS_INTRO`` and the strong-induction argument is no
-# longer needed for any downstream consumer. Both lemmas are retired.
-# ---------------------------------------------------------------------------
-
-
-
-# ---------------------------------------------------------------------------
 # Stage 3B (h) -- ``Proof_HF p h ==> mem_l p h`` (head is its own member).
 # ---------------------------------------------------------------------------
 
@@ -2208,9 +2126,9 @@ REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 
 
 # ---------------------------------------------------------------------------
-# Stage 3C (a) -- representability of ``substitute`` (AXIOMATIZED).
+# Stage 3C (a) -- representability of ``substitute``.
 #
-# Headline theorem (``SUBSTITUTE_REPRESENTS``):
+# Headline theorem (``SUBSTITUTE_REPRESENTS``, body in hf_repr_thms.py):
 #   |- !F t v. Prov_HF (
 #         substitute (substitute (substitute (substitute
 #             substitute_internal (numeral F) var_x)
@@ -2218,40 +2136,18 @@ REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 #             (numeral v) var_z)
 #             (numeral (substitute F t v)) var_w).
 #
-# ``substitute_internal`` is a HF-formula in four free variables -- ``var_x``
-# (F-slot), ``var_y`` (t-slot), ``var_z`` (v-slot), ``var_w`` (result-slot)
-# -- expressing the relation "substitute(F, t, v) = r".
+# ``substitute_internal`` is a HF-formula in four free variables --
+# ``var_x`` (F-slot), ``var_y`` (t-slot), ``var_z`` (v-slot), ``var_w``
+# (result-slot) -- expressing the relation "substitute(F, t, v) = r".
 #
-# The standard textbook proof requires:
-#   * a finite-sequence coding device inside HF (Goedel's beta function
-#     via Chinese remainder, or Cantor pairing via division/mod);
-#   * external structural induction on F using the Stage-1 SUBSTITUTE_AT_*
-#     equations.
+# Why a single fixed Sigma_1 formula (not a HOL-recursive family): the
+# diagonal lemma (Stage 3D) forms the Goedel sentence by substituting a
+# numeric godelnum into a *single fixed* internal-provability formula.
+# Without ``substitute_internal`` as one fixed HF-formula, no ``D(x, y)``
+# represents the diagonal function and the fixed-point construction
+# collapses.
 #
-# Why a single fixed Sigma_1 formula is required, not a HOL-recursive
-# family: the diagonal lemma (Stage 3D) forms the Goedel sentence by
-# substituting a numeric godelnum into a *single fixed* internal-provability
-# formula. Without ``substitute_internal`` as one fixed HF-formula, no
-# ``D(x, y)`` represents the diagonal function and the fixed-point
-# construction collapses (analysis recorded for posterity, do not
-# re-explore).
-#
-# AXIOMATIZED for now: ``substitute_internal`` is declared opaque
-# (``new_constant``, no defining body) and ``SUBSTITUTE_REPRESENTS`` is
-# closed via ``p.sorry()`` -- which posts ``new_axiom`` of the conclusion
-# and prints a sorry-warning at proof end. The opaque declaration prevents
-# downstream code from accidentally unfolding the placeholder and deriving
-# inconsistencies from a degenerate body.
-#
-# To discharge later: build (Cantor pairing or beta) sequence coding,
-# prove the substitute trace as a Sigma_1 predicate, then external
-# induction on F (~1500 lines of new infrastructure including the arith.
-# representability prerequisites for ``add``, ``times``, ``mod``).
-#
-# TODO -- discharge via HF (preferred over the beta-function path).
-# The HF primitives (Insert_t / In_a / Empty_t) and axioms HF1-HF5 are
-# already in place (hf_syntax.py, hf_proof.py). Define
-# ``substitute_internal`` as the Sigma_1 predicate
+# Encoding strategy: ``substitute_internal`` is the Sigma_1 predicate
 #     ?T. is_substitute_trace T F t v r
 # where T : nat0 is an HF set of (subterm-shape, output-shape) pairs
 # (Pair_ord-encoded), and is_substitute_trace asserts:
@@ -2261,62 +2157,8 @@ REPRESENTS_PRED_AT = _at2(REPRESENTS_PRED_DEF, _F_n0, _P_pred)
 #        conjunction over its members via In, decoded by Pair_ord
 #        projection.
 # HF proves substitute_internal at every numeral instance by exhibiting
-# the trace HF set explicitly (|F|-many closed Pair_ord numerals);
-# verification conjuncts are decidable equalities + In-membership
-# facts, all Sigma_0 in HF. Estimated ~150 lines vs ~1500 for the
-# beta-function path. The structural recognisers in hf_syntax.py
-# (is_term, is_form, free_in, substitute) already cover Insert_t and
-# In_a, so this can be attempted directly.
-#
-# Progress (2026-05-09):
-#   * Union added to hf_sets.py (Stage 3 cont.) with IN_UNION.
-#   * var_T (Var_t 4) and var_a..var_f2 (Var_t 5..15) added as the
-#     internal HF-variable indices used by the trace-encoding formula.
-#   * is_substitute_step (HOL) and is_substitute_trace (HOL) defined,
-#     with pointwise unfolding lemmas IS_SUBSTITUTE_STEP_AT and
-#     IS_SUBSTITUTE_TRACE_AT.
-#   * TRACE_STEP_MONO proved -- membership-monotonicity of
-#     is_substitute_step (the foundation for binary trace assembly via
-#     ``Insert (Pair_ord F r) (Union T1 T2)``).
-#   * Q_and / Q_or / Q_exists / Q_imp / ... Python-level helpers for
-#     building HF-formulas compositionally (HF has only Forall_f / Imp_f
-#     / Not_f / Eq_f as primitives -- these macros suppress the
-#     bookkeeping bloat of explicit Not_f/Imp_f trees).
-#   * TRACE_EXISTS stated under syntactic precondition (is_term F \/
-#     is_form F) and SORRY'd. Full proof is mechanical follow-up:
-#     strong induction on F via nat0_lt; the 13 SUBSTITUTE_AT_* cases
-#     each construct ``Insert (Pair_ord F (substitute F t v))
-#     (Union T_sub1 T_sub2 ...)`` over IH-supplied sub-traces and
-#     verify is_substitute_trace via TRACE_STEP_MONO + IN_UNION +
-#     IN_INSERT.
-#
-# Remaining significant scope (B1-B3):
-#
-#   B1 (HF-encoding):  is_substitute_step_internal as a closed HF-formula
-#     blocks on Sigma_1 representability of ``Pair_ord`` and ``In``
-#     (neither is in HF's primitive vocabulary -- ``Pair_ord`` is an
-#     HF helper, ``In`` is bit-extraction). Each disjunct of
-#     is_substitute_step references ``In (Pair_ord _ _) T`` and
-#     constructor patterns ``a = Var_t v / Plus_t a1 a2 / ...`` which
-#     all involve ``Pair_ord`` (since each HF-syntax constructor
-#     unfolds to a ``Pair_ord``-prefixed encoding). Without
-#     representing-formula constants ``is_Pair_ord_internal``,
-#     ``is_In_internal`` (or inlined Sigma_1-equivalent expansions),
-#     the HF-formula cannot be spelled out. Each representability
-#     proof is its own ~50-100 line construction (size lemmas, strict
-#     monotonicity, the Sigma_0 verification at numerals).
-#
-#   B2 (replace opaque substitute_internal):  Becomes one ``define``
-#     call once B1's is_substitute_trace_internal is in hand. Trivial
-#     in isolation; blocked on B1.
-#
-#   B3 (SUBSTITUTE_REPRESENTS proof):  Combines TRACE_EXISTS (A4) with
-#     B1's HF-encoding, exhibiting the trace HF set T and discharging
-#     each disjunct's Sigma_0 verification using HF axioms. Blocks
-#     on A4 + B1 + B2; itself ~200-300 lines (mostly HF-axiom citations).
-#
-# Total remaining estimate after foundations: ~500-1000 lines, plus
-# the Pair_ord / In representability prerequisites (~200 lines).
+# the trace HF set explicitly; verification conjuncts are decidable
+# equalities + In-membership facts, all Sigma_0 in HF.
 # ---------------------------------------------------------------------------
 
 
@@ -2374,7 +2216,7 @@ idx_T = mk_const("idx_T", [])
 
 # Additional HF-internal variables for the body of is_substitute_trace_internal:
 #   var_a, var_b           -- the "!a b. ..." outer for-all binders.
-#   var_s1, var_s2         -- Succ_t / Not_f sub-shape existentials.
+#   var_s1, var_s2         -- Not_f sub-shape existentials.
 #   var_wq                 -- Var_t-miss / Forall_f-* index existentials
 #                             (named with q-suffix to avoid clash with HOL w).
 #   var_a1, var_a2,        -- binary-constructor sub-shape existentials.
@@ -3871,13 +3713,13 @@ def TRACE_EXISTS(p):
 
 
 # ===========================================================================
-# Stubs for the HF-encoding side (B1).
+# HF-encoding side.
 #
 # Each ``is_X_internal`` is the HF-formula encoding of the HOL predicate
 # ``X``. The associated ``IS_X_REPRESENTS`` theorem says: at every input
 # where the HOL fact holds, HF proves the substituted HF-formula.
 #
-# Encoding strategy (option A -- quote_hf bridge):
+# Encoding strategy -- quote_hf bridge:
 #
 #   HOL HF sets are bit-encoded (``Insert i s = set_bit i s``); HF-syntax
 #   HF sets are Insert_t-tower-encoded (``Insert_t i s = Pair_ord 9
@@ -3888,25 +3730,14 @@ def TRACE_EXISTS(p):
 #       quote_hf : nat0 -> nat0   -- bit-encoded HF set -> Insert_t-tower.
 #
 #   Every HF-set input slot in a representability goal uses ``quote_hf``.
-#   Numeric-input slots (where Q4-Q7 fire on Succ_t-towered ``numeral n``)
-#   continue to use ``numeral``. The ``SUBSTITUTE_REPRESENTS`` headline
-#   keeps ``numeral`` for the F / t / v / r slots (downstream concern);
-#   the IS_*_REPRESENTS stubs below use ``quote_hf`` throughout since
-#   their inputs are all HF-shaped (traces, encoded shapes, set members).
-#
-#   IS_POW2_REPRESENTS is no longer required: pow2 was a prerequisite
-#   only for the bit-extraction trace formula (option B); under the
-#   bridge, Pair_ord and In are represented directly via HF's axioms
-#   without internalising bit arithmetic in HF.
-#
-# All ``is_X_internal`` constants are declared opaque (``new_constant``,
-# no defining body) and SORRY'd to allow downstream construction to
-# type-check while leaving the representability proofs as discrete
-# follow-up tasks.
+#   The ``SUBSTITUTE_REPRESENTS`` headline keeps ``numeral`` for the F /
+#   t / v / r slots; the IS_*_REPRESENTS lemmas use ``quote_hf``
+#   throughout since their inputs are all HF-shaped (traces, encoded
+#   shapes, set members).
 # ===========================================================================
 
 
-# B1.0 -- quote_hf bridge (the encoding interface).
+# quote_hf bridge (the encoding interface).
 #
 # HOL ``Insert`` (bit-encoded) and HF-syntax ``Insert_t`` (Pair_ord-tagged)
 # are different nat0 functions; ``quote_hf`` recursively rebuilds an HF
@@ -3928,17 +3759,10 @@ def TRACE_EXISTS(p):
 #     F f n = COND (n = 0) Empty_t
 #                  (Insert_t (f (low_bit n)) (f (clear_low n))).
 #
-# This is the *canonical low-bit-first* form: every non-empty set is
-# decomposed deterministically by its lowest set bit. The corresponding
-# recursion equation is ``_QUOTE_HF_AT_NZ`` (replaces the previous
-# opaque ``QUOTE_HF_AT_INSERT``); a literal ``~In i s ==> quote_hf
-# (Insert i s) = Insert_t (quote_hf i) (quote_hf s)`` for *arbitrary*
-# fresh ``i`` is HOL-inconsistent under ``Insert_t`` injectivity, so
-# downstream consumers walk the canonical structure instead.
-#
-# ``low_bit`` / ``clear_low`` are still opaque stubs (bits.py) with
-# only their MONO-relevant side conditions sorry'd. Concretising them
-# is task #7.
+# A literal ``~In i s ==> quote_hf (Insert i s) = Insert_t (quote_hf i)
+# (quote_hf s)`` for *arbitrary* fresh ``i`` is HOL-inconsistent under
+# ``Insert_t`` injectivity, so downstream consumers walk the canonical
+# (low-bit-first) structure instead.
 _quote_hf_fn_ty = parse_type("nat0 -> nat0")
 _quote_hf_F_ty = parse_type("(nat0 -> nat0) -> nat0 -> nat0")
 _f_qhf = Var("f", _quote_hf_fn_ty)
@@ -4039,12 +3863,11 @@ QUOTE_HF_REC = _unfold_rec_via_F_def(_QUOTE_HF_REC_RAW, _QUOTE_HF_F_DEF)
 
 
 # --------------------------------------------------------------------------
-# Stage 3 contract -- the public quote_hf interface.
+# The public quote_hf interface.
 #
-# Stage 3 representability stubs interact with quote_hf through exactly
+# Stage 3 representability proofs interact with quote_hf through exactly
 # two equations: ``QUOTE_HF_AT_EMPTY`` and ``QUOTE_HF_AT_INSERT_LOW``
-# (plus the derived structural rewrites in section "Stage 3B (l)"
-# below: SINGLETON / PAIR / PAIR_ORD).
+# (plus the derived structural rewrites SINGLETON / PAIR / PAIR_ORD).
 #
 # The bit-level recursion equation ``_QUOTE_HF_AT_NZ`` is internal --
 # it exposes ``low_bit`` / ``clear_low``, which Stage 3 proofs must
@@ -4160,7 +3983,7 @@ def QUOTE_HF_AT_INSERT_LOW(p):
 # Derived shape equations layered on top of QUOTE_HF_AT_INSERT_LOW. Each
 # tells the user what ``quote_hf`` does to a derived HF-set shape
 # (Singleton / Pair / ...) without ever mentioning the bit
-# decomposition (low_bit / clear_low). Stage 3 representability stubs
+# decomposition (low_bit / clear_low). Stage 3 representability proofs
 # rewrite at the top of these and then never reach for _QUOTE_HF_AT_NZ.
 # ---------------------------------------------------------------------------
 
@@ -5041,8 +4864,8 @@ is_substitute_trace_internal = mk_const("is_substitute_trace_internal", [])
 # IS_SUBSTITUTE_TRACE_REPRESENTS body lives in hf_repr_thms.py.
 
 
-# Opaque: no defining body. Stage 3C will replace this with a definition
-# of the actual Sigma_1 substitute-trace formula.
+# Opaque: no defining body. Defined elsewhere as the Sigma_1
+# substitute-trace formula ``?T. is_substitute_trace_internal T F t v r``.
 new_constant("substitute_internal", nat0_ty)
 substitute_internal = mk_const("substitute_internal", [])
 
@@ -5175,7 +4998,7 @@ if __name__ == "__main__":
     print("    REPRESENTS_PRED_DEF :", pp_thm(REPRESENTS_PRED_DEF))
     print("    REPRESENTS_PRED_AT  :", pp_thm(REPRESENTS_PRED_AT))
     print()
-    print("Stage 3C (a) -- representability of substitute (SORRY).")
+    print("Stage 3C (a) -- representability of substitute.")
     print("    VAR_Z_DEF              :", pp_thm(VAR_Z_DEF))
     print("    VAR_W_DEF              :", pp_thm(VAR_W_DEF))
     print("    VAR_T_DEF              :", pp_thm(VAR_T_DEF))
@@ -5195,7 +5018,7 @@ if __name__ == "__main__":
     print("    IS_SUBSTITUTE_TRACE_DEF:", pp_thm(IS_SUBSTITUTE_TRACE_DEF))
     print("    IS_SUBSTITUTE_TRACE_AT :", pp_thm(IS_SUBSTITUTE_TRACE_AT))
     print("    TRACE_STEP_MONO                       :", pp_thm(TRACE_STEP_MONO))
-    print("    TRACE_EXISTS (SORRY)                  :", pp_thm(TRACE_EXISTS))
+    print("    TRACE_EXISTS                          :", pp_thm(TRACE_EXISTS))
     print("    QUOTE_HF_AT_EMPTY                    :", pp_thm(QUOTE_HF_AT_EMPTY))
     print("    QUOTE_HF_AT_INSERT_LOW               :", pp_thm(QUOTE_HF_AT_INSERT_LOW))
     print("    QUOTE_HF_AT_SINGLETON                :", pp_thm(QUOTE_HF_AT_SINGLETON))
