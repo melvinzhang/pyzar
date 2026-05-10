@@ -23,15 +23,13 @@ Each connective ships:
     capture-avoidance side condition as ``Forall_f``.
 """
 
-from fusion import Var
-from basics import mk_const, mk_app, mk_abs, rand
-from parser import define, parse_type
-from nat0 import nat0_ty
-from proof import proof
-from tactics import SPECL, MP, AP_THM, BETA_CONV, TRANS, GENL
+from basics import mk_const
+from parser import parse_type
+from proof import proof, define_with_at
+from tactics import SPECL, MP
 from hf_syntax import (
-    Not_f,
-    Imp_f,
+    Not_f,  # noqa: F401  -- parser alias inside connective bodies
+    Imp_f,  # noqa: F401  -- parser alias inside connective bodies
     Forall_f,  # noqa: F401  -- parser alias inside Exists_f body
     SUBSTITUTE_AT_NOT,
     SUBSTITUTE_AT_IMP,
@@ -39,74 +37,37 @@ from hf_syntax import (
 )
 
 
-_a_n0 = Var("a", nat0_ty)
-_b_n0 = Var("b", nat0_ty)
-_v_n0 = Var("v", nat0_ty)
-_f_n0 = Var("f", nat0_ty)
-
-
-AND_F_DEF = define(
+# |- And_f = \a b. Not_f (Imp_f a (Not_f b))   /   |- !a b. And_f a b = ...
+AND_F_DEF, AND_F_AT = define_with_at(
     "And_f",
     parse_type("nat0 -> nat0 -> nat0"),
-    mk_abs(
-        _a_n0,
-        mk_abs(_b_n0, mk_app(Not_f, mk_app(Imp_f, _a_n0, mk_app(Not_f, _b_n0)))),
-    ),
+    "\\a:nat0. \\b:nat0. Not_f (Imp_f a (Not_f b))",
 )
 And_f = mk_const("And_f", [])
 
 
-OR_F_DEF = define(
+OR_F_DEF, OR_F_AT = define_with_at(
     "Or_f",
     parse_type("nat0 -> nat0 -> nat0"),
-    mk_abs(_a_n0, mk_abs(_b_n0, mk_app(Imp_f, mk_app(Not_f, _a_n0), _b_n0))),
+    "\\a:nat0. \\b:nat0. Imp_f (Not_f a) b",
 )
 Or_f = mk_const("Or_f", [])
 
 
-IFF_F_DEF = define(
+IFF_F_DEF, IFF_F_AT = define_with_at(
     "Iff_f",
     parse_type("nat0 -> nat0 -> nat0"),
-    mk_abs(
-        _a_n0,
-        mk_abs(
-            _b_n0,
-            mk_app(And_f, mk_app(Imp_f, _a_n0, _b_n0), mk_app(Imp_f, _b_n0, _a_n0)),
-        ),
-    ),
+    "\\a:nat0. \\b:nat0. And_f (Imp_f a b) (Imp_f b a)",
 )
 Iff_f = mk_const("Iff_f", [])
 
 
-EXISTS_F_DEF = define(
+EXISTS_F_DEF, EXISTS_F_AT = define_with_at(
     "Exists_f",
     parse_type("nat0 -> nat0 -> nat0"),
-    mk_abs(
-        _v_n0,
-        mk_abs(_f_n0, mk_app(Not_f, mk_app(Forall_f, _v_n0, mk_app(Not_f, _f_n0)))),
-    ),
+    "\\v:nat0. \\f:nat0. Not_f (Forall_f v (Not_f f))",
 )
 Exists_f = mk_const("Exists_f", [])
-
-
-# Pointwise-applied form: usable as a rewrite rule.  REWRITE_PROVE doesn't
-# beta-reduce, so the bare DEF theorems don't fire under an applied head.
-def _at2(def_th, x, y):
-    th_x = AP_THM(def_th, x)
-    th_x = TRANS(th_x, BETA_CONV(rand(th_x._concl)))
-    th_xy = AP_THM(th_x, y)
-    th_xy = TRANS(th_xy, BETA_CONV(rand(th_xy._concl)))
-    return GENL([x, y], th_xy)
-
-
-# |- !a b. And_f a b = Not_f (Imp_f a (Not_f b)).
-AND_F_AT = _at2(AND_F_DEF, _a_n0, _b_n0)
-# |- !a b. Or_f a b = Imp_f (Not_f a) b.
-OR_F_AT = _at2(OR_F_DEF, _a_n0, _b_n0)
-# |- !a b. Iff_f a b = And_f (Imp_f a b) (Imp_f b a).
-IFF_F_AT = _at2(IFF_F_DEF, _a_n0, _b_n0)
-# |- !v f. Exists_f v f = Not_f (Forall_f v (Not_f f)).
-EXISTS_F_AT = _at2(EXISTS_F_DEF, _v_n0, _f_n0)
 
 
 # ---------------------------------------------------------------------------

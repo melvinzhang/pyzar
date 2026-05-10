@@ -39,13 +39,7 @@ test-axioms:
 test-proof:
 	$(PY) proof_test.py
 
-# L6 -- theories: classical logic, then the Landau development bottom-up
-# (num builds the natural numbers; nat proves Landau's Sätze on them; frac
-# builds rationals on top of nat; rat_int adds the integer-rational subset),
-# then the Goedel-incompleteness stack (nat0 carves out a copy of num with
-# 0/SUC0 primitives; nat0_order/bits/hf_sets build hereditarily-finite sets;
-# q_syntax/q_proof/q_repr/q_logic/godel_first encode Robinson Q and lay out
-# the diagonal lemma + first incompleteness theorem).
+# L6 -- theories
 # Captures the printed `SATZ_N: |- ...` / `LEMMA: |- ...` lines from
 # nat.py + frac.py + rat_int.py into $(LANDAU_OUT), and the same pattern
 # from the godel stack into $(GODEL_OUT), for the golden checks below.
@@ -66,10 +60,12 @@ test-theories:
 	  $(PY) nat0_order.py | tee -a $$raw; \
 	  $(PY) bits.py | tee -a $$raw; \
 	  $(PY) hf_sets.py | tee -a $$raw; \
-	  $(PY) q_syntax.py | tee -a $$raw; \
-	  $(PY) q_proof.py | tee -a $$raw; \
-	  $(PY) q_repr.py | tee -a $$raw; \
-	  $(PY) q_logic.py | tee -a $$raw; \
+	  $(PY) hf_syntax.py | tee -a $$raw; \
+	  $(PY) hf_connectives.py | tee -a $$raw; \
+	  $(PY) hf_proof.py | tee -a $$raw; \
+	  $(PY) hf_repr_core.py | tee -a $$raw; \
+	  $(PY) hf_logic.py | tee -a $$raw; \
+	  $(PY) hf_repr_thms.py | tee -a $$raw; \
 	  $(PY) godel_first.py | tee -a $$raw; \
 	  grep -E '^[[:space:]]*[A-Z][A-Z0-9_]*[[:space:]]*:.*\|-' $$raw > $(GODEL_OUT); \
 	  rm -f $$raw
