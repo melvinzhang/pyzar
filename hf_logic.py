@@ -647,25 +647,13 @@ def PROV_HF_EX_FALSO(p):
 
 
 @proof
-def PROV_HF_DOUBLE_NEG_INTRO(p):
-    """|- !A. is_form A /\\ Prov_HF A ==> Prov_HF (Not_f (Not_f A)).
+def PROV_HF_DOUBLE_NEG_ELIM_IMP(p):
+    """|- !A. is_form A ==> Prov_HF (Imp_f (Not_f (Not_f A)) A).
 
-    Mendelson Lemma 1.11(a). STUB; see implementation below.
-    """
-    p.goal(
-        "!A. is_form A /\\ Prov_HF A ==> Prov_HF (Not_f (Not_f A))",
-        types={"A": nat0_ty},
-    )
-    p.sorry()
-
-
-@proof
-def PROV_HF_DOUBLE_NEG_ELIM(p):
-    """|- !A. is_form A /\\ Prov_HF (Not_f (Not_f A)) ==> Prov_HF A.
-
-    Mendelson Lemma 1.11(a): double-negation elimination. Derives the
-    implication ``~~A -> A`` via an 8-step DT-transformed Hilbert
-    proof, then MPs with the supplied ``Prov_HF (~~A)`` hypothesis.
+    Mendelson Lemma 1.11(a) at the implication level. Owns the 8-step
+    DT-transformed Hilbert derivation of ``~~A -> A``; the rule-form
+    ``PROV_HF_DOUBLE_NEG_ELIM`` and the dual ``PROV_HF_DOUBLE_NEG_INTRO``
+    both consume this lemma to avoid re-deriving the chain.
 
     Hilbert proof (under hypothesis ~~A):
       1. ~~A                          [hyp]
@@ -679,14 +667,15 @@ def PROV_HF_DOUBLE_NEG_ELIM(p):
 
     DT transformation: each step gets ``~~A ->`` prefix; K/N-axiom
     steps wrap via PROV_HF_HYP_DROP, MP steps combine via
-    PROV_HF_DT_MP.
+    PROV_HF_DT_MP. The final dt8 result is exactly the goal of this
+    lemma, so no further MP is performed.
     """
     p.goal(
-        "!A. is_form A /\\ Prov_HF (Not_f (Not_f A)) ==> Prov_HF A",
+        "!A. is_form A ==> Prov_HF (Imp_f (Not_f (Not_f A)) A)",
         types={"A": nat0_ty},
     )
     p.fix("A")
-    p.assume("(hA, hPnnA): is_form A /\\ Prov_HF (Not_f (Not_f A))")
+    p.assume("hA: is_form A")
 
     # is_form chain: nA, nnA, n3A, n4A. Each step uses IS_FORM_AT_NOT.
     isf_A = SPEC(p._parse("A"), IS_FORM_AT_NOT)
@@ -1031,9 +1020,7 @@ def PROV_HF_DOUBLE_NEG_ELIM(p):
             ),
         )
     )
-    p.have(
-        "dt8: Prov_HF (Imp_f (Not_f (Not_f A)) A)"
-    ).by(
+    p.thus("Prov_HF (Imp_f (Not_f (Not_f A)) A)").by(
         PROV_HF_DT_MP,
         "Not_f (Not_f A)",
         "Not_f (Not_f A)",
@@ -1041,12 +1028,97 @@ def PROV_HF_DOUBLE_NEG_ELIM(p):
         "dt8_in",
     )
 
-    # Final: MP dt8 with hPnnA.
+
+@proof
+def PROV_HF_DOUBLE_NEG_ELIM(p):
+    """|- !A. is_form A /\\ Prov_HF (Not_f (Not_f A)) ==> Prov_HF A.
+
+    Rule-form wrapper around PROV_HF_DOUBLE_NEG_ELIM_IMP plus one MP.
+    """
+    p.goal(
+        "!A. is_form A /\\ Prov_HF (Not_f (Not_f A)) ==> Prov_HF A",
+        types={"A": nat0_ty},
+    )
+    p.fix("A")
+    p.assume("(hA, hPnnA): is_form A /\\ Prov_HF (Not_f (Not_f A))")
+
+    p.have("h_imp: Prov_HF (Imp_f (Not_f (Not_f A)) A)").by(
+        PROV_HF_DOUBLE_NEG_ELIM_IMP, "A", "hA"
+    )
     p.have(
-        "h_final_mp: Prov_HF (Not_f (Not_f A)) "
+        "h_mp_in: Prov_HF (Not_f (Not_f A)) "
         "/\\ Prov_HF (Imp_f (Not_f (Not_f A)) A)"
-    ).by_thm(CONJ(p.fact("hPnnA"), p.fact("dt8")))
-    p.thus("Prov_HF A").by(PROV_HF_MP, "Not_f (Not_f A)", "A", "h_final_mp")
+    ).by_thm(CONJ(p.fact("hPnnA"), p.fact("h_imp")))
+    p.thus("Prov_HF A").by(
+        PROV_HF_MP, "Not_f (Not_f A)", "A", "h_mp_in"
+    )
+
+
+@proof
+def PROV_HF_DOUBLE_NEG_INTRO(p):
+    """|- !A. is_form A /\\ Prov_HF A ==> Prov_HF (Not_f (Not_f A)).
+
+    Mendelson Lemma 1.11(b): double-negation introduction. Three steps:
+      1. ``~~~A -> ~A``                 [ELIM_IMP at ~A]
+      2. ``(~~~A -> ~A) -> (A -> ~~A)`` [N(A, ~~A)]
+      3. ``A -> ~~A``                   [MP 1, 2]
+    Then one final MP with the supplied ``Prov_HF A`` to close the rule
+    form.
+    """
+    p.goal(
+        "!A. is_form A /\\ Prov_HF A ==> Prov_HF (Not_f (Not_f A))",
+        types={"A": nat0_ty},
+    )
+    p.fix("A")
+    p.assume("(hA, hPA): is_form A /\\ Prov_HF A")
+
+    # is_form for ~A and ~~A (needed by ELIM_IMP at ~A and N(A, ~~A)).
+    isf_A = SPEC(p._parse("A"), IS_FORM_AT_NOT)
+    p.have("hnA: is_form (Not_f A)").by_eq_mp(SYM(isf_A), "hA")
+    isf_nA = SPEC(p._parse("Not_f A"), IS_FORM_AT_NOT)
+    p.have("hnnA: is_form (Not_f (Not_f A))").by_eq_mp(SYM(isf_nA), "hnA")
+
+    # Step 1: ELIM_IMP at ~A gives Prov_HF (~~~A -> ~A).
+    p.have(
+        "h1: Prov_HF (Imp_f (Not_f (Not_f (Not_f A))) (Not_f A))"
+    ).by(PROV_HF_DOUBLE_NEG_ELIM_IMP, "Not_f A", "hnA")
+
+    # Step 2: N(A, ~~A) gives (~~~A -> ~A) -> (A -> ~~A).
+    p.have(
+        "h2: Prov_HF (Imp_f "
+        "  (Imp_f (Not_f (Not_f (Not_f A))) (Not_f A)) "
+        "  (Imp_f A (Not_f (Not_f A))))"
+    ).by(
+        PROV_HF_N,
+        "A",
+        "Not_f (Not_f A)",
+        CONJ(p.fact("hA"), p.fact("hnnA")),
+    )
+
+    # Step 3: MP h1 h2 gives Prov_HF (A -> ~~A).
+    p.have(
+        "h_mp1_in: Prov_HF (Imp_f (Not_f (Not_f (Not_f A))) (Not_f A)) "
+        "/\\ Prov_HF (Imp_f "
+        "    (Imp_f (Not_f (Not_f (Not_f A))) (Not_f A)) "
+        "    (Imp_f A (Not_f (Not_f A))))"
+    ).by_thm(CONJ(p.fact("h1"), p.fact("h2")))
+    p.have(
+        "h_imp: Prov_HF (Imp_f A (Not_f (Not_f A)))"
+    ).by(
+        PROV_HF_MP,
+        "Imp_f (Not_f (Not_f (Not_f A))) (Not_f A)",
+        "Imp_f A (Not_f (Not_f A))",
+        "h_mp1_in",
+    )
+
+    # Final: MP h_imp with hPA.
+    p.have(
+        "h_final_in: Prov_HF A "
+        "/\\ Prov_HF (Imp_f A (Not_f (Not_f A)))"
+    ).by_thm(CONJ(p.fact("hPA"), p.fact("h_imp")))
+    p.thus("Prov_HF (Not_f (Not_f A))").by(
+        PROV_HF_MP, "A", "Not_f (Not_f A)", "h_final_in"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1275,9 +1347,10 @@ if __name__ == "__main__":
     print("    PROV_HF_TRANS_IMP :", pp_thm(PROV_HF_TRANS_IMP))
     print("    PROV_HF_EX_FALSO  :", pp_thm(PROV_HF_EX_FALSO))
     print()
-    print("Stage 2C (c) -- negation reasoning (STUB).")
-    print("    PROV_HF_DOUBLE_NEG_INTRO :", pp_thm(PROV_HF_DOUBLE_NEG_INTRO))
-    print("    PROV_HF_DOUBLE_NEG_ELIM  :", pp_thm(PROV_HF_DOUBLE_NEG_ELIM))
+    print("Stage 2C (c) -- negation reasoning.")
+    print("    PROV_HF_DOUBLE_NEG_ELIM_IMP :", pp_thm(PROV_HF_DOUBLE_NEG_ELIM_IMP))
+    print("    PROV_HF_DOUBLE_NEG_ELIM     :", pp_thm(PROV_HF_DOUBLE_NEG_ELIM))
+    print("    PROV_HF_DOUBLE_NEG_INTRO    :", pp_thm(PROV_HF_DOUBLE_NEG_INTRO))
     print()
     print("Stage 2C (d) -- conjunction / biconditional intro (STUB).")
     print("    PROV_HF_AND_INTRO :", pp_thm(PROV_HF_AND_INTRO))
