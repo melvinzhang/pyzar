@@ -58,9 +58,9 @@ NAT0_LT_PAIR_ORD pair, chained via ``NAT0_LT_TRANS``. Disjointness
 between distinct constructors follows from PAIR_ORD_INJ at slot 0
 and tag-numeral inequalities (``~(SUC0 (SUC0 0) = SUC0 0)`` etc.).
 
-``godelnum`` is the identity function on the encoded representation
-(``hf_ty = nat0_ty``, no nominal subtype, so the encoded constructor
-output IS its own Goedel number).
+With ``hf_ty = nat0_ty`` (no nominal subtype), every constructor
+output is already a bona fide ``nat0`` -- the encoded HF tree IS its
+own Goedel number, so no separate godelnum-of-tree wrapper is needed.
 """
 
 # ---------------------------------------------------------------------------
@@ -232,42 +232,10 @@ In_a = mk_const("In_a", [])
 # pattern-match on the applied head.
 
 
-# ---------------------------------------------------------------------------
-# godelnum -- the encoded HF tree IS its own Goedel number. With
-# ``hf_ty = nat0_ty`` (no nominal subtype) and the Pair_ord-based
-# encoding above, every constructor output is a bona fide nat0, so
-# the Goedel-numbering function is the identity.
-# ---------------------------------------------------------------------------
-
-GODELNUM_DEF = define(
-    "godelnum",
-    parse_type("nat0 -> nat0"),
-    "\\n:nat0. n",
-)
-godelnum = mk_const("godelnum", [])
-
-
-# Pointwise:  |- !n. godelnum n = n.
-@proof
-def GODELNUM_AT(p):
-    p.goal("!n. godelnum n = n")
-    p.fix("n")
-    p.thus("godelnum n = n").by_thm(p.unfold(GODELNUM_DEF, "n"))
-
-
-# ---------------------------------------------------------------------------
-# Stage 1 (a):  |- !t1 t2. godelnum t1 = godelnum t2 ==> t1 = t2.
-# godelnum is the identity, so injectivity collapses to reflexive
-# transport across GODELNUM_AT.
-# ---------------------------------------------------------------------------
-
-
-@proof
-def GODELNUM_INJ(p):
-    p.goal("!t1 t2. godelnum t1 = godelnum t2 ==> t1 = t2")
-    p.fix("t1 t2")
-    p.assume("h: godelnum t1 = godelnum t2")
-    p.thus("t1 = t2").by_rewrite_of("h", [GODELNUM_AT])
+# Note on Gödel-numbering: with ``hf_ty = nat0_ty`` (no nominal
+# subtype) and the Pair_ord-based encoding above, every constructor
+# output is already a bona fide nat0 -- the encoded HF tree IS its
+# own Gödel number, so no separate ``godelnum`` function is needed.
 
 
 # ---------------------------------------------------------------------------
@@ -3341,7 +3309,7 @@ def IDENTITY_SUBSTITUTE(p):
 if __name__ == "__main__":
     from parser import pp_thm
 
-    print("Stage 1 (a) -- term/form datatype + godelnum injectivity.")
+    print("Stage 1 (a) -- term/form datatype.")
     print("  Term constructors:")
     print("    VAR_T_DEF     :", pp_thm(VAR_T_DEF))
     print("    VAR_T_AT      :", pp_thm(VAR_T_AT))
@@ -3360,10 +3328,6 @@ if __name__ == "__main__":
     print("    INSERT_T_AT   :", pp_thm(INSERT_T_AT))
     print("    IN_A_DEF      :", pp_thm(IN_A_DEF))
     print("    IN_A_AT       :", pp_thm(IN_A_AT))
-    print("  Goedel numbering:")
-    print("    GODELNUM_DEF  :", pp_thm(GODELNUM_DEF))
-    print("    GODELNUM_AT   :", pp_thm(GODELNUM_AT))
-    print("    GODELNUM_INJ  :", pp_thm(GODELNUM_INJ))
     print()
     print("Stage 1 -- size lemmas (foundation for define_wf_lt MONO proofs).")
     print("  Unary constructors:")
