@@ -2717,6 +2717,37 @@ SUBSTITUTE_AT_FORALL_HIT, SUBSTITUTE_AT_FORALL_MISS = derive_rec_eq_select_cond(
 )
 
 
+# ---------------------------------------------------------------------------
+# Stage 1 (d) -- substitute / is_form preservation (STUB).
+#
+# Used by Prov_HF-internal logic (PROV_HF_EXISTS_INTRO and downstream
+# representability proofs) to discharge the ``is_form (substitute phi t
+# v)`` side condition of CONTRAP / similar. Proper proof requires
+# structural induction on the formula F (cases for Eq_f / Not_f / Imp_f
+# / Forall_f / In_a) plus a parallel SUBSTITUTE_PRESERVES_IS_TERM lemma
+# for the term arguments. STUB pending the structural-induction
+# infrastructure; relocated from godel_first.py so hf_logic.py can
+# consume it without a circular import.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def SUBSTITUTE_PRESERVES_IS_FORM(p):
+    """|- !F t v. is_form F /\\ is_term t ==> is_form (substitute F t v).
+
+    Substitution into a well-formed HF-formula (replacing a variable
+    index by a well-formed HF-term) yields a well-formed HF-formula.
+    Strong induction on F using SUBSTITUTE_AT_* equations and the
+    is_form constructor closure lemmas (IS_FORM_AT_EQ / NOT / IMP /
+    FORALL / IN). STUB.
+    """
+    p.goal(
+        "!F t v. is_form F /\\ is_term t ==> is_form (substitute F t v)",
+        types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
 if __name__ == "__main__":
     from parser import pp_thm
 

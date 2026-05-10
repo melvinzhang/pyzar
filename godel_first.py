@@ -381,6 +381,7 @@ from hf_syntax import (
     SUBSTITUTE_AT_NOT,
     SUBSTITUTE_AT_IMP,
     SUBSTITUTE_AT_FORALL_MISS,
+    SUBSTITUTE_PRESERVES_IS_FORM,
 )
 from hf_proof import var_x, var_y
 from hf_repr import (
@@ -773,26 +774,6 @@ def VAR_Y_NEQ_VAR_X(p):
     inside phi during the theta_of_phi construction. STUB.
     """
     p.goal("~(var_y = var_x)")
-    p.sorry()
-
-
-@proof
-def SUBSTITUTE_PRESERVES_IS_FORM(p):
-    """|- !F t v. is_form F /\\ is_term t ==> is_form (substitute F t v).
-
-    Substitution into a well-formed HF-formula (replacing a variable
-    index by a well-formed HF-term) yields a well-formed HF-formula.
-    Strong induction on F using SUBSTITUTE_AT_* equations and the
-    is_form constructor closure lemmas (IS_FORM_AT_EQ / NOT / IMP /
-    FORALL). STUB.
-
-    Used to derive ``is_form (diag (theta_of_phi phi))`` for the
-    well-formedness conjunct of DIAGONAL_LEMMA's conclusion.
-    """
-    p.goal(
-        "!F t v. is_form F /\\ is_term t ==> is_form (substitute F t v)",
-        types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
-    )
     p.sorry()
 
 

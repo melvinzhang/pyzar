@@ -36,8 +36,11 @@ from tactics import (
 )
 
 from hf_syntax import (
+    IS_FORM_AT_FORALL,
     IS_FORM_AT_IMP,
     IS_FORM_AT_NOT,
+    SUBSTITUTE_AT_NOT,
+    SUBSTITUTE_PRESERVES_IS_FORM,
 )
 from hf_proof import (
     IS_K_AT,
@@ -269,20 +272,51 @@ def PROV_HF_N(p):
 
 
 @proof
+def PROV_HF_UI_IMP(p):
+    """|- !x phi t. is_form phi /\\ is_term t
+                    ==> Prov_HF (Imp_f (Forall_f x phi) (substitute phi t x)).
+
+    UI as a closed-implication theorem. Witnesses (x, phi, t) into the
+    is_UI body schema, then lifts ``is_UI (...)`` to ``Prov_HF (...)``
+    via ``_prov_of_logical`` at slot 3. Consumed by PROV_HF_UI (rule
+    form) and downstream lemmas (PROV_HF_EXISTS_INTRO, ...) that need
+    the implication directly.
+
+    DSL friction note: the goal text uses ``phi`` rather than ``F`` --
+    bare ``F`` resolves to the kernel False constant even with
+    ``types={"F": nat0_ty}`` declared.
+    """
+    p.goal(
+        "!x phi t. is_form phi /\\ is_term t "
+        "==> Prov_HF (Imp_f (Forall_f x phi) (substitute phi t x))",
+        types={"x": nat0_ty, "phi": nat0_ty, "t": nat0_ty},
+    )
+    p.fix("x phi t")
+    p.assume("(hphi, ht): is_form phi /\\ is_term t")
+
+    n_term = p._parse("Imp_f (Forall_f x phi) (substitute phi t x)")
+    is_ui_at_n = SPEC(n_term, IS_UI_AT)
+
+    p.have(
+        "ui_body: ?x1 phi1 t1. is_form phi1 /\\ is_term t1 /\\ "
+        "       Imp_f (Forall_f x phi) (substitute phi t x) "
+        "       = Imp_f (Forall_f x1 phi1) (substitute phi1 t1 x1)"
+    ).by_exists(["x", "phi", "t"], "hphi", "ht")
+    is_ui_th = EQ_MP(SYM(is_ui_at_n), p.fact("ui_body"))
+
+    prov_imp = _prov_of_logical(p, "ui", is_ui_th, 3, n_term)
+    p.thus(
+        "Prov_HF (Imp_f (Forall_f x phi) (substitute phi t x))"
+    ).by_thm(prov_imp)
+
+
+@proof
 def PROV_HF_UI(p):
     """|- !x phi t. is_form phi /\\ is_term t /\\ Prov_HF (Forall_f x phi)
                     ==> Prov_HF (substitute phi t x).
 
-    Universal instantiation. Witnesses (x, phi, t) into the is_UI body
-    schema, lifts the resulting ``is_UI (Imp_f (Forall_f x phi) ...)`` to
-    Prov_HF via ``_prov_of_logical`` at slot 3, then PROV_HF_MP discharges
-    the implication using the supplied ``Prov_HF (Forall_f x phi)``.
-
-    DSL friction note (dsl_spec.md cross-ref): the goal text uses ``phi``
-    rather than ``F`` because ``F`` is the kernel False constant
-    (``from axioms import F``) and the parser preferentially resolves bare
-    ``F`` to the constant rather than a fresh binder, even with
-    ``types={"F": nat0_ty}`` declared.
+    Universal instantiation, rule form. Wraps PROV_HF_UI_IMP plus one
+    MP with the supplied ``Prov_HF (Forall_f x phi)``.
     """
     p.goal(
         "!x phi t. is_form phi /\\ is_term t /\\ Prov_HF (Forall_f x phi) "
@@ -294,25 +328,16 @@ def PROV_HF_UI(p):
         "(hphi, ht, hPF): is_form phi /\\ is_term t /\\ Prov_HF (Forall_f x phi)"
     )
 
-    n_term = p._parse("Imp_f (Forall_f x phi) (substitute phi t x)")
-    is_ui_at_n = SPEC(n_term, IS_UI_AT)
-
-    # Witness ?x1 phi1 t1. is_form phi1 /\ is_term t1 /\ n_term = ...
     p.have(
-        "ui_body: ?x1 phi1 t1. is_form phi1 /\\ is_term t1 /\\ "
-        "       Imp_f (Forall_f x phi) (substitute phi t x) "
-        "       = Imp_f (Forall_f x1 phi1) (substitute phi1 t1 x1)"
-    ).by_exists(["x", "phi", "t"], "hphi", "ht")
-    is_ui_th = EQ_MP(SYM(is_ui_at_n), p.fact("ui_body"))
-    # is_ui_th : |- is_UI (Imp_f (Forall_f x phi) (substitute phi t x))
-
-    prov_imp = _prov_of_logical(p, "ui", is_ui_th, 3, n_term)
-    # prov_imp : |- Prov_HF (Imp_f (Forall_f x phi) (substitute phi t x))
-
+        "h_imp: Prov_HF (Imp_f (Forall_f x phi) (substitute phi t x))"
+    ).by(
+        PROV_HF_UI_IMP, "x", "phi", "t",
+        CONJ(p.fact("hphi"), p.fact("ht")),
+    )
     p.have(
         "h_mp_in: Prov_HF (Forall_f x phi) /\\ "
         "         Prov_HF (Imp_f (Forall_f x phi) (substitute phi t x))"
-    ).by_thm(CONJ(p.fact("hPF"), prov_imp))
+    ).by_thm(CONJ(p.fact("hPF"), p.fact("h_imp")))
     p.thus("Prov_HF (substitute phi t x)").by(
         PROV_HF_MP, "Forall_f x phi", "substitute phi t x", "h_mp_in"
     )
@@ -1474,19 +1499,127 @@ def PROV_HF_IFF_INTRO(p):
 
 @proof
 def PROV_HF_EXISTS_INTRO(p):
-    """|- !x F t. is_form F /\\ is_term t /\\ Prov_HF (substitute F t x)
-                  ==> Prov_HF (Not_f (Forall_f x (Not_f F))).
+    """|- !x phi t. is_form phi /\\ is_term t /\\ Prov_HF (substitute phi t x)
+                    ==> Prov_HF (Not_f (Forall_f x (Not_f phi))).
 
-    Existential-introduction in HF (encoded form). STUB; see
-    implementation below.
+    Existential-introduction in HF. The encoded ``Exists_f x phi`` is
+    ``Not_f (Forall_f x (Not_f phi))``. Given a Prov_HF witness
+    ``substitute phi t x`` (i.e., ``phi[t/x]``), conclude that the
+    encoded existential holds.
+
+    Proof outline:
+      1. UI_IMP at (x, ~phi, t): ``Forall_f x (Not_f phi) ->
+         substitute (Not_f phi) t x``.
+      2. Rewrite the consequent via SUBSTITUTE_AT_NOT:
+         ``Forall_f x (Not_f phi) -> Not_f (substitute phi t x)``.
+      3. CONTRAP gives ``Not_f (Not_f (substitute phi t x)) ->
+         Not_f (Forall_f x (Not_f phi))``.
+      4. DNI on the given Prov_HF (substitute phi t x):
+         ``Not_f (Not_f (substitute phi t x))``.
+      5. MP gives ``Not_f (Forall_f x (Not_f phi))``.
     """
     p.goal(
-        "!x F t. is_form F /\\ is_term t /\\ "
-        "Prov_HF (substitute F t x) "
-        "==> Prov_HF (Not_f (Forall_f x (Not_f F)))",
-        types={"x": nat0_ty, "F": nat0_ty, "t": nat0_ty},
+        "!x phi t. is_form phi /\\ is_term t "
+        "/\\ Prov_HF (substitute phi t x) "
+        "==> Prov_HF (Not_f (Forall_f x (Not_f phi)))",
+        types={"x": nat0_ty, "phi": nat0_ty, "t": nat0_ty},
     )
-    p.sorry()
+    p.fix("x phi t")
+    p.assume(
+        "(hphi, ht, hPsub): is_form phi /\\ is_term t "
+        "/\\ Prov_HF (substitute phi t x)"
+    )
+
+    # is_form composites: ~phi, ∀x.~phi, substitute phi t x.
+    isf_phi_at = SPEC(p._parse("phi"), IS_FORM_AT_NOT)
+    p.have("hnphi: is_form (Not_f phi)").by_eq_mp(SYM(isf_phi_at), "hphi")
+    isf_forall_at = SPECL(
+        [p._parse("x"), p._parse("Not_f phi")], IS_FORM_AT_FORALL
+    )
+    p.have(
+        "hForall_nphi_form: is_form (Forall_f x (Not_f phi))"
+    ).by_eq_mp(SYM(isf_forall_at), "hnphi")
+    # is_form (substitute phi t x) via SUBSTITUTE_PRESERVES_IS_FORM
+    # (a STUB lemma in hf_syntax.py; the kernel theorem is axiomatized
+    # pending structural induction infrastructure on formulas).
+    p.have(
+        "hsub_form: is_form (substitute phi t x)"
+    ).by(
+        SUBSTITUTE_PRESERVES_IS_FORM, "phi", "t", "x",
+        CONJ(p.fact("hphi"), p.fact("ht")),
+    )
+    # is_form (Not_f (substitute phi t x)) for the CONTRAP B-slot.
+    isf_sub_at = SPEC(p._parse("substitute phi t x"), IS_FORM_AT_NOT)
+    p.have(
+        "hnsub_form: is_form (Not_f (substitute phi t x))"
+    ).by_eq_mp(SYM(isf_sub_at), "hsub_form")
+
+    # Step 1: UI_IMP at (x, ~phi, t).
+    p.have(
+        "h_ui: Prov_HF (Imp_f (Forall_f x (Not_f phi)) "
+        "                    (substitute (Not_f phi) t x))"
+    ).by(
+        PROV_HF_UI_IMP, "x", "Not_f phi", "t",
+        CONJ(p.fact("hnphi"), p.fact("ht")),
+    )
+
+    # Step 2: SUBSTITUTE_AT_NOT specialized at (phi, t, x).
+    sub_not_at = SPECL(
+        [p._parse("phi"), p._parse("t"), p._parse("x")],
+        SUBSTITUTE_AT_NOT,
+    )
+    # sub_not_at : |- substitute (Not_f phi) t x = Not_f (substitute phi t x).
+    # Rewrite h_ui's consequent.
+    p.have(
+        "h_ui2: Prov_HF (Imp_f (Forall_f x (Not_f phi)) "
+        "                     (Not_f (substitute phi t x)))"
+    ).by_rewrite_of("h_ui", [sub_not_at])
+
+    # Step 3: CONTRAP gives ~~(substitute phi t x) -> ~(Forall_f x (Not_f phi)).
+    p.have(
+        "h_contrap_in: is_form (Forall_f x (Not_f phi)) "
+        "/\\ is_form (Not_f (substitute phi t x)) "
+        "/\\ Prov_HF (Imp_f (Forall_f x (Not_f phi)) "
+        "                  (Not_f (substitute phi t x)))"
+    ).by_thm(
+        CONJ(
+            p.fact("hForall_nphi_form"),
+            CONJ(p.fact("hnsub_form"), p.fact("h_ui2")),
+        )
+    )
+    p.have(
+        "h_contrap: Prov_HF (Imp_f (Not_f (Not_f (substitute phi t x))) "
+        "                         (Not_f (Forall_f x (Not_f phi))))"
+    ).by(
+        PROV_HF_CONTRAP,
+        "Forall_f x (Not_f phi)",
+        "Not_f (substitute phi t x)",
+        "h_contrap_in",
+    )
+
+    # Step 4: DNI on hPsub.
+    p.have(
+        "h_dni_in: is_form (substitute phi t x) "
+        "/\\ Prov_HF (substitute phi t x)"
+    ).by_thm(CONJ(p.fact("hsub_form"), p.fact("hPsub")))
+    p.have(
+        "h_dni: Prov_HF (Not_f (Not_f (substitute phi t x)))"
+    ).by(
+        PROV_HF_DOUBLE_NEG_INTRO, "substitute phi t x", "h_dni_in"
+    )
+
+    # Step 5: MP gives the goal.
+    p.have(
+        "h_final_in: Prov_HF (Not_f (Not_f (substitute phi t x))) "
+        "/\\ Prov_HF (Imp_f (Not_f (Not_f (substitute phi t x))) "
+        "                  (Not_f (Forall_f x (Not_f phi))))"
+    ).by_thm(CONJ(p.fact("h_dni"), p.fact("h_contrap")))
+    p.thus("Prov_HF (Not_f (Forall_f x (Not_f phi)))").by(
+        PROV_HF_MP,
+        "Not_f (Not_f (substitute phi t x))",
+        "Not_f (Forall_f x (Not_f phi))",
+        "h_final_in",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1799,7 +1932,8 @@ if __name__ == "__main__":
     print("    PROV_HF_N :", pp_thm(PROV_HF_N))
     print()
     print("Stage 2C (a') -- universal instantiation.")
-    print("    PROV_HF_UI :", pp_thm(PROV_HF_UI))
+    print("    PROV_HF_UI_IMP :", pp_thm(PROV_HF_UI_IMP))
+    print("    PROV_HF_UI     :", pp_thm(PROV_HF_UI))
     print()
     print("Stage 2C (b) -- basic propositional reasoning.")
     print("    PROV_HF_IMP_REFL  :", pp_thm(PROV_HF_IMP_REFL))
@@ -1818,7 +1952,7 @@ if __name__ == "__main__":
     print("    PROV_HF_AND_INTRO :", pp_thm(PROV_HF_AND_INTRO))
     print("    PROV_HF_IFF_INTRO :", pp_thm(PROV_HF_IFF_INTRO))
     print()
-    print("Stage 2C (e) -- existential intro (STUB).")
+    print("Stage 2C (e) -- existential intro.")
     print("    PROV_HF_EXISTS_INTRO :", pp_thm(PROV_HF_EXISTS_INTRO))
     print()
     print("Stage 2C (f) -- conjunction elimination.")
