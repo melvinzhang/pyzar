@@ -519,14 +519,45 @@ def PROOF_PRST_CONS(p):
                               /\\ Proof_PRST t (Imp_pf f g)
                               /\\ h = g))).
 
-    SORRY: the `?h0 t0. Tup_pt h t = Tup_pt h0 t0 /\\ P(h0, t0)` form
-    produced by PROOF_PRST_AT collapses to `P(h, t)` via TUP_PT_INJ,
-    but the DSL's CHOOSE_WITNESS-based elimination produces SELECT
-    terms that REWRITE_RULE refuses to rewrite under the inner `?f g.`
-    binder (see `_bottom_up` line 998: rules with non-empty asl are
-    filtered out under binders). Downstream consumers can use
-    PROOF_PRST_AT directly; CONS is convenience, not load-bearing.
+    Discharged via a kernel-level construction analogous to
+    PROOF_PRST_MONO: the SELECT-witness-under-binder friction noted
+    earlier is bypassed by building the body substitution at the
+    AP_TERM / AP_THM / MK_EXISTS_CONG level, never asking the rewriter
+    to descend into the inner ?f g. binder.
+
+    Strategy:
+      Forward (LHS ==> RHS): assume the existential from PROOF_PRST_AT,
+      CHOOSE witnesses hh, tt; from TUP_PT_INJ on the Tup_pt equality
+      get hh=h and tt=t; build the body equation
+      `body[hh, tt] = body[h, t]` at kernel level by propagating the
+      two equations through AP_TERM (for Proof_PRST tt = Proof_PRST t),
+      AP_THM (for app-at-f / Imp_pf), AND_CONG / OR_CONG (inline-built),
+      and MK_EXISTS_CONG (inline-built); then EQ_MP to recover the
+      RHS-shaped conjunction.
+
+      Backward (RHS ==> LHS): given the RHS, EXISTS at (h, t) with
+      REFL on the Tup_pt equality.
     """
+    from tactics import (
+        SPECL, SPEC, MP, REFL, SYM, TRANS, AP_TERM, AP_THM, OR_CONG,
+        CONJUNCT1, CONJUNCT2, CONJ, DISCH, EQ_MP,
+    )
+    from fusion import DEDUCT_ANTISYM_RULE, MK_COMB, ABS, aty, ASSUME
+    from basics import mk_const, mk_app, mk_abs, mk_eq, rand
+    from axioms import mk_exists, mk_or, mk_and
+    from prst_syntax import TUP_PT_INJ
+
+    # DSL friction recap (already in MONO): no public AND_CONG /
+    # MK_EXISTS_CONG helpers; build them inline.
+    AND_c = mk_const("/\\", [])
+
+    def AND_CONG(eq_l, eq_r):
+        return MK_COMB(AP_TERM(AND_c, eq_l), eq_r)
+
+    def MK_EXISTS_CONG(v_var, eq_th):
+        exists_c = mk_const("?", [(v_var.ty, aty)])
+        return AP_TERM(exists_c, ABS(v_var, eq_th))
+
     p.goal(
         "!h t n. Proof_PRST (Tup_pt h t) n = "
         "( n = h "
@@ -534,88 +565,214 @@ def PROOF_PRST_CONS(p):
         "      \\/ (?f g. Proof_PRST t f /\\ Proof_PRST t (Imp_pf f g) /\\ h = g)))",
         types={"h": nat0_ty, "t": nat0_ty, "n": nat0_ty},
     )
-    p.sorry()
-    return  # unreachable; kept code below for future try
-    from prst_syntax import TUP_PT_INJ
-    from tactics import SPECL, REFL, SYM, CONJ
-    from fusion import TRANS
     p.fix("h t n")
-    # Reduce LHS via PROOF_PRST_AT.
-    at_tup = SPECL(
-        [p._parse("Tup_pt h t"), p._parse("n")], PROOF_PRST_AT
-    )
-    # at_tup: Proof_PRST (Tup_pt h t) n = ?h' t'. Tup_pt h t = Tup_pt h' t' /\ ...
-    # Strategy: prove both directions of the iff between the body's
-    # outer existential and the goal's CONS-form RHS, then chain through
-    # at_tup.
-    rhs_body_str = (
+
+    h_t = p._parse("h")
+    t_t = p._parse("t")
+    n_t = p._parse("n")
+    Tup_pt_c = mk_const("Tup_pt", [])
+    Proof_PRST_c = mk_const("Proof_PRST", [])
+    Imp_pf_c = mk_const("Imp_pf", [])
+    is_pr_axiom_c = mk_const("is_pr_axiom", [])
+
+    # Get the AT-form: Proof_PRST (Tup_pt h t) n = ?h' t'. body[h', t'].
+    at_th = SPECL([p._parse("Tup_pt h t"), n_t], PROOF_PRST_AT)
+
+    # body[h', t'] is:
+    #   Tup_pt h t = Tup_pt h' t' /\ n = h' /\ (is_pr_axiom h' \/ inner_ex[h', t'])
+    # where inner_ex[h', t'] := ?f g. Proof_PRST t' f /\ Proof_PRST t' (Imp_pf f g) /\ h' = g
+    # The RHS shape we want is body[h, t] (with the constructor-equality
+    # conjunct dropped, since it becomes REFL).
+
+    # Bvars in the existential from SPECL are alpha-renamed to h', t'
+    # to avoid capture with the outer h, t. We construct everything
+    # using the actual renamed bvars.
+    h_p = Var("h'", nat0_ty)
+    t_p = Var("t'", nat0_ty)
+    f_var = Var("f", nat0_ty)
+    g_var = Var("g", nat0_ty)
+
+    def inner_body_at(t_term, head_term):
+        # Proof_PRST t_term f /\ Proof_PRST t_term (Imp_pf f g) /\ head_term = g
+        imp_app = mk_app(mk_app(Imp_pf_c, f_var), g_var)
+        return mk_and(
+            mk_app(mk_app(Proof_PRST_c, t_term), f_var),
+            mk_and(
+                mk_app(mk_app(Proof_PRST_c, t_term), imp_app),
+                mk_eq(head_term, g_var),
+            ),
+        )
+
+    def inner_ex_at(t_term, head_term):
+        return mk_exists(f_var, mk_exists(g_var, inner_body_at(t_term, head_term)))
+
+    def disj_at(t_term, head_term):
+        return mk_or(mk_app(is_pr_axiom_c, head_term), inner_ex_at(t_term, head_term))
+
+    def body_at(h_term, t_term):
+        # Tup_pt h t = Tup_pt h_term t_term /\ n = h_term /\ disj[t_term, h_term]
+        return mk_and(
+            mk_eq(p._parse("Tup_pt h t"), mk_app(mk_app(Tup_pt_c, h_term), t_term)),
+            mk_and(
+                mk_eq(n_t, h_term),
+                disj_at(t_term, h_term),
+            ),
+        )
+
+    # LHS existential: ?h' t'. body[h', t']
+    lhs_ex = mk_exists(h_p, mk_exists(t_p, body_at(h_p, t_p)))
+    # body_at_ht: body[h, t]
+    body_ht = body_at(h_t, t_t)
+
+    rhs_target = p._parse(
         "n = h /\\ ( is_pr_axiom h "
-        "          \\/ (?f g. Proof_PRST t f /\\ Proof_PRST t (Imp_pf t f g for clarity) ))"
+        "          \\/ (?f g. Proof_PRST t f /\\ Proof_PRST t (Imp_pf f g) /\\ h = g))"
     )
-    # forward: ?h' t'. ... ==> RHS  (CHOOSE + TUP_PT_INJ).
-    inner_ex_str = (
-        "?h0 t0. Tup_pt h t = Tup_pt h0 t0 /\\ n = h0 /\\ "
-        "  (is_pr_axiom h0 \\/ "
-        "   (?f g. Proof_PRST t0 f /\\ Proof_PRST t0 (Imp_pf f g) /\\ h0 = g))"
-    )
-    rhs_cons_str = (
-        "n = h /\\ ( is_pr_axiom h "
-        "          \\/ (?f g. Proof_PRST t f /\\ Proof_PRST t (Imp_pf f g) "
-        "                    /\\ h = g))"
-    )
-    # fwd built at the kernel level to avoid p.choose's SELECT-binder
-    # explosion under by_rewrite_of (the inner SELECT pulls the whole
-    # body into every reference of h0 / t0).
-    from fusion import ASSUME
-    from tactics import CHOOSE_WITNESS, DISCH, REWRITE_RULE, MP, CONJUNCT1, CONJUNCT2
-    from basics import rand, rator
-    inner_ex_term = p._parse(inner_ex_str)
-    h_ex_th = ASSUME(inner_ex_term)
-    # Outer existential ?h0. ?t0. <body>: pull out h0 via CHOOSE_WITNESS,
-    # then t0 via another CHOOSE_WITNESS. The "witness" terms produced
-    # are SELECT terms but they are NOT free vars, so REWRITE_RULE
-    # against TUP_PT_INJ's projections rewrites the entire body in one
-    # pass (no recursion through the SELECT body).
-    outer_pred = rand(inner_ex_term)
-    chose_h0 = CHOOSE_WITNESS(outer_pred, h_ex_th)
-    inner_pred = rand(chose_h0._concl)
-    chose_both = CHOOSE_WITNESS(inner_pred, chose_h0)
-    # chose_both: |- (Tup_pt h t = Tup_pt h0_wit t0_wit) /\ <rest>
-    h_tup_th = CONJUNCT1(chose_both)
-    rest_th = CONJUNCT2(chose_both)
-    # Apply TUP_PT_INJ to h_tup_th to get (h = h0_wit) /\ (t = t0_wit).
-    # h_tup_th: Tup_pt h t = Tup_pt h0_wit t0_wit. TUP_PT_INJ gives
-    # h = h0_wit /\ t = t0_wit; SYM each gets h0_wit = h, t0_wit = t.
-    h0_wit = rand(rator(rand(h_tup_th._concl)))
-    t0_wit = rand(rand(h_tup_th._concl))
-    inj_th = MP(
-        SPECL([p._parse("h"), p._parse("t"), h0_wit, t0_wit], TUP_PT_INJ),
-        h_tup_th,
-    )
-    h_eq_inj = SYM(CONJUNCT1(inj_th))  # h0_wit = h
-    t_eq_inj = SYM(CONJUNCT2(inj_th))  # t0_wit = t
-    rest_h_eq_t = REWRITE_RULE([h_eq_inj, t_eq_inj], rest_th)
-    # rest_h_eq_t: |- (n = h) /\ (is_pr_axiom h \/ ...) with h_assumption (inner_ex_term) as hyp.
-    fwd_th = DISCH(inner_ex_term, rest_h_eq_t)
-    p.have("fwd: (" + inner_ex_str + ") ==> " + rhs_cons_str).by_thm(fwd_th)
-    # backward: RHS ==> ?h' t'. ...   (witness h, t)
-    with p.have("bwd: " + rhs_cons_str + " ==> (" + inner_ex_str + ")").proof():
-        p.assume("h_rhs: " + rhs_cons_str)
-        p.have(
-            "h_refl_tup: Tup_pt h t = Tup_pt h t"
-        ).by_thm(REFL(p._parse("Tup_pt h t")))
-        # Build the inner conjunction body for the witness (h, t).
-        p.have(
-            "h_inner: Tup_pt h t = Tup_pt h t /\\ n = h /\\ "
-            "         (is_pr_axiom h \\/ "
-            "          (?f g. Proof_PRST t f /\\ Proof_PRST t (Imp_pf f g) "
-            "                 /\\ h = g))"
-        ).by_thm(CONJ(p.fact("h_refl_tup"), p.fact("h_rhs")))
-        p.thus(inner_ex_str).by_exists(["h", "t"], "h_inner")
-    p.have("iff_body: (" + inner_ex_str + ") = " + rhs_cons_str).by_iff("fwd", "bwd")
+
+    # ----------------- Forward direction: lhs_ex ==> rhs_target -----------------
+    h_lhs = ASSUME(lhs_ex)
+
+    # CHOOSE_WITNESS twice to extract hh, tt.
+    from tactics import CHOOSE_WITNESS
+    from axioms import dest_exists
+    outer_pred = dest_exists(lhs_ex)
+    chosen_outer = CHOOSE_WITNESS(outer_pred, h_lhs)
+    # chosen_outer: ?t'. body[SH, t']  where SH = @h'. ?t'. body[h', t']
+    inner_pred = dest_exists(chosen_outer._concl)
+    chosen_inner = CHOOSE_WITNESS(inner_pred, chosen_outer)
+    # chosen_inner: body[SH, ST]  where ST = @t'. body[SH, t']
+
+    # Extract witnesses as terms.
+    SH = rand(chosen_outer._concl)  # the SELECT term for h'
+    # Actually rand(chosen_outer._concl) is the body of the inner exists; the
+    # witness is buried in the term differently. Let me use a different approach.
+    # CHOOSE_WITNESS uses SELECT to instantiate the binder. The witness term
+    # is constructed inside CHOOSE_WITNESS; I can reconstruct it from
+    # mk_select(bvar, pred_body).
+    # Actually, simpler: chosen_inner contains the body[SH, ST] with concrete
+    # SH and ST terms. I can pull them out by pattern.
+    from basics import rator
+    # body[SH, ST] outermost conjunct: Tup_pt h t = Tup_pt SH ST
+    p_eq_th_part = CONJUNCT1(chosen_inner)  # Tup_pt h t = Tup_pt SH ST
+    rhs_tup = rand(p_eq_th_part._concl)  # Tup_pt SH ST
+    ST_term = rand(rhs_tup)
+    SH_term = rand(rator(rhs_tup))
+
+    # Split chosen_inner into its three top-level conjuncts.
+    rest1 = CONJUNCT2(chosen_inner)  # n = SH /\ disj[ST, SH]
+    n_eq_SH = CONJUNCT1(rest1)  # n = SH
+    disj_at_SH_ST = CONJUNCT2(rest1)  # is_pr_axiom SH \/ inner_ex[ST, SH]
+
+    # TUP_PT_INJ: |- !a1 b1 a2 b2. Tup_pt a1 b1 = Tup_pt a2 b2 ==> a1 = a2 /\ b1 = b2.
+    inj_th = SPECL([h_t, t_t, SH_term, ST_term], TUP_PT_INJ)
+    # inj_th: Tup_pt h t = Tup_pt SH ST ==> h = SH /\ t = ST.
+    eq_conj = MP(inj_th, p_eq_th_part)
+    # eq_conj: h = SH /\ t = ST
+    h_eq_SH = CONJUNCT1(eq_conj)  # h = SH
+    t_eq_ST = CONJUNCT2(eq_conj)  # t = ST
+
+    # We want body_at[h, t]'s RHS shape (without the Tup_pt-equality
+    # conjunct), i.e. rhs_target = `n = h /\ disj_at(t, h)`.
+    # Build:
+    #   n_eq_h:  n = h   from  n = SH and h = SH (= TRANS n_eq_SH SYM(h_eq_SH))
+    n_eq_h = TRANS(n_eq_SH, SYM(h_eq_SH))
+
+    # Build disj_at(t, h) by rewriting disj_at_SH_ST.
+    # disj_at_SH_ST: is_pr_axiom SH \/ inner_ex[ST, SH]
+    # Target:        is_pr_axiom h  \/ inner_ex[t,  h ]
+    # Build the equation `disj_at_SH_ST_concl = disj_at_h_t` by congruence.
+    #
+    # is_pr_axiom_eq:  is_pr_axiom SH = is_pr_axiom h
+    is_pr_axiom_eq = AP_TERM(is_pr_axiom_c, SYM(h_eq_SH))
+    # inner_ex_eq:  inner_ex[ST, SH] = inner_ex[t, h]
+    # Build inner via congruence:
+    #   Proof_PRST ST = Proof_PRST t  (AP_TERM)
+    proof_t_eq = AP_TERM(Proof_PRST_c, SYM(t_eq_ST))
+    #   Proof_PRST ST f = Proof_PRST t f  (AP_THM at f_var)
+    pf_t_f_eq = AP_THM(proof_t_eq, f_var)
+    # Same for the Imp_pf application:
+    imp_app_term = mk_app(mk_app(Imp_pf_c, f_var), g_var)
+    pf_t_imp_eq = AP_THM(proof_t_eq, imp_app_term)
+    # h_g_eq: (SH = g) = (h = g)
+    # Use AP_TERM(=, h_eq_SH-style) then AP_THM at g.
+    eq_c = mk_const("=", [(nat0_ty, aty)])
+    eq_partial_SH = mk_app(eq_c, SH_term)  # (SH =) as a partial app
+    # We want (SH = g) = (h = g). Build `SH=` partial-app eq:
+    #   eq_part_eq: (=) SH = (=) h, i.e. AP_TERM(=, SYM h_eq_SH).
+    eq_part_eq = AP_TERM(eq_c, SYM(h_eq_SH))
+    # eq_part_eq: (\x. SH = x) = (\x. h = x), at the function level.
+    # AP_THM at g: (SH = g) = (h = g).
+    h_g_eq = AP_THM(eq_part_eq, g_var)
+
+    # Inner body iff: build (pf_t_f /\ pf_t_imp /\ SH=g) = (pf_t_f' /\ pf_t_imp' /\ h=g).
+    inner_rest_eq = AND_CONG(pf_t_imp_eq, h_g_eq)
+    inner_body_eq = AND_CONG(pf_t_f_eq, inner_rest_eq)
+    # Lift through ?g, ?f.
+    inner_ex_eq_g = MK_EXISTS_CONG(g_var, inner_body_eq)
+    inner_ex_eq = MK_EXISTS_CONG(f_var, inner_ex_eq_g)
+
+    # Disjunction: is_pr_axiom_eq /\ inner_ex_eq -> OR_CONG.
+    disj_eq = OR_CONG(is_pr_axiom_eq, inner_ex_eq)
+    # disj_eq: is_pr_axiom SH \/ inner_ex[ST, SH] = is_pr_axiom h \/ inner_ex[t, h].
+
+    # Use disj_eq to derive disj_at(t, h) from disj_at_SH_ST.
+    disj_at_h_t = EQ_MP(disj_eq, disj_at_SH_ST)
+    # Combine n_eq_h with disj_at_h_t to get the RHS conjunction.
+    rhs_th = CONJ(n_eq_h, disj_at_h_t)
+    # rhs_th: n = h /\ (is_pr_axiom h \/ inner_ex[t, h])
+    # Note: asl includes h_lhs (the assumed existential).
+
+    fwd_imp = DISCH(lhs_ex, rhs_th)
+    # fwd_imp: lhs_ex ==> rhs_target.
+
+    # ----------------- Backward direction: rhs_target ==> lhs_ex -----------------
+    h_rhs = ASSUME(rhs_target)
+    n_eq_h_rhs = CONJUNCT1(h_rhs)
+    disj_rhs = CONJUNCT2(h_rhs)
+
+    # Build the existential witnesses h, t.
+    # Body parts: Tup_pt h t = Tup_pt h t (REFL), n = h_rhs, disj_rhs.
+    tup_refl = REFL(p._parse("Tup_pt h t"))
+    body_h_t_inner = CONJ(tup_refl, CONJ(n_eq_h_rhs, disj_rhs))
+    # Existential introduction: ?h' t'. body[h', t'].
+    # EXISTS takes (pred=Abs(v, body), witness, th: |- body[witness/v]).
+    # Inner: pred = \t'. body[h_t, t'], witness = t_t.
+    # Outer: pred = \h'. ?t'. body[h', t'], witness = h_t.
+    from tactics import EXISTS
+    inner_pred_abs = mk_abs(t_p, body_at(h_t, t_p))
+    ex_inner_th = EXISTS(inner_pred_abs, t_t, body_h_t_inner)
+    # ex_inner_th: ?t'. body[h_t, t']
+    outer_pred_abs = mk_abs(h_p, mk_exists(t_p, body_at(h_p, t_p)))
+    ex_outer_th = EXISTS(outer_pred_abs, h_t, ex_inner_th)
+    # ex_outer_th: ?h' t'. body[h', t']  (= lhs_ex)
+
+    rev_imp = DISCH(rhs_target, ex_outer_th)
+    # rev_imp: rhs_target ==> lhs_ex.
+
+    # Combine into iff.
+    iff_lhs_rhs = DEDUCT_ANTISYM_RULE(rev_imp, fwd_imp)
+    # DEDUCT_ANTISYM_RULE(t1, t2) yields t1._concl = t2._concl. With rev_imp
+    # whose concl is `rhs_target ==> lhs_ex` and fwd_imp whose concl is
+    # `lhs_ex ==> rhs_target`, this gives the equality of those two implication
+    # terms -- not what we want. Use the alternative form:
+    # DEDUCT_ANTISYM_RULE expects two theorems with assumptions: one with
+    # rhs_target as concl (and lhs_ex in asl), other with lhs_ex as concl (and
+    # rhs_target in asl). Pass them un-DISCHed.
+    # DEDUCT_ANTISYM_RULE(t1, t2) gives `t1._concl = t2._concl`. With
+    # ex_outer_th (concl = lhs_ex) and rhs_th (concl = rhs_target),
+    # the result is `lhs_ex = rhs_target` -- exactly what we need for the
+    # TRANS chain. (DSL friction recap from MONO: orientation matters here.)
+    iff_th = DEDUCT_ANTISYM_RULE(ex_outer_th, rhs_th)
+    # iff_th: lhs_ex = rhs_target
+
+    # Chain with at_th: Proof_PRST (Tup_pt h t) n = lhs_ex = rhs_target.
+    final = TRANS(at_th, iff_th)
     p.thus(
-        "Proof_PRST (Tup_pt h t) n = " + rhs_cons_str
-    ).by_thm(TRANS(at_tup, p.fact("iff_body")))
+        "Proof_PRST (Tup_pt h t) n = "
+        "( n = h "
+        "  /\\ ( is_pr_axiom h "
+        "      \\/ (?f g. Proof_PRST t f /\\ Proof_PRST t (Imp_pf f g) /\\ h = g)))"
+    ).by_thm(final)
 
 
 # ---------------------------------------------------------------------------

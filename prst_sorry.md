@@ -161,7 +161,7 @@ All 7 listed sorries cleared in commit `ad84a26`, plus a new size lemma `NAT0_LT
 
 ---
 
-## Layer 6 — `prst_proof` foundations (8 + 6 sorries) — **partial: 8/14 cleared**
+## Layer 6 — `prst_proof` foundations (8 + 6 sorries) — **DONE (14/14)**
 
 Depends on Layer 0 real `Proof_PRST_def` body + Layers 1-5.
 
@@ -171,9 +171,9 @@ Depends on Layer 0 real `Proof_PRST_def` body + Layers 1-5.
 - `PROV_PRST_AXIOM`: build one-line proof `Tup_pt n Empty_pt` against PROOF_PRST_AT directly. Bypasses PROOF_PRST_CONS.
 - 6 `PROV_PRST_*_DEF` (ZERO/PROJ/IF_IN_TRUE/IF_IN_FALSE/REC_BASE/REC_STEP). Each is one `_is_pr_axiom_from_pr_def` helper call (DISJ1 + IS_PR_AXIOM_DEF unfold) + `by(PROV_PRST_AXIOM, axiom, h_axiom)`.
 
-**Remaining (4 Layer 6 sorries):**
+**All Layer 6 sorries discharged this sprint:**
 - ~~`PROOF_PRST_MONO`~~ — **DONE.** Discharged with a kernel-level proof (~180 lines, lives in `prst_proof.py`). Approach: derive `f t = g t` as a HOL function equation under the outer `?h t.` constructor witness via NAT0_LT_TUP_PT_R + the recursion hypothesis, then propagate through the body using kernel-level AP_THM (for the two rec-call applications) + OR_CONG + AND_CONG (inline-built since no public helper) + MK_EXISTS_CONG (inline-built; no public helper for lifting `body1 = body2` to `(?v. body1) = (?v. body2)`).
-- `PROOF_PRST_CONS` — DSL friction (SELECT-under-binder), non-load-bearing. Downstream can route through PROOF_PRST_AT directly.
+- ~~`PROOF_PRST_CONS`~~ — **DONE.** Discharged with a kernel-level construction parallel to PROOF_PRST_MONO. The SELECT-witness-under-binder friction is avoided by building the body substitution at AP_TERM / AP_THM / MK_EXISTS_CONG level: after CHOOSE_WITNESS extracts SH, ST from the AT-form's existential, TUP_PT_INJ on the constructor-equality conjunct gives `h = SH /\ t = ST` (kernel theorems with empty asl); these propagate through the body via `AP_TERM(Proof_PRST, SYM(t_eq))` for the rec-call function-equation lift, AP_THM for the f / Imp_pf application slots, AP_TERM(=, SYM(h_eq)) + AP_THM for the `h = g` slot, AND_CONG / OR_CONG / MK_EXISTS_CONG (all inline-built) for the surrounding structure. ~150 lines.
 - ~~`PROV_PRST_ADJ_DEF_AT`~~ — **DONE.** Investigation confirmed the design issue (is_Refl requires is_term, but `App_pt`-typed terms aren't is_term). Resolved by (1) positing `PRST_REFL_AXIOM: !t. is_pterm t ==> Prov_PRST (Eq_pf t t)` -- the missing PRST-extended reflexivity-of-equality schema, parallel to HF's is_Refl but covering is_pterm; (2) adding `is_pterm x /\ is_pterm y` preconditions to the signature; (3) deriving the lemma constructively from PRST_REFL_AXIOM + ADJ_PT_DEF unfolding + is_pterm chaining (IS_PTERM_AT_APP / TUP / EMPTY + IS_PR_SYM_ADJ via IS_PR_SYM_IMP_PARTIAL). The signature change is non-disruptive: no downstream consumers in the chain.
 - ~~`MU_CORRECTNESS`~~ — **DONE** (posited via `new_axiom`).
 - ~~`PROV_PRST_SUBST_AXIOM`~~ — **DONE** (posited via `new_axiom`). Initial design suggested an `IS_PR_DEF_CLOSED_UNDER_SUBST` route, but closure fails for parametric axiom families: `proj_def_axiom_at i n` embeds `Var_t k` slots at FIXED positions for k = 0..n-1; substituting at v < n replaces a slot with t, and the result is not of the form `axiom_at i' n'`. So `is_pr_def` is not closed under `substitute_p` in general. Posited as a primitive PRST inference-rule schema (analog of UI for theory axioms). Same precedent as MU_CORRECTNESS.
