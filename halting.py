@@ -2618,90 +2618,323 @@ def OMEGA_T_NOT_NORMAL(p):
         p.absurd().by_conj("h_neq", "h_eq_sym")
 
 
+# ---------------------------------------------------------------------------
+# Size-induction route to OMEGA_NON_HALTING.
+#
+# Three feeder lemmas (each stubbed below with a docstring sketch of its
+# own proof); OMEGA_NON_HALTING composes them.
+#
+#   SK_ITER_ADD                  : iterate-of-iterate decomposition along
+#                                  n0plus.  Pure induction on the outer
+#                                  count.
+#   SK_ITER_PAST_NORMAL          : once normal, stays normal under any
+#                                  additional iter prefix.  Built from
+#                                  SK_ITER_ADD + IS_NORMAL_SK_ITER_FIXED.
+#   OMEGA_SHAPE_TRAJ_RETURNS     : from any Omega-shape, some k>0 sk_steps
+#                                  later we land back at Omega-shape with
+#                                  strictly larger sk_size.  Inducts on
+#                                  the App_t I_t-nesting depth of X.
+#   OMEGA_T_REACHES_LARGE_SIZE   : !N L. arbitrarily large Omega-shape
+#                                  iterate at index n0plus k L (so >= L).
+#                                  Induction on N using OMEGA_T_STEP1 as
+#                                  base and OMEGA_SHAPE_TRAJ_RETURNS as
+#                                  step.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def SK_ITER_ADD(p):
+    """|- !n m t. sk_iter (n0plus n m) t = sk_iter n (sk_iter m t).
+
+    Induction on ``n``:
+      base:  sk_iter (n0plus 0 m) t = sk_iter m t = sk_iter 0 (sk_iter m t)
+             [N0PLUS_BASE_L (or commutativity to N0PLUS_BASE), SK_ITER_ZERO].
+             N0PLUS_BASE in this module is ``n0plus x 0 = x``; we need
+             ``n0plus 0 m = m`` -- prove via small induction on m or
+             via an N0PLUS_COMM helper.
+      step:  sk_iter (n0plus (SUC0 n) m) t
+              = sk_iter (SUC0 (n0plus n m)) t          [N0PLUS_SUC_L]
+              = sk_step (sk_iter (n0plus n m) t)        [SK_ITER_SUC]
+              = sk_step (sk_iter n (sk_iter m t))       [IH]
+              = sk_iter (SUC0 n) (sk_iter m t)          [SK_ITER_SUC].
+
+    Minor DSL friction: this module uses N0PLUS_BASE / N0PLUS_STEP at the
+    right argument; the proof above needs versions at the LEFT argument.
+    Either re-derive N0PLUS_BASE_L / N0PLUS_SUC_L inline or commute via
+    N0PLUS_COMM (already in hf_sets? check before importing).
+    """
+    p.goal("!n m t. sk_iter (n0plus n m) t = sk_iter n (sk_iter m t)")
+    p.sorry()
+
+
+@proof
+def SK_ITER_PAST_NORMAL(p):
+    """|- !t n k. is_normal (sk_iter n t)
+                  ==> sk_iter (n0plus k n) t = sk_iter n t.
+
+    Once we land in normal form at step n, the trajectory stays put.
+
+    Proof: SK_ITER_ADD at (k, n, t) gives
+      sk_iter (n0plus k n) t = sk_iter k (sk_iter n t).
+    IS_NORMAL_SK_ITER_FIXED at (k, sk_iter n t) gives
+      sk_iter k (sk_iter n t) = sk_iter n t (under is_normal).
+    Chain via TRANS.
+    """
+    p.goal(
+        "!t n k. is_normal (sk_iter n t) "
+        "        ==> sk_iter (n0plus k n) t = sk_iter n t"
+    )
+    p.sorry()
+
+
+@proof
+def OMEGA_SHAPE_TRAJ_RETURNS(p):
+    """|- !X. ?k Y. sk_iter k (App_t (App_t I_t X) (App_t I_t X))
+                    = App_t (App_t I_t Y) (App_t I_t Y)
+                  /\\ nat0_lt (sk_size (App_t (App_t I_t X) (App_t I_t X)))
+                              (sk_size (App_t (App_t I_t Y) (App_t I_t Y))).
+
+    Trajectory-return-with-growth: from any Omega-shape, some number
+    of sk_steps later we are back at Omega-shape with strictly larger
+    size.  Witness: Y := App_t I_t X (one extra leading I_t).
+
+    Concrete step counts:
+
+      X = SII:                          k = 3.
+        T0 := (I X)(I X)
+        T1 := sk_step T0 = ((K X)(K X))(I X)   [TRAJ_STEP_OMEGA_SHAPE]
+        T2 := sk_step T1 = X (I X)              [descend-L: K-redex]
+        T3 := sk_step T2 = (I (I X))(I (I X))   [TOP S-redex of SII (IX)
+                                                 with x=I_t, y=I_t,
+                                                 z=I_t X; SK_STEP_S]
+                                                = Omega-shape (I_t X).
+
+      X = App_t I_t Z (any Z):           5 step header before recursing.
+        T1, T2 as above; T2 = (I Z)(I (IZ)).
+        T3 = ((K Z)(K Z))(I (IZ))         [descend-L: SK_STEP_I_APP on (IZ)]
+        T4 = Z (I (IZ))                   [descend-L: K-redex]
+        ... now structurally identical to (Z (I Z')) with Z' = I_t X --
+        but with one fewer App_t I_t layer in the head.  Recurse on Z.
+
+    Proof strategy: structural / well-founded induction on
+    ``sk_size X`` (any measure that strictly decreases when stripping
+    the outermost I_t).
+
+    Strict-size component: SK_SIZE_GROWTH_OMEGA_SHAPE specialised at
+    t = App_t I_t X gives
+      sk_size (App_t I_t X) < sk_size (App_t (App_t I_t (App_t I_t X))
+                                              (App_t I_t (App_t I_t X)))
+    and SK_SIZE_GROWTH_OMEGA_SHAPE at t = X gives
+      sk_size X < sk_size (Omega-shape X)
+    which (one SK_SIZE_APP unfold) suffices for the
+    Omega-shape X < Omega-shape (I X) comparison.
+
+    Estimated ~~100-200 lines once the peel induction is fully spelled
+    out (the per-layer descent and S-redex bookkeeping is the bulk).
+    """
+    p.goal(
+        "!X. ?k Y. sk_iter k (App_t (App_t I_t X) (App_t I_t X)) "
+        "          = App_t (App_t I_t Y) (App_t I_t Y) "
+        "        /\\ nat0_lt (sk_size (App_t (App_t I_t X) (App_t I_t X))) "
+        "                    (sk_size (App_t (App_t I_t Y) (App_t I_t Y)))"
+    )
+    p.sorry()
+
+
+@proof
+def OMEGA_T_REACHES_LARGE_SIZE(p):
+    """|- !N L. ?k X. sk_iter (n0plus k L) Omega_t
+                       = App_t (App_t I_t X) (App_t I_t X)
+                    /\\ nat0_lt N (sk_size (App_t (App_t I_t X)
+                                                   (App_t I_t X))).
+
+    For any size threshold N and any iter-offset L, there is an
+    Omega-shape iterate at index ``n0plus k L`` (i.e. >= L) with
+    size > N.
+
+    The offset-by-L formulation is what later combines with
+    SK_ITER_PAST_NORMAL: plug L = n0 (the halts-witness) and the
+    iterate index becomes ``n0plus k n0``, exactly the shape
+    SK_ITER_PAST_NORMAL collapses.
+
+    Induction on ``N``:
+      base N = 0:
+        OMEGA_T_STEP1 + SK_ITER_SUC give
+          sk_iter (SUC0 0) Omega_t = sk_step Omega_t
+                                   = App_t (I_t SII) (I_t SII).
+        Witness k = SUC0 L, X = SII (assuming we can absorb the L
+        offset).  More carefully: the witness for k is chosen so
+        that ``n0plus k L = SUC0 L`` -- this needs an "absorb a
+        suffix" reduction that itself is small.  Alternatively, lift
+        the base to "n0plus (SUC0 0) L is an iterate index reaching
+        Omega-shape" via applying SK_ITER_PAST_NORMAL-like padding
+        when L > 1 (no -- Omega_t is non-normal so we cannot rely on
+        idempotence; instead we run OMEGA_SHAPE_TRAJ_RETURNS L times
+        from T1 = Omega-shape SII to absorb the offset).
+        nat0_lt 0 (sk_size (Omega-shape SII)) is immediate from
+        SK_SIZE_APP (sk_size of an App_t is SUC0 _, hence > 0).
+
+      step N = SUC0 N':
+        From IH: k_0, X_0 with
+          sk_iter (n0plus k_0 L) Omega_t = Omega-shape X_0
+          /\\ nat0_lt N' (sk_size (Omega-shape X_0)).
+        Apply OMEGA_SHAPE_TRAJ_RETURNS at X_0:
+          k_1, Y with
+            sk_iter k_1 (Omega-shape X_0) = Omega-shape Y
+            /\\ nat0_lt (sk_size (Omega-shape X_0))
+                        (sk_size (Omega-shape Y)).
+        New k := n0plus k_1 k_0; chain through SK_ITER_ADD:
+          sk_iter (n0plus k L) Omega_t
+            = sk_iter (n0plus (n0plus k_1 k_0) L) Omega_t
+            = sk_iter k_1 (sk_iter (n0plus k_0 L) Omega_t)    [assoc + ADD]
+            = sk_iter k_1 (Omega-shape X_0)                    [IH]
+            = Omega-shape Y.
+        Size: N' < sk_size (Omega-shape X_0) < sk_size (Omega-shape Y),
+        so NAT0_LT_TRANS gives N' < sk_size (Omega-shape Y); plus
+        N = SUC0 N' < sk_size (Omega-shape Y) by NAT0_LT_SUC0_MONO
+        on the strict gap.  (Mind the SUC0-step: TRAJ_RETURNS gives
+        strict-lt, and SUC0-lifting N' -> N consumes one step of
+        the gap.  When the gap is one, this case might need an
+        extra TRAJ_RETURNS iteration -- fold two cycles into one in
+        the worst case.  Documented as a 5-line bookkeeping hop.)
+    """
+    p.goal(
+        "!N L. ?k X. sk_iter (n0plus k L) Omega_t "
+        "             = App_t (App_t I_t X) (App_t I_t X) "
+        "          /\\ nat0_lt N "
+        "                      (sk_size (App_t (App_t I_t X) (App_t I_t X)))"
+    )
+    p.sorry()
+
+
 @proof
 def OMEGA_NON_HALTING(p):
     """|- ~ halts Omega_t.
 
-    TRUE under the (now-shipped) leftmost-outermost congruence
-    ``sk_step``, but the proof requires machinery this module does
-    not yet provide.  Concrete sk_step trajectory (see
-    OMEGA_T_STEP1 for the first step):
+    Size-induction proof.  Trajectory analysis (under leftmost-outermost
+    ``sk_step``):
 
       T0 = Omega_t                              = App_t SII SII
       T1 = sk_step T0                           = App_t (I_t SII) (I_t SII)
       T2 = sk_step T1                           = App_t ((K_t SII)(K_t SII)) (I_t SII)
-                                                  [descend-L: inner I_t SII fires
-                                                   as S-redex via I_T_DEF]
+                                                  [descend-L: SK_STEP_I_APP]
       T3 = sk_step T2                           = App_t SII (I_t SII)
                                                   [descend-L: K-redex fires]
       T4 = sk_step T3                           = App_t (I_t (I_t SII)) (I_t (I_t SII))
-                                                  [top-level S-redex with
+                                                  [TOP S-redex with
                                                    x=I_t, y=I_t, z=I_t SII]
       ...
-    where SII = App_t (App_t S_t I_t) I_t.  Each 3-step window
-    transforms ``App_t (I_t X) (I_t X)`` into ``App_t (I_t (I_t X))
-    (I_t (I_t X))`` -- the nesting depth on each side strictly grows
-    by one, so the term size strictly grows by a constant per cycle.
-    Therefore no ``sk_iter n Omega_t`` is a fixed point of sk_step,
-    so ``~ halts Omega_t``.
+    where SII = App_t (App_t S_t I_t) I_t.  Omega-shape recurs at
+    iters 1, 4, 9, 16, ... with sk_size strictly growing each return.
 
-    Infrastructure already shipped:
-      Stage 3b (size measure)
-        ``sk_size``, ``SK_SIZE_S``, ``SK_SIZE_K``, ``SK_SIZE_APP``,
-        ``NAT0_LT_SUC0_N0PLUS_{L,R}``,
-        ``SK_SIZE_GROWTH_OMEGA_SHAPE``.
-      Stage 3 (Omega first step + trajectory)
-        ``OMEGA_T_STEP1``                 -- sk_step Omega_t computed.
-        ``OMEGA_T_NOT_NORMAL``            -- base case (n = 0).
-        ``SK_STEP_I_APP``                 -- sk_step (App_t I_t X) computed
-                                             generically (X arbitrary).
-        ``TRAJ_STEP_OMEGA_SHAPE``         -- sk_step on Omega-shape:
-                                             (I X)(I X) --> ((K X)(K X))(I X).
-                                             Generic in X.
-        ``OMEGA_SHAPE_NOT_NORMAL``        -- !X. ~ is_normal (Omega-shape X).
-                                             Closes n = 1 (T1 is Omega-shape)
-                                             and any iter where Omega-shape
-                                             recurs.
-      Stage 3 (normality propagation)
-        ``SK_ITER_PUSH``                  -- commute sk_step in/out of iter.
-        ``IS_NORMAL_SK_STEP``             -- normality preserved forward.
-        ``IS_NORMAL_SK_ITER_FIXED``       -- fixed point is fixed under iter.
-        ``HALTS_SK_STEP_FWD``             -- halts shifts forward.
+    Proof structure:
 
-    Remaining gap for the full proof:
+      Suppose ``halts Omega_t``.  HALTS_AT then ``p.choose`` extracts
+      ``n0`` with ``is_normal (sk_iter n0 Omega_t)``.
 
-    With the shipped lemmas we can rule out the supposed halts witness
-    ``n_0`` for ``n_0 in {0, 1}`` (and any later Omega-shape iterate
-    via OMEGA_SHAPE_NOT_NORMAL).  Closing the remaining cases requires
-    characterising the non-Omega-shape states in the trajectory:
+      Let N := sk_size (sk_iter n0 Omega_t).
 
-      Cycle 1 (3 steps from T1, X = SII):
-        T2  =  ((K SII)(K SII)) (I SII)
-        T3  =  SII (I SII)
-        T4  =  Omega-shape with X' = App_t I_t SII
+      OMEGA_T_REACHES_LARGE_SIZE at (N, n0) gives k, X with
+        sk_iter (n0plus k n0) Omega_t = Omega-shape X                  (a)
+        nat0_lt N (sk_size (Omega-shape X)).                            (b)
 
-      Cycle k>=2 grows: cycle k takes ``2k+1`` steps because each
-      App_t I_t-layer in X needs to descend through one extra
-      reduction.  Specifically Omega-shape appears at iters
-      1, 4, 9, 16, ... (perfect squares).
+      SK_ITER_PAST_NORMAL at (Omega_t, n0, k) gives
+        sk_iter (n0plus k n0) Omega_t = sk_iter n0 Omega_t.            (c)
 
-    To finish OMEGA_NON_HALTING one option is the SIZE-based argument:
-      (a) Prove ``!t. P(t) ==> ?k. nat0_lt (sk_size t)
-                                      (sk_size (sk_iter k t))`` for
-          ``P(t) := ?X. t = Omega-shape X``.  Needs the trajectory
-          back to Omega-shape (cycle of length 2 sk_size+1 say), which
-          characterises the WHOLE cycle.
-      (b) Combine with IS_NORMAL_SK_ITER_FIXED: fixed point would
-          give constant size from n_0 onwards, contradicting (a).
+      Chain (a) + SYM(c):
+        sk_iter n0 Omega_t = Omega-shape X.                             (d)
 
-    Alternative -- give a separate non-normality lemma for each
-    non-Omega trajectory shape (T2-shape ``((K X)(K X)) (I X)`` and
-    T3-shape ``X (I X)`` where X has S-redex structure), then induct.
+      AP_TERM sk_size to (d):
+        sk_size (sk_iter n0 Omega_t) = sk_size (Omega-shape X)
+        i.e.  N = sk_size (Omega-shape X).                              (e)
 
-    Either way ~200-400 lines more.  Out of scope for this turn.
+      Rewrite (b) by SYM(e):
+        nat0_lt N N.
+
+      NAT0_LT_NOT_REFL at N: contradiction.
+
+    Net feeder dependencies (all stubbed above):
+      ``SK_ITER_ADD``, ``SK_ITER_PAST_NORMAL``,
+      ``OMEGA_SHAPE_TRAJ_RETURNS``, ``OMEGA_T_REACHES_LARGE_SIZE``.
+    Plus already-shipped: HALTS_AT, OMEGA_T_STEP1, SK_ITER_SUC,
+    SK_SIZE_GROWTH_OMEGA_SHAPE, IS_NORMAL_SK_ITER_FIXED,
+    NAT0_LT_TRANS, NAT0_LT_NOT_REFL.
+
+    Estimated total once feeders are filled: ~~400-600 lines (the bulk
+    is OMEGA_SHAPE_TRAJ_RETURNS's peel induction).
     """
+    from tactics import AP_TERM as _AP_TERM, TRANS as _TRANS, SYM as _SYM
+    from nat0_order import NAT0_LT_NOT_REFL
+
     p.goal("~ halts Omega_t")
-    p.sorry()
+
+    with p.suppose("h_halts: halts Omega_t"):
+        # ---- (1) Extract normal-iterate witness n0. ---------------------
+        p.have(
+            "h_at: halts Omega_t = (?n. is_normal (sk_iter n Omega_t))"
+        ).by(HALTS_AT, "Omega_t")
+        p.have("h_ex: ?n. is_normal (sk_iter n Omega_t)").by_eq_mp(
+            "h_at", "h_halts"
+        )
+        p.choose("n0", from_="h_ex")
+        # n0_eq : is_normal (sk_iter n0 Omega_t)
+
+        # ---- (2) Large-size Omega-shape iterate at index n0plus k n0. ---
+        # Threshold N := sk_size (sk_iter n0 Omega_t); offset L := n0.
+        p.have(
+            "h_big: ?k X. "
+            "       sk_iter (n0plus k n0) Omega_t "
+            "       = App_t (App_t I_t X) (App_t I_t X) "
+            "    /\\ nat0_lt (sk_size (sk_iter n0 Omega_t)) "
+            "                (sk_size (App_t (App_t I_t X) (App_t I_t X)))"
+        ).by(
+            OMEGA_T_REACHES_LARGE_SIZE,
+            "sk_size (sk_iter n0 Omega_t)",
+            "n0",
+        )
+        p.choose("k", from_="h_big")
+        p.choose("X", from_="k_eq")
+        # X_eq : sk_iter (n0plus k n0) Omega_t = Omega-shape X
+        #        /\ nat0_lt (sk_size (sk_iter n0 Omega_t))
+        #                   (sk_size (Omega-shape X))
+
+        # ---- (3) Past-normal collapse: iter at n0plus k n0 = iter at n0. -
+        p.have(
+            "h_past: sk_iter (n0plus k n0) Omega_t = sk_iter n0 Omega_t"
+        ).by(SK_ITER_PAST_NORMAL, "Omega_t", "n0", "k", "n0_eq")
+
+        # ---- (4) Chain X_eq's first conjunct with SYM(h_past). ---------
+        # sk_iter n0 Omega_t = Omega-shape X.
+        # (DSL friction: ``X_eq`` is the full conjunction; split it.)
+        p.split("X_eq", "(h_iter_eq, h_size_lt)")
+        # h_iter_eq : sk_iter (n0plus k n0) Omega_t = Omega-shape X
+        # h_size_lt : nat0_lt (sk_size (sk_iter n0 Omega_t))
+        #                     (sk_size (Omega-shape X))
+        p.have(
+            "h_iter_at_n0: sk_iter n0 Omega_t "
+            "              = App_t (App_t I_t X) (App_t I_t X)"
+        ).by_thm(_TRANS(_SYM(p.fact("h_past")), p.fact("h_iter_eq")))
+
+        # ---- (5) AP_TERM sk_size to (4): N = sk_size (Omega-shape X). --
+        p.have(
+            "h_size_eq: sk_size (sk_iter n0 Omega_t) "
+            "           = sk_size (App_t (App_t I_t X) (App_t I_t X))"
+        ).by_thm(_AP_TERM(sk_size, p.fact("h_iter_at_n0")))
+
+        # ---- (6) Rewrite h_size_lt by SYM(h_size_eq) -> nat0_lt N N. ----
+        # h_size_lt : nat0_lt N (sk_size (Omega-shape X))
+        # SYM h_size_eq folds RHS back to N.
+        p.have(
+            "h_lt_NN: nat0_lt (sk_size (sk_iter n0 Omega_t)) "
+            "                   (sk_size (sk_iter n0 Omega_t))"
+        ).by_rewrite_of("h_size_lt", [_SYM(p.fact("h_size_eq"))])
+
+        # ---- (7) Contradict via NAT0_LT_NOT_REFL. ----------------------
+        p.have(
+            "h_not_refl: ~(nat0_lt (sk_size (sk_iter n0 Omega_t)) "
+            "                       (sk_size (sk_iter n0 Omega_t)))"
+        ).by(NAT0_LT_NOT_REFL, "sk_size (sk_iter n0 Omega_t)")
+        p.absurd().by_conj("h_not_refl", "h_lt_NN")
 
 
 # ---------------------------------------------------------------------------
