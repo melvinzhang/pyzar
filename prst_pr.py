@@ -59,6 +59,7 @@ from parser import define, parse_type
 from nat0 import nat0_ty, define_unary_0
 from nat0_order import define_wf_lt
 from proof import proof, define_with_at
+from tactics import SYM
 from hf_syntax import (
     Var_t,
 )
@@ -507,59 +508,153 @@ IS_PR_DEF_DEF = define(
 is_pr_def = mk_const("is_pr_def", [])
 
 
+# Same proof shape as the IS_PR_SYM_* lemmas: build the 6-disjunct body
+# of IS_PR_DEF_DEF specialized at the axiom name, then by_unfold. The
+# REFL cases (ZERO / IF_IN_TRUE / IF_IN_FALSE) discharge a literal-equal
+# disjunct; PROJ / REC_BASE / REC_STEP build the 2-binder existential
+# leaf via by_exists first (since by_disj_witness is single-binder).
+# Fresh bound names (ii nn0 / gg hh) avoid the by_unfold alpha-rename
+# trap from Layer 4 part 1.
+_IS_PR_DEF_BODY = (
+    "{n} = zero_def_axiom \\/ "
+    "(?ii nn0. {n} = proj_def_axiom_at ii nn0 /\\ nat0_lt ii nn0) \\/ "
+    "{n} = if_in_true_def_axiom \\/ "
+    "{n} = if_in_false_def_axiom \\/ "
+    "(?gg hh. {n} = rec_base_def_axiom_at gg hh "
+    "         /\\ is_pr_sym gg /\\ is_pr_sym hh) \\/ "
+    "(?gg hh. {n} = rec_step_def_axiom_at gg hh "
+    "         /\\ is_pr_sym gg /\\ is_pr_sym hh)"
+)
+
+
 @proof
 def IS_PR_DEF_HOLDS_ZERO(p):
-    """|- is_pr_def zero_def_axiom. STUB."""
+    """|- is_pr_def zero_def_axiom."""
+    from tactics import REFL
     p.goal("is_pr_def zero_def_axiom")
-    p.sorry()
+    p.have("h_refl: zero_def_axiom = zero_def_axiom").by_thm(
+        REFL(p._parse("zero_def_axiom"))
+    )
+    p.have("h_body: " + _IS_PR_DEF_BODY.format(n="zero_def_axiom")).by_disj(
+        "h_refl"
+    )
+    p.thus("is_pr_def zero_def_axiom").by_unfold("h_body", IS_PR_DEF_DEF)
 
 
 @proof
 def IS_PR_DEF_HOLDS_PROJ(p):
-    """|- !i n. nat0_lt i n ==> is_pr_def (proj_def_axiom_at i n). STUB."""
+    """|- !i n. nat0_lt i n ==> is_pr_def (proj_def_axiom_at i n)."""
+    from tactics import REFL
     p.goal(
         "!i n. nat0_lt i n ==> is_pr_def (proj_def_axiom_at i n)",
         types={"i": nat0_ty, "n": nat0_ty},
     )
-    p.sorry()
+    p.fix("i n")
+    p.assume("h_lt: nat0_lt i n")
+    p.have(
+        "h_refl: proj_def_axiom_at i n = proj_def_axiom_at i n"
+    ).by_thm(REFL(p._parse("proj_def_axiom_at i n")))
+    # by_exists splits the body into conjuncts and discharges each via
+    # a supplied rule (equation conjuncts also fall back to REWRITE_PROVE).
+    # The non-equation `nat0_lt i n` conjunct needs `h_lt` to alpha-match.
+    p.have(
+        "h_ex: ?ii nn0. proj_def_axiom_at i n = proj_def_axiom_at ii nn0 "
+        "      /\\ nat0_lt ii nn0"
+    ).by_exists(["i", "n"], "h_refl", "h_lt")
+    p.have(
+        "h_body: " + _IS_PR_DEF_BODY.format(n="proj_def_axiom_at i n")
+    ).by_disj("h_ex")
+    p.thus("is_pr_def (proj_def_axiom_at i n)").by_unfold(
+        "h_body", IS_PR_DEF_DEF
+    )
 
 
 @proof
 def IS_PR_DEF_HOLDS_IF_IN_TRUE(p):
-    """|- is_pr_def if_in_true_def_axiom. STUB."""
+    """|- is_pr_def if_in_true_def_axiom."""
+    from tactics import REFL
     p.goal("is_pr_def if_in_true_def_axiom")
-    p.sorry()
+    p.have("h_refl: if_in_true_def_axiom = if_in_true_def_axiom").by_thm(
+        REFL(p._parse("if_in_true_def_axiom"))
+    )
+    p.have(
+        "h_body: " + _IS_PR_DEF_BODY.format(n="if_in_true_def_axiom")
+    ).by_disj("h_refl")
+    p.thus("is_pr_def if_in_true_def_axiom").by_unfold(
+        "h_body", IS_PR_DEF_DEF
+    )
 
 
 @proof
 def IS_PR_DEF_HOLDS_IF_IN_FALSE(p):
-    """|- is_pr_def if_in_false_def_axiom. STUB."""
+    """|- is_pr_def if_in_false_def_axiom."""
+    from tactics import REFL
     p.goal("is_pr_def if_in_false_def_axiom")
-    p.sorry()
+    p.have("h_refl: if_in_false_def_axiom = if_in_false_def_axiom").by_thm(
+        REFL(p._parse("if_in_false_def_axiom"))
+    )
+    p.have(
+        "h_body: " + _IS_PR_DEF_BODY.format(n="if_in_false_def_axiom")
+    ).by_disj("h_refl")
+    p.thus("is_pr_def if_in_false_def_axiom").by_unfold(
+        "h_body", IS_PR_DEF_DEF
+    )
 
 
 @proof
 def IS_PR_DEF_HOLDS_REC_BASE(p):
     """|- !g h. is_pr_sym g /\\ is_pr_sym h
-            ==> is_pr_def (rec_base_def_axiom_at g h). STUB."""
+            ==> is_pr_def (rec_base_def_axiom_at g h)."""
+    from tactics import REFL
+    from tactics import CONJ
     p.goal(
         "!g h. is_pr_sym g /\\ is_pr_sym h "
         "==> is_pr_def (rec_base_def_axiom_at g h)",
         types={"g": nat0_ty, "h": nat0_ty},
     )
-    p.sorry()
+    p.fix("g h")
+    p.assume("(h_g, h_h): is_pr_sym g /\\ is_pr_sym h")
+    p.have(
+        "h_refl: rec_base_def_axiom_at g h = rec_base_def_axiom_at g h"
+    ).by_thm(REFL(p._parse("rec_base_def_axiom_at g h")))
+    p.have(
+        "h_ex: ?gg hh. rec_base_def_axiom_at g h = rec_base_def_axiom_at gg hh "
+        "      /\\ is_pr_sym gg /\\ is_pr_sym hh"
+    ).by_exists(["g", "h"], "h_refl", "h_g", "h_h")
+    p.have(
+        "h_body: " + _IS_PR_DEF_BODY.format(n="rec_base_def_axiom_at g h")
+    ).by_disj("h_ex")
+    p.thus("is_pr_def (rec_base_def_axiom_at g h)").by_unfold(
+        "h_body", IS_PR_DEF_DEF
+    )
 
 
 @proof
 def IS_PR_DEF_HOLDS_REC_STEP(p):
     """|- !g h. is_pr_sym g /\\ is_pr_sym h
-            ==> is_pr_def (rec_step_def_axiom_at g h). STUB."""
+            ==> is_pr_def (rec_step_def_axiom_at g h)."""
+    from tactics import REFL
+    from tactics import CONJ
     p.goal(
         "!g h. is_pr_sym g /\\ is_pr_sym h "
         "==> is_pr_def (rec_step_def_axiom_at g h)",
         types={"g": nat0_ty, "h": nat0_ty},
     )
-    p.sorry()
+    p.fix("g h")
+    p.assume("(h_g, h_h): is_pr_sym g /\\ is_pr_sym h")
+    p.have(
+        "h_refl: rec_step_def_axiom_at g h = rec_step_def_axiom_at g h"
+    ).by_thm(REFL(p._parse("rec_step_def_axiom_at g h")))
+    p.have(
+        "h_ex: ?gg hh. rec_step_def_axiom_at g h = rec_step_def_axiom_at gg hh "
+        "      /\\ is_pr_sym gg /\\ is_pr_sym hh"
+    ).by_exists(["g", "h"], "h_refl", "h_g", "h_h")
+    p.have(
+        "h_body: " + _IS_PR_DEF_BODY.format(n="rec_step_def_axiom_at g h")
+    ).by_disj("h_ex")
+    p.thus("is_pr_def (rec_step_def_axiom_at g h)").by_unfold(
+        "h_body", IS_PR_DEF_DEF
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -648,11 +743,38 @@ _IS_PARTIAL_PR_SYM_F_DEF = define(
 _IS_PARTIAL_PR_SYM_F = mk_const("_is_partial_pr_sym_F", [])
 
 
+# NAT0_LT_MU_SYM: `mu_sym g = Pair_ord 6 g`, so `g < mu_sym g` by
+# NAT0_LT_PAIR_ORD_R + unfold mu_sym. Needed as the size lemma for
+# IS_PARTIAL_PR_SYM_MONO's recursive disjunct.
+@proof
+def NAT0_LT_MU_SYM(p):
+    """|- !g. nat0_lt g (mu_sym g)."""
+    from hf_sets import NAT0_LT_PAIR_ORD_R
+    p.goal("!g. nat0_lt g (mu_sym g)", types={"g": nat0_ty})
+    p.fix("g")
+    # mu_sym g = Pair_ord 6 g; nat0_lt g (Pair_ord 6 g) by NAT0_LT_PAIR_ORD_R.
+    p.have("h_pair: nat0_lt g (Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))) g)").by(
+        NAT0_LT_PAIR_ORD_R, "SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))", "g"
+    )
+    # Specialize mu_sym_def at g via p.unfold so the rewrite is on the
+    # applied form (not the bare abstraction): |- mu_sym g = Pair_ord 6 g.
+    mu_at_g = p.unfold(mu_sym_def, "g")
+    p.thus("nat0_lt g (mu_sym g)").by_rewrite_of("h_pair", [SYM(mu_at_g)])
+
+
 @proof
 def IS_PARTIAL_PR_SYM_MONO(p):
     """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
               ==> _is_partial_pr_sym_F f n = _is_partial_pr_sym_F g n.
-    STUB (Layer 2)."""
+
+    Body: ``is_pr_sym n \\/ (?g'. n = mu_sym g' /\\ rec g')``. Disjunct 1
+    is non-recursive (REFL); disjunct 2 is the standard unary recursive
+    shape, discharged by ``mono_iff_unary_step(mu_sym, NAT0_LT_MU_SYM, h)``.
+    Glued by ``or_chain_collapse``, bridged to _IS_PARTIAL_PR_SYM_F via
+    ``by_unfold``.
+    """
+    from tactics import REFL, or_chain_collapse
+    from hf_syntax import mono_iff_unary_step
     p.goal(
         "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> "
         "_is_partial_pr_sym_F f n = _is_partial_pr_sym_F g n",
@@ -663,7 +785,15 @@ def IS_PARTIAL_PR_SYM_MONO(p):
             "k": nat0_ty,
         },
     )
-    p.sorry()
+    p.fix("f g n")
+    p.assume("h: !k. nat0_lt k n ==> f k = g k")
+    h_th = p.fact("h")
+    eq_pr = REFL(p._parse("is_pr_sym n"))
+    eq_mu = mono_iff_unary_step(mu_sym, NAT0_LT_MU_SYM, h_th)
+    body_eq = or_chain_collapse([eq_pr, eq_mu])
+    p.thus("_is_partial_pr_sym_F f n = _is_partial_pr_sym_F g n").by_unfold(
+        body_eq, _IS_PARTIAL_PR_SYM_F_DEF
+    )
 
 
 IS_PARTIAL_PR_SYM_DEF, _IS_PARTIAL_PR_SYM_REC = define_wf_lt(
@@ -677,12 +807,42 @@ is_partial_pr_sym = mk_const("is_partial_pr_sym", [])
 
 @proof
 def IS_PARTIAL_PR_SYM_MU(p):
-    """|- !f. is_partial_pr_sym f ==> is_partial_pr_sym (mu_sym f). STUB."""
+    """|- !f. is_partial_pr_sym f ==> is_partial_pr_sym (mu_sym f).
+
+    One unfold of the wf-recursion equation _IS_PARTIAL_PR_SYM_REC at
+    ``mu_sym f``, then unfold _IS_PARTIAL_PR_SYM_F_DEF to expose the
+    2-disjunct body. Pick the mu-branch (?g. n = mu_sym g /\\ rec g),
+    witness g := f, discharge `mu_sym f = mu_sym f` by REFL and the
+    hypothesis pins the recursive call.
+    """
+    from tactics import REFL
     p.goal(
         "!f. is_partial_pr_sym f ==> is_partial_pr_sym (mu_sym f)",
         types={"f": nat0_ty},
     )
-    p.sorry()
+    p.fix("f")
+    p.assume("h_part: is_partial_pr_sym f")
+    p.have(
+        "h_refl: mu_sym f = mu_sym f"
+    ).by_thm(REFL(p._parse("mu_sym f")))
+    # Build the mu-branch existential: witness g := f.
+    p.have(
+        "h_ex: ?gg. mu_sym f = mu_sym gg /\\ is_partial_pr_sym gg"
+    ).by_exists(["f"], "h_refl", "h_part")
+    # Disjunction body of _IS_PARTIAL_PR_SYM_F at f := mu_sym f.
+    p.have(
+        "h_body: is_pr_sym (mu_sym f) "
+        "        \\/ (?gg. mu_sym f = mu_sym gg /\\ is_partial_pr_sym gg)"
+    ).by_disj("h_ex")
+    # Bridge to _is_partial_pr_sym_F is_partial_pr_sym (mu_sym f).
+    p.have(
+        "h_F: _is_partial_pr_sym_F is_partial_pr_sym (mu_sym f)"
+    ).by_unfold("h_body", _IS_PARTIAL_PR_SYM_F_DEF)
+    # And to is_partial_pr_sym (mu_sym f) via the recursion equation.
+    p.thus("is_partial_pr_sym (mu_sym f)").by_eq_mp(
+        SYM(__import__("tactics").SPEC(p._parse("mu_sym f"), _IS_PARTIAL_PR_SYM_REC)),
+        "h_F",
+    )
 
 
 # find_proof_pr := mu_sym Proof_PRST_pr -- the unbounded search for a
