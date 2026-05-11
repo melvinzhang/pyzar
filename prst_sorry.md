@@ -1,13 +1,13 @@
 # PRST `p.sorry()` plan of attack
 
-Census across `prst_*.py` (47 sorries remaining; 19 + 3 + 5 + 7 = 34 cleared so far):
+Census across `prst_*.py` (39 sorries remaining; 19 + 3 + 5 + 7 + 8 = 42 cleared so far):
 
 | File | sorries | Role |
 |------|---------|------|
 | `prst_syntax.py` | 0 (was 19) | App_pt constructor + extended `is_pterm`/`is_pform`/`free_in_p`/`substitute_p` AT-equations and preservation lemmas — **DONE** |
 | `prst_connectives.py` | 0 (was 3) | `substitute_p` distribution over And/Or/Iff (alias-thin wrappers) — **DONE** (Layer 3) |
 | `prst_pr.py` | 5 (was 17) | PR-symbol registry + defining-equation axioms + `is_pr_def` recogniser + mu-closure — Layer 4 **partial** (5 PR_ARITY_* remaining), Layer 5 **DONE** |
-| `prst_proof.py` | 20 (was 15) | `Proof_PRST` / `Prov_PRST` + closure rules + per-axiom `PROV_PRST_*_DEF` corollaries + `MU_CORRECTNESS` + PR-eval lemmas + `Prov_PRST_internal` (Layer 0 added new MONO + Proof_PRST defining-equation sorries) |
+| `prst_proof.py` | 12 (was 15) | `Proof_PRST` / `Prov_PRST` + closure rules + per-axiom `PROV_PRST_*_DEF` corollaries + `MU_CORRECTNESS` + PR-eval lemmas + `Prov_PRST_internal` — Layer 6 **partial** (8 cleared) |
 | `prst_repr.py` | 7 | Boolean-tag disjointness + parametric representability schema + four headline representations |
 | `prst_godel1.py` | 6 | Diagonal lemma, Gödel sentence, consistency, Sigma_1-soundness, G1, essential undecidability |
 | `prst_godel2.py` | 8 | D1/D2/D3 derivability conditions, `mp_combine_pr` correctness, Löb, G2 |
@@ -161,19 +161,27 @@ All 7 listed sorries cleared in commit `ad84a26`, plus a new size lemma `NAT0_LT
 
 ---
 
-## Layer 6 — `prst_proof` foundations (8 sorries)
+## Layer 6 — `prst_proof` foundations (8 + 6 sorries) — **partial: 8/14 cleared**
 
 Depends on Layer 0 real `Proof_PRST_def` body + Layers 1-5.
 
-- `PROOF_PRST_NIL`, `PROOF_PRST_CONS` (2) — `define_wf_lt` unfolds
-- `PROV_PRST_AXIOM`, `PROV_PRST_MP` (2) — exhibit one-line / append-with-MP proofs and EXISTS
-- `PROV_PRST_SUBST_AXIOM` (1) — requires a closure lemma `is_pr_def F ==> is_pr_def (substitute_p F t v)`, which is a fresh proof obligation not yet stated (add it under `prst_pr` as `IS_PR_DEF_CLOSED_UNDER_SUBST`; ~40 lines via the disjunct structure)
-- `MU_CORRECTNESS` (1) — sole non-PR axiom; either kept as `p.sorry()` and treated as an axiom posit, **or** posited via `prove_axiom` machinery; the standard nat0 HOL model justifies it but the proof is not internal to the kernel
-- The per-axiom `PROV_PRST_ZERO_DEF/PROJ_DEF/IF_IN_TRUE_DEF/IF_IN_FALSE_DEF/REC_BASE_DEF/REC_STEP_DEF` (6) + `PROV_PRST_ADJ_DEF_AT` (1) — each is MP of `PROV_PRST_AXIOM` against the corresponding `IS_PR_DEF_HOLDS_*`. Per the file comment, these "fall out of MP + IS_PR_DEF_HOLDS_*"; should be ~3 lines each once the chain is in place.
+**Done in commit `2ab7431` (8 cleared):**
+- `PROOF_PRST_AT` (new helper): binary at-form `Proof_PRST p n = ?h t. p = Tup_pt h t /\ ...` derived from `_PROOF_PRST_REC` + `_PROOF_PRST_F_DEF` via SPEC + AP_THM + BETA.
+- `PROOF_PRST_NIL`: contradiction proof — PROOF_PRST_AT at Empty_pt + TUP_PT_NEQ_EMPTY_PT.
+- `PROV_PRST_AXIOM`: build one-line proof `Tup_pt n Empty_pt` against PROOF_PRST_AT directly. Bypasses PROOF_PRST_CONS.
+- 6 `PROV_PRST_*_DEF` (ZERO/PROJ/IF_IN_TRUE/IF_IN_FALSE/REC_BASE/REC_STEP). Each is one `_is_pr_axiom_from_pr_def` helper call (DISJ1 + IS_PR_AXIOM_DEF unfold) + `by(PROV_PRST_AXIOM, axiom, h_axiom)`.
 
-**Cost:** ~150 lines + the new `IS_PR_DEF_CLOSED_UNDER_SUBST` (~40 lines).
+**Remaining (6 Layer 6 sorries):**
+- `PROOF_PRST_MONO` (Layer 0/2 leftover) — body has a nested `?h t. p = Tup_pt h t /\ (... /\ (?f g. rec t f /\ rec t (Imp_pf f g) /\ ...))`. Two recursive calls on `t` inside an inner existential; no existing `mono_iff_*` factory matches this shape (would need a fresh `mono_iff_binary_right_with_inner_exists_step`). ~80 lines bespoke.
+- `PROOF_PRST_CONS` — recursion equation. PROOF_PRST_AT delivers `?h0 t0. Tup_pt h t = Tup_pt h0 t0 /\ P(h0, t0)`; need to collapse to `P(h, t)` via TUP_PT_INJ. DSL friction: `CHOOSE_WITNESS` produces SELECT-term witnesses that `REWRITE_RULE` refuses to rewrite under the inner `?f g.` binder (tactics._bottom_up line 998 filters rules with non-empty asl when descending under binders). Workarounds explored: ELIM_EX + INST (INST can't substitute SELECT terms), kernel-level CHOOSE_WITNESS + REWRITE_RULE (same binder problem), `with .proof()` + `by_rewrite_of` (same). Downstream uses can route through PROOF_PRST_AT directly so CONS is convenience, not load-bearing.
+- `PROV_PRST_ADJ_DEF_AT` — as currently stated, requires `is_pterm x /\ is_pterm y` preconditions to invoke the `is_Refl` schema. Either add the precondition or sorry.
+- `MU_CORRECTNESS` — keep as `prove_axiom` (per plan's risk register).
+- `PROV_PRST_SUBST_AXIOM` — needs new `IS_PR_DEF_CLOSED_UNDER_SUBST` obligation in prst_pr (~40 lines).
+- `PROV_PRST_MP` — needs proof-list concatenation lemma + a Proof_PRST monotonicity-under-concat lemma. Not provided by the current Proof_PRST encoding; either add the concat helper or revisit the encoding.
 
-⚠️ Decide upfront whether `MU_CORRECTNESS` is an **axiom** (cleanest, matches the design intent in the comment) or a **theorem in a fixed HOL model** (cheapest mechanisation). The file's narrative treats it as the lone axiom about `mu_sym`; recommend keeping it as `prove_axiom`.
+**DSL friction newly observed:**
+- `_bottom_up`'s "filter rules with non-empty asl under binders" rule (line 998 of tactics.py) makes REWRITE_RULE useless for substituting choose-derived `_eq` facts under inner binders. Two ways to work around it: prove the unconditional version of the rule first (so its asl is empty), or write the substitution at the kernel level using AP_TERM / ABS / etc.
+- `axiom_name_str` passed to a generic helper must be parenthesised (`"(" + s + ")"`) before concatenating into a parse-string — otherwise multi-token forms like `"proj_def_axiom_at i n"` get re-parsed as `is_pr_def proj_def_axiom_at` applied to `i n`, type-mismatching.
 
 ---
 
@@ -289,6 +297,7 @@ Land Layer 0 + Layer 1 + Layer 3 together — they unblock Layer 2 (the largest 
 - `92a9994` Layer 4 part 1 — real IS_PR_SYM body + 5 IS_PR_SYM_* lemmas.
 - `18f81a3` Layer 4 cleanup — drop wf-lt scaffolding from pr_arity (avoided a sorry'd MONO without unlocking any PR_ARITY_* lemma).
 - `ad84a26` Layer 5 — 6 IS_PR_DEF_HOLDS_* + IS_PARTIAL_PR_SYM_MONO + IS_PARTIAL_PR_SYM_MU + new NAT0_LT_MU_SYM helper.
+- `2ab7431` Layer 6 part 1 — new PROOF_PRST_AT helper + PROOF_PRST_NIL + PROV_PRST_AXIOM + 6 PROV_PRST_*_DEF.
 
-**Cleared:** 34 sorries (19 in prst_syntax + 3 in prst_connectives + 5 IS_PR_SYM + 7 Layer 5 in prst_pr).
-**Remaining:** 47 sorries (5 in prst_pr, 20 in prst_proof, 7 in prst_repr, 6 in prst_godel1, 8 in prst_godel2). prst_proof grew by 5 versus the plan's original count because Layer 0 introduced new MONO obligations (Proof_PRST + Proof_PRST_pr defining equations).
+**Cleared:** 42 sorries (19 + 3 + 5 + 7 + 8).
+**Remaining:** 39 sorries (5 in prst_pr, 12 in prst_proof, 7 in prst_repr, 6 in prst_godel1, 8 in prst_godel2). prst_proof's Layer 6 has 6 sorries to go (MONO, CONS, ADJ_DEF_AT, MP, SUBST_AXIOM, MU_CORRECTNESS); Layer 7 owns the other 6.
