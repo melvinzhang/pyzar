@@ -604,6 +604,22 @@ Fact references resolve via `coerce`:
 
 Lookup is last-write-wins, so inner frames shadow outer.
 
+The parser's atom resolution (`parser._Builder._lookup`) walks a
+single precedence cascade:
+
+1. an in-parse binder for the name (innermost wins)
+2. an env-provided `Var` — so `p.fix("F")`, `choose`, and lazy-let
+   carriers shadow same-named constants, mirroring how an in-parse
+   binder shadows them above
+3. a registered constant in `sig.const`
+4. an env-provided `Const` / `Comb` / `Abs` term
+5. an env-provided `hol_type`, treated as a free `Var` of that type
+6. the registry's `default_var_ty`
+
+Step 2 is the reason `fix("F")` works without further parser config:
+the local `Var("F", ...)` in `_scope_env` outranks the `F = False`
+constant for the lifetime of the frame.
+
 ---
 
 ## 12. Errors

@@ -385,20 +385,27 @@ class _Builder(Interpreter):
     # ----- atom resolution -----
 
     def _lookup(self, name):
-        # Bound variable shadows everything else.
+        # Single resolution cascade. In order:
+        #   1. an in-parse binder for ``name`` (innermost wins)
+        #   2. an env-provided ``Var`` -- so ``fix("F")``-style locals
+        #      shadow same-named constants, mirroring how an in-parse
+        #      binder shadows them above
+        #   3. a registered constant
+        #   4. an env-provided ``Const``/``Comb``/``Abs`` term
+        #   5. an env-provided ``hol_type``, treated as a free ``Var``
+        #   6. the registry's default variable type
         for s in reversed(self.scope):
             if name in s:
                 return s[name]
-        # Then registered constants.
+        env_binding = self.env.get(name)
+        if isinstance(env_binding, Var):
+            return env_binding
         if name in self.sig.const:
             return self.sig.const[name]
-        # Then env-provided binding (kernel term or hol_type).
-        if name in self.env:
-            binding = self.env[name]
-            if isinstance(binding, (Var, Const, Comb, Abs)):
-                return binding
-            return mk_var(name, binding)
-        # Otherwise a free variable at the registry's default type.
+        if isinstance(env_binding, (Const, Comb, Abs)):
+            return env_binding
+        if env_binding is not None:
+            return mk_var(name, env_binding)
         ty = self.sig.default_var_ty
         if ty is None:
             raise ParseError(
@@ -424,6 +431,19 @@ class _Builder(Interpreter):
         f, a = self.visit(f_tree), self.visit(a_tree)
         return mk_comb(f, a)
 
+    def _env_type_hint(self, name):
+        """Type hint an env entry contributes for a *fresh* binder named
+        ``name``: a ``Tyvar``/``Tyapp`` is itself the hint, a ``Var``
+        donates its type. Deliberately skips ``scope`` (the binder is
+        being introduced, not resolved) and ``sig.const`` (a const-named
+        binder defaults rather than inheriting the constant's type)."""
+        binding = self.env.get(name)
+        if isinstance(binding, (Tyvar, Tyapp)):
+            return binding
+        if isinstance(binding, Var):
+            return binding.ty
+        return None
+
     def _decls(self, varlist_tree):
         out = []
         for vd in varlist_tree.children:
@@ -435,15 +455,11 @@ class _Builder(Interpreter):
                 # which resolve against the registered signature first
                 # and then env-provided type aliases.
                 ty = self.visit(vd.children[1])
-            elif n in self.env:
+            else:
                 # Inherit type from an env-provided binding so callers can
                 # introduce higher-order binders (e.g. !f. ... where
                 # f : num -> num) without registering a fresh type alias.
-                binding = self.env[n]
-                if isinstance(binding, (Tyvar, Tyapp)):
-                    ty = binding
-                elif isinstance(binding, Var):
-                    ty = binding.ty
+                ty = self._env_type_hint(n)
             if ty is None:
                 ty = self.sig.default_var_ty
             if ty is None:
