@@ -80,7 +80,7 @@ from prst_pr import (
     diag_pr,  # noqa: F401  -- parser alias
     Proof_HF_pr,  # noqa: F401  -- parser alias
     zero_def_axiom,  # noqa: F401  -- parser alias for PROV_PRST_ZERO_DEF
-    adj_def_axiom,  # noqa: F401  -- parser alias for PROV_PRST_ADJ_DEF
+    Adj_pt,  # noqa: F401  -- parser alias for PROV_PRST_ADJ_DEF_AT
     proj_def_axiom_at,  # noqa: F401  -- parser alias
     if_in_true_def_axiom,  # noqa: F401  -- parser alias
     if_in_false_def_axiom,  # noqa: F401  -- parser alias
@@ -246,16 +246,12 @@ def PROV_PRST_ZERO_DEF(p):
     p.sorry()
 
 
-@proof
-def PROV_PRST_ADJ_DEF(p):
-    """|- Prov_PRST adj_def_axiom.
-
-    The implicit universal closure: adj_def_axiom has free Var_t 0,
-    Var_t (SUC0 0). To use at specific terms a, b, apply the derived
-    substitution-into-axiom rule PROV_PRST_SUBST_AXIOM below. STUB.
-    """
-    p.goal("Prov_PRST adj_def_axiom")
-    p.sorry()
+# adj_sym is a primitive PR symbol -- no defining equation, hence no
+# PROV_PRST_ADJ_DEF theorem. The downstream "concrete" form
+# PROV_PRST_ADJ_DEF_AT is the reflexive equation App_pt adj_sym [x; y]
+# = Adj_pt x y, which is REFL (Adj_pt unfolds to the App_pt
+# expression). Listed below for symmetry with the other defining
+# theorems; trivial discharge.
 
 
 @proof
@@ -348,24 +344,27 @@ def PROV_PRST_SUBST_AXIOM(p):
 #     PROV_PRST_ADJ_DEF_AT :
 #         |- !x y. Prov_PRST (Eq_pf (App_pt adj_sym
 #                                     (cons_l x (cons_l y nil_l)))
-#                                   (Insert_pt x y)).
+#                                   (Adj_pt x y)).
 #
-# Proof: take PROV_PRST_ADJ_DEF; apply PROV_PRST_SUBST_AXIOM twice
-# (Var_t 0 |-> x, Var_t (SUC0 0) |-> y); reduce substitute_p via the
-# AT-equations in prst_syntax.
+# Trivial discharge: Adj_pt is defined as App_pt adj_sym (cons_l x
+# (cons_l y nil_l)), so the equation is the PRST-internal REFL on
+# that term. The reason to state it as a named lemma is so downstream
+# code can chain through "App_pt adj_sym ... = Adj_pt ..." without
+# unfolding Adj_pt manually.
 
 
 @proof
 def PROV_PRST_ADJ_DEF_AT(p):
     """|- !x y. Prov_PRST (Eq_pf (App_pt adj_sym (cons_l x (cons_l y nil_l)))
-                                 (Insert_pt x y)). STUB.
+                                 (Adj_pt x y)).
 
-    Specialised adj-defining equation. From PROV_PRST_ADJ_DEF +
-    PROV_PRST_SUBST_AXIOM (twice) + substitute_p reduction.
+    The PRST-internal reflexivity of adj_sym applied to its arguments
+    against the Adj_pt alias. Discharge: unfold Adj_pt, REFL, package
+    via PRST equality axioms. STUB.
     """
     p.goal(
         "!x y. Prov_PRST (Eq_pf (App_pt adj_sym (cons_l x (cons_l y nil_l))) "
-        "                       (Insert_pt x y))",
+        "                       (Adj_pt x y))",
         types={"x": nat0_ty, "y": nat0_ty},
     )
     p.sorry()
@@ -601,7 +600,6 @@ if __name__ == "__main__":
     print()
     print("Stage 2B (d.1) -- PR-defining-equation theorems (specialisations).")
     print("    PROV_PRST_ZERO_DEF       :", pp_thm(PROV_PRST_ZERO_DEF))
-    print("    PROV_PRST_ADJ_DEF        :", pp_thm(PROV_PRST_ADJ_DEF))
     print("    PROV_PRST_PROJ_DEF       :", pp_thm(PROV_PRST_PROJ_DEF))
     print("    PROV_PRST_IF_IN_TRUE_DEF :", pp_thm(PROV_PRST_IF_IN_TRUE_DEF))
     print("    PROV_PRST_REC_BASE_DEF   :", pp_thm(PROV_PRST_REC_BASE_DEF))

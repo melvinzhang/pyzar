@@ -14,7 +14,7 @@
 #
 # In PRST, every PR predicate P : nat0 -> bool that is decidable comes
 # with a PR function symbol p_sym whose application returns a boolean
-# value (encoded as Empty_pt for false, Insert_pt Empty_pt Empty_pt for
+# value (encoded as Empty_pt for false, Adj_pt Empty_pt Empty_pt for
 # true). The representing formula is:
 #
 #     F_P(x) := Eq_pf (App_pt p_sym (cons_l x nil_l)) (encoded_true).
@@ -45,7 +45,6 @@ from prst_syntax import (
     Not_pf,  # noqa: F401  -- parser alias
     App_pt,
     Empty_pt,  # noqa: F401  -- "encoded false" sentinel
-    Insert_pt,  # noqa: F401  -- "encoded true" sentinel = Insert Empty Empty
     substitute_p,  # noqa: F401  -- parser alias
 )
 from prst_pr import (
@@ -53,6 +52,7 @@ from prst_pr import (
     numeral_pr,
     diag_pr,
     Proof_HF_pr,
+    Adj_pt,  # noqa: F401  -- "encoded true" sentinel = Adj_pt Empty_pt Empty_pt
     is_pr_sym,  # noqa: F401
 )
 from prst_proof import (
@@ -63,14 +63,15 @@ from prst_proof import (
 # ---------------------------------------------------------------------------
 # Stage 3 (a) -- the boolean encoding.
 #
-#   T_pt := Insert_pt Empty_pt Empty_pt   ("encoded true")
+#   T_pt := Adj_pt Empty_pt Empty_pt       ("encoded true")
 #   F_pt := Empty_pt                       ("encoded false")
 #
-# Distinct nat0 by Pair_ord encoding -- T_pt has tag 9, F_pt is 0.
+# Distinct nat0: T_pt is App_pt adj_sym (cons_l Empty_pt (cons_l
+# Empty_pt nil_l)), tag 11; F_pt is 0.
 # ---------------------------------------------------------------------------
 
 
-T_PT_DEF = define("T_pt", parse_type("nat0"), "Insert_pt Empty_pt Empty_pt")
+T_PT_DEF = define("T_pt", parse_type("nat0"), "Adj_pt Empty_pt Empty_pt")
 T_pt = mk_const("T_pt", [])
 
 

@@ -52,7 +52,6 @@ from prst_syntax import (
     Eq_pf,  # noqa: F401  -- parser alias
     Not_pf,  # noqa: F401  -- parser alias
     Imp_pf,  # noqa: F401  -- parser alias
-    Insert_pt,  # noqa: F401
     Empty_pt,  # noqa: F401
     App_pt,
     substitute_p,  # noqa: F401  -- parser alias
@@ -68,6 +67,7 @@ from prst_pr import (
     diag_pr,
     numeral_pr,  # noqa: F401
     Proof_HF_pr,  # noqa: F401
+    Adj_pt,  # noqa: F401  -- parser alias; "1" = Adj_pt Empty_pt Empty_pt
 )
 from prst_proof import (
     Prov_PRST,  # noqa: F401  -- parser alias
@@ -232,7 +232,7 @@ def G_PRST_DIAGONAL_EQ(p):
 
 @proof
 def PRST_CONSISTENT(p):
-    """|- ~ Prov_PRST (Eq_pf Empty_pt (Insert_pt Empty_pt Empty_pt)).
+    """|- ~ Prov_PRST (Eq_pf Empty_pt (Adj_pt Empty_pt Empty_pt)).
 
     Consistency: PRST does not prove ``0 = 1``. Proof via the standard
     HOL-level model on nat0 -- the model interprets every PRST term as
@@ -240,7 +240,7 @@ def PRST_CONSISTENT(p):
     definition in prst_pr; HF1-HF5 follow from membership lemmas in
     hf_sets; logical axioms by tautological correctness). STUB.
     """
-    p.goal("~ Prov_PRST (Eq_pf Empty_pt (Insert_pt Empty_pt Empty_pt))")
+    p.goal("~ Prov_PRST (Eq_pf Empty_pt (Adj_pt Empty_pt Empty_pt))")
     p.sorry()
 
 
@@ -313,7 +313,7 @@ def GODEL_FIRST_PRST(p):
 @proof
 def PRST_ESSENTIALLY_UNDECIDABLE(p):
     """|- !T. (!n. Prov_PRST n ==> T n)
-            /\\ (~ T (Eq_pf Empty_pt (Insert_pt Empty_pt Empty_pt)))
+            /\\ (~ T (Eq_pf Empty_pt (Adj_pt Empty_pt Empty_pt)))
             ==> ?S. ~ T S /\\ ~ T (Not_pf S).
 
     Essential undecidability: any consistent extension T of PRST (in
@@ -327,7 +327,7 @@ def PRST_ESSENTIALLY_UNDECIDABLE(p):
     """
     p.goal(
         "!T. ((!n. Prov_PRST n ==> T n) "
-        "    /\\ (~ T (Eq_pf Empty_pt (Insert_pt Empty_pt Empty_pt)))) "
+        "    /\\ (~ T (Eq_pf Empty_pt (Adj_pt Empty_pt Empty_pt)))) "
         "    ==> ?S. ~ T S /\\ ~ T (Not_pf S)",
         types={"T": parse_type("nat0 -> bool")},
     )

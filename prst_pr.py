@@ -22,20 +22,25 @@
 #
 #   * Zero      : 0-ary, value Empty_pt.
 #   * Proj_i_n  : n-ary, value (i+1)-th argument.
-#   * Adj       : 2-ary, value Insert_pt arg_1 arg_2.
-#                 (HF's only constructor besides Empty.)
+#   * Adj       : 2-ary, primitive. ``App_pt adj_sym (cons_l a (cons_l
+#                 b nil_l))`` IS the adjunction operation -- there is
+#                 no further-reducing defining equation, just as
+#                 Empty_pt has no defining body. (Adj is HF's only
+#                 non-empty set constructor; in PRST it becomes the
+#                 primitive PR-symbol form rather than a separate
+#                 term constructor.)
 #   * If_in     : 4-ary case-split, dispatching on In_pa arg_1 arg_2:
 #                     If_in a b x y := if In a b then x else y.
 #   * Rec       : (n+2)-ary primitive recursion on the second argument's
-#                 Insert-decomposition:
-#                     Rec g h Empty_pt     y_vec = g(y_vec)
-#                     Rec g h (Insert i s) y_vec
+#                 Adj-decomposition:
+#                     Rec g h Empty_pt          y_vec = g(y_vec)
+#                     Rec g h (Adj_pt i s)      y_vec
 #                         = h(i, s, Rec g h s y_vec, y_vec)
 #                                                  if ~In_pa i s
-#                     Rec g h (Insert i s) y_vec
+#                     Rec g h (Adj_pt i s)      y_vec
 #                         = Rec g h s y_vec      otherwise.
 #                 (Side condition is HF's "membership-canonical"
-#                 normalisation; HF5 guarantees the Insert-decomposition
+#                 normalisation; HF5 guarantees the Adj-decomposition
 #                 exists for every nonempty HF set.)
 #
 # Substitution, numeral, diag, Proof_HF -- all of them are definable in
@@ -61,7 +66,6 @@ from hf_proof import (
 )
 from hf_syntax import (
     Var_t,  # noqa: F401  -- parser alias for free Var_t indices in axioms
-    Insert_t,  # noqa: F401  -- parser alias
 )
 from prst_syntax import (
     Empty_pt,  # noqa: F401  -- parser alias in PR-defining-equation bodies
@@ -69,7 +73,6 @@ from prst_syntax import (
     Eq_pf,  # noqa: F401  -- parser alias
     Not_pf,  # noqa: F401  -- parser alias
     Imp_pf,  # noqa: F401  -- parser alias
-    Insert_pt,  # noqa: F401  -- parser alias
     In_pa,  # noqa: F401  -- parser alias
     App_pt,
     is_pterm,  # noqa: F401  -- parser alias
@@ -240,8 +243,7 @@ def PR_ARITY_REC(p):
 # ---------------------------------------------------------------------------
 
 
-# Closed (no free Var_t): adj_sym(0, ...) -- not actually closed; uses Var_t.
-# zero_sym applied to the empty argument list returns Empty_pt.
+# Closed: zero_sym applied to the empty argument list returns Empty_pt.
 ZERO_DEF_AXIOM_DEF = define(
     "zero_def_axiom",
     parse_type("nat0"),
@@ -250,15 +252,17 @@ ZERO_DEF_AXIOM_DEF = define(
 zero_def_axiom = mk_const("zero_def_axiom", [])
 
 
-# adj_sym(Var_t 0, Var_t 1) = Insert_t (Var_t 0) (Var_t 1).
-# Free Var_t 0, Var_t 1 implicitly universally quantified.
-ADJ_DEF_AXIOM_DEF = define(
-    "adj_def_axiom",
-    parse_type("nat0"),
-    "Eq_pf (App_pt adj_sym (cons_l (Var_t 0) (cons_l (Var_t (SUC0 0)) nil_l))) "
-    "      (Insert_t (Var_t 0) (Var_t (SUC0 0)))",
+# adj_sym is *primitive*: no defining equation. The term
+# ``App_pt adj_sym (cons_l a (cons_l b nil_l))`` IS the adjunction
+# operation, just as Empty_pt is the empty set. Adj_pt is a HOL-level
+# abbreviation for callers' convenience -- it unfolds to the
+# corresponding App_pt expression.
+ADJ_PT_DEF = define(
+    "Adj_pt",
+    parse_type("nat0 -> nat0 -> nat0"),
+    "\\a:nat0. \\b:nat0. App_pt adj_sym (cons_l a (cons_l b nil_l))",
 )
-adj_def_axiom = mk_const("adj_def_axiom", [])
+Adj_pt = mk_const("Adj_pt", [])
 
 
 # proj_sym i n is parametric in i, n at the HOL level: each (i, n) gives
@@ -346,9 +350,9 @@ rec_step_def_axiom_at = mk_const("rec_step_def_axiom_at", [])
 IS_PR_DEF_DEF = define(
     "is_pr_def",
     parse_type("nat0 -> bool"),
-    # Real body:
+    # Real body (no adj branch: adj_sym is primitive, no defining
+    # equation):
     #   n = zero_def_axiom
-    #   \/ n = adj_def_axiom
     #   \/ (?i n0. n = proj_def_axiom_at i n0 /\ nat0_lt i n0)
     #   \/ n = if_in_true_def_axiom
     #   \/ n = if_in_false_def_axiom
@@ -365,13 +369,6 @@ is_pr_def = mk_const("is_pr_def", [])
 def IS_PR_DEF_HOLDS_ZERO(p):
     """|- is_pr_def zero_def_axiom. STUB."""
     p.goal("is_pr_def zero_def_axiom")
-    p.sorry()
-
-
-@proof
-def IS_PR_DEF_HOLDS_ADJ(p):
-    """|- is_pr_def adj_def_axiom. STUB."""
-    p.goal("is_pr_def adj_def_axiom")
     p.sorry()
 
 
@@ -468,11 +465,11 @@ comp_sym = mk_const("comp_sym", [])
 # uniformly from PRST_REC_* / PRST_PROJ_* / PRST_ADJ_* / PRST_IF_IN_*.
 #
 # ``numeral_pr`` -- the symbol that, applied to n, returns the encoded
-# numeral term ``numeral(n)`` (a nested Insert_pt tower). Definition:
+# numeral term ``numeral(n)`` (a nested Adj_pt tower). Definition:
 #   numeral_pr := REC zero_sym (\i,s,r,_vec. ADJ r r)
 # Defining equation:
 #   numeral_pr 0           = Empty_pt
-#   numeral_pr (Insert i s) = Insert_pt (numeral_pr s) (numeral_pr s)
+#   numeral_pr (Adj_pt i s) = Adj_pt (numeral_pr s) (numeral_pr s)
 # (i.e. successor as von-Neumann ordinal). One Prov_PRST equation each;
 # both discharged by PRST_REC_BASE / PRST_REC_STEP at concrete g, h.
 #
@@ -555,13 +552,12 @@ if __name__ == "__main__":
     print()
     print("Stage 2A (d) -- defining-equation godelnums (closed nat0s).")
     print("    ZERO_DEF_AXIOM_DEF        :", pp_thm(ZERO_DEF_AXIOM_DEF))
-    print("    ADJ_DEF_AXIOM_DEF         :", pp_thm(ADJ_DEF_AXIOM_DEF))
+    print("    ADJ_PT_DEF                :", pp_thm(ADJ_PT_DEF))
     print("    IF_IN_TRUE_DEF_AXIOM_DEF  :", pp_thm(IF_IN_TRUE_DEF_AXIOM_DEF))
     print()
     print("Stage 2A (e) -- is_pr_def recogniser.")
     print("    IS_PR_DEF_DEF             :", pp_thm(IS_PR_DEF_DEF))
     print("    IS_PR_DEF_HOLDS_ZERO      :", pp_thm(IS_PR_DEF_HOLDS_ZERO))
-    print("    IS_PR_DEF_HOLDS_ADJ       :", pp_thm(IS_PR_DEF_HOLDS_ADJ))
     print("    IS_PR_DEF_HOLDS_PROJ      :", pp_thm(IS_PR_DEF_HOLDS_PROJ))
     print("    IS_PR_DEF_HOLDS_REC_BASE  :", pp_thm(IS_PR_DEF_HOLDS_REC_BASE))
     print()
