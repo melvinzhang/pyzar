@@ -59,7 +59,7 @@ from hf_repr_core import (
     numeral,  # noqa: F401  -- parser alias for PROV_PRST_NUMERAL_EVAL
     substitute,  # noqa: F401  -- parser alias for PROV_PRST_SUBSTITUTE_EVAL
 )
-from godel_first import (
+from hf_godel1 import (
     diag,  # noqa: F401  -- parser alias for PROV_PRST_DIAG_EVAL
 )
 from prst_pr import (
@@ -88,8 +88,6 @@ from prst_pr import (
     rec_step_def_axiom_at,  # noqa: F401  -- parser alias
 )
 from hf_proof import (
-    nil_l,  # noqa: F401  -- parser alias
-    cons_l,  # noqa: F401  -- parser alias
     var_x,  # noqa: F401  -- parser alias
 )
 from prst_syntax import (
@@ -97,6 +95,8 @@ from prst_syntax import (
     Eq_pf,  # noqa: F401  -- parser alias for Prov_PRST_internal
     Var_pt,  # noqa: F401  -- parser alias for Prov_PRST_internal
     App_pt,  # noqa: F401  -- parser alias for Prov_PRST_internal
+    Tup_pt,  # noqa: F401  -- parser alias; args- and proof-list cons cells
+    Empty_pt,  # noqa: F401  -- parser alias; nil-tuple / empty proof list
 )
 
 
@@ -130,7 +130,7 @@ is_pr_axiom = mk_const("is_pr_axiom", [])
 # ---------------------------------------------------------------------------
 # Stage 2B (b) -- Proof_PRST: the list-of-formulas proof checker.
 #
-# One cons_l step at a time, each step being either an axiom instance
+# One Tup_pt step at a time, each step being either an axiom instance
 # or a modus-ponens step from earlier lines. (No generalisation step:
 # PRST is quantifier-free.)
 #
@@ -148,14 +148,14 @@ Proof_PRST = mk_const("Proof_PRST", [])
 
 @proof
 def PROOF_PRST_NIL(p):
-    """|- !n. ~ Proof_PRST nil_l n. STUB (empty proof proves nothing)."""
-    p.goal("!n. ~ Proof_PRST nil_l n", types={"n": nat0_ty})
+    """|- !n. ~ Proof_PRST Empty_pt n. STUB (empty proof proves nothing)."""
+    p.goal("!n. ~ Proof_PRST Empty_pt n", types={"n": nat0_ty})
     p.sorry()
 
 
 @proof
 def PROOF_PRST_CONS(p):
-    """|- !h t n. Proof_PRST (cons_l h t) n =
+    """|- !h t n. Proof_PRST (Tup_pt h t) n =
             ( n = h
               /\\ ( is_pr_axiom h
                   \\/ (?f g. Proof_PRST t f
@@ -164,7 +164,7 @@ def PROOF_PRST_CONS(p):
     STUB (one-step extension of an existing proof; only axiom and
     modus-ponens steps -- PRST has no generalisation rule)."""
     p.goal(
-        "!h t n. Proof_PRST (cons_l h t) n = "
+        "!h t n. Proof_PRST (Tup_pt h t) n = "
         "( n = h "
         "  /\\ ( is_pr_axiom h "
         "      \\/ (?f g. Proof_PRST t f /\\ Proof_PRST t (Imp_pf f g) /\\ h = g)))",
@@ -197,7 +197,7 @@ Prov_PRST = mk_const("Prov_PRST", [])
 def PROV_PRST_AXIOM(p):
     """|- !n. is_pr_axiom n ==> Prov_PRST n.
 
-    Proof: take the one-line proof ``cons_l n nil_l``, axiom branch of
+    Proof: take the one-line proof ``Tup_pt n Empty_pt``, axiom branch of
     PROOF_PRST_CONS, EXISTS to close ``?p. Proof_PRST p n``, fold via
     PROV_PRST_AT. STUB.
     """
@@ -342,11 +342,11 @@ def PROV_PRST_SUBST_AXIOM(p):
 # Example (adj at concrete x, y):
 #     PROV_PRST_ADJ_DEF_AT :
 #         |- !x y. Prov_PRST (Eq_pf (App_pt adj_sym
-#                                     (cons_l x (cons_l y nil_l)))
+#                                     (Tup_pt x (Tup_pt y Empty_pt)))
 #                                   (Adj_pt x y)).
 #
-# Trivial discharge: Adj_pt is defined as App_pt adj_sym (cons_l x
-# (cons_l y nil_l)), so the equation is the PRST-internal REFL on
+# Trivial discharge: Adj_pt is defined as App_pt adj_sym (Tup_pt x
+# (Tup_pt y Empty_pt)), so the equation is the PRST-internal REFL on
 # that term. The reason to state it as a named lemma is so downstream
 # code can chain through "App_pt adj_sym ... = Adj_pt ..." without
 # unfolding Adj_pt manually.
@@ -354,7 +354,7 @@ def PROV_PRST_SUBST_AXIOM(p):
 
 @proof
 def PROV_PRST_ADJ_DEF_AT(p):
-    """|- !x y. Prov_PRST (Eq_pf (App_pt adj_sym (cons_l x (cons_l y nil_l)))
+    """|- !x y. Prov_PRST (Eq_pf (App_pt adj_sym (Tup_pt x (Tup_pt y Empty_pt)))
                                  (Adj_pt x y)).
 
     The PRST-internal reflexivity of adj_sym applied to its arguments
@@ -362,7 +362,7 @@ def PROV_PRST_ADJ_DEF_AT(p):
     via PRST equality axioms. STUB.
     """
     p.goal(
-        "!x y. Prov_PRST (Eq_pf (App_pt adj_sym (cons_l x (cons_l y nil_l))) "
+        "!x y. Prov_PRST (Eq_pf (App_pt adj_sym (Tup_pt x (Tup_pt y Empty_pt))) "
         "                       (Adj_pt x y))",
         types={"x": nat0_ty, "y": nat0_ty},
     )
@@ -385,8 +385,8 @@ def PROV_PRST_ADJ_DEF_AT(p):
 #     MU_CORRECTNESS :
 #       |- !f q args.
 #            is_partial_pr_sym f
-#            /\ App_pt f (cons_l q args) = T_pt
-#            ==> App_pt f (cons_l (App_pt (mu_sym f) args) args) = T_pt.
+#            /\ App_pt f (Tup_pt q args) = T_pt
+#            ==> App_pt f (Tup_pt (App_pt (mu_sym f) args) args) = T_pt.
 #
 # Reading: "if any q makes f hold at args, then the witness returned by
 # mu_sym f at args also makes f hold." No quantifier elimination, no
@@ -399,8 +399,8 @@ def PROV_PRST_ADJ_DEF_AT(p):
 def MU_CORRECTNESS(p):
     """|- !f q args.
             is_partial_pr_sym f
-            /\\ App_pt f (cons_l q args) = T_pt
-            ==> App_pt f (cons_l (App_pt (mu_sym f) args) args) = T_pt.
+            /\\ App_pt f (Tup_pt q args) = T_pt
+            ==> App_pt f (Tup_pt (App_pt (mu_sym f) args) args) = T_pt.
 
     The mu-correctness axiom (HOL-level statement; reflected into PRST
     via PROV_PRST_AXIOM at concrete (f, q, args) when used inside a
@@ -411,8 +411,8 @@ def MU_CORRECTNESS(p):
     """
     p.goal(
         "!f q args. is_partial_pr_sym f "
-        "           /\\ App_pt f (cons_l q args) = T_pt "
-        "           ==> App_pt f (cons_l (App_pt (mu_sym f) args) args) = T_pt",
+        "           /\\ App_pt f (Tup_pt q args) = T_pt "
+        "           ==> App_pt f (Tup_pt (App_pt (mu_sym f) args) args) = T_pt",
         types={"f": nat0_ty, "q": nat0_ty, "args": nat0_ty},
     )
     p.sorry()
@@ -438,9 +438,9 @@ def PROV_PRST_MP(p):
 # lookup:
 #
 #   |- !F v. Prov_PRST (Eq_pf (App_pt substitute_pr
-#                                  (cons_l F (cons_l (App_pt numeral_pr
-#                                                       (cons_l n nil_l))
-#                                                    (cons_l v nil_l))))
+#                                  (Tup_pt F (Tup_pt (App_pt numeral_pr
+#                                                       (Tup_pt n Empty_pt))
+#                                                    (Tup_pt v Empty_pt))))
 #                             <result computed at HOL level>).
 #
 # Free evaluation of PR-symbol applications inside Prov_PRST.
@@ -450,7 +450,7 @@ def PROV_PRST_MP(p):
 @proof
 def PROV_PRST_SUBSTITUTE_EVAL(p):
     """|- !F t v. Prov_PRST (Eq_pf (App_pt substitute_pr
-                                    (cons_l F (cons_l t (cons_l v nil_l))))
+                                    (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt))))
                                   (substitute F t v)).
 
     Where ``substitute`` on the RHS is HOL's substitute function (from
@@ -465,7 +465,7 @@ def PROV_PRST_SUBSTITUTE_EVAL(p):
     """
     p.goal(
         "!F t v. Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr (cons_l F (cons_l t (cons_l v nil_l)))) "
+        "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
         "  (substitute F t v))",
         types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
     )
@@ -474,13 +474,13 @@ def PROV_PRST_SUBSTITUTE_EVAL(p):
 
 @proof
 def PROV_PRST_NUMERAL_EVAL(p):
-    """|- !n. Prov_PRST (Eq_pf (App_pt numeral_pr (cons_l n nil_l))
+    """|- !n. Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt n Empty_pt))
                                (numeral n)).
 
     Similar to PROV_PRST_SUBSTITUTE_EVAL, for numeral. STUB.
     """
     p.goal(
-        "!n. Prov_PRST (Eq_pf (App_pt numeral_pr (cons_l n nil_l)) (numeral n))",
+        "!n. Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt n Empty_pt)) (numeral n))",
         types={"n": nat0_ty},
     )
     p.sorry()
@@ -488,13 +488,13 @@ def PROV_PRST_NUMERAL_EVAL(p):
 
 @proof
 def PROV_PRST_DIAG_EVAL(p):
-    """|- !n. Prov_PRST (Eq_pf (App_pt diag_pr (cons_l n nil_l)) (diag n)).
+    """|- !n. Prov_PRST (Eq_pf (App_pt diag_pr (Tup_pt n Empty_pt)) (diag n)).
 
     From DIAG_PR_DEFINING + PROV_PRST_SUBSTITUTE_EVAL + PROV_PRST_NUMERAL_EVAL,
     chained via PRST equality reasoning (PROV_PRST_EQ_TRANS). STUB.
     """
     p.goal(
-        "!n. Prov_PRST (Eq_pf (App_pt diag_pr (cons_l n nil_l)) (diag n))",
+        "!n. Prov_PRST (Eq_pf (App_pt diag_pr (Tup_pt n Empty_pt)) (diag n))",
         types={"n": nat0_ty},
     )
     p.sorry()
@@ -512,9 +512,9 @@ def PROV_PRST_DIAG_EVAL(p):
 #
 #   Prov_PRST_internal := Eq_pf
 #                           (App_pt Proof_PRST_pr
-#                             (cons_l (App_pt find_proof_pr
-#                                       (cons_l (Var_pt var_x) nil_l))
-#                                     (cons_l (Var_pt var_x) nil_l)))
+#                             (Tup_pt (App_pt find_proof_pr
+#                                       (Tup_pt (Var_pt var_x) Empty_pt))
+#                                     (Tup_pt (Var_pt var_x) Empty_pt)))
 #                           T_pt.
 #
 # Reading: "the canonical witness mu_sym Proof_PRST_pr at x checks T_pt
@@ -533,8 +533,8 @@ prov_prst_internal_def = define(
     "Prov_PRST_internal",
     parse_type("nat0"),
     "Eq_pf (App_pt Proof_PRST_pr "
-    "         (cons_l (App_pt find_proof_pr (cons_l (Var_pt var_x) nil_l)) "
-    "           (cons_l (Var_pt var_x) nil_l))) "
+    "         (Tup_pt (App_pt find_proof_pr (Tup_pt (Var_pt var_x) Empty_pt)) "
+    "           (Tup_pt (Var_pt var_x) Empty_pt))) "
     "      T_pt",
 )
 Prov_PRST_internal = mk_const("Prov_PRST_internal", [])

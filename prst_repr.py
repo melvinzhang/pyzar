@@ -13,7 +13,7 @@
 # false, Adj_pt Empty_pt Empty_pt for true). The representing formula
 # is:
 #
-#     F_P(x) := Eq_pf (App_pt p_sym (cons_l x nil_l)) (encoded_true).
+#     F_P(x) := Eq_pf (App_pt p_sym (Tup_pt x Empty_pt)) (encoded_true).
 #
 # The representability theorem reduces to a single defining-equation
 # lookup plus equality reasoning:
@@ -21,8 +21,8 @@
 #     |- !n. P n   ==> Prov_PRST (substitute_p F_P (numeral n) var_x).
 #
 # Proof: substitute_p computes F_P(numeral n) = Eq_pf (App_pt p_sym
-# (cons_l (numeral n) nil_l)) encoded_true. The defining equation of
-# p_sym (an axiom) gives App_pt p_sym (cons_l (numeral n) nil_l) =
+# (Tup_pt (numeral n) Empty_pt)) encoded_true. The defining equation of
+# p_sym (an axiom) gives App_pt p_sym (Tup_pt (numeral n) Empty_pt) =
 # encoded_true (when P n holds at the meta level). Equality and modus
 # ponens close the goal.
 #
@@ -76,8 +76,8 @@ def T_PT_NEQ_F_PT(p):
 #
 # Given any HOL predicate P : nat0 -> bool *that is realised by a PR
 # function symbol p_sym* (meaning: HOL proves P n = Prov_PRST (Eq_pf
-# (App_pt p_sym (cons_l n nil_l)) T_pt)), the predicate is represented
-# by F_P(x) := Eq_pf (App_pt p_sym (cons_l x nil_l)) T_pt.
+# (App_pt p_sym (Tup_pt n Empty_pt)) T_pt)), the predicate is represented
+# by F_P(x) := Eq_pf (App_pt p_sym (Tup_pt x Empty_pt)) T_pt.
 #
 # We expose a *parametric* theorem schema: the user supplies p_sym
 # (a closed PR symbol) and the realisation hypothesis, and gets the
@@ -90,8 +90,8 @@ represents_pred_prst_def = define(
     "represents_pred_prst",
     parse_type("nat0 -> (nat0 -> bool) -> bool"),
     "\\p_sym:nat0. \\P:nat0->bool. "
-    "!n:nat0. (P n = Prov_PRST (Eq_pf (App_pt p_sym (cons_l n nil_l)) T_pt)) "
-    "      /\\ (~P n = Prov_PRST (Eq_pf (App_pt p_sym (cons_l n nil_l)) F_pt))",
+    "!n:nat0. (P n = Prov_PRST (Eq_pf (App_pt p_sym (Tup_pt n Empty_pt)) T_pt)) "
+    "      /\\ (~P n = Prov_PRST (Eq_pf (App_pt p_sym (Tup_pt n Empty_pt)) F_pt))",
 )
 represents_pred_prst = mk_const("represents_pred_prst", [])
 
@@ -101,13 +101,13 @@ def REPRESENTABILITY_POSITIVE(p):
     """|- !p_sym P n.
             represents_pred_prst p_sym P /\\ P n
             ==> Prov_PRST (substitute_p
-                            (Eq_pf (App_pt p_sym (cons_l var_x nil_l)) T_pt)
+                            (Eq_pf (App_pt p_sym (Tup_pt var_x Empty_pt)) T_pt)
                             (numeral n)
                             var_x).
 
     Proof (~5 lines once filled in):
       * Unfold substitute_p via SUBSTITUTE_P_AT_APP / _AT_VAR_HIT to
-        reduce to Eq_pf (App_pt p_sym (cons_l (numeral n) nil_l)) T_pt.
+        reduce to Eq_pf (App_pt p_sym (Tup_pt (numeral n) Empty_pt)) T_pt.
       * From represents_pred_prst's positive branch + P n, this is exactly
         what Prov_PRST entails.
 
@@ -116,7 +116,7 @@ def REPRESENTABILITY_POSITIVE(p):
     p.goal(
         "!p_sym P n. (represents_pred_prst p_sym P /\\ P n) ==> "
         "Prov_PRST (substitute_p "
-        "  (Eq_pf (App_pt p_sym (cons_l var_x nil_l)) T_pt) "
+        "  (Eq_pf (App_pt p_sym (Tup_pt var_x Empty_pt)) T_pt) "
         "  (numeral n) var_x)",
         types={"p_sym": nat0_ty, "P": parse_type("nat0 -> bool"), "n": nat0_ty},
     )
@@ -129,7 +129,7 @@ def REPRESENTABILITY_NEGATIVE(p):
             represents_pred_prst p_sym P /\\ ~P n
             ==> Prov_PRST (Not_pf
                   (substitute_p
-                    (Eq_pf (App_pt p_sym (cons_l var_x nil_l)) T_pt)
+                    (Eq_pf (App_pt p_sym (Tup_pt var_x Empty_pt)) T_pt)
                     (numeral n)
                     var_x)).
 
@@ -139,7 +139,7 @@ def REPRESENTABILITY_NEGATIVE(p):
     p.goal(
         "!p_sym P n. (represents_pred_prst p_sym P /\\ ~P n) ==> "
         "Prov_PRST (Not_pf (substitute_p "
-        "  (Eq_pf (App_pt p_sym (cons_l var_x nil_l)) T_pt) "
+        "  (Eq_pf (App_pt p_sym (Tup_pt var_x Empty_pt)) T_pt) "
         "  (numeral n) var_x))",
         types={"p_sym": nat0_ty, "P": parse_type("nat0 -> bool"), "n": nat0_ty},
     )
@@ -159,9 +159,9 @@ def REPRESENTABILITY_NEGATIVE(p):
 @proof
 def SUBSTITUTE_REPRESENTS_PRST(p):
     """|- !F t v. Prov_PRST (Eq_pf (App_pt substitute_pr
-                                     (cons_l (numeral F)
-                                       (cons_l (numeral t)
-                                         (cons_l (numeral v) nil_l))))
+                                     (Tup_pt (numeral F)
+                                       (Tup_pt (numeral t)
+                                         (Tup_pt (numeral v) Empty_pt))))
                                    (numeral (substitute F t v))).
 
     Representability of substitute as a PRST claim. One
@@ -172,7 +172,7 @@ def SUBSTITUTE_REPRESENTS_PRST(p):
     p.goal(
         "!F t v. Prov_PRST (Eq_pf "
         "  (App_pt substitute_pr "
-        "    (cons_l (numeral F) (cons_l (numeral t) (cons_l (numeral v) nil_l)))) "
+        "    (Tup_pt (numeral F) (Tup_pt (numeral t) (Tup_pt (numeral v) Empty_pt)))) "
         "  (numeral (substitute F t v)))",
         types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
     )
@@ -181,7 +181,7 @@ def SUBSTITUTE_REPRESENTS_PRST(p):
 
 @proof
 def DIAG_REPRESENTS_PRST(p):
-    """|- !n. Prov_PRST (Eq_pf (App_pt diag_pr (cons_l (numeral n) nil_l))
+    """|- !n. Prov_PRST (Eq_pf (App_pt diag_pr (Tup_pt (numeral n) Empty_pt))
                                 (numeral (diag n))).
 
     Representability of diag as a PRST claim: PROV_PRST_DIAG_EVAL +
@@ -189,7 +189,7 @@ def DIAG_REPRESENTS_PRST(p):
     """
     p.goal(
         "!n. Prov_PRST (Eq_pf "
-        "      (App_pt diag_pr (cons_l (numeral n) nil_l)) "
+        "      (App_pt diag_pr (Tup_pt (numeral n) Empty_pt)) "
         "      (numeral (diag n)))",
         types={"n": nat0_ty},
     )
@@ -200,7 +200,7 @@ def DIAG_REPRESENTS_PRST(p):
 def PROOF_PRST_REPRESENTS_POS(p):
     """|- !p n. Proof_PRST p n ==>
               Prov_PRST (Eq_pf
-                (App_pt Proof_PRST_pr (cons_l (numeral p) (cons_l (numeral n) nil_l)))
+                (App_pt Proof_PRST_pr (Tup_pt (numeral p) (Tup_pt (numeral n) Empty_pt)))
                 T_pt).
 
     Positive branch of representability of the (decidable) Proof_PRST
@@ -212,7 +212,7 @@ def PROOF_PRST_REPRESENTS_POS(p):
     p.goal(
         "!pf n. Proof_PRST pf n ==> "
         "Prov_PRST (Eq_pf "
-        "  (App_pt Proof_PRST_pr (cons_l (numeral pf) (cons_l (numeral n) nil_l))) "
+        "  (App_pt Proof_PRST_pr (Tup_pt (numeral pf) (Tup_pt (numeral n) Empty_pt))) "
         "  T_pt)",
         types={"pf": nat0_ty, "n": nat0_ty},
     )
@@ -223,12 +223,12 @@ def PROOF_PRST_REPRESENTS_POS(p):
 def PROOF_PRST_REPRESENTS_NEG(p):
     """|- !p n. ~Proof_PRST p n ==>
               Prov_PRST (Eq_pf
-                (App_pt Proof_PRST_pr (cons_l (numeral p) (cons_l (numeral n) nil_l)))
+                (App_pt Proof_PRST_pr (Tup_pt (numeral p) (Tup_pt (numeral n) Empty_pt)))
                 F_pt). STUB."""
     p.goal(
         "!pf n. ~Proof_PRST pf n ==> "
         "Prov_PRST (Eq_pf "
-        "  (App_pt Proof_PRST_pr (cons_l (numeral pf) (cons_l (numeral n) nil_l))) "
+        "  (App_pt Proof_PRST_pr (Tup_pt (numeral pf) (Tup_pt (numeral n) Empty_pt))) "
         "  F_pt)",
         types={"pf": nat0_ty, "n": nat0_ty},
     )

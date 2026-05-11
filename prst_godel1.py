@@ -79,13 +79,13 @@ from hf_proof import var_x  # PRST re-uses the var_x constant from the encoding
 # Goedel-Carnap construction in quantifier-free form:
 #
 #   theta_of_phi_p(phi) := substitute_p phi
-#                                       (App_pt diag_pr (cons_l var_x nil_l))
+#                                       (App_pt diag_pr (Tup_pt var_x Empty_pt))
 #                                       var_x.
 #
 # psi := substitute_p theta_of_phi_p(phi) (numeral (theta_of_phi_p phi)) var_x.
 #
 # Since ``diag_pr`` is a PR function symbol, the term
-# ``App_pt diag_pr (cons_l var_x nil_l)`` IS the value diag(x) at the
+# ``App_pt diag_pr (Tup_pt var_x Empty_pt)`` IS the value diag(x) at the
 # syntactic level. The construction is binder-free: substitute the
 # diag-term in for var_x directly, no existential quantifier needed.
 # ---------------------------------------------------------------------------
@@ -94,12 +94,12 @@ from hf_proof import var_x  # PRST re-uses the var_x constant from the encoding
 _phi_n0 = Var("phi", nat0_ty)
 
 
-# theta_of_phi_p(phi) := substitute_p phi (App_pt diag_pr (cons_l var_x nil_l)) var_x
+# theta_of_phi_p(phi) := substitute_p phi (App_pt diag_pr (Tup_pt var_x Empty_pt)) var_x
 THETA_OF_PHI_P_DEF = define(
     "theta_of_phi_p",
     parse_type("nat0 -> nat0"),
     "\\phi:nat0. substitute_p phi "
-    "             (App_pt diag_pr (cons_l var_x nil_l)) "
+    "             (App_pt diag_pr (Tup_pt var_x Empty_pt)) "
     "             var_x",
 )
 theta_of_phi_p = mk_const("theta_of_phi_p", [])
@@ -117,7 +117,7 @@ def DIAGONAL_LEMMA_PRST(p):
                                                    var_x)).
 
     The quantifier-free diagonal lemma. Because diag is a PR function
-    symbol, ``App_pt diag_pr (cons_l (numeral n) nil_l) = numeral
+    symbol, ``App_pt diag_pr (Tup_pt (numeral n) Empty_pt) = numeral
     (diag n)`` is one defining-equation step (DIAG_REPRESENTS_PRST):
     no functionality lemma, no existential elimination, no D-formula
     bookkeeping.
@@ -125,7 +125,7 @@ def DIAGONAL_LEMMA_PRST(p):
     Sketch: theta_of_phi_p(phi) is phi with var_x replaced by the
     diag-term. Substituting (numeral (theta_of_phi_p phi)) for var_x
     in theta_of_phi_p(phi) gives phi with var_x replaced by
-    App_pt diag_pr (cons_l (numeral (theta_of_phi_p phi)) nil_l). By
+    App_pt diag_pr (Tup_pt (numeral (theta_of_phi_p phi)) Empty_pt). By
     DIAG_REPRESENTS_PRST that App_pt term equals
     numeral (diag (theta_of_phi_p phi)), and substituting that into
     phi gives the right-hand side. The Iff is then closed by PRST

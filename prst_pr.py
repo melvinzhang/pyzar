@@ -21,8 +21,8 @@
 #
 #   * Zero      : 0-ary, value Empty_pt.
 #   * Proj_i_n  : n-ary, value (i+1)-th argument.
-#   * Adj       : 2-ary, primitive. ``App_pt adj_sym (cons_l a (cons_l
-#                 b nil_l))`` IS the adjunction operation -- there is
+#   * Adj       : 2-ary, primitive. ``App_pt adj_sym (Tup_pt a (Tup_pt
+#                 b Empty_pt))`` IS the adjunction operation -- there is
 #                 no further-reducing defining equation, just as
 #                 Empty_pt has no defining body. Adj is the only
 #                 non-empty set constructor; it is a primitive PR
@@ -58,21 +58,18 @@ from basics import mk_const
 from parser import define, parse_type
 from nat0 import nat0_ty
 from proof import proof, define_with_at
-from hf_proof import (
-    nil_l,  # noqa: F401  -- parser alias for axiom bodies
-    cons_l,  # noqa: F401  -- parser alias
-)
 from hf_syntax import (
     Var_t,  # noqa: F401  -- parser alias for free Var_t indices in axioms
 )
 from prst_syntax import (
-    Empty_pt,  # noqa: F401  -- parser alias in PR-defining-equation bodies
+    Empty_pt,  # noqa: F401  -- parser alias in PR-defining-equation bodies; also nil-tuple
     Var_pt,  # noqa: F401  -- parser alias
     Eq_pf,  # noqa: F401  -- parser alias
     Not_pf,  # noqa: F401  -- parser alias
     Imp_pf,  # noqa: F401  -- parser alias
     In_pa,  # noqa: F401  -- parser alias
     App_pt,
+    Tup_pt,  # noqa: F401  -- parser alias for args-tuple cons cells
     is_pterm,  # noqa: F401  -- parser alias
 )
 
@@ -246,20 +243,20 @@ def PR_ARITY_REC(p):
 ZERO_DEF_AXIOM_DEF = define(
     "zero_def_axiom",
     parse_type("nat0"),
-    "Eq_pf (App_pt zero_sym nil_l) Empty_pt",
+    "Eq_pf (App_pt zero_sym Empty_pt) Empty_pt",
 )
 zero_def_axiom = mk_const("zero_def_axiom", [])
 
 
 # adj_sym is *primitive*: no defining equation. The term
-# ``App_pt adj_sym (cons_l a (cons_l b nil_l))`` IS the adjunction
+# ``App_pt adj_sym (Tup_pt a (Tup_pt b Empty_pt))`` IS the adjunction
 # operation, just as Empty_pt is the empty set. Adj_pt is a HOL-level
 # abbreviation for callers' convenience -- it unfolds to the
 # corresponding App_pt expression.
 ADJ_PT_DEF = define(
     "Adj_pt",
     parse_type("nat0 -> nat0 -> nat0"),
-    "\\a:nat0. \\b:nat0. App_pt adj_sym (cons_l a (cons_l b nil_l))",
+    "\\a:nat0. \\b:nat0. App_pt adj_sym (Tup_pt a (Tup_pt b Empty_pt))",
 )
 Adj_pt = mk_const("Adj_pt", [])
 
@@ -286,12 +283,12 @@ F_pt = mk_const("F_pt", [])
 #
 # where the argument list has length n. Closed; no free Var_t beyond
 # those that appear bound by the implicit universal quantifier over
-# every Var_t. (Stub body: just zero, since we'd need an n-fold cons_l
+# every Var_t. (Stub body: just zero, since we'd need an n-fold Tup_pt
 # builder.)
 PROJ_DEF_AXIOM_AT_DEF = define(
     "proj_def_axiom_at",
     parse_type("nat0 -> nat0 -> nat0"),
-    "\\i:nat0. \\n:nat0. 0",  # stub; real body builds the cons_l list of length n
+    "\\i:nat0. \\n:nat0. 0",  # stub; real body builds the Tup_pt-nested args of length n
 )
 proj_def_axiom_at = mk_const("proj_def_axiom_at", [])
 
@@ -305,10 +302,10 @@ IF_IN_TRUE_DEF_AXIOM_DEF = define(
     parse_type("nat0"),
     "Imp_pf (In_pa (Var_t 0) (Var_t (SUC0 0))) "
     "       (Eq_pf (App_pt if_in_sym "
-    "                (cons_l (Var_t 0) "
-    "                  (cons_l (Var_t (SUC0 0)) "
-    "                    (cons_l (Var_t (SUC0 (SUC0 0))) "
-    "                      (cons_l (Var_t (SUC0 (SUC0 (SUC0 0)))) nil_l))))) "
+    "                (Tup_pt (Var_t 0) "
+    "                  (Tup_pt (Var_t (SUC0 0)) "
+    "                    (Tup_pt (Var_t (SUC0 (SUC0 0))) "
+    "                      (Tup_pt (Var_t (SUC0 (SUC0 (SUC0 0)))) Empty_pt))))) "
     "              (Var_t (SUC0 (SUC0 0))))",
 )
 if_in_true_def_axiom = mk_const("if_in_true_def_axiom", [])
@@ -319,10 +316,10 @@ IF_IN_FALSE_DEF_AXIOM_DEF = define(
     parse_type("nat0"),
     "Imp_pf (Not_pf (In_pa (Var_t 0) (Var_t (SUC0 0)))) "
     "       (Eq_pf (App_pt if_in_sym "
-    "                (cons_l (Var_t 0) "
-    "                  (cons_l (Var_t (SUC0 0)) "
-    "                    (cons_l (Var_t (SUC0 (SUC0 0))) "
-    "                      (cons_l (Var_t (SUC0 (SUC0 (SUC0 0)))) nil_l))))) "
+    "                (Tup_pt (Var_t 0) "
+    "                  (Tup_pt (Var_t (SUC0 0)) "
+    "                    (Tup_pt (Var_t (SUC0 (SUC0 0))) "
+    "                      (Tup_pt (Var_t (SUC0 (SUC0 (SUC0 0)))) Empty_pt))))) "
     "              (Var_t (SUC0 (SUC0 (SUC0 0)))))",
 )
 if_in_false_def_axiom = mk_const("if_in_false_def_axiom", [])
@@ -444,10 +441,10 @@ def IS_PR_DEF_HOLDS_REC_STEP(p):
 #   Lemma (compose). For any PR symbols g, h_1, ..., h_k of compatible
 #   arity, there exists a PR symbol comp(g, h_1, ..., h_k) such that
 #       Prov_PRST (Eq_pf (App_pt (comp g h_1 ... h_k) args)
-#                        (App_pt g (cons_l (App_pt h_1 args)
+#                        (App_pt g (Tup_pt (App_pt h_1 args)
 #                                            ...
-#                                            (cons_l (App_pt h_k args)
-#                                                    nil_l)))).
+#                                            (Tup_pt (App_pt h_k args)
+#                                                    Empty_pt)))).
 #
 # In practice ``comp`` is itself a base-layer construction (REC over
 # trivial recursion), so its defining equation reduces to PRST_REC_*
@@ -472,7 +469,7 @@ comp_sym = mk_const("comp_sym", [])
 # Stage 2A (f') -- Kleene minimisation as an operator on PR symbols.
 #
 # mu_sym f  :=  the symbol id of the unary function
-#                   args |-> least q s.t. App_pt f (cons_l q args) = T_pt,
+#                   args |-> least q s.t. App_pt f (Tup_pt q args) = T_pt,
 #               or a sentinel if no such q exists.
 #
 # Crucially, mu_sym is an *operator on closed nat0 symbol ids*, not a
@@ -545,7 +542,7 @@ def IS_PARTIAL_PR_SYM_MU(p):
 # ``substitute_pr`` -- structural recursion on the formula tree.
 # Five base-layer compositions, one per formula constructor; the
 # App_pt recursive call uses ``map_substitute`` which is itself
-# definable as a REC over the cons_l list. Total: ~10 base-layer
+# definable as a REC over the Tup_pt-nested args. Total: ~10 base-layer
 # symbols composed, ~30 Prov_PRST defining equations.
 #
 # ``diag_pr`` -- two compositions:  diag(n) = substitute_pr(n,

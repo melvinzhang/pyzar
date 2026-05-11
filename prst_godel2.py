@@ -193,25 +193,25 @@ mp_combine_pr = mk_const("mp_combine_pr", [])
 @proof
 def MP_COMBINE_PR_CORRECT(p):
     """|- !p1 p2 phi psi.
-            App_pt Proof_PRST_pr (cons_l p1 (cons_l (Imp_pf phi psi) nil_l)) = T_pt
-            /\\ App_pt Proof_PRST_pr (cons_l p2 (cons_l phi nil_l)) = T_pt
+            App_pt Proof_PRST_pr (Tup_pt p1 (Tup_pt (Imp_pf phi psi) Empty_pt)) = T_pt
+            /\\ App_pt Proof_PRST_pr (Tup_pt p2 (Tup_pt phi Empty_pt)) = T_pt
             ==> App_pt Proof_PRST_pr
-                  (cons_l (App_pt mp_combine_pr (cons_l p1 (cons_l p2 nil_l)))
-                          (cons_l psi nil_l)) = T_pt.
+                  (Tup_pt (App_pt mp_combine_pr (Tup_pt p1 (Tup_pt p2 Empty_pt)))
+                          (Tup_pt psi Empty_pt)) = T_pt.
 
     The PR-side correctness of the proof-combinator: given proof lists
     p1 of (phi -> psi) and p2 of phi, mp_combine_pr appends one
     modus-ponens step and yields a proof of psi. Quantifier-free Pi_1;
     discharged by definitional unfolding of mp_combine_pr + structural
-    case analysis on Proof_PRST_pr's cons_l recursion. ~30 lines. STUB.
+    case analysis on Proof_PRST_pr's Tup_pt recursion. ~30 lines. STUB.
     """
     p.goal(
         "!p1 p2 phi psi. "
-        "  (App_pt Proof_PRST_pr (cons_l p1 (cons_l (Imp_pf phi psi) nil_l)) = T_pt "
-        "   /\\ App_pt Proof_PRST_pr (cons_l p2 (cons_l phi nil_l)) = T_pt) "
+        "  (App_pt Proof_PRST_pr (Tup_pt p1 (Tup_pt (Imp_pf phi psi) Empty_pt)) = T_pt "
+        "   /\\ App_pt Proof_PRST_pr (Tup_pt p2 (Tup_pt phi Empty_pt)) = T_pt) "
         "  ==> App_pt Proof_PRST_pr "
-        "        (cons_l (App_pt mp_combine_pr (cons_l p1 (cons_l p2 nil_l))) "
-        "                (cons_l psi nil_l)) = T_pt",
+        "        (Tup_pt (App_pt mp_combine_pr (Tup_pt p1 (Tup_pt p2 Empty_pt))) "
+        "                (Tup_pt psi Empty_pt)) = T_pt",
         types={"p1": nat0_ty, "p2": nat0_ty, "phi": nat0_ty, "psi": nat0_ty},
     )
     p.sorry()
@@ -237,8 +237,8 @@ def DERIV_D2(p):
       1. Reduce the substituted forms: substitute_p
          Prov_PRST_internal (numeral phi) var_x evaluates to
              Eq_pf (App_pt Proof_PRST_pr
-                     (cons_l (App_pt find_proof_pr (cons_l (numeral phi) nil_l))
-                       (cons_l (numeral phi) nil_l))) T_pt.
+                     (Tup_pt (App_pt find_proof_pr (Tup_pt (numeral phi) Empty_pt))
+                       (Tup_pt (numeral phi) Empty_pt))) T_pt.
          (one substitute_p step under each App_pt / Eq_pf clause)
       2. Under the antecedents we have two witnesses
             p1 := App_pt find_proof_pr [numeral (Imp_pf phi psi)],
@@ -250,8 +250,8 @@ def DERIV_D2(p):
       4. By MU_CORRECTNESS at f = Proof_PRST_pr, q = mp_combine_pr(p1,
          p2), args = [numeral psi]: the mu-witness also certifies, i.e.
          App_pt Proof_PRST_pr
-           (cons_l (App_pt find_proof_pr (cons_l (numeral psi) nil_l))
-             (cons_l (numeral psi) nil_l)) = T_pt.
+           (Tup_pt (App_pt find_proof_pr (Tup_pt (numeral psi) Empty_pt))
+             (Tup_pt (numeral psi) Empty_pt)) = T_pt.
       5. Repackaging via Eq_pf gives the substituted-internal form,
          and Imp_pf-introduction closes the goal.
 
