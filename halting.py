@@ -342,25 +342,117 @@ def IS_SK_TERM_APP(p):
 IS_SK_TERM_CASES = IS_SK_TERM_REC
 
 
-# IS_SK_TERM_CASES is defined above as an alias for IS_SK_TERM_REC.
+# ---------------------------------------------------------------------------
+# Stage 1 -- constructor injectivity and disjointness.
+#
+# Three lemmas we need for the head-redex reductions and the normal-form
+# proofs:
+#   APP_T_INJ    -- !a1 b1 a2 b2. App_t a1 b1 = App_t a2 b2
+#                                   ==> a1 = a2 /\ b1 = b2.
+#   S_T_NEQ_K_T  -- ~(S_t = K_t).
+#   S_T_NEQ_APP_T, K_T_NEQ_APP_T -- !x y. ~(S_t = App_t x y),
+#                                   !x y. ~(K_t = App_t x y).
+#
+# Tags: S_t = Pair_ord 0 0, K_t = Pair_ord 1 0, App_t a b =
+# Pair_ord 2 (Pair_ord a b).  Disjointness is therefore one
+# PAIR_ORD_INJ at slot 0 plus a tag-numeral inequality (cf.
+# ``hf_syntax._TAG_NEQS``).
+# ---------------------------------------------------------------------------
+
+
+from hf_syntax import _proof_binary_inj, _TAG_NEQS  # noqa: E402
+from hf_sets import PAIR_ORD_INJ  # noqa: E402
+from tactics import CONJUNCT1  # noqa: E402
+
+
+APP_T_INJ = _proof_binary_inj(
+    "APP_T_INJ", "a1", "b1", "a2", "b2", "App_t", APP_T_AT, _APP_T_TAG
+)
+
+
+@proof
+def S_T_NEQ_K_T(p):
+    """|- ~(S_t = K_t).
+
+    S_t = Pair_ord 0 0, K_t = Pair_ord (SUC0 0) 0; PAIR_ORD_INJ at slot
+    0 reduces ``S_t = K_t`` to ``0 = SUC0 0``, contradicting AXIOM_3_0
+    (packaged here as _TAG_NEQS[(0, 1)]).
+    """
+    p.goal("~(S_t = K_t)")
+    with p.suppose("h: S_t = K_t"):
+        # Rewrite via the definitions to expose the Pair_ord shape.
+        p.have("h_po: Pair_ord 0 0 = Pair_ord (SUC0 0) 0").by_rewrite_of(
+            "h", [S_T_DEF, K_T_DEF]
+        )
+        p.have("h_inj: 0 = SUC0 0 /\\ 0 = 0").by(
+            PAIR_ORD_INJ, "0", "0", "SUC0 0", "0", "h_po"
+        )
+        p.have("h_tag: 0 = SUC0 0").by_thm(CONJUNCT1(p.fact("h_inj")))
+        p.have("h_neg: ~(0 = SUC0 0)").by_thm(_TAG_NEQS[(0, 1)])
+        p.absurd().by_conj("h_neg", "h_tag")
+
+
+def _proof_atom_neq_app_t(thm_name, atom_const, atom_def, atom_tag_str, atom_tag_idx):
+    """Build ``|- !x y. ~(atom = App_t x y)`` for atom in {S_t, K_t}."""
+
+    @proof
+    def _THM(p):
+        from tactics import SPECL
+
+        p.goal(f"!x y. ~({atom_const} = App_t x y)")
+        p.fix("x y")
+        with p.suppose(f"h: {atom_const} = App_t x y"):
+            app_inst = SPECL([p._parse("x"), p._parse("y")], APP_T_AT)
+            # ``atom = Pair_ord atom_tag 0`` from its definition (which is
+            # itself a Pair_ord-application; pyzar's S_T_DEF / K_T_DEF
+            # read in reverse).
+            p.have(
+                f"h_po: Pair_ord ({atom_tag_str}) 0 = "
+                f"       Pair_ord (SUC0 (SUC0 0)) (Pair_ord x y)"
+            ).by_rewrite_of("h", [atom_def, app_inst])
+            p.have(
+                f"h_inj: ({atom_tag_str}) = SUC0 (SUC0 0) /\\ 0 = Pair_ord x y"
+            ).by(
+                PAIR_ORD_INJ,
+                f"({atom_tag_str})",
+                "0",
+                "SUC0 (SUC0 0)",
+                "Pair_ord x y",
+                "h_po",
+            )
+            p.have(f"h_tag: ({atom_tag_str}) = SUC0 (SUC0 0)").by_thm(
+                CONJUNCT1(p.fact("h_inj"))
+            )
+            p.have(f"h_neg: ~(({atom_tag_str}) = SUC0 (SUC0 0))").by_thm(
+                _TAG_NEQS[(atom_tag_idx, 2)]
+            )
+            p.absurd().by_conj("h_neg", "h_tag")
+
+    return _THM
+
+
+S_T_NEQ_APP_T = _proof_atom_neq_app_t("S_T_NEQ_APP_T", "S_t", S_T_DEF, "0", 0)
+K_T_NEQ_APP_T = _proof_atom_neq_app_t("K_T_NEQ_APP_T", "K_t", K_T_DEF, "SUC0 0", 1)
 
 
 # ---------------------------------------------------------------------------
 # Stage 1 -- one-step reduction.
 #
-# Strategy: leftmost-outermost (call-by-name).  Deterministic, hence
-# ``sk_step`` is a *function* nat0 -> nat0 rather than a relation; for
-# normal forms it returns the term itself, and the predicate
-# ``is_normal`` distinguishes the two cases.
+# Strategy: head-only.  ``sk_step`` fires a K- or S- redex at the head
+# spine when one is present; otherwise returns the term unchanged.
+# This is weaker than the standard leftmost-outermost (no congruence
+# into subterms), but suffices for the diagonal: I_t / Omega_t / the
+# constructed diagonal term ``d`` all have head redexes throughout
+# their reduction sequences.
 #
-# Reduction rules:
-#   sk_step (App_t (App_t K_t x) y)              = x
-#   sk_step (App_t (App_t (App_t S_t x) y) z)    = App_t (App_t x z) (App_t y z)
-#   otherwise (head of leftmost spine is a free variable / S short of
-#   arity / K short of arity):  recurse into the left child.
-#
-# The K/S patterns are decidable by inspecting the spine, which is a
-# left-fold over App_t.  Primitive recursive on the Pair_ord depth.
+# DSL friction note: a fully recursive ``sk_step`` would go through
+# ``define_wf_lt`` with a body that uses ``mk_cond`` -- COND's
+# polymorphism doesn't survive string parsing (``COND b x y`` types as
+# A but the parser can't infer A from context), so the body must be
+# built term-by-term with kernel constructors.  For Stage 1 we stay
+# head-only and posit ``sk_step``'s behaviour as defining axioms; a
+# follow-up pass can replace this with the recursive definition once
+# the COND term-builder pattern is in place.
 # ---------------------------------------------------------------------------
 
 
@@ -369,14 +461,29 @@ sk_step = mk_const("sk_step", [])
 add_const("sk_step", sk_step)
 
 
-new_constant("is_normal", parse_type("nat0 -> bool"))
+# ``is_normal`` is *defined* (head-only) as the conjunction of
+#   ~ K-redex-shape /\ ~ S-redex-shape.
+# This matches sk_step's head-only behaviour: when both clauses hold,
+# sk_step is the identity at the head; when either fails, sk_step makes
+# progress.
+IS_NORMAL_DEF = define(
+    "is_normal",
+    parse_type("nat0 -> bool"),
+    "\\t:nat0. "
+    "~(?x y. t = App_t (App_t K_t x) y) /\\ "
+    "~(?x y z. t = App_t (App_t (App_t S_t x) y) z)",
+)
 is_normal = mk_const("is_normal", [])
-add_const("is_normal", is_normal)
 
 
 @proof
 def SK_STEP_K(p):
-    """|- !x y. sk_step (App_t (App_t K_t x) y) = x."""
+    """|- !x y. sk_step (App_t (App_t K_t x) y) = x.
+
+    Defining axiom for sk_step on K-redexes.  Will be discharged once
+    sk_step is given a concrete definition (see Stage 1 strategy note
+    above).
+    """
     p.goal("!x y. sk_step (App_t (App_t K_t x) y) = x")
     p.sorry()
 
@@ -384,7 +491,10 @@ def SK_STEP_K(p):
 @proof
 def SK_STEP_S(p):
     """|- !x y z. sk_step (App_t (App_t (App_t S_t x) y) z)
-                  = App_t (App_t x z) (App_t y z)."""
+                  = App_t (App_t x z) (App_t y z).
+
+    Defining axiom for sk_step on S-redexes.
+    """
     p.goal(
         "!x y z. sk_step (App_t (App_t (App_t S_t x) y) z) "
         "         = App_t (App_t x z) (App_t y z)"
@@ -394,16 +504,66 @@ def SK_STEP_S(p):
 
 @proof
 def IS_NORMAL_S(p):
-    """|- is_normal S_t."""
+    """|- is_normal S_t.
+
+    S_t is a leaf atom: it doesn't unify with the K-redex shape
+    ``App_t (App_t K_t x) y`` (would need S_t = App_t something,
+    ruled out by S_T_NEQ_APP_T) nor the S-redex shape (same).  Unfold
+    is_normal, conjoin the two negations.
+    """
     p.goal("is_normal S_t")
-    p.sorry()
+    # Negation of the K-redex shape.
+    with p.have("nK: ~(?x y. S_t = App_t (App_t K_t x) y)").proof():
+        with p.suppose("hex: ?x y. S_t = App_t (App_t K_t x) y"):
+            p.choose("x", from_="hex")
+            p.choose("y", from_="x_eq")
+            # y_eq : S_t = App_t (App_t K_t x) y
+            p.have("hneq: ~(S_t = App_t (App_t K_t x) y)").by(
+                S_T_NEQ_APP_T, "App_t K_t x", "y"
+            )
+            p.absurd().by_conj("hneq", "y_eq")
+    # Negation of the S-redex shape.
+    with p.have("nS: ~(?x y z. S_t = App_t (App_t (App_t S_t x) y) z)").proof():
+        with p.suppose("hex: ?x y z. S_t = App_t (App_t (App_t S_t x) y) z"):
+            p.choose("x", from_="hex")
+            p.choose("y", from_="x_eq")
+            p.choose("z", from_="y_eq")
+            p.have("hneq: ~(S_t = App_t (App_t (App_t S_t x) y) z)").by(
+                S_T_NEQ_APP_T, "App_t (App_t S_t x) y", "z"
+            )
+            p.absurd().by_conj("hneq", "z_eq")
+    # Combine via IS_NORMAL_DEF unfolded at S_t.
+    from tactics import CONJ as _CONJ
+    p.thus("is_normal S_t").by_unfold(
+        _CONJ(p.fact("nK"), p.fact("nS")), IS_NORMAL_DEF
+    )
 
 
 @proof
 def IS_NORMAL_K(p):
-    """|- is_normal K_t."""
+    """|- is_normal K_t.  Same shape as IS_NORMAL_S, via K_T_NEQ_APP_T."""
     p.goal("is_normal K_t")
-    p.sorry()
+    with p.have("nK: ~(?x y. K_t = App_t (App_t K_t x) y)").proof():
+        with p.suppose("hex: ?x y. K_t = App_t (App_t K_t x) y"):
+            p.choose("x", from_="hex")
+            p.choose("y", from_="x_eq")
+            p.have("hneq: ~(K_t = App_t (App_t K_t x) y)").by(
+                K_T_NEQ_APP_T, "App_t K_t x", "y"
+            )
+            p.absurd().by_conj("hneq", "y_eq")
+    with p.have("nS: ~(?x y z. K_t = App_t (App_t (App_t S_t x) y) z)").proof():
+        with p.suppose("hex: ?x y z. K_t = App_t (App_t (App_t S_t x) y) z"):
+            p.choose("x", from_="hex")
+            p.choose("y", from_="x_eq")
+            p.choose("z", from_="y_eq")
+            p.have("hneq: ~(K_t = App_t (App_t (App_t S_t x) y) z)").by(
+                K_T_NEQ_APP_T, "App_t (App_t S_t x) y", "z"
+            )
+            p.absurd().by_conj("hneq", "z_eq")
+    from tactics import CONJ as _CONJ
+    p.thus("is_normal K_t").by_unfold(
+        _CONJ(p.fact("nK"), p.fact("nS")), IS_NORMAL_DEF
+    )
 
 
 @proof
