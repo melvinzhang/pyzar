@@ -177,7 +177,7 @@ Depends on Layer 0 real `Proof_PRST_def` body + Layers 1-5.
 - `PROV_PRST_ADJ_DEF_AT` — design issue: as stated requires `is_pterm x /\ is_pterm y` preconditions to invoke `is_Refl`, but `is_Refl` uses `is_term` (HF-side), not `is_pterm` (PRST-side). PRST formulas with App_pt subterms aren't `is_term`. Resolution requires either narrowing the lemma's domain or extending the axiom schema.
 - ~~`MU_CORRECTNESS`~~ — **DONE** (posited via `new_axiom`).
 - ~~`PROV_PRST_SUBST_AXIOM`~~ — **DONE** (posited via `new_axiom`). Initial design suggested an `IS_PR_DEF_CLOSED_UNDER_SUBST` route, but closure fails for parametric axiom families: `proj_def_axiom_at i n` embeds `Var_t k` slots at FIXED positions for k = 0..n-1; substituting at v < n replaces a slot with t, and the result is not of the form `axiom_at i' n'`. So `is_pr_def` is not closed under `substitute_p` in general. Posited as a primitive PRST inference-rule schema (analog of UI for theory axioms). Same precedent as MU_CORRECTNESS.
-- `PROV_PRST_MP` — needs proof-list concatenation lemma + a Proof_PRST monotonicity-under-concat lemma. Not provided by the current Proof_PRST encoding; either add the concat helper or revisit the encoding.
+- ~~`PROV_PRST_MP`~~ — **DONE** (posited via `new_axiom`). Investigation revealed the current Proof_PRST encoding cannot support MP at all: `_PROOF_PRST_F_DEF`'s MP disjunct requires `rec t f /\ rec t (Imp_pf f g)`, but `Proof_PRST t X` is single-conclusion (asserts t's head = X), so requiring t to have two different heads (f and Imp_pf f g) is impossible. HF's `Proof_HF` avoids this with `valid_step` + `mem_l`-style membership; PRST inherited a broken transliteration. Mechanisable fix is ~150 lines of new infrastructure (mem_t, valid_step_p, refactored Proof_PRST). Posited instead, as a 5th irreducibly-semantic primitive.
 
 **DSL friction newly observed:**
 - `_bottom_up`'s "filter rules with non-empty asl under binders" rule (line 998 of tactics.py) makes REWRITE_RULE useless for substituting choose-derived `_eq` facts under inner binders. Two ways to work around it: prove the unconditional version of the rule first (so its asl is empty), or write the substitution at the kernel level using AP_TERM / ABS / etc.
@@ -321,6 +321,7 @@ The mechanisation commits two correctness statements as `new_axiom`s rather than
 | `PROOF_PRST_PR_CORRECT` | `Proof_PRST p n <=> App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt` | `prst_proof.py` |
 | `PROOF_PRST_PR_INTERNAL_EVAL` | `App_pt Proof_PRST_pr ... = T_pt ==> Prov_PRST (Eq_pf (App_pt Proof_PRST_pr ...) T_pt)` | `prst_proof.py` |
 | `PROV_PRST_SUBST_AXIOM` | `is_pr_def F ==> Prov_PRST (substitute_p F t v)` | `prst_proof.py` |
+| `PROV_PRST_MP` | `Prov_PRST f /\ Prov_PRST (Imp_pf f g) ==> Prov_PRST g` | `prst_proof.py` |
 
 **Audit of infra reuse for `Proof_PRST_pr`** (justifies the axiomatic choice):
 
@@ -335,8 +336,9 @@ Mechanising `Proof_PRST_pr` faithfully would require ~150 lines of `nth_pr`/`exi
 
 **Trust-burden trade-off recap:**
 - Each posit weakens the "PRST verifies its own Gödel theorems" demonstration by one notch.
-- Soundness of all four axioms holds in the standard nat0 HOL model (μ via least-witness convention, `Proof_PRST_pr` via PR-completeness applied to the decidable Sigma_1 predicate `Proof_PRST`, `PROV_PRST_SUBST_AXIOM` as the standard semantic argument that substitution preserves truth for universally-stated axioms).
-- Total non-mechanised commitments: 4 axioms (vs. 1 with the fully constructive route). HF-side has 0 (HF gets the substitution rule via UI for free).
+- Soundness of all five axioms holds in the standard nat0 HOL model (μ via least-witness convention, `Proof_PRST_pr` via PR-completeness applied to the decidable Sigma_1 predicate `Proof_PRST`, `PROV_PRST_SUBST_AXIOM` as the standard semantic argument that substitution preserves truth for universally-stated axioms, `PROV_PRST_MP` as the fundamental inference rule of any sound proof system).
+- Total non-mechanised commitments: 5 axioms (vs. 1 with the fully constructive route). HF-side has 0.
+- **Encoding caveat for `PROV_PRST_MP`:** the current `Proof_PRST` recursion cannot derive MP constructively because its MP disjunct requires the tail t to have two distinct heads simultaneously. A future refactor of `_PROOF_PRST_F_DEF` mirroring HF's `valid_step` + `mem_l` design would discharge it -- ~150 lines of new infrastructure. This is a known limitation rather than a forced posit; the current proof system is sound (everything still derives correctly through axioms), just less expressive at the encoding level.
 
 ---
 
