@@ -572,6 +572,28 @@ def PROV_PRST_REC_STEP_DEF(p):
     )
 
 
+@proof
+def PROV_PRST_CONST_DEF(p):
+    """|- !c. Prov_PRST (const_def_axiom_at c).
+
+    Unconditional defining-equation theorem for const_sym -- one-line
+    specialisation of PROV_PRST_AXIOM at any c, via IS_PR_DEF_HOLDS_CONST.
+    """
+    from prst_pr import IS_PR_DEF_HOLDS_CONST, const_def_axiom_at  # noqa: F401
+    p.goal(
+        "!c. Prov_PRST (const_def_axiom_at c)",
+        types={"c": nat0_ty},
+    )
+    p.fix("c")
+    p.have("h_pr_def: is_pr_def (const_def_axiom_at c)").by(
+        IS_PR_DEF_HOLDS_CONST, "c"
+    )
+    _is_pr_axiom_from_pr_def(p, "const_def_axiom_at c", "h_pr_def")
+    p.thus("Prov_PRST (const_def_axiom_at c)").by(
+        PROV_PRST_AXIOM, "const_def_axiom_at c", "h_axiom"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Stage 2B (d.2) -- substitute-into-axiom derived rule.
 #

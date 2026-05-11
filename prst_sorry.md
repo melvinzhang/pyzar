@@ -316,7 +316,9 @@ Land Layer 0 + Layer 1 + Layer 3 together — they unblock Layer 2 (the largest 
 - `ad84a26` Layer 5 — 6 IS_PR_DEF_HOLDS_* + IS_PARTIAL_PR_SYM_MONO + IS_PARTIAL_PR_SYM_MU + new NAT0_LT_MU_SYM helper.
 - `2ab7431` Layer 6 part 1 — new PROOF_PRST_AT helper + PROOF_PRST_NIL + PROV_PRST_AXIOM + 6 PROV_PRST_*_DEF.
 - `4ee3e49` Layer 7 part 1 — new FREE_IN_P_AT_EMPTY helper + FREE_IN_PROV_PRST_INTERNAL.
-- *(pending)* Layer 2 relax (option B) + Layer 7 part 2 — `is_partial_pr_sym` moved to prst_syntax; `_IS_PTERM_F` App branch uses `is_partial_pr_sym`; new `IS_PR_SYM_IMP_PARTIAL` helper; IS_PFORM_PROV_PRST_INTERNAL discharged.
+- `3980771` Layer 2 relax (option B) + Layer 7 part 2 — `is_partial_pr_sym` moved to prst_syntax; `_IS_PTERM_F` App branch uses `is_partial_pr_sym`; new `IS_PR_SYM_IMP_PARTIAL` helper; IS_PFORM_PROV_PRST_INTERNAL discharged.
+- `31c2ca3` Tier-1 PR-body builders (prst_pr_builders) — readable kernel-term constructors (`nat`, `pt_list`, `proj`, `rec`, `comp`, `app_pt`, `var_t`, formula-syntax cons cells). Migrated 11 definitions in prst_pr to use them; no semantic change, all printed terms byte-identical to before.
+- *(pending)* `const_sym` primitive closes the structural hole in `diag_pr`. Tag 5 (between rec at tag 4 and mu at tag 6). New definitions: `CONST_SYM_DEF`, `CONST_DEF_AXIOM_AT_DEF`, `IS_PR_SYM_CONST`, `IS_PR_DEF_HOLDS_CONST`, `PROV_PRST_CONST_DEF`. `IS_PR_SYM_DEF` widened from 5 to 6 disjuncts, `IS_PR_DEF_DEF` from 6 to 7. `diag_pr_def` body now includes the const slot (`const_sym (Var_t 0)` for the var_x argument). Existing IS_PR_SYM_* / IS_PR_DEF_HOLDS_* lemmas unaffected (by_disj just traverses one more disjunct).
 
 **Cleared:** 44 sorries (19 + 3 + 5 + 7 + 8 + 2).
 **Remaining:** 37 sorries (5 in prst_pr, 10 in prst_proof, 7 in prst_repr, 6 in prst_godel1, 8 in prst_godel2 — plus 1 sorry in `prst_godel1` for the new G1 chain... wait, the count is 37 across all PRST files). prst_proof's Layer 6 has 6 sorries to go (MONO, CONS, ADJ_DEF_AT, MP, SUBST_AXIOM, MU_CORRECTNESS); Layer 7 owns 4 of the remaining 10 (2 cleared).

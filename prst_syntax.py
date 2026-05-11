@@ -685,20 +685,21 @@ def TUP_PT_DISJOINT_APP_PT(p):
 # ---------------------------------------------------------------------------
 
 
-# Real bodies inlined verbatim (no recursion). The five base PR symbols
+# Real bodies inlined verbatim (no recursion). The six base PR symbols
 # encode as:
-#   zero_sym = 0
-#   adj_sym  = SUC0 0                                              (= 1)
-#   proj_sym i n = Pair_ord (SUC0 (SUC0 0)) (Pair_ord i n)         (tag 2)
-#   if_in_sym    = SUC0 (SUC0 (SUC0 0))                            (= 3)
+#   zero_sym  = 0
+#   adj_sym   = SUC0 0                                              (= 1)
+#   proj_sym i n = Pair_ord (SUC0 (SUC0 0)) (Pair_ord i n)          (tag 2)
+#   if_in_sym = SUC0 (SUC0 (SUC0 0))                                (= 3)
 #   rec_sym g h  = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord g h)  (tag 4)
+#   const_sym c  = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) c  (tag 5)
+# (`mu_sym f = Pair_ord 6 f` is the partial-PR extension, not is_pr_sym.)
 # Symbolic names (zero_sym, adj_sym, ...) live in prst_pr.py, so the
 # body below uses the underlying nat0 literals / Pair_ord shapes
 # directly. `is_pr_sym` is non-recursive: the proj guard `nat0_lt i n`
 # and the rec hypotheses on g, h are encoded in the IS_PR_SYM_PROJ /
 # IS_PR_SYM_REC lemma statements, not in this body. (`is_partial_pr_sym`
-# in prst_pr.py is the wf-recursive closure that adds the mu-symbol
-# case.)
+# below is the wf-recursive closure that adds the mu-symbol case.)
 IS_PR_SYM_DEF = define(
     "is_pr_sym",
     parse_type("nat0 -> bool"),
@@ -707,7 +708,8 @@ IS_PR_SYM_DEF = define(
     "f = SUC0 0 \\/ "
     "(?i n. f = Pair_ord (SUC0 (SUC0 0)) (Pair_ord i n)) \\/ "
     "f = SUC0 (SUC0 (SUC0 0)) \\/ "
-    "(?g h. f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord g h))",
+    "(?g h. f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord g h)) \\/ "
+    "(?c. f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) c)",
 )
 is_pr_sym = mk_const("is_pr_sym", [])
 

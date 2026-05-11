@@ -131,6 +131,18 @@ REC_SYM_DEF = define(
 )
 rec_sym = mk_const("rec_sym", [])
 
+# const_sym c -- the 1-ary PR symbol "constant function returning c".
+# Tag 5 (between rec_sym tag 4 and mu_sym tag 6). Defining axiom:
+#   App_pt (const_sym c) (Tup_pt (Var_t 0) Empty_pt) = c
+# Closes the structural hole in diag_pr (the var_x slot) and unblocks
+# any further "constant argument" plumbing in substitute_pr / etc.
+CONST_SYM_DEF = define(
+    "const_sym",
+    parse_type("nat0 -> nat0"),
+    "\\c:nat0. Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) c",
+)
+const_sym = mk_const("const_sym", [])
+
 
 # ---------------------------------------------------------------------------
 # Stage 2A (c) -- the base layer is registered.
@@ -155,7 +167,8 @@ _IS_PR_SYM_BODY = (
     "{sym} = SUC0 0 \\/ "
     "(?i n. {sym} = Pair_ord (SUC0 (SUC0 0)) (Pair_ord i n)) \\/ "
     "{sym} = SUC0 (SUC0 (SUC0 0)) \\/ "
-    "(?g h. {sym} = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord g h))"
+    "(?g h. {sym} = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord g h)) \\/ "
+    "(?c. {sym} = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) c)"
 )
 
 
@@ -258,6 +271,42 @@ def IS_PR_SYM_REC(p):
         ).replace("Pair_ord g h", "Pair_ord gg hh")
     ).by_disj("h_ex")
     p.thus("is_pr_sym (rec_sym g h)").by_unfold("h_body", IS_PR_SYM_DEF)
+
+
+@proof
+def IS_PR_SYM_CONST(p):
+    """|- !c. is_pr_sym (const_sym c).
+
+    `const_sym c = Pair_ord 5 c` (CONST_SYM_DEF), so the const-disjunct
+    of `is_pr_sym`'s body matches at the witness `cc := c`.
+    """
+    p.goal("!c. is_pr_sym (const_sym c)", types={"c": nat0_ty})
+    p.fix("c")
+    const_eq_th = p.unfold(CONST_SYM_DEF, "c")
+    p.have(
+        "const_eq: const_sym c = "
+        "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) c"
+    ).by_thm(const_eq_th)
+    # Fresh bound name `cc` to avoid alpha-collision with the outer `c`.
+    p.have(
+        "h_ex: ?cc. const_sym c = "
+        "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) cc"
+    ).by_exists(["c"], "const_eq")
+    # Manual body string with the const disjunct renamed to ?cc.
+    # (Going through _IS_PR_SYM_BODY.format(...) here would require a
+    # fragile substring-replace; the inline form is clearer.)
+    body = (
+        "const_sym c = 0 \\/ "
+        "const_sym c = SUC0 0 \\/ "
+        "(?i n. const_sym c = Pair_ord (SUC0 (SUC0 0)) (Pair_ord i n)) \\/ "
+        "const_sym c = SUC0 (SUC0 (SUC0 0)) \\/ "
+        "(?g h. const_sym c = "
+        "       Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord g h)) \\/ "
+        "(?cc. const_sym c = "
+        "      Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) cc)"
+    )
+    p.have("h_body: " + body).by_disj("h_ex")
+    p.thus("is_pr_sym (const_sym c)").by_unfold("h_body", IS_PR_SYM_DEF)
 
 
 @proof
@@ -513,10 +562,26 @@ REC_STEP_DEF_AXIOM_AT_DEF = define(
 rec_step_def_axiom_at = mk_const("rec_step_def_axiom_at", [])
 
 
+# const_def_axiom_at c: defining equation for const_sym c. Unary axiom
+# (Var_t 0 is the single ignored arg). No side condition on c.
+_c_var_const_ax = Var("c", nat0_ty)
+CONST_DEF_AXIOM_AT_DEF = define(
+    "const_def_axiom_at",
+    parse_type("nat0 -> nat0"),
+    mk_abs(_c_var_const_ax,
+        _eq_pf_b(
+            _app_pt_b(mk_app(const_sym, _c_var_const_ax), var_t(0)),
+            _c_var_const_ax,
+        ),
+    ),
+)
+const_def_axiom_at = mk_const("const_def_axiom_at", [])
+
+
 # ---------------------------------------------------------------------------
 # Stage 2A (e) -- is_pr_def, the structural recogniser.
 #
-# Disjunction recognising any closed nat0 that matches one of the six
+# Disjunction recognising any closed nat0 that matches one of the seven
 # defining-equation patterns (no adj branch since adj_sym is primitive).
 #
 # Stub body: F. Real body is the disjunction listed below. The
@@ -536,18 +601,20 @@ IS_PR_DEF_DEF = define(
     "(?g h. n = rec_base_def_axiom_at g h "
     "       /\\ is_pr_sym g /\\ is_pr_sym h) \\/ "
     "(?g h. n = rec_step_def_axiom_at g h "
-    "       /\\ is_pr_sym g /\\ is_pr_sym h)",
+    "       /\\ is_pr_sym g /\\ is_pr_sym h) \\/ "
+    "(?c. n = const_def_axiom_at c)",
 )
 is_pr_def = mk_const("is_pr_def", [])
 
 
-# Same proof shape as the IS_PR_SYM_* lemmas: build the 6-disjunct body
+# Same proof shape as the IS_PR_SYM_* lemmas: build the 7-disjunct body
 # of IS_PR_DEF_DEF specialized at the axiom name, then by_unfold. The
 # REFL cases (ZERO / IF_IN_TRUE / IF_IN_FALSE) discharge a literal-equal
 # disjunct; PROJ / REC_BASE / REC_STEP build the 2-binder existential
-# leaf via by_exists first (since by_disj_witness is single-binder).
-# Fresh bound names (ii nn0 / gg hh) avoid the by_unfold alpha-rename
-# trap from Layer 4 part 1.
+# leaf via by_exists first (since by_disj_witness is single-binder);
+# CONST is a single-binder existential like PROJ but unguarded.
+# Fresh bound names (ii nn0 / gg hh / cc) avoid the by_unfold alpha-
+# rename trap from Layer 4 part 1.
 _IS_PR_DEF_BODY = (
     "{n} = zero_def_axiom \\/ "
     "(?ii nn0. {n} = proj_def_axiom_at ii nn0 /\\ nat0_lt ii nn0) \\/ "
@@ -556,7 +623,8 @@ _IS_PR_DEF_BODY = (
     "(?gg hh. {n} = rec_base_def_axiom_at gg hh "
     "         /\\ is_pr_sym gg /\\ is_pr_sym hh) \\/ "
     "(?gg hh. {n} = rec_step_def_axiom_at gg hh "
-    "         /\\ is_pr_sym gg /\\ is_pr_sym hh)"
+    "         /\\ is_pr_sym gg /\\ is_pr_sym hh) \\/ "
+    "(?cc. {n} = const_def_axiom_at cc)"
 )
 
 
@@ -686,6 +754,33 @@ def IS_PR_DEF_HOLDS_REC_STEP(p):
         "h_body: " + _IS_PR_DEF_BODY.format(n="rec_step_def_axiom_at g h")
     ).by_disj("h_ex")
     p.thus("is_pr_def (rec_step_def_axiom_at g h)").by_unfold(
+        "h_body", IS_PR_DEF_DEF
+    )
+
+
+@proof
+def IS_PR_DEF_HOLDS_CONST(p):
+    """|- !c. is_pr_def (const_def_axiom_at c).
+
+    Unconditional: the const axiom is parametric on any c with no
+    side condition. Single-binder existential leaf (?cc. ... = ...).
+    """
+    from tactics import REFL
+    p.goal(
+        "!c. is_pr_def (const_def_axiom_at c)",
+        types={"c": nat0_ty},
+    )
+    p.fix("c")
+    p.have(
+        "h_refl: const_def_axiom_at c = const_def_axiom_at c"
+    ).by_thm(REFL(p._parse("const_def_axiom_at c")))
+    p.have(
+        "h_ex: ?cc. const_def_axiom_at c = const_def_axiom_at cc"
+    ).by_exists(["c"], "h_refl")
+    p.have(
+        "h_body: " + _IS_PR_DEF_BODY.format(n="const_def_axiom_at c")
+    ).by_disj("h_ex")
+    p.thus("is_pr_def (const_def_axiom_at c)").by_unfold(
         "h_body", IS_PR_DEF_DEF
     )
 
@@ -909,14 +1004,17 @@ substitute_pr = mk_const("substitute_pr", [])
 
 
 # diag_pr n := substitute_pr (n, numeral_pr n, var_x).
-# Compositional shape: comp_sym substitute_pr applied to argument-shapers,
-# each fed the original n:
-#   * proj 0 1                   -- yields n
-#   * comp numeral_pr (proj 0 1) -- yields numeral n
-#   * const_var_x                -- yields var_x (constant function)
-# PRST does not yet provide a const_sym primitive, so the var_x slot is
-# left as a structural hole here; the third arg in the comp_sym arg-list
-# is omitted. Layer 7 fills it in alongside the full substitute_pr body.
+# Compositional shape: comp_sym substitute_pr applied to three 1-ary
+# argument-shapers, each fed the original n:
+#   * proj 0 1                       -- yields n
+#   * comp numeral_pr (proj 0 1)     -- yields numeral n
+#   * const_sym (Var_pt var_x)       -- yields var_x (constant function)
+# The const slot is now closed via the new const_sym primitive: its
+# defining axiom App_pt (const_sym c) (Tup_pt _ Empty_pt) = c lets the
+# argument vector evaluate to var_x regardless of the carried n.
+# substitute_pr's third arg is the variable INDEX (nat0), not a Var_pt
+# term. var_x is defined in hf_proof as `Var_t 0`; here we use the
+# encoded form directly to avoid a hf_proof import dependency.
 diag_pr_def = define(
     "diag_pr",
     parse_type("nat0"),
@@ -924,6 +1022,7 @@ diag_pr_def = define(
         substitute_pr,
         proj(0, 1),
         comp(numeral_pr, proj(0, 1)),
+        mk_app(const_sym, var_t(0)),  # const (Var_t 0) = const var_x
     ),
 )
 diag_pr = mk_const("diag_pr", [])
