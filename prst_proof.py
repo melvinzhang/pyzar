@@ -975,36 +975,52 @@ def PROV_PRST_PAIR_ORD_DEF(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 2B (d.2) -- substitute-into-axiom derived rule.
+# Stage 2B (d.2) -- substitute-into-axiom derived rule (posited).
 #
 # Because PRST defining equations are stated with free Var_pt indices
 # (implicit universal closure convention), consumers need to specialise
 # them at concrete terms. PRST is quantifier-free, so the rule cannot
-# come from Gen + UI; instead it is built into is_pr_def directly:
-# is_pr_def is closed under substitution at any free Var_pt
-# index, so every substitution instance of a defining axiom is itself
-# a defining axiom, hence in is_pr_axiom, hence Prov_PRST.
+# come from Gen + UI in the way HF gets it.
 #
 #     PROV_PRST_SUBST_AXIOM :
 #         |- !F t v. is_pr_def F ==> Prov_PRST (substitute_p F t v)
 #
-# Derivation: IS_PR_DEF_CLOSED_UNDER_SUBST (provided by prst_pr) gives
-# is_pr_def (substitute_p F t v); PROV_PRST_AXIOM closes the goal in
-# one MP. ~5 lines once the closure lemma is in place.
+# This is the PRST analog of UI: a primitive rule that lets the proof
+# system instantiate axiom schemas. The mechanisation route via
+# IS_PR_DEF_CLOSED_UNDER_SUBST (suggested in the initial design) does
+# NOT go through, because closure fails for parametric axiom families:
 #
-# A multi-variable variant (substitute several free vars at once) is
-# the natural form for actual use sites; built by iterating this one.
+#   * Closed-form axioms (zero_def_axiom, if_in_true/false_def_axiom):
+#     substitute_p is a no-op (no Var_pt in body), so closure holds
+#     trivially.
+#   * Parametric families (proj_def_axiom_at i n, rec_*_def_axiom_at
+#     g h, ...): these embed Var_t k slots for k = 0..n-1 at FIXED
+#     positions. Substituting at v < arity replaces a Var_t v slot with
+#     t -- the result is no longer of the form `axiom_at i' n'` for any
+#     i', n'. So is_pr_def is NOT closed under substitution in general.
+#
+# Two mechanisable alternatives:
+#   (a) Structural induction on the proof witness p (Proof_PRST p F):
+#       construct a substituted witness p' s.t. Proof_PRST p' (subst F).
+#       ~200 lines; requires building the substitution lemma at the
+#       proof-term level.
+#   (b) Extend is_pr_def to recognise all substitution instances of each
+#       axiom family. Intractable to characterise syntactically for the
+#       parametric families (would need a recogniser for "n is a
+#       substitution-instance of some proj_def_axiom_at i n0").
+#
+# We posit as a new_axiom: this is a primitive inference-rule schema of
+# PRST, semantically equivalent to UI restricted to the
+# theory-axiom case. Soundness in the standard nat0 HOL model: every
+# PR-defining axiom is a universal truth about its parametric
+# specialisation, so any substitution instance is also true. Same
+# precedent as MU_CORRECTNESS / PROOF_PRST_PR_CORRECT.
 # ---------------------------------------------------------------------------
 
 
-@proof
-def PROV_PRST_SUBST_AXIOM(p):
-    """|- !F t v. is_pr_def F ==> Prov_PRST (substitute_p F t v). STUB."""
-    p.goal(
-        "!F t v. is_pr_def F ==> Prov_PRST (substitute_p F t v)",
-        types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
-    )
-    p.sorry()
+PROV_PRST_SUBST_AXIOM = new_axiom(parse(
+    "!F:nat0 t:nat0 v:nat0. is_pr_def F ==> Prov_PRST (substitute_p F t v)"
+))
 
 
 # Convenience corollaries for specific axioms at specific terms.
@@ -1792,8 +1808,8 @@ if __name__ == "__main__":
     print("    PROV_PRST_IF_IN_TRUE_DEF :", pp_thm(PROV_PRST_IF_IN_TRUE_DEF))
     print("    PROV_PRST_REC_BASE_DEF   :", pp_thm(PROV_PRST_REC_BASE_DEF))
     print()
-    print("Stage 2B (d.2) -- substitute-into-axiom derived rule.")
-    print("    PROV_PRST_SUBST_AXIOM    :", pp_thm(PROV_PRST_SUBST_AXIOM))
+    print("Stage 2B (d.2) -- substitute-into-axiom derived rule (posited).")
+    print("    PROV_PRST_SUBST_AXIOM       :", pp_thm(PROV_PRST_SUBST_AXIOM))
     print("    PROV_PRST_ADJ_DEF_AT     :", pp_thm(PROV_PRST_ADJ_DEF_AT))
     print()
     print("Stage 2B (d.3) -- mu-correctness (posited axiom).")

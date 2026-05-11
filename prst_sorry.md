@@ -176,7 +176,7 @@ Depends on Layer 0 real `Proof_PRST_def` body + Layers 1-5.
 - `PROOF_PRST_CONS` — DSL friction (SELECT-under-binder), non-load-bearing. Downstream can route through PROOF_PRST_AT directly.
 - `PROV_PRST_ADJ_DEF_AT` — design issue: as stated requires `is_pterm x /\ is_pterm y` preconditions to invoke `is_Refl`, but `is_Refl` uses `is_term` (HF-side), not `is_pterm` (PRST-side). PRST formulas with App_pt subterms aren't `is_term`. Resolution requires either narrowing the lemma's domain or extending the axiom schema.
 - ~~`MU_CORRECTNESS`~~ — **DONE** (posited via `new_axiom`).
-- `PROV_PRST_SUBST_AXIOM` — needs new `IS_PR_DEF_CLOSED_UNDER_SUBST` obligation in prst_pr (~40 lines).
+- ~~`PROV_PRST_SUBST_AXIOM`~~ — **DONE** (posited via `new_axiom`). Initial design suggested an `IS_PR_DEF_CLOSED_UNDER_SUBST` route, but closure fails for parametric axiom families: `proj_def_axiom_at i n` embeds `Var_t k` slots at FIXED positions for k = 0..n-1; substituting at v < n replaces a slot with t, and the result is not of the form `axiom_at i' n'`. So `is_pr_def` is not closed under `substitute_p` in general. Posited as a primitive PRST inference-rule schema (analog of UI for theory axioms). Same precedent as MU_CORRECTNESS.
 - `PROV_PRST_MP` — needs proof-list concatenation lemma + a Proof_PRST monotonicity-under-concat lemma. Not provided by the current Proof_PRST encoding; either add the concat helper or revisit the encoding.
 
 **DSL friction newly observed:**
@@ -320,6 +320,7 @@ The mechanisation commits two correctness statements as `new_axiom`s rather than
 | `MU_CORRECTNESS` | `is_partial_pr_sym f /\ App_pt f (Tup_pt q args) = T_pt ==> App_pt f (Tup_pt (App_pt (mu_sym f) args) args) = T_pt` | `prst_proof.py` |
 | `PROOF_PRST_PR_CORRECT` | `Proof_PRST p n <=> App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt` | `prst_proof.py` |
 | `PROOF_PRST_PR_INTERNAL_EVAL` | `App_pt Proof_PRST_pr ... = T_pt ==> Prov_PRST (Eq_pf (App_pt Proof_PRST_pr ...) T_pt)` | `prst_proof.py` |
+| `PROV_PRST_SUBST_AXIOM` | `is_pr_def F ==> Prov_PRST (substitute_p F t v)` | `prst_proof.py` |
 
 **Audit of infra reuse for `Proof_PRST_pr`** (justifies the axiomatic choice):
 
@@ -334,8 +335,8 @@ Mechanising `Proof_PRST_pr` faithfully would require ~150 lines of `nth_pr`/`exi
 
 **Trust-burden trade-off recap:**
 - Each posit weakens the "PRST verifies its own Gödel theorems" demonstration by one notch.
-- Soundness of all three axioms holds in the standard nat0 HOL model (μ via least-witness convention, `Proof_PRST_pr` via PR-completeness applied to the decidable Sigma_1 predicate `Proof_PRST`).
-- Total non-mechanised commitments after this fork: 3 axioms (vs. 1 with the constructive route). HF-side has 0.
+- Soundness of all four axioms holds in the standard nat0 HOL model (μ via least-witness convention, `Proof_PRST_pr` via PR-completeness applied to the decidable Sigma_1 predicate `Proof_PRST`, `PROV_PRST_SUBST_AXIOM` as the standard semantic argument that substitution preserves truth for universally-stated axioms).
+- Total non-mechanised commitments: 4 axioms (vs. 1 with the fully constructive route). HF-side has 0 (HF gets the substitution rule via UI for free).
 
 ---
 
