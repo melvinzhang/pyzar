@@ -2663,8 +2663,73 @@ def SK_ITER_ADD(p):
     Either re-derive N0PLUS_BASE_L / N0PLUS_SUC_L inline or commute via
     N0PLUS_COMM (already in hf_sets? check before importing).
     """
+    from tactics import TRANS as _TRANS, SYM as _SYM
+
     p.goal("!n m t. sk_iter (n0plus n m) t = sk_iter n (sk_iter m t)")
-    p.sorry()
+    p.fix("n")
+    # DSL friction: we want induction on the SECOND quantifier (m); leave
+    # m unfixed so ``with p.induction("m"):`` auto-peels ``!m t. body``.
+    with p.induction("m"):
+        with p.base():
+            p.fix("t")
+            # Goal: sk_iter (n0plus n 0) t = sk_iter n (sk_iter 0 t).
+            # Both sides reduce to ``sk_iter n t`` under N0PLUS_BASE
+            # (n0plus n 0 -> n) and SK_ITER_ZERO (sk_iter 0 t -> t).
+            p.thus(
+                "sk_iter (n0plus n 0) t = sk_iter n (sk_iter 0 t)"
+            ).by_rewrite([N0PLUS_BASE, SK_ITER_ZERO])
+
+        with p.step("IH"):
+            p.fix("t")
+            # IH (universally bound in t): specialise at this frame's t.
+            p.have(
+                "h_ih: sk_iter (n0plus n m) t = sk_iter n (sk_iter m t)"
+            ).by("IH", "t")
+
+            # ---- Commutation lemma at X := sk_iter m t. ------------------
+            # ``sk_step (sk_iter n X) = sk_iter n (sk_step X)`` -- both
+            # sides equal sk_iter (SUC0 n) X via SK_ITER_SUC and
+            # SK_ITER_PUSH respectively.  Chain SYM + TRANS.
+            p.have(
+                "h_push: sk_iter (SUC0 n) (sk_iter m t) "
+                "       = sk_iter n (sk_step (sk_iter m t))"
+            ).by(SK_ITER_PUSH, "n", "sk_iter m t")
+            p.have(
+                "h_suc: sk_iter (SUC0 n) (sk_iter m t) "
+                "      = sk_step (sk_iter n (sk_iter m t))"
+            ).by(SK_ITER_SUC, "n", "sk_iter m t")
+            # DSL friction: no "by_trans against a shared LHS" tactic
+            # (by_trans composes a=b, b=c into a=c; here both facts have
+            # the same LHS so we need SYM on one side first).  Drop to
+            # kernel TRANS + SYM through ``by_thm``.
+            p.have(
+                "h_comm: sk_step (sk_iter n (sk_iter m t)) "
+                "       = sk_iter n (sk_step (sk_iter m t))"
+            ).by_thm(_TRANS(_SYM(p.fact("h_suc")), p.fact("h_push")))
+
+            # ---- Compose LHS -> RHS via by_rewrite ----------------------
+            # Goal: sk_iter (n0plus n (SUC0 m)) t
+            #       = sk_iter n (sk_iter (SUC0 m) t).
+            # Rewrites (all left-to-right):
+            #   N0PLUS_STEP : n0plus _ (SUC0 _) -> SUC0 (n0plus _ _)
+            #   SK_ITER_SUC : sk_iter (SUC0 _) _ -> sk_step (sk_iter _ _)
+            #   h_ih        : sk_iter (n0plus n m) t -> sk_iter n (sk_iter m t)
+            #   h_comm      : sk_step (sk_iter n (sk_iter m t))
+            #                   -> sk_iter n (sk_step (sk_iter m t))
+            # Both sides normalise to sk_iter n (sk_step (sk_iter m t)).
+            #
+            # DSL friction: h_ih and h_comm are FREE in t (not re-
+            # universalised at frame entry); by_rewrite relies on
+            # exact-shape occurrences, which the cascade above produces.
+            p.thus(
+                "sk_iter (n0plus n (SUC0 m)) t "
+                "= sk_iter n (sk_iter (SUC0 m) t)"
+            ).by_rewrite([
+                N0PLUS_STEP,
+                SK_ITER_SUC,
+                "h_ih",
+                "h_comm",
+            ])
 
 
 @proof
