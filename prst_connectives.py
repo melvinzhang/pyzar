@@ -1,13 +1,16 @@
 """Derived PRST-formula connectives on godelnums.
 
-Mirrors ``hf_connectives.py`` -- since PRST shares HF's logical
-constructors (Not_pf = Not_f, Imp_pf = Imp_f, Forall_pf = Forall_f),
-the derived connectives ``And_pf`` / ``Or_pf`` / ``Iff_pf`` /
-``Exists_pf`` are literally the same as their HF counterparts. We
-re-export them under PRST-flavoured names so downstream PRST modules
-(diagonal lemma, godel_first_prst) have a uniform naming convention,
-and re-state their substitute-distribution lemmas at the PRST
-``substitute_p`` level.
+Mirrors ``hf_connectives.py`` -- since PRST shares HF's propositional
+constructors (Not_pf = Not_f, Imp_pf = Imp_f), the derived connectives
+``And_pf`` / ``Or_pf`` / ``Iff_pf`` are literally the same as their HF
+counterparts. We re-export them under PRST-flavoured names so downstream
+PRST modules (diagonal lemma, godel_first_prst) have a uniform naming
+convention, and re-state their substitute-distribution lemmas at the
+PRST ``substitute_p`` level.
+
+PRST is quantifier-free, so HF's ``Exists_f`` (which is built from
+``Forall_f``) has no PRST counterpart; consumers express "there exists"
+in the meta-theory or via PR-function evaluation instead.
 
 Stubs: the substitute-distribution lemmas at ``substitute_p`` are
 sorried; their proofs are the same as the hf_connectives versions,
@@ -23,16 +26,13 @@ from hf_connectives import (
     And_f,  # noqa: F401  -- body of And_pf
     Or_f,  # noqa: F401  -- body of Or_pf
     Iff_f,  # noqa: F401  -- body of Iff_pf
-    Exists_f,  # noqa: F401  -- body of Exists_pf
     AND_F_AT,  # noqa: F401  -- re-exported
     OR_F_AT,  # noqa: F401  -- re-exported
     IFF_F_AT,  # noqa: F401  -- re-exported
-    EXISTS_F_AT,  # noqa: F401  -- re-exported
 )
 from prst_syntax import (
     Not_pf,  # noqa: F401  -- parser alias in connective bodies
     Imp_pf,  # noqa: F401  -- parser alias
-    Forall_pf,  # noqa: F401  -- parser alias
     substitute_p,  # noqa: F401  -- parser alias
     free_in_p,  # noqa: F401  -- parser alias for capture-avoidance
 )
@@ -55,20 +55,15 @@ Or_pf = mk_const("Or_pf", [])
 IFF_PF_DEF = define("Iff_pf", parse_type("nat0 -> nat0 -> nat0"), "Iff_f")
 Iff_pf = mk_const("Iff_pf", [])
 
-EXISTS_PF_DEF = define(
-    "Exists_pf", parse_type("nat0 -> nat0 -> nat0"), "Exists_f"
-)
-Exists_pf = mk_const("Exists_pf", [])
-
 
 # ---------------------------------------------------------------------------
 # Stage 1' (a) -- substitute_p distribution for the derived connectives.
 #
-# Same shape as SUBSTITUTE_AT_AND / _OR / _IFF / _EXISTS_MISS in
-# hf_connectives, but stated at substitute_p (the PRST substitute).
-# Proofs proceed by unfolding the connective via *_F_AT, then applying
-# the PRST AT-equations for Not_pf / Imp_pf / Forall_pf (which agree
-# with the HF versions by re-export).
+# Same shape as SUBSTITUTE_AT_AND / _OR / _IFF in hf_connectives, but
+# stated at substitute_p (the PRST substitute). Proofs proceed by
+# unfolding the connective via *_F_AT, then applying the PRST
+# AT-equations for Not_pf / Imp_pf (which agree with the HF versions
+# by re-export).
 # ---------------------------------------------------------------------------
 
 
@@ -108,24 +103,6 @@ def SUBSTITUTE_P_AT_IFF(p):
     p.sorry()
 
 
-@proof
-def SUBSTITUTE_P_AT_EXISTS_MISS(p):
-    """|- !u F t v. ~(u = v) /\\ ~(free_in_p t u)
-                    ==> substitute_p (Exists_pf u F) t v
-                        = Exists_pf u (substitute_p F t v). STUB.
-
-    Capture-avoiding side conditions: ``v`` is not the bound variable
-    ``u``; and ``u`` is not free in the replacement term ``t``.
-    """
-    p.goal(
-        "!u F t v. ~(u = v) /\\ ~(free_in_p t u) ==> "
-        "          substitute_p (Exists_pf u F) t v "
-        "          = Exists_pf u (substitute_p F t v)",
-        types={"u": nat0_ty, "F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
-    )
-    p.sorry()
-
-
 if __name__ == "__main__":
     from parser import pp_thm
 
@@ -133,4 +110,3 @@ if __name__ == "__main__":
     print("    SUBSTITUTE_P_AT_AND          :", pp_thm(SUBSTITUTE_P_AT_AND))
     print("    SUBSTITUTE_P_AT_OR           :", pp_thm(SUBSTITUTE_P_AT_OR))
     print("    SUBSTITUTE_P_AT_IFF          :", pp_thm(SUBSTITUTE_P_AT_IFF))
-    print("    SUBSTITUTE_P_AT_EXISTS_MISS  :", pp_thm(SUBSTITUTE_P_AT_EXISTS_MISS))

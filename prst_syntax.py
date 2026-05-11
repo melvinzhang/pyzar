@@ -27,7 +27,11 @@
 #
 #   Term  ::=  Empty | Var num | Insert Term Term | App f_sym ArgList
 #   Form  ::=  Eq Term Term | In Term Term
-#           |  Not Form | Imp Form Form | Forall num Form
+#           |  Not Form | Imp Form Form
+#
+# PRST is quantifier-free: free Var_pt indices in a PRST formula are
+# implicitly universally closed by the proof system (PROV_PRST_AXIOM +
+# the substitution-into-axiom derived rule). There is no Forall_pf.
 #
 #   ArgList = nat0-encoded list of Terms (cons_l / nil_l from hf_proof).
 #
@@ -39,7 +43,6 @@
 #     Eq_pf    t1 t2    :=  Pair_ord 5 (Pair_ord t1 t2) (= Eq_f)
 #     Not_pf   F        :=  Pair_ord 6 F                (= Not_f)
 #     Imp_pf   F1 F2    :=  Pair_ord 7 (Pair_ord F1 F2) (= Imp_f)
-#     Forall_pf n F     :=  Pair_ord 8 (Pair_ord n F)   (= Forall_f)
 #     Insert_pt t1 t2   :=  Pair_ord 9 (Pair_ord t1 t2) (= Insert_t)
 #     In_pa    t1 t2    :=  Pair_ord 10 (Pair_ord t1 t2)(= In_a)
 #     App_pt   f a      :=  Pair_ord 11 (Pair_ord f a)  (NEW)
@@ -82,14 +85,12 @@ from hf_syntax import (  # re-exported; PRST uses the same encoding for these
     Eq_f,  # noqa: F401  -- body of Eq_pf
     Not_f,  # noqa: F401  -- body of Not_pf
     Imp_f,  # noqa: F401  -- body of Imp_pf
-    Forall_f,  # noqa: F401  -- body of Forall_pf
     Insert_t,  # noqa: F401  -- body of Insert_pt
     In_a,  # noqa: F401  -- body of In_pa
     VAR_T_AT,  # noqa: F401  -- re-export
     EQ_F_AT,  # noqa: F401  -- re-export
     NOT_F_AT,  # noqa: F401  -- re-export
     IMP_F_AT,  # noqa: F401  -- re-export
-    FORALL_F_AT,  # noqa: F401  -- re-export
     INSERT_T_AT,  # noqa: F401  -- re-export
     IN_A_AT,  # noqa: F401  -- re-export
 )
@@ -117,11 +118,6 @@ Not_pf = mk_const("Not_pf", [])
 
 IMP_PF_DEF = define("Imp_pf", parse_type("nat0 -> nat0 -> nat0"), "Imp_f")
 Imp_pf = mk_const("Imp_pf", [])
-
-FORALL_PF_DEF = define(
-    "Forall_pf", parse_type("nat0 -> nat0 -> nat0"), "Forall_f"
-)
-Forall_pf = mk_const("Forall_pf", [])
 
 INSERT_PT_DEF = define(
     "Insert_pt", parse_type("nat0 -> nat0 -> nat0"), "Insert_t"
@@ -388,16 +384,6 @@ def IS_PFORM_AT_IMP(p):
     p.sorry()
 
 
-@proof
-def IS_PFORM_AT_FORALL(p):
-    """|- !v F. is_pform (Forall_pf v F) = is_pform F. STUB."""
-    p.goal(
-        "!v F. is_pform (Forall_pf v F) = is_pform F",
-        types={"v": nat0_ty, "F": nat0_ty},
-    )
-    p.sorry()
-
-
 # ---------------------------------------------------------------------------
 # Stage 1 (f) -- free_in extended for App_pt.
 #
@@ -529,10 +515,11 @@ def SUBSTITUTE_P_PRESERVES_IS_PFORM(p):
 #     (4 AT-equations + 2 preservation lemmas).
 #
 # Estimate ~500 lines once filled in -- the bulk of HF's syntax lemmas
-# (Pair_ord injectivity, the disjointness chain across all 8 HF tags,
-# substitute distributing over Imp/Forall/Eq/In, free_in computing
+# (Pair_ord injectivity, the disjointness chain across the HF tags PRST
+# uses, substitute distributing over Imp/Eq/In, free_in computing
 # correctly) is inherited verbatim and only needs re-stating, not
-# re-proving.
+# re-proving. PRST drops HF's Forall clauses entirely (the object
+# theory is quantifier-free).
 # ---------------------------------------------------------------------------
 
 

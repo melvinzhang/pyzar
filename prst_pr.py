@@ -69,7 +69,6 @@ from prst_syntax import (
     Eq_pf,  # noqa: F401  -- parser alias
     Not_pf,  # noqa: F401  -- parser alias
     Imp_pf,  # noqa: F401  -- parser alias
-    Forall_pf,  # noqa: F401  -- parser alias
     Insert_pt,  # noqa: F401  -- parser alias
     In_pa,  # noqa: F401  -- parser alias
     App_pt,

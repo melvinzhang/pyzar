@@ -2,10 +2,11 @@
 # Stage 2B (PRST) -- the PRST proof system.
 # ---------------------------------------------------------------------------
 #
-# PRST's logic = HF's logic. Same Hilbert-style propositional axioms
-# (K, S, N), same quantifier axioms (UI, Vac, FaImp), same equality
-# axioms (Refl, Subst), same inference rules (modus ponens,
-# generalisation). The only delta is the non-logical axiom layer:
+# PRST is a quantifier-free theory: HF's propositional fragment
+# (K, S, N axiom schemas, modus ponens) plus equality axioms
+# (Refl, Subst), with free Var_pt indices in axioms implicitly
+# universally closed. No object-level Forall_pf, no UI/Gen rules.
+# The non-logical axiom layer differs from HF:
 #
 #   * HF1 - HF5 carry over verbatim (membership/insert/extensionality/
 #     foundation).
@@ -24,11 +25,15 @@
 #
 # where Proof_PRST is a list-of-godelnums proof-checker.
 #
-# The closure rules drop out the same way:
+# The closure rules drop out the same way (minus generalisation,
+# which has no object-level counterpart):
 #
 #   (1) |- !n. is_pr_axiom n ==> Prov_PRST n.
 #   (2) |- !f g. Prov_PRST f /\ Prov_PRST (Imp_pf f g) ==> Prov_PRST g.
-#   (3) |- !f x. Prov_PRST f ==> Prov_PRST (Forall_pf x f).
+#
+# Specialisation of free Var_pt indices is provided by the derived
+# rule PROV_PRST_SUBST_AXIOM: each axiom schema is closed under
+# substitution into its free Var_pt slots.
 #
 # This file is mostly *re-using* hf_proof's logical axiom schemas
 # (IS_K/IS_S/.../IS_SUBST), wrapping them under is_pr_axiom, and
@@ -46,12 +51,11 @@ from proof import proof, define_with_at
 from hf_proof import (
     IS_HF_AXIOM_DEF,  # noqa: F401  -- re-used: HF1-5 carry over to PRST
     IS_HF_AXIOM_AT,  # noqa: F401  -- re-used
-    IS_LOGICAL_AXIOM_DEF,  # noqa: F401  -- re-used: same logic as HF
+    IS_LOGICAL_AXIOM_DEF,  # noqa: F401  -- re-used: propositional fragment only
     IS_LOGICAL_AXIOM_AT,  # noqa: F401  -- re-used
     IS_AXIOM_DEF,  # noqa: F401  -- re-used as a building block
     IS_AXIOM_AT,  # noqa: F401  -- re-used
     is_mp,  # noqa: F401
-    is_gen,  # noqa: F401
 )
 from hf_repr_core import (
     Prov_HF,  # noqa: F401  -- used in PROV_HF_TO_PROV_PRST
@@ -90,7 +94,7 @@ from hf_proof import (
 )
 from prst_syntax import (
     Imp_pf,  # noqa: F401  -- parser alias for is_pr_axiom
-    Forall_pf,  # noqa: F401  -- parser alias
+    is_pform,  # noqa: F401  -- parser alias for PROV_HF_TO_PROV_PRST
 )
 
 
@@ -115,6 +119,13 @@ IS_PR_AXIOM_DEF, IS_PR_AXIOM_AT = define_with_at(
     "\\n:nat0. is_hf_axiom n \\/ is_pr_def n \\/ is_logical_axiom n",
 )
 is_pr_axiom = mk_const("is_pr_axiom", [])
+
+# Note on is_logical_axiom: HF's bundle includes the quantifier
+# schemas is_UI / is_Vac / is_FaImp. In PRST these branches are inert
+# because the underlying schemas recognise formulas containing Forall_f
+# (= the HF Forall constructor), which PRST formulas (built without
+# Forall_pf) never contain. So re-using is_logical_axiom verbatim is
+# safe -- the unused branches never fire on PRST inputs.
 
 
 # ---------------------------------------------------------------------------
@@ -150,15 +161,14 @@ def PROOF_PRST_CONS(p):
               /\\ ( is_pr_axiom h
                   \\/ (?f g. Proof_PRST t f
                               /\\ Proof_PRST t (Imp_pf f g)
-                              /\\ h = g)
-                  \\/ (?f x. Proof_PRST t f /\\ h = Forall_pf x f))).
-    STUB (one-step extension of an existing proof)."""
+                              /\\ h = g))).
+    STUB (one-step extension of an existing proof; only axiom and
+    modus-ponens steps -- PRST has no generalisation rule)."""
     p.goal(
         "!h t n. Proof_PRST (cons_l h t) n = "
         "( n = h "
         "  /\\ ( is_pr_axiom h "
-        "      \\/ (?f g. Proof_PRST t f /\\ Proof_PRST t (Imp_pf f g) /\\ h = g) "
-        "      \\/ (?f x. Proof_PRST t f /\\ h = Forall_pf x f)))",
+        "      \\/ (?f g. Proof_PRST t f /\\ Proof_PRST t (Imp_pf f g) /\\ h = g)))",
         types={"h": nat0_ty, "t": nat0_ty, "n": nat0_ty},
     )
     p.sorry()
@@ -299,24 +309,20 @@ def PROV_PRST_REC_STEP_DEF(p):
 # ---------------------------------------------------------------------------
 # Stage 2B (d.2) -- substitute-into-axiom derived rule.
 #
-# Because PRST defining equations are stated with free Var_t indices
+# Because PRST defining equations are stated with free Var_pt indices
 # (implicit universal closure convention), consumers need to specialise
-# them at concrete terms. This is the derived rule that does it.
+# them at concrete terms. PRST is quantifier-free, so we cannot derive
+# the rule via Gen + UI as HF does; instead it is built into is_pr_def
+# directly: is_pr_def is closed under substitution at any free Var_pt
+# index, so every substitution instance of a defining axiom is itself
+# a defining axiom, hence in is_pr_axiom, hence Prov_PRST.
 #
 #     PROV_PRST_SUBST_AXIOM :
 #         |- !F t v. is_pr_def F ==> Prov_PRST (substitute_p F t v)
 #
-# Derivation (standard Hilbert pattern):
-#     is_pr_def F                                       (hyp)
-#   -----------------------------------------          (PROV_PRST_AXIOM)
-#     Prov_PRST F
-#   -----------------------------------------          (PROV_PRST_GEN at v)
-#     Prov_PRST (Forall_pf v F)
-#   -----------------------------------------          (PROV_PRST_UI on t)
-#     Prov_PRST (substitute_p F t v)
-#
-# ~10 lines once PROV_PRST_UI is in place (PROV_PRST_UI is itself the
-# is_UI logical axiom + PROV_PRST_AXIOM specialisation).
+# Derivation: IS_PR_DEF_CLOSED_UNDER_SUBST (provided by prst_pr) gives
+# is_pr_def (substitute_p F t v); PROV_PRST_AXIOM closes the goal in
+# one MP. ~5 lines once the closure lemma is in place.
 #
 # A multi-variable variant (substitute several free vars at once) is
 # the natural form for actual use sites; built by iterating this one.
@@ -380,46 +386,37 @@ def PROV_PRST_MP(p):
     p.sorry()
 
 
-@proof
-def PROV_PRST_GEN(p):
-    """|- !f x. Prov_PRST f ==> Prov_PRST (Forall_pf x f).
-
-    Proof: extend witnessing proof of f by one generalisation step. STUB.
-    """
-    p.goal("!f x. Prov_PRST f ==> Prov_PRST (Forall_pf x f)")
-    p.sorry()
-
-
 # ---------------------------------------------------------------------------
-# Stage 2B (e) -- bridge: every HF theorem is a PRST theorem.
+# Stage 2B (e) -- bridge: every quantifier-free HF theorem is a PRST theorem.
 #
-# Because is_pr_axiom is a *superset* of is_hf_axiom (and the logical
-# axioms / inference rules coincide), every HF proof is automatically
-# a PRST proof. Formally:
+# is_pr_axiom is a superset of is_hf_axiom and shares is_logical_axiom,
+# so any Forall-free HF proof is automatically a PRST proof. Formally:
 #
-#   |- !n. Prov_HF n ==> Prov_PRST n.
+#   |- !n. is_pform n /\ Prov_HF n ==> Prov_PRST n.
 #
-# This lets us re-use the entire hf_logic toolkit (PROV_HF_K,
-# PROV_HF_AND_INTRO, PROV_HF_IFF_INTRO, PROV_HF_UI, ...) inside PRST
-# without re-proving anything: just push each Prov_HF conclusion
-# through PROV_HF_TO_PROV_PRST.
+# (The is_pform side condition restricts to Forall-free formulas;
+# Forall_f-containing HF theorems have no PRST counterpart since PRST
+# formulas don't include Forall_pf.) This lets us re-use the
+# propositional / equality fragment of the hf_logic toolkit
+# (PROV_HF_K, PROV_HF_AND_INTRO, PROV_HF_IFF_INTRO, ...) inside PRST
+# by pushing each Forall-free Prov_HF conclusion through the bridge.
 # ---------------------------------------------------------------------------
 
 
 @proof
 def PROV_HF_TO_PROV_PRST(p):
-    """|- !n. Prov_HF n ==> Prov_PRST n.
+    """|- !n. is_pform n /\\ Prov_HF n ==> Prov_PRST n.
 
-    Proof: induction on the Prov_HF witness. The axiom branch uses
-    is_hf_axiom ==> is_pr_axiom (via disjunction); the MP and GEN
-    branches go through PROV_PRST_MP / PROV_PRST_GEN. STUB.
-
-    (Once filled in, this is THE entry point for re-using all of
-    hf_logic.py inside PRST. The HF-internal toolkit -- iff intro,
-    UI, contraposition, double-negation -- becomes available for
-    Prov_PRST goals via one PROV_HF_TO_PROV_PRST step at the end.)
+    Proof: induction on the Prov_HF witness, restricted to is_pform
+    (= Forall-free) conclusions. The axiom branch uses is_hf_axiom ==>
+    is_pr_axiom (via disjunction); the MP branch goes through
+    PROV_PRST_MP. The GEN branch of Prov_HF cannot fire on an is_pform
+    conclusion because Forall_f-headed formulas fail is_pform. STUB.
     """
-    p.goal("!n. Prov_HF n ==> Prov_PRST n", types={"n": nat0_ty})
+    p.goal(
+        "!n. is_pform n /\\ Prov_HF n ==> Prov_PRST n",
+        types={"n": nat0_ty},
+    )
     p.sorry()
 
 
@@ -499,35 +496,38 @@ def PROV_PRST_DIAG_EVAL(p):
 # ---------------------------------------------------------------------------
 # Stage 2B (g) -- Prov_PRST_internal: the PRST formula expressing
 # "Prov_PRST holds at x". This is the analog of Prov_HF_internal from
-# hf_repr_thms.py, but built differently: instead of representing
-# Proof_HF as a Sigma_1 HF-formula, we use the Proof_HF_pr function
-# symbol directly:
+# hf_repr_thms.py, but built differently. PRST is quantifier-free, so
+# we cannot write "there exists a proof y of x" as an Exists_pf formula
+# directly. Instead we use a *search* PR symbol find_proof_pr that
+# returns a proof of x when one exists (and a sentinel otherwise), and
+# define:
 #
-#   Prov_PRST_internal := Exists_pf var_y (Eq_pf
-#                            (App_pt Proof_HF_pr
-#                              (cons_l (Var_pt y) (cons_l (Var_pt x) nil_l)))
-#                            (encoded "T")).
+#   Prov_PRST_internal := Eq_pf
+#                           (App_pt Proof_HF_pr
+#                             (cons_l (App_pt find_proof_pr
+#                                       (cons_l (Var_pt x) nil_l))
+#                                     (cons_l (Var_pt x) nil_l)))
+#                           T_pt.
 #
-# I.e. "there exists a proof y such that Proof_HF_pr(y, x) holds". The
-# "encoded T" trick exploits PRST's equality with a sentinel value
-# (e.g. Empty_pt vs Insert_pt Empty_pt Empty_pt for true/false).
-# Alternative encoding: make Proof_HF_pr return an HF-set marker and
-# compare with In_pa.
+# I.e. "Proof_HF_pr(find_proof_pr(x), x) = T_pt". Because find_proof_pr
+# is a PR symbol (registered in prst_pr), this is a closed PRST formula
+# with no quantifiers. The representability theorem is one Prov_PRST
+# step:
 #
-# Either way the *representability theorem* is one Prov_PRST step:
+#   |- !n. Prov_PRST n <=> Prov_PRST (substitute_p Prov_PRST_internal
+#                                                  (numeral n) var_x).
 #
-#   |- !n. Prov_PRST n <=> Prov_PRST (substitute Prov_PRST_internal
-#                                               (numeral n) var_x).
-#
-# This is structurally trivial in PRST -- compare with the ~2000 lines
-# of PROV_HF_REPRESENTS scaffolding in hf_repr_thms.
+# (find_proof_pr is not primitive recursive in the usual sense -- it
+# requires unbounded search -- so this layer relies on the partial-PR
+# extension; that is the analog of the HF Sigma_1 existential. See
+# prst_pr for the construction.)
 # ---------------------------------------------------------------------------
 
 
 prov_prst_internal_def = define(
     "Prov_PRST_internal",
     parse_type("nat0"),
-    "0",  # placeholder; real body uses Exists_pf + App_pt Proof_HF_pr
+    "0",  # placeholder; real body uses App_pt find_proof_pr + Proof_HF_pr
 )
 Prov_PRST_internal = mk_const("Prov_PRST_internal", [])
 
@@ -598,7 +598,6 @@ if __name__ == "__main__":
     print("    PROV_PRST_DEF          :", pp_thm(PROV_PRST_DEF))
     print("    PROV_PRST_AXIOM        :", pp_thm(PROV_PRST_AXIOM))
     print("    PROV_PRST_MP           :", pp_thm(PROV_PRST_MP))
-    print("    PROV_PRST_GEN          :", pp_thm(PROV_PRST_GEN))
     print()
     print("Stage 2B (d.1) -- PR-defining-equation theorems (specialisations).")
     print("    PROV_PRST_ZERO_DEF       :", pp_thm(PROV_PRST_ZERO_DEF))

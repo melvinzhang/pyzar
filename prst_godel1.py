@@ -52,7 +52,6 @@ from prst_syntax import (
     Eq_pf,  # noqa: F401  -- parser alias
     Not_pf,  # noqa: F401  -- parser alias
     Imp_pf,  # noqa: F401  -- parser alias
-    Forall_pf,  # noqa: F401  -- parser alias
     Insert_pt,  # noqa: F401
     Empty_pt,  # noqa: F401
     App_pt,
@@ -64,7 +63,6 @@ from prst_syntax import (
 from prst_connectives import (
     And_pf,  # noqa: F401
     Iff_pf,
-    Exists_pf,  # noqa: F401  -- parser alias
 )
 from prst_pr import (
     diag_pr,
@@ -82,52 +80,49 @@ from prst_proof import (
 from prst_repr import (
     DIAG_REPRESENTS_PRST,  # noqa: F401  -- replaces godel_first.DIAG_REPRESENTS
 )
-from hf_proof import var_x, var_y  # PRST re-uses HF variable choices
+from hf_proof import var_x  # PRST re-uses HF variable choices
 
 
 # ---------------------------------------------------------------------------
 # Stage 4 (PRST) -- the diagonal lemma.
 #
-# Same Goedel-Carnap construction:
+# Goedel-Carnap construction in quantifier-free form:
 #
-#   theta_of_phi_p(phi) := Exists_pf var_y
-#                            (And_pf (Eq_pf (App_pt diag_pr
-#                                              (cons_l var_x nil_l))
-#                                           var_y)
-#                                    (substitute_p phi var_y var_x)).
+#   theta_of_phi_p(phi) := substitute_p phi
+#                                       (App_pt diag_pr (cons_l var_x nil_l))
+#                                       var_x.
 #
 # psi := substitute_p theta_of_phi_p(phi) (numeral (theta_of_phi_p phi)) var_x.
 #
 # Compare with the HF version (godel_first.py L582-589):
-#   * HF used ``And_f diag_internal (substitute phi var_y var_x)``,
-#     where ``diag_internal`` was an axiomatized HF formula
-#     representing the diag relation.
-#   * PRST uses ``And_pf (Eq_pf (App_pt diag_pr ...) var_y) ...`` --
-#     a *concrete* PRST formula with no axiomatization required, since
-#     ``diag_pr`` is a registered PR symbol whose evaluation is given
-#     by DIAG_REPRESENTS_PRST.
+#   * HF used ``Exists_f var_y (And_f diag_internal (substitute phi var_y
+#     var_x))``, where ``diag_internal`` was an axiomatized HF formula
+#     representing the diag relation. The existential was needed because
+#     diag was only available as a Sigma_1 relation, not a function.
+#   * PRST collapses the existential entirely: since ``diag_pr`` is a
+#     PR function symbol, the term ``App_pt diag_pr (cons_l var_x
+#     nil_l)`` IS the value diag(x) at the syntactic level. There is
+#     nothing to existentially quantify over; we just substitute the
+#     diag-term in for var_x directly.
 #
-# This is the key payoff: ``diag_internal`` (4 axiomatic stubs in
-# godel_first.py: DIAG_REPRESENTS, IS_FORM_DIAG_INTERNAL,
-# FREE_IN_DIAG_INTERNAL, DIAG_FUNCTIONAL) collapses to ZERO axiomatic
-# stubs in PRST.
+# This is the key payoff of moving from HF to PRST: the diagonal lemma
+# requires no quantifiers at the object level, and ``diag_internal``
+# (4 axiomatic stubs in godel_first.py: DIAG_REPRESENTS,
+# IS_FORM_DIAG_INTERNAL, FREE_IN_DIAG_INTERNAL, DIAG_FUNCTIONAL)
+# collapses to ZERO axiomatic stubs in PRST.
 # ---------------------------------------------------------------------------
 
 
 _phi_n0 = Var("phi", nat0_ty)
 
 
-# theta_of_phi_p(phi) := Exists_pf (SUC0 0)
-#                          (And_pf
-#                            (Eq_pf (App_pt diag_pr (cons_l var_x nil_l)) var_y)
-#                            (substitute_p phi var_y var_x))
+# theta_of_phi_p(phi) := substitute_p phi (App_pt diag_pr (cons_l var_x nil_l)) var_x
 THETA_OF_PHI_P_DEF = define(
     "theta_of_phi_p",
     parse_type("nat0 -> nat0"),
-    "\\phi:nat0. Exists_pf (SUC0 0) "
-    "             (And_pf "
-    "               (Eq_pf (App_pt diag_pr (cons_l var_x nil_l)) var_y) "
-    "               (substitute_p phi var_y var_x))",
+    "\\phi:nat0. substitute_p phi "
+    "             (App_pt diag_pr (cons_l var_x nil_l)) "
+    "             var_x",
 )
 theta_of_phi_p = mk_const("theta_of_phi_p", [])
 
@@ -143,25 +138,25 @@ def DIAGONAL_LEMMA_PRST(p):
                                                      (diag (theta_of_phi_p phi)))
                                                    var_x)).
 
-    PRST analog of DIAGONAL_LEMMA from godel_first.py. The construction
-    is identical; the proof is shorter because:
+    PRST analog of DIAGONAL_LEMMA from godel_first.py. The proof is
+    much shorter than the HF version because diag is a PR function
+    symbol, so ``App_pt diag_pr (cons_l (numeral n) nil_l) = numeral
+    (diag n)`` is one defining-equation step (DIAG_REPRESENTS_PRST).
+    No DIAG_FUNCTIONAL, no existential elimination, no D-formula
+    bookkeeping.
 
-      * The "D(x, y)" sub-formula is ``Eq_pf (App_pt diag_pr (cons_l x
-        nil_l)) y`` -- a concrete PRST formula whose semantics is
-        pinned by DIAG_REPRESENTS_PRST (one PR-defining-equation
-        application), not by an axiomatized ``diag_internal``.
+    Sketch: theta_of_phi_p(phi) is phi with var_x replaced by the
+    diag-term. Substituting (numeral (theta_of_phi_p phi)) for var_x
+    in theta_of_phi_p(phi) gives phi with var_x replaced by
+    App_pt diag_pr (cons_l (numeral (theta_of_phi_p phi)) nil_l). By
+    DIAG_REPRESENTS_PRST that App_pt term equals
+    numeral (diag (theta_of_phi_p phi)), and substituting that into
+    phi gives the right-hand side. The Iff is then closed by PRST
+    equality reasoning.
 
-      * Functionality of D follows from the syntactic functional
-        nature of App_pt: given two equality theorems ``App_pt diag_pr
-        ... = y1`` and ``App_pt diag_pr ... = y2``, PRST proves
-        ``y1 = y2`` by transitivity. No separate DIAG_FUNCTIONAL axiom.
-
-    The substitution-pushing through Exists_pf / And_pf / Eq_pf
-    proceeds exactly as in the HF version (SUBSTITUTE_P_AT_AND /
-    _AT_EXISTS_MISS / _AT_EQ / _AT_APP).
-
-    STUB. Estimate filled in: ~150 lines (vs ~400 in HF), saving from
-    the absence of DIAG_FUNCTIONAL + the cheaper D evaluation.
+    STUB. Estimate filled in: ~80 lines (vs ~400 in HF) -- the
+    quantifier-free formulation eliminates the existential-elim
+    bookkeeping entirely.
     """
     p.goal(
         "!phi. (is_pform phi /\\ (!v. free_in_p phi v ==> v = var_x)) ==> "
