@@ -171,17 +171,25 @@ Depends on Layer 0 real `Proof_PRST_def` body + Layers 1-5.
 - `PROV_PRST_AXIOM`: build one-line proof `Tup_pt n Empty_pt` against PROOF_PRST_AT directly. Bypasses PROOF_PRST_CONS.
 - 6 `PROV_PRST_*_DEF` (ZERO/PROJ/IF_IN_TRUE/IF_IN_FALSE/REC_BASE/REC_STEP). Each is one `_is_pr_axiom_from_pr_def` helper call (DISJ1 + IS_PR_AXIOM_DEF unfold) + `by(PROV_PRST_AXIOM, axiom, h_axiom)`.
 
-**Remaining (6 Layer 6 sorries):**
-- `PROOF_PRST_MONO` (Layer 0/2 leftover) — body has a nested `?h t. p = Tup_pt h t /\ (... /\ (?f g. rec t f /\ rec t (Imp_pf f g) /\ ...))`. Two recursive calls on `t` inside an inner existential; no existing `mono_iff_*` factory matches this shape (would need a fresh `mono_iff_binary_right_with_inner_exists_step`). ~80 lines bespoke.
-- `PROOF_PRST_CONS` — recursion equation. PROOF_PRST_AT delivers `?h0 t0. Tup_pt h t = Tup_pt h0 t0 /\ P(h0, t0)`; need to collapse to `P(h, t)` via TUP_PT_INJ. DSL friction: `CHOOSE_WITNESS` produces SELECT-term witnesses that `REWRITE_RULE` refuses to rewrite under the inner `?f g.` binder (tactics._bottom_up line 998 filters rules with non-empty asl when descending under binders). Workarounds explored: ELIM_EX + INST (INST can't substitute SELECT terms), kernel-level CHOOSE_WITNESS + REWRITE_RULE (same binder problem), `with .proof()` + `by_rewrite_of` (same). Downstream uses can route through PROOF_PRST_AT directly so CONS is convenience, not load-bearing.
-- `PROV_PRST_ADJ_DEF_AT` — as currently stated, requires `is_pterm x /\ is_pterm y` preconditions to invoke the `is_Refl` schema. Either add the precondition or sorry.
-- `MU_CORRECTNESS` — keep as `prove_axiom` (per plan's risk register).
+**Remaining (4 Layer 6 sorries):**
+- ~~`PROOF_PRST_MONO`~~ — **DONE.** Discharged with a kernel-level proof (~180 lines, lives in `prst_proof.py`). Approach: derive `f t = g t` as a HOL function equation under the outer `?h t.` constructor witness via NAT0_LT_TUP_PT_R + the recursion hypothesis, then propagate through the body using kernel-level AP_THM (for the two rec-call applications) + OR_CONG + AND_CONG (inline-built since no public helper) + MK_EXISTS_CONG (inline-built; no public helper for lifting `body1 = body2` to `(?v. body1) = (?v. body2)`).
+- `PROOF_PRST_CONS` — DSL friction (SELECT-under-binder), non-load-bearing. Downstream can route through PROOF_PRST_AT directly.
+- `PROV_PRST_ADJ_DEF_AT` — design issue: as stated requires `is_pterm x /\ is_pterm y` preconditions to invoke `is_Refl`, but `is_Refl` uses `is_term` (HF-side), not `is_pterm` (PRST-side). PRST formulas with App_pt subterms aren't `is_term`. Resolution requires either narrowing the lemma's domain or extending the axiom schema.
+- ~~`MU_CORRECTNESS`~~ — **DONE** (posited via `new_axiom`).
 - `PROV_PRST_SUBST_AXIOM` — needs new `IS_PR_DEF_CLOSED_UNDER_SUBST` obligation in prst_pr (~40 lines).
 - `PROV_PRST_MP` — needs proof-list concatenation lemma + a Proof_PRST monotonicity-under-concat lemma. Not provided by the current Proof_PRST encoding; either add the concat helper or revisit the encoding.
 
 **DSL friction newly observed:**
 - `_bottom_up`'s "filter rules with non-empty asl under binders" rule (line 998 of tactics.py) makes REWRITE_RULE useless for substituting choose-derived `_eq` facts under inner binders. Two ways to work around it: prove the unconditional version of the rule first (so its asl is empty), or write the substitution at the kernel level using AP_TERM / ABS / etc.
 - `axiom_name_str` passed to a generic helper must be parenthesised (`"(" + s + ")"`) before concatenating into a parse-string — otherwise multi-token forms like `"proj_def_axiom_at i n"` get re-parsed as `is_pr_def proj_def_axiom_at` applied to `i n`, type-mismatching.
+
+**DSL friction discharged during PROOF_PRST_MONO (kernel-level proof):**
+- No public `AND_CONG` helper (`OR_CONG` exists at `tactics.py:380`); had to build inline: `MK_COMB(AP_TERM(/\\, eq_l), eq_r)`. Worth promoting alongside `OR_CONG`.
+- No public `MK_EXISTS_CONG` / `EXISTS_CONG` helper to lift `body1 = body2` to `(?v. body1) = (?v. body2)`. Built inline: `AP_TERM(mk_const("?", [(v.ty, aty)]), ABS(v, eq))`. The recursion-equation MONO pattern needs this routinely; would significantly shorten any future inner-existential MONO.
+- `DISCH` is in `tactics`, not `fusion` — re-confirmed (already noted in Layer 7 section).
+- `aty` (the schematic type variable A for HOL polymorphism) lives in `fusion`, not `axioms` or `basics`.
+- The inner-existential bvars in `_PROOF_PRST_F_DEF`'s body (`?f g. rec t f /\ ...`) are literally named `f` and `g`. They collide with the recursion-function parameters `f`, `g` only at the *Python variable name* level; the kernel keeps them distinct via type (`nat0` vs `nat0 -> nat0 -> bool`). **Critical detail:** when building the body manually for a TRANS chain, you must use the def's literal bvar names (here `f`, `g`, not `f'`, `g'`) — TRANS uses syntactic equality, not aconv, so a fresh bvar name causes a mismatch that's hard to diagnose without dumping the raw AST.
+- `DEDUCT_ANTISYM_RULE(th1, th2)` produces `th1._concl = th2._concl` — orientation matters. To get `body_f = body_g`, pass `body_g_to_f` (concl = body_f) as `th1` and `body_f_to_g` (concl = body_g) as `th2`. The natural reading "deduct fwd, then deduct rev" gives the wrong direction.
 
 ---
 

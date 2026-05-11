@@ -161,18 +161,287 @@ _PROOF_PRST_F = mk_const("_Proof_PRST_F", [])
 @proof
 def PROOF_PRST_MONO(p):
     """|- !f g p. (!k. nat0_lt k p ==> f k = g k)
-              ==> _Proof_PRST_F f p = _Proof_PRST_F g p. STUB (Layer 2)."""
+              ==> _Proof_PRST_F f p = _Proof_PRST_F g p.
+
+    Body has an inner ?f' g'. with two recursive calls (rec t f',
+    rec t (Imp_pf f' g')) on the SAME tail t. Existing hf_syntax
+    mono_iff_* helpers are built for pointwise-rewrite shapes; here we
+    proceed at function-equation level instead: derive `f t = g t`
+    (a function equation over nat0 -> bool) once, then propagate
+    through the body via kernel-level AP_THM / OR_CONG / MK_COMB.
+
+    DSL friction (inline notes below): the `_bottom_up` line-998 filter
+    excludes rules with non-empty asl from REWRITE under binders, so the
+    inner ?f' g'. block can't accept `f t = g t` as a REWRITE rule. The
+    kernel-level approach avoids that filter entirely by building each
+    equality step by hand.
+    """
+    from tactics import (
+        AP_TERM, AP_THM, BETA_CONV, OR_CONG, SPEC, SPECL, MP, REFL, SYM, TRANS,
+    )
+    from fusion import DEDUCT_ANTISYM_RULE, MK_COMB, ABS, aty
+    from basics import mk_const, mk_app, mk_abs, mk_eq, rand, rator
+    from axioms import mk_exists, mk_or, mk_and
+    from prst_syntax import NAT0_LT_TUP_PT_R
+
+    # DSL friction: there is no public MK_EXISTS / EXISTS_CONG helper to
+    # lift `body1 = body2` to `(?v. body1) = (?v. body2)`. We build it
+    # inline as AP_TERM(? : (v.ty -> bool) -> bool, ABS(v, eq)).
+    def MK_EXISTS_CONG(v_var, eq_th):
+        exists_c = mk_const("?", [(v_var.ty, aty)])
+        return AP_TERM(exists_c, ABS(v_var, eq_th))
+
+    rec_ty = parse_type("nat0 -> nat0 -> bool")
     p.goal(
         "!f g p. (!k. nat0_lt k p ==> f k = g k) ==> "
         "_Proof_PRST_F f p = _Proof_PRST_F g p",
         types={
-            "f": parse_type("nat0 -> nat0 -> bool"),
-            "g": parse_type("nat0 -> nat0 -> bool"),
+            "f": rec_ty,
+            "g": rec_ty,
             "p": nat0_ty,
             "k": nat0_ty,
         },
     )
-    p.sorry()
+    p.fix("f g p")
+    p.assume("h_hyp: !k. nat0_lt k p ==> f k = g k")
+    h_hyp_th = p.fact("h_hyp")
+
+    # Term-level building blocks for the body.
+    f_const = p._parse("f")
+    g_const = p._parse("g")
+    p_const = p._parse("p")
+    n_var = Var("n", nat0_ty)
+    h_var = Var("h", nat0_ty)
+    t_var = Var("t", nat0_ty)
+    # DSL friction: the inner ?f g. existential in _PROOF_PRST_F_DEF uses
+    # bvars literally named `f` and `g` (of type nat0). These collide with
+    # the recursion functions f, g (of type nat0 -> nat0 -> bool) only at
+    # the Python-Var-name level -- different types make them distinct
+    # kernel Vars, and the kernel handles the scoping correctly. We MUST
+    # match the def's bvar names exactly so post-BETA terms are
+    # syntactically identical (TRANS uses syntactic equality, not aconv).
+    fp_var = Var("f", nat0_ty)
+    gp_var = Var("g", nat0_ty)
+    Tup_pt_c = mk_const("Tup_pt", [])
+    Imp_pf_c = mk_const("Imp_pf", [])
+    is_pr_axiom_c = mk_const("is_pr_axiom", [])
+
+    def inner_body(rec_t_expr):
+        # rec_t_expr f' /\ rec_t_expr (Imp_pf f' g') /\ h = g'
+        imp_app = mk_app(mk_app(Imp_pf_c, fp_var), gp_var)
+        return mk_and(
+            mk_app(rec_t_expr, fp_var),
+            mk_and(
+                mk_app(rec_t_expr, imp_app),
+                mk_eq(h_var, gp_var),
+            ),
+        )
+
+    def inner_ex(rec_t_expr):
+        # ?f' g'. inner_body(rec_t_expr)
+        return mk_exists(fp_var, mk_exists(gp_var, inner_body(rec_t_expr)))
+
+    def disj_body(rec_t_expr):
+        # is_pr_axiom h \/ inner_ex(rec_t_expr)
+        return mk_or(mk_app(is_pr_axiom_c, h_var), inner_ex(rec_t_expr))
+
+    def full_body(rec_const):
+        # p = Tup_pt h t /\ n = h /\ disj_body(rec_const t)
+        rec_t = mk_app(rec_const, t_var)
+        return mk_and(
+            mk_eq(p_const, mk_app(mk_app(Tup_pt_c, h_var), t_var)),
+            mk_and(
+                mk_eq(n_var, h_var),
+                disj_body(rec_t),
+            ),
+        )
+
+    def outer_ex(rec_const):
+        # ?h t. full_body(rec_const)
+        return mk_exists(h_var, mk_exists(t_var, full_body(rec_const)))
+
+    # Step 1: prove `?h t. full_body[f]  =  ?h t. full_body[g]`.
+    # We need a per-(h, t) iff and then lift via MK_EXISTS (built by ABS
+    # + AP_TERM(?, ...)).
+    #
+    # Strategy for the per-(h, t) iff: build the equation
+    #     `full_body[f] = full_body[g]`
+    # as a theorem with assumption `p = Tup_pt h t` (the constructor
+    # equality). Under that assumption, NAT0_LT_TUP_PT_R + h_hyp gives
+    # `f t = g t`, and AP_THM swaps `f t X` ↔ `g t X` at each application.
+    #
+    # Then DISCH the assumption to get `(p = Tup_pt h t) ==> body[f] = body[g]`.
+    # But that's still not the iff of the bodies themselves -- the iff has
+    # `p = Tup_pt h t` as a conjunct, so an inner iff equating the bodies
+    # *includes* the conjunct, hence can use it.
+    #
+    # Use DEDUCT_ANTISYM on the inner conjunction.
+
+    from fusion import ASSUME
+    from tactics import DISCH
+
+    # Assume the full body with rec = f. Then we have p = Tup_pt h t
+    # available, hence f t = g t, hence inner_ex[f] = inner_ex[g] (via
+    # AP_THM), hence the disjunction is equal, hence the whole conjunction
+    # is equal -- and we can EQ_MP to get body[g].
+
+    def build_body_eq(src_rec, tgt_rec):
+        """Build a theorem `[ASSUME body[src_rec]] |- body[tgt_rec]`."""
+        body_src = full_body(src_rec)
+        h_body_src = ASSUME(body_src)
+        # Project: p_eq, rest
+        from tactics import CONJUNCT1, CONJUNCT2, CONJ, DISJ_CASES, DISJ1, DISJ2
+        p_eq_th = CONJUNCT1(h_body_src)  # |- p = Tup_pt h t
+        rest1 = CONJUNCT2(h_body_src)  # n = h /\ disj
+        n_eq_th = CONJUNCT1(rest1)
+        disj_th = CONJUNCT2(rest1)  # is_pr_axiom h \/ inner_ex[src_rec t]
+
+        # Derive nat0_lt t p:
+        # NAT0_LT_TUP_PT_R: |- !a b. nat0_lt b (Tup_pt a b).
+        # Specialise at (h, t): nat0_lt t (Tup_pt h t).
+        # Rewrite via SYM(p_eq) to get nat0_lt t p.
+        lt_tup = SPECL([h_var, t_var], NAT0_LT_TUP_PT_R)
+        # lt_tup: nat0_lt t (Tup_pt h t)
+        # Goal: nat0_lt t p. Use TRANS-style: have `Tup_pt h t = p` (SYM
+        # p_eq), AP_TERM(nat0_lt t, ...) -> `nat0_lt t (Tup_pt h t) =
+        # nat0_lt t p`, EQ_MP.
+        from tactics import EQ_MP
+        nat0_lt_c = mk_const("nat0_lt", [])
+        nlt_t_partial = mk_app(nat0_lt_c, t_var)  # \rhs. nat0_lt t rhs (as a Comb)
+        eq_lt = AP_TERM(nlt_t_partial, SYM(p_eq_th))
+        # eq_lt: nat0_lt t (Tup_pt h t) = nat0_lt t p
+        lt_t_p = EQ_MP(eq_lt, lt_tup)  # |- nat0_lt t p (with p_eq as asl)
+
+        # Specialise h_hyp at t: nat0_lt t p ==> f t = g t.
+        hyp_at_t = SPEC(t_var, h_hyp_th)
+        # f t = g t (with p_eq as asl, plus original h_hyp's asl).
+        # Note: src_rec might be f or g, so we need the right direction.
+        if src_rec == f_const and tgt_rec == g_const:
+            ft_eq_gt = MP(hyp_at_t, lt_t_p)  # f t = g t
+        elif src_rec == g_const and tgt_rec == f_const:
+            ft_eq_gt = SYM(MP(hyp_at_t, lt_t_p))  # g t = f t
+        else:
+            raise ValueError("src/tgt must be f/g")
+
+        # Now lift ft_eq_gt through the inner body via AP_THM at each app.
+        # Inner body: src_rec_t f' /\ src_rec_t (Imp_pf f' g') /\ h = g'
+        #   where src_rec_t := src_rec t
+        # Target: tgt_rec_t f' /\ tgt_rec_t (Imp_pf f' g') /\ h = g'.
+        #
+        # Build the function-equation lifted to applied form:
+        #   eq_f1: src_rec t f' = tgt_rec t f' (AP_THM of ft_eq_gt at f')
+        #   eq_f2: src_rec t (Imp_pf f' g') = tgt_rec t (Imp_pf f' g')
+        eq_f1 = AP_THM(ft_eq_gt, fp_var)
+        imp_app = mk_app(mk_app(Imp_pf_c, fp_var), gp_var)
+        eq_f2 = AP_THM(ft_eq_gt, imp_app)
+
+        # DSL friction: there is no public AND_CONG helper. Build it inline:
+        #   from a=c, b=d derive (a/\b) = (c/\d) via MK_COMB(AP_TERM(/\, a=c), b=d).
+        AND_c = mk_const("/\\", [])
+        def AND_CONG(eq_l, eq_r):
+            return MK_COMB(AP_TERM(AND_c, eq_l), eq_r)
+
+        # Inner conjunct equation: (eq_f2 /\ h = g')
+        inner_rest_eq = AND_CONG(eq_f2, REFL(mk_eq(h_var, gp_var)))
+        # Full inner-body equation: (eq_f1 /\ (eq_f2 /\ h = g'))
+        inner_body_eq = AND_CONG(eq_f1, inner_rest_eq)
+        # inner_body_eq: src_rec_t f' /\ src_rec_t (...) /\ h = g'
+        #                 = tgt_rec_t f' /\ tgt_rec_t (...) /\ h = g'
+
+        # Lift to ?g' then ?f' via MK_EXISTS_CONG.
+        eq_ex_g = MK_EXISTS_CONG(gp_var, inner_body_eq)
+        eq_inner_ex = MK_EXISTS_CONG(fp_var, eq_ex_g)
+        # eq_inner_ex: inner_ex[src_rec] = inner_ex[tgt_rec]
+
+        # Lift through disjunction with OR_CONG.
+        disj_eq = OR_CONG(REFL(mk_app(is_pr_axiom_c, h_var)), eq_inner_ex)
+        # disj_eq: disj_body[src_rec] = disj_body[tgt_rec]
+
+        # Lift through outer conjunction: (n_eq /\ disj_body) = (n_eq /\ disj_body')
+        rest_eq = AND_CONG(REFL(mk_eq(n_var, h_var)), disj_eq)
+        # Full body: (p_eq_term /\ rest)
+        full_eq = AND_CONG(REFL(mk_eq(p_const, mk_app(mk_app(Tup_pt_c, h_var), t_var))), rest_eq)
+        # full_eq: full_body[src_rec] = full_body[tgt_rec]
+
+        # Now apply full_eq to body_src to obtain body_tgt.
+        body_tgt = EQ_MP(full_eq, h_body_src)
+        return body_tgt  # [body_src] |- body_tgt
+
+    body_f_to_g = build_body_eq(f_const, g_const)
+    body_g_to_f = build_body_eq(g_const, f_const)
+
+    # Build the iff of bodies at fixed (h, t).
+    from fusion import ASSUME
+    from tactics import DISCH
+    body_f = full_body(f_const)
+    body_g = full_body(g_const)
+    body_iff = DEDUCT_ANTISYM_RULE(
+        DISCH(body_g, body_g_to_f),
+        DISCH(body_f, body_f_to_g),
+    )
+    # body_iff: |- full_body[f] = full_body[g]  (with h_hyp asl)
+    # Wait -- DEDUCT_ANTISYM_RULE expects two implications. Actually it
+    # takes two theorems and yields equality of their conclusions, with
+    # one as antecedent for the other; let me re-check.
+
+    # DSL friction note: DEDUCT_ANTISYM_RULE(t1, t2) yields `t1._concl =
+    # t2._concl` with hyps from both (minus their conclusions used as
+    # assumptions). With body_g_to_f : [body_g] |- body_f and
+    # body_f_to_g : [body_f] |- body_g, DEDUCT_ANTISYM_RULE(body_g_to_f,
+    # body_f_to_g) gives `body_g = body_f`.
+    body_iff = DEDUCT_ANTISYM_RULE(body_g_to_f, body_f_to_g)
+    # DEDUCT_ANTISYM_RULE(th1, th2) returns th1._concl = th2._concl. With
+    # body_g_to_f (concl = body_f) and body_f_to_g (concl = body_g), the
+    # result is `body_f = body_g`. No SYM needed.
+
+    # Lift through ?h t. via MK_EXISTS_CONG.
+    eq_ex_t = MK_EXISTS_CONG(t_var, body_iff)
+    eq_outer_ex = MK_EXISTS_CONG(h_var, eq_ex_t)
+    # eq_outer_ex: outer_ex[f] = outer_ex[g]
+
+    # Now lift to _Proof_PRST_F f p = _Proof_PRST_F g p.
+    # _Proof_PRST_F f p (after BETA) reduces to:
+    #   \n. outer_ex[f]  (with rec=f everywhere)
+    # Need to lift over the outer \n. ABS over n_var, then equate to the
+    # unfolded def.
+    eq_abs_n = ABS(n_var, eq_outer_ex)
+    # eq_abs_n: (\n. outer_ex[f]) = (\n. outer_ex[g])
+
+    # Connect to _Proof_PRST_F via def unfolding.
+    # _Proof_PRST_F_DEF: _Proof_PRST_F = \rec. \p. \n. <body>
+    # We want: _Proof_PRST_F f p = \n. outer_ex[f].
+    # Build:  _Proof_PRST_F f = (\rec. \p. \n. body) f
+    #                        = \p. \n. body[f/rec]  (BETA)
+    #         _Proof_PRST_F f p = (\p. \n. body[f/rec]) p
+    #                          = \n. body[f/rec, p/p]  (BETA)
+    # The body[f/rec, p/p, n] = `?h t. p = Tup_pt h t /\ n = h /\ disj`
+    # which is exactly outer_ex[f] (with the body's `f t` referring to
+    # the substituted f).
+    from fusion import INST
+    def unfold_F_at(rec_const):
+        # _Proof_PRST_F = \rec. \p. \n. body (rec, p, n)
+        # AP_THM at rec_const: _Proof_PRST_F rec_const = (\rec. ...) rec_const
+        eq0 = AP_THM(_PROOF_PRST_F_DEF, rec_const)
+        # RHS is (\rec. \p. \n. body) rec_const, beta-reduce:
+        rhs = rand(eq0._concl)
+        beta1 = BETA_CONV(rhs)
+        # beta1: (\rec. \p. \n. body) rec_const = \p. \n. body[rec_const/rec]
+        eq1 = TRANS(eq0, beta1)
+        # eq1: _Proof_PRST_F rec_const = \p. \n. body[rec_const/rec]
+        eq2 = AP_THM(eq1, p_const)
+        # eq2: _Proof_PRST_F rec_const p = (\p. \n. body[rec_const/rec]) p
+        rhs2 = rand(eq2._concl)
+        beta2 = BETA_CONV(rhs2)
+        eq3 = TRANS(eq2, beta2)
+        # eq3: _Proof_PRST_F rec_const p = \n. body[rec_const/rec, p/p]
+        return eq3
+
+    unfold_f = unfold_F_at(f_const)  # _Proof_PRST_F f p = \n. body[f]
+    unfold_g = unfold_F_at(g_const)  # _Proof_PRST_F g p = \n. body[g]
+    # Chain: _Proof_PRST_F f p = \n. body[f] = \n. body[g] = _Proof_PRST_F g p
+    final_eq = TRANS(TRANS(unfold_f, eq_abs_n), SYM(unfold_g))
+
+    p.thus("_Proof_PRST_F f p = _Proof_PRST_F g p").by_thm(final_eq)
 
 
 Proof_PRST_def, _PROOF_PRST_REC = define_wf_lt(
