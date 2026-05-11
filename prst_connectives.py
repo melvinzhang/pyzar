@@ -1,22 +1,22 @@
 """Derived PRST-formula connectives on godelnums.
 
-Mirrors ``hf_connectives.py`` -- since PRST shares HF's propositional
-constructors (Not_pf = Not_f, Imp_pf = Imp_f), the derived connectives
-``And_pf`` / ``Or_pf`` / ``Iff_pf`` are literally the same as their HF
-counterparts. We re-export them under PRST-flavoured names so downstream
-PRST modules (diagonal lemma, godel_first_prst) have a uniform naming
-convention, and re-state their substitute-distribution lemmas at the
-PRST ``substitute_p`` level.
+PRST shares the propositional constructors from the nat0 encoding
+(Not_pf = Not_f, Imp_pf = Imp_f), so the derived connectives
+``And_pf`` / ``Or_pf`` / ``Iff_pf`` are aliases of the existing
+``hf_connectives`` definitions. We re-export them under PRST-flavoured
+names so downstream PRST modules (diagonal lemma, godel_first_prst)
+have a uniform naming convention, and re-state their
+substitute-distribution lemmas at the PRST ``substitute_p`` level.
 
-PRST is quantifier-free, so HF's ``Exists_f`` (which is built from
-``Forall_f``) has no PRST counterpart; consumers express "there exists"
-in the meta-theory or via PR-function evaluation instead.
+PRST is quantifier-free; there is no existential connective at the
+object level. Consumers express "there exists" in the meta-theory or
+via PR-function evaluation instead.
 
 Stubs: the substitute-distribution lemmas at ``substitute_p`` are
-sorried; their proofs are the same as the hf_connectives versions,
-extended to the App_pt case (which is irrelevant for these lemmas
-because the connectives don't contain App_pt at their outer layer --
-substitution distributes through them without seeing any App).
+sorried; their proofs are the same shape as the hf_connectives
+versions, extended to the App_pt case (which is irrelevant for these
+lemmas because the connectives don't contain App_pt at their outer
+layer -- substitution distributes through them without seeing any App).
 """
 
 from basics import mk_const
@@ -42,8 +42,8 @@ from nat0 import nat0_ty
 # ---------------------------------------------------------------------------
 # Stage 1' (PRST) -- derived connectives.
 #
-# Each PRST connective is defined as an alias of the corresponding HF
-# connective so that parse-strings can refer to them.
+# Each PRST connective is defined as an alias of the corresponding
+# constant from hf_connectives so that parse-strings can refer to them.
 # ---------------------------------------------------------------------------
 
 AND_PF_DEF = define("And_pf", parse_type("nat0 -> nat0 -> nat0"), "And_f")
@@ -62,8 +62,8 @@ Iff_pf = mk_const("Iff_pf", [])
 # Same shape as SUBSTITUTE_AT_AND / _OR / _IFF in hf_connectives, but
 # stated at substitute_p (the PRST substitute). Proofs proceed by
 # unfolding the connective via *_F_AT, then applying the PRST
-# AT-equations for Not_pf / Imp_pf (which agree with the HF versions
-# by re-export).
+# AT-equations for Not_pf / Imp_pf (which agree with the hf_connectives
+# versions by re-export).
 # ---------------------------------------------------------------------------
 
 

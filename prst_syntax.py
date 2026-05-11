@@ -2,26 +2,16 @@
 # Stage 1 (PRST) -- syntax of Primitive Recursive Set Theory.
 # ---------------------------------------------------------------------------
 #
-# PRST extends Swierczkowski-style HF by adjoining a *function symbol*
-# for every primitive recursive (PR) set function, along with its
-# defining recursion equations. The point of the move (vs ``hf_syntax``):
+# PRST adjoins a *function symbol* for every primitive recursive (PR)
+# set function, along with its defining recursion equations.
 #
-#   * In HF, primitive recursive predicates are represented by Sigma_1
-#     formulas whose witnesses are explicit *trace sets* (Goedel-Bernays
-#     beta function, or in our case ``is_substitute_trace`` plus
-#     ``QUOTE_HF`` injectivity). Functions are represented as
-#     functional relations; their "evaluation" requires an HF-internal
-#     proof that the trace exists and is unique. Substitute alone costs
-#     ~600-1000 lines of trace-existence + functionality bookkeeping.
-#
-#   * In PRST, a PR function ``f`` is a *term constructor*. The PRST
-#     term ``App_t f_sym [t1; ...; tk]`` is the value of ``f`` at
-#     ``t1, ..., tk``; PRST proves
-#         App_t f_sym [t1; ...; tk]  =  <body of f's definition>
-#     by direct unfolding (its defining equation is an axiom). No
-#     traces, no functionality side proof. Substitute, numeral, diag,
-#     Proof_PRST all become closed PRST terms with their
-#     representability theorems trivial.
+# A PR function ``f`` is a *term constructor*. The PRST term
+# ``App_t f_sym [t1; ...; tk]`` is the value of ``f`` at
+# ``t1, ..., tk``; PRST proves
+#     App_t f_sym [t1; ...; tk]  =  <body of f's definition>
+# by direct unfolding (its defining equation is an axiom). No traces,
+# no functionality side proof. Substitute, numeral, diag, Proof_PRST
+# all become closed PRST terms with trivial representability theorems.
 #
 # Encoding choices:
 #
@@ -33,17 +23,17 @@
 # implicitly universally closed by the proof system (PROV_PRST_AXIOM +
 # the substitution-into-axiom derived rule). There is no Forall_pf.
 #
-# Adjunction (HF's only non-empty set constructor) is *not* a term
-# constructor in PRST; it is the primitive binary PR function symbol
-# ``adj_sym`` (see prst_pr). To build "insert a into b" PRST writes
-# ``App_pt adj_sym (cons_l a (cons_l b nil_l))`` (or the helper alias
-# ``Adj_pt a b`` from prst_pr). This keeps the term grammar minimal --
-# everything beyond Empty_pt / Var_pt is a PR-function application.
+# Adjunction is *not* a term constructor in PRST; it is the primitive
+# binary PR function symbol ``adj_sym`` (see prst_pr). To build "insert
+# a into b" PRST writes ``App_pt adj_sym (cons_l a (cons_l b nil_l))``
+# (or the helper alias ``Adj_pt a b`` from prst_pr). This keeps the
+# term grammar minimal -- everything beyond Empty_pt / Var_pt is a
+# PR-function application.
 #
 #   ArgList = nat0-encoded list of Terms (cons_l / nil_l from hf_proof).
 #
-# Tags (extending the HF tag space; preserving HF's existing tags so
-# old syntax still parses):
+# Tag layout (sharing the nat0 tag space already used by hf_syntax so
+# that PRST formulas parse with the existing constructor encoding):
 #
 #     Empty_pt          :=  0                           (= Empty_t)
 #     Var_pt   v        :=  Pair_ord 2 v                (= Var_t v)
@@ -53,9 +43,9 @@
 #     In_pa    t1 t2    :=  Pair_ord 10 (Pair_ord t1 t2)(= In_a)
 #     App_pt   f a      :=  Pair_ord 11 (Pair_ord f a)  (NEW)
 #
-# ``App_pt`` is the only new constructor; the HF ones are re-exported
-# under PRST names so downstream PRST formulas can build on existing HF
-# syntax lemmas.
+# ``App_pt`` is the only new constructor; the rest are re-exported
+# under PRST names from ``hf_syntax`` so downstream PRST formulas can
+# share its syntax lemmas about the nat0 encoding.
 #
 # Per-function-symbol intro (in ``prst_pr``): each PR function symbol
 # ``f`` is a closed nat0 (an id), and ``App_pt f (cons_l t1 ... nil_l)``
@@ -63,18 +53,18 @@
 # pinned by a *defining equation* axiom; ``prst_pr`` introduces a
 # uniform recogniser ``is_pr_def`` for those axioms.
 #
-# All HF structural recognisers (``is_term``, ``is_form``, ``free_in``,
+# The structural recognisers (``is_term``, ``is_form``, ``free_in``,
 # ``substitute``) are extended with one extra recursion clause for
 # ``App_pt``. The clauses are stubbed; their AT-equations follow the
-# same shape as the HF ones.
+# same shape as those in ``hf_syntax``.
 # ---------------------------------------------------------------------------
 
 
 r"""Syntax of PRST (Primitive Recursive Set Theory) encoded as nat0.
 
-Mirrors ``hf_syntax.py`` and adds the ``App_pt`` constructor for
-applications of PR function symbols. See the module-level comment block
-for the encoding table.
+Adds the ``App_pt`` constructor for applications of PR function symbols
+on top of the nat0 term/formula encoding from ``hf_syntax.py``. See
+the module-level comment block for the encoding table.
 
 Stubs: every theorem here is sorried. The expected proof shape is
 indicated in each docstring.
@@ -101,11 +91,11 @@ from hf_syntax import (  # re-exported; PRST uses the same encoding for these
 
 
 # ---------------------------------------------------------------------------
-# Stage 1 (a) -- PRST renames for HF constructors.
+# Stage 1 (a) -- PRST renames for the shared nat0 constructors.
 #
-# PRST inherits HF's term/form constructors verbatim. Each PRST name
-# is defined as an alias of the corresponding HF constant so that
-# downstream parse-strings can refer to ``Var_pt`` etc.
+# PRST inherits the term/form constructors from ``hf_syntax`` verbatim.
+# Each PRST name is defined as an alias of the corresponding constant
+# so that downstream parse-strings can refer to ``Var_pt`` etc.
 # ---------------------------------------------------------------------------
 
 EMPTY_PT_DEF = define("Empty_pt", parse_type("nat0"), "Empty_t")
@@ -156,10 +146,9 @@ App_pt = mk_const("App_pt", [])
 # ---------------------------------------------------------------------------
 # Stage 1 (c) -- size and injectivity lemmas for App_pt.
 #
-# Same shape as NAT0_LT_INSERT_T_L / _R and the constructor-INJ lemmas
-# in hf_syntax. Proofs: one or two applications of NAT0_LT_PAIR_ORD_L /
-# _R chained via NAT0_LT_TRANS for size; PAIR_ORD_INJ at slots 0/1 for
-# injectivity.
+# Same shape as the constructor-INJ lemmas in hf_syntax. Proofs: one or
+# two applications of NAT0_LT_PAIR_ORD_L / _R chained via NAT0_LT_TRANS
+# for size; PAIR_ORD_INJ at slots 0/1 for injectivity.
 # ---------------------------------------------------------------------------
 
 
@@ -313,8 +302,9 @@ def IS_PTERM_AT_APP(p):
 # ---------------------------------------------------------------------------
 # Stage 1 (e) -- is_form recogniser.
 #
-# Identical to is_form for HF except every atom recognises is_pterm
-# (not is_term) in its term slots, picking up App_pt automatically.
+# Same shape as is_form in hf_syntax, except every atom recognises
+# is_pterm (not is_term) in its term slots, picking up App_pt
+# automatically.
 # ---------------------------------------------------------------------------
 
 
@@ -451,9 +441,10 @@ def SUBSTITUTE_P_AT_APP(p):
 
 # ---------------------------------------------------------------------------
 # Closure under substitute -- preservation of is_pterm / is_pform.
-# Same shape as SUBSTITUTE_PRESERVES_IS_FORM in hf_syntax, extended
-# with the App_pt clause (which is closed under substitute by the
-# above AT-equation plus the map_substitute_p preservation lemma).
+# Same shape as SUBSTITUTE_PRESERVES_IS_FORM in hf_syntax (which works
+# on the shared nat0 encoding), extended with the App_pt clause (closed
+# under substitute by the above AT-equation plus the map_substitute_p
+# preservation lemma).
 # ---------------------------------------------------------------------------
 
 
@@ -480,22 +471,22 @@ def SUBSTITUTE_P_PRESERVES_IS_PFORM(p):
 
 
 # ---------------------------------------------------------------------------
-# Notes on the size of this module vs hf_syntax.py.
+# Notes on the size of this module.
 #
-# hf_syntax.py is ~3500 lines. prst_syntax.py mostly *re-exports* HF
-# constructors plus adds the App_pt clause; the new content is:
+# This module re-exports the shared nat0 constructors from hf_syntax and
+# adds the App_pt clause; the new content is:
 #
 #   * App_pt itself (one constructor + 4 size/inj lemmas).
 #   * One extra clause in each of is_term, is_form, free_in, substitute
 #     (4 AT-equations + 2 preservation lemmas).
 #
-# Estimate ~500 lines once filled in -- the bulk of HF's syntax lemmas
-# (Pair_ord injectivity, the disjointness chain across the HF tags PRST
-# uses, substitute distributing over Imp/Eq/In, free_in computing
-# correctly) is inherited verbatim and only needs re-stating, not
-# re-proving. PRST drops HF's Forall clauses entirely (the object
-# theory is quantifier-free) and folds Insert into App_pt adj_sym (the
-# only set-constructor is the PR symbol adj_sym from prst_pr).
+# Estimate ~500 lines once filled in -- the syntax lemmas from
+# hf_syntax (Pair_ord injectivity, tag disjointness, substitute
+# distributing over Imp/Eq/In, free_in computing correctly) carry over
+# to the shared encoding without re-proving. There are no Forall
+# clauses (the object theory is quantifier-free) and no separate Insert
+# constructor (the only set-constructor is the PR symbol adj_sym from
+# prst_pr).
 # ---------------------------------------------------------------------------
 
 

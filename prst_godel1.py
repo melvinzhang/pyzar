@@ -1,46 +1,36 @@
 """First incompleteness theorem, formalised over PRST.
 
-This file is the PRST analog of ``godel_first.py``. The headline
-theorem is identical:
+Headline theorem:
 
     |- ~ Prov_PRST G_PRST  /\\  ~ Prov_PRST (Not_pf G_PRST).
 
-The strategy is unchanged from the HF version (diagonal lemma + Goedel
-sentence + consistency via the standard model). What changes is the
-*cost*:
+Strategy: diagonal lemma + Goedel sentence + consistency via the
+standard nat0 HOL model. Stage breakdown:
 
-  * Diagonal lemma: HF uses ``DIAG_REPRESENTS`` (an axiom in
-    godel_first.py, ~80 lines to discharge in HF) plus substantial
-    substitution-pushing. PRST uses ``DIAG_REPRESENTS_PRST`` (~10
-    lines from ``PROV_PRST_DIAG_EVAL``) plus the SAME substitution
-    bookkeeping -- the diagonal lemma is structurally identical, only
-    the representability step at the heart is cheaper.
+  * Diagonal lemma: built on ``DIAG_REPRESENTS_PRST`` (~10 lines from
+    ``PROV_PRST_DIAG_EVAL``) plus the standard substitution
+    bookkeeping. The diag term is syntactically a PR-symbol
+    application, so the representability step is a single defining
+    equation.
 
-  * Goedel sentence: identical -- a fixed-point of ``Not_pf
-    Prov_PRST_internal``.
+  * Goedel sentence: fixed-point of ``Not_pf Prov_PRST_internal``.
 
-  * Main theorem: identical -- two implications, each derived from
-    the diagonal equivalence + representability + consistency /
-    Sigma_1-soundness.
+  * Main theorem: two implications, each derived from the diagonal
+    equivalence + representability + consistency / Sigma_1-soundness.
 
-  * Consistency (stage 6): different from HF. PRST has no HF1-HF5
-    axioms (set-theoretic content lives only in the standard HF
-    model, Jensen-Karp style), so the consistency obligation is just
-    one HOL-soundness theorem per registered PR-defining equation.
-    Each obligation is uniform: the defining equation is a HOL
-    theorem on nat0 by construction, since the PR symbol's value is
-    a HOL function computed by HOL primitive recursion. Estimate
-    ~80 lines (smaller than HF's ~120 because there are no
-    HF-axiom soundness obligations).
+  * Consistency (stage 6): PRST has no set-theoretic axioms, so the
+    consistency obligation is just one HOL-soundness theorem per
+    registered PR-defining equation. Each obligation is uniform: the
+    defining equation is a HOL theorem on nat0 by construction, since
+    the PR symbol's value is a HOL function computed by HOL primitive
+    recursion. Estimate ~80 lines.
 
-  * Sigma_1-soundness: arguably cheaper -- because the represented
-    predicates are PR-evaluated by symbol unfolding rather than
-    by trace existence, the soundness step "Prov_PRST F ==> F" for
-    Sigma_1 F reduces to the same induction on the proof witness,
-    but the atomic case no longer has to peel a trace set apart.
+  * Sigma_1-soundness: the represented predicates are PR-evaluated by
+    symbol unfolding, so the soundness step "Prov_PRST F ==> F" for
+    Sigma_1 F reduces to induction on the proof witness with no trace
+    set to peel apart. Estimate ~80 lines.
 
-Total: ~400 lines, of which ~300 are shared verbatim with the HF
-version. Stubs throughout.
+Total: ~400 lines. Stubs throughout.
 """
 
 
@@ -78,9 +68,9 @@ from prst_proof import (
     PROV_PRST_REPRESENTS,
 )
 from prst_repr import (
-    DIAG_REPRESENTS_PRST,  # noqa: F401  -- replaces godel_first.DIAG_REPRESENTS
+    DIAG_REPRESENTS_PRST,  # noqa: F401
 )
-from hf_proof import var_x  # PRST re-uses HF variable choices
+from hf_proof import var_x  # PRST re-uses the var_x constant from the encoding
 
 
 # ---------------------------------------------------------------------------
@@ -94,22 +84,10 @@ from hf_proof import var_x  # PRST re-uses HF variable choices
 #
 # psi := substitute_p theta_of_phi_p(phi) (numeral (theta_of_phi_p phi)) var_x.
 #
-# Compare with the HF version (godel_first.py L582-589):
-#   * HF used ``Exists_f var_y (And_f diag_internal (substitute phi var_y
-#     var_x))``, where ``diag_internal`` was an axiomatized HF formula
-#     representing the diag relation. The existential was needed because
-#     diag was only available as a Sigma_1 relation, not a function.
-#   * PRST collapses the existential entirely: since ``diag_pr`` is a
-#     PR function symbol, the term ``App_pt diag_pr (cons_l var_x
-#     nil_l)`` IS the value diag(x) at the syntactic level. There is
-#     nothing to existentially quantify over; we just substitute the
-#     diag-term in for var_x directly.
-#
-# This is the key payoff of moving from HF to PRST: the diagonal lemma
-# requires no quantifiers at the object level, and ``diag_internal``
-# (4 axiomatic stubs in godel_first.py: DIAG_REPRESENTS,
-# IS_FORM_DIAG_INTERNAL, FREE_IN_DIAG_INTERNAL, DIAG_FUNCTIONAL)
-# collapses to ZERO axiomatic stubs in PRST.
+# Since ``diag_pr`` is a PR function symbol, the term
+# ``App_pt diag_pr (cons_l var_x nil_l)`` IS the value diag(x) at the
+# syntactic level. The construction is binder-free: substitute the
+# diag-term in for var_x directly, no existential quantifier needed.
 # ---------------------------------------------------------------------------
 
 
@@ -138,11 +116,10 @@ def DIAGONAL_LEMMA_PRST(p):
                                                      (diag (theta_of_phi_p phi)))
                                                    var_x)).
 
-    PRST analog of DIAGONAL_LEMMA from godel_first.py. The proof is
-    much shorter than the HF version because diag is a PR function
-    symbol, so ``App_pt diag_pr (cons_l (numeral n) nil_l) = numeral
-    (diag n)`` is one defining-equation step (DIAG_REPRESENTS_PRST).
-    No DIAG_FUNCTIONAL, no existential elimination, no D-formula
+    The quantifier-free diagonal lemma. Because diag is a PR function
+    symbol, ``App_pt diag_pr (cons_l (numeral n) nil_l) = numeral
+    (diag n)`` is one defining-equation step (DIAG_REPRESENTS_PRST):
+    no functionality lemma, no existential elimination, no D-formula
     bookkeeping.
 
     Sketch: theta_of_phi_p(phi) is phi with var_x replaced by the
@@ -154,9 +131,7 @@ def DIAGONAL_LEMMA_PRST(p):
     phi gives the right-hand side. The Iff is then closed by PRST
     equality reasoning.
 
-    STUB. Estimate filled in: ~80 lines (vs ~400 in HF) -- the
-    quantifier-free formulation eliminates the existential-elim
-    bookkeeping entirely.
+    STUB. Estimate filled in: ~80 lines.
     """
     p.goal(
         "!phi. (is_pform phi /\\ (!v. free_in_p phi v ==> v = var_x)) ==> "
@@ -219,15 +194,15 @@ def G_PRST_DIAGONAL_EQ(p):
 # ---------------------------------------------------------------------------
 # Stage 6 (PRST) -- consistency and Sigma_1-soundness.
 #
-# Consistency of PRST: standard HF model on nat0, with one HOL
-# soundness theorem per registered PR-symbol defining equation. Each
-# defining equation is, by construction, a HOL theorem on nat0 (the
-# PR symbol's value is a HOL function with the same recursion
-# equations). No HF1-HF5 obligations (PRST has no set-theoretic
-# axioms; their truth in the model is inherited from the HF carrier
-# but not needed to certify any PRST axiom). Estimate ~80 lines.
+# Consistency of PRST: standard nat0 HOL model, with one HOL soundness
+# theorem per registered PR-symbol defining equation. Each defining
+# equation is, by construction, a HOL theorem on nat0 (the PR symbol's
+# value is a HOL function with the same recursion equations). PRST has
+# no set-theoretic axioms, so there are no further model obligations
+# beyond the PR-symbol layer. Estimate ~80 lines.
 #
-# Sigma_1-soundness: same structure as for HF. ~80 lines.
+# Sigma_1-soundness: induction on the Prov_PRST witness; atomic case
+# dispatches to PR-symbol defining equations. ~80 lines.
 # ---------------------------------------------------------------------------
 
 
@@ -236,11 +211,11 @@ def PRST_CONSISTENT(p):
     """|- ~ Prov_PRST (Eq_pf Empty_pt (Adj_pt Empty_pt Empty_pt)).
 
     Consistency: PRST does not prove ``0 = 1``. Proof via the standard
-    HOL-level model on nat0 -- the model interprets every PRST term as
-    its HOL value (each PR symbol's value is given by its HOL-side
-    definition in prst_pr); each defining equation is true in the
-    model by HOL-side primitive recursion; logical axioms by
-    tautological correctness. STUB.
+    nat0 HOL model -- the model interprets every PRST term as its HOL
+    value (each PR symbol's value is given by its HOL-side definition
+    in prst_pr); each defining equation is true in the model by
+    HOL-side primitive recursion; logical axioms by tautological
+    correctness. STUB.
     """
     p.goal("~ Prov_PRST (Eq_pf Empty_pt (Adj_pt Empty_pt Empty_pt))")
     p.sorry()
@@ -263,9 +238,8 @@ def PRST_SIGMA1_SOUND(p):
     """|- !phi. is_sigma1 phi /\\ Prov_PRST phi ==> sigma1_holds phi.
 
     Sigma_1-soundness: any provable Sigma_1 PRST-sentence is true in
-    the standard HOL model. Proof: induction on Prov_PRST witness,
-    atomic case dispatches to the PR symbol's defining equation
-    (cheaper than HF's trace-evaluation case). STUB.
+    the standard nat0 HOL model. Proof: induction on Prov_PRST witness;
+    atomic case dispatches to the PR symbol's defining equation. STUB.
     """
     p.goal(
         "!phi. is_sigma1 phi /\\ Prov_PRST phi ==> sigma1_holds phi",
@@ -283,9 +257,8 @@ def PRST_SIGMA1_SOUND(p):
 def GODEL_FIRST_PRST(p):
     """|- ~ Prov_PRST G_PRST /\\ ~ Prov_PRST (Not_pf G_PRST).
 
-    First incompleteness for PRST. Proof structure mirrors the HF
-    version of the Gödel argument, but every step is a Prov_PRST
-    inference -- no Prov_HF in sight:
+    First incompleteness for PRST. Proof structure: standard Gödel
+    argument with every step a Prov_PRST inference.
 
       First conjunct (PRST does not prove G_PRST):
         Suppose Prov_PRST G_PRST.
@@ -325,8 +298,7 @@ def PRST_ESSENTIALLY_UNDECIDABLE(p):
     the same diagonal argument carries over. STUB.
 
     This is how PA, ZFC, HOL itself inherit incompleteness for free --
-    each extends PRST (via the standard HF embedding) and is
-    consistent, so each is incomplete.
+    each interprets PRST and is consistent, so each is incomplete.
     """
     p.goal(
         "!T. ((!n. Prov_PRST n ==> T n) "
@@ -338,43 +310,30 @@ def PRST_ESSENTIALLY_UNDECIDABLE(p):
 
 
 # ---------------------------------------------------------------------------
-# Summary -- the PRST vs HF accounting.
+# Summary -- module size estimates.
 # ---------------------------------------------------------------------------
 #
-#                                            HF estimate     PRST estimate
-#   Stage 1 (syntax)                            ~3500             ~500
-#       (PRST inherits HF's; only adds App_pt clause + the four
-#        recursive recognisers' App_pt cases.)
+#   Stage 1 (syntax, prst_syntax.py)             ~500
+#       App_pt constructor + the four recognisers' App_pt cases.
 #
-#   Stage 2 (proof system)                       ~900             ~400
-#       (PRST inherits is_logical_axiom verbatim, drops HF1-HF5
-#        entirely, adds is_pr_def + 6 base-layer defining equations.)
+#   Stage 2 (proof system, prst_pr/prst_proof)   ~1000
+#       is_logical_axiom re-used; is_pr_def + 6 base-layer defining
+#       equations; Prov_PRST + closure rules.
 #
-#   Stage 3 (representability)                  ~7900            ~1150
-#       (PR symbols are first-class terms; no trace sets, no
-#        functionality proofs, no quote_hf machinery.)
+#   Stage 3 (representability, prst_repr.py)      ~150
+#       PR symbols are first-class terms; representability collapses
+#       to a defining-equation lookup.
 #
-#   Stage 4 (diagonal lemma)                     ~400             ~150
-#       (Same construction; DIAG_FUNCTIONAL goes away because
-#        App_pt-of-diag_pr is syntactically functional.)
+#   Stage 4 (diagonal lemma)                      ~150
+#       App_pt-of-diag_pr is syntactically functional; no
+#       DIAG_FUNCTIONAL needed.
 #
-#   Stage 5 (Goedel sentence + main theorem)     ~200             ~100
-#       (Identical proof; cheaper representability step.)
+#   Stage 5 (Goedel sentence + main theorem)      ~100
 #
-#   Stage 6 (consistency + Sigma_1-soundness)    ~200             ~250
-#       (One extra HOL-theorem per PR-defining equation; modest
-#        increase relative to the HF model construction.)
+#   Stage 6 (consistency + Sigma_1-soundness)     ~250
+#       One HOL-theorem per PR-defining equation.
 #
-#   TOTAL                                      ~13100            ~2550
-#
-# Estimated 5x reduction in line count, with the bulk of the saving
-# concentrated in Stage 3 (representability), which is exactly where
-# the HF route is currently most painful.
-#
-# The tax: ~80 extra lines in Stage 6 for PR-symbol soundness, and
-# a more involved Stage 1 syntax module if we want bullet-proof
-# is_pterm / is_pform recognisers for App_pt. Both are uniform and
-# mechanical.
+#   TOTAL                                       ~2150
 # ---------------------------------------------------------------------------
 
 

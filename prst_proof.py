@@ -2,11 +2,11 @@
 # Stage 2B (PRST) -- the PRST proof system.
 # ---------------------------------------------------------------------------
 #
-# PRST is a quantifier-free theory: HF's propositional fragment
-# (K, S, N axiom schemas, modus ponens) plus equality axioms
-# (Refl, Subst), with free Var_pt indices in axioms implicitly
-# universally closed. No object-level Forall_pf, no UI/Gen rules.
-# The non-logical axiom layer is purely equational:
+# PRST is a quantifier-free theory: propositional axiom schemas
+# (K, S, N), modus ponens, and equality axioms (Refl, Subst), with
+# free Var_pt indices in axioms implicitly universally closed. No
+# object-level Forall_pf, no UI/Gen rules. The non-logical axiom layer
+# is purely equational:
 #
 #   * PR-defining-equation axioms (one per registered PR symbol's
 #     defining clause). Recognised by ``is_pr_def`` from prst_pr.
@@ -16,25 +16,21 @@
 #   is_pr_axiom n   :<=>   is_pr_def n  \/  is_logical_axiom n.
 #
 # Following Jensen-Karp 1971 ("Primitive Recursive Set Functions"):
-# PRST has *no* set-theoretic axioms in the object language. The
-# set-theoretic content (HF1-HF5: ~In x Empty, In x (Adj x y),
-# extensionality, foundation) lives in the standard HF model used in
-# PRST_CONSISTENT. PR symbols are uninterpreted at the syntactic
-# level; their defining equations + the standard-model soundness
-# argument do all the work. This is the analog of PRA, where natural
-# numbers are not axiomatized -- 0 and S are primitive symbols, +/*
-# have defining equations, and arithmetic facts come from the
-# standard N-model.
+# PRST has *no* set-theoretic axioms in the object language. PR
+# symbols are uninterpreted at the syntactic level; their defining
+# equations plus the standard nat0 HOL model do all the work. This is
+# analogous to PRA, where natural numbers are not axiomatised -- 0 and
+# S are primitive symbols, +/* have defining equations, and arithmetic
+# facts come from the standard N-model.
 #
-# Prov_PRST is the corresponding closure predicate. Definition shape
-# mirrors Prov_HF:
+# Prov_PRST is the corresponding closure predicate:
 #
 #   Prov_PRST n :<=> ?p. Proof_PRST p n,
 #
 # where Proof_PRST is a list-of-godelnums proof-checker.
 #
-# The closure rules drop out the same way (minus generalisation,
-# which has no object-level counterpart):
+# The closure rules are the standard Hilbert-style pair (minus
+# generalisation, which has no object-level counterpart):
 #
 #   (1) |- !n. is_pr_axiom n ==> Prov_PRST n.
 #   (2) |- !f g. Prov_PRST f /\ Prov_PRST (Imp_pf f g) ==> Prov_PRST g.
@@ -43,11 +39,9 @@
 # rule PROV_PRST_SUBST_AXIOM: each axiom schema is closed under
 # substitution into its free Var_pt slots.
 #
-# This file is mostly *re-using* hf_proof's logical axiom schemas
-# (IS_K/IS_S/.../IS_SUBST), wrapping them under is_pr_axiom, and
-# defining the new closure predicate. Estimate: ~400 lines once
-# filled in (vs ~900 in hf_proof, which had to write the equality and
-# quantifier schemas from scratch).
+# This file re-uses hf_proof's logical axiom schemas (IS_K / IS_S /
+# ... / IS_SUBST), wraps them under is_pr_axiom, and defines the new
+# closure predicate. Estimate: ~400 lines once filled in.
 # ---------------------------------------------------------------------------
 
 
@@ -114,7 +108,7 @@ from prst_syntax import (
 # is_pr_def from prst_pr.py recognises defining equations for the PR
 # function symbols (ZERO/PROJ/IF_IN/REC + derived symbols). adj_sym
 # has no defining equation -- it is a primitive PR symbol whose
-# semantics is fixed by the standard HF model, not by an axiom.
+# semantics is fixed by the standard nat0 HOL model, not by an axiom.
 # ---------------------------------------------------------------------------
 
 
@@ -125,20 +119,20 @@ IS_PR_AXIOM_DEF, IS_PR_AXIOM_AT = define_with_at(
 )
 is_pr_axiom = mk_const("is_pr_axiom", [])
 
-# Note on is_logical_axiom: HF's bundle includes the quantifier
-# schemas is_UI / is_Vac / is_FaImp. In PRST these branches are inert
-# because the underlying schemas recognise formulas containing Forall_f
-# (= the HF Forall constructor), which PRST formulas (built without
-# Forall_pf) never contain. So re-using is_logical_axiom verbatim is
-# safe -- the unused branches never fire on PRST inputs.
+# Note on is_logical_axiom: the bundle re-used from hf_proof includes
+# the quantifier schemas is_UI / is_Vac / is_FaImp. In PRST these
+# branches are inert because the underlying schemas recognise formulas
+# containing Forall_f, which PRST formulas (built without Forall_pf)
+# never contain. So re-using is_logical_axiom verbatim is safe -- the
+# unused branches never fire on PRST inputs.
 
 
 # ---------------------------------------------------------------------------
 # Stage 2B (b) -- Proof_PRST: the list-of-formulas proof checker.
 #
-# Same shape as Proof_HF (one cons_l step at a time, each step being
-# either an axiom instance, a modus-ponens step from earlier lines, or
-# a generalisation of an earlier line).
+# One cons_l step at a time, each step being either an axiom instance
+# or a modus-ponens step from earlier lines. (No generalisation step:
+# PRST is quantifier-free.)
 #
 # We model it via define_wf_lt on the proof list. Stub.
 # ---------------------------------------------------------------------------
@@ -312,9 +306,9 @@ def PROV_PRST_REC_STEP_DEF(p):
 #
 # Because PRST defining equations are stated with free Var_pt indices
 # (implicit universal closure convention), consumers need to specialise
-# them at concrete terms. PRST is quantifier-free, so we cannot derive
-# the rule via Gen + UI as HF does; instead it is built into is_pr_def
-# directly: is_pr_def is closed under substitution at any free Var_pt
+# them at concrete terms. PRST is quantifier-free, so the rule cannot
+# come from Gen + UI; instead it is built into is_pr_def directly:
+# is_pr_def is closed under substitution at any free Var_pt
 # index, so every substitution instance of a defining axiom is itself
 # a defining axiom, hence in is_pr_axiom, hence Prov_PRST.
 #
@@ -412,8 +406,8 @@ def MU_CORRECTNESS(p):
     via PROV_PRST_AXIOM at concrete (f, q, args) when used inside a
     Prov_PRST derivation). This is the only axiom about mu_sym and the
     only non-strict-PR commitment in the PRST + mu extension. Soundness
-    holds in the standard HF model under the convention that mu_sym f
-    returns the classical least witness when one exists. STUB.
+    holds in the standard nat0 HOL model under the convention that
+    mu_sym f returns the classical least witness when one exists. STUB.
     """
     p.goal(
         "!f q args. is_partial_pr_sym f "
@@ -438,12 +432,10 @@ def PROV_PRST_MP(p):
 # ---------------------------------------------------------------------------
 # Stage 2B (e) -- internal arithmetic via PR symbols.
 #
-# In HF, "HF proves P(numeral n)" requires evaluating substitute
-# externally and then having SUBSTITUTE_REPRESENTS push the equality
-# into HF. In PRST, both ``substitute`` and ``numeral`` are PR symbols,
-# so the corresponding term is *already* the result. The Prov_PRST
-# version of ``substitute(F, numeral n, v) = result`` is one
-# defining-equation lookup:
+# Both ``substitute`` and ``numeral`` are PR symbols, so the
+# corresponding term is *already* the result. The Prov_PRST version of
+# ``substitute(F, numeral n, v) = result`` is one defining-equation
+# lookup:
 #
 #   |- !F v. Prov_PRST (Eq_pf (App_pt substitute_pr
 #                                  (cons_l F (cons_l (App_pt numeral_pr
@@ -451,7 +443,7 @@ def PROV_PRST_MP(p):
 #                                                    (cons_l v nil_l))))
 #                             <result computed at HOL level>).
 #
-# Stub: this is the "free evaluation" the PRST move buys us.
+# Free evaluation of PR-symbol applications inside Prov_PRST.
 # ---------------------------------------------------------------------------
 
 
@@ -467,8 +459,9 @@ def PROV_PRST_SUBSTITUTE_EVAL(p):
     proved by structural induction on F, dispatching to PRST_REC_STEP
     at each constructor. STUB.
 
-    Once available, this is the "free representability" theorem -- it
-    replaces ~3000 lines of SUBSTITUTE_REPRESENTS infrastructure.
+    The "free representability" theorem: since substitute_pr is a term
+    constructor, its representability collapses to one defining-equation
+    lookup.
     """
     p.goal(
         "!F t v. Prov_PRST (Eq_pf "
@@ -570,8 +563,7 @@ def PROV_PRST_REPRESENTS(p):
               Prov_PRST (substitute_p Prov_PRST_internal (numeral n) var_x).
 
     The headline representability theorem for PRST's own provability
-    predicate. In HF this was the most expensive single theorem in the
-    development (~1000 lines). In PRST it reduces to:
+    predicate. Reduces to:
       * Forward: from a Prov_PRST witness, exhibit the existential
         witness inside Prov_PRST_internal via PROV_PRST_DIAG_EVAL +
         equality-of-PR-terms reasoning.
@@ -594,17 +586,11 @@ def PROV_PRST_REPRESENTS(p):
 #
 # Filled in: ~400 lines.
 #
-# Comparison to hf_proof.py + the Prov_HF parts of hf_repr_core.py:
-#   hf_proof.py            = ~900 lines.
-#   hf_repr_core.py (Prov_HF part) = ~500 lines.
-#   prst_proof.py replaces both, taking ~400 lines.
-#
-# The saving comes from re-using is_logical_axiom verbatim (one
-# disjunct in is_pr_axiom) and dropping HF1-HF5 entirely (set-theoretic
-# content moves to the model side, following Jensen-Karp 1971). PRST
-# does not import HF logic theorems -- the propositional / equality
-# Hilbert axioms are sufficient and identical to HF's, so any
-# propositional fact needed inside PRST is re-derived directly.
+# This module re-uses is_logical_axiom from hf_proof verbatim (one
+# disjunct in is_pr_axiom), wraps it together with is_pr_def, and
+# defines Prov_PRST. PRST has no set-theoretic axioms (Jensen-Karp
+# 1971), and no quantifier rules. Any propositional fact needed inside
+# PRST is re-derived directly from the Hilbert axioms.
 # ---------------------------------------------------------------------------
 
 

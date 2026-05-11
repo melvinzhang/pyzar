@@ -2,8 +2,7 @@
 # Stage 2A (PRST) -- the PR-function-symbol mechanism.
 # ---------------------------------------------------------------------------
 #
-# This is the engine room of the PRST shortcut. Every primitive
-# recursive function on HF sets gets:
+# Every primitive recursive function in PRST gets:
 #
 #   (i)   a closed nat0 ``f_sym`` -- its function-symbol id;
 #   (ii)  a declared arity ``pr_arity f_sym : nat0``;
@@ -17,18 +16,17 @@
 # inputs and a recursion scheme, produces a fresh ``f_sym`` plus its
 # defining equations.
 #
-# The base layer mirrors the recursion-theoretic basis for PR functions
-# on HF (Swierczkowski 2003 ch. 3; Boolos-Burgess-Jeffrey ch. 6):
+# The base layer follows the recursion-theoretic basis for PR set
+# functions (Jensen-Karp 1971; Boolos-Burgess-Jeffrey ch. 6):
 #
 #   * Zero      : 0-ary, value Empty_pt.
 #   * Proj_i_n  : n-ary, value (i+1)-th argument.
 #   * Adj       : 2-ary, primitive. ``App_pt adj_sym (cons_l a (cons_l
 #                 b nil_l))`` IS the adjunction operation -- there is
 #                 no further-reducing defining equation, just as
-#                 Empty_pt has no defining body. (Adj is HF's only
-#                 non-empty set constructor; in PRST it becomes the
-#                 primitive PR-symbol form rather than a separate
-#                 term constructor.)
+#                 Empty_pt has no defining body. Adj is the only
+#                 non-empty set constructor; it is a primitive PR
+#                 symbol rather than a separate term constructor.
 #   * If_in     : 4-ary case-split, dispatching on In_pa arg_1 arg_2:
 #                     If_in a b x y := if In a b then x else y.
 #   * Rec       : (n+2)-ary primitive recursion on the second argument's
@@ -39,13 +37,13 @@
 #                                                  if ~In_pa i s
 #                     Rec g h (Adj_pt i s)      y_vec
 #                         = Rec g h s y_vec      otherwise.
-#                 (Side condition is HF's "membership-canonical"
-#                 normalisation; HF5 guarantees the Adj-decomposition
-#                 exists for every nonempty HF set.)
+#                 The side condition is the membership-canonical
+#                 normalisation enforced by the bit-encoded carrier
+#                 (cf. low_bit / clear_low in nat0).
 #
 # Substitution, numeral, diag, Proof_PRST -- all of them are definable in
-# this base layer by ~50-100 lines each, vs ~500-1000 in HF. Sketches
-# for the four headline definitions appear at the bottom of this file.
+# this base layer. Sketches for the four headline definitions appear at
+# the bottom of this file.
 #
 # Stubs: every theorem here is sorried. The work is *cataloguing the
 # axioms*, not proving any one of them; the discharges are uniform
@@ -222,7 +220,7 @@ def PR_ARITY_REC(p):
 
 # ---------------------------------------------------------------------------
 # Stage 2A (d) -- the *defining equations* of the base layer as closed
-# nat0 godelnums (HF-style encoding).
+# nat0 godelnums.
 #
 # Convention: free Var_t indices in a defining equation are *implicitly
 # universally closed*. The defining-axiom godelnum is the open
@@ -235,7 +233,8 @@ def PR_ARITY_REC(p):
 #   Var_t 0           -- first formal argument
 #   Var_t (SUC0 0)    -- second formal argument
 #   Var_t (SUC0^2 0)  -- third / "y_vec" / "i" / extra
-# These match the var_x / var_y / var_z constants in hf_proof.
+# These match the var_x / var_y / var_z constants from hf_proof, which
+# pyzar re-uses for the nat0 encoding of PRST variables.
 #
 # Each closed nat0 below encodes one PR defining equation. The
 # corresponding ``Prov_PRST (...)`` theorems live in prst_proof as
@@ -350,10 +349,8 @@ rec_step_def_axiom_at = mk_const("rec_step_def_axiom_at", [])
 # ---------------------------------------------------------------------------
 # Stage 2A (e) -- is_pr_def, the structural recogniser.
 #
-# Structural analog of HF's is_hf_axiom (which disjuncts over five HF
-# axiom slots), but for PRST: the disjunction recognises any closed
-# nat0 that matches one of the six defining-equation patterns (no adj
-# branch since adj_sym is primitive).
+# Disjunction recognising any closed nat0 that matches one of the six
+# defining-equation patterns (no adj branch since adj_sym is primitive).
 #
 # Stub body: F. Real body is the disjunction listed below. The
 # IS_PR_DEF_HOLDS_* lemmas (one per axiom) discharge by tag analysis.
@@ -436,7 +433,7 @@ def IS_PR_DEF_HOLDS_REC_STEP(p):
 # ---------------------------------------------------------------------------
 # Stage 2A (f) -- the *PR introduction* combinator (sketch only).
 #
-# The base layer is "complete" in that every PR function on HF is
+# The base layer is "complete" in that every PR set function is
 # expressible as a composition of {Zero, Adj, Proj, If_in, Rec}. So
 # downstream PR functions -- substitute_pr, numeral_pr, diag_pr,
 # Proof_PRST_pr -- can be defined as HOL functions that compute the
@@ -485,12 +482,13 @@ comp_sym = mk_const("comp_sym", [])
 # App_pt clause they already handle, and no capture-avoidance machinery
 # is needed for mu.
 #
-# Cost: mu_sym leaves strict primitive recursion. The standard HF model
-# interprets mu_sym soundly via classical least-witness (with sentinel
-# for the no-witness case), so consistency is preserved -- but the
-# resulting symbol class "PR + mu" is total-recursive rather than PR.
-# We mark this distinction with ``is_partial_pr_sym``: every is_pr_sym
-# is is_partial_pr_sym, and mu_sym(f) is is_partial_pr_sym when f is.
+# Cost: mu_sym leaves strict primitive recursion. The standard nat0
+# HOL model interprets mu_sym soundly via classical least-witness (with
+# sentinel for the no-witness case), so consistency is preserved -- but
+# the resulting symbol class "PR + mu" is total-recursive rather than
+# PR. We mark this distinction with ``is_partial_pr_sym``: every
+# is_pr_sym is is_partial_pr_sym, and mu_sym(f) is is_partial_pr_sym
+# when f is.
 # ---------------------------------------------------------------------------
 
 
@@ -544,8 +542,8 @@ def IS_PARTIAL_PR_SYM_MU(p):
 # (i.e. successor as von-Neumann ordinal). One Prov_PRST equation each;
 # both discharged by PRST_REC_BASE / PRST_REC_STEP at concrete g, h.
 #
-# ``substitute_pr`` -- structural recursion on the formula tree (HF
-# encoding). Five base-layer compositions, one per HF constructor; the
+# ``substitute_pr`` -- structural recursion on the formula tree.
+# Five base-layer compositions, one per formula constructor; the
 # App_pt recursive call uses ``map_substitute`` which is itself
 # definable as a REC over the cons_l list. Total: ~10 base-layer
 # symbols composed, ~30 Prov_PRST defining equations.
@@ -559,9 +557,8 @@ def IS_PARTIAL_PR_SYM_MU(p):
 # ``is_pr_axiom`` (= is_pr_def \/ is_logical_axiom) and ``is_mp``.
 # All primitive recursive. Total: ~50 base-layer symbols composed.
 #
-# The full implementation costs ~600 lines vs ~2900 in hf_repr_thms.py
-# -- the saving comes from never needing trace sets or functionality
-# proofs.
+# The full implementation is ~600 lines; PR symbols are first-class
+# terms, so there are no trace sets and no functionality proofs.
 # ---------------------------------------------------------------------------
 
 
@@ -592,31 +589,13 @@ find_proof_pr = mk_const("find_proof_pr", [])
 #
 #     NUMERAL_PR_DEF_EQ_ZERO, NUMERAL_PR_DEF_EQ_SUC,
 #     SUBSTITUTE_PR_DEFINING, DIAG_PR_DEFINING,
-#     PROOF_HF_PR_DEFINING.
+#     PROOF_PRST_PR_DEFINING.
 #
 # The mu-correctness axiom for find_proof_pr (and any mu-closed symbol)
 # lives in prst_proof.py as MU_CORRECTNESS: from any specific witness
 # q certifying f(q, args) = T_pt, conclude f(App_pt (mu_sym f) args,
 # args) = T_pt. This is the only axiom about mu_sym -- it is what
 # makes D2 derivable in the quantifier-free setting.
-
-
-# ---------------------------------------------------------------------------
-# Module size estimate
-# ---------------------------------------------------------------------------
-#
-# Filled in: ~600 lines.
-#
-# Comparison to the HF representability path:
-#   hf_repr_core.py + hf_repr_thms.py = ~7900 lines.
-#   prst_pr.py replaces both with ~600 lines, because:
-#     * No trace sets (substitute, numeral, diag are *terms*).
-#     * No functionality proofs (terms are functional by HOL syntax).
-#     * No quote_hf / QUOTE_HF_INJ apparatus (PRST terms ARE their own
-#       internal representation).
-#
-# Net saving from the move: ~7000 lines on Stage 3 alone.
-# ---------------------------------------------------------------------------
 
 
 if __name__ == "__main__":

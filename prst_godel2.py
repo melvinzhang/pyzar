@@ -419,20 +419,19 @@ def PRST_CANNOT_PROVE_OWN_CONSISTENCY(p):
 # Stage 7 (f) -- Module size estimate.
 # ---------------------------------------------------------------------------
 #
-#                                          HF estimate    PRST estimate
-#   D1 (already in prst_proof.py)              ~50            ~5
+#   D1 (already in prst_proof.py)              ~5
 #   D2 (mp_combine_pr correctness +
-#       mu-correctness chain)                  ~150           ~50
+#       mu-correctness chain)                  ~50
 #   D3 (Sigma_1 completeness; structural
-#       induction over formula constructors)   ~600           ~200
-#   Loeb's theorem                             ~100           ~60
-#   G2 main theorem                            ~50            ~20
-#   ----                                       ----           ----
-#   TOTAL                                      ~950           ~335
+#       induction over formula constructors)   ~200
+#   Loeb's theorem                             ~60
+#   G2 main theorem                            ~20
+#   ----                                       ----
+#   TOTAL                                      ~335
 #
-# Saving comes from the same place as G1: no trace sets, no
-# functionality lemmas, and the existential-elimination steps that
-# would normally bloat D2/D3 are replaced by single applications of
+# PR symbols are first-class terms, so there are no trace sets and no
+# functionality lemmas. Existential-elimination steps that would
+# otherwise bloat D2/D3 are replaced by single applications of
 # MU_CORRECTNESS at concrete witnesses.
 # ---------------------------------------------------------------------------
 

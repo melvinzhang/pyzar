@@ -2,22 +2,16 @@
 # Stage 3 (PRST) -- representability is (almost) free.
 # ---------------------------------------------------------------------------
 #
-# In HF, "representability of a PR predicate P : nat0 -> bool" means
-# exhibiting an HF-formula F(x) and proving
+# Representability of a PR predicate P : nat0 -> bool in PRST means
+# exhibiting a PRST formula F(x) and proving
 #
-#     |- !n. P n      ==> Prov_HF (substitute F (numeral n) var_x).
-#     |- !n. ~ P n    ==> Prov_HF (Not_f (substitute F (numeral n) var_x)).
-# (Stated for HF to contrast with the PRST cost; the PRST analog uses
-# Prov_PRST in place of Prov_HF.)
+#     |- !n. P n      ==> Prov_PRST (substitute_p F (numeral n) var_x).
+#     |- !n. ~ P n    ==> Prov_PRST (Not_pf (substitute_p F (numeral n) var_x)).
 #
-# The witnessing F(x) was always a Sigma_1 trace-existence formula, and
-# the proofs required machinery to evaluate the trace inside HF (~3000
-# lines for substitute alone).
-#
-# In PRST, every PR predicate P : nat0 -> bool that is decidable comes
-# with a PR function symbol p_sym whose application returns a boolean
-# value (encoded as Empty_pt for false, Adj_pt Empty_pt Empty_pt for
-# true). The representing formula is:
+# Every decidable PR predicate P comes with a PR function symbol p_sym
+# whose application returns a boolean value (encoded as Empty_pt for
+# false, Adj_pt Empty_pt Empty_pt for true). The representing formula
+# is:
 #
 #     F_P(x) := Eq_pf (App_pt p_sym (cons_l x nil_l)) (encoded_true).
 #
@@ -32,8 +26,8 @@
 # encoded_true (when P n holds at the meta level). Equality and modus
 # ponens close the goal.
 #
-# This is what the move BUYS us: a 3000-line trace argument collapses
-# to ~5 lines.
+# Making PR symbols first-class terms collapses representability to
+# a defining-equation lookup -- no trace sets, no functionality proofs.
 # ---------------------------------------------------------------------------
 
 
@@ -170,10 +164,10 @@ def SUBSTITUTE_REPRESENTS_PRST(p):
                                          (cons_l (numeral v) nil_l))))
                                    (numeral (substitute F t v))).
 
-    The PRST analog of SUBSTITUTE_REPRESENTS (~3000 lines in HF). Here
-    it's one PROV_PRST_SUBSTITUTE_EVAL specialisation plus
-    PROV_PRST_NUMERAL_EVAL on each argument, chained by PRST equality.
-    STUB. Estimate: ~30 lines.
+    Representability of substitute as a PRST claim. One
+    PROV_PRST_SUBSTITUTE_EVAL specialisation plus PROV_PRST_NUMERAL_EVAL
+    on each argument, chained by PRST equality. STUB. Estimate: ~30
+    lines.
     """
     p.goal(
         "!F t v. Prov_PRST (Eq_pf "
@@ -190,8 +184,7 @@ def DIAG_REPRESENTS_PRST(p):
     """|- !n. Prov_PRST (Eq_pf (App_pt diag_pr (cons_l (numeral n) nil_l))
                                 (numeral (diag n))).
 
-    The PRST analog of DIAG_REPRESENTS (axiom in godel_first.py, ~80
-    lines once fully discharged). Here: PROV_PRST_DIAG_EVAL +
+    Representability of diag as a PRST claim: PROV_PRST_DIAG_EVAL +
     PROV_PRST_NUMERAL_EVAL. STUB. Estimate: ~10 lines.
     """
     p.goal(
@@ -240,22 +233,6 @@ def PROOF_PRST_REPRESENTS_NEG(p):
         types={"pf": nat0_ty, "n": nat0_ty},
     )
     p.sorry()
-
-
-# ---------------------------------------------------------------------------
-# Module size estimate
-# ---------------------------------------------------------------------------
-#
-# Filled in: ~150 lines.
-#
-# Comparison to the HF representability chain:
-#   hf_repr_core.py + hf_repr_thms.py = ~7900 lines.
-#   prst_pr.py (~600) + prst_proof.py (~400) + prst_repr.py (~150)
-#                                              = ~1150 lines total.
-#
-# Net saving: ~6750 lines, just from making PR symbols first-class
-# terms instead of represented relations.
-# ---------------------------------------------------------------------------
 
 
 if __name__ == "__main__":
