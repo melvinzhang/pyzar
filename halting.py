@@ -581,12 +581,12 @@ is_normal = mk_const("is_normal", [])
 
 
 # ---------------------------------------------------------------------------
-# DSL friction helper: the wf-recursive ``sk_step`` doesn't have a
-# direct ``sk_step = \\t. @r. body`` lambda definition (``define_wf_lt``
-# returns a fixed-point equation instead), so ``by_select_def`` can't
-# be used as-is.  This helper plays the same role -- given the REC
-# equation, the input term, and an existence fact, it CHOOSE_WITNESSes
-# the SELECT and folds back to ``sk_step <input>`` via SYM(SPECL REC).
+# DSL helpers for the SK_STEP_REC case-split pattern.  Without these,
+# each of SK_STEP_K / SK_STEP_S / SK_STEP_LEAF_S / SK_STEP_LEAF_K
+# has to spell the 4-disjunct body verbatim at three sites (existence
+# witness, post-select body fact, each case spec), which is ~150 lines
+# per proof.
+
 def _select_via_rec(rec_th, args, ex_th):
     """Like ``by_select_def``, but works with a REC-shape equation
     ``|- !n. f n = @r. body[f, n, r]`` instead of a direct lambda def.
@@ -595,7 +595,7 @@ def _select_via_rec(rec_th, args, ex_th):
     substituted out for ``f`` at the given args).
     """
     from tactics import REWRITE_RULE, CHOOSE_WITNESS, SYM as _SYM, SPECL as _SPECL
-    from fusion import dest_exists as _dest_ex
+    from axioms import dest_exists as _dest_ex
     if not isinstance(args, (list, tuple)):
         args = [args]
     spec = _SPECL(args, rec_th)  # |- f args = @r. body[f, args, r]
@@ -606,28 +606,123 @@ def _select_via_rec(rec_th, args, ex_th):
     return REWRITE_RULE([_SYM(spec)], chosen)
 
 
+def _sk_step_disjuncts(t, r):
+    """Return the four disjunct strings of the ``_sk_step_F`` body
+    applied at input ``t``, with the SELECT-bound variable substituted
+    by ``r`` (literal ``"r"`` for the existence witness; ``"sk_step
+    (<t>)"`` for the post-select body and case specs).
+
+    Existential bound names are ``a, b, c`` (renamed from the
+    definition's ``x, y, z`` so they don't shadow caller-free vars
+    like ``x, y, z`` from the outer goal).
+    """
+    K_shape = f"?a b. {t} = App_t (App_t K_t a) b"
+    S_shape = f"?a b c. {t} = App_t (App_t (App_t S_t a) b) c"
+    App_shape = f"?a b. {t} = App_t a b"
+    D1 = f"(?a b. {t} = App_t (App_t K_t a) b /\\ {r} = a)"
+    D2 = (
+        f"(~({K_shape}) /\\ "
+        f" ?a b c. {t} = App_t (App_t (App_t S_t a) b) c /\\ "
+        f"         {r} = App_t (App_t a c) (App_t b c))"
+    )
+    D3_inner = (
+        f"((~(sk_step a = a) /\\ {r} = App_t (sk_step a) b) \\/ "
+        f" (sk_step a = a /\\ ~(sk_step b = b) /\\ "
+        f"  {r} = App_t a (sk_step b)) \\/ "
+        f" (sk_step a = a /\\ sk_step b = b /\\ {r} = {t}))"
+    )
+    D3 = (
+        f"(~({K_shape}) /\\ ~({S_shape}) /\\ "
+        f" (?a b. {t} = App_t a b /\\ {D3_inner}))"
+    )
+    D4 = (
+        f"(~({K_shape}) /\\ ~({S_shape}) /\\ ~({App_shape}) /\\ "
+        f" {r} = {t})"
+    )
+    return [D1, D2, D3, D4]
+
+
+def _sk_step_body(t, r):
+    return " \\/ ".join(_sk_step_disjuncts(t, r))
+
+
+def _sk_step_select_at(p, t, witness_r, inner_branch_th):
+    """Build the body-at-sk_step fact for input ``t``.
+
+    Combines:
+      1. ``ex: ?r. body[t, r]``      (existence witness via inner_branch_th + by_disj)
+      2. ``_select_via_rec``         (fold SELECT to ``sk_step t``)
+
+    Args:
+      t                : input term, as a string.
+      witness_r        : the ``r``-value to witness with, as a string.
+      inner_branch_th  : a fact label or theorem proving the firing
+                         disjunct's body at ``r := witness_r``.
+
+    The caller registers ``inner_branch_th`` as a fact in scope
+    (e.g. ``p.have("inner_K: ?a b. t = App_t (App_t K_t a) b /\\ r0 = a")``
+    with ``r0 = witness_r``).  This helper DISJ-chains it into the
+    full 4-disjunct shape, EXISTS-introduces ``r``, and feeds to
+    ``_select_via_rec``.
+
+    Returns the kernel theorem ``|- body[t, sk_step t]``.
+    """
+    body_at_r = _sk_step_body(t, witness_r)
+    body_at_r_var = _sk_step_body(t, "r")
+    p.have(f"_step_disj_rhs: {body_at_r}").by_disj(inner_branch_th)
+    p.have(f"_step_ex: ?r. {body_at_r_var}").by_witness(witness_r, "_step_disj_rhs")
+    return _select_via_rec(SK_STEP_REC, [p._parse(t)], p.fact("_step_ex"))
+
+
 @proof
 def SK_STEP_K(p):
     """|- !x y. sk_step (App_t (App_t K_t x) y) = x.
 
-    Strategy unchanged from the head-only version, modulo the extra
-    App-recursion disjunct in the body of the new ``sk_step``:
-      1. Build the 4-disjunct existence witness at r := x, K-redex
-         branch.
-      2. ``_select_via_rec`` substitutes ``sk_step (App_t (App_t K_t x) y)``
-         for the SELECT variable.
-      3. Case-split: K-branch gives the answer via APP_T_INJ; the
-         S-, App-, and leaf-branches all carry ``~(K-redex)`` and
-         contradict the K-redex shape of the input.
+    K-redex disjunct of the 4-disjunct body fires at ``r := x``;
+    APP_T_INJ chain identifies the K-redex's bound ``a`` with our
+    ``x``.  The S-, App-, and leaf-branches all carry ``~K`` and are
+    refuted via the obvious K-redex existence of the input.
     """
+    from tactics import CONJ as _CONJ, CONJUNCT1 as _C1, CONJUNCT2 as _C2
     p.goal("!x y. sk_step (App_t (App_t K_t x) y) = x")
     p.fix("x y")
-    # DSL friction: the SELECT body string has to be repeated verbatim
-    # at the existence witness, the post-select body fact, and each
-    # case-branch's spec.  No primitive lets us name the body once and
-    # interpolate the SELECT value.  Sorried pending the rework of the
-    # 4-disjunct existence + case-split into a reusable helper.
-    p.sorry()
+    t = "App_t (App_t K_t x) y"
+    sk_t = f"sk_step ({t})"
+    # K-disjunct witness at r := x: ?a b. t = App_t (App_t K_t a) b /\ x = a.
+    p.have(
+        f"inner_K: ?a b. {t} = App_t (App_t K_t a) b /\\ x = a"
+    ).by_exists(
+        ["x", "y"], REFL(p._parse(t)), REFL(p._parse("x"))
+    )
+    body_th = _sk_step_select_at(p, t, "x", "inner_K")
+    p.have(f"body: {_sk_step_body(t, sk_t)}").by_thm(body_th)
+    # K-redex existence at the input; refutes ~K guards in cases 2-4.
+    p.have(f"is_kred: ?a b. {t} = App_t (App_t K_t a) b").by_exists(
+        ["x", "y"], REFL(p._parse(t))
+    )
+    D1, D2, D3, D4 = _sk_step_disjuncts(t, sk_t)
+    with p.cases_on("body"):
+        with p.case(f"h1: {D1}"):
+            p.choose("b", from_="a_eq")
+            p.split("b_eq", "(h_app, h_sk)")
+            p.have(
+                "h_o: App_t K_t x = App_t K_t a /\\ y = b"
+            ).by(APP_T_INJ, "App_t K_t x", "y", "App_t K_t a", "b", "h_app")
+            p.have("h_o1: App_t K_t x = App_t K_t a").by_thm(_C1(p.fact("h_o")))
+            p.have("h_i: K_t = K_t /\\ x = a").by(
+                APP_T_INJ, "K_t", "x", "K_t", "a", "h_o1"
+            )
+            p.have("h_xa: x = a").by_thm(_C2(p.fact("h_i")))
+            p.thus(f"{sk_t} = x").by_rewrite_of("h_sk", [SYM(p.fact("h_xa"))])
+        with p.case(f"h2: {D2}"):
+            p.split("h2", "(h_nk, _)")
+            p.absurd().by_conj("h_nk", "is_kred")
+        with p.case(f"h3: {D3}"):
+            p.split("h3", "(h_nk, _, _)")
+            p.absurd().by_conj("h_nk", "is_kred")
+        with p.case(f"h4: {D4}"):
+            p.split("h4", "(h_nk, _, _, _)")
+            p.absurd().by_conj("h_nk", "is_kred")
 
 
 @proof
@@ -635,17 +730,109 @@ def SK_STEP_S(p):
     """|- !x y z. sk_step (App_t (App_t (App_t S_t x) y) z)
                   = App_t (App_t x z) (App_t y z).
 
-    Same shape as SK_STEP_K but the witness lands in disjunct 2 and
-    the K-, App-, leaf-disjuncts are refuted via ``not_kred`` (S-input
-    can't be a K-redex) and ``is_sred`` against the ``~S`` guards.
+    S-redex disjunct (index 1, guarded by ``~K``) fires at the natural
+    witness; refute K-branch via ``not_kred`` (APP_T_INJ chain shows
+    an S-input can't unify with a K-redex shape); refute App-rec and
+    leaf branches via the obvious S-redex existence of the input.
     """
-    # DSL friction: same 4-disjunct body verbatim-duplication as
-    # SK_STEP_K; sorried pending the helper rework.
+    from tactics import CONJ as _CONJ, CONJUNCT1 as _C1, CONJUNCT2 as _C2
     p.goal(
         "!x y z. sk_step (App_t (App_t (App_t S_t x) y) z) "
         "         = App_t (App_t x z) (App_t y z)"
     )
-    p.sorry()
+    p.fix("x y z")
+    t = "App_t (App_t (App_t S_t x) y) z"
+    sk_t = f"sk_step ({t})"
+    val = "App_t (App_t x z) (App_t y z)"
+
+    # not_kred: ~(?a b. t = App_t (App_t K_t a) b).  S-input has head
+    # S_t, not K_t; tag clash via K_T_NEQ_APP_T after two APP_T_INJ peels.
+    with p.have(
+        f"not_kred: ~(?a b. {t} = App_t (App_t K_t a) b)"
+    ).proof():
+        with p.suppose(f"ex_kred: ?a b. {t} = App_t (App_t K_t a) b"):
+            p.choose("a", from_="ex_kred")
+            p.choose("b", from_="a_eq")
+            p.have(
+                "h_o: App_t (App_t S_t x) y = App_t K_t a /\\ z = b"
+            ).by(APP_T_INJ, "App_t (App_t S_t x) y", "z",
+                 "App_t K_t a", "b", "b_eq")
+            p.have("h_o1: App_t (App_t S_t x) y = App_t K_t a").by_thm(
+                _C1(p.fact("h_o"))
+            )
+            p.have("h_m: App_t S_t x = K_t /\\ y = a").by(
+                APP_T_INJ, "App_t S_t x", "y", "K_t", "a", "h_o1"
+            )
+            p.have("ASx_eq_K: App_t S_t x = K_t").by_thm(_C1(p.fact("h_m")))
+            p.have("K_neq: ~(K_t = App_t S_t x)").by(K_T_NEQ_APP_T, "S_t", "x")
+            p.have("K_eq: K_t = App_t S_t x").by_thm(SYM(p.fact("ASx_eq_K")))
+            p.absurd().by_conj("K_neq", "K_eq")
+
+    # S-disjunct inner witness at r := val.
+    p.have(
+        f"inner_S_inner: ?a b c. {t} = App_t (App_t (App_t S_t a) b) c /\\ "
+        f"                       {val} = App_t (App_t a c) (App_t b c)"
+    ).by_exists(
+        ["x", "y", "z"], REFL(p._parse(t)), REFL(p._parse(val))
+    )
+    p.have(
+        f"inner_S: ~(?a b. {t} = App_t (App_t K_t a) b) /\\ "
+        f" (?a b c. {t} = App_t (App_t (App_t S_t a) b) c /\\ "
+        f"          {val} = App_t (App_t a c) (App_t b c))"
+    ).by_thm(_CONJ(p.fact("not_kred"), p.fact("inner_S_inner")))
+    body_th = _sk_step_select_at(p, t, val, "inner_S")
+    p.have(f"body: {_sk_step_body(t, sk_t)}").by_thm(body_th)
+
+    # is_sred: refutes ~S guards in branches 3, 4.
+    p.have(
+        f"is_sred: ?a b c. {t} = App_t (App_t (App_t S_t a) b) c"
+    ).by_exists(["x", "y", "z"], REFL(p._parse(t)))
+
+    D1, D2, D3, D4 = _sk_step_disjuncts(t, sk_t)
+    with p.cases_on("body"):
+        with p.case(f"h1: {D1}"):
+            # K-branch on S-input: extract a, b and contradict not_kred.
+            p.choose("b", from_="a_eq")
+            p.split("b_eq", "(h_app, _)")
+            p.have(
+                f"h_kred_ex: ?a b. {t} = App_t (App_t K_t a) b"
+            ).by_exists(["a", "b"], p.fact("h_app"))
+            p.absurd().by_conj("not_kred", "h_kred_ex")
+        with p.case(f"h2: {D2}"):
+            p.split("h2", "(_, h2_ex)")
+            p.choose("a", from_="h2_ex")
+            p.choose("b", from_="a_eq")
+            p.choose("c", from_="b_eq")
+            p.split("c_eq", "(h_app, h_sk)")
+            # h_app: t = App_t (App_t (App_t S_t a) b) c.  Three APP_T_INJ peels
+            # identify x = a, y = b, z = c.
+            p.have(
+                "h_o: App_t (App_t S_t x) y = App_t (App_t S_t a) b /\\ z = c"
+            ).by(APP_T_INJ, "App_t (App_t S_t x) y", "z",
+                 "App_t (App_t S_t a) b", "c", "h_app")
+            p.have("h_o1: App_t (App_t S_t x) y = App_t (App_t S_t a) b").by_thm(
+                _C1(p.fact("h_o"))
+            )
+            p.have("h_zc: z = c").by_thm(_C2(p.fact("h_o")))
+            p.have(
+                "h_m: App_t S_t x = App_t S_t a /\\ y = b"
+            ).by(APP_T_INJ, "App_t S_t x", "y", "App_t S_t a", "b", "h_o1")
+            p.have("h_m1: App_t S_t x = App_t S_t a").by_thm(_C1(p.fact("h_m")))
+            p.have("h_yb: y = b").by_thm(_C2(p.fact("h_m")))
+            p.have(
+                "h_i: S_t = S_t /\\ x = a"
+            ).by(APP_T_INJ, "S_t", "x", "S_t", "a", "h_m1")
+            p.have("h_xa: x = a").by_thm(_C2(p.fact("h_i")))
+            p.thus(f"{sk_t} = {val}").by_rewrite_of(
+                "h_sk",
+                [SYM(p.fact("h_xa")), SYM(p.fact("h_yb")), SYM(p.fact("h_zc"))],
+            )
+        with p.case(f"h3: {D3}"):
+            p.split("h3", "(_, h_ns, _)")
+            p.absurd().by_conj("h_ns", "is_sred")
+        with p.case(f"h4: {D4}"):
+            p.split("h4", "(_, h_ns, _, _)")
+            p.absurd().by_conj("h_ns", "is_sred")
 
 
 
@@ -694,36 +881,80 @@ def _atom_neq_App_negations(p, atom, atom_neq_lemma):
     return f"nK_{atom_str}", f"nS_{atom_str}", f"nApp_{atom_str}"
 
 
-@proof
-def SK_STEP_LEAF_S(p):
-    """|- sk_step S_t = S_t.
-
-    S_t is a leaf atom: no K-redex, no S-redex, no App_t shape, so
-    the 4th (``leaf'') disjunct of the body fires with r = S_t.
-    Existence witness builds that branch; ``_select_via_rec`` folds
-    the SELECT back to ``sk_step S_t``; case-split eliminates the
-    three Application-shaped branches via the S_t-not-App negations.
+def _prove_sk_step_leaf(p, atom_str, atom_neq_lemma):
+    """Shared body of SK_STEP_LEAF_S / SK_STEP_LEAF_K.  Proves
+    ``sk_step <atom> = <atom>`` where ``atom`` is ``S_t`` or ``K_t``
+    (a leaf with no App_t shape).  The leaf-disjunct (index 3) fires;
+    all three App-shaped branches are refuted via ``atom_neq_lemma``.
     """
     from tactics import CONJ as _CONJ
-    p.goal("sk_step S_t = S_t")
-    # Three atomic negations.
-    nK_lbl, nS_lbl, nApp_lbl = _atom_neq_App_negations(
-        p, "S_t", S_T_NEQ_APP_T
+    t = atom_str
+    sk_t = f"sk_step {t}"
+    nK_lbl, nS_lbl, nApp_lbl = _atom_neq_App_negations(p, t, atom_neq_lemma)
+    # Leaf-disjunct inner: nK /\ nS /\ nApp /\ atom = atom.
+    p.have(
+        f"inner_leaf: ~(?a b. {t} = App_t (App_t K_t a) b) /\\ "
+        f"~(?a b c. {t} = App_t (App_t (App_t S_t a) b) c) /\\ "
+        f"~(?a b. {t} = App_t a b) /\\ {t} = {t}"
+    ).by_thm(
+        _CONJ(
+            p.fact(nK_lbl),
+            _CONJ(
+                p.fact(nS_lbl),
+                _CONJ(p.fact(nApp_lbl), REFL(p._parse(t))),
+            ),
+        )
     )
-    # DSL friction: the 4-disjunct body has to be spelled out three
-    # times (existence ``rhs``, witness target, post-select ``body``
-    # fact, plus each of the four case-branch specs).  No DSL
-    # primitive lets us name the body once and parameterise the
-    # SELECT-bound r; this is what makes Stage-1 reproofs verbose.
-    # The mechanical 200-line proof is left as TODO; sketched here.
-    p.sorry()
+    body_th = _sk_step_select_at(p, t, t, "inner_leaf")
+    p.have(f"body: {_sk_step_body(t, sk_t)}").by_thm(body_th)
+    D1, D2, D3, D4 = _sk_step_disjuncts(t, sk_t)
+    with p.cases_on("body"):
+        with p.case(f"h1: {D1}"):
+            # ?a b. atom = App_t (App_t K_t a) b /\ sk_step atom = a.
+            # The existential is what nK rules out.
+            p.choose("b", from_="a_eq")
+            p.split("b_eq", "(h_app, _)")
+            p.have(
+                f"h_kred_ex: ?a b. {t} = App_t (App_t K_t a) b"
+            ).by_exists(["a", "b"], p.fact("h_app"))
+            p.absurd().by_conj(nK_lbl, "h_kred_ex")
+        with p.case(f"h2: {D2}"):
+            p.split("h2", "(_, h2_ex)")
+            p.choose("a", from_="h2_ex")
+            p.choose("b", from_="a_eq")
+            p.choose("c", from_="b_eq")
+            p.split("c_eq", "(h_app, _)")
+            p.have(
+                f"h_sred_ex: ?a b c. {t} = App_t (App_t (App_t S_t a) b) c"
+            ).by_exists(["a", "b", "c"], p.fact("h_app"))
+            p.absurd().by_conj(nS_lbl, "h_sred_ex")
+        with p.case(f"h3: {D3}"):
+            p.split("h3", "(_, _, h3_app)")
+            p.choose("a", from_="h3_app")
+            p.choose("b", from_="a_eq")
+            p.split("b_eq", "(h_app, _)")
+            p.have(
+                f"h_app_ex: ?a b. {t} = App_t a b"
+            ).by_exists(["a", "b"], p.fact("h_app"))
+            p.absurd().by_conj(nApp_lbl, "h_app_ex")
+        with p.case(f"h4: {D4}"):
+            p.split("h4", "(_, _, _, h_sk)")
+            p.thus(f"{sk_t} = {t}").by_thm(p.fact("h_sk"))
+
+
+@proof
+def SK_STEP_LEAF_S(p):
+    """|- sk_step S_t = S_t.  Leaf disjunct fires; App-branches all
+    refuted via S_T_NEQ_APP_T."""
+    p.goal("sk_step S_t = S_t")
+    _prove_sk_step_leaf(p, "S_t", S_T_NEQ_APP_T)
 
 
 @proof
 def SK_STEP_LEAF_K(p):
     """|- sk_step K_t = K_t.  Same structure as SK_STEP_LEAF_S."""
     p.goal("sk_step K_t = K_t")
-    p.sorry()
+    _prove_sk_step_leaf(p, "K_t", K_T_NEQ_APP_T)
 
 
 @proof
