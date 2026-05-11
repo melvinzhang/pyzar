@@ -1,12 +1,12 @@
 # PRST `p.sorry()` plan of attack
 
-Census across `prst_*.py` (54 sorries remaining; 19 + 3 + 5 = 27 cleared so far):
+Census across `prst_*.py` (47 sorries remaining; 19 + 3 + 5 + 7 = 34 cleared so far):
 
 | File | sorries | Role |
 |------|---------|------|
 | `prst_syntax.py` | 0 (was 19) | App_pt constructor + extended `is_pterm`/`is_pform`/`free_in_p`/`substitute_p` AT-equations and preservation lemmas — **DONE** |
 | `prst_connectives.py` | 0 (was 3) | `substitute_p` distribution over And/Or/Iff (alias-thin wrappers) — **DONE** (Layer 3) |
-| `prst_pr.py` | 13 (was 17) | PR-symbol registry (`is_pr_sym`, `pr_arity`) + base-layer defining-equation axioms + `is_pr_def` recogniser + mu-closure registry — Layer 4 **partial** (5 IS_PR_SYM_* cleared) |
+| `prst_pr.py` | 5 (was 17) | PR-symbol registry + defining-equation axioms + `is_pr_def` recogniser + mu-closure — Layer 4 **partial** (5 PR_ARITY_* remaining), Layer 5 **DONE** |
 | `prst_proof.py` | 20 (was 15) | `Proof_PRST` / `Prov_PRST` + closure rules + per-axiom `PROV_PRST_*_DEF` corollaries + `MU_CORRECTNESS` + PR-eval lemmas + `Prov_PRST_internal` (Layer 0 added new MONO + Proof_PRST defining-equation sorries) |
 | `prst_repr.py` | 7 | Boolean-tag disjointness + parametric representability schema + four headline representations |
 | `prst_godel1.py` | 6 | Diagonal lemma, Gödel sentence, consistency, Sigma_1-soundness, G1, essential undecidability |
@@ -144,6 +144,23 @@ Depends on Layer 0 real `IS_PR_DEF_DEF` body + the per-axiom closed nat0s being 
 
 ---
 
+## Layer 5 — `prst_pr` `is_pr_def` recogniser (6 sorries + IS_PARTIAL_PR_SYM_MU) — **DONE**
+
+All 7 listed sorries cleared in commit `ad84a26`, plus a new size lemma `NAT0_LT_MU_SYM`.
+
+**Cleared:**
+- 6 IS_PR_DEF_HOLDS_* (ZERO/PROJ/IF_IN_TRUE/IF_IN_FALSE/REC_BASE/REC_STEP) — identical proof shape to Layer 4's IS_PR_SYM_* lemmas (build the disjunction body specialised at the axiom name, then `by_unfold` of `IS_PR_DEF_DEF`). The 2-binder existential leaves (PROJ, REC_BASE, REC_STEP) build via `by_exists` with the REFL conjunct + side-condition facts passed as *separate* rules.
+- `IS_PARTIAL_PR_SYM_MONO` — plan listed it as a Layer 2 leftover. Body has a non-recursive `is_pr_sym n` disjunct (REFL) plus the standard unary recursive `?g. n = mu_sym g /\ rec g` disjunct (`mono_iff_unary_step(mu_sym, NAT0_LT_MU_SYM, h)`), glued by `or_chain_collapse` + `by_unfold`.
+- `IS_PARTIAL_PR_SYM_MU` — one `SPEC` of `_IS_PARTIAL_PR_SYM_REC` at `mu_sym f`, `by_unfold` to expose `_IS_PARTIAL_PR_SYM_F`'s 2-disjunct body, witness `g := f` via `by_exists`, `by_disj`, `by_eq_mp` back through the recursion equation.
+
+**New helper:** `NAT0_LT_MU_SYM: !g. nat0_lt g (mu_sym g)`. Derived from `NAT0_LT_PAIR_ORD_R` after specialising `mu_sym_def` at `g` via `p.unfold(mu_sym_def, "g")` — the bare definition equation is at function-equality level (`mu_sym = \f. Pair_ord 6 f`), so `by_rewrite_of` against `SYM(mu_sym_def)` doesn't reduce; need the applied-form equation `mu_sym g = Pair_ord 6 g` first.
+
+**DSL friction newly observed:**
+- `by_exists` discharges *each `/\` conjunct of the substituted body* independently — passing a pre-`CONJ`'d fact as one rule trips `dest_eq` because conjunction isn't an equation. Pass each conjunct's witness/REFL as separate `*rules` arguments.
+- `by_rewrite_of` against a function-equality `f = \x. body` doesn't reduce the applied form `f a` directly — you have to specialise via `p.unfold(f_def, "a")` first to get `f a = body[a]`, then rewrite with that. (Discovered while proving `NAT0_LT_MU_SYM`.)
+
+---
+
 ## Layer 6 — `prst_proof` foundations (8 sorries)
 
 Depends on Layer 0 real `Proof_PRST_def` body + Layers 1-5.
@@ -271,6 +288,7 @@ Land Layer 0 + Layer 1 + Layer 3 together — they unblock Layer 2 (the largest 
 - `1d74a37` Layer 3 — 3 prst_connectives sorries cleared.
 - `92a9994` Layer 4 part 1 — real IS_PR_SYM body + 5 IS_PR_SYM_* lemmas.
 - `18f81a3` Layer 4 cleanup — drop wf-lt scaffolding from pr_arity (avoided a sorry'd MONO without unlocking any PR_ARITY_* lemma).
+- `ad84a26` Layer 5 — 6 IS_PR_DEF_HOLDS_* + IS_PARTIAL_PR_SYM_MONO + IS_PARTIAL_PR_SYM_MU + new NAT0_LT_MU_SYM helper.
 
-**Cleared:** 27 sorries (19 in prst_syntax + 3 in prst_connectives + 5 IS_PR_SYM in prst_pr).
-**Remaining:** 54 sorries (13 in prst_pr, 20 in prst_proof, 7 in prst_repr, 6 in prst_godel1, 8 in prst_godel2). prst_proof grew by 5 versus the plan's original count because Layer 0 introduced new MONO obligations (Proof_PRST + Proof_PRST_pr defining equations).
+**Cleared:** 34 sorries (19 in prst_syntax + 3 in prst_connectives + 5 IS_PR_SYM + 7 Layer 5 in prst_pr).
+**Remaining:** 47 sorries (5 in prst_pr, 20 in prst_proof, 7 in prst_repr, 6 in prst_godel1, 8 in prst_godel2). prst_proof grew by 5 versus the plan's original count because Layer 0 introduced new MONO obligations (Proof_PRST + Proof_PRST_pr defining equations).
