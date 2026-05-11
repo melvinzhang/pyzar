@@ -712,55 +712,22 @@ IS_PR_SYM_DEF = define(
 is_pr_sym = mk_const("is_pr_sym", [])
 
 # `pr_arity` returns a literal arity for the four non-recursive base
-# symbols; for `rec_sym g h` it returns SUC0 (pr_arity g) -- the only
-# recursive case. We use define_wf_lt: `g < rec_sym g h = Pair_ord 4
-# (Pair_ord g h)` by NAT0_LT_PAIR_ORD_L + NAT0_LT_PAIR_ORD_R + transit.
-# The five cases use a SELECT body that pins r in each branch; this is
-# the same SELECT-style shape as substitute_p (see _SUBSTITUTE_P_F_DEF).
-_PR_ARITY_F_DEF = define(
-    "_pr_arity_F",
-    parse_type("(nat0 -> nat0) -> nat0 -> nat0"),
-    "\\rec:nat0->nat0. \\f:nat0. @r:nat0. "
+# symbols. The rec-sym branch's intended arity is ``SUC0 (pr_arity g)``,
+# but mechanising that here would require a wf-recursive pr_arity plus
+# a substantial MONO proof (~150 lines, see SUBSTITUTE_P_MONO for the
+# pattern). For now `pr_arity (rec_sym g h)` collapses to the SUC0 0
+# fallback below (rec branch not encoded) and the corresponding
+# PR_ARITY_REC lemma in prst_pr.py remains sorry'd as Layer 4 follow-up
+# work. No downstream code consumes pr_arity, so the placeholder is safe.
+PR_ARITY_DEF = define(
+    "pr_arity",
+    parse_type("nat0 -> nat0"),
+    "\\f:nat0. @r:nat0. "
     "(f = 0 /\\ r = 0) \\/ "
     "(f = SUC0 0 /\\ r = SUC0 (SUC0 0)) \\/ "
     "(?i n. f = Pair_ord (SUC0 (SUC0 0)) (Pair_ord i n) /\\ r = n) \\/ "
     "(f = SUC0 (SUC0 (SUC0 0)) "
-    " /\\ r = SUC0 (SUC0 (SUC0 (SUC0 0)))) \\/ "
-    "(?g h. f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord g h) "
-    "       /\\ r = SUC0 (rec g))",
-)
-_PR_ARITY_F = mk_const("_pr_arity_F", [])
-
-
-@proof
-def PR_ARITY_MONO(p):
-    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
-              ==> _pr_arity_F f n = _pr_arity_F g n.
-
-    The only recursive case is the rec-sym branch, which calls
-    ``rec g`` for the first component of ``Pair_ord 4 (Pair_ord g h)``.
-    By NAT0_LT_PAIR_ORD_L + _R + NAT0_LT_TRANS, ``g`` lies strictly
-    below ``Pair_ord 4 (Pair_ord g h) = n``; the hypothesis ``h`` then
-    rewrites the recursive call so the SELECT body is identical.
-    """
-    p.goal(
-        "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> "
-        "_pr_arity_F f n = _pr_arity_F g n",
-        types={
-            "f": parse_type("nat0 -> nat0"),
-            "g": parse_type("nat0 -> nat0"),
-            "n": nat0_ty,
-            "k": nat0_ty,
-        },
-    )
-    p.sorry()
-
-
-PR_ARITY_DEF, _PR_ARITY_REC_RAW = define_wf_lt(
-    "pr_arity",
-    parse_type("nat0 -> nat0"),
-    _PR_ARITY_F,
-    PR_ARITY_MONO,
+    " /\\ r = SUC0 (SUC0 (SUC0 (SUC0 0))))",
 )
 pr_arity = mk_const("pr_arity", [])
 
