@@ -572,6 +572,58 @@ def FREE_IN_P_AT_TUP(p):
     p.sorry()
 
 
+# The four AT-equations below (Eq_pf / In_pa / Not_pf / Imp_pf) are
+# uniform structural-homomorphism corollaries of free_in_p's recursion
+# -- the absence of binders means every non-Var case is just a
+# disjunction over the children. They're listed individually for
+# downstream rewrite convenience, not because the cases are substantive
+# (in hf_syntax the analogous FREE_IN_AT_FORALL is structurally
+# distinct due to capture-avoidance; PRST has no such case).
+
+
+@proof
+def FREE_IN_P_AT_EQ(p):
+    """|- !a b v. free_in_p (Eq_pf a b) v
+                 = (free_in_p a v \\/ free_in_p b v). STUB."""
+    p.goal(
+        "!a b v. free_in_p (Eq_pf a b) v = (free_in_p a v \\/ free_in_p b v)",
+        types={"a": nat0_ty, "b": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def FREE_IN_P_AT_IN(p):
+    """|- !a b v. free_in_p (In_pa a b) v
+                 = (free_in_p a v \\/ free_in_p b v). STUB."""
+    p.goal(
+        "!a b v. free_in_p (In_pa a b) v = (free_in_p a v \\/ free_in_p b v)",
+        types={"a": nat0_ty, "b": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def FREE_IN_P_AT_NOT(p):
+    """|- !phi v. free_in_p (Not_pf phi) v = free_in_p phi v. STUB."""
+    p.goal(
+        "!phi v. free_in_p (Not_pf phi) v = free_in_p phi v",
+        types={"phi": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def FREE_IN_P_AT_IMP(p):
+    """|- !a b v. free_in_p (Imp_pf a b) v
+                 = (free_in_p a v \\/ free_in_p b v). STUB."""
+    p.goal(
+        "!a b v. free_in_p (Imp_pf a b) v = (free_in_p a v \\/ free_in_p b v)",
+        types={"a": nat0_ty, "b": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
 @proof
 def FREE_IN_P_AT_APP(p):
     """|- !f args v. free_in_p (App_pt f args) v = free_in_p args v. STUB."""
@@ -654,6 +706,16 @@ substitute_p = mk_const("substitute_p", [])
 
 
 @proof
+def SUBSTITUTE_P_AT_EMPTY(p):
+    """|- !t v. substitute_p Empty_pt t v = Empty_pt. STUB."""
+    p.goal(
+        "!t v. substitute_p Empty_pt t v = Empty_pt",
+        types={"t": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
 def SUBSTITUTE_P_AT_VAR_HIT(p):
     """|- !v t. substitute_p (Var_pt v) t v = t. STUB."""
     p.goal(
@@ -681,6 +743,68 @@ def SUBSTITUTE_P_AT_TUP(p):
     p.goal(
         "!a b t v. substitute_p (Tup_pt a b) t v "
         "          = Tup_pt (substitute_p a t v) (substitute_p b t v)",
+        types={"a": nat0_ty, "b": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+# The four AT-equations below (Eq_pf / In_pa / Not_pf / Imp_pf) are
+# uniform structural-homomorphism corollaries of substitute_p's
+# recursion -- the absence of binders means substitute_p distributes
+# through every non-Var constructor without capture-avoidance branching.
+# They're listed individually for downstream rewrite convenience, not
+# because the cases are substantive (in hf_syntax the analogous
+# SUBSTITUTE_AT_FORALL_HIT/MISS are structurally distinct; PRST has
+# no such case).
+
+
+@proof
+def SUBSTITUTE_P_AT_EQ(p):
+    """|- !a b t v.
+            substitute_p (Eq_pf a b) t v
+              = Eq_pf (substitute_p a t v) (substitute_p b t v). STUB."""
+    p.goal(
+        "!a b t v. substitute_p (Eq_pf a b) t v "
+        "          = Eq_pf (substitute_p a t v) (substitute_p b t v)",
+        types={"a": nat0_ty, "b": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def SUBSTITUTE_P_AT_IN(p):
+    """|- !a b t v.
+            substitute_p (In_pa a b) t v
+              = In_pa (substitute_p a t v) (substitute_p b t v). STUB."""
+    p.goal(
+        "!a b t v. substitute_p (In_pa a b) t v "
+        "          = In_pa (substitute_p a t v) (substitute_p b t v)",
+        types={"a": nat0_ty, "b": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def SUBSTITUTE_P_AT_NOT(p):
+    """|- !phi t v.
+            substitute_p (Not_pf phi) t v
+              = Not_pf (substitute_p phi t v). STUB."""
+    p.goal(
+        "!phi t v. substitute_p (Not_pf phi) t v "
+        "          = Not_pf (substitute_p phi t v)",
+        types={"phi": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def SUBSTITUTE_P_AT_IMP(p):
+    """|- !a b t v.
+            substitute_p (Imp_pf a b) t v
+              = Imp_pf (substitute_p a t v) (substitute_p b t v). STUB."""
+    p.goal(
+        "!a b t v. substitute_p (Imp_pf a b) t v "
+        "          = Imp_pf (substitute_p a t v) (substitute_p b t v)",
         types={"a": nat0_ty, "b": nat0_ty, "t": nat0_ty, "v": nat0_ty},
     )
     p.sorry()
@@ -758,6 +882,15 @@ if __name__ == "__main__":
     print("    IS_PTERM_AT_TUP        :", pp_thm(IS_PTERM_AT_TUP))
     print("    IS_PTERM_AT_APP        :", pp_thm(IS_PTERM_AT_APP))
     print("    FREE_IN_P_AT_TUP       :", pp_thm(FREE_IN_P_AT_TUP))
+    print("    FREE_IN_P_AT_EQ        :", pp_thm(FREE_IN_P_AT_EQ))
+    print("    FREE_IN_P_AT_IN        :", pp_thm(FREE_IN_P_AT_IN))
+    print("    FREE_IN_P_AT_NOT       :", pp_thm(FREE_IN_P_AT_NOT))
+    print("    FREE_IN_P_AT_IMP       :", pp_thm(FREE_IN_P_AT_IMP))
     print("    FREE_IN_P_AT_APP       :", pp_thm(FREE_IN_P_AT_APP))
+    print("    SUBSTITUTE_P_AT_EMPTY  :", pp_thm(SUBSTITUTE_P_AT_EMPTY))
     print("    SUBSTITUTE_P_AT_TUP    :", pp_thm(SUBSTITUTE_P_AT_TUP))
+    print("    SUBSTITUTE_P_AT_EQ     :", pp_thm(SUBSTITUTE_P_AT_EQ))
+    print("    SUBSTITUTE_P_AT_IN     :", pp_thm(SUBSTITUTE_P_AT_IN))
+    print("    SUBSTITUTE_P_AT_NOT    :", pp_thm(SUBSTITUTE_P_AT_NOT))
+    print("    SUBSTITUTE_P_AT_IMP    :", pp_thm(SUBSTITUTE_P_AT_IMP))
     print("    SUBSTITUTE_P_AT_APP    :", pp_thm(SUBSTITUTE_P_AT_APP))
