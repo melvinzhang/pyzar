@@ -131,45 +131,127 @@ rec_sym = mk_const("rec_sym", [])
 # ---------------------------------------------------------------------------
 
 
+# All five IS_PR_SYM_* lemmas follow the same shape: prove the
+# disjunction that is the body of IS_PR_SYM_DEF applied to the symbol,
+# then bridge through IS_PR_SYM_DEF via `by_unfold`. The literal-tag
+# cases (zero / adj / if_in) discharge their disjunct by REFL after
+# unfolding the symbol DEF; the existential cases (proj / rec) supply
+# a witness via `disj_witness`.
+#
+# DSL friction: there is no "unfold-and-prove-a-disjunct" idiom in the
+# DSL. Each lemma writes out the full 5-disjunct body explicitly. A
+# `by_unfold_disj(IS_PR_SYM_DEF, witness=...)` helper would collapse
+# the 6-line ritual to one call.
+from prst_syntax import IS_PR_SYM_DEF  # noqa: E402
+
+_IS_PR_SYM_BODY = (
+    "{sym} = 0 \\/ "
+    "{sym} = SUC0 0 \\/ "
+    "(?i n. {sym} = Pair_ord (SUC0 (SUC0 0)) (Pair_ord i n)) \\/ "
+    "{sym} = SUC0 (SUC0 (SUC0 0)) \\/ "
+    "(?g h. {sym} = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord g h))"
+)
+
+
 @proof
 def IS_PR_SYM_ZERO(p):
-    """|- is_pr_sym zero_sym. STUB."""
+    """|- is_pr_sym zero_sym."""
     p.goal("is_pr_sym zero_sym")
-    p.sorry()
+    p.have("zero_eq: zero_sym = 0").by_thm(ZERO_SYM_DEF)
+    p.have("h_body: " + _IS_PR_SYM_BODY.format(sym="zero_sym")).by_disj(
+        "zero_eq"
+    )
+    p.thus("is_pr_sym zero_sym").by_unfold("h_body", IS_PR_SYM_DEF)
 
 
 @proof
 def IS_PR_SYM_ADJ(p):
-    """|- is_pr_sym adj_sym. STUB."""
+    """|- is_pr_sym adj_sym."""
     p.goal("is_pr_sym adj_sym")
-    p.sorry()
+    p.have("adj_eq: adj_sym = SUC0 0").by_thm(ADJ_SYM_DEF)
+    p.have("h_body: " + _IS_PR_SYM_BODY.format(sym="adj_sym")).by_disj("adj_eq")
+    p.thus("is_pr_sym adj_sym").by_unfold("h_body", IS_PR_SYM_DEF)
 
 
 @proof
 def IS_PR_SYM_PROJ(p):
-    """|- !i n. nat0_lt i n ==> is_pr_sym (proj_sym i n). STUB."""
+    """|- !i n. nat0_lt i n ==> is_pr_sym (proj_sym i n).
+
+    The ``nat0_lt i n`` hypothesis is kept in the lemma's signature
+    (Layer 5 PR-def axioms expect it as a side condition on proj
+    arity-checks) but is not consumed here: ``is_pr_sym``'s body uses a
+    bare existential ``?i n. ...`` without the guard, so the lemma is
+    in fact unconditional on (i, n). The hypothesis falls out as
+    vacuous after assumption.
+    """
     p.goal(
         "!i n. nat0_lt i n ==> is_pr_sym (proj_sym i n)",
         types={"i": nat0_ty, "n": nat0_ty},
     )
-    p.sorry()
+    p.fix("i n")
+    p.assume("_h_lt: nat0_lt i n")
+    # `p.unfold` returns the beta-reduced specialization of PROJ_SYM_DEF.
+    proj_eq_th = p.unfold(PROJ_SYM_DEF, "i", "n")
+    p.have(
+        "proj_eq: proj_sym i n = Pair_ord (SUC0 (SUC0 0)) (Pair_ord i n)"
+    ).by_thm(proj_eq_th)
+    # DSL friction: by_disj_witness is single-binder; the existential
+    # leaf here is `?i n. ...` (two binders), so we prove the
+    # existential first via by_exists and then DISJ it in.
+    # Use fresh bound names `ii nn` to avoid shadowing the outer i, n
+    # (otherwise by_unfold's alpha-match misses the unfolded `i' n'`).
+    p.have(
+        "h_ex: ?ii nn. proj_sym i n = Pair_ord (SUC0 (SUC0 0)) (Pair_ord ii nn)"
+    ).by_exists(["i", "n"], "proj_eq")
+    p.have(
+        "h_body: " + _IS_PR_SYM_BODY.format(sym="proj_sym i n").replace(
+            "?i n.", "?ii nn."
+        ).replace("Pair_ord i n", "Pair_ord ii nn")
+    ).by_disj("h_ex")
+    p.thus("is_pr_sym (proj_sym i n)").by_unfold("h_body", IS_PR_SYM_DEF)
 
 
 @proof
 def IS_PR_SYM_IF_IN(p):
-    """|- is_pr_sym if_in_sym. STUB."""
+    """|- is_pr_sym if_in_sym."""
     p.goal("is_pr_sym if_in_sym")
-    p.sorry()
+    p.have("if_in_eq: if_in_sym = SUC0 (SUC0 (SUC0 0))").by_thm(IF_IN_SYM_DEF)
+    p.have("h_body: " + _IS_PR_SYM_BODY.format(sym="if_in_sym")).by_disj(
+        "if_in_eq"
+    )
+    p.thus("is_pr_sym if_in_sym").by_unfold("h_body", IS_PR_SYM_DEF)
 
 
 @proof
 def IS_PR_SYM_REC(p):
-    """|- !g h. is_pr_sym g /\\ is_pr_sym h ==> is_pr_sym (rec_sym g h). STUB."""
+    """|- !g h. is_pr_sym g /\\ is_pr_sym h ==> is_pr_sym (rec_sym g h).
+
+    Both ``is_pr_sym`` hypotheses are vacuous: ``is_pr_sym``'s body
+    accepts any (g, h) under the rec-sym tag (the closure property is
+    enforced at the proof-system level via is_pr_def, not here).
+    """
     p.goal(
         "!g h. is_pr_sym g /\\ is_pr_sym h ==> is_pr_sym (rec_sym g h)",
         types={"g": nat0_ty, "h": nat0_ty},
     )
-    p.sorry()
+    p.fix("g h")
+    p.assume("_h_pr: is_pr_sym g /\\ is_pr_sym h")
+    rec_eq_th = p.unfold(REC_SYM_DEF, "g", "h")
+    p.have(
+        "rec_eq: rec_sym g h = "
+        "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord g h)"
+    ).by_thm(rec_eq_th)
+    # Fresh bound names to avoid shadowing outer g, h.
+    p.have(
+        "h_ex: ?gg hh. rec_sym g h = "
+        "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord gg hh)"
+    ).by_exists(["g", "h"], "rec_eq")
+    p.have(
+        "h_body: " + _IS_PR_SYM_BODY.format(sym="rec_sym g h").replace(
+            "?g h.", "?gg hh."
+        ).replace("Pair_ord g h", "Pair_ord gg hh")
+    ).by_disj("h_ex")
+    p.thus("is_pr_sym (rec_sym g h)").by_unfold("h_body", IS_PR_SYM_DEF)
 
 
 @proof
