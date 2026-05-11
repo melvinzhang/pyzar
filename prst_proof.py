@@ -77,10 +77,14 @@ from prst_pr import (
     if_in_sym,  # noqa: F401  -- parser alias
     rec_sym,  # noqa: F401  -- parser alias
     comp_sym,  # noqa: F401  -- parser alias
+    mu_sym,  # noqa: F401  -- parser alias for MU_CORRECTNESS
     numeral_pr,  # noqa: F401  -- parser alias
     substitute_pr,  # noqa: F401  -- parser alias
     diag_pr,  # noqa: F401  -- parser alias
     Proof_PRST_pr,  # noqa: F401  -- parser alias
+    find_proof_pr,  # noqa: F401  -- parser alias for Prov_PRST_internal
+    T_pt,  # noqa: F401  -- parser alias for MU_CORRECTNESS
+    is_partial_pr_sym,  # noqa: F401  -- parser alias for MU_CORRECTNESS
     zero_def_axiom,  # noqa: F401  -- parser alias for PROV_PRST_ZERO_DEF
     Adj_pt,  # noqa: F401  -- parser alias for PROV_PRST_ADJ_DEF_AT
     proj_def_axiom_at,  # noqa: F401  -- parser alias
@@ -96,6 +100,9 @@ from hf_proof import (
 )
 from prst_syntax import (
     Imp_pf,  # noqa: F401  -- parser alias for is_pr_axiom
+    Eq_pf,  # noqa: F401  -- parser alias for Prov_PRST_internal
+    Var_pt,  # noqa: F401  -- parser alias for Prov_PRST_internal
+    App_pt,  # noqa: F401  -- parser alias for Prov_PRST_internal
 )
 
 
@@ -372,6 +379,51 @@ def PROV_PRST_ADJ_DEF_AT(p):
 # follow the same shape; omitted from this sketch.
 
 
+# ---------------------------------------------------------------------------
+# Stage 2B (d.3) -- mu-correctness axiom.
+#
+# The single non-PR axiom in the PRST + mu extension. For any (partial-)
+# PR symbol f and any witness q certifying f at args, the mu-closure
+# returns *some* witness that also certifies f. This is the
+# quantifier-free internalisation of existential elimination needed for
+# the second derivability condition (D2):
+#
+#     MU_CORRECTNESS :
+#       |- !f q args.
+#            is_partial_pr_sym f
+#            /\ App_pt f (cons_l q args) = T_pt
+#            ==> App_pt f (cons_l (App_pt (mu_sym f) args) args) = T_pt.
+#
+# Reading: "if any q makes f hold at args, then the witness returned by
+# mu_sym f at args also makes f hold." No quantifier elimination, no
+# bound proof-variable -- just a free q that gets specialised by
+# PROV_PRST_SUBST_AXIOM at each use site.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def MU_CORRECTNESS(p):
+    """|- !f q args.
+            is_partial_pr_sym f
+            /\\ App_pt f (cons_l q args) = T_pt
+            ==> App_pt f (cons_l (App_pt (mu_sym f) args) args) = T_pt.
+
+    The mu-correctness axiom (HOL-level statement; reflected into PRST
+    via PROV_PRST_AXIOM at concrete (f, q, args) when used inside a
+    Prov_PRST derivation). This is the only axiom about mu_sym and the
+    only non-strict-PR commitment in the PRST + mu extension. Soundness
+    holds in the standard HF model under the convention that mu_sym f
+    returns the classical least witness when one exists. STUB.
+    """
+    p.goal(
+        "!f q args. is_partial_pr_sym f "
+        "           /\\ App_pt f (cons_l q args) = T_pt "
+        "           ==> App_pt f (cons_l (App_pt (mu_sym f) args) args) = T_pt",
+        types={"f": nat0_ty, "q": nat0_ty, "args": nat0_ty},
+    )
+    p.sorry()
+
+
 @proof
 def PROV_PRST_MP(p):
     """|- !f g. Prov_PRST f /\\ Prov_PRST (Imp_pf f g) ==> Prov_PRST g.
@@ -457,37 +509,40 @@ def PROV_PRST_DIAG_EVAL(p):
 
 # ---------------------------------------------------------------------------
 # Stage 2B (f) -- Prov_PRST_internal: the PRST formula expressing
-# "Prov_PRST holds at x". PRST is quantifier-free, so we cannot write
-# "there exists a proof y of x" as an Exists_pf formula directly.
-# Instead we use a *search* PR symbol find_proof_pr that returns a
-# PRST proof of x when one exists (and a sentinel otherwise), and
-# define:
+# "Prov_PRST holds at x". PRST is quantifier-free, so "there exists a
+# proof y of x" cannot be written with an object-level binder. Instead
+# we use find_proof_pr := mu_sym Proof_PRST_pr (from prst_pr) -- the
+# mu-closure of the decidable proof-checker, which returns a witness
+# whenever one exists. The existential lives entirely at the
+# meta-level inside mu_sym's interpretation; the formula below is
+# binder-free:
 #
 #   Prov_PRST_internal := Eq_pf
 #                           (App_pt Proof_PRST_pr
 #                             (cons_l (App_pt find_proof_pr
-#                                       (cons_l (Var_pt x) nil_l))
-#                                     (cons_l (Var_pt x) nil_l)))
+#                                       (cons_l (Var_pt var_x) nil_l))
+#                                     (cons_l (Var_pt var_x) nil_l)))
 #                           T_pt.
 #
-# I.e. "Proof_PRST_pr(find_proof_pr(x), x) = T_pt": there is a PRST
-# proof-list whose decidable PR check evaluates to T_pt at x. The
-# representability theorem is one Prov_PRST step:
+# Reading: "the canonical witness mu_sym Proof_PRST_pr at x checks T_pt
+# against x". By MU_CORRECTNESS, this is equivalent to "some witness
+# checks T_pt", which is exactly the standard Sigma_1 provability
+# predicate -- but stated quantifier-free.
+#
+# The representability theorem is one Prov_PRST step:
 #
 #   |- !n. Prov_PRST n <=> Prov_PRST (substitute_p Prov_PRST_internal
 #                                                  (numeral n) var_x).
-#
-# (find_proof_pr requires unbounded search and so is not primitive
-# recursive in the strict sense -- this layer relies on a partial-PR
-# extension; analog of the Sigma_1 existential in arithmetic. See
-# prst_pr for the construction.)
 # ---------------------------------------------------------------------------
 
 
 prov_prst_internal_def = define(
     "Prov_PRST_internal",
     parse_type("nat0"),
-    "0",  # placeholder; real body uses App_pt find_proof_pr + Proof_PRST_pr
+    "Eq_pf (App_pt Proof_PRST_pr "
+    "         (cons_l (App_pt find_proof_pr (cons_l (Var_pt var_x) nil_l)) "
+    "           (cons_l (Var_pt var_x) nil_l))) "
+    "      T_pt",
 )
 Prov_PRST_internal = mk_const("Prov_PRST_internal", [])
 
@@ -571,6 +626,9 @@ if __name__ == "__main__":
     print("Stage 2B (d.2) -- substitute-into-axiom derived rule.")
     print("    PROV_PRST_SUBST_AXIOM    :", pp_thm(PROV_PRST_SUBST_AXIOM))
     print("    PROV_PRST_ADJ_DEF_AT     :", pp_thm(PROV_PRST_ADJ_DEF_AT))
+    print()
+    print("Stage 2B (d.3) -- mu-correctness (the only non-PR axiom).")
+    print("    MU_CORRECTNESS           :", pp_thm(MU_CORRECTNESS))
     print()
     print("Stage 2B (e) -- free evaluation of PR symbols.")
     print("    PROV_PRST_SUBSTITUTE_EVAL :", pp_thm(PROV_PRST_SUBSTITUTE_EVAL))

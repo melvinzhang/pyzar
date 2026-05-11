@@ -55,6 +55,8 @@ from prst_pr import (
     diag_pr,
     Proof_PRST_pr,
     Adj_pt,  # noqa: F401  -- "encoded true" sentinel = Adj_pt Empty_pt Empty_pt
+    T_pt,  # noqa: F401  -- parser alias
+    F_pt,  # noqa: F401  -- parser alias
     is_pr_sym,  # noqa: F401
 )
 from prst_proof import (
@@ -63,23 +65,9 @@ from prst_proof import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Stage 3 (a) -- the boolean encoding.
-#
-#   T_pt := Adj_pt Empty_pt Empty_pt       ("encoded true")
-#   F_pt := Empty_pt                       ("encoded false")
-#
-# Distinct nat0: T_pt is App_pt adj_sym (cons_l Empty_pt (cons_l
-# Empty_pt nil_l)), tag 11; F_pt is 0.
-# ---------------------------------------------------------------------------
-
-
-T_PT_DEF = define("T_pt", parse_type("nat0"), "Adj_pt Empty_pt Empty_pt")
-T_pt = mk_const("T_pt", [])
-
-
-F_PT_DEF = define("F_pt", parse_type("nat0"), "Empty_pt")
-F_pt = mk_const("F_pt", [])
+# T_pt / F_pt -- the boolean encoding -- live in prst_pr.py so they're
+# shared with prst_proof (MU_CORRECTNESS uses T_pt). Re-exported here
+# for the parser via the imports at the top of this module.
 
 
 @proof
@@ -274,8 +262,6 @@ if __name__ == "__main__":
     from parser import pp_thm
 
     print("Stage 3 (PRST) -- representability is (almost) free.")
-    print("    T_PT_DEF                       :", pp_thm(T_PT_DEF))
-    print("    F_PT_DEF                       :", pp_thm(F_PT_DEF))
     print("    T_PT_NEQ_F_PT                  :", pp_thm(T_PT_NEQ_F_PT))
     print()
     print("    REPRESENTABILITY_POSITIVE      :", pp_thm(REPRESENTABILITY_POSITIVE))

@@ -265,6 +265,18 @@ ADJ_PT_DEF = define(
 Adj_pt = mk_const("Adj_pt", [])
 
 
+# Boolean encoding used by PR-symbol-valued predicates (e.g.
+# Proof_PRST_pr returns T_pt iff its arguments form a valid proof).
+# Lives here so prst_proof and prst_repr can both reference it.
+#   T_pt := Adj_pt Empty_pt Empty_pt       ("encoded true",  tag 11)
+#   F_pt := Empty_pt                       ("encoded false", tag 0)
+T_PT_DEF = define("T_pt", parse_type("nat0"), "Adj_pt Empty_pt Empty_pt")
+T_pt = mk_const("T_pt", [])
+
+F_PT_DEF = define("F_pt", parse_type("nat0"), "Empty_pt")
+F_pt = mk_const("F_pt", [])
+
+
 # proj_sym i n is parametric in i, n at the HOL level: each (i, n) gives
 # a distinct closed axiom. ``proj_def_axiom_at i n`` is the axiom
 # godelnum for that specific (i, n) pair.
@@ -460,6 +472,64 @@ comp_sym = mk_const("comp_sym", [])
 
 
 # ---------------------------------------------------------------------------
+# Stage 2A (f') -- Kleene minimisation as an operator on PR symbols.
+#
+# mu_sym f  :=  the symbol id of the unary function
+#                   args |-> least q s.t. App_pt f (cons_l q args) = T_pt,
+#               or a sentinel if no such q exists.
+#
+# Crucially, mu_sym is an *operator on closed nat0 symbol ids*, not a
+# binder on formulas. The witness variable lives inside mu_sym's
+# meta-level interpretation; it never appears as a syntactic binder in
+# any PRST term or formula. So substitute_p / free_in_p see only the
+# App_pt clause they already handle, and no capture-avoidance machinery
+# is needed for mu.
+#
+# Cost: mu_sym leaves strict primitive recursion. The standard HF model
+# interprets mu_sym soundly via classical least-witness (with sentinel
+# for the no-witness case), so consistency is preserved -- but the
+# resulting symbol class "PR + mu" is total-recursive rather than PR.
+# We mark this distinction with ``is_partial_pr_sym``: every is_pr_sym
+# is is_partial_pr_sym, and mu_sym(f) is is_partial_pr_sym when f is.
+# ---------------------------------------------------------------------------
+
+
+mu_sym_def = define(
+    "mu_sym",
+    parse_type("nat0 -> nat0"),  # mu_sym f
+    "\\f:nat0. Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))) f",
+)
+mu_sym = mk_const("mu_sym", [])
+
+
+# is_partial_pr_sym extends is_pr_sym with the mu-closed symbols. PRST
+# itself uses is_partial_pr_sym wherever it would use is_pr_sym (since
+# find_proof_pr is in this class). Recogniser stub; the AT-equation
+# would say:
+#     is_partial_pr_sym f  iff  is_pr_sym f
+#                               \/  (?g. f = mu_sym g /\ is_partial_pr_sym g).
+IS_PARTIAL_PR_SYM_DEF = define(
+    "is_partial_pr_sym", parse_type("nat0 -> bool"), "\\f:nat0. F"
+)
+is_partial_pr_sym = mk_const("is_partial_pr_sym", [])
+
+
+@proof
+def IS_PARTIAL_PR_SYM_MU(p):
+    """|- !f. is_partial_pr_sym f ==> is_partial_pr_sym (mu_sym f). STUB."""
+    p.goal(
+        "!f. is_partial_pr_sym f ==> is_partial_pr_sym (mu_sym f)",
+        types={"f": nat0_ty},
+    )
+    p.sorry()
+
+
+# find_proof_pr := mu_sym Proof_PRST_pr -- the unbounded search for a
+# proof of the second-argument formula. Defined later, after
+# Proof_PRST_pr.
+
+
+# ---------------------------------------------------------------------------
 # Stage 2A (g) -- sketches of the four headline PR symbols.
 #
 # These are HOL-side definitions; their defining equations follow
@@ -508,6 +578,14 @@ Proof_PRST_pr_def = define("Proof_PRST_pr", parse_type("nat0"), "0")
 Proof_PRST_pr = mk_const("Proof_PRST_pr", [])
 
 
+# find_proof_pr is the mu-closure of Proof_PRST_pr: applied to a formula
+# godelnum x, it returns (a witness for) the least p such that
+# Proof_PRST_pr checks (p, x) to T_pt -- equivalently, returns *some*
+# proof of x when one exists.
+FIND_PROOF_PR_DEF = define("find_proof_pr", parse_type("nat0"), "mu_sym Proof_PRST_pr")
+find_proof_pr = mk_const("find_proof_pr", [])
+
+
 # Defining equations for the headline derived symbols (numeral_pr,
 # substitute_pr, diag_pr, Proof_PRST_pr) are Prov_PRST claims, so they
 # live in prst_proof.py:
@@ -515,6 +593,12 @@ Proof_PRST_pr = mk_const("Proof_PRST_pr", [])
 #     NUMERAL_PR_DEF_EQ_ZERO, NUMERAL_PR_DEF_EQ_SUC,
 #     SUBSTITUTE_PR_DEFINING, DIAG_PR_DEFINING,
 #     PROOF_HF_PR_DEFINING.
+#
+# The mu-correctness axiom for find_proof_pr (and any mu-closed symbol)
+# lives in prst_proof.py as MU_CORRECTNESS: from any specific witness
+# q certifying f(q, args) = T_pt, conclude f(App_pt (mu_sym f) args,
+# args) = T_pt. This is the only axiom about mu_sym -- it is what
+# makes D2 derivable in the quantifier-free setting.
 
 
 # ---------------------------------------------------------------------------
