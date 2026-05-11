@@ -67,7 +67,7 @@ from prst_connectives import (
 from prst_pr import (
     diag_pr,
     numeral_pr,  # noqa: F401
-    Proof_HF_pr,  # noqa: F401
+    Proof_PRST_pr,  # noqa: F401
     Adj_pt,  # noqa: F401  -- parser alias; "1" = Adj_pt Empty_pt Empty_pt
 )
 from prst_proof import (
@@ -76,7 +76,6 @@ from prst_proof import (
     IS_PFORM_PROV_PRST_INTERNAL,
     FREE_IN_PROV_PRST_INTERNAL,
     PROV_PRST_REPRESENTS,
-    PROV_HF_TO_PROV_PRST,  # noqa: F401  -- bridge for HF logic toolkit
 )
 from prst_repr import (
     DIAG_REPRESENTS_PRST,  # noqa: F401  -- replaces godel_first.DIAG_REPRESENTS
@@ -284,8 +283,9 @@ def PRST_SIGMA1_SOUND(p):
 def GODEL_FIRST_PRST(p):
     """|- ~ Prov_PRST G_PRST /\\ ~ Prov_PRST (Not_pf G_PRST).
 
-    First incompleteness for PRST. Proof structure (identical to the
-    HF version, but every Prov_HF step is now a Prov_PRST step):
+    First incompleteness for PRST. Proof structure mirrors the HF
+    version of the Gödel argument, but every step is a Prov_PRST
+    inference -- no Prov_HF in sight:
 
       First conjunct (PRST does not prove G_PRST):
         Suppose Prov_PRST G_PRST.

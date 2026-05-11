@@ -62,10 +62,8 @@ from hf_proof import (
     is_mp,  # noqa: F401
 )
 from hf_repr_core import (
-    Prov_HF,  # noqa: F401  -- used in PROV_HF_TO_PROV_PRST
     numeral,  # noqa: F401  -- parser alias for PROV_PRST_NUMERAL_EVAL
     substitute,  # noqa: F401  -- parser alias for PROV_PRST_SUBSTITUTE_EVAL
-    Proof_HF,  # noqa: F401  -- parser alias
 )
 from godel_first import (
     diag,  # noqa: F401  -- parser alias for PROV_PRST_DIAG_EVAL
@@ -82,7 +80,7 @@ from prst_pr import (
     numeral_pr,  # noqa: F401  -- parser alias
     substitute_pr,  # noqa: F401  -- parser alias
     diag_pr,  # noqa: F401  -- parser alias
-    Proof_HF_pr,  # noqa: F401  -- parser alias
+    Proof_PRST_pr,  # noqa: F401  -- parser alias
     zero_def_axiom,  # noqa: F401  -- parser alias for PROV_PRST_ZERO_DEF
     Adj_pt,  # noqa: F401  -- parser alias for PROV_PRST_ADJ_DEF_AT
     proj_def_axiom_at,  # noqa: F401  -- parser alias
@@ -98,7 +96,6 @@ from hf_proof import (
 )
 from prst_syntax import (
     Imp_pf,  # noqa: F401  -- parser alias for is_pr_axiom
-    is_pform,  # noqa: F401  -- parser alias for PROV_HF_TO_PROV_PRST
 )
 
 
@@ -387,49 +384,7 @@ def PROV_PRST_MP(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 2B (e) -- bridge: every purely-logical quantifier-free HF
-# theorem is a PRST theorem.
-#
-# is_pr_axiom and Prov_HF share is_logical_axiom (propositional and
-# equality schemas) but disagree on the non-logical axioms: HF has
-# HF1-HF5, PRST has PR defining equations. So the bridge cannot move
-# arbitrary HF theorems across -- only those that use no HF axioms,
-# i.e. the *logical* HF theorems whose conclusion is also a valid
-# PRST formula:
-#
-#   |- !n. is_pform n /\ Prov_HF n /\ uses_only_logic n
-#          ==> Prov_PRST n.
-#
-# In practice the bridge is rarely used: PRST consumers typically
-# re-derive the propositional facts they need, or invoke the
-# propositional fragment of hf_logic with a side proof that the HF
-# proof transcript references no HF1-HF5 axiom slot.
-# ---------------------------------------------------------------------------
-
-
-@proof
-def PROV_HF_TO_PROV_PRST(p):
-    """|- !n. is_pform n /\\ Prov_HF n ==> Prov_PRST n.
-
-    Restricted bridge. Discharge requires showing the Prov_HF witness
-    uses no HF1-HF5 axiom step (a syntactic side condition on the proof
-    transcript). In a stub form the side condition is invisible; a
-    real proof would track an extra ``uses_only_logic`` predicate.
-    The is_pform side condition further rules out Forall_f-headed
-    conclusions.
-
-    Most PRST consumers re-derive propositional facts directly rather
-    than going through this bridge. STUB.
-    """
-    p.goal(
-        "!n. is_pform n /\\ Prov_HF n ==> Prov_PRST n",
-        types={"n": nat0_ty},
-    )
-    p.sorry()
-
-
-# ---------------------------------------------------------------------------
-# Stage 2B (f) -- internal arithmetic via PR symbols.
+# Stage 2B (e) -- internal arithmetic via PR symbols.
 #
 # In HF, "HF proves P(numeral n)" requires evaluating substitute
 # externally and then having SUBSTITUTE_REPRESENTS push the equality
@@ -491,8 +446,7 @@ def PROV_PRST_DIAG_EVAL(p):
     """|- !n. Prov_PRST (Eq_pf (App_pt diag_pr (cons_l n nil_l)) (diag n)).
 
     From DIAG_PR_DEFINING + PROV_PRST_SUBSTITUTE_EVAL + PROV_PRST_NUMERAL_EVAL,
-    chained via PRST equality reasoning (PROV_HF_EQ_TRANS lifted through
-    PROV_HF_TO_PROV_PRST). STUB.
+    chained via PRST equality reasoning (PROV_PRST_EQ_TRANS). STUB.
     """
     p.goal(
         "!n. Prov_PRST (Eq_pf (App_pt diag_pr (cons_l n nil_l)) (diag n))",
@@ -502,32 +456,30 @@ def PROV_PRST_DIAG_EVAL(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 2B (g) -- Prov_PRST_internal: the PRST formula expressing
-# "Prov_PRST holds at x". This is the analog of Prov_HF_internal from
-# hf_repr_thms.py, but built differently. PRST is quantifier-free, so
-# we cannot write "there exists a proof y of x" as an Exists_pf formula
-# directly. Instead we use a *search* PR symbol find_proof_pr that
-# returns a proof of x when one exists (and a sentinel otherwise), and
+# Stage 2B (f) -- Prov_PRST_internal: the PRST formula expressing
+# "Prov_PRST holds at x". PRST is quantifier-free, so we cannot write
+# "there exists a proof y of x" as an Exists_pf formula directly.
+# Instead we use a *search* PR symbol find_proof_pr that returns a
+# PRST proof of x when one exists (and a sentinel otherwise), and
 # define:
 #
 #   Prov_PRST_internal := Eq_pf
-#                           (App_pt Proof_HF_pr
+#                           (App_pt Proof_PRST_pr
 #                             (cons_l (App_pt find_proof_pr
 #                                       (cons_l (Var_pt x) nil_l))
 #                                     (cons_l (Var_pt x) nil_l)))
 #                           T_pt.
 #
-# I.e. "Proof_HF_pr(find_proof_pr(x), x) = T_pt". Because find_proof_pr
-# is a PR symbol (registered in prst_pr), this is a closed PRST formula
-# with no quantifiers. The representability theorem is one Prov_PRST
-# step:
+# I.e. "Proof_PRST_pr(find_proof_pr(x), x) = T_pt": there is a PRST
+# proof-list whose decidable PR check evaluates to T_pt at x. The
+# representability theorem is one Prov_PRST step:
 #
 #   |- !n. Prov_PRST n <=> Prov_PRST (substitute_p Prov_PRST_internal
 #                                                  (numeral n) var_x).
 #
-# (find_proof_pr is not primitive recursive in the usual sense -- it
-# requires unbounded search -- so this layer relies on the partial-PR
-# extension; that is the analog of the HF Sigma_1 existential. See
+# (find_proof_pr requires unbounded search and so is not primitive
+# recursive in the strict sense -- this layer relies on a partial-PR
+# extension; analog of the Sigma_1 existential in arithmetic. See
 # prst_pr for the construction.)
 # ---------------------------------------------------------------------------
 
@@ -535,7 +487,7 @@ def PROV_PRST_DIAG_EVAL(p):
 prov_prst_internal_def = define(
     "Prov_PRST_internal",
     parse_type("nat0"),
-    "0",  # placeholder; real body uses App_pt find_proof_pr + Proof_HF_pr
+    "0",  # placeholder; real body uses App_pt find_proof_pr + Proof_PRST_pr
 )
 Prov_PRST_internal = mk_const("Prov_PRST_internal", [])
 
@@ -594,9 +546,10 @@ def PROV_PRST_REPRESENTS(p):
 #
 # The saving comes from re-using is_logical_axiom verbatim (one
 # disjunct in is_pr_axiom) and dropping HF1-HF5 entirely (set-theoretic
-# content moves to the model side, following Jensen-Karp 1971). The
-# remaining restricted bridge PROV_HF_TO_PROV_PRST lets us inherit
-# only the propositional / equality fragment of hf_logic.py.
+# content moves to the model side, following Jensen-Karp 1971). PRST
+# does not import HF logic theorems -- the propositional / equality
+# Hilbert axioms are sufficient and identical to HF's, so any
+# propositional fact needed inside PRST is re-derived directly.
 # ---------------------------------------------------------------------------
 
 
@@ -619,15 +572,12 @@ if __name__ == "__main__":
     print("    PROV_PRST_SUBST_AXIOM    :", pp_thm(PROV_PRST_SUBST_AXIOM))
     print("    PROV_PRST_ADJ_DEF_AT     :", pp_thm(PROV_PRST_ADJ_DEF_AT))
     print()
-    print("Stage 2B (e) -- bridge.")
-    print("    PROV_HF_TO_PROV_PRST   :", pp_thm(PROV_HF_TO_PROV_PRST))
-    print()
-    print("Stage 2B (f) -- free evaluation of PR symbols.")
+    print("Stage 2B (e) -- free evaluation of PR symbols.")
     print("    PROV_PRST_SUBSTITUTE_EVAL :", pp_thm(PROV_PRST_SUBSTITUTE_EVAL))
     print("    PROV_PRST_NUMERAL_EVAL    :", pp_thm(PROV_PRST_NUMERAL_EVAL))
     print("    PROV_PRST_DIAG_EVAL       :", pp_thm(PROV_PRST_DIAG_EVAL))
     print()
-    print("Stage 2B (g) -- Prov_PRST_internal.")
+    print("Stage 2B (f) -- Prov_PRST_internal.")
     print("    IS_PFORM_PROV_PRST_INTERNAL :", pp_thm(IS_PFORM_PROV_PRST_INTERNAL))
     print("    FREE_IN_PROV_PRST_INTERNAL  :", pp_thm(FREE_IN_PROV_PRST_INTERNAL))
     print("    PROV_PRST_REPRESENTS        :", pp_thm(PROV_PRST_REPRESENTS))

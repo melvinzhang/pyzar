@@ -20,8 +20,8 @@
 #         App_t f_sym [t1; ...; tk]  =  <body of f's definition>
 #     by direct unfolding (its defining equation is an axiom). No
 #     traces, no functionality side proof. Substitute, numeral, diag,
-#     Proof_HF all become closed PRST terms with their representability
-#     theorems trivial.
+#     Proof_PRST all become closed PRST terms with their
+#     representability theorems trivial.
 #
 # Encoding choices:
 #

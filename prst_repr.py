@@ -7,6 +7,8 @@
 #
 #     |- !n. P n      ==> Prov_HF (substitute F (numeral n) var_x).
 #     |- !n. ~ P n    ==> Prov_HF (Not_f (substitute F (numeral n) var_x)).
+# (Stated for HF to contrast with the PRST cost; the PRST analog uses
+# Prov_PRST in place of Prov_HF.)
 #
 # The witnessing F(x) was always a Sigma_1 trace-existence formula, and
 # the proofs required machinery to evaluate the trace inside HF (~3000
@@ -51,12 +53,13 @@ from prst_pr import (
     substitute_pr,
     numeral_pr,
     diag_pr,
-    Proof_HF_pr,
+    Proof_PRST_pr,
     Adj_pt,  # noqa: F401  -- "encoded true" sentinel = Adj_pt Empty_pt Empty_pt
     is_pr_sym,  # noqa: F401
 )
 from prst_proof import (
     Prov_PRST,  # noqa: F401  -- parser alias
+    Proof_PRST,  # noqa: F401  -- parser alias for PROOF_PRST_REPRESENTS_*
 )
 
 
@@ -164,10 +167,10 @@ def REPRESENTABILITY_NEGATIVE(p):
 # ---------------------------------------------------------------------------
 # Stage 3 (c) -- the four headline representations.
 #
-# Each of substitute, numeral, diag, Proof_HF gets its representability
-# theorem as an instance of REPRESENTABILITY_POSITIVE / _NEGATIVE
-# applied to the corresponding PR symbol and the realisation lemma
-# (PROV_PRST_SUBSTITUTE_EVAL / PROV_PRST_NUMERAL_EVAL / ...).
+# Each of substitute, numeral, diag, Proof_PRST gets its
+# representability theorem as an instance of REPRESENTABILITY_POSITIVE
+# / _NEGATIVE applied to the corresponding PR symbol and the realisation
+# lemma (PROV_PRST_SUBSTITUTE_EVAL / PROV_PRST_NUMERAL_EVAL / ...).
 # ---------------------------------------------------------------------------
 
 
@@ -213,23 +216,22 @@ def DIAG_REPRESENTS_PRST(p):
 
 
 @proof
-def PROOF_HF_REPRESENTS_PRST_POS(p):
-    """|- !p n. Proof_HF p n ==>
+def PROOF_PRST_REPRESENTS_POS(p):
+    """|- !p n. Proof_PRST p n ==>
               Prov_PRST (Eq_pf
-                (App_pt Proof_HF_pr (cons_l (numeral p) (cons_l (numeral n) nil_l)))
+                (App_pt Proof_PRST_pr (cons_l (numeral p) (cons_l (numeral n) nil_l)))
                 T_pt).
 
-    Positive branch of representability of the (decidable) Proof_HF
+    Positive branch of representability of the (decidable) Proof_PRST
     predicate. STUB.
 
-    PRST analog of the IS_*_REPRESENTS chain (~2000 lines in HF via
-    traces). Here: one PROOF_HF_PR_DEFINING specialisation per branch.
+    Here: one PROOF_PRST_PR_DEFINING specialisation per branch.
     Estimate: ~20 lines for both branches combined.
     """
     p.goal(
-        "!pf n. Proof_HF pf n ==> "
+        "!pf n. Proof_PRST pf n ==> "
         "Prov_PRST (Eq_pf "
-        "  (App_pt Proof_HF_pr (cons_l (numeral pf) (cons_l (numeral n) nil_l))) "
+        "  (App_pt Proof_PRST_pr (cons_l (numeral pf) (cons_l (numeral n) nil_l))) "
         "  T_pt)",
         types={"pf": nat0_ty, "n": nat0_ty},
     )
@@ -237,15 +239,15 @@ def PROOF_HF_REPRESENTS_PRST_POS(p):
 
 
 @proof
-def PROOF_HF_REPRESENTS_PRST_NEG(p):
-    """|- !p n. ~Proof_HF p n ==>
+def PROOF_PRST_REPRESENTS_NEG(p):
+    """|- !p n. ~Proof_PRST p n ==>
               Prov_PRST (Eq_pf
-                (App_pt Proof_HF_pr (cons_l (numeral p) (cons_l (numeral n) nil_l)))
+                (App_pt Proof_PRST_pr (cons_l (numeral p) (cons_l (numeral n) nil_l)))
                 F_pt). STUB."""
     p.goal(
-        "!pf n. ~Proof_HF pf n ==> "
+        "!pf n. ~Proof_PRST pf n ==> "
         "Prov_PRST (Eq_pf "
-        "  (App_pt Proof_HF_pr (cons_l (numeral pf) (cons_l (numeral n) nil_l))) "
+        "  (App_pt Proof_PRST_pr (cons_l (numeral pf) (cons_l (numeral n) nil_l))) "
         "  F_pt)",
         types={"pf": nat0_ty, "n": nat0_ty},
     )
@@ -281,5 +283,5 @@ if __name__ == "__main__":
     print()
     print("    SUBSTITUTE_REPRESENTS_PRST     :", pp_thm(SUBSTITUTE_REPRESENTS_PRST))
     print("    DIAG_REPRESENTS_PRST           :", pp_thm(DIAG_REPRESENTS_PRST))
-    print("    PROOF_HF_REPRESENTS_PRST_POS   :", pp_thm(PROOF_HF_REPRESENTS_PRST_POS))
-    print("    PROOF_HF_REPRESENTS_PRST_NEG   :", pp_thm(PROOF_HF_REPRESENTS_PRST_NEG))
+    print("    PROOF_PRST_REPRESENTS_POS      :", pp_thm(PROOF_PRST_REPRESENTS_POS))
+    print("    PROOF_PRST_REPRESENTS_NEG      :", pp_thm(PROOF_PRST_REPRESENTS_NEG))

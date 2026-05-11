@@ -43,7 +43,7 @@
 #                 normalisation; HF5 guarantees the Adj-decomposition
 #                 exists for every nonempty HF set.)
 #
-# Substitution, numeral, diag, Proof_HF -- all of them are definable in
+# Substitution, numeral, diag, Proof_PRST -- all of them are definable in
 # this base layer by ~50-100 lines each, vs ~500-1000 in HF. Sketches
 # for the four headline definitions appear at the bottom of this file.
 #
@@ -427,7 +427,7 @@ def IS_PR_DEF_HOLDS_REC_STEP(p):
 # The base layer is "complete" in that every PR function on HF is
 # expressible as a composition of {Zero, Adj, Proj, If_in, Rec}. So
 # downstream PR functions -- substitute_pr, numeral_pr, diag_pr,
-# Proof_HF_pr -- can be defined as HOL functions that compute the
+# Proof_PRST_pr -- can be defined as HOL functions that compute the
 # composite ``f_sym`` from the base symbols, with no further axioms.
 #
 # Each derived symbol comes with a *derived* defining equation theorem:
@@ -485,7 +485,7 @@ comp_sym = mk_const("comp_sym", [])
 # comp_sym numeral_pr [proj_sym 0 1], const_sym var_x]. Defining
 # equation: one Prov_PRST equation via PRST_COMP_DEF.
 #
-# ``Proof_HF_pr`` -- decidable list-of-formulas proof checker; uses
+# ``Proof_PRST_pr`` -- decidable list-of-formulas proof checker; uses
 # ``is_pr_axiom`` (= is_pr_def \/ is_logical_axiom) and ``is_mp``.
 # All primitive recursive. Total: ~50 base-layer symbols composed.
 #
@@ -504,12 +504,12 @@ substitute_pr = mk_const("substitute_pr", [])
 diag_pr_def = define("diag_pr", parse_type("nat0"), "0")
 diag_pr = mk_const("diag_pr", [])
 
-Proof_HF_pr_def = define("Proof_HF_pr", parse_type("nat0"), "0")
-Proof_HF_pr = mk_const("Proof_HF_pr", [])
+Proof_PRST_pr_def = define("Proof_PRST_pr", parse_type("nat0"), "0")
+Proof_PRST_pr = mk_const("Proof_PRST_pr", [])
 
 
 # Defining equations for the headline derived symbols (numeral_pr,
-# substitute_pr, diag_pr, Proof_HF_pr) are Prov_PRST claims, so they
+# substitute_pr, diag_pr, Proof_PRST_pr) are Prov_PRST claims, so they
 # live in prst_proof.py:
 #
 #     NUMERAL_PR_DEF_EQ_ZERO, NUMERAL_PR_DEF_EQ_SUC,
