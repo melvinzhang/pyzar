@@ -733,6 +733,119 @@ pr_arity = mk_const("pr_arity", [])
 
 
 # ---------------------------------------------------------------------------
+# Stage 1 (d.5) -- is_partial_pr_sym (the mu-closure of is_pr_sym).
+#
+#   is_partial_pr_sym f  iff  is_pr_sym f
+#                             \/ (?g. f = Pair_ord 6 g /\ is_partial_pr_sym g)
+#
+# `Pair_ord 6 g` is the bare encoding of `mu_sym g` (the `mu_sym`
+# constant itself lives in prst_pr.py alongside the other PR-symbol-id
+# constants; this layer stays self-contained by encoding the
+# mu-disjunct as the raw Pair_ord shape). The bridge lemma
+# IS_PARTIAL_PR_SYM_MU in prst_pr.py packages
+# `is_partial_pr_sym (mu_sym f)` from this body.
+#
+# Well-foundedness: `g < Pair_ord 6 g` by NAT0_LT_PAIR_ORD_R; the wf-lt
+# scaffolding folds this into IS_PARTIAL_PR_SYM_DEF.
+#
+# Lives here (not prst_pr) because IS_PTERM's App-branch guard mentions
+# is_partial_pr_sym: PRST formulas may contain `App_pt (mu_sym _) _`
+# subterms (e.g. `Prov_PRST_internal` mentions `App_pt find_proof_pr`
+# where `find_proof_pr = mu_sym Proof_PRST_pr`), so well-formedness has
+# to admit mu-headed apps at the syntactic level.
+# ---------------------------------------------------------------------------
+
+
+_IS_PARTIAL_PR_SYM_F_DEF = define(
+    "_is_partial_pr_sym_F",
+    parse_type("(nat0 -> bool) -> nat0 -> bool"),
+    "\\rec:nat0->bool. \\f:nat0. "
+    "is_pr_sym f \\/ "
+    "(?g. f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))) g "
+    "      /\\ rec g)",
+)
+_IS_PARTIAL_PR_SYM_F = mk_const("_is_partial_pr_sym_F", [])
+
+
+@proof
+def IS_PARTIAL_PR_SYM_MONO(p):
+    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
+              ==> _is_partial_pr_sym_F f n = _is_partial_pr_sym_F g n.
+
+    Body has 2 disjuncts: ``is_pr_sym n`` (non-recursive; REFL) and
+    ``?g'. n = Pair_ord 6 g' /\\ rec g'`` (unary recursive with ctor =
+    ``Pair_ord 6`` partial app, size lemma = NAT0_LT_PAIR_ORD_R at
+    a := 6).
+    """
+    from tactics import REFL, or_chain_collapse, SPEC
+    from hf_syntax import mono_iff_unary_step
+
+    p.goal(
+        "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> "
+        "_is_partial_pr_sym_F f n = _is_partial_pr_sym_F g n",
+        types={
+            "f": parse_type("nat0 -> bool"),
+            "g": parse_type("nat0 -> bool"),
+            "n": nat0_ty,
+            "k": nat0_ty,
+        },
+    )
+    p.fix("f g n")
+    p.assume("h: !k. nat0_lt k n ==> f k = g k")
+    h_th = p.fact("h")
+    eq_pr = REFL(p._parse("is_pr_sym n"))
+    # DSL friction: mono_iff_unary_step takes ctor as a term, not a
+    # constant. Pair_ord-applied-at-6 is a Comb, not a Const, but the
+    # factory handles it uniformly (rand stripping unwinds the
+    # application chain).
+    six = p._parse("SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))")
+    pair6 = mk_app(mk_const("Pair_ord", []), six)
+    sz_pair6 = SPEC(six, NAT0_LT_PAIR_ORD_R)  # |- !b. nat0_lt b (Pair_ord 6 b)
+    eq_mu = mono_iff_unary_step(pair6, sz_pair6, h_th)
+    body_eq = or_chain_collapse([eq_pr, eq_mu])
+    p.thus("_is_partial_pr_sym_F f n = _is_partial_pr_sym_F g n").by_unfold(
+        body_eq, _IS_PARTIAL_PR_SYM_F_DEF
+    )
+
+
+IS_PARTIAL_PR_SYM_DEF, _IS_PARTIAL_PR_SYM_REC = define_wf_lt(
+    "is_partial_pr_sym",
+    parse_type("nat0 -> bool"),
+    _IS_PARTIAL_PR_SYM_F,
+    IS_PARTIAL_PR_SYM_MONO,
+)
+is_partial_pr_sym = mk_const("is_partial_pr_sym", [])
+
+
+@proof
+def IS_PR_SYM_IMP_PARTIAL(p):
+    """|- !f. is_pr_sym f ==> is_partial_pr_sym f.
+
+    DISJ1 lift through the wf-recursion equation -- pure-PR symbols sit
+    in the first disjunct of `is_partial_pr_sym`'s body. Used to lift
+    every concrete `IS_PR_SYM_*` lemma (ZERO/ADJ/PROJ/IF_IN/REC) to its
+    partial-PR counterpart for downstream `is_pterm` checks.
+    """
+    from tactics import SPEC, SYM
+
+    p.goal("!f. is_pr_sym f ==> is_partial_pr_sym f", types={"f": nat0_ty})
+    p.fix("f")
+    p.assume("h: is_pr_sym f")
+    p.have(
+        "h_body: is_pr_sym f \\/ "
+        "(?g. f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))) g "
+        "      /\\ is_partial_pr_sym g)"
+    ).by_disj("h")
+    p.have(
+        "h_F: _is_partial_pr_sym_F is_partial_pr_sym f"
+    ).by_unfold("h_body", _IS_PARTIAL_PR_SYM_F_DEF)
+    p.thus("is_partial_pr_sym f").by_eq_mp(
+        SYM(SPEC(p._parse("f"), _IS_PARTIAL_PR_SYM_REC)),
+        "h_F",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Stage 1 (e) -- is_pterm.
 #
 # Four disjuncts (no Forall_pt -- PRST is quantifier-free; no walker
@@ -741,7 +854,14 @@ pr_arity = mk_const("pr_arity", [])
 #   t = Empty_pt
 #   \/ ?v.       t = Var_pt v
 #   \/ ?a b.     t = Tup_pt a b     /\ f a /\ f b
-#   \/ ?fn args. t = App_pt fn args /\ is_pr_sym fn /\ f args
+#   \/ ?fn args. t = App_pt fn args /\ is_partial_pr_sym fn /\ f args
+#
+# App-branch guard is `is_partial_pr_sym` (not `is_pr_sym`) so PRST
+# formulas may contain `App_pt (mu_sym _) _` subterms. The
+# total/partial distinction stays visible at the symbol level
+# (is_pr_sym still means strict PR); is_pterm just admits the wider
+# class. PR-defining-axiom-shape terms still satisfy is_pterm via the
+# DISJ1 lift `is_pr_sym fn ==> is_partial_pr_sym fn`.
 #
 # The arity check (pr_arity fn = length of args) is intentionally NOT
 # part of is_pterm -- it would require walking the Tup_pt chain to
@@ -759,7 +879,7 @@ _IS_PTERM_F_DEF = define(
     "t = Empty_pt \\/ "
     "(?v. t = Var_pt v) \\/ "
     "(?a b. t = Tup_pt a b /\\ f a /\\ f b) \\/ "
-    "(?fn args. t = App_pt fn args /\\ is_pr_sym fn /\\ f args)",
+    "(?fn args. t = App_pt fn args /\\ is_partial_pr_sym fn /\\ f args)",
 )
 _IS_PTERM_F = mk_const("_is_pterm_F", [])
 
@@ -787,13 +907,15 @@ def IS_PTERM_MONO(p):
     h_th = p.fact("h")
 
     # Disjuncts: Empty_pt, Var_pt (both non-recursive), Tup_pt (binary
-    # recursion), App_pt (right recursion with is_pr_sym left guard).
+    # recursion), App_pt (right recursion with is_partial_pr_sym left
+    # guard -- relaxed from is_pr_sym so PRST formulas can mention
+    # mu-headed apps like `App_pt find_proof_pr _`).
     eq_empty = REFL(p._parse("n = Empty_pt"))
     eq_var = REFL(p._parse("?v. n = Var_pt v"))
     eq_tup = mono_iff_binary_step(
         Tup_pt, NAT0_LT_TUP_PT_L, NAT0_LT_TUP_PT_R, h_th
     )
-    eq_app = _mono_iff_app_pt_step(is_pr_sym, NAT0_LT_APP_PT_R, h_th)
+    eq_app = _mono_iff_app_pt_step(is_partial_pr_sym, NAT0_LT_APP_PT_R, h_th)
     body_eq = or_chain_collapse([eq_empty, eq_var, eq_tup, eq_app])
     p.thus("_is_pterm_F f n = _is_pterm_F g n").by_unfold(
         body_eq, _IS_PTERM_F_DEF
@@ -1013,7 +1135,7 @@ def IS_PTERM_AT_EMPTY(p):
         "(?v. Empty_pt = Var_pt v) \\/ "
         "(?a b. Empty_pt = Tup_pt a b /\\ is_pterm a /\\ is_pterm b) \\/ "
         "(?fn args. Empty_pt = App_pt fn args "
-        "/\\ is_pr_sym fn /\\ is_pterm args)"
+        "/\\ is_partial_pr_sym fn /\\ is_pterm args)"
     )
     p.have(f"rec_at: is_pterm Empty_pt = ({body})").by_thm(rec_at)
     p.have("hr: Empty_pt = Empty_pt").by_thm(REFL(p._parse("Empty_pt")))
@@ -1759,7 +1881,8 @@ def SUBSTITUTE_P_PRESERVES_IS_PTERM(p):
         p.have(
             "h_disj: s = Empty_pt \\/ (?v. s = Var_pt v) \\/ "
             "(?a b. s = Tup_pt a b /\\ is_pterm a /\\ is_pterm b) \\/ "
-            "(?fn args. s = App_pt fn args /\\ is_pr_sym fn /\\ is_pterm args)"
+            "(?fn args. s = App_pt fn args "
+            "          /\\ is_partial_pr_sym fn /\\ is_pterm args)"
         ).by_eq_mp(rec_at_s, "h_s")
 
         with p.cases_on("h_disj"):
@@ -1838,10 +1961,12 @@ def SUBSTITUTE_P_PRESERVES_IS_PTERM(p):
                     "h_tup_pterm", [SYM(p.fact("h_subst"))]
                 )
 
-            # --- App_pt fn args (only args recurses; fn is a PR-symbol) ---
+            # --- App_pt fn args (only args recurses; fn is a partial-PR
+            # symbol -- relaxed from is_pr_sym, since PRST formulas may
+            # contain mu-headed apps).
             with p.case(
                 "c_app: ?fn args. s = App_pt fn args "
-                "/\\ is_pr_sym fn /\\ is_pterm args"
+                "/\\ is_partial_pr_sym fn /\\ is_pterm args"
             ):
                 p.choose("args", "fn_eq")
                 p.split("args_eq", "(s_eq, h_pr, h_args)")

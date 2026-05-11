@@ -727,25 +727,25 @@ mu_sym_def = define(
 mu_sym = mk_const("mu_sym", [])
 
 
-# is_partial_pr_sym extends is_pr_sym with the mu-closed symbols. PRST
-# itself uses is_partial_pr_sym wherever it would use is_pr_sym (since
-# find_proof_pr is in this class). Recursive on f via define_wf_lt:
-#     is_partial_pr_sym f  iff  is_pr_sym f
-#                               \/  (?g. f = mu_sym g /\ is_partial_pr_sym g).
-# Well-foundedness: mu_sym g = Pair_ord 6 g, so g < mu_sym g by
-# NAT0_LT_PAIR_ORD_R, which lets the recursive call on g go through.
-_IS_PARTIAL_PR_SYM_F_DEF = define(
-    "_is_partial_pr_sym_F",
-    parse_type("(nat0 -> bool) -> nat0 -> bool"),
-    "\\rec:nat0->bool. \\f:nat0. "
-    "is_pr_sym f \\/ (?g. f = mu_sym g /\\ rec g)",
+# is_partial_pr_sym extends is_pr_sym with the mu-closed symbols. The
+# definition now lives in prst_syntax.py (Stage 1 d.5) because
+# `_IS_PTERM_F_DEF`'s App-branch guard mentions is_partial_pr_sym;
+# prst_syntax encodes the mu-disjunct using bare `Pair_ord 6 g`, and
+# the bridge lemma IS_PARTIAL_PR_SYM_MU below packages
+# `is_partial_pr_sym (mu_sym f)` from that body.
+from prst_syntax import (  # noqa: E402
+    is_partial_pr_sym,  # noqa: F401  -- re-export
+    IS_PARTIAL_PR_SYM_DEF,  # noqa: F401  -- re-export
+    _IS_PARTIAL_PR_SYM_REC,
+    _IS_PARTIAL_PR_SYM_F_DEF,
+    IS_PARTIAL_PR_SYM_MONO,  # noqa: F401  -- re-export
 )
-_IS_PARTIAL_PR_SYM_F = mk_const("_is_partial_pr_sym_F", [])
 
 
 # NAT0_LT_MU_SYM: `mu_sym g = Pair_ord 6 g`, so `g < mu_sym g` by
-# NAT0_LT_PAIR_ORD_R + unfold mu_sym. Needed as the size lemma for
-# IS_PARTIAL_PR_SYM_MONO's recursive disjunct.
+# NAT0_LT_PAIR_ORD_R + unfold mu_sym. Kept here (alongside mu_sym
+# itself) so prst_syntax stays mu-agnostic; consumed by
+# IS_PARTIAL_PR_SYM_MU below.
 @proof
 def NAT0_LT_MU_SYM(p):
     """|- !g. nat0_lt g (mu_sym g)."""
@@ -763,76 +763,38 @@ def NAT0_LT_MU_SYM(p):
 
 
 @proof
-def IS_PARTIAL_PR_SYM_MONO(p):
-    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
-              ==> _is_partial_pr_sym_F f n = _is_partial_pr_sym_F g n.
-
-    Body: ``is_pr_sym n \\/ (?g'. n = mu_sym g' /\\ rec g')``. Disjunct 1
-    is non-recursive (REFL); disjunct 2 is the standard unary recursive
-    shape, discharged by ``mono_iff_unary_step(mu_sym, NAT0_LT_MU_SYM, h)``.
-    Glued by ``or_chain_collapse``, bridged to _IS_PARTIAL_PR_SYM_F via
-    ``by_unfold``.
-    """
-    from tactics import REFL, or_chain_collapse
-    from hf_syntax import mono_iff_unary_step
-    p.goal(
-        "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> "
-        "_is_partial_pr_sym_F f n = _is_partial_pr_sym_F g n",
-        types={
-            "f": parse_type("nat0 -> bool"),
-            "g": parse_type("nat0 -> bool"),
-            "n": nat0_ty,
-            "k": nat0_ty,
-        },
-    )
-    p.fix("f g n")
-    p.assume("h: !k. nat0_lt k n ==> f k = g k")
-    h_th = p.fact("h")
-    eq_pr = REFL(p._parse("is_pr_sym n"))
-    eq_mu = mono_iff_unary_step(mu_sym, NAT0_LT_MU_SYM, h_th)
-    body_eq = or_chain_collapse([eq_pr, eq_mu])
-    p.thus("_is_partial_pr_sym_F f n = _is_partial_pr_sym_F g n").by_unfold(
-        body_eq, _IS_PARTIAL_PR_SYM_F_DEF
-    )
-
-
-IS_PARTIAL_PR_SYM_DEF, _IS_PARTIAL_PR_SYM_REC = define_wf_lt(
-    "is_partial_pr_sym",
-    parse_type("nat0 -> bool"),
-    _IS_PARTIAL_PR_SYM_F,
-    IS_PARTIAL_PR_SYM_MONO,
-)
-is_partial_pr_sym = mk_const("is_partial_pr_sym", [])
-
-
-@proof
 def IS_PARTIAL_PR_SYM_MU(p):
     """|- !f. is_partial_pr_sym f ==> is_partial_pr_sym (mu_sym f).
 
-    One unfold of the wf-recursion equation _IS_PARTIAL_PR_SYM_REC at
-    ``mu_sym f``, then unfold _IS_PARTIAL_PR_SYM_F_DEF to expose the
-    2-disjunct body. Pick the mu-branch (?g. n = mu_sym g /\\ rec g),
-    witness g := f, discharge `mu_sym f = mu_sym f` by REFL and the
-    hypothesis pins the recursive call.
+    Bridges from the prst_syntax-side encoding (`Pair_ord 6 g`) to the
+    symbolic `mu_sym g` form. The wf-recursion body in prst_syntax says
+    `is_partial_pr_sym f = is_pr_sym f \\/ (?g. f = Pair_ord 6 g /\\
+    is_partial_pr_sym g)`. We hit the mu-branch with g := f and unfold
+    mu_sym to bridge `Pair_ord 6 f = mu_sym f`.
     """
-    from tactics import REFL
+    from tactics import REFL, SPEC
     p.goal(
         "!f. is_partial_pr_sym f ==> is_partial_pr_sym (mu_sym f)",
         types={"f": nat0_ty},
     )
     p.fix("f")
     p.assume("h_part: is_partial_pr_sym f")
+    # Bridge `mu_sym f = Pair_ord 6 f` from the abstraction equation.
+    mu_at_f = p.unfold(mu_sym_def, "f")
+    # mu_at_f: mu_sym f = Pair_ord 6 f.
+    # Build the mu-branch of the body at n := mu_sym f, witness g := f.
     p.have(
-        "h_refl: mu_sym f = mu_sym f"
-    ).by_thm(REFL(p._parse("mu_sym f")))
-    # Build the mu-branch existential: witness g := f.
+        "h_eq: mu_sym f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))) f"
+    ).by_thm(mu_at_f)
     p.have(
-        "h_ex: ?gg. mu_sym f = mu_sym gg /\\ is_partial_pr_sym gg"
-    ).by_exists(["f"], "h_refl", "h_part")
-    # Disjunction body of _IS_PARTIAL_PR_SYM_F at f := mu_sym f.
+        "h_ex: ?gg. mu_sym f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))) gg "
+        "        /\\ is_partial_pr_sym gg"
+    ).by_exists(["f"], "h_eq", "h_part")
+    # Disjunction body of _IS_PARTIAL_PR_SYM_F at n := mu_sym f.
     p.have(
         "h_body: is_pr_sym (mu_sym f) "
-        "        \\/ (?gg. mu_sym f = mu_sym gg /\\ is_partial_pr_sym gg)"
+        "        \\/ (?gg. mu_sym f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))) gg "
+        "                  /\\ is_partial_pr_sym gg)"
     ).by_disj("h_ex")
     # Bridge to _is_partial_pr_sym_F is_partial_pr_sym (mu_sym f).
     p.have(
@@ -840,7 +802,7 @@ def IS_PARTIAL_PR_SYM_MU(p):
     ).by_unfold("h_body", _IS_PARTIAL_PR_SYM_F_DEF)
     # And to is_partial_pr_sym (mu_sym f) via the recursion equation.
     p.thus("is_partial_pr_sym (mu_sym f)").by_eq_mp(
-        SYM(__import__("tactics").SPEC(p._parse("mu_sym f"), _IS_PARTIAL_PR_SYM_REC)),
+        SYM(SPEC(p._parse("mu_sym f"), _IS_PARTIAL_PR_SYM_REC)),
         "h_F",
     )
 

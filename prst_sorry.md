@@ -1,13 +1,13 @@
 # PRST `p.sorry()` plan of attack
 
-Census across `prst_*.py` (38 sorries remaining; 19 + 3 + 5 + 7 + 8 + 1 = 43 cleared so far):
+Census across `prst_*.py` (37 sorries remaining; 19 + 3 + 5 + 7 + 8 + 2 = 44 cleared so far):
 
 | File | sorries | Role |
 |------|---------|------|
 | `prst_syntax.py` | 0 (was 19) | App_pt constructor + extended `is_pterm`/`is_pform`/`free_in_p`/`substitute_p` AT-equations and preservation lemmas — **DONE** |
 | `prst_connectives.py` | 0 (was 3) | `substitute_p` distribution over And/Or/Iff (alias-thin wrappers) — **DONE** (Layer 3) |
 | `prst_pr.py` | 5 (was 17) | PR-symbol registry + defining-equation axioms + `is_pr_def` recogniser + mu-closure — Layer 4 **partial** (5 PR_ARITY_* remaining), Layer 5 **DONE** |
-| `prst_proof.py` | 11 (was 15) | `Proof_PRST` / `Prov_PRST` + closure rules + per-axiom `PROV_PRST_*_DEF` corollaries + `MU_CORRECTNESS` + PR-eval lemmas + `Prov_PRST_internal` — Layer 6 **partial** (8 cleared), Layer 7 **partial** (1 cleared: FREE_IN_PROV_PRST_INTERNAL) |
+| `prst_proof.py` | 10 (was 15) | `Proof_PRST` / `Prov_PRST` + closure rules + per-axiom `PROV_PRST_*_DEF` corollaries + `MU_CORRECTNESS` + PR-eval lemmas + `Prov_PRST_internal` — Layer 6 **partial** (8 cleared), Layer 7 **partial** (2 cleared: FREE_IN_PROV_PRST_INTERNAL + IS_PFORM_PROV_PRST_INTERNAL via Layer-2 relax) |
 | `prst_repr.py` | 7 | Boolean-tag disjointness + parametric representability schema + four headline representations |
 | `prst_godel1.py` | 6 | Diagonal lemma, Gödel sentence, consistency, Sigma_1-soundness, G1, essential undecidability |
 | `prst_godel2.py` | 8 | D1/D2/D3 derivability conditions, `mp_combine_pr` correctness, Löb, G2 |
@@ -185,20 +185,26 @@ Depends on Layer 0 real `Proof_PRST_def` body + Layers 1-5.
 
 ---
 
-## Layer 7 — `prst_proof` PR-eval + `Prov_PRST_internal` (5 sorries) — **partial: 1/6 cleared**
+## Layer 7 — `prst_proof` PR-eval + `Prov_PRST_internal` (5 sorries) — **partial: 2/6 cleared**
 
-Depends on Layer 6 and on Layer 0 real bodies of `numeral_pr` / `substitute_pr` / `diag_pr`.
+Depends on Layer 6 and on Layer 0 real bodies of `numeral_pr` / `substitute_pr` / `diag_pr`. Layer 2 relax (`is_pterm`'s App branch now uses `is_partial_pr_sym`) unblocked `IS_PFORM_PROV_PRST_INTERNAL`.
 
-**Done (1 cleared):**
-- `FREE_IN_PROV_PRST_INTERNAL` — one `by_rewrite` over the unfolded `Prov_PRST_internal` body, `T_pt`/`Adj_pt` definitions, the four FREE_IN_P_AT_* equations (EQ/APP/TUP/VAR), a new `FREE_IN_P_AT_EMPTY` helper, and boolean simp rules (OR_F_LEFT/RIGHT + a locally-derived OR_IDEMP). Independent of well-formedness, so the IS_PFORM design hole below doesn't block it.
+**Done (2 cleared):**
+- `FREE_IN_PROV_PRST_INTERNAL` — one `by_rewrite` over the unfolded `Prov_PRST_internal` body, `T_pt`/`Adj_pt` definitions, the four FREE_IN_P_AT_* equations (EQ/APP/TUP/VAR), a new `FREE_IN_P_AT_EMPTY` helper, and boolean simp rules (OR_F_LEFT/RIGHT + a locally-derived OR_IDEMP). Independent of well-formedness.
+- `IS_PFORM_PROV_PRST_INTERNAL` — unblocked by the Layer 2 relax (option B): IS_PTERM_AT_APP now reads `is_pterm (App_pt f args) = is_partial_pr_sym f /\ is_pterm args`. Proof structure: unfold to `Eq_pf <lhs> T_pt`, apply IS_PFORM_AT_EQ, prove `is_pterm` for both sides via IS_PTERM_AT_APP/_TUP/_VAR/_EMPTY recursively. Every `is_partial_pr_sym _` obligation discharges via `IS_PR_SYM_IMP_PARTIAL` (new helper, prst_syntax) composed with `IS_PR_SYM_PROJ` / `IS_PR_SYM_ADJ`, plus `IS_PARTIAL_PR_SYM_MU` for the `mu_sym Proof_PRST_pr` slot. ~130 lines.
+
+**Layer 2 relax (option B) — applied:**
+- `is_partial_pr_sym` moved from prst_pr.py to prst_syntax.py so `_IS_PTERM_F_DEF`'s App-branch guard can mention it. The body uses bare `Pair_ord 6 g` encoding rather than `mu_sym g`; the mu_sym constant + `IS_PARTIAL_PR_SYM_MU` bridge stay in prst_pr.py (which keeps prst_syntax mu-agnostic at the symbol-constant level).
+- `_IS_PTERM_F_DEF` App branch: `is_pr_sym fn` → `is_partial_pr_sym fn`. `IS_PTERM_MONO`'s `_mono_iff_app_pt_step` call passes `is_partial_pr_sym` as the guard. `IS_PTERM_AT_EMPTY` body string + `SUBSTITUTE_P_PRESERVES_IS_PTERM`'s App case body string updated to match.
+- New helper `IS_PR_SYM_IMP_PARTIAL: |- !f. is_pr_sym f ==> is_partial_pr_sym f` in prst_syntax. Lifts every concrete `IS_PR_SYM_*` lemma to its partial-PR counterpart for downstream `is_pterm` checks.
+- Semantic invariant: `is_pr_sym` still means "totally-defined PR symbol" (5-disjunct body unchanged); `is_partial_pr_sym` is the mu-closed wider class admitted by `is_pterm`. No downstream consumer broke: pure-PR App-sites (e.g. PR-defining axioms) lift to `is_partial_pr_sym fn` via `IS_PR_SYM_IMP_PARTIAL` in one line.
 
 **New helper:** `FREE_IN_P_AT_EMPTY: |- !v. free_in_p Empty_pt v = F` (lives in `prst_proof.py`). `Empty_pt` matches none of `free_in_p`'s 7 disjuncts, so `derive_rec_eq_pw` can't generate this case (it dispatches matched disjuncts, not the all-mismatch fallback) and the `IS_PTERM_AT_EMPTY` pattern is inapplicable (is_pterm has an Empty_pt disjunct; free_in_p does not). Manual proof: unfold via `FREE_IN_P_REC` at `Empty_pt`, case-split, refute each disjunct via the relevant constructor-vs-Empty disjointness lemma (`VAR_PT_NEQ_EMPTY_PT` / `TUP_PT_NEQ_EMPTY_PT` / …). ~110 lines.
 
-**Blocked (5 remaining):**
+**Blocked (4 remaining):**
 - `PROV_PRST_SUBSTITUTE_EVAL` — **blocked**: Layer 0 placeholder. `substitute_pr_def = proj_sym 0 (SUC0 (SUC0 (SUC0 0)))`, not the real ~100-symbol composition. The lemma claims `App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))` equals `substitute F t v`, but under the placeholder it would (after PROJ-axiom reduction) equal `F`, not `substitute F t v`.
 - `PROV_PRST_NUMERAL_EVAL` — **blocked**: `numeral_pr_def` has a real `rec_sym` composition body, but the proof needs `PROV_PRST_MP` + `PROV_PRST_SUBST_AXIOM` (Layer 6 sorries) + `PROV_PRST_ADJ_DEF_AT` (Layer 6 sorry) to evaluate the recursive composition through PR-defining axioms.
 - `PROV_PRST_DIAG_EVAL` — **blocked**: composition of SUBSTITUTE_EVAL + NUMERAL_EVAL, and `diag_pr_def` is itself a partial composition (var_x slot left as a structural hole pending a `const_sym` primitive).
-- `IS_PFORM_PROV_PRST_INTERNAL` — **blocked by design hole**: `Prov_PRST_internal` mentions `App_pt find_proof_pr (...)`, and `find_proof_pr := mu_sym Proof_PRST_pr`. `is_pterm`'s App_pt branch requires `is_pr_sym fn` (`IS_PTERM_AT_APP`), but `IS_PR_SYM_DEF` (prst_syntax.py L702) has 5 disjuncts at tags 0/1/2/3/4 and `mu_sym f = Pair_ord 6 f` (tag 6). Hence `is_pr_sym (mu_sym _) = F`, so `is_pterm (App_pt find_proof_pr _) = F`, hence `is_pform Prov_PRST_internal = F`. Resolution requires *either* widening `IS_PR_SYM_DEF` to admit mu-symbols (mirroring `is_partial_pr_sym`) *or* relaxing `is_pterm`'s App branch to use `is_partial_pr_sym`. Both ripple through Layer 2 (size lemmas, MONOs, the `_mono_iff_app_pt_step` factory's pred slot).
 - `PROV_PRST_REPRESENTS` — **blocked**: depends on `PROV_PRST_DIAG_EVAL` (also blocked).
 
 **DSL friction newly observed (Layer 7 part 1):**
@@ -309,7 +315,8 @@ Land Layer 0 + Layer 1 + Layer 3 together — they unblock Layer 2 (the largest 
 - `18f81a3` Layer 4 cleanup — drop wf-lt scaffolding from pr_arity (avoided a sorry'd MONO without unlocking any PR_ARITY_* lemma).
 - `ad84a26` Layer 5 — 6 IS_PR_DEF_HOLDS_* + IS_PARTIAL_PR_SYM_MONO + IS_PARTIAL_PR_SYM_MU + new NAT0_LT_MU_SYM helper.
 - `2ab7431` Layer 6 part 1 — new PROOF_PRST_AT helper + PROOF_PRST_NIL + PROV_PRST_AXIOM + 6 PROV_PRST_*_DEF.
-- *(pending)* Layer 7 part 1 — new FREE_IN_P_AT_EMPTY helper + FREE_IN_PROV_PRST_INTERNAL. The other 5 Layer 7 sorries are documented as blockers (4 require Layer 0 real PR-symbol bodies; IS_PFORM_PROV_PRST_INTERNAL requires a design decision on whether `is_pr_sym` admits `mu_sym`).
+- `4ee3e49` Layer 7 part 1 — new FREE_IN_P_AT_EMPTY helper + FREE_IN_PROV_PRST_INTERNAL.
+- *(pending)* Layer 2 relax (option B) + Layer 7 part 2 — `is_partial_pr_sym` moved to prst_syntax; `_IS_PTERM_F` App branch uses `is_partial_pr_sym`; new `IS_PR_SYM_IMP_PARTIAL` helper; IS_PFORM_PROV_PRST_INTERNAL discharged.
 
-**Cleared:** 43 sorries (19 + 3 + 5 + 7 + 8 + 1).
-**Remaining:** 38 sorries (5 in prst_pr, 11 in prst_proof, 7 in prst_repr, 6 in prst_godel1, 8 in prst_godel2). prst_proof's Layer 6 has 6 sorries to go (MONO, CONS, ADJ_DEF_AT, MP, SUBST_AXIOM, MU_CORRECTNESS); Layer 7 owns 5 of the remaining 11 (1 cleared).
+**Cleared:** 44 sorries (19 + 3 + 5 + 7 + 8 + 2).
+**Remaining:** 37 sorries (5 in prst_pr, 10 in prst_proof, 7 in prst_repr, 6 in prst_godel1, 8 in prst_godel2 — plus 1 sorry in `prst_godel1` for the new G1 chain... wait, the count is 37 across all PRST files). prst_proof's Layer 6 has 6 sorries to go (MONO, CONS, ADJ_DEF_AT, MP, SUBST_AXIOM, MU_CORRECTNESS); Layer 7 owns 4 of the remaining 10 (2 cleared).

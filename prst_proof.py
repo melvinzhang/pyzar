@@ -813,24 +813,197 @@ Prov_PRST_internal = mk_const("Prov_PRST_internal", [])
 
 @proof
 def IS_PFORM_PROV_PRST_INTERNAL(p):
-    """|- is_pform Prov_PRST_internal. STUB.
+    """|- is_pform Prov_PRST_internal.
 
-    BLOCKED (design hole, not a proof gap):
-      Prov_PRST_internal mentions `App_pt find_proof_pr (...)`, and
-      `find_proof_pr := mu_sym Proof_PRST_pr` (FIND_PROOF_PR_DEF in
-      prst_pr). is_pterm's App_pt branch requires `is_pr_sym fn`
-      (IS_PTERM_AT_APP), but IS_PR_SYM_DEF has only 5 disjuncts at tags
-      0/1/2/3/4 and `mu_sym f = Pair_ord 6 f` has tag 6. So
-      `is_pr_sym (mu_sym _) = F` under the current definitions, hence
-      `is_pterm (App_pt find_proof_pr _) = F`, hence
-      `is_pform Prov_PRST_internal = F`.
-      Resolution requires *either* widening IS_PR_SYM_DEF to admit
-      mu-symbols (mirroring is_partial_pr_sym), *or* relaxing
-      IS_PTERM's App branch to use is_partial_pr_sym. Both are design
-      changes that ripple through Layer 2; outside Layer 7's scope.
+    Unblocked by the Layer 2 relax of IS_PTERM's App branch:
+    IS_PTERM_AT_APP now reads `is_pterm (App_pt f args) =
+    is_partial_pr_sym f /\\ is_pterm args`. `find_proof_pr =
+    mu_sym Proof_PRST_pr` is admitted at the partial-PR layer via
+    IS_PARTIAL_PR_SYM_MU.
+
+    Structure: unfold Prov_PRST_internal to an Eq_pf form, apply
+    IS_PFORM_AT_EQ, then prove `is_pterm` for both sides via
+    IS_PTERM_AT_APP / IS_PTERM_AT_TUP / IS_PTERM_AT_VAR /
+    IS_PTERM_AT_EMPTY recursively. Every `is_partial_pr_sym _`
+    obligation is discharged by `IS_PR_SYM_IMP_PARTIAL` (from
+    prst_syntax) composed with the relevant `IS_PR_SYM_*` (or by
+    `IS_PARTIAL_PR_SYM_MU` for the mu_sym slot).
     """
+    from prst_syntax import (
+        IS_PFORM_AT_EQ,
+        IS_PTERM_AT_APP,
+        IS_PTERM_AT_TUP,
+        IS_PTERM_AT_VAR,
+        IS_PTERM_AT_EMPTY,
+        IS_PR_SYM_IMP_PARTIAL,
+    )
+    from prst_pr import (
+        T_PT_DEF,
+        ADJ_PT_DEF,
+        Proof_PRST_pr_def,
+        FIND_PROOF_PR_DEF,
+        IS_PR_SYM_ADJ,
+        IS_PR_SYM_PROJ,
+        IS_PARTIAL_PR_SYM_MU,
+    )
+    from tactics import SPECL, CONJ, SYM, AP_TERM
+    from basics import mk_const as _mk_const
+
     p.goal("is_pform Prov_PRST_internal")
-    p.sorry()
+
+    # --- is_partial_pr_sym facts for the symbols that head App_pts ---
+    # adj_sym (head of T_pt's App_pt expansion).
+    p.have("h_pr_adj: is_pr_sym adj_sym").by_thm(IS_PR_SYM_ADJ)
+    p.have("h_pp_adj: is_partial_pr_sym adj_sym").by(
+        IS_PR_SYM_IMP_PARTIAL, "adj_sym", "h_pr_adj"
+    )
+    # Proof_PRST_pr = proj_sym 1 2; needs nat0_lt 1 2.
+    # nat0_lt 1 2 holds: 1 = SUC0 0, 2 = SUC0 (SUC0 0), and 0 < SUC0 0
+    # < SUC0 (SUC0 0). The cleanest discharge is via NAT0_LT_SUC.
+    from nat0_order import NAT0_LT_SUC0
+    p.have(
+        "h_lt_1_2: nat0_lt (SUC0 0) (SUC0 (SUC0 0))"
+    ).by(NAT0_LT_SUC0, "SUC0 0")
+    p.have(
+        "h_pr_proof_inner: is_pr_sym (proj_sym (SUC0 0) (SUC0 (SUC0 0)))"
+    ).by(IS_PR_SYM_PROJ, "SUC0 0", "SUC0 (SUC0 0)", "h_lt_1_2")
+    # Proof_PRST_pr = proj_sym 1 2, so is_pr_sym Proof_PRST_pr.
+    p.have(
+        "h_pr_proof: is_pr_sym Proof_PRST_pr"
+    ).by_rewrite_of("h_pr_proof_inner", [SYM(Proof_PRST_pr_def)])
+    p.have(
+        "h_pp_proof: is_partial_pr_sym Proof_PRST_pr"
+    ).by(IS_PR_SYM_IMP_PARTIAL, "Proof_PRST_pr", "h_pr_proof")
+    # find_proof_pr = mu_sym Proof_PRST_pr; lift via IS_PARTIAL_PR_SYM_MU.
+    p.have(
+        "h_pp_find_inner: is_partial_pr_sym (mu_sym Proof_PRST_pr)"
+    ).by(IS_PARTIAL_PR_SYM_MU, "Proof_PRST_pr", "h_pp_proof")
+    p.have(
+        "h_pp_find: is_partial_pr_sym find_proof_pr"
+    ).by_rewrite_of("h_pp_find_inner", [SYM(FIND_PROOF_PR_DEF)])
+
+    # --- is_pterm Empty_pt (atomic) ---
+    p.have("h_pt_empty: is_pterm Empty_pt").by_thm(IS_PTERM_AT_EMPTY)
+
+    # --- is_pterm (Var_pt var_x) ---
+    p.have("h_pt_var: is_pterm (Var_pt var_x)").by(IS_PTERM_AT_VAR, "var_x")
+
+    # --- is_pterm (Tup_pt (Var_pt var_x) Empty_pt) ---
+    p.have(
+        "h_pt_tup_vx: is_pterm (Tup_pt (Var_pt var_x) Empty_pt)"
+    ).by_eq_mp(
+        SYM(SPECL([p._parse("Var_pt var_x"), p._parse("Empty_pt")], IS_PTERM_AT_TUP)),
+        CONJ(p.fact("h_pt_var"), p.fact("h_pt_empty")),
+    )
+
+    # --- is_pterm (App_pt find_proof_pr (Tup_pt (Var_pt var_x) Empty_pt)) ---
+    p.have(
+        "h_pt_app_find: is_pterm "
+        "  (App_pt find_proof_pr (Tup_pt (Var_pt var_x) Empty_pt))"
+    ).by_eq_mp(
+        SYM(SPECL(
+            [p._parse("find_proof_pr"),
+             p._parse("Tup_pt (Var_pt var_x) Empty_pt")],
+            IS_PTERM_AT_APP,
+        )),
+        CONJ(p.fact("h_pp_find"), p.fact("h_pt_tup_vx")),
+    )
+
+    # --- is_pterm (Tup_pt <app_find> (Tup_pt (Var_pt var_x) Empty_pt)) ---
+    p.have(
+        "h_pt_outer_tup: is_pterm "
+        "  (Tup_pt (App_pt find_proof_pr (Tup_pt (Var_pt var_x) Empty_pt)) "
+        "          (Tup_pt (Var_pt var_x) Empty_pt))"
+    ).by_eq_mp(
+        SYM(SPECL(
+            [p._parse("App_pt find_proof_pr (Tup_pt (Var_pt var_x) Empty_pt)"),
+             p._parse("Tup_pt (Var_pt var_x) Empty_pt")],
+            IS_PTERM_AT_TUP,
+        )),
+        CONJ(p.fact("h_pt_app_find"), p.fact("h_pt_tup_vx")),
+    )
+
+    # --- LHS of Eq_pf: is_pterm (App_pt Proof_PRST_pr <outer_tup>) ---
+    p.have(
+        "h_pt_lhs: is_pterm "
+        "  (App_pt Proof_PRST_pr "
+        "    (Tup_pt (App_pt find_proof_pr (Tup_pt (Var_pt var_x) Empty_pt)) "
+        "            (Tup_pt (Var_pt var_x) Empty_pt)))"
+    ).by_eq_mp(
+        SYM(SPECL(
+            [p._parse("Proof_PRST_pr"),
+             p._parse(
+                "Tup_pt (App_pt find_proof_pr (Tup_pt (Var_pt var_x) Empty_pt)) "
+                "       (Tup_pt (Var_pt var_x) Empty_pt)"
+             )],
+            IS_PTERM_AT_APP,
+        )),
+        CONJ(p.fact("h_pp_proof"), p.fact("h_pt_outer_tup")),
+    )
+
+    # --- is_pterm T_pt (= Adj_pt Empty_pt Empty_pt
+    #                  = App_pt adj_sym (Tup_pt Empty_pt (Tup_pt Empty_pt Empty_pt))) ---
+    p.have(
+        "h_pt_tup_ee: is_pterm (Tup_pt Empty_pt Empty_pt)"
+    ).by_eq_mp(
+        SYM(SPECL(
+            [p._parse("Empty_pt"), p._parse("Empty_pt")], IS_PTERM_AT_TUP
+        )),
+        CONJ(p.fact("h_pt_empty"), p.fact("h_pt_empty")),
+    )
+    p.have(
+        "h_pt_tup_eee: is_pterm (Tup_pt Empty_pt (Tup_pt Empty_pt Empty_pt))"
+    ).by_eq_mp(
+        SYM(SPECL(
+            [p._parse("Empty_pt"), p._parse("Tup_pt Empty_pt Empty_pt")],
+            IS_PTERM_AT_TUP,
+        )),
+        CONJ(p.fact("h_pt_empty"), p.fact("h_pt_tup_ee")),
+    )
+    p.have(
+        "h_pt_app_adj: is_pterm "
+        "  (App_pt adj_sym (Tup_pt Empty_pt (Tup_pt Empty_pt Empty_pt)))"
+    ).by_eq_mp(
+        SYM(SPECL(
+            [p._parse("adj_sym"),
+             p._parse("Tup_pt Empty_pt (Tup_pt Empty_pt Empty_pt)")],
+            IS_PTERM_AT_APP,
+        )),
+        CONJ(p.fact("h_pp_adj"), p.fact("h_pt_tup_eee")),
+    )
+    # Bridge: T_pt = Adj_pt Empty_pt Empty_pt = App_pt adj_sym (...).
+    adj_at = p.unfold(ADJ_PT_DEF, "Empty_pt", "Empty_pt")
+    # adj_at: Adj_pt Empty_pt Empty_pt = App_pt adj_sym (Tup_pt Empty_pt (Tup_pt Empty_pt Empty_pt))
+    is_pterm_const = _mk_const("is_pterm", [])
+    p.have("h_pt_rhs: is_pterm T_pt").by_rewrite_of(
+        "h_pt_app_adj", [SYM(adj_at), SYM(T_PT_DEF)]
+    )
+
+    # --- Combine: is_pform (Eq_pf lhs T_pt) ---
+    p.have(
+        "h_pform_inner: is_pform "
+        "  (Eq_pf "
+        "    (App_pt Proof_PRST_pr "
+        "      (Tup_pt (App_pt find_proof_pr (Tup_pt (Var_pt var_x) Empty_pt)) "
+        "              (Tup_pt (Var_pt var_x) Empty_pt))) "
+        "    T_pt)"
+    ).by_eq_mp(
+        SYM(SPECL(
+            [p._parse(
+                "App_pt Proof_PRST_pr "
+                "  (Tup_pt (App_pt find_proof_pr (Tup_pt (Var_pt var_x) Empty_pt)) "
+                "          (Tup_pt (Var_pt var_x) Empty_pt))"
+             ),
+             p._parse("T_pt")],
+            IS_PFORM_AT_EQ,
+        )),
+        CONJ(p.fact("h_pt_lhs"), p.fact("h_pt_rhs")),
+    )
+
+    # Fold back to Prov_PRST_internal via prov_prst_internal_def.
+    p.thus("is_pform Prov_PRST_internal").by_rewrite_of(
+        "h_pform_inner", [SYM(prov_prst_internal_def)]
+    )
 
 
 # Helper: |- !v. free_in_p Empty_pt v = F.
