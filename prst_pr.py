@@ -74,6 +74,11 @@ from prst_syntax import (
     Tup_pt,  # noqa: F401  -- parser alias for args-tuple cons cells
     is_pterm,  # noqa: F401  -- parser alias
 )
+from prst_pr_builders import (  # tier-1 readable-body helpers
+    nat, pt_list, proj, comp, rec, app_pt as _app_pt_b, var_t,
+    eq_pf as _eq_pf_b, imp_pf as _imp_pf_b, in_pa as _in_pa_b,
+    not_pf as _not_pf_b, tup_pt as _tup_pt_b,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -324,10 +329,11 @@ def PR_ARITY_REC(p):
 
 
 # Closed: zero_sym applied to the empty argument list returns Empty_pt.
+# `_app_pt_b` with no args builds `App_pt zero_sym Empty_pt`.
 ZERO_DEF_AXIOM_DEF = define(
     "zero_def_axiom",
     parse_type("nat0"),
-    "Eq_pf (App_pt zero_sym Empty_pt) Empty_pt",
+    _eq_pf_b(_app_pt_b(zero_sym), Empty_pt),
 )
 zero_def_axiom = mk_const("zero_def_axiom", [])
 
@@ -337,10 +343,14 @@ zero_def_axiom = mk_const("zero_def_axiom", [])
 # operation, just as Empty_pt is the empty set. Adj_pt is a HOL-level
 # abbreviation for callers' convenience -- it unfolds to the
 # corresponding App_pt expression.
+_a_var_adj = Var("a", nat0_ty)
+_b_var_adj = Var("b", nat0_ty)
 ADJ_PT_DEF = define(
     "Adj_pt",
     parse_type("nat0 -> nat0 -> nat0"),
-    "\\a:nat0. \\b:nat0. App_pt adj_sym (Tup_pt a (Tup_pt b Empty_pt))",
+    mk_abs(_a_var_adj, mk_abs(_b_var_adj,
+        _app_pt_b(adj_sym, _a_var_adj, _b_var_adj),
+    )),
 )
 Adj_pt = mk_const("Adj_pt", [])
 
@@ -391,11 +401,20 @@ var_t_args_rev = mk_const("var_t_args_rev", [])
 #   proj_def_axiom_at i n
 #     := Eq_pf (App_pt (proj_sym i n) (var_t_args_rev n))
 #              (Var_t i)
+# `proj_t(i, n)` (non-literal i, n -- already terms) is used because the
+# lambda binds them as free Vars, not Python integers.
+_i_var = Var("i", nat0_ty)
+_n_var = Var("n", nat0_ty)
+from prst_pr_builders import proj_t as _proj_t  # noqa: E402
 PROJ_DEF_AXIOM_AT_DEF = define(
     "proj_def_axiom_at",
     parse_type("nat0 -> nat0 -> nat0"),
-    "\\i:nat0. \\n:nat0. "
-    "Eq_pf (App_pt (proj_sym i n) (var_t_args_rev n)) (Var_t i)",
+    mk_abs(_i_var, mk_abs(_n_var,
+        _eq_pf_b(
+            mk_app(App_pt, _proj_t(_i_var, _n_var), mk_app(var_t_args_rev, _n_var)),
+            mk_app(Var_t, _i_var),
+        ),
+    )),
 )
 proj_def_axiom_at = mk_const("proj_def_axiom_at", [])
 
@@ -404,30 +423,35 @@ proj_def_axiom_at = mk_const("proj_def_axiom_at", [])
 #   if_in_true : In_pa a b -> if_in_sym(a, b, x, y) = x
 #   if_in_false: ~ In_pa a b -> if_in_sym(a, b, x, y) = y
 # Free Var_t 0..3 universally quantified.
+# if_in_true_def_axiom :=
+#   In_pa Var_t0 Var_t1
+#     ==> Eq_pf (App_pt if_in_sym [Var_t0; Var_t1; Var_t2; Var_t3]) Var_t2.
 IF_IN_TRUE_DEF_AXIOM_DEF = define(
     "if_in_true_def_axiom",
     parse_type("nat0"),
-    "Imp_pf (In_pa (Var_t 0) (Var_t (SUC0 0))) "
-    "       (Eq_pf (App_pt if_in_sym "
-    "                (Tup_pt (Var_t 0) "
-    "                  (Tup_pt (Var_t (SUC0 0)) "
-    "                    (Tup_pt (Var_t (SUC0 (SUC0 0))) "
-    "                      (Tup_pt (Var_t (SUC0 (SUC0 (SUC0 0)))) Empty_pt))))) "
-    "              (Var_t (SUC0 (SUC0 0))))",
+    _imp_pf_b(
+        _in_pa_b(var_t(0), var_t(1)),
+        _eq_pf_b(
+            _app_pt_b(if_in_sym, var_t(0), var_t(1), var_t(2), var_t(3)),
+            var_t(2),
+        ),
+    ),
 )
 if_in_true_def_axiom = mk_const("if_in_true_def_axiom", [])
 
 
+# Same shape as the true-branch but with `Not_pf` on the In_pa antecedent
+# and Var_t 3 (the else-result) on the RHS.
 IF_IN_FALSE_DEF_AXIOM_DEF = define(
     "if_in_false_def_axiom",
     parse_type("nat0"),
-    "Imp_pf (Not_pf (In_pa (Var_t 0) (Var_t (SUC0 0)))) "
-    "       (Eq_pf (App_pt if_in_sym "
-    "                (Tup_pt (Var_t 0) "
-    "                  (Tup_pt (Var_t (SUC0 0)) "
-    "                    (Tup_pt (Var_t (SUC0 (SUC0 0))) "
-    "                      (Tup_pt (Var_t (SUC0 (SUC0 (SUC0 0)))) Empty_pt))))) "
-    "              (Var_t (SUC0 (SUC0 (SUC0 0)))))",
+    _imp_pf_b(
+        _not_pf_b(_in_pa_b(var_t(0), var_t(1))),
+        _eq_pf_b(
+            _app_pt_b(if_in_sym, var_t(0), var_t(1), var_t(2), var_t(3)),
+            var_t(3),
+        ),
+    ),
 )
 if_in_false_def_axiom = mk_const("if_in_false_def_axiom", [])
 
@@ -446,36 +470,45 @@ if_in_false_def_axiom = mk_const("if_in_false_def_axiom", [])
 #                         Adj decomposition)
 #
 # rec_base: ``rec g h Empty_pt y_vec = g y_vec``.
+#   Var_t 0 is y_vec; the empty list arg is Empty_pt directly.
+_g_var = Var("g", nat0_ty)
+_h_var = Var("h", nat0_ty)
 REC_BASE_DEF_AXIOM_AT_DEF = define(
     "rec_base_def_axiom_at",
     parse_type("nat0 -> nat0 -> nat0"),
-    "\\g:nat0. \\h:nat0. "
-    "Eq_pf (App_pt (rec_sym g h) (Tup_pt Empty_pt (Tup_pt (Var_t 0) Empty_pt))) "
-    "      (App_pt g (Tup_pt (Var_t 0) Empty_pt))",
+    mk_abs(_g_var, mk_abs(_h_var,
+        _eq_pf_b(
+            _app_pt_b(rec(_g_var, _h_var), Empty_pt, var_t(0)),
+            _app_pt_b(_g_var, var_t(0)),
+        ),
+    )),
 )
 rec_base_def_axiom_at = mk_const("rec_base_def_axiom_at", [])
 
 
 # rec_step: ``rec g h (Adj_pt i s) y_vec = h i s (rec g h s y_vec) y_vec``
-# (the membership-canonical normalisation collapse case is handled at
-# the proof-system level rather than syntactically here).
+#   Var_t 0 = y_vec, Var_t 1 = i, Var_t 2 = s.
+# (The membership-canonical normalisation collapse case is handled at
+# the proof-system level rather than syntactically here.)
 REC_STEP_DEF_AXIOM_AT_DEF = define(
     "rec_step_def_axiom_at",
     parse_type("nat0 -> nat0 -> nat0"),
-    "\\g:nat0. \\h:nat0. "
-    "Eq_pf "
-    "  (App_pt (rec_sym g h) "
-    "     (Tup_pt (App_pt adj_sym "
-    "                (Tup_pt (Var_t (SUC0 0)) "
-    "                  (Tup_pt (Var_t (SUC0 (SUC0 0))) Empty_pt))) "
-    "             (Tup_pt (Var_t 0) Empty_pt))) "
-    "  (App_pt h "
-    "     (Tup_pt (Var_t (SUC0 0)) "
-    "       (Tup_pt (Var_t (SUC0 (SUC0 0))) "
-    "         (Tup_pt (App_pt (rec_sym g h) "
-    "                    (Tup_pt (Var_t (SUC0 (SUC0 0))) "
-    "                      (Tup_pt (Var_t 0) Empty_pt))) "
-    "           (Tup_pt (Var_t 0) Empty_pt)))))",
+    mk_abs(_g_var, mk_abs(_h_var,
+        _eq_pf_b(
+            _app_pt_b(
+                rec(_g_var, _h_var),
+                _app_pt_b(adj_sym, var_t(1), var_t(2)),
+                var_t(0),
+            ),
+            _app_pt_b(
+                _h_var,
+                var_t(1),
+                var_t(2),
+                _app_pt_b(rec(_g_var, _h_var), var_t(2), var_t(0)),
+                var_t(0),
+            ),
+        ),
+    )),
 )
 rec_step_def_axiom_at = mk_const("rec_step_def_axiom_at", [])
 
@@ -848,19 +881,13 @@ def IS_PARTIAL_PR_SYM_MU(p):
 
 
 # numeral_pr := REC zero_sym (\i,s,r,_vec. Adj_pt r r)
-#            =  rec_sym zero_sym (comp_sym adj_sym (Tup_pt (proj 2 4)
-#                                                    (Tup_pt (proj 2 4)
-#                                                            Empty_pt)))
+#            =  rec_sym zero_sym (comp_sym adj_sym (proj 2 4) (proj 2 4))
 # 4-ary step (i, s, r, y_vec), zero-ary y_vec collapses to no
 # additional slots; proj 2 4 picks ``r`` (the 3rd of 4 args).
 numeral_pr_def = define(
     "numeral_pr",
     parse_type("nat0"),
-    "rec_sym zero_sym "
-    "  (comp_sym adj_sym "
-    "    (Tup_pt (proj_sym (SUC0 (SUC0 0)) (SUC0 (SUC0 (SUC0 (SUC0 0))))) "
-    "      (Tup_pt (proj_sym (SUC0 (SUC0 0)) (SUC0 (SUC0 (SUC0 (SUC0 0))))) "
-    "        Empty_pt)))",
+    rec(zero_sym, comp(adj_sym, proj(2, 4), proj(2, 4))),
 )
 numeral_pr = mk_const("numeral_pr", [])
 
@@ -876,28 +903,28 @@ numeral_pr = mk_const("numeral_pr", [])
 substitute_pr_def = define(
     "substitute_pr",
     parse_type("nat0"),
-    "proj_sym 0 (SUC0 (SUC0 (SUC0 0)))",
+    proj(0, 3),
 )
 substitute_pr = mk_const("substitute_pr", [])
 
 
 # diag_pr n := substitute_pr (n, numeral_pr n, var_x).
-# Compositional shape: comp_sym substitute_pr applied to three 1-ary
-# argument-shapers, each fed the original n:
-#   * proj 0 1           -- yields n
-#   * comp_sym numeral_pr (Tup_pt (proj 0 1) Empty_pt) -- yields numeral n
-#   * const_var_x        -- yields var_x (constant function)
+# Compositional shape: comp_sym substitute_pr applied to argument-shapers,
+# each fed the original n:
+#   * proj 0 1                   -- yields n
+#   * comp numeral_pr (proj 0 1) -- yields numeral n
+#   * const_var_x                -- yields var_x (constant function)
 # PRST does not yet provide a const_sym primitive, so the var_x slot is
 # left as a structural hole here; the third arg in the comp_sym arg-list
 # is omitted. Layer 7 fills it in alongside the full substitute_pr body.
 diag_pr_def = define(
     "diag_pr",
     parse_type("nat0"),
-    "comp_sym substitute_pr "
-    "  (Tup_pt (proj_sym 0 (SUC0 0)) "
-    "    (Tup_pt (comp_sym numeral_pr "
-    "               (Tup_pt (proj_sym 0 (SUC0 0)) Empty_pt)) "
-    "      Empty_pt))",
+    comp(
+        substitute_pr,
+        proj(0, 1),
+        comp(numeral_pr, proj(0, 1)),
+    ),
 )
 diag_pr = mk_const("diag_pr", [])
 
@@ -912,7 +939,7 @@ diag_pr = mk_const("diag_pr", [])
 Proof_PRST_pr_def = define(
     "Proof_PRST_pr",
     parse_type("nat0"),
-    "proj_sym (SUC0 0) (SUC0 (SUC0 0))",
+    proj(1, 2),
 )
 Proof_PRST_pr = mk_const("Proof_PRST_pr", [])
 
