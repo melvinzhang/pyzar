@@ -117,7 +117,7 @@ diagonal a third time.
 """
 
 from fusion import Var, new_constant
-from basics import mk_const, mk_app, mk_abs
+from basics import mk_const, mk_app, mk_abs, rand
 from parser import define, parse_type, add_const
 from nat0 import nat0_ty, ZERO, mk_suc0
 from nat0_order import define_wf_lt
@@ -1171,43 +1171,112 @@ def IS_NORMAL_CASES(p):
 # ---------------------------------------------------------------------------
 
 
-new_constant("sk_iter", parse_type("nat0 -> nat0 -> nat0"))
+# ``sk_iter`` is defined by primitive recursion on the iteration count
+# (the first argument). Using ``define_unary_0`` with result type
+# ``nat0 -> nat0`` makes ``sk_iter n`` a function:
+#
+#   sk_iter 0          = \t. t
+#   sk_iter (SUC0 n)   = \t. sk_step (sk_iter n t)
+#
+# The point-free form yields the SK_ITER_BASE / SK_ITER_STEP equations
+# directly; SK_ITER_ZERO / SK_ITER_SUC just AP_THM at t and BETA.
+from nat0 import define_unary_0  # noqa: E402
+
+_n0_t_var = Var("t", nat0_ty)
+_n0_k_var = Var("k", nat0_ty)
+_n0_a_var = Var("a", parse_type("nat0 -> nat0"))
+
+# c : nat0 -> nat0  ==  \t. t.
+_c_sk_iter = mk_abs(_n0_t_var, _n0_t_var)
+
+# h : nat0 -> (nat0 -> nat0) -> (nat0 -> nat0)
+#   == \k. \a. \t. sk_step (a t).
+_h_sk_iter = mk_abs(
+    _n0_k_var,
+    mk_abs(
+        _n0_a_var,
+        mk_abs(_n0_t_var, mk_app(sk_step, mk_app(_n0_a_var, _n0_t_var))),
+    ),
+)
+
+SK_ITER_BASE, SK_ITER_STEP = define_unary_0(
+    "sk_iter",
+    parse_type("nat0 -> nat0 -> nat0"),
+    _c_sk_iter,
+    _h_sk_iter,
+    result_ty=parse_type("nat0 -> nat0"),
+)
 sk_iter = mk_const("sk_iter", [])
-add_const("sk_iter", sk_iter)
+# SK_ITER_BASE : |- sk_iter 0 = (\t. t)
+# SK_ITER_STEP : |- !n. sk_iter (SUC0 n) = (\t. sk_step (sk_iter n t))
 
 
-#   halts t  :=  ?n. is_normal (sk_iter n t).
-# Posted via ``new_constant`` for now; the real ``define`` reads
-#   "\\t:nat0. ?n:nat0. is_normal (sk_iter n t)"
-# and is a one-liner once ``sk_iter`` and ``is_normal`` are in place.
-new_constant("halts", parse_type("nat0 -> bool"))
+# halts t := ?n. is_normal (sk_iter n t).
+HALTS_DEF = define(
+    "halts",
+    parse_type("nat0 -> bool"),
+    "\\t:nat0. ?n:nat0. is_normal (sk_iter n t)",
+)
 halts = mk_const("halts", [])
-add_const("halts", halts)
 
 
 @proof
 def SK_ITER_ZERO(p):
-    """|- !t. sk_iter 0 t = t."""
+    """|- !t. sk_iter 0 t = t.
+
+    AP_THM SK_ITER_BASE at t, then BETA_CONV reduces ``(\\t. t) t`` to t.
+    """
+    from tactics import AP_THM, BETA_CONV, TRANS
+
+    # SK_ITER_BASE : |- sk_iter 0 = \t. t
+    # AP_THM at t  : |- sk_iter 0 t = (\t. t) t
+    ap = AP_THM(SK_ITER_BASE, _n0_t_var)
+    # BETA the RHS : |- (\t. t) t = t
+    bet = BETA_CONV(rand(ap._concl))
+    # TRANS gives  : |- sk_iter 0 t = t
+    spec_th = TRANS(ap, bet)
     p.goal("!t. sk_iter 0 t = t")
-    p.sorry()
+    from tactics import GEN
+    p.thus("!t. sk_iter 0 t = t").by_thm(GEN(_n0_t_var, spec_th))
 
 
 @proof
 def SK_ITER_SUC(p):
-    """|- !n t. sk_iter (SUC0 n) t = sk_step (sk_iter n t)."""
+    """|- !n t. sk_iter (SUC0 n) t = sk_step (sk_iter n t).
+
+    SPEC SK_ITER_STEP at n, AP_THM at t, BETA.
+    """
+    from tactics import AP_THM, BETA_CONV, TRANS, SPEC, GENL
+
+    n_var = Var("n", nat0_ty)
+    # SPEC at n  : |- sk_iter (SUC0 n) = \t. sk_step (sk_iter n t)
+    step_at_n = SPEC(n_var, SK_ITER_STEP)
+    # AP_THM at t: |- sk_iter (SUC0 n) t = (\t. sk_step (sk_iter n t)) t
+    ap = AP_THM(step_at_n, _n0_t_var)
+    bet = BETA_CONV(rand(ap._concl))
+    spec_th = TRANS(ap, bet)
     p.goal("!n t. sk_iter (SUC0 n) t = sk_step (sk_iter n t)")
-    p.sorry()
+    p.thus("!n t. sk_iter (SUC0 n) t = sk_step (sk_iter n t)").by_thm(
+        GENL([n_var, _n0_t_var], spec_th)
+    )
 
 
 @proof
 def HALTS_AT(p):
-    """|- !t. halts t <=> ?n. is_normal (sk_iter n t).
+    """|- !t. halts t = (?n. is_normal (sk_iter n t)).
 
-    Restating ``HALTS_DEF`` as the standard Sigma_1 predicate.  The
-    canonical-form work goes here.
+    Direct unfold of HALTS_DEF via AP_THM + BETA.
     """
+    from tactics import AP_THM, BETA_CONV, TRANS, GEN
+
+    # HALTS_DEF: |- halts = \t. ?n. is_normal (sk_iter n t).
+    ap = AP_THM(HALTS_DEF, _n0_t_var)
+    bet = BETA_CONV(rand(ap._concl))
+    spec_th = TRANS(ap, bet)
     p.goal("!t. halts t = (?n. is_normal (sk_iter n t))")
-    p.sorry()
+    p.thus("!t. halts t = (?n. is_normal (sk_iter n t))").by_thm(
+        GEN(_n0_t_var, spec_th)
+    )
 
 
 # ---------------------------------------------------------------------------
