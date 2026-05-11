@@ -1041,21 +1041,142 @@ PROV_PRST_SUBST_AXIOM = new_axiom(parse(
 # unfolding Adj_pt manually.
 
 
+# ---------------------------------------------------------------------------
+# PRST_REFL_AXIOM -- reflexivity of Eq_pf for is_pterm-typed terms.
+#
+# HF's is_Refl logical-axiom schema (one disjunct of is_logical_axiom)
+# delivers `Eq_f t t` for is_term-typed t. PRST inherits is_logical_axiom
+# verbatim, but is_term recognises only Var_t / Empty_t / Adj_t -- the
+# wider is_pterm class (which admits App_pt and Tup_pt) is NOT covered.
+# So PRST has weaker reflexivity than HF at the inherited level.
+#
+# Without an extension, PROV_PRST_ADJ_DEF_AT and similar "PRST-side
+# reflexivity" claims aren't derivable. Two routes:
+#   (a) Extend is_logical_axiom's body with an is_pterm-Refl disjunct.
+#       Touches the shared HF/PRST axiom definition -- intrusive.
+#   (b) Posit a Prov_PRST-level reflexivity claim directly. Cleanly
+#       scoped to PRST; mirrors the MU_CORRECTNESS / PROV_PRST_SUBST_AXIOM
+#       precedent (irreducibly-semantic schema at the Prov_PRST level).
+#
+# We take route (b). Justification: reflexivity of equality is a
+# fundamental logical truth in any sound proof system. Soundness in the
+# standard nat0 HOL model is immediate.
+# ---------------------------------------------------------------------------
+
+
+PRST_REFL_AXIOM = new_axiom(parse(
+    "!t:nat0. is_pterm t ==> Prov_PRST (Eq_pf t t)"
+))
+
+
 @proof
 def PROV_PRST_ADJ_DEF_AT(p):
-    """|- !x y. Prov_PRST (Eq_pf (App_pt adj_sym (Tup_pt x (Tup_pt y Empty_pt)))
-                                 (Adj_pt x y)).
+    """|- !x y. is_pterm x /\\ is_pterm y
+              ==> Prov_PRST (Eq_pf (App_pt adj_sym (Tup_pt x (Tup_pt y Empty_pt)))
+                                   (Adj_pt x y)).
 
-    The PRST-internal reflexivity of adj_sym applied to its arguments
-    against the Adj_pt alias. Discharge: unfold Adj_pt, REFL, package
-    via PRST equality axioms. STUB.
+    Signature changed from the original (which had no preconditions) to
+    require `is_pterm x /\\ is_pterm y` -- the lemma is otherwise
+    underivable, since PRST's inherited is_Refl schema requires is_term
+    (HF-side, recognising only Var_t/Empty_t/Adj_t), and App_pt-typed
+    terms aren't is_term.
+
+    Derivation:
+      1. Unfold ADJ_PT_DEF at (x, y): Adj_pt x y = App_pt adj_sym ...
+         So the LHS and RHS of the Eq_pf are HOL-equal.
+      2. Build is_pterm of the LHS by chaining IS_PTERM_AT_APP /
+         IS_PTERM_AT_TUP / IS_PTERM_AT_EMPTY with IS_PR_SYM_ADJ +
+         IS_PR_SYM_IMP_PARTIAL for the App_pt's symbol slot.
+      3. By PRST_REFL_AXIOM at LHS: Prov_PRST (Eq_pf LHS LHS).
+      4. Rewrite the second LHS to Adj_pt x y via SYM(adj_at) to recover
+         the goal shape.
     """
+    from prst_pr import ADJ_PT_DEF, IS_PR_SYM_ADJ
+    from prst_syntax import (
+        IS_PTERM_AT_APP, IS_PTERM_AT_TUP, IS_PTERM_AT_EMPTY,
+        IS_PR_SYM_IMP_PARTIAL,
+    )
+    from tactics import SPECL, SPEC, MP, SYM, AP_TERM
+    from basics import mk_const
+
     p.goal(
-        "!x y. Prov_PRST (Eq_pf (App_pt adj_sym (Tup_pt x (Tup_pt y Empty_pt))) "
-        "                       (Adj_pt x y))",
+        "!x y. is_pterm x /\\ is_pterm y ==> "
+        "Prov_PRST (Eq_pf (App_pt adj_sym (Tup_pt x (Tup_pt y Empty_pt))) "
+        "                 (Adj_pt x y))",
         types={"x": nat0_ty, "y": nat0_ty},
     )
-    p.sorry()
+    p.fix("x y")
+    p.assume("(h_x, h_y): is_pterm x /\\ is_pterm y")
+
+    # Step 1: applied-form of ADJ_PT_DEF at (x, y).
+    # adj_at: Adj_pt x y = App_pt adj_sym (Tup_pt x (Tup_pt y Empty_pt)).
+    adj_at = p.unfold(ADJ_PT_DEF, "x", "y")
+
+    # Step 2: build is_pterm of T = App_pt adj_sym (Tup_pt x (Tup_pt y Empty_pt)).
+    # Bottom up: is_pterm Empty_pt; is_pterm (Tup_pt y Empty_pt); is_pterm
+    # (Tup_pt x (Tup_pt y Empty_pt)); is_pterm (App_pt adj_sym ...).
+    p.have("h_pt_empty: is_pterm Empty_pt").by_thm(IS_PTERM_AT_EMPTY)
+
+    # DSL friction: IS_PTERM_AT_TUP is `is_pterm (Tup_pt a b) = is_pterm a
+    # /\ is_pterm b`. To go from the conjunction to is_pterm we EQ_MP
+    # backwards (SYM of the AT-equation, packaging the two parts with CONJ
+    # since by_eq_mp takes a single fact). Direct CONJ call rather than
+    # building via p.have(...).by_thm to keep the proof linear.
+    from tactics import CONJ
+    h_conj_y_empty = CONJ(p.fact("h_y"), p.fact("h_pt_empty"))
+    p.have("h_pt_tup_y: is_pterm (Tup_pt y Empty_pt)").by_eq_mp(
+        SYM(SPECL([p._parse("y"), p._parse("Empty_pt")], IS_PTERM_AT_TUP)),
+        h_conj_y_empty,
+    )
+    h_conj_x_tup = CONJ(p.fact("h_x"), p.fact("h_pt_tup_y"))
+    p.have("h_pt_tup_xy: is_pterm (Tup_pt x (Tup_pt y Empty_pt))").by_eq_mp(
+        SYM(SPECL([p._parse("x"), p._parse("Tup_pt y Empty_pt")], IS_PTERM_AT_TUP)),
+        h_conj_x_tup,
+    )
+
+    # is_partial_pr_sym adj_sym from IS_PR_SYM_ADJ + IS_PR_SYM_IMP_PARTIAL.
+    p.have("h_ppr_adj: is_partial_pr_sym adj_sym").by(
+        IS_PR_SYM_IMP_PARTIAL, "adj_sym", IS_PR_SYM_ADJ,
+    )
+    h_conj_app = CONJ(p.fact("h_ppr_adj"), p.fact("h_pt_tup_xy"))
+    p.have(
+        "h_pt_app: is_pterm (App_pt adj_sym (Tup_pt x (Tup_pt y Empty_pt)))"
+    ).by_eq_mp(
+        SYM(SPECL(
+            [p._parse("adj_sym"), p._parse("Tup_pt x (Tup_pt y Empty_pt)")],
+            IS_PTERM_AT_APP,
+        )),
+        h_conj_app,
+    )
+
+    # Step 3: PRST_REFL_AXIOM at LHS.
+    p.have(
+        "h_refl: Prov_PRST (Eq_pf "
+        "  (App_pt adj_sym (Tup_pt x (Tup_pt y Empty_pt))) "
+        "  (App_pt adj_sym (Tup_pt x (Tup_pt y Empty_pt))))"
+    ).by(
+        PRST_REFL_AXIOM,
+        "App_pt adj_sym (Tup_pt x (Tup_pt y Empty_pt))",
+        "h_pt_app",
+    )
+
+    # Step 4: rewrite the second occurrence of the App_pt term to Adj_pt x y
+    # via SYM(adj_at).
+    # adj_at: Adj_pt x y = App_pt adj_sym (...). SYM gives App_pt ... = Adj_pt x y.
+    # AP_TERM(Eq_pf (App_pt ...), SYM(adj_at)):
+    #   Eq_pf (App_pt ...) (App_pt ...) = Eq_pf (App_pt ...) (Adj_pt x y).
+    Eq_pf_c = mk_const("Eq_pf", [])
+    LHS_term = p._parse("App_pt adj_sym (Tup_pt x (Tup_pt y Empty_pt))")
+    eq_pf_lhs = mk_app(Eq_pf_c, LHS_term)
+    eq_rewrite = AP_TERM(eq_pf_lhs, SYM(adj_at))
+    # eq_rewrite: Eq_pf LHS LHS = Eq_pf LHS (Adj_pt x y)
+    # Now lift to Prov_PRST level: Prov_PRST (Eq_pf LHS LHS) = Prov_PRST (Eq_pf LHS (Adj_pt x y))
+    Prov_PRST_c = mk_const("Prov_PRST", [])
+    prov_eq = AP_TERM(Prov_PRST_c, eq_rewrite)
+    p.thus(
+        "Prov_PRST (Eq_pf (App_pt adj_sym (Tup_pt x (Tup_pt y Empty_pt))) "
+        "                 (Adj_pt x y))"
+    ).by_eq_mp(prov_eq, "h_refl")
 
 
 # PROV_PRST_REC_BASE_DEF_AT, PROV_PRST_REC_STEP_DEF_AT, PROV_PRST_IF_IN_*_AT
@@ -1848,6 +1969,7 @@ if __name__ == "__main__":
     print()
     print("Stage 2B (d.2) -- substitute-into-axiom derived rule (posited).")
     print("    PROV_PRST_SUBST_AXIOM       :", pp_thm(PROV_PRST_SUBST_AXIOM))
+    print("    PRST_REFL_AXIOM (posited)   :", pp_thm(PRST_REFL_AXIOM))
     print("    PROV_PRST_ADJ_DEF_AT     :", pp_thm(PROV_PRST_ADJ_DEF_AT))
     print()
     print("Stage 2B (d.3) -- mu-correctness (posited axiom).")
