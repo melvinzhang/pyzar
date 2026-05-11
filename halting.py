@@ -1904,6 +1904,311 @@ def OMEGA_T_STEP1(p):
     ).by_rewrite_of("step_S", [SYM(OMEGA_T_DEF)])
 
 
+# ---------------------------------------------------------------------------
+# halts shift lemmas.  Two general-purpose facts about the
+# ``sk_iter``/``halts`` interaction:
+#
+#   SK_ITER_PUSH   :  |- !n t. sk_iter (SUC0 n) t = sk_iter n (sk_step t)
+#                   -- commute one sk_step from the outside to the
+#                      inside of an iter (or vice versa via SYM).
+#   HALTS_SK_STEP  :  |- !t. halts t = halts (sk_step t)
+#                   -- halting is preserved going both directions across
+#                      a single sk_step.
+#
+# Used by the eventual OMEGA_NON_HALTING reasoning to shift the
+# fixed-point witness between iterates.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def SK_ITER_PUSH(p):
+    """|- !n t. sk_iter (SUC0 n) t = sk_iter n (sk_step t).
+
+    Commute sk_step in and out of sk_iter.  Induction on ``n``:
+      base: sk_iter 1 t = sk_step t = sk_iter 0 (sk_step t).
+      step: sk_iter (SUC0 (SUC0 n)) t
+            = sk_step (sk_iter (SUC0 n) t)                 [SK_ITER_SUC]
+            = sk_step (sk_iter n (sk_step t))              [IH]
+            = sk_iter (SUC0 n) (sk_step t).                [SK_ITER_SUC, SYM].
+    """
+    from tactics import TRANS
+    p.goal("!n t. sk_iter (SUC0 n) t = sk_iter n (sk_step t)")
+    with p.induction("n"):
+        with p.base():
+            p.fix("t")
+            # sk_iter 1 t = sk_step (sk_iter 0 t) = sk_step t.
+            p.have(
+                "h_iter1: sk_iter (SUC0 0) t = sk_step (sk_iter 0 t)"
+            ).by(SK_ITER_SUC, "0", "t")
+            p.have("h_zero: sk_iter 0 t = t").by(SK_ITER_ZERO, "t")
+            p.have(
+                "h_iter1_simp: sk_iter (SUC0 0) t = sk_step t"
+            ).by_rewrite_of("h_iter1", ["h_zero"])
+            # sk_iter 0 (sk_step t) = sk_step t.
+            p.have(
+                "h_zero_st: sk_iter 0 (sk_step t) = sk_step t"
+            ).by(SK_ITER_ZERO, "sk_step t")
+            # Combine.
+            p.thus(
+                "sk_iter (SUC0 0) t = sk_iter 0 (sk_step t)"
+            ).by_thm(TRANS(p.fact("h_iter1_simp"), SYM(p.fact("h_zero_st"))))
+        with p.step("IH"):
+            p.fix("t")
+            # sk_iter (SUC0 (SUC0 n)) t = sk_step (sk_iter (SUC0 n) t).
+            p.have(
+                "h_unfold: sk_iter (SUC0 (SUC0 n)) t "
+                "          = sk_step (sk_iter (SUC0 n) t)"
+            ).by(SK_ITER_SUC, "SUC0 n", "t")
+            # IH at t: sk_iter (SUC0 n) t = sk_iter n (sk_step t).
+            p.have(
+                "h_ih: sk_iter (SUC0 n) t = sk_iter n (sk_step t)"
+            ).by("IH", "t")
+            # Replace inner sk_iter (SUC0 n) t with sk_iter n (sk_step t).
+            p.have(
+                "h_mid: sk_iter (SUC0 (SUC0 n)) t "
+                "       = sk_step (sk_iter n (sk_step t))"
+            ).by_rewrite_of("h_unfold", ["h_ih"])
+            # sk_step (sk_iter n (sk_step t)) = sk_iter (SUC0 n) (sk_step t).
+            p.have(
+                "h_fold: sk_iter (SUC0 n) (sk_step t) "
+                "        = sk_step (sk_iter n (sk_step t))"
+            ).by(SK_ITER_SUC, "n", "sk_step t")
+            p.thus(
+                "sk_iter (SUC0 (SUC0 n)) t = sk_iter (SUC0 n) (sk_step t)"
+            ).by_thm(TRANS(p.fact("h_mid"), SYM(p.fact("h_fold"))))
+
+
+# ---------------------------------------------------------------------------
+# is_normal propagation under sk_iter, in both directions:
+#
+#   IS_NORMAL_SK_ITER_FIXED :  |- !n t. is_normal t ==> sk_iter n t = t
+#                              -- a normal-form fixed point of sk_step is
+#                                 also a fixed point of every sk_iter.
+#   IS_NORMAL_SK_STEP       :  |- !t. is_normal t ==> is_normal (sk_step t)
+#                              -- normality is preserved by sk_step
+#                                 (trivially: sk_step t = t).
+#   HALTS_SK_STEP_FWD       :  |- !t. halts t ==> halts (sk_step t)
+#                              -- shift halts witness forward by one step.
+#
+# These are weak enough not to close OMEGA_NON_HALTING on their own
+# (the backward direction halts (sk_step t) ==> halts t would also
+# be needed, and the heart of the proof is still the 3-step cycle
+# computation -- see OMEGA_NON_HALTING's docstring), but they form
+# the structural skeleton around the missing trajectory lemma.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def IS_NORMAL_SK_STEP(p):
+    """|- !t. is_normal t ==> is_normal (sk_step t).
+
+    Trivial: if sk_step t = t, then sk_step (sk_step t) = sk_step t
+    (apply sk_step to both sides), so sk_step t is also a fixed point.
+    """
+    from tactics import AP_TERM, TRANS
+    p.goal("!t. is_normal t ==> is_normal (sk_step t)")
+    p.fix("t")
+    p.assume("h_norm: is_normal t")
+    p.have("h_fixed: sk_step t = t").by(
+        IS_NORMAL_IMP_FIXED, "t", "h_norm"
+    )
+    # AP_TERM sk_step h_fixed : sk_step (sk_step t) = sk_step t.
+    p.have("h_step_fixed: sk_step (sk_step t) = sk_step t").by_thm(
+        AP_TERM(sk_step, p.fact("h_fixed"))
+    )
+    # is_normal (sk_step t) unfolds to sk_step (sk_step t) = sk_step t.
+    p.thus("is_normal (sk_step t)").by_unfold(
+        "h_step_fixed", IS_NORMAL_DEF
+    )
+
+
+@proof
+def IS_NORMAL_SK_ITER_FIXED(p):
+    """|- !n t. is_normal t ==> sk_iter n t = t.
+
+    Induction on ``n``:
+      base: sk_iter 0 t = t                                   [SK_ITER_ZERO].
+      step: sk_iter (SUC0 n) t = sk_step (sk_iter n t)
+                                = sk_step t                   [IH]
+                                = t                           [is_normal].
+    """
+    from tactics import TRANS
+    p.goal("!n t. is_normal t ==> sk_iter n t = t")
+    with p.induction("n"):
+        with p.base():
+            p.fix("t")
+            p.assume("h_norm: is_normal t")
+            p.thus("sk_iter 0 t = t").by(SK_ITER_ZERO, "t")
+        with p.step("IH"):
+            p.fix("t")
+            p.assume("h_norm: is_normal t")
+            p.have(
+                "h_unfold: sk_iter (SUC0 n) t = sk_step (sk_iter n t)"
+            ).by(SK_ITER_SUC, "n", "t")
+            p.have("h_ih: sk_iter n t = t").by("IH", "t", "h_norm")
+            # Rewrite ``sk_iter n t`` to ``t`` in h_unfold's RHS via h_ih.
+            p.have(
+                "h_step_t: sk_iter (SUC0 n) t = sk_step t"
+            ).by_rewrite_of("h_unfold", ["h_ih"])
+            p.have("h_fixed: sk_step t = t").by(
+                IS_NORMAL_IMP_FIXED, "t", "h_norm"
+            )
+            p.thus("sk_iter (SUC0 n) t = t").by_thm(
+                TRANS(p.fact("h_step_t"), p.fact("h_fixed"))
+            )
+
+
+@proof
+def HALTS_SK_STEP_FWD(p):
+    """|- !t. halts t ==> halts (sk_step t).
+
+    Two cases on the halts witness ``n``:
+      n = 0:        is_normal t ==> is_normal (sk_step t)     [IS_NORMAL_SK_STEP].
+      n > 0 = SUC0 m: sk_iter (SUC0 m) t = sk_iter m (sk_step t)
+                                                              [SK_ITER_PUSH],
+                      so is_normal (sk_iter m (sk_step t)).
+
+    To avoid a NAT0_CASES helper (not in the codebase), we
+    pre-derive ``is_normal (sk_iter n t) ==> halts (sk_step t)``
+    by induction on ``n``, where the base AND step both yield
+    explicit halts-witnesses.
+    """
+    from tactics import AP_TERM
+    # Helper inducted on n: |- !n t. is_normal (sk_iter n t) ==> halts (sk_step t).
+    @proof
+    def _NORMAL_IMP_HALTS_STEP(p2):
+        p2.goal("!n t. is_normal (sk_iter n t) ==> halts (sk_step t)")
+        with p2.induction("n"):
+            with p2.base():
+                p2.fix("t")
+                p2.assume("h_norm0: is_normal (sk_iter 0 t)")
+                # sk_iter 0 t = t, so h_norm0 = is_normal t.
+                p2.have("h_iter0: sk_iter 0 t = t").by(SK_ITER_ZERO, "t")
+                p2.have("h_norm_t: is_normal t").by_rewrite_of(
+                    "h_norm0", ["h_iter0"]
+                )
+                # IS_NORMAL_SK_STEP: is_normal (sk_step t).
+                p2.have("h_norm_st: is_normal (sk_step t)").by(
+                    IS_NORMAL_SK_STEP, "t", "h_norm_t"
+                )
+                # halts (sk_step t) = ?m. is_normal (sk_iter m (sk_step t)); witness m=0.
+                p2.have(
+                    "h_at: halts (sk_step t) = (?m. is_normal (sk_iter m (sk_step t)))"
+                ).by(HALTS_AT, "sk_step t")
+                # sk_iter 0 (sk_step t) = sk_step t.
+                p2.have(
+                    "h_iter0_st: sk_iter 0 (sk_step t) = sk_step t"
+                ).by(SK_ITER_ZERO, "sk_step t")
+                # is_normal (sk_iter 0 (sk_step t)).
+                p2.have(
+                    "h_norm_iter0: is_normal (sk_iter 0 (sk_step t))"
+                ).by_eq_mp(
+                    AP_TERM(is_normal, p2.fact("h_iter0_st")),
+                    "h_norm_st",
+                )
+                p2.have(
+                    "h_ex: ?m. is_normal (sk_iter m (sk_step t))"
+                ).by_witness("0", "h_norm_iter0")
+                p2.thus("halts (sk_step t)").by_eq_mp("h_at", "h_ex")
+            with p2.step("IH"):
+                p2.fix("t")
+                p2.assume("h_norm: is_normal (sk_iter (SUC0 n) t)")
+                # SK_ITER_PUSH: sk_iter (SUC0 n) t = sk_iter n (sk_step t).
+                p2.have(
+                    "h_push: sk_iter (SUC0 n) t = sk_iter n (sk_step t)"
+                ).by(SK_ITER_PUSH, "n", "t")
+                # is_normal (sk_iter n (sk_step t)).
+                p2.have(
+                    "h_norm_pushed: is_normal (sk_iter n (sk_step t))"
+                ).by_eq_mp(
+                    AP_TERM(is_normal, p2.fact("h_push")),
+                    "h_norm",
+                )
+                p2.have(
+                    "h_at: halts (sk_step t) = (?m. is_normal (sk_iter m (sk_step t)))"
+                ).by(HALTS_AT, "sk_step t")
+                p2.have(
+                    "h_ex: ?m. is_normal (sk_iter m (sk_step t))"
+                ).by_witness("n", "h_norm_pushed")
+                p2.thus("halts (sk_step t)").by_eq_mp("h_at", "h_ex")
+
+    p.goal("!t. halts t ==> halts (sk_step t)")
+    p.fix("t")
+    p.assume("h_ht: halts t")
+    p.have("h_at: halts t = (?n. is_normal (sk_iter n t))").by(HALTS_AT, "t")
+    p.have("h_ex: ?n. is_normal (sk_iter n t)").by_eq_mp("h_at", "h_ht")
+    p.choose("n", from_="h_ex")
+    # n_eq : is_normal (sk_iter n t)
+    p.thus("halts (sk_step t)").by(_NORMAL_IMP_HALTS_STEP, "n", "t", "n_eq")
+
+
+@proof
+def OMEGA_T_NOT_NORMAL(p):
+    """|- ~ is_normal Omega_t.
+
+    Base case for OMEGA_NON_HALTING: rule out ``halts`` at iteration
+    n = 0.  Proof:
+      is_normal Omega_t  =>  sk_step Omega_t = Omega_t            [IS_NORMAL_IMP_FIXED]
+      OMEGA_T_STEP1:     sk_step Omega_t = App_t (App_t I_t SII) (App_t I_t SII)
+      Combine:           App_t (App_t I_t SII) (App_t I_t SII) = Omega_t
+      OMEGA_T_DEF:       Omega_t = App_t SII SII
+      Combine:           App_t (App_t I_t SII) (App_t I_t SII) = App_t SII SII
+      APP_T_INJ x3:      App_t I_t SII = SII => I_t = App_t S_t I_t
+                                              => App_t S_t K_t = S_t   [via I_T_DEF]
+      S_T_NEQ_APP_T:     ~(S_t = App_t S_t K_t)                    -- contradiction.
+    """
+    from tactics import CONJUNCT1 as _C1, TRANS
+    p.goal("~ is_normal Omega_t")
+    SII = "App_t (App_t S_t I_t) I_t"
+    with p.suppose("h_norm: is_normal Omega_t"):
+        p.have("h_eq: sk_step Omega_t = Omega_t").by(
+            IS_NORMAL_IMP_FIXED, "Omega_t", "h_norm"
+        )
+        # SYM(OMEGA_T_STEP1) gives RHS = sk_step Omega_t; TRANS with h_eq.
+        p.have(
+            f"h1: App_t (App_t I_t ({SII})) (App_t I_t ({SII})) = Omega_t"
+        ).by_thm(TRANS(SYM(OMEGA_T_STEP1), p.fact("h_eq")))
+        # Unfold Omega_t on the RHS via OMEGA_T_DEF.
+        p.have(
+            f"h2: App_t (App_t I_t ({SII})) (App_t I_t ({SII})) "
+            f"     = App_t ({SII}) ({SII})"
+        ).by_rewrite_of("h1", [OMEGA_T_DEF])
+        # Outer APP_T_INJ: App_t I_t SII = SII (LHS) and same (RHS, unused).
+        p.have(
+            f"h3: App_t I_t ({SII}) = ({SII}) /\\ App_t I_t ({SII}) = ({SII})"
+        ).by(
+            APP_T_INJ,
+            f"App_t I_t ({SII})",
+            f"App_t I_t ({SII})",
+            SII,
+            SII,
+            "h2",
+        )
+        p.have(f"h4: App_t I_t ({SII}) = ({SII})").by_thm(_C1(p.fact("h3")))
+        # SII = App_t (App_t S_t I_t) I_t literally, so h4 reads:
+        #   App_t I_t (App_t (App_t S_t I_t) I_t) = App_t (App_t S_t I_t) I_t.
+        # APP_T_INJ at the outer App_t on both sides:
+        #   I_t = App_t S_t I_t  /\  SII = I_t.
+        p.have(
+            f"h5: I_t = App_t S_t I_t /\\ ({SII}) = I_t"
+        ).by(APP_T_INJ, "I_t", SII, "App_t S_t I_t", "I_t", "h4")
+        p.have("h_It_eq: I_t = App_t S_t I_t").by_thm(_C1(p.fact("h5")))
+        # I_T_DEF: I_t = App_t (App_t S_t K_t) K_t.  Compose:
+        #   App_t (App_t S_t K_t) K_t = App_t S_t I_t   [TRANS(SYM(I_T_DEF), h_It_eq)].
+        p.have(
+            "h_unfolded: App_t (App_t S_t K_t) K_t = App_t S_t I_t"
+        ).by_thm(TRANS(SYM(I_T_DEF), p.fact("h_It_eq")))
+        # APP_T_INJ: App_t S_t K_t = S_t /\ K_t = I_t.
+        p.have(
+            "h_inj: App_t S_t K_t = S_t /\\ K_t = I_t"
+        ).by(APP_T_INJ, "App_t S_t K_t", "K_t", "S_t", "I_t", "h_unfolded")
+        p.have("h_ASK_eq_S: App_t S_t K_t = S_t").by_thm(_C1(p.fact("h_inj")))
+        # Contradict via S_T_NEQ_APP_T at (S_t, K_t).
+        p.have("h_neq: ~(S_t = App_t S_t K_t)").by(S_T_NEQ_APP_T, "S_t", "K_t")
+        p.have("h_eq_sym: S_t = App_t S_t K_t").by_thm(SYM(p.fact("h_ASK_eq_S")))
+        p.absurd().by_conj("h_neq", "h_eq_sym")
+
+
 @proof
 def OMEGA_NON_HALTING(p):
     """|- ~ halts Omega_t.
@@ -1931,47 +2236,48 @@ def OMEGA_NON_HALTING(p):
     Therefore no ``sk_iter n Omega_t`` is a fixed point of sk_step,
     so ``~ halts Omega_t``.
 
-    Infrastructure already shipped (Stage 3b above):
-      * ``sk_size``                       -- nat0-term size measure.
-      * ``SK_SIZE_S``, ``SK_SIZE_K``,
-        ``SK_SIZE_APP``                   -- unfolding equations.
-      * ``NAT0_LT_SUC0_N0PLUS_L``,
-        ``NAT0_LT_SUC0_N0PLUS_R``         -- ``n0plus`` strict-bound
-                                             lemmas.
-      * ``SK_SIZE_GROWTH_OMEGA_SHAPE``    -- ``sk_size t <
-                                             sk_size (App_t (App_t I_t t)
-                                                            (App_t I_t t))``,
-                                             the key strict-growth
-                                             lemma.
-      * ``OMEGA_T_STEP1``                 -- explicit first step of
-                                             ``sk_step Omega_t``, lands
-                                             in the Omega-shape that
-                                             SK_SIZE_GROWTH consumes.
+    Infrastructure already shipped:
+      Stage 3b (size measure)
+        ``sk_size``, ``SK_SIZE_S``, ``SK_SIZE_K``, ``SK_SIZE_APP``,
+        ``NAT0_LT_SUC0_N0PLUS_{L,R}``,
+        ``SK_SIZE_GROWTH_OMEGA_SHAPE``.
+      Stage 3 (Omega first step + normality propagation)
+        ``OMEGA_T_STEP1``                 -- sk_step Omega_t computed.
+        ``OMEGA_T_NOT_NORMAL``            -- BASE CASE: rules out n = 0.
+        ``SK_ITER_PUSH``                  -- commute sk_step in/out of iter.
+        ``IS_NORMAL_SK_STEP``             -- normality preserved forward.
+        ``IS_NORMAL_SK_ITER_FIXED``       -- fixed point is fixed under iter.
+        ``HALTS_SK_STEP_FWD``             -- halts shifts forward.
 
-    Remaining work for the full proof (estimate ~150-200 lines):
+    Remaining gap for the full proof:
 
-    (1) Two more concrete sk_step computations (T1 -> T2 -> T3) plus
-        a lemma showing the 3-step iterate from any
-        ``App_t (App_t I_t X) (App_t I_t X)`` reaches
-        ``App_t (App_t I_t (App_t I_t X)) (App_t I_t (App_t I_t X))``.
-        Each step is a SK_STEP_REC case-split, ~30-40 lines.
+    The base case ``n = 0`` is closed by OMEGA_T_NOT_NORMAL.  The
+    general case ``n > 0`` requires showing that no state in the
+    Omega trajectory is a fixed point of sk_step, equivalently
+    ``!n. ~ is_normal (sk_iter n Omega_t)``.
 
-    (2) Induction on iteration count: bundle (1) with
-        SK_SIZE_GROWTH_OMEGA_SHAPE to derive
-        ``!k. nat0_lt (sk_size (sk_iter (3 * k) (sk_step Omega_t)))
-                       (sk_size (sk_iter (3 * (k + 1))
-                                          (sk_step Omega_t)))``.
-        ~40 lines.
+    The cleanest path: compute the explicit 3-step transformation
+    that sends ``App_t (App_t I_t X) (App_t I_t X)`` to
+    ``App_t (App_t I_t (App_t I_t X)) (App_t I_t (App_t I_t X))``,
+    then combine with SK_SIZE_GROWTH_OMEGA_SHAPE to get
+    ``!k. nat0_lt (sk_size (sk_iter (3 * k + 1) Omega_t))
+                   (sk_size (sk_iter (3 * (k+1) + 1) Omega_t))``.
+    From any supposed fixed point at ``n0 >= 1``, derive
+    ``sk_iter (n0 + 3) Omega_t = sk_iter n0 Omega_t`` via
+    IS_NORMAL_SK_ITER_FIXED and contradict the strict-growth
+    sub-sequence.
 
-    (3) From ``halts Omega_t`` pick witness ``n`` with
-        ``is_normal (sk_iter n Omega_t)`` i.e.
-        ``sk_step (sk_iter n Omega_t) = sk_iter n Omega_t``; chain
-        through SK_ITER_SUC to show
-        ``sk_iter (n + k) Omega_t = sk_iter n Omega_t`` for all k
-        (Peano-induction), then contradict (2)'s strict growth.
-        ~40 lines.
+    The trajectory computation breaks down to three sk_step
+    case-splits (~80 lines each, mirroring SK_STEP_K / SK_STEP_S):
+      T1  =  App_t (I X) (I X)                             [given]
+      T2  =  App_t ((K X)(K X)) (I X)                      [descent-L: I X --> K X (K X)]
+      T3  =  App_t X (I X)                                 [descent-L: K X (K X) --> X]
+      T4  =  App_t (I (I X)) (I (I X))                     [top-level S-redex with z = I X]
+    Each step uses SK_STEP_REC at the appropriate term plus
+    APP_T_INJ chains to refute the wrong-disjunct guards.
 
-    Out of scope for this turn; left as ``sorry``.
+    Total estimated: ~300-400 lines of trajectory work.  Out of
+    scope for this turn; left as ``sorry``.
     """
     p.goal("~ halts Omega_t")
     p.sorry()
