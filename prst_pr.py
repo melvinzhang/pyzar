@@ -54,12 +54,13 @@
 
 
 from fusion import Var
-from basics import mk_const
+from basics import mk_const, mk_app, mk_abs
 from parser import define, parse_type
-from nat0 import nat0_ty
+from nat0 import nat0_ty, define_unary_0
+from nat0_order import define_wf_lt
 from proof import proof, define_with_at
 from hf_syntax import (
-    Var_t,  # noqa: F401  -- parser alias for free Var_t indices in axioms
+    Var_t,
 )
 from prst_syntax import (
     Empty_pt,  # noqa: F401  -- parser alias in PR-defining-equation bodies; also nil-tuple
@@ -273,22 +274,45 @@ F_PT_DEF = define("F_pt", parse_type("nat0"), "Empty_pt")
 F_pt = mk_const("F_pt", [])
 
 
+# Helper: n-fold Var_t tuple used by proj_def_axiom_at's argument list.
+# Built by primitive recursion on nat0:
+#     var_t_args_rev 0           = Empty_pt
+#     var_t_args_rev (SUC0 k)    = Tup_pt (Var_t k) (var_t_args_rev k).
+# Result for n is the Tup_pt-nested tuple
+#     Tup_pt (Var_t (n-1)) (Tup_pt (Var_t (n-2)) ... (Tup_pt (Var_t 0) Empty_pt)).
+# (Reverse index order; the choice is consistent across rec / proj defining
+# equations, so the soundness obligation is uniform.)
+_k_var_args = Var("k", nat0_ty)
+_a_var_args = Var("a", nat0_ty)
+_h_var_t_args = mk_abs(
+    _k_var_args,
+    mk_abs(
+        _a_var_args,
+        mk_app(mk_app(mk_const("Tup_pt", []), mk_app(Var_t, _k_var_args)), _a_var_args),
+    ),
+)
+VAR_T_ARGS_REV_BASE, VAR_T_ARGS_REV_STEP = define_unary_0(
+    "var_t_args_rev",
+    parse_type("nat0 -> nat0"),
+    Empty_pt,
+    _h_var_t_args,
+    result_ty=nat0_ty,
+)
+var_t_args_rev = mk_const("var_t_args_rev", [])
+
+
 # proj_sym i n is parametric in i, n at the HOL level: each (i, n) gives
 # a distinct closed axiom. ``proj_def_axiom_at i n`` is the axiom
 # godelnum for that specific (i, n) pair.
 #
 #   proj_def_axiom_at i n
-#     := Eq_pf (App_pt (proj_sym i n) (Var_t 0 ... Var_t (n-1)))
+#     := Eq_pf (App_pt (proj_sym i n) (var_t_args_rev n))
 #              (Var_t i)
-#
-# where the argument list has length n. Closed; no free Var_t beyond
-# those that appear bound by the implicit universal quantifier over
-# every Var_t. (Stub body: just zero, since we'd need an n-fold Tup_pt
-# builder.)
 PROJ_DEF_AXIOM_AT_DEF = define(
     "proj_def_axiom_at",
     parse_type("nat0 -> nat0 -> nat0"),
-    "\\i:nat0. \\n:nat0. 0",  # stub; real body builds the Tup_pt-nested args of length n
+    "\\i:nat0. \\n:nat0. "
+    "Eq_pf (App_pt (proj_sym i n) (var_t_args_rev n)) (Var_t i)",
 )
 proj_def_axiom_at = mk_const("proj_def_axiom_at", [])
 
@@ -327,18 +351,48 @@ if_in_false_def_axiom = mk_const("if_in_false_def_axiom", [])
 
 # rec_sym g h is parametric in g, h. Each (g, h) pair gives two axioms
 # (base and step), each a closed nat0 indexed by (g, h).
+#
+# Variable slot convention (within these axioms):
+#     Var_t 0           : y_vec (the carried argument; a single slot
+#                         stands in for the n-tuple of carried args
+#                         when g/h have higher arity -- the arity
+#                         correctness obligation lives at Layer 4)
+#     Var_t (SUC0 0)    : i (the head of the recursion target's
+#                         Adj decomposition)
+#     Var_t (SUC0^2 0)  : s (the tail of the recursion target's
+#                         Adj decomposition)
+#
+# rec_base: ``rec g h Empty_pt y_vec = g y_vec``.
 REC_BASE_DEF_AXIOM_AT_DEF = define(
     "rec_base_def_axiom_at",
     parse_type("nat0 -> nat0 -> nat0"),
-    "\\g:nat0. \\h:nat0. 0",  # stub; real body encodes rec_sym(g,h) base equation
+    "\\g:nat0. \\h:nat0. "
+    "Eq_pf (App_pt (rec_sym g h) (Tup_pt Empty_pt (Tup_pt (Var_t 0) Empty_pt))) "
+    "      (App_pt g (Tup_pt (Var_t 0) Empty_pt))",
 )
 rec_base_def_axiom_at = mk_const("rec_base_def_axiom_at", [])
 
 
+# rec_step: ``rec g h (Adj_pt i s) y_vec = h i s (rec g h s y_vec) y_vec``
+# (the membership-canonical normalisation collapse case is handled at
+# the proof-system level rather than syntactically here).
 REC_STEP_DEF_AXIOM_AT_DEF = define(
     "rec_step_def_axiom_at",
     parse_type("nat0 -> nat0 -> nat0"),
-    "\\g:nat0. \\h:nat0. 0",  # stub; real body encodes rec_sym(g,h) step equation
+    "\\g:nat0. \\h:nat0. "
+    "Eq_pf "
+    "  (App_pt (rec_sym g h) "
+    "     (Tup_pt (App_pt adj_sym "
+    "                (Tup_pt (Var_t (SUC0 0)) "
+    "                  (Tup_pt (Var_t (SUC0 (SUC0 0))) Empty_pt))) "
+    "             (Tup_pt (Var_t 0) Empty_pt))) "
+    "  (App_pt h "
+    "     (Tup_pt (Var_t (SUC0 0)) "
+    "       (Tup_pt (Var_t (SUC0 (SUC0 0))) "
+    "         (Tup_pt (App_pt (rec_sym g h) "
+    "                    (Tup_pt (Var_t (SUC0 (SUC0 0))) "
+    "                      (Tup_pt (Var_t 0) Empty_pt))) "
+    "           (Tup_pt (Var_t 0) Empty_pt)))))",
 )
 rec_step_def_axiom_at = mk_const("rec_step_def_axiom_at", [])
 
@@ -357,17 +411,16 @@ rec_step_def_axiom_at = mk_const("rec_step_def_axiom_at", [])
 IS_PR_DEF_DEF = define(
     "is_pr_def",
     parse_type("nat0 -> bool"),
-    # Real body (no adj branch: adj_sym is primitive, no defining
-    # equation):
-    #   n = zero_def_axiom
-    #   \/ (?i n0. n = proj_def_axiom_at i n0 /\ nat0_lt i n0)
-    #   \/ n = if_in_true_def_axiom
-    #   \/ n = if_in_false_def_axiom
-    #   \/ (?g h. n = rec_base_def_axiom_at g h
-    #             /\ is_pr_sym g /\ is_pr_sym h)
-    #   \/ (?g h. n = rec_step_def_axiom_at g h
-    #             /\ is_pr_sym g /\ is_pr_sym h)
-    "\\n:nat0. F",  # stub body
+    # No adj branch: adj_sym is primitive, no defining equation.
+    "\\n:nat0. "
+    "n = zero_def_axiom \\/ "
+    "(?i n0. n = proj_def_axiom_at i n0 /\\ nat0_lt i n0) \\/ "
+    "n = if_in_true_def_axiom \\/ "
+    "n = if_in_false_def_axiom \\/ "
+    "(?g h. n = rec_base_def_axiom_at g h "
+    "       /\\ is_pr_sym g /\\ is_pr_sym h) \\/ "
+    "(?g h. n = rec_step_def_axiom_at g h "
+    "       /\\ is_pr_sym g /\\ is_pr_sym h)",
 )
 is_pr_def = mk_const("is_pr_def", [])
 
@@ -499,12 +552,43 @@ mu_sym = mk_const("mu_sym", [])
 
 # is_partial_pr_sym extends is_pr_sym with the mu-closed symbols. PRST
 # itself uses is_partial_pr_sym wherever it would use is_pr_sym (since
-# find_proof_pr is in this class). Recogniser stub; the AT-equation
-# would say:
+# find_proof_pr is in this class). Recursive on f via define_wf_lt:
 #     is_partial_pr_sym f  iff  is_pr_sym f
 #                               \/  (?g. f = mu_sym g /\ is_partial_pr_sym g).
-IS_PARTIAL_PR_SYM_DEF = define(
-    "is_partial_pr_sym", parse_type("nat0 -> bool"), "\\f:nat0. F"
+# Well-foundedness: mu_sym g = Pair_ord 6 g, so g < mu_sym g by
+# NAT0_LT_PAIR_ORD_R, which lets the recursive call on g go through.
+_IS_PARTIAL_PR_SYM_F_DEF = define(
+    "_is_partial_pr_sym_F",
+    parse_type("(nat0 -> bool) -> nat0 -> bool"),
+    "\\rec:nat0->bool. \\f:nat0. "
+    "is_pr_sym f \\/ (?g. f = mu_sym g /\\ rec g)",
+)
+_IS_PARTIAL_PR_SYM_F = mk_const("_is_partial_pr_sym_F", [])
+
+
+@proof
+def IS_PARTIAL_PR_SYM_MONO(p):
+    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
+              ==> _is_partial_pr_sym_F f n = _is_partial_pr_sym_F g n.
+    STUB (Layer 2)."""
+    p.goal(
+        "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> "
+        "_is_partial_pr_sym_F f n = _is_partial_pr_sym_F g n",
+        types={
+            "f": parse_type("nat0 -> bool"),
+            "g": parse_type("nat0 -> bool"),
+            "n": nat0_ty,
+            "k": nat0_ty,
+        },
+    )
+    p.sorry()
+
+
+IS_PARTIAL_PR_SYM_DEF, _IS_PARTIAL_PR_SYM_REC = define_wf_lt(
+    "is_partial_pr_sym",
+    parse_type("nat0 -> bool"),
+    _IS_PARTIAL_PR_SYM_F,
+    IS_PARTIAL_PR_SYM_MONO,
 )
 is_partial_pr_sym = mk_const("is_partial_pr_sym", [])
 
@@ -559,16 +643,73 @@ def IS_PARTIAL_PR_SYM_MU(p):
 # ---------------------------------------------------------------------------
 
 
-numeral_pr_def = define("numeral_pr", parse_type("nat0"), "0")
+# numeral_pr := REC zero_sym (\i,s,r,_vec. Adj_pt r r)
+#            =  rec_sym zero_sym (comp_sym adj_sym (Tup_pt (proj 2 4)
+#                                                    (Tup_pt (proj 2 4)
+#                                                            Empty_pt)))
+# 4-ary step (i, s, r, y_vec), zero-ary y_vec collapses to no
+# additional slots; proj 2 4 picks ``r`` (the 3rd of 4 args).
+numeral_pr_def = define(
+    "numeral_pr",
+    parse_type("nat0"),
+    "rec_sym zero_sym "
+    "  (comp_sym adj_sym "
+    "    (Tup_pt (proj_sym (SUC0 (SUC0 0)) (SUC0 (SUC0 (SUC0 (SUC0 0))))) "
+    "      (Tup_pt (proj_sym (SUC0 (SUC0 0)) (SUC0 (SUC0 (SUC0 (SUC0 0))))) "
+    "        Empty_pt)))",
+)
 numeral_pr = mk_const("numeral_pr", [])
 
-substitute_pr_def = define("substitute_pr", parse_type("nat0"), "0")
+
+# substitute_pr -- structural recursion on the formula tree. The
+# complete body is a comp_sym / rec_sym / if_in_sym chain (~100 lines)
+# discriminating on each formula constructor (Empty / Var / Tup / Eq /
+# In / Not / Imp / App) and recursing on subterms. Pending the full
+# expansion, model it here as the identity-like 3-ary composition that
+# returns its first argument -- well-typed and structurally valid, just
+# not yet the intended function. Downstream lemmas (Layer 7
+# PROV_PRST_SUBSTITUTE_EVAL) remain sorry'd against this placeholder.
+substitute_pr_def = define(
+    "substitute_pr",
+    parse_type("nat0"),
+    "proj_sym 0 (SUC0 (SUC0 (SUC0 0)))",
+)
 substitute_pr = mk_const("substitute_pr", [])
 
-diag_pr_def = define("diag_pr", parse_type("nat0"), "0")
+
+# diag_pr n := substitute_pr (n, numeral_pr n, var_x).
+# Compositional shape: comp_sym substitute_pr applied to three 1-ary
+# argument-shapers, each fed the original n:
+#   * proj 0 1           -- yields n
+#   * comp_sym numeral_pr (Tup_pt (proj 0 1) Empty_pt) -- yields numeral n
+#   * const_var_x        -- yields var_x (constant function)
+# PRST does not yet provide a const_sym primitive, so the var_x slot is
+# left as a structural hole here; the third arg in the comp_sym arg-list
+# is omitted. Layer 7 fills it in alongside the full substitute_pr body.
+diag_pr_def = define(
+    "diag_pr",
+    parse_type("nat0"),
+    "comp_sym substitute_pr "
+    "  (Tup_pt (proj_sym 0 (SUC0 0)) "
+    "    (Tup_pt (comp_sym numeral_pr "
+    "               (Tup_pt (proj_sym 0 (SUC0 0)) Empty_pt)) "
+    "      Empty_pt))",
+)
 diag_pr = mk_const("diag_pr", [])
 
-Proof_PRST_pr_def = define("Proof_PRST_pr", parse_type("nat0"), "0")
+
+# Proof_PRST_pr -- the list-of-formulas proof checker as a PR symbol.
+# Full body is ~50 base-layer symbol compositions (case-split via
+# if_in_sym on each axiom schema + modus-ponens recognition + recursion
+# on the proof list). Sentinel composition pending full expansion: a
+# 2-ary projection that returns its second argument, well-typed for
+# inputs (proof_list, target_formula). Layer 7 / Layer 10 lemmas remain
+# sorry'd against this placeholder.
+Proof_PRST_pr_def = define(
+    "Proof_PRST_pr",
+    parse_type("nat0"),
+    "proj_sym (SUC0 0) (SUC0 (SUC0 0))",
+)
 Proof_PRST_pr = mk_const("Proof_PRST_pr", [])
 
 

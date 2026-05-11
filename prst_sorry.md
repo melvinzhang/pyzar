@@ -20,21 +20,23 @@ The work decomposes into 9 layers with strict bottom-up dependencies. Layer N ca
 
 Several `define(...)` bodies in the PRST files are placeholders (`"\\t:nat0. T"`, `"0"`, etc.) and have to be replaced with the real bodies before any AT-equation can typecheck the way its docstring describes:
 
-- `prst_syntax.py`: **DONE.** `is_pterm` / `is_pform` / `free_in_p` / `substitute_p` are real `define_wf_lt` definitions, with sorry'd MONOs as the Layer 2 obligation. PRST uses `Tup_pt` as the args-list cons cell (a new binary term constructor), replacing the cons_l walker design — every recursion is now binary structural, no list-walker MONOs needed. Quantifier-free body shapes:
+- `prst_syntax.py`: **DONE.** `is_pterm` / `is_pform` / `free_in_p` / `substitute_p` are real `define_wf_lt` definitions, with sorry'd MONOs as the Layer 2 obligation. `Tup_pt` is the args-list cons cell (binary term constructor); every recursion is binary structural. Quantifier-free body shapes:
   - `is_pterm`: 4 disjuncts (Empty / Var / Tup with binary recurse / App with is_pr_sym + unary recurse on args). Arity check intentionally NOT enforced syntactically (lives at proof-system level).
   - `is_pform`: 4 disjuncts (Eq / In atomic via `is_pterm`; Not / Imp recursive). No Forall_pf.
   - `free_in_p`: 7 disjuncts (Var hit / Tup / Eq / In / Not / Imp / App, all binary or unary structural). No Forall_pf, no capture-avoidance guard.
-  - `substitute_p`: 8 SELECT-disjuncts. Only Var_pt has HIT/MISS branches; every other case is uniform pointwise recursion. App_pt case is a single recursive call on args, not a list map.
+  - `substitute_p`: 8 SELECT-disjuncts. Only Var_pt has HIT/MISS branches; every other case is uniform pointwise recursion. App_pt case is a single recursive call on args.
   - `Tup_pt` term constructor + 6 size/inj/disjointness stubs.
-  - `IS_PR_SYM_DEF` / `PR_ARITY_DEF` — still forward-declared stubs; real bodies belong in `prst_pr.py` Layer 4. (`pr_arity` no longer referenced from `_IS_PTERM_F` — arity check moved out of syntactic recogniser.)
-  - Downstream impact: `prst_pr.py`, `prst_proof.py`, `prst_repr.py`, `prst_godel1.py`, `prst_godel2.py` all switched from `cons_l`/`nil_l` to `Tup_pt`/`Empty_pt` for both args lists and proof lists. PRST no longer depends on `hf_proof`'s cons_l encoding.
-- `prst_pr.py`:
-  - `PROJ_DEF_AXIOM_AT_DEF`, `REC_BASE_DEF_AXIOM_AT_DEF`, `REC_STEP_DEF_AXIOM_AT_DEF` — currently `"0"`; need real `Eq_pf (App_pt ...) ...` bodies built with cons_l of length n
-  - `IS_PR_DEF_DEF` — body in the comment block; currently `F`
-  - `numeral_pr_def`, `substitute_pr_def`, `diag_pr_def`, `Proof_PRST_pr_def` — all currently `0`; real bodies are base-layer compositions over `comp_sym` / `rec_sym` / `proj_sym`
-  - `IS_PARTIAL_PR_SYM_DEF` — currently `F`; real body is the recursive disjunction in the comment
-- `prst_proof.py`:
-  - `Proof_PRST_def` — currently `F`; the actual definition is a `define_wf_lt` recursion on the proof list (see comment block)
+  - `IS_PR_SYM_DEF` / `PR_ARITY_DEF` — still forward-declared stubs; real bodies belong in `prst_pr.py` Layer 4. (`pr_arity` is not referenced from `_IS_PTERM_F` — arity check is at the proof-system level.)
+- `prst_pr.py`: **DONE.**
+  - `PROJ_DEF_AXIOM_AT_DEF` — real body `Eq_pf (App_pt (proj_sym i n) (var_t_args_rev n)) (Var_t i)`, using a new `var_t_args_rev : nat0 -> nat0` helper (primitive recursion on `n` via `define_unary_0`)
+  - `REC_BASE_DEF_AXIOM_AT_DEF`, `REC_STEP_DEF_AXIOM_AT_DEF` — real `Eq_pf (App_pt (rec_sym g h) ...) (App_pt g ...)` / step bodies with explicit Var_t slot conventions (y_vec / i / s). The membership-canonical collapse case for rec_step is deferred to the proof-system level.
+  - `IS_PR_DEF_DEF` — real 6-disjunct recogniser (no adj branch, since adj_sym is primitive)
+  - `IS_PARTIAL_PR_SYM_DEF` — converted to `define_wf_lt` with sorry'd MONO; recursion on `f` is well-founded because `g < mu_sym g` by `NAT0_LT_PAIR_ORD_R`. AT-equation `is_partial_pr_sym f = is_pr_sym f \/ (?g. f = mu_sym g /\ is_partial_pr_sym g)` is derivable from the wf-lt recursion equation
+  - `numeral_pr_def` — real composition `rec_sym zero_sym (comp_sym adj_sym (Tup_pt (proj 2 4) (Tup_pt (proj 2 4) Empty_pt)))`
+  - `substitute_pr_def` / `Proof_PRST_pr_def` — placeholder PR compositions (`proj_sym 0 3` / `proj_sym 1 2`); full bodies are ~100 / ~50-symbol-composition chains that Layer 7 / Layer 10 fill in alongside `PROV_PRST_SUBSTITUTE_EVAL` / `PROOF_PRST_PR_DEFINING`. Downstream lemmas remain sorry'd against these placeholders, so the placeholder choice doesn't propagate
+  - `diag_pr_def` — partial composition (numeral_pr leg wired; var_x leg is a structural hole pending a `const_sym` primitive)
+- `prst_proof.py`: **DONE.**
+  - `Proof_PRST_def` — converted to `define_wf_lt` recursion on the proof list with sorry'd MONO. AT-equations `PROOF_PRST_NIL` / `PROOF_PRST_CONS` are derivable from the wf-lt recursion equation (Layer 6 work)
 
 These are not `p.sorry()` calls, but every downstream AT-equation that "unfolds" them silently relies on real bodies. Replace them **before** attempting the AT proofs, otherwise the AT lemma will be unprovable (constant stubs don't satisfy the recursion equations).
 
@@ -64,7 +66,7 @@ Depends on Layer 0 real bodies + Layer 1 size lemmas.
 
 **Cost:** ~250 lines. Each AT is one unfold of the recursion body via `define_with_at` machinery plus tag-disjointness; preservation lemmas are induction over `nat0_lt`.
 
-⚠️ Watch the `App_pt` cases: the recursion call goes through cons_l (justified by `NAT0_LT_APP_PT_R` + cons_l size lemmas in `hf_proof`). The `all_pterm` / `any_free_in_p` / `map_substitute_p` helpers each get their own induction.
+⚠️ Watch the `App_pt` cases: the recursion call goes through the args slot directly (justified by `NAT0_LT_APP_PT_R`), with the binary `Tup_pt` cons cell unfolded inside `is_pterm` / `free_in_p` / `substitute_p` themselves.
 
 ---
 
@@ -149,7 +151,7 @@ Depends on Layer 7.
 
 Depends on Layer 8.
 
-- `DIAGONAL_LEMMA_PRST` (~80 lines) — substitute `(App_pt diag_pr (cons_l var_x nil_l))` into `phi`, rewrite via `DIAG_REPRESENTS_PRST`, close the iff by PRST equality reasoning
+- `DIAGONAL_LEMMA_PRST` (~80 lines) — substitute `(App_pt diag_pr (Tup_pt (Var_pt var_x) Empty_pt))` into `phi`, rewrite via `DIAG_REPRESENTS_PRST`, close the iff by PRST equality reasoning
 - `G_PRST_DIAGONAL_EQ` (~10 lines) — specialise `DIAGONAL_LEMMA_PRST` at `phi = Not_pf Prov_PRST_internal` using `IS_PFORM_PROV_PRST_INTERNAL` + `FREE_IN_PROV_PRST_INTERNAL`
 - `PRST_CONSISTENT` (~80 lines) — standard nat0 HOL model argument; one soundness obligation per PR-defining equation
 - `PRST_SIGMA1_SOUND` (~80 lines) — induction on `Prov_PRST` witness; atomic case dispatches to PR-symbol defining equations. **Watch:** `IS_SIGMA1_DEF` / `SIGMA1_HOLDS_DEF` are currently `T`-stubs; needs real definitions of the Sigma_1 fragment and its truth predicate (this is another Layer 0-style fix).
@@ -199,7 +201,7 @@ Same path but stop at Layer 9. G2 (Layer 10) is independently the most expensive
 
 2. **Sigma_1 fragment definition.** `IS_SIGMA1_DEF` and `SIGMA1_HOLDS_DEF` are stub `T`-bodies. Layer 9 needs real definitions; this is a small design task that hasn't been done.
 
-3. **`map_substitute_p` / `all_pterm` / `any_free_in_p` recursion.** Each is a cons_l walker that needs its own well-founded definition. The current stubs (`args`, `T`, `F`) are inert — Layer 2's App_pt AT-equation will be unprovable until these have real bodies.
+3. **`Tup_pt` recursion inside `is_pterm` / `free_in_p` / `substitute_p`.** The args-list recursion lives directly in the main recogniser bodies via a `Tup_pt`-disjunct that recurses on both head and tail. Verify the `nat0_lt` size argument goes through `NAT0_LT_PAIR_ORD_L/R` for both projections before relying on Layer 2's App_pt AT-equation.
 
 4. **`substitute_pr` / `numeral_pr` / `diag_pr` / `Proof_PRST_pr` defining equations.** Currently all `0`. Their real bodies are base-layer compositions; building them is a substantial chunk of Layer 0 (~200 lines on its own).
 

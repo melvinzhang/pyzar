@@ -50,6 +50,7 @@ from basics import mk_const, mk_app
 from parser import define, parse_type
 from nat0 import nat0_ty
 from proof import proof, define_with_at
+from nat0_order import define_wf_lt
 from hf_proof import (
     IS_LOGICAL_AXIOM_DEF,  # noqa: F401  -- re-used: propositional fragment only
     IS_LOGICAL_AXIOM_AT,  # noqa: F401  -- re-used
@@ -134,14 +135,45 @@ is_pr_axiom = mk_const("is_pr_axiom", [])
 # or a modus-ponens step from earlier lines. (No generalisation step:
 # PRST is quantifier-free.)
 #
-# We model it via define_wf_lt on the proof list. Stub.
+# We model it via define_wf_lt recursing on the proof list. The
+# recursive call ``rec t ...`` for any tail t is well-founded because
+# t < Tup_pt h t by NAT0_LT_TUP_PT_R.
 # ---------------------------------------------------------------------------
 
 
-Proof_PRST_def = define(
+_PROOF_PRST_F_DEF = define(
+    "_Proof_PRST_F",
+    parse_type("(nat0 -> nat0 -> bool) -> nat0 -> nat0 -> bool"),
+    "\\rec:nat0->nat0->bool. \\p:nat0. \\n:nat0. "
+    "?h t. p = Tup_pt h t /\\ n = h /\\ "
+    "      (is_pr_axiom h \\/ "
+    "       (?f g. rec t f /\\ rec t (Imp_pf f g) /\\ h = g))",
+)
+_PROOF_PRST_F = mk_const("_Proof_PRST_F", [])
+
+
+@proof
+def PROOF_PRST_MONO(p):
+    """|- !f g p. (!k. nat0_lt k p ==> f k = g k)
+              ==> _Proof_PRST_F f p = _Proof_PRST_F g p. STUB (Layer 2)."""
+    p.goal(
+        "!f g p. (!k. nat0_lt k p ==> f k = g k) ==> "
+        "_Proof_PRST_F f p = _Proof_PRST_F g p",
+        types={
+            "f": parse_type("nat0 -> nat0 -> bool"),
+            "g": parse_type("nat0 -> nat0 -> bool"),
+            "p": nat0_ty,
+            "k": nat0_ty,
+        },
+    )
+    p.sorry()
+
+
+Proof_PRST_def, _PROOF_PRST_REC = define_wf_lt(
     "Proof_PRST",
     parse_type("nat0 -> nat0 -> bool"),
-    "\\p:nat0. \\n:nat0. F",
+    _PROOF_PRST_F,
+    PROOF_PRST_MONO,
 )
 Proof_PRST = mk_const("Proof_PRST", [])
 
