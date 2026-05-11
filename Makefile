@@ -66,7 +66,7 @@ test-theories:
 	  $(PY) hf_repr_core.py | tee -a $$raw; \
 	  $(PY) hf_logic.py | tee -a $$raw; \
 	  $(PY) hf_repr_thms.py | tee -a $$raw; \
-	  $(PY) godel_first.py | tee -a $$raw; \
+	  $(PY) hf_godel1.py | tee -a $$raw; \
 	  grep -E '^[[:space:]]*[A-Z][A-Z0-9_]*[[:space:]]*:.*\|-' $$raw > $(GODEL_OUT); \
 	  rm -f $$raw
 
