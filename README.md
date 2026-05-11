@@ -1,7 +1,8 @@
 # pyzar
 
-A small HOL Light–style proof kernel in Python, used to formalise Edmund
-Landau's *Grundlagen der Analysis* as readable Python.
+A small HOL Light–style proof kernel in Python to host a Python DSL for writing proofs.
+
+Ispired by [Mizar](https://mizar.uwb.edu.pl/) and [Isar](https://isabelle.in.tum.de/Isar/)
 
 ## Layout
 
