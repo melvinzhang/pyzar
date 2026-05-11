@@ -1,10 +1,10 @@
 # PRST `p.sorry()` plan of attack
 
-Census across `prst_*.py` (75 sorries total):
+Census across `prst_*.py` (56 sorries remaining; 19 cleared from `prst_syntax.py`):
 
 | File | sorries | Role |
 |------|---------|------|
-| `prst_syntax.py` | 19 | App_pt constructor + extended `is_pterm`/`is_pform`/`free_in_p`/`substitute_p` AT-equations and preservation lemmas |
+| `prst_syntax.py` | 0 (was 19) | App_pt constructor + extended `is_pterm`/`is_pform`/`free_in_p`/`substitute_p` AT-equations and preservation lemmas — **DONE** |
 | `prst_connectives.py` | 3 | `substitute_p` distribution over And/Or/Iff (alias-thin wrappers) |
 | `prst_pr.py` | 17 | PR-symbol registry (`is_pr_sym`, `pr_arity`) + base-layer defining-equation axioms + `is_pr_def` recogniser + mu-closure registry |
 | `prst_proof.py` | 15 | `Proof_PRST` / `Prov_PRST` + closure rules + per-axiom `PROV_PRST_*_DEF` corollaries + `MU_CORRECTNESS` + PR-eval lemmas + `Prov_PRST_internal` |
@@ -54,28 +54,33 @@ Reused private helpers from `hf_syntax`: `_prove_tag_neq`, `_NEQ_PAIR_ORD_ZERO`.
 
 ---
 
-## Layer 2 — `prst_syntax` MONOs and AT-equations (~30 sorries, partial)
+## Layer 2 — `prst_syntax` MONOs and AT-equations — **DONE**
 
 Depends on Layer 0 real bodies + Layer 1 size lemmas.
 
-**Done:**
-- `IS_PTERM_MONO` — via `mono_iff_binary_step` (Tup_pt branch) + local helper `_mono_iff_app_pt_step` (for the `?a b. n = App_pt a b /\ is_pr_sym a /\ f b` shape, which isn't covered by existing `mono_iff_*` helpers because of the `is_pr_sym` left-predicate). MONOs for the other three recursors (`IS_PFORM_MONO`, `FREE_IN_P_MONO`, `SUBSTITUTE_P_MONO`) plus `IS_PARTIAL_PR_SYM_MONO`, `PROOF_PRST_MONO` are still sorry'd.
-- All four `IS_PTERM_AT_*` AT-equations — `_EMPTY` manually via `IS_PTERM_REC` (since nullary cases have no derive_rec_eq path), `_VAR` / `_TUP` / `_APP` via `derive_rec_eq` against a new `PRST_REGISTRY`.
+All 19 prst_syntax sorries discharged: 3 MONOs (IS_PFORM / FREE_IN_P / SUBSTITUTE_P) + 16 AT-equations + 2 preservation lemmas. (IS_PARTIAL_PR_SYM_MONO and PROOF_PRST_MONO live in `prst_pr.py` / `prst_proof.py` and remain Layer 4/6 work.)
 
-**Refactor shipped:** `hf_syntax` now exports `CtorRegistry` (namedtuple of `ctors`, `inj`, `disjointness`, `neq_empty`, `empty_name`) and accepts an explicit `registry=` kwarg on `derive_rec_eq` / `derive_rec_eq_pw` / `derive_rec_eq_select` / `derive_rec_eq_select_cond`. The hf-side default is `HF_REGISTRY`; PRST builds its own `PRST_REGISTRY` with `empty_name="Empty_pt"` and PRST-renamed disjointness/injectivity lemmas (5 short derivations through `VAR_PT_DEF`/`EMPTY_PT_DEF` rewrites).
+**MONOs.** Pattern: per-disjunct iff via the appropriate `mono_iff_*_step` family, glued by `or_chain_collapse`, then `by_unfold` against the `_*_F_DEF`. For function-valued / SELECT-valued targets, additional `ABS` (over `v` / `r` / `t`) and `AP_TERM` (through the `@` constant) lifts.
+- `IS_PFORM_MONO`: 4 disjuncts (Eq_pf/In_pa REFL, Not_pf unary, Imp_pf binary) via `mono_iff_unary_step` / `mono_iff_binary_step`.
+- `FREE_IN_P_MONO`: 7 disjuncts; binary-disj-pw for Tup_pt/Eq_pf/In_pa/Imp_pf, unary-pw for Not_pf, REFL for Var_pt, and the App_pt right-only case via the private `_mono_iff_binary_pw_step` factory with `recurses_l=False`.
+- `SUBSTITUTE_P_MONO`: 8 disjuncts; value-binary-pw for Tup_pt/Eq_pf/In_pa/Imp_pf, value-unary-pw for Not_pf, REFL for Empty_pt/Var_pt, App_pt right-only via the private `_mono_iff_value_binary_pw_step`.
 
-**Remaining:** Each is ~80 lines manually, or 1 line via the registry once the corresponding MONO is proved and the PRST-side disjointness/injectivity entries for the new constructors are added.
-- `IS_PFORM_AT_*` — needs PRST registry entries for Eq_pf / In_pa / Not_pf / Imp_pf plus PRST-renamed disjointness pairs among them; same pattern as the IS_PTERM registry buildout (~6 trivial alias rewrites).
-- `FREE_IN_P_AT_*` — function-equality at the pointwise level (`derive_rec_eq_pw`).
-- `SUBSTITUTE_P_AT_*` — value-equality through `@r` (`derive_rec_eq_select` / `_cond`).
-- `SUBSTITUTE_P_PRESERVES_IS_PTERM` / `_PFORM` — strong induction on the formula.
+**AT-equations.** `IS_PFORM_AT_*` via `derive_rec_eq`, `FREE_IN_P_AT_*` via `derive_rec_eq_pw`, `SUBSTITUTE_P_AT_*` via `derive_rec_eq_select` / `_select_cond` (the latter for `Var_pt`'s HIT/MISS conditional).
+
+**Preservation.** `SUBSTITUTE_P_PRESERVES_IS_PTERM` / `_PFORM`: strong induction on the encoded term/formula, case-split on `IS_PTERM_REC` / `IS_PFORM_REC`, dispatch through the AT-equations + `EXCLUDED_MIDDLE` on `w = v` for the `Var_pt` HIT/MISS.
+
+**Registry buildout.** `PRST_REGISTRY` is extended in-place with the formula constructors (`Eq_pf`, `In_pa`, `Not_pf`, `Imp_pf`), 6 intra-formula disjointness pairs, 4 `Var_pt` × formula disjointness pairs (all via `_alias_transport` from hf-side lemmas + `EQ_PF_DEF` / etc.), and 8 cross-pairs `(Eq_pf/Not_pf/Imp_pf/In_pa) × (Tup_pt/App_pt)` (built by monkey-patching hf_syntax's `_CTORS` and `_TAG_NEQS` with PRST-only entries, then reusing `_proof_ctor_disjoint`).
 
 **DSL friction observed:**
 - The `mono_iff_*` family doesn't cover the App_pt-with-pred shape (`?a b. n = C a b /\ P a /\ f b`); a fresh `_mono_iff_app_pt_step` had to be written from scratch (~70 lines).
-- The PRST formula-constructor aliases (Not_pf, Imp_pf, Eq_pf, In_pa) are fresh constants distinct from their hf_syntax originals (Not_f, etc.). Existing size lemmas like `NAT0_LT_NOT_F` are for the underlying constants, so `mono_iff_unary_step(Not_pf, NAT0_LT_NOT_F, ...)` won't fire — the ctor in the body and the ctor in the size lemma must match. PRST-side size lemmas need to be derived (or the body strings refactored to use the underlying constants).
-- ~~`hf_syntax.derive_rec_eq` autogenerates AT-equations using a module-local `_CTORS` registry; PRST constructors aren't in that registry, and extending it would require module-level mutation of hf_syntax internals.~~ Resolved: parameterized via `CtorRegistry`.
+- The PRST formula-constructor aliases (Not_pf, Imp_pf, Eq_pf, In_pa) are fresh constants distinct from their hf_syntax originals. `_alias_transport(hf_thm, *alias_defs)` (REWRITE_RULE with `SYM` of alias DEFs) reliably transports size/INJ/disjointness/neq-empty across the alias boundary; 14 calls in prst_syntax. Worth promoting to a public hf_syntax helper.
+- `mono_iff_binary_right_pw_step` (bool) and `mono_iff_value_binary_right_pw_step` (value) don't exist publicly. Both PRST `App_pt` cases (in free_in_p and substitute_p) reach into the private `_mono_iff_binary_pw_step` / `_mono_iff_value_binary_pw_step` with `recurses_l=False` and a custom `rest_builder` lambda. Two more public helpers would close the API gap.
+- **Disjointness keys must follow the lemma's `~(LHS = RHS)` orientation, not body-disjunct order.** `_ctor_neq_lemma` reads the first name in the key as the LHS-ctor; `_spec_neq_at` then SPECLs `target_args + other_args` (fwd) or `other_args + target_args` (rev). Mis-keying produces a `neq_specd` term whose arguments are shuffled across the two ctors (e.g. `~(Not_pf t1 = In_pa t2 SELECT)` instead of `~(In_pa t1 t2 = Not_pf SELECT)`); the MP against `head_eq_th` then fails with a confusing `EQ_MP` error far downstream. PRST keys mirror the hf-side `_CTOR_NAMES` order: `Eq_pf < Not_pf < Imp_pf < In_pa`, with PRST-native ctors (Tup_pt tag 12, App_pt tag 11) following the formula ctors.
+- `_ctor_neq_lemma` routes the Empty case through `registry.neq_empty[ctor_b_name]`, so SUBSTITUTE_P_AT_EMPTY needs neq-empty entries for *every* other body constructor (Eq_pf/In_pa/Not_pf/Imp_pf in addition to the term ctors).
+- `_proof_ctor_disjoint` reads tag indices and AT lemmas from the module-level `_CTORS` and tag inequalities from `_TAG_NEQS` (which only ships pairs with both indices in `{0..10}`). PRST monkey-patches both dicts with `Tup_pt` / `App_pt` decls and the 8 missing tag-neq pairs `(5..10, 11..12)`, then reuses the factory. The alternative — writing 8 fresh `@proof` blocks — would be ~200 lines.
 - `derive_rec_eq` doesn't handle nullary `Empty` cases — the hf side skips `IS_TERM_AT_EMPTY` for the same reason. The trivial REFL has to be done manually.
 - `derive_rec_eq` produces `... = T` rather than the bare assertion for body-less matched disjuncts (e.g. `is_pterm (Var_pt v) = T` instead of `is_pterm (Var_pt v)`); a small `_strip_eqT` helper EQT_ELIMs under the foralls.
+- IS_PTERM_REC's Var disjunct binds `?v. s = Var_pt v`, which shadows the outer substitute index in `SUBSTITUTE_P_PRESERVES_IS_PTERM`. Worked around by renaming the goal's substitute index to `w` instead of `v` (alpha-equivalent published theorem).
 
 ⚠️ Watch the `App_pt` cases: the recursion call goes through the args slot directly (justified by `NAT0_LT_APP_PT_R`), with the binary `Tup_pt` cons cell unfolded inside `is_pterm` / `free_in_p` / `substitute_p` themselves.
 
