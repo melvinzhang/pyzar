@@ -200,6 +200,22 @@ def rec(g, h):
     return mk_app(_c("rec_sym"), g, h)
 
 
+def course_rec(g, h):
+    """``course_rec_sym g h`` -- structural recursion on Pair_ord-decomposition.
+
+    Defining equations (via PR-defining axioms):
+      course_rec g h [0]           = g []
+      course_rec g h [Pair_ord a b]
+          = h [a; b; course_rec g h [a]; course_rec g h [b]].
+
+    The step `h` receives the left/right components AND the recursive
+    values at each, so structural recursion on formula trees /
+    proof lists / etc. is a ~20-line composition without needing
+    separate pair_left / pair_right / get_tag primitives.
+    """
+    return mk_app(_c("course_rec_sym"), g, h)
+
+
 def comp(g, *args):
     """``comp_sym g (pt_list *args)`` -- composition.
 

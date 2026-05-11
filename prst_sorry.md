@@ -319,6 +319,7 @@ Land Layer 0 + Layer 1 + Layer 3 together — they unblock Layer 2 (the largest 
 - `3980771` Layer 2 relax (option B) + Layer 7 part 2 — `is_partial_pr_sym` moved to prst_syntax; `_IS_PTERM_F` App branch uses `is_partial_pr_sym`; new `IS_PR_SYM_IMP_PARTIAL` helper; IS_PFORM_PROV_PRST_INTERNAL discharged.
 - `31c2ca3` Tier-1 PR-body builders (prst_pr_builders) — readable kernel-term constructors (`nat`, `pt_list`, `proj`, `rec`, `comp`, `app_pt`, `var_t`, formula-syntax cons cells). Migrated 11 definitions in prst_pr to use them; no semantic change, all printed terms byte-identical to before.
 - `0a11831` `const_sym` primitive closes the structural hole in `diag_pr`. Tag 5 (between rec at tag 4 and mu at tag 6). New definitions: `CONST_SYM_DEF`, `CONST_DEF_AXIOM_AT_DEF`, `IS_PR_SYM_CONST`, `IS_PR_DEF_HOLDS_CONST`, `PROV_PRST_CONST_DEF`. `IS_PR_SYM_DEF` widened from 5 to 6 disjuncts, `IS_PR_DEF_DEF` from 6 to 7. `diag_pr_def` body now includes the const slot (`const_sym (Var_t 0)` for the var_x argument). Existing IS_PR_SYM_* / IS_PR_DEF_HOLDS_* lemmas unaffected (by_disj just traverses one more disjunct).
+- *(pending)* `course_rec_sym` primitive — Pair_ord-structural-recursion combinator at tag 7 (skipping mu's tag 6). Folds destructuring + recursion into one symbol: step `h` receives `(a, b, course_rec g h a, course_rec g h b)` for input `Pair_ord a b`, so substitute_pr / diag_pr / Proof_PRST_pr become ~20-line compositions without needing separate pair_left / pair_right / get_tag primitives. New definitions: `COURSE_REC_SYM_DEF` (parametric in g, h like rec_sym), `COURSE_REC_BASE_DEF_AXIOM_AT_DEF` (2-binder), `COURSE_REC_STEP_DEF_AXIOM_AT_DEF` (4-binder — new at IS_PR_DEF level vs. existing 2-binder shapes), `IS_PR_SYM_COURSE_REC`, `IS_PR_DEF_HOLDS_COURSE_REC_BASE`/`_STEP`, `PROV_PRST_COURSE_REC_BASE_DEF`/`_STEP_DEF`. `IS_PR_SYM_DEF` widened from 6 to 7 disjuncts, `IS_PR_DEF_DEF` from 7 to 9 (two new disjuncts: 2-binder base + 4-binder step). `course_rec(g, h)` Python builder added. The 4-binder `by_exists(["g", "h", "a", "b"], ...)` proof of `IS_PR_DEF_HOLDS_COURSE_REC_STEP` confirms the existing pyzar `by_exists` generalises beyond 2 witnesses.
 
 **Cleared:** 44 sorries (19 + 3 + 5 + 7 + 8 + 2).
 **Remaining:** 37 sorries across all PRST files (5 in prst_pr, 10 in prst_proof, 7 in prst_repr, 6 in prst_godel1, 8 in prst_godel2). prst_proof's Layer 6 has 6 sorries to go (MONO, CONS, ADJ_DEF_AT, MP, SUBST_AXIOM, MU_CORRECTNESS); Layer 7 owns 4 of the remaining 10 (2 cleared).
@@ -327,64 +328,21 @@ Land Layer 0 + Layer 1 + Layer 3 together — they unblock Layer 2 (the largest 
 
 ## Structural-recursion harness (Tier 3) — pending design
 
-The remaining Layer 7 blockers (`PROV_PRST_SUBSTITUTE_EVAL`, the `PROOF_PRST_PR_DEFINING` family in Layer 10, anything that does structural recursion on the formula tree from inside the PR-symbol language) need a way to *destructure Pair_ord-encoded inputs* at the PR level. This sub-plan inventories the options.
-
-### Why this is hard
-
-PR's only built-in recursion equation is `rec_sym g h (Adj_pt i s) y = h(i, s, rec_sym g h s y, y)` — the recursion variable is destructured via *set adjunction* (Empty / Adj), not Pair_ord. But every formula constructor encodes through Pair_ord with a tag:
-
-- `App_pt f args = Pair_ord 11 (Pair_ord f args)`
-- `Tup_pt a b   = Pair_ord 12 (Pair_ord a b)`
-- `Eq_pf a b    = Pair_ord <eq_tag> (Pair_ord a b)`
-- `Var_pt v     = Var_t v` (no Pair_ord — special)
-- `Empty_pt     = 0` (no Pair_ord — special)
-
-So to run `substitute_pr` on `F = App_pt f args`, the PR composition has to:
-1. **Detect "this is an App_pt"** — check `left(F) = 11`.
-2. **Extract `f` and `args`** — read `right(F)`, then split again as `left(right(F))` / `right(right(F))`.
-3. **Decide what to do** based on the tag and recurse on the parts.
-
-`rec_sym` doesn't help directly. When given `Pair_ord 11 _`, it walks the bit-level set elements of `Pair_ord 11 _`, not the tag/payload split that the formula encoding intends.
-
-### Four ways out
-
-| Option | Cost | Trade-off |
-|---|---|---|
-| **(a) Three new primitives** `pair_left`, `pair_right`, `get_tag` — same scaffolding as the just-landed `const_sym` (`*_SYM_DEF` + axiom + `IS_PR_SYM_*` + `IS_PR_DEF_HOLDS_*` + `PROV_PRST_*_DEF` per accessor). | ~250 lines | Clean strict-PR semantics; each primitive's standard-model interpretation is `λ(Pair_ord a b). a` / etc. Three more disjuncts in `IS_PR_SYM_DEF` and three more in `IS_PR_DEF_DEF`. |
-| **(b) Derive from existing primitives via bounded search.** `pair_left n := the unique a ≤ n such that ∃ b ≤ n. Pair_ord a b = n` — expressible via `rec_sym` + `if_in_sym` over equality tests. | ~150 lines per accessor | No new primitives, no widened registries. The bounded-search encoding is ~3× longer per accessor than (a); semantics is more involved (uniqueness obligation on the search). |
-| **(c) One `course_rec_sym` primitive** with defining equation `course_rec g n = g(n, course_rec g (left n), course_rec g (right n))`. Folds destructuring + recursion into one symbol. | ~120 lines | One primitive instead of three; but it's a "smart" primitive with built-in Pair_ord knowledge, blurring the "minimal PR base" aesthetic that the current 6-symbol set carries. |
-| **(d) `mu_sym` semantically.** Define `substitute_pr := mu_sym <pred uniquely characterising substitute>`, similarly for `Proof_PRST_pr` etc. | ~30 lines per symbol | Cheap but moves these from strict-PR into partial-PR territory. Loses computable PR-eval semantics; pushes soundness onto `MU_CORRECTNESS` for every reduction. G1's chain still goes through, but G2's `DERIV_D3` needs strict reduction so loses. |
-
-### Recommended path
-
-For the readable-body program, (a) is the natural fit:
-- Same pattern as `const_sym` (the `0a11831` commit) — pure mechanical repetition once the template is in place.
-- Strict PR-totality preserved; soundness arguments in PRST_SIGMA1_SOUND stay clean.
-- Tier-1 builders absorb the lookup: `pair_left(t)` / `pair_right(t)` / `get_tag(t)` as Python helpers wrapping the bare PR symbols.
-
-Order of attack inside (a) — each new primitive at tags 7 / 8 / 9 (avoiding tag 6 = mu):
-1. `pair_left_sym` (tag 7) + axiom `App_pt pair_left_sym (Tup_pt (Pair_ord a b) Empty_pt) = a`.
-2. `pair_right_sym` (tag 8) + axiom `App_pt pair_right_sym (Tup_pt (Pair_ord a b) Empty_pt) = b`.
-3. (Optional) `get_tag_sym` (tag 9) as a synonym for `pair_left_sym` applied at the outer level — or omit and use `comp(pair_left_sym, proj 0 1)` as the helper.
-
-Side-condition: each axiom needs the input to be a Pair_ord. Convention: the PR symbol's value on non-Pair_ord inputs (e.g. `Empty_pt = 0`) is 0 by default (matches the standard nat0 model's interpretation). Soundness in `PRST_SIGMA1_SOUND` carries this through as a fact about the standard model, not the axiom.
+Going with course_rec_sym primitive. The step's 4-tuple (a, b, rec_left,
+rec_right) gives h direct access to BOTH the destructured pieces and the
+recursive results at each, eliminating any need for separate pair_left /
+pair_right / get_tag primitives
 
 ### What this unblocks
 
-Once (a) is landed:
-- **`substitute_pr_def`** can be filled in via a ~30-line `course_rec`-shaped composition over `pair_left` / `pair_right` / tag-test via `if_in_sym`. The body dispatches on the tag of F and recurses on `left(right F)` / `right(right F)`.
-- **`Proof_PRST_pr_def`** likewise — the proof-checker iterates over the proof list (a Tup_pt cons chain) by destructuring head/tail via `pair_right`-then-split.
-- **`PROV_PRST_SUBSTITUTE_EVAL`** etc. discharge by one `by_rewrite` over the substitute_pr body + the new accessors' defining axioms + `PROV_PRST_PROJ_DEF` / `PROV_PRST_REC_*_DEF` chains.
+With `course_rec_sym` landed:
+- **`substitute_pr_def`** can be filled in via a ~20-line composition. The step symbol `h_subst` receives `(a, b, rec_left, rec_right)` directly: for `F = Pair_ord <tag> payload`, dispatch on `a` (= the tag) via `if_in_sym`, with the recursive substituted values at `pair_left F` and `pair_right F` already in hand as `rec_left` / `rec_right`. No separate pair_left / pair_right / get_tag primitives needed.
+- **`Proof_PRST_pr_def`** likewise — the proof-checker iterates over the proof list (a Tup_pt cons chain) by reading head = `a`, tail-result = `rec_right` directly from the step.
+- **`PROV_PRST_SUBSTITUTE_EVAL`** etc. discharge by one `by_rewrite` over the substitute_pr body + `PROV_PRST_COURSE_REC_BASE_DEF` / `PROV_PRST_COURSE_REC_STEP_DEF` + `PROV_PRST_PROJ_DEF` / `PROV_PRST_REC_*_DEF` chains.
 
-### Risk
-
-The `MU_CORRECTNESS`-via-(d) route is a *reasonable fallback* for the EVAL lemmas if (a) proves too expensive. The PRST design tolerates a mix: PR-defining axioms close pure-PR symbols (zero/adj/proj/if_in/rec/const), and `MU_CORRECTNESS` closes partial-PR symbols (mu_sym, and any `mu`-encoded substitute / Proof_PRST_pr if we opt for (d)). The cost is that PR-eval steps inside `Prov_PRST` need a `MU_CORRECTNESS`-mediated lift, which adds one indirection per evaluation step. For G1's chain (~80 lines of `GODEL_FIRST_PRST`) this is tolerable; for G2's `DERIV_D3` (~200 lines of structural induction on phi) it is not — DERIV_D3 needs *every* reduction step to be unconditional. So:
-
-- If goal is G1 only: (d) suffices, ~30 lines.
-- If goal is G1 + G2: (a), ~250 lines.
 
 ---
 
 ## Risk register update
 
-8. **Pair_ord destructuring is a Layer-0-style decision.** *(New, see §"Structural-recursion harness".)* Either add `pair_left` / `pair_right` as new PR primitives (option a, ~250 lines, recommended for full G1+G2) or fall back to `mu_sym`-encoded substitute (option d, ~30 lines per symbol, G1-only). Resolution needed before any Layer 7 EVAL lemma can be honestly discharged.
+8. **Pair_ord destructuring is a Layer-0-style decision.** *(New, see §"Structural-recursion harness".)* ~~Either add `pair_left` / `pair_right` as new PR primitives (option a, ~250 lines, recommended for full G1+G2) or fall back to `mu_sym`-encoded substitute (option d, ~30 lines per symbol, G1-only).~~ **Resolved**: option (c) landed — `course_rec_sym g h` is a single new PR primitive at tag 7 with built-in Pair_ord-decomposition. Step function receives left/right components AND recursive values at each, so substitute_pr / Proof_PRST_pr / diag_pr bodies become ~20-line compositions. Pair_left / pair_right / get_tag are now expressible as one-line wrappers via `course_rec` if ever needed, but no longer required as standalone PR primitives.

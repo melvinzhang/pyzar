@@ -78,6 +78,7 @@ from prst_pr_builders import (  # tier-1 readable-body helpers
     nat, pt_list, proj, comp, rec, app_pt as _app_pt_b, var_t,
     eq_pf as _eq_pf_b, imp_pf as _imp_pf_b, in_pa as _in_pa_b,
     not_pf as _not_pf_b, tup_pt as _tup_pt_b,
+    pair_ord as _pair_ord_b,
 )
 
 
@@ -143,6 +144,33 @@ CONST_SYM_DEF = define(
 )
 const_sym = mk_const("const_sym", [])
 
+# course_rec_sym g h -- structural recursion on Pair_ord-decomposition.
+# Tag 7 (skipping mu's tag 6). Encoded as Pair_ord 7 (Pair_ord g h),
+# parametric in (g, h) like rec_sym: g is the base symbol (consulted at
+# input 0), h is the step symbol (consulted at Pair_ord inputs).
+#
+# Defining axioms (one base + one step):
+#   App_pt (course_rec g h) [0]            = App_pt g []
+#   App_pt (course_rec g h) [Pair_ord a b]
+#       = App_pt h [a; b;
+#                   App_pt (course_rec g h) [a];
+#                   App_pt (course_rec g h) [b]]
+#
+# The step's 4-tuple (a, b, rec_left, rec_right) gives h direct access
+# to BOTH the destructured pieces and the recursive results at each,
+# eliminating any need for separate pair_left / pair_right / get_tag
+# primitives. Tag-dispatch happens inside h via if_in_sym against the
+# bare literal "a" (which IS the constructor tag for Pair_ord-encoded
+# inputs).
+COURSE_REC_SYM_DEF = define(
+    "course_rec_sym",
+    parse_type("nat0 -> nat0 -> nat0"),
+    "\\g:nat0. \\h:nat0. "
+    "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))) "
+    "         (Pair_ord g h)",
+)
+course_rec_sym = mk_const("course_rec_sym", [])
+
 
 # ---------------------------------------------------------------------------
 # Stage 2A (c) -- the base layer is registered.
@@ -168,7 +196,10 @@ _IS_PR_SYM_BODY = (
     "(?i n. {sym} = Pair_ord (SUC0 (SUC0 0)) (Pair_ord i n)) \\/ "
     "{sym} = SUC0 (SUC0 (SUC0 0)) \\/ "
     "(?g h. {sym} = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord g h)) \\/ "
-    "(?c. {sym} = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) c)"
+    "(?c. {sym} = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) c) \\/ "
+    "(?g h. {sym} = "
+    "  Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))) "
+    "           (Pair_ord g h))"
 )
 
 
@@ -303,10 +334,54 @@ def IS_PR_SYM_CONST(p):
         "(?g h. const_sym c = "
         "       Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord g h)) \\/ "
         "(?cc. const_sym c = "
-        "      Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) cc)"
+        "      Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) cc) \\/ "
+        "(?g h. const_sym c = "
+        "       Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))) "
+        "                (Pair_ord g h))"
     )
     p.have("h_body: " + body).by_disj("h_ex")
     p.thus("is_pr_sym (const_sym c)").by_unfold("h_body", IS_PR_SYM_DEF)
+
+
+@proof
+def IS_PR_SYM_COURSE_REC(p):
+    """|- !g h. is_pr_sym g /\\ is_pr_sym h ==> is_pr_sym (course_rec_sym g h).
+
+    `course_rec_sym g h = Pair_ord 7 (Pair_ord g h)`; same 2-binder
+    existential shape as IS_PR_SYM_REC. The hypotheses are vacuous at
+    this layer (is_pr_sym's body has no closure requirements; closure
+    is enforced at the proof-system level via is_pr_def).
+    """
+    p.goal(
+        "!g h. is_pr_sym g /\\ is_pr_sym h ==> is_pr_sym (course_rec_sym g h)",
+        types={"g": nat0_ty, "h": nat0_ty},
+    )
+    p.fix("g h")
+    p.assume("_h_pr: is_pr_sym g /\\ is_pr_sym h")
+    course_eq_th = p.unfold(COURSE_REC_SYM_DEF, "g", "h")
+    p.have(
+        "course_eq: course_rec_sym g h = "
+        "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))) "
+        "         (Pair_ord g h)"
+    ).by_thm(course_eq_th)
+    # Fresh bound names to avoid shadowing the outer g, h.
+    p.have(
+        "h_ex: ?gg hh. course_rec_sym g h = "
+        "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))) "
+        "         (Pair_ord gg hh)"
+    ).by_exists(["g", "h"], "course_eq")
+    # IS_PR_SYM_BODY's rec disjunct also has `?g h.`/`Pair_ord g h`, so
+    # the substring replaces touch *both* the rec and course_rec
+    # disjuncts. That's harmless: by_disj only needs each disjunct
+    # well-formed; binder reuse is fine.
+    p.have(
+        "h_body: " + _IS_PR_SYM_BODY.format(sym="course_rec_sym g h").replace(
+            "?g h.", "?gg hh."
+        ).replace("Pair_ord g h", "Pair_ord gg hh")
+    ).by_disj("h_ex")
+    p.thus("is_pr_sym (course_rec_sym g h)").by_unfold(
+        "h_body", IS_PR_SYM_DEF
+    )
 
 
 @proof
@@ -578,6 +653,70 @@ CONST_DEF_AXIOM_AT_DEF = define(
 const_def_axiom_at = mk_const("const_def_axiom_at", [])
 
 
+# course_rec defining-equation axioms. Two axioms (base + step),
+# parametric like rec_*. The base is parametric in (g, h):
+#
+#   course_rec_base_def_axiom_at g h
+#     := Eq_pf (App_pt (course_rec g h) (Tup_pt 0 Empty_pt))
+#              (App_pt g Empty_pt)
+#
+# The step is parametric in (g, h, a, b) -- the HOL-level pair
+# components a, b are plugged directly into the encoded equation as
+# the concrete Pair_ord shape, eliminating any need for separate
+# pair_left / pair_right primitives at the syntactic level:
+#
+#   course_rec_step_def_axiom_at g h a b
+#     := Eq_pf (App_pt (course_rec g h) (Tup_pt (Pair_ord a b) Empty_pt))
+#              (App_pt h (Tup_pt a (Tup_pt b
+#                          (Tup_pt (App_pt (course_rec g h) (Tup_pt a Empty_pt))
+#                                  (Tup_pt (App_pt (course_rec g h)
+                                            #   (Tup_pt b Empty_pt))
+#                                          Empty_pt)))))
+#
+# The step's 4-binder structure (g, h, a, b) at IS_PR_DEF level is new
+# vs. rec_*'s 2-binder shape; by_exists generalises to the 4-witness
+# case via the existing ``by_exists([...], rules)`` API.
+def _course_rec_app(g_term, h_term, arg_term):
+    """Helper: App_pt (course_rec_sym g h) (Tup_pt arg Empty_pt) -- the
+    common shape inside both base and step axiom RHSs."""
+    return _app_pt_b(mk_app(mk_app(course_rec_sym, g_term), h_term), arg_term)
+
+
+COURSE_REC_BASE_DEF_AXIOM_AT_DEF = define(
+    "course_rec_base_def_axiom_at",
+    parse_type("nat0 -> nat0 -> nat0"),
+    mk_abs(_g_var, mk_abs(_h_var,
+        _eq_pf_b(
+            _course_rec_app(_g_var, _h_var, nat(0)),
+            _app_pt_b(_g_var),
+        ),
+    )),
+)
+course_rec_base_def_axiom_at = mk_const("course_rec_base_def_axiom_at", [])
+
+
+_a_var_crec = Var("a", nat0_ty)
+_b_var_crec = Var("b", nat0_ty)
+COURSE_REC_STEP_DEF_AXIOM_AT_DEF = define(
+    "course_rec_step_def_axiom_at",
+    parse_type("nat0 -> nat0 -> nat0 -> nat0 -> nat0"),
+    mk_abs(_g_var, mk_abs(_h_var, mk_abs(_a_var_crec, mk_abs(_b_var_crec,
+        _eq_pf_b(
+            _course_rec_app(_g_var, _h_var,
+                            _pair_ord_b(_a_var_crec, _b_var_crec)),
+            _app_pt_b(
+                _h_var,
+                _a_var_crec,
+                _b_var_crec,
+                _course_rec_app(_g_var, _h_var, _a_var_crec),
+                _course_rec_app(_g_var, _h_var, _b_var_crec),
+            ),
+        ),
+    )))),
+)
+course_rec_step_def_axiom_at = mk_const("course_rec_step_def_axiom_at", [])
+
+
 # ---------------------------------------------------------------------------
 # Stage 2A (e) -- is_pr_def, the structural recogniser.
 #
@@ -602,7 +741,11 @@ IS_PR_DEF_DEF = define(
     "       /\\ is_pr_sym g /\\ is_pr_sym h) \\/ "
     "(?g h. n = rec_step_def_axiom_at g h "
     "       /\\ is_pr_sym g /\\ is_pr_sym h) \\/ "
-    "(?c. n = const_def_axiom_at c)",
+    "(?c. n = const_def_axiom_at c) \\/ "
+    "(?g h. n = course_rec_base_def_axiom_at g h "
+    "       /\\ is_pr_sym g /\\ is_pr_sym h) \\/ "
+    "(?g h a b. n = course_rec_step_def_axiom_at g h a b "
+    "       /\\ is_pr_sym g /\\ is_pr_sym h)",
 )
 is_pr_def = mk_const("is_pr_def", [])
 
@@ -624,7 +767,11 @@ _IS_PR_DEF_BODY = (
     "         /\\ is_pr_sym gg /\\ is_pr_sym hh) \\/ "
     "(?gg hh. {n} = rec_step_def_axiom_at gg hh "
     "         /\\ is_pr_sym gg /\\ is_pr_sym hh) \\/ "
-    "(?cc. {n} = const_def_axiom_at cc)"
+    "(?cc. {n} = const_def_axiom_at cc) \\/ "
+    "(?gg hh. {n} = course_rec_base_def_axiom_at gg hh "
+    "         /\\ is_pr_sym gg /\\ is_pr_sym hh) \\/ "
+    "(?gg hh aa bb. {n} = course_rec_step_def_axiom_at gg hh aa bb "
+    "         /\\ is_pr_sym gg /\\ is_pr_sym hh)"
 )
 
 
@@ -754,6 +901,74 @@ def IS_PR_DEF_HOLDS_REC_STEP(p):
         "h_body: " + _IS_PR_DEF_BODY.format(n="rec_step_def_axiom_at g h")
     ).by_disj("h_ex")
     p.thus("is_pr_def (rec_step_def_axiom_at g h)").by_unfold(
+        "h_body", IS_PR_DEF_DEF
+    )
+
+
+@proof
+def IS_PR_DEF_HOLDS_COURSE_REC_BASE(p):
+    """|- !g h. is_pr_sym g /\\ is_pr_sym h
+            ==> is_pr_def (course_rec_base_def_axiom_at g h).
+
+    Same 2-binder shape as IS_PR_DEF_HOLDS_REC_BASE.
+    """
+    from tactics import REFL
+    p.goal(
+        "!g h. is_pr_sym g /\\ is_pr_sym h "
+        "==> is_pr_def (course_rec_base_def_axiom_at g h)",
+        types={"g": nat0_ty, "h": nat0_ty},
+    )
+    p.fix("g h")
+    p.assume("(h_g, h_h): is_pr_sym g /\\ is_pr_sym h")
+    p.have(
+        "h_refl: course_rec_base_def_axiom_at g h = course_rec_base_def_axiom_at g h"
+    ).by_thm(REFL(p._parse("course_rec_base_def_axiom_at g h")))
+    p.have(
+        "h_ex: ?gg hh. course_rec_base_def_axiom_at g h "
+        "      = course_rec_base_def_axiom_at gg hh "
+        "      /\\ is_pr_sym gg /\\ is_pr_sym hh"
+    ).by_exists(["g", "h"], "h_refl", "h_g", "h_h")
+    p.have(
+        "h_body: "
+        + _IS_PR_DEF_BODY.format(n="course_rec_base_def_axiom_at g h")
+    ).by_disj("h_ex")
+    p.thus("is_pr_def (course_rec_base_def_axiom_at g h)").by_unfold(
+        "h_body", IS_PR_DEF_DEF
+    )
+
+
+@proof
+def IS_PR_DEF_HOLDS_COURSE_REC_STEP(p):
+    """|- !g h a b. is_pr_sym g /\\ is_pr_sym h
+            ==> is_pr_def (course_rec_step_def_axiom_at g h a b).
+
+    4-binder existential leaf (g, h, a, b). The is_pr_sym hypotheses
+    apply only to g, h (the symbol slots); a, b are unconstrained Pair_ord
+    components.
+    """
+    from tactics import REFL
+    p.goal(
+        "!g h a b. is_pr_sym g /\\ is_pr_sym h "
+        "==> is_pr_def (course_rec_step_def_axiom_at g h a b)",
+        types={"g": nat0_ty, "h": nat0_ty,
+               "a": nat0_ty, "b": nat0_ty},
+    )
+    p.fix("g h a b")
+    p.assume("(h_g, h_h): is_pr_sym g /\\ is_pr_sym h")
+    p.have(
+        "h_refl: course_rec_step_def_axiom_at g h a b "
+        "      = course_rec_step_def_axiom_at g h a b"
+    ).by_thm(REFL(p._parse("course_rec_step_def_axiom_at g h a b")))
+    p.have(
+        "h_ex: ?gg hh aa bb. course_rec_step_def_axiom_at g h a b "
+        "      = course_rec_step_def_axiom_at gg hh aa bb "
+        "      /\\ is_pr_sym gg /\\ is_pr_sym hh"
+    ).by_exists(["g", "h", "a", "b"], "h_refl", "h_g", "h_h")
+    p.have(
+        "h_body: "
+        + _IS_PR_DEF_BODY.format(n="course_rec_step_def_axiom_at g h a b")
+    ).by_disj("h_ex")
+    p.thus("is_pr_def (course_rec_step_def_axiom_at g h a b)").by_unfold(
         "h_body", IS_PR_DEF_DEF
     )
 

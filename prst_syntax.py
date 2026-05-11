@@ -685,14 +685,16 @@ def TUP_PT_DISJOINT_APP_PT(p):
 # ---------------------------------------------------------------------------
 
 
-# Real bodies inlined verbatim (no recursion). The six base PR symbols
+# Real bodies inlined verbatim (no recursion). The seven base PR symbols
 # encode as:
-#   zero_sym  = 0
-#   adj_sym   = SUC0 0                                              (= 1)
-#   proj_sym i n = Pair_ord (SUC0 (SUC0 0)) (Pair_ord i n)          (tag 2)
-#   if_in_sym = SUC0 (SUC0 (SUC0 0))                                (= 3)
-#   rec_sym g h  = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord g h)  (tag 4)
-#   const_sym c  = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) c  (tag 5)
+#   zero_sym         = 0
+#   adj_sym          = SUC0 0                                          (= 1)
+#   proj_sym i n     = Pair_ord (SUC0 (SUC0 0)) (Pair_ord i n)          (tag 2)
+#   if_in_sym        = SUC0 (SUC0 (SUC0 0))                             (= 3)
+#   rec_sym g h      = Pair_ord (SUC0^4 0) (Pair_ord g h)               (tag 4)
+#   const_sym c      = Pair_ord (SUC0^5 0) c                             (tag 5)
+#   course_rec_sym g h
+#                    = Pair_ord (SUC0^7 0) (Pair_ord g h)               (tag 7)
 # (`mu_sym f = Pair_ord 6 f` is the partial-PR extension, not is_pr_sym.)
 # Symbolic names (zero_sym, adj_sym, ...) live in prst_pr.py, so the
 # body below uses the underlying nat0 literals / Pair_ord shapes
@@ -700,6 +702,14 @@ def TUP_PT_DISJOINT_APP_PT(p):
 # and the rec hypotheses on g, h are encoded in the IS_PR_SYM_PROJ /
 # IS_PR_SYM_REC lemma statements, not in this body. (`is_partial_pr_sym`
 # below is the wf-recursive closure that adds the mu-symbol case.)
+#
+# course_rec_sym is the Pair_ord-structural-recursion combinator (the
+# analogue of rec_sym but recursing on Pair_ord-decomposition rather
+# than Adj-decomposition). It folds destructuring + recursion into one
+# primitive: its step function receives the left/right components of
+# the input and the recursive values at each, so substitute_pr /
+# Proof_PRST_pr / diag_pr can be written as ~20-line compositions
+# without separate pair_left / pair_right / get_tag primitives.
 IS_PR_SYM_DEF = define(
     "is_pr_sym",
     parse_type("nat0 -> bool"),
@@ -709,7 +719,9 @@ IS_PR_SYM_DEF = define(
     "(?i n. f = Pair_ord (SUC0 (SUC0 0)) (Pair_ord i n)) \\/ "
     "f = SUC0 (SUC0 (SUC0 0)) \\/ "
     "(?g h. f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord g h)) \\/ "
-    "(?c. f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) c)",
+    "(?c. f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) c) \\/ "
+    "(?g h. f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))) "
+    "                    (Pair_ord g h))",
 )
 is_pr_sym = mk_const("is_pr_sym", [])
 

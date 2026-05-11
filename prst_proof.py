@@ -594,6 +594,57 @@ def PROV_PRST_CONST_DEF(p):
     )
 
 
+@proof
+def PROV_PRST_COURSE_REC_BASE_DEF(p):
+    """|- !g h. is_pr_sym g /\\ is_pr_sym h
+            ==> Prov_PRST (course_rec_base_def_axiom_at g h)."""
+    from prst_pr import (  # noqa: F401
+        IS_PR_DEF_HOLDS_COURSE_REC_BASE, course_rec_base_def_axiom_at,
+    )
+    p.goal(
+        "!g h. is_pr_sym g /\\ is_pr_sym h "
+        "==> Prov_PRST (course_rec_base_def_axiom_at g h)",
+        types={"g": nat0_ty, "h": nat0_ty},
+    )
+    p.fix("g h")
+    p.assume("h_conj: is_pr_sym g /\\ is_pr_sym h")
+    p.have("h_pr_def: is_pr_def (course_rec_base_def_axiom_at g h)").by(
+        IS_PR_DEF_HOLDS_COURSE_REC_BASE, "g", "h", "h_conj"
+    )
+    _is_pr_axiom_from_pr_def(
+        p, "course_rec_base_def_axiom_at g h", "h_pr_def"
+    )
+    p.thus("Prov_PRST (course_rec_base_def_axiom_at g h)").by(
+        PROV_PRST_AXIOM, "course_rec_base_def_axiom_at g h", "h_axiom"
+    )
+
+
+@proof
+def PROV_PRST_COURSE_REC_STEP_DEF(p):
+    """|- !g h a b. is_pr_sym g /\\ is_pr_sym h
+            ==> Prov_PRST (course_rec_step_def_axiom_at g h a b)."""
+    from prst_pr import (  # noqa: F401
+        IS_PR_DEF_HOLDS_COURSE_REC_STEP, course_rec_step_def_axiom_at,
+    )
+    p.goal(
+        "!g h a b. is_pr_sym g /\\ is_pr_sym h "
+        "==> Prov_PRST (course_rec_step_def_axiom_at g h a b)",
+        types={"g": nat0_ty, "h": nat0_ty,
+               "a": nat0_ty, "b": nat0_ty},
+    )
+    p.fix("g h a b")
+    p.assume("h_conj: is_pr_sym g /\\ is_pr_sym h")
+    p.have(
+        "h_pr_def: is_pr_def (course_rec_step_def_axiom_at g h a b)"
+    ).by(IS_PR_DEF_HOLDS_COURSE_REC_STEP, "g", "h", "a", "b", "h_conj")
+    _is_pr_axiom_from_pr_def(
+        p, "course_rec_step_def_axiom_at g h a b", "h_pr_def"
+    )
+    p.thus("Prov_PRST (course_rec_step_def_axiom_at g h a b)").by(
+        PROV_PRST_AXIOM, "course_rec_step_def_axiom_at g h a b", "h_axiom"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Stage 2B (d.2) -- substitute-into-axiom derived rule.
 #
