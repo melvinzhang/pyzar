@@ -1008,22 +1008,153 @@ def IS_NORMAL_IMP_FIXED(p):
 def IS_NORMAL_CASES(p):
     """|- !t. is_sk_term t ==> (is_normal t = (sk_step t = t)).
 
-    Forward direction is IS_NORMAL_IMP_FIXED (proved above).
+    Forward: IS_NORMAL_IMP_FIXED specialized at t.
 
-    Reverse direction (sk_step t = t ==> is_normal t) needs the
-    nat0_lt size argument: if t is a K-redex App_t (App_t K_t x) y,
-    SK_STEP_K gives sk_step t = x; combined with sk_step t = t we get
-    x = App_t (App_t K_t x) y, which contradicts nat0_lt x t (via
-    NAT0_LT_APP_T_R + NAT0_LT_APP_T_R + NAT0_LT_TRANS) and
-    NAT0_LT_NOT_REFL.  Symmetric argument for the S-redex case.
+    Reverse: assume sk_step t = t.  Show ``~K-redex(t)`` and
+    ``~S-redex(t)`` separately, then conjoin and fold to is_normal.
 
-    The is_sk_term hypothesis is actually unused: sk_step is total on
-    nat0 and is_normal makes sense on every nat0.  Carrying it in the
-    goal is conservative -- downstream consumers (HALTS_AT) already
-    pass through is_sk_term anyway.
+    Each negation is by contradiction using NAT0_LT_NOT_REFL:
+      * K-redex case: t = App_t (App_t K_t x) y and SK_STEP_K give
+        sk_step t = x.  With h_fix: t = x.  But
+        nat0_lt x (App_t (App_t K_t x) y) follows from
+        NAT0_LT_APP_T_R (K_t, x) and NAT0_LT_APP_T_L composed via
+        NAT0_LT_TRANS.  Rewriting by t = App_t (App_t K_t x) y
+        gives nat0_lt x t, then by x = t gives nat0_lt t t -- contra.
+      * S-redex case: t = App_t (App_t (App_t S_t x) y) z and
+        SK_STEP_S give sk_step t = App_t (App_t x z) (App_t y z).
+        With h_fix: App_t (App_t x z) (App_t y z) = t.
+        APP_T_INJ yields ``App_t y z = z``, and
+        NAT0_LT_APP_T_R (y, z) gives nat0_lt z (App_t y z).
+        Substituting the equality flips to nat0_lt z z -- contra.
+
+    The is_sk_term hypothesis isn't used; carried in the goal for
+    interface consistency with downstream consumers.
     """
+    from tactics import (
+        CONJ as _CONJ,
+        CONJUNCT1 as _CONJ1,
+        CONJUNCT2 as _CONJ2,
+        TRANS as _TRANS,
+    )
+    from nat0_order import NAT0_LT_TRANS, NAT0_LT_NOT_REFL
+
     p.goal("!t. is_sk_term t ==> (is_normal t = (sk_step t = t))")
-    p.sorry()
+    p.fix("t")
+    p.assume("h_st: is_sk_term t")  # unused, see docstring
+
+    # ---- Forward direction (specialize IS_NORMAL_IMP_FIXED). ---------------
+    p.have("fwd: is_normal t ==> sk_step t = t").by_inst(
+        IS_NORMAL_IMP_FIXED, "t"
+    )
+
+    # ---- Reverse direction. -----------------------------------------------
+    with p.have("rev: sk_step t = t ==> is_normal t").proof():
+        p.assume("h_fix: sk_step t = t")
+
+        # not_kred: ~K-redex.
+        with p.have("not_kred: ~(?x y. t = App_t (App_t K_t x) y)").proof():
+            with p.suppose("hex: ?x y. t = App_t (App_t K_t x) y"):
+                p.choose("x", from_="hex")
+                p.choose("y", from_="x_eq")
+                # y_eq : t = App_t (App_t K_t x) y
+                p.have(
+                    "hsk_red: sk_step (App_t (App_t K_t x) y) = x"
+                ).by(SK_STEP_K, "x", "y")
+                # Pull along y_eq: sk_step t = x.
+                p.have("hsk_tx: sk_step t = x").by_rewrite_of(
+                    "hsk_red", [SYM(p.fact("y_eq"))]
+                )
+                # x = t via SYM(hsk_tx); h_fix; TRANS.
+                p.have("hxt: x = t").by_thm(
+                    _TRANS(SYM(p.fact("hsk_tx")), p.fact("h_fix"))
+                )
+                # nat0_lt x (App_t K_t x).
+                p.have("lt1: nat0_lt x (App_t K_t x)").by(
+                    NAT0_LT_APP_T_R, "K_t", "x"
+                )
+                # nat0_lt (App_t K_t x) (App_t (App_t K_t x) y).
+                p.have(
+                    "lt2: nat0_lt (App_t K_t x) (App_t (App_t K_t x) y)"
+                ).by(NAT0_LT_APP_T_L, "App_t K_t x", "y")
+                # Compose: nat0_lt x (App_t (App_t K_t x) y).
+                p.have(
+                    "lt_x_red: nat0_lt x (App_t (App_t K_t x) y)"
+                ).by(
+                    NAT0_LT_TRANS,
+                    "x", "App_t K_t x", "App_t (App_t K_t x) y",
+                    "lt1", "lt2",
+                )
+                # Rewrite using y_eq to fold App_t (App_t K_t x) y back to t.
+                p.have("lt_x_t: nat0_lt x t").by_rewrite_of(
+                    "lt_x_red", [SYM(p.fact("y_eq"))]
+                )
+                # Substitute x := t (via hxt) to get nat0_lt t t.
+                p.have("lt_t_t: nat0_lt t t").by_rewrite_of(
+                    "lt_x_t", [p.fact("hxt")]
+                )
+                p.have("nrefl: ~(nat0_lt t t)").by(NAT0_LT_NOT_REFL, "t")
+                p.absurd().by_conj("nrefl", "lt_t_t")
+
+        # not_sred: ~S-redex.
+        with p.have(
+            "not_sred: ~(?x y z. t = App_t (App_t (App_t S_t x) y) z)"
+        ).proof():
+            with p.suppose(
+                "hex: ?x y z. t = App_t (App_t (App_t S_t x) y) z"
+            ):
+                p.choose("x", from_="hex")
+                p.choose("y", from_="x_eq")
+                p.choose("z", from_="y_eq")
+                # z_eq : t = App_t (App_t (App_t S_t x) y) z
+                p.have(
+                    "hsk_red: sk_step (App_t (App_t (App_t S_t x) y) z) "
+                    "= App_t (App_t x z) (App_t y z)"
+                ).by(SK_STEP_S, "x", "y", "z")
+                # Fold to sk_step t.
+                p.have(
+                    "hsk_t: sk_step t = App_t (App_t x z) (App_t y z)"
+                ).by_rewrite_of("hsk_red", [SYM(p.fact("z_eq"))])
+                # h_fix : sk_step t = t, so
+                # App_t (App_t x z) (App_t y z) = t.
+                p.have(
+                    "h_redt: App_t (App_t x z) (App_t y z) = t"
+                ).by_thm(_TRANS(SYM(p.fact("hsk_t")), p.fact("h_fix")))
+                # Replace t with the S-redex form on the RHS.
+                p.have(
+                    "h_eq: App_t (App_t x z) (App_t y z) "
+                    "= App_t (App_t (App_t S_t x) y) z"
+                ).by_rewrite_of("h_redt", [p.fact("z_eq")])
+                # APP_T_INJ on the outer App_t:
+                #   App_t x z = App_t (App_t S_t x) y  AND  App_t y z = z.
+                p.have(
+                    "h_outer: App_t x z = App_t (App_t S_t x) y /\\ "
+                    "         App_t y z = z"
+                ).by(
+                    APP_T_INJ,
+                    "App_t x z", "App_t y z",
+                    "App_t (App_t S_t x) y", "z",
+                    "h_eq",
+                )
+                p.have("h_yz: App_t y z = z").by_thm(
+                    _CONJ2(p.fact("h_outer"))
+                )
+                # nat0_lt z (App_t y z), substitute App_t y z = z to get
+                # nat0_lt z z.
+                p.have("lt_z: nat0_lt z (App_t y z)").by(
+                    NAT0_LT_APP_T_R, "y", "z"
+                )
+                p.have("lt_z_z: nat0_lt z z").by_rewrite_of(
+                    "lt_z", [p.fact("h_yz")]
+                )
+                p.have("nrefl: ~(nat0_lt z z)").by(NAT0_LT_NOT_REFL, "z")
+                p.absurd().by_conj("nrefl", "lt_z_z")
+
+        # Combine the two negations and fold to is_normal.
+        p.thus("is_normal t").by_unfold(
+            _CONJ(p.fact("not_kred"), p.fact("not_sred")), IS_NORMAL_DEF
+        )
+
+    p.thus("is_normal t = (sk_step t = t)").by_iff("fwd", "rev")
 
 
 # ---------------------------------------------------------------------------
