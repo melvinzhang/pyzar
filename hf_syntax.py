@@ -1687,18 +1687,52 @@ def _disjunct_eq_match_binary(disj, target_app, target_args, inj_lemma):
     return DEDUCT_ANTISYM_RULE(outer_th, rest_at_target)
 
 
-def _ctor_neq_lemma(ctor_a_name, ctor_b_name):
-    """Look up ``|- !args1 args2. ~(ctor_a args1 = ctor_b args2)`` from
-    the precomputed registry (``CTOR_DISJOINTNESS`` + ``_NEQ_EMPTY`` family)."""
-    if ctor_a_name == "Empty_t":
-        # ~(Empty_t = ctor_b args). Symmetric to ctor_b's NEQ_EMPTY.
-        return ("rev", _CTOR_NEQ_EMPTY[ctor_b_name])
-    if ctor_b_name == "Empty_t":
-        return ("fwd", _CTOR_NEQ_EMPTY[ctor_a_name])
-    if (ctor_a_name, ctor_b_name) in CTOR_DISJOINTNESS:
-        return ("fwd", CTOR_DISJOINTNESS[(ctor_a_name, ctor_b_name)])
-    if (ctor_b_name, ctor_a_name) in CTOR_DISJOINTNESS:
-        return ("rev", CTOR_DISJOINTNESS[(ctor_b_name, ctor_a_name)])
+from collections import namedtuple
+
+# CtorRegistry: bundles the lookup tables consumed by ``derive_rec_eq``
+# and its siblings. Splitting them out from module-level globals lets
+# downstream encodings (e.g. PRST) build their own registry without
+# mutating ``hf_syntax`` internals.
+#
+#   ctors       : name -> (name, AT_thm_unused_by_derive, tag_idx_unused,
+#                          var_names, tag_str_unused).
+#                 ``derive_rec_eq`` consults [0] (name) via _ctor_app and
+#                 [3] (var_names) for arity; the other slots are kept for
+#                 compatibility with the hf-side constructor-prep code.
+#   inj         : name -> ``|- !args. C args1 = C args2 ==> args1 = args2``.
+#   disjointness: (a_name, b_name) -> ``|- !ax bx. ~(C_a ax = C_b bx)``.
+#   neq_empty   : name -> ``|- !args. ~(C args = empty_const)``.
+#   empty_name  : the string name of the "zero" constant (e.g. "Empty_t",
+#                 "Empty_pt") that gets special-cased through neq_empty
+#                 rather than the pairwise table.
+CtorRegistry = namedtuple(
+    "CtorRegistry", ["ctors", "inj", "disjointness", "neq_empty", "empty_name"]
+)
+
+
+# Default registry: the hf-side constructors.
+HF_REGISTRY = CtorRegistry(
+    ctors=_CTORS,
+    inj=_CTOR_INJ,
+    disjointness=CTOR_DISJOINTNESS,
+    neq_empty=_CTOR_NEQ_EMPTY,
+    empty_name="Empty_t",
+)
+
+
+def _ctor_neq_lemma(ctor_a_name, ctor_b_name, registry=None):
+    """Look up ``|- !args1 args2. ~(ctor_a args1 = ctor_b args2)`` in
+    ``registry`` (defaults to the hf-side registry)."""
+    if registry is None:
+        registry = HF_REGISTRY
+    if ctor_a_name == registry.empty_name:
+        return ("rev", registry.neq_empty[ctor_b_name])
+    if ctor_b_name == registry.empty_name:
+        return ("fwd", registry.neq_empty[ctor_a_name])
+    if (ctor_a_name, ctor_b_name) in registry.disjointness:
+        return ("fwd", registry.disjointness[(ctor_a_name, ctor_b_name)])
+    if (ctor_b_name, ctor_a_name) in registry.disjointness:
+        return ("rev", registry.disjointness[(ctor_b_name, ctor_a_name)])
     raise ValueError(
         f"_ctor_neq_lemma: no disjointness for {ctor_a_name} vs {ctor_b_name}"
     )
@@ -1729,24 +1763,28 @@ def _ctor_app(ctor_decl, args):
     return mk_app(mk_const(name, []), *args)
 
 
-def derive_rec_eq(REC, target_ctor_name, var_names):
+def derive_rec_eq(REC, target_ctor_name, var_names, *, registry=None):
     """Constructor recursion equation, auto-generated.
 
     Args:
       REC : ``|- !n. F n = body[F, n]`` from ``define_wf_lt``.
-      target_ctor_name : name in ``_CTORS`` (e.g. ``"Succ_t"``).
+      target_ctor_name : name in ``registry.ctors`` (e.g. ``"Succ_t"``).
       var_names : list of strings naming the constructor's args
                   (length must match the constructor's arity).
+      registry  : ``CtorRegistry`` to consult; defaults to the hf-side
+                  registry. Pass a custom registry to derive recursion
+                  equations against a different set of constructors.
 
     Returns:
       ``|- !v1...vk. F (target_C v1...vk) = <body of matching disjunct,
                                               with v1..vk substituted>``,
-      with all non-matching disjuncts collapsed to F via the relevant
-      ``_NEQ_*`` / ``CTOR_DISJOINTNESS`` lemmas.
+      with all non-matching disjuncts collapsed to F via disjointness.
     """
-    if target_ctor_name not in _CTORS:
+    if registry is None:
+        registry = HF_REGISTRY
+    if target_ctor_name not in registry.ctors:
         raise ValueError(f"derive_rec_eq: unknown ctor {target_ctor_name!r}")
-    target_decl = _CTORS[target_ctor_name]
+    target_decl = registry.ctors[target_ctor_name]
     target_arity = len(target_decl[3])
     if len(var_names) != target_arity:
         raise ValueError(
@@ -1755,12 +1793,11 @@ def derive_rec_eq(REC, target_ctor_name, var_names):
         )
     target_args = [Var(name, nat0_ty) for name in var_names]
     target_app = _ctor_app(target_decl, target_args)
-    rec_at = SPEC(target_app, REC)  # |- F target_app = body[F, target_app]
+    rec_at = SPEC(target_app, REC)
     body_at = rand(rec_at._concl)
     disjuncts = _split_n_disj(body_at)
 
-    # For each disjunct, classify and produce the |- disjunct = ... eq.
-    target_inj = _CTOR_INJ.get(target_ctor_name)
+    target_inj = registry.inj.get(target_ctor_name)
     per_eqs = []
     for disj in disjuncts:
         head_name = _disjunct_ctor_name(disj)
@@ -1774,19 +1811,16 @@ def derive_rec_eq(REC, target_ctor_name, var_names):
                     disj, target_app, target_args, target_inj
                 )
         else:
-            # Non-matching: collapse to F via disjointness lemma. Witnesses
-            # are extracted post-CHOOSE_WITNESS inside the helper to keep
-            # nested existentials' substitutions in lockstep.
-            neq_dir = _ctor_neq_lemma(target_ctor_name, head_name)
+            neq_dir = _ctor_neq_lemma(target_ctor_name, head_name, registry)
             eq = _disjunct_eq_F_via_neq(disj, neq_dir, target_args)
         per_eqs.append(eq)
 
-    body_eq = or_chain_collapse(per_eqs)  # |- body_at = collapsed_rhs
-    final = TRANS(rec_at, body_eq)  # |- F target_app = collapsed_rhs
+    body_eq = or_chain_collapse(per_eqs)
+    final = TRANS(rec_at, body_eq)
     return GENL(target_args, final)
 
 
-def derive_rec_eq_pw(REC, target_ctor_name, var_names):
+def derive_rec_eq_pw(REC, target_ctor_name, var_names, *, registry=None):
     """Pointwise constructor recursion for function-valued recursion.
 
     Given REC : ``|- !n. fn n = (\\v. body[fn, n, v])`` from
@@ -1800,9 +1834,11 @@ def derive_rec_eq_pw(REC, target_ctor_name, var_names):
     BETA_CONV step that lifts the function-equality REC to a bool eq
     before the disjunction is processed.
     """
-    if target_ctor_name not in _CTORS:
+    if registry is None:
+        registry = HF_REGISTRY
+    if target_ctor_name not in registry.ctors:
         raise ValueError(f"derive_rec_eq_pw: unknown ctor {target_ctor_name!r}")
-    target_decl = _CTORS[target_ctor_name]
+    target_decl = registry.ctors[target_ctor_name]
     target_arity = len(target_decl[3])
     if len(var_names) != target_arity:
         raise ValueError(
@@ -1812,18 +1848,16 @@ def derive_rec_eq_pw(REC, target_ctor_name, var_names):
     target_args = [Var(name, nat0_ty) for name in var_names]
     target_app = _ctor_app(target_decl, target_args)
     rec_at = SPEC(target_app, REC)
-    # rec_at : |- fn target_app = (\v. body[fn, target_app, v])
     body_abs = rand(rec_at._concl)
     v_bvar = body_abs.bvar
     rec_at_v = AP_THM(rec_at, v_bvar)
     rhs_redex = rand(rec_at_v._concl)
     rhs_beta = BETA_CONV(rhs_redex)
     rec_normalized = TRANS(rec_at_v, rhs_beta)
-    # rec_normalized : |- fn target_app v_bvar = body[fn, target_app, v_bvar]
 
     body_at = rand(rec_normalized._concl)
     disjuncts = _split_n_disj(body_at)
-    target_inj = _CTOR_INJ.get(target_ctor_name)
+    target_inj = registry.inj.get(target_ctor_name)
     per_eqs = []
     for disj in disjuncts:
         head_name = _disjunct_ctor_name(disj)
@@ -1837,7 +1871,7 @@ def derive_rec_eq_pw(REC, target_ctor_name, var_names):
                     disj, target_app, target_args, target_inj
                 )
         else:
-            neq_dir = _ctor_neq_lemma(target_ctor_name, head_name)
+            neq_dir = _ctor_neq_lemma(target_ctor_name, head_name, registry)
             eq = _disjunct_eq_F_via_neq(disj, neq_dir, target_args)
         per_eqs.append(eq)
     body_eq = or_chain_collapse(per_eqs)
@@ -1858,7 +1892,9 @@ def _disjunct_eq_match_nullary(disj, target_app):
     return DEDUCT_ANTISYM_RULE(disj_th, rest_th)
 
 
-def derive_rec_eq_select(REC, target_ctor_name, var_names, extra_arg_vars):
+def derive_rec_eq_select(
+    REC, target_ctor_name, var_names, extra_arg_vars, *, registry=None
+):
     """Constructor recursion equation for SELECT-shaped recursion.
 
     Given REC : ``|- !n. fn n = (\\arg1...argk. @r. body[fn, n, args, r])``
@@ -1874,18 +1910,21 @@ def derive_rec_eq_select(REC, target_ctor_name, var_names, extra_arg_vars):
     (``(cond /\\ r = T) \\/ (~cond /\\ r = E)``, used by ``Var_t`` and
     ``Forall_f`` in substitute) need ``derive_rec_eq_select_cond``.
     """
-    if target_ctor_name == "Empty_t":
+    if registry is None:
+        registry = HF_REGISTRY
+    if target_ctor_name == registry.empty_name:
         if var_names:
             raise ValueError(
-                "derive_rec_eq_select: Empty_t is nullary; var_names must be empty"
+                f"derive_rec_eq_select: {registry.empty_name} is nullary; "
+                "var_names must be empty"
             )
         target_arity = 0
         target_args = []
-        target_app = Empty_t
+        target_app = mk_const(registry.empty_name, [])
     else:
-        if target_ctor_name not in _CTORS:
+        if target_ctor_name not in registry.ctors:
             raise ValueError(f"derive_rec_eq_select: unknown ctor {target_ctor_name!r}")
-        target_decl = _CTORS[target_ctor_name]
+        target_decl = registry.ctors[target_ctor_name]
         target_arity = len(target_decl[3])
         if len(var_names) != target_arity:
             raise ValueError(
@@ -1911,7 +1950,7 @@ def derive_rec_eq_select(REC, target_ctor_name, var_names, extra_arg_vars):
     body_at = select_pred.body  # body[fn, target_app, args, r]
     disjuncts = _split_n_disj(body_at)
 
-    target_inj = _CTOR_INJ.get(target_ctor_name)
+    target_inj = registry.inj.get(target_ctor_name)
     per_eqs = []
     matched_K = None
     for disj in disjuncts:
@@ -1927,7 +1966,6 @@ def derive_rec_eq_select(REC, target_ctor_name, var_names, extra_arg_vars):
                 eq = _disjunct_eq_match_binary(
                     disj, target_app, target_args, target_inj
                 )
-            # The matched disjunct's RHS should be ``r = K``; pin K.
             rhs = dest_eq(eq._concl)[1]
             if not is_eq(rhs):
                 raise ValueError(
@@ -1943,7 +1981,7 @@ def derive_rec_eq_select(REC, target_ctor_name, var_names, extra_arg_vars):
                 )
             matched_K = K_t
         else:
-            neq_dir = _ctor_neq_lemma(target_ctor_name, head_name)
+            neq_dir = _ctor_neq_lemma(target_ctor_name, head_name, registry)
             eq = _disjunct_eq_F_via_neq(disj, neq_dir, target_args)
         per_eqs.append(eq)
 
@@ -2021,7 +2059,9 @@ def _conditional_body_eq(P_term, T_val, E_val, r_var, taking_then):
         return DEDUCT_ANTISYM_RULE(reverse, forward)
 
 
-def derive_rec_eq_select_cond(REC, target_ctor_name, var_names, extra_arg_vars):
+def derive_rec_eq_select_cond(
+    REC, target_ctor_name, var_names, extra_arg_vars, *, registry=None
+):
     """Constructor recursion equation for SELECT-shaped recursion with
     a conditional matching disjunct.
 
@@ -2033,11 +2073,13 @@ def derive_rec_eq_select_cond(REC, target_ctor_name, var_names, extra_arg_vars):
       THEN_TH : ``|- !v1...vk extras. P  ==> fn (C v1...vk) extras = T``
       ELSE_TH : ``|- !v1...vk extras. ~P ==> fn (C v1...vk) extras = E``
     """
-    if target_ctor_name not in _CTORS:
+    if registry is None:
+        registry = HF_REGISTRY
+    if target_ctor_name not in registry.ctors:
         raise ValueError(
             f"derive_rec_eq_select_cond: unknown ctor {target_ctor_name!r}"
         )
-    target_decl = _CTORS[target_ctor_name]
+    target_decl = registry.ctors[target_ctor_name]
     target_arity = len(target_decl[3])
     if len(var_names) != target_arity:
         raise ValueError(
@@ -2060,7 +2102,7 @@ def derive_rec_eq_select_cond(REC, target_ctor_name, var_names, extra_arg_vars):
     body_at = select_pred.body
     disjuncts = _split_n_disj(body_at)
 
-    target_inj = _CTOR_INJ.get(target_ctor_name)
+    target_inj = registry.inj.get(target_ctor_name)
     per_eqs = []
     matched_form = None
     for disj in disjuncts:
@@ -2096,7 +2138,7 @@ def derive_rec_eq_select_cond(REC, target_ctor_name, var_names, extra_arg_vars):
             E_val = dest_eq(eq_E)[1]
             matched_form = (P_t, T_val, E_val)
         else:
-            neq_dir = _ctor_neq_lemma(target_ctor_name, head_name)
+            neq_dir = _ctor_neq_lemma(target_ctor_name, head_name, registry)
             eq = _disjunct_eq_F_via_neq(disj, neq_dir, target_args)
         per_eqs.append(eq)
 

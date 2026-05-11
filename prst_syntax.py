@@ -790,17 +790,177 @@ def _unfold_prst_rec(rec_raw, F_def):
 IS_PTERM_REC = _unfold_prst_rec(_IS_PTERM_REC_RAW, _IS_PTERM_F_DEF)
 
 
-# AT-equations: SPEC the unfolded REC at each constructor, simplify the
-# disjunction by exhibiting the matching disjunct (and refuting the rest
-# via constructor disjointness/injectivity).
+# ---------------------------------------------------------------------------
+# PRST-side CtorRegistry, consumed by ``derive_rec_eq`` and friends.
 #
-# DSL friction: hf_syntax's ``derive_rec_eq`` automates exactly this
-# shape, but it's keyed on a private ``_CTORS`` registry that doesn't
-# include the PRST constructors. Extending the registry from this
-# module would require module-level mutation of hf_syntax internals
-# (since ``_CTORS`` is consumed at the call site, not lazily). The
-# pragmatic path is to write each AT-equation explicitly here using the
-# REC theorem -- about 20 lines per constructor.
+# Two pieces of derived bookkeeping needed:
+#   1. Injectivity for the Var_pt alias (derived from VAR_T_INJ via the
+#      VAR_PT_DEF alias equation).
+#   2. PRST-renamed disjointness lemmas:
+#      - Var_pt / Tup_pt / App_pt vs Empty_pt (vs the PRST nil, not Empty_t)
+#      - (Var_pt, Tup_pt), (Var_pt, App_pt), (Tup_pt, App_pt)
+#
+# These derivations are one rewrite each through VAR_PT_DEF / EMPTY_PT_DEF.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def VAR_PT_INJ(p):
+    """|- !a b. Var_pt a = Var_pt b ==> a = b."""
+    from hf_syntax import VAR_T_INJ
+    from tactics import SPECL, MP
+
+    p.goal("!a b. Var_pt a = Var_pt b ==> a = b")
+    p.fix("a b")
+    p.assume("h: Var_pt a = Var_pt b")
+    # VAR_PT_DEF : Var_pt = Var_t, so rewriting yields Var_t a = Var_t b.
+    p.have("h2: Var_t a = Var_t b").by_rewrite_of("h", [VAR_PT_DEF])
+    p.thus("a = b").by_thm(
+        MP(SPECL([p._parse("a"), p._parse("b")], VAR_T_INJ), p.fact("h2"))
+    )
+
+
+@proof
+def VAR_PT_NEQ_EMPTY_PT(p):
+    """|- !v. ~(Var_pt v = Empty_pt)."""
+    from hf_syntax import VAR_T_NEQ_EMPTY
+
+    p.goal("!v. ~(Var_pt v = Empty_pt)", types={"v": nat0_ty})
+    p.fix("v")
+    with p.suppose("h: Var_pt v = Empty_pt"):
+        # Rewrite through aliases to obtain Var_t v = Empty_t, contradicting
+        # VAR_T_NEQ_EMPTY.
+        p.have("h2: Var_t v = Empty_t").by_rewrite_of(
+            "h", [VAR_PT_DEF, EMPTY_PT_DEF]
+        )
+        p.have("neg: ~(Var_t v = Empty_t)").by(VAR_T_NEQ_EMPTY, "v")
+        p.absurd().by_conj("neg", "h2")
+
+
+@proof
+def TUP_PT_NEQ_EMPTY_PT(p):
+    """|- !a b. ~(Tup_pt a b = Empty_pt)."""
+    p.goal(
+        "!a b. ~(Tup_pt a b = Empty_pt)", types={"a": nat0_ty, "b": nat0_ty}
+    )
+    p.fix("a b")
+    with p.suppose("h: Tup_pt a b = Empty_pt"):
+        p.have("h2: Tup_pt a b = Empty_t").by_rewrite_of("h", [EMPTY_PT_DEF])
+        p.have("neg: ~(Tup_pt a b = Empty_t)").by(TUP_PT_DISJOINT_EMPTY, "a", "b")
+        p.absurd().by_conj("neg", "h2")
+
+
+@proof
+def APP_PT_NEQ_EMPTY_PT(p):
+    """|- !f args. ~(App_pt f args = Empty_pt)."""
+    p.goal(
+        "!f args. ~(App_pt f args = Empty_pt)",
+        types={"f": nat0_ty, "args": nat0_ty},
+    )
+    p.fix("f args")
+    with p.suppose("h: App_pt f args = Empty_pt"):
+        p.have("h2: App_pt f args = Empty_t").by_rewrite_of("h", [EMPTY_PT_DEF])
+        p.have("neg: ~(App_pt f args = Empty_t)").by(
+            APP_PT_DISJOINT_EMPTY, "f", "args"
+        )
+        p.absurd().by_conj("neg", "h2")
+
+
+@proof
+def VAR_PT_NEQ_TUP_PT(p):
+    """|- !v a b. ~(Var_pt v = Tup_pt a b).
+
+    Symmetric flip of TUP_PT_DISJOINT_VAR_T (which uses Var_t naming),
+    plus alias rewrite. The disjointness-key in the registry follows the
+    natural alphabetical order seen in IS_PTERM_F's body (Var_pt comes
+    before Tup_pt in the disjunction ordering).
+    """
+    p.goal(
+        "!v a b. ~(Var_pt v = Tup_pt a b)",
+        types={"v": nat0_ty, "a": nat0_ty, "b": nat0_ty},
+    )
+    p.fix("v a b")
+    with p.suppose("h: Var_pt v = Tup_pt a b"):
+        from tactics import SYM as _SYM
+
+        p.have("h_sym: Tup_pt a b = Var_pt v").by_thm(_SYM(p.fact("h")))
+        p.have("h2: Tup_pt a b = Var_t v").by_rewrite_of("h_sym", [VAR_PT_DEF])
+        p.have("neg: ~(Tup_pt a b = Var_t v)").by(
+            TUP_PT_DISJOINT_VAR_T, "a", "b", "v"
+        )
+        p.absurd().by_conj("neg", "h2")
+
+
+@proof
+def VAR_PT_NEQ_APP_PT(p):
+    """|- !v f args. ~(Var_pt v = App_pt f args)."""
+    p.goal(
+        "!v f args. ~(Var_pt v = App_pt f args)",
+        types={"v": nat0_ty, "f": nat0_ty, "args": nat0_ty},
+    )
+    p.fix("v f args")
+    with p.suppose("h: Var_pt v = App_pt f args"):
+        from tactics import SYM as _SYM
+
+        p.have("h_sym: App_pt f args = Var_pt v").by_thm(_SYM(p.fact("h")))
+        p.have("h2: App_pt f args = Var_t v").by_rewrite_of("h_sym", [VAR_PT_DEF])
+        p.have("neg: ~(App_pt f args = Var_t v)").by(
+            APP_PT_DISJOINT_VAR_T, "f", "args", "v"
+        )
+        p.absurd().by_conj("neg", "h2")
+
+
+# ---------------------------------------------------------------------------
+# PRST_REGISTRY: feeds ``derive_rec_eq`` for the IS_PTERM AT-equations.
+#
+# The registry shape mirrors hf_syntax's HF_REGISTRY. ctor declarations
+# carry the name and var_names list (the other tuple slots are unused
+# by derive_rec_eq's hot path so we pad with ``None``).
+# ---------------------------------------------------------------------------
+from hf_syntax import CtorRegistry as _CtorRegistry
+
+_PRST_CTORS = {
+    "Var_pt": ("Var_pt", None, None, ["v"], None),
+    "Tup_pt": ("Tup_pt", None, None, ["a", "b"], None),
+    "App_pt": ("App_pt", None, None, ["f", "args"], None),
+}
+
+_PRST_INJ = {
+    "Var_pt": VAR_PT_INJ,
+    "Tup_pt": TUP_PT_INJ,
+    "App_pt": APP_PT_INJ,
+}
+
+# Pairwise disjointness, keyed by (a_name, b_name) in the order they
+# appear in the IS_PTERM body's disjunction.
+_PRST_CTOR_DISJOINTNESS = {
+    ("Var_pt", "Tup_pt"): VAR_PT_NEQ_TUP_PT,
+    ("Var_pt", "App_pt"): VAR_PT_NEQ_APP_PT,
+    ("Tup_pt", "App_pt"): TUP_PT_DISJOINT_APP_PT,
+}
+
+_PRST_NEQ_EMPTY = {
+    "Var_pt": VAR_PT_NEQ_EMPTY_PT,
+    "Tup_pt": TUP_PT_NEQ_EMPTY_PT,
+    "App_pt": APP_PT_NEQ_EMPTY_PT,
+}
+
+PRST_REGISTRY = _CtorRegistry(
+    ctors=_PRST_CTORS,
+    inj=_PRST_INJ,
+    disjointness=_PRST_CTOR_DISJOINTNESS,
+    neq_empty=_PRST_NEQ_EMPTY,
+    empty_name="Empty_pt",
+)
+
+
+# AT-equations: now derive_rec_eq with PRST_REGISTRY handles each one.
+from hf_syntax import derive_rec_eq as _derive_rec_eq
+
+
+# Empty_pt's AT is the trivial T-shape; derive_rec_eq doesn't ship a
+# nullary path (the hf side likewise skips IS_TERM_AT_EMPTY). Manual
+# proof via the REC + left-disjunct REFL.
 @proof
 def IS_PTERM_AT_EMPTY(p):
     """|- is_pterm Empty_pt."""
@@ -808,68 +968,55 @@ def IS_PTERM_AT_EMPTY(p):
 
     p.goal("is_pterm Empty_pt")
     rec_at = SPEC(p._parse("Empty_pt"), IS_PTERM_REC)
-    body = "Empty_pt = Empty_pt \\/ " \
-           "(?v. Empty_pt = Var_pt v) \\/ " \
-           "(?a b. Empty_pt = Tup_pt a b /\\ is_pterm a /\\ is_pterm b) \\/ " \
-           "(?fn args. Empty_pt = App_pt fn args " \
-           "          /\\ is_pr_sym fn /\\ is_pterm args)"
+    body = (
+        "Empty_pt = Empty_pt \\/ "
+        "(?v. Empty_pt = Var_pt v) \\/ "
+        "(?a b. Empty_pt = Tup_pt a b /\\ is_pterm a /\\ is_pterm b) \\/ "
+        "(?fn args. Empty_pt = App_pt fn args "
+        "/\\ is_pr_sym fn /\\ is_pterm args)"
+    )
     p.have(f"rec_at: is_pterm Empty_pt = ({body})").by_thm(rec_at)
     p.have("hr: Empty_pt = Empty_pt").by_thm(REFL(p._parse("Empty_pt")))
-    # Take the left disjunct; the rest of the disjunction is irrelevant.
     p.have(f"disj: {body}").by_disj("hr")
     p.thus("is_pterm Empty_pt").by_eq_mp(SYM(p.fact("rec_at")), "disj")
 
 
-@proof
-def IS_PTERM_AT_VAR(p):
-    """|- !v. is_pterm (Var_pt v)."""
-    from tactics import SPEC, REFL, SYM
+# derive_rec_eq dispatches each disjunct: the matching constructor's
+# injectivity gives a one-point form; the others collapse to F via the
+# PRST_REGISTRY disjointness lemmas.
+def _strip_eqT(th):
+    """``|- !vs. P = T`` -> ``|- !vs. P``. derive_rec_eq's body-less
+    matched disjunct (e.g. ``?w. n = Var_pt w``) reduces to ``T`` after
+    the existential is witnessed via REFL; the natural consumer interface
+    is the bare assertion, so we EQT_ELIM under the foralls."""
+    from tactics import EQT_ELIM
+    from axioms import dest_forall
 
-    p.goal("!v. is_pterm (Var_pt v)", types={"v": nat0_ty})
-    p.fix("v")
-    rec_at = SPEC(p._parse("Var_pt v"), IS_PTERM_REC)
-    body = "Var_pt v = Empty_pt \\/ " \
-           "(?w. Var_pt v = Var_pt w) \\/ " \
-           "(?a b. Var_pt v = Tup_pt a b /\\ is_pterm a /\\ is_pterm b) \\/ " \
-           "(?fn args. Var_pt v = App_pt fn args " \
-           "          /\\ is_pr_sym fn /\\ is_pterm args)"
-    p.have(f"rec_at: is_pterm (Var_pt v) = ({body})").by_thm(rec_at)
-    # Witness the second disjunct: Var_pt v = Var_pt v.
-    p.have("hr: Var_pt v = Var_pt v").by_thm(REFL(p._parse("Var_pt v")))
-    p.have("hex: ?w. Var_pt v = Var_pt w").by_witness("v", "hr")
-    p.have(f"disj: {body}").by_disj("hex")
-    p.thus("is_pterm (Var_pt v)").by_eq_mp(SYM(p.fact("rec_at")), "disj")
+    bvars = []
+    cur = th
+    while dest_forall(cur._concl) is not None:
+        from tactics import SPEC
 
+        bvar = dest_forall(cur._concl).bvar
+        bvars.append(bvar)
+        cur = SPEC(bvar, cur)
+    elim = EQT_ELIM(cur)
+    from tactics import GEN
 
-@proof
-def IS_PTERM_AT_TUP(p):
-    """|- !a b. is_pterm (Tup_pt a b) = (is_pterm a /\\ is_pterm b). STUB.
-
-    Iff: the forward direction requires case-splitting the REC body's
-    4-disjunct and refuting Empty_pt / Var_pt / App_pt branches via
-    constructor disjointness, then extracting (a, b) from the Tup_pt
-    branch via TUP_PT_INJ. The reverse direction witnesses the Tup_pt
-    disjunct with (a, b) = (a, b). Pending; ~80 lines once written.
-    """
-    p.goal(
-        "!a b. is_pterm (Tup_pt a b) = (is_pterm a /\\ is_pterm b)",
-        types={"a": nat0_ty, "b": nat0_ty},
-    )
-    p.sorry()
+    for bvar in reversed(bvars):
+        elim = GEN(bvar, elim)
+    return elim
 
 
-@proof
-def IS_PTERM_AT_APP(p):
-    """|- !f args. is_pterm (App_pt f args) = (is_pr_sym f /\\ is_pterm args). STUB.
-
-    Same pattern as IS_PTERM_AT_TUP; the App_pt branch's witness gives
-    is_pr_sym f /\\ is_pterm args.
-    """
-    p.goal(
-        "!f args. is_pterm (App_pt f args) = (is_pr_sym f /\\ is_pterm args)",
-        types={"f": nat0_ty, "args": nat0_ty},
-    )
-    p.sorry()
+IS_PTERM_AT_VAR = _strip_eqT(
+    _derive_rec_eq(IS_PTERM_REC, "Var_pt", ["v"], registry=PRST_REGISTRY)
+)
+IS_PTERM_AT_TUP = _derive_rec_eq(
+    IS_PTERM_REC, "Tup_pt", ["a", "b"], registry=PRST_REGISTRY
+)
+IS_PTERM_AT_APP = _derive_rec_eq(
+    IS_PTERM_REC, "App_pt", ["f", "args"], registry=PRST_REGISTRY
+)
 
 
 # ---------------------------------------------------------------------------
