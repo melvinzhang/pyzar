@@ -1,13 +1,13 @@
 # PRST `p.sorry()` plan of attack
 
-Census across `prst_*.py` (56 sorries remaining; 19 cleared from `prst_syntax.py`):
+Census across `prst_*.py` (54 sorries remaining; 19 + 3 + 5 = 27 cleared so far):
 
 | File | sorries | Role |
 |------|---------|------|
 | `prst_syntax.py` | 0 (was 19) | App_pt constructor + extended `is_pterm`/`is_pform`/`free_in_p`/`substitute_p` AT-equations and preservation lemmas — **DONE** |
-| `prst_connectives.py` | 3 | `substitute_p` distribution over And/Or/Iff (alias-thin wrappers) |
-| `prst_pr.py` | 17 | PR-symbol registry (`is_pr_sym`, `pr_arity`) + base-layer defining-equation axioms + `is_pr_def` recogniser + mu-closure registry |
-| `prst_proof.py` | 15 | `Proof_PRST` / `Prov_PRST` + closure rules + per-axiom `PROV_PRST_*_DEF` corollaries + `MU_CORRECTNESS` + PR-eval lemmas + `Prov_PRST_internal` |
+| `prst_connectives.py` | 0 (was 3) | `substitute_p` distribution over And/Or/Iff (alias-thin wrappers) — **DONE** (Layer 3) |
+| `prst_pr.py` | 13 (was 17) | PR-symbol registry (`is_pr_sym`, `pr_arity`) + base-layer defining-equation axioms + `is_pr_def` recogniser + mu-closure registry — Layer 4 **partial** (5 IS_PR_SYM_* cleared) |
+| `prst_proof.py` | 20 (was 15) | `Proof_PRST` / `Prov_PRST` + closure rules + per-axiom `PROV_PRST_*_DEF` corollaries + `MU_CORRECTNESS` + PR-eval lemmas + `Prov_PRST_internal` (Layer 0 added new MONO + Proof_PRST defining-equation sorries) |
 | `prst_repr.py` | 7 | Boolean-tag disjointness + parametric representability schema + four headline representations |
 | `prst_godel1.py` | 6 | Diagonal lemma, Gödel sentence, consistency, Sigma_1-soundness, G1, essential undecidability |
 | `prst_godel2.py` | 8 | D1/D2/D3 derivability conditions, `mp_combine_pr` correctness, Löb, G2 |
@@ -86,22 +86,48 @@ All 19 prst_syntax sorries discharged: 3 MONOs (IS_PFORM / FREE_IN_P / SUBSTITUT
 
 ---
 
-## Layer 3 — `prst_connectives` (3 sorries)
+## Layer 3 — `prst_connectives` (3 sorries) — **DONE**
 
-- `SUBSTITUTE_P_AT_AND` / `_AT_OR` / `_AT_IFF`
+All three `SUBSTITUTE_P_AT_AND/_OR/_IFF` discharged. Cost ended up at ~25 lines of proof + ~10 lines of comment.
 
-**Cost:** ~30 lines total. Each one: unfold the connective via `*_F_AT`, apply `SUBSTITUTE_P_AT_NOT` / `_IMP` (Layer 2). These are pure aliases of the `hf_connectives` versions on the shared encoding — the only reason they need restating is so consumers can parse-name `substitute_p` instead of `substitute`.
+**Shape that worked:** each lemma is one `by_rewrite` call. The rule set must include both directions of the alias DEFs:
+- forward `AND_PF_DEF` / `OR_PF_DEF` / `IFF_PF_DEF` to unfold the PRST connective alias
+- forward `AND_F_AT` (for And, Or, Iff — Or expands through And via the hf-side body; Iff expands through And too)
+- `SYM(NOT_PF_DEF)` / `SYM(IMP_PF_DEF)` to *fold* the `Not_f` / `Imp_f` produced by `AND_F_AT` *back* into `Not_pf` / `Imp_pf` so that `SUBSTITUTE_P_AT_NOT` / `_AT_IMP` can fire (those lemmas are stated at `Not_pf` / `Imp_pf`).
+- `SUBSTITUTE_P_AT_NOT` and `SUBSTITUTE_P_AT_IMP` to distribute substitute_p across the unfolded body.
+
+**DSL friction noted:**
+- Mixing forward `AND_PF_DEF` / `AND_F_AT` with `SYM(NOT_PF_DEF)` / `SYM(IMP_PF_DEF)` in one `by_rewrite` is loop-free *only* because the two directions touch disjoint heads — the rewriter doesn't warn about this; it just diverges if the directions overlap. Worth keeping in mind for Layer 4+.
+- PRST formula-constructor aliases (`Not_pf`, `Imp_pf`, `And_pf`, `Or_pf`, `Iff_pf`) are fresh constants wrapping `Not_f` / `Imp_f` / `And_f` / `Or_f` / `Iff_f`. Sharing the bit-encoded body alone isn't enough for `by_rewrite` to mix-and-match hf-side and prst-side AT-lemmas — you pay a small fold/unfold dance per connective.
 
 ---
 
-## Layer 4 — `prst_pr` PR-symbol registry (10 sorries)
+## Layer 4 — `prst_pr` PR-symbol registry (10 sorries) — **partial: 5/10 done**
 
 Depends on Layer 0 real bodies of `IS_PR_SYM_DEF` / `PR_ARITY_DEF`.
 
-- `IS_PR_SYM_ZERO/ADJ/PROJ/IF_IN/REC` (5)
-- `PR_ARITY_ZERO/ADJ/PROJ/IF_IN/REC` (5)
+**Done (5 sorries cleared):**
+- `IS_PR_SYM_ZERO/ADJ/PROJ/IF_IN/REC` (5) — discharged.
+- `IS_PR_SYM_DEF` got a real non-recursive 5-disjunct body in `prst_syntax.py` (was `\f. F` stub). Body is encoded directly in nat0 literals / `Pair_ord` shapes (symbolic `zero_sym` / `adj_sym` / ... live in `prst_pr.py`, so the body can't name them).
+- Each lemma follows the same shape: `have eq` (specialize symbol DEF), `have h_ex` via `by_exists` for the multi-binder existential leaves (proj, rec), `have h_body` via `by_disj` into the 5-disjunct body, `thus` via `by_unfold` of `IS_PR_SYM_DEF`.
 
-**Cost:** ~80 lines. Each lemma is one `define_with_at` unfold of the registry body + `Pair_ord` injectivity to distinguish tags. The hard part is choosing the registry body shape so that all five tag-cases are decidable.
+**Remaining (5 sorries):**
+- `PR_ARITY_ZERO/ADJ/PROJ/IF_IN/REC` (5) — all still sorry.
+- `PR_ARITY_DEF` was given a non-recursive 4-case SELECT body covering only the closed-tag cases (`zero_sym = 0`, `adj_sym = 2`, `if_in_sym = 4`). The proj and rec arities collapse into the unconstrained-SELECT fallback.
+
+**Why the remaining 5 are harder than the original "~80 lines" estimate:**
+- `PR_ARITY_REC`'s intended statement `pr_arity (rec_sym g h) = SUC0 (pr_arity g)` is *intrinsically recursive* on the encoding (`rec_sym g h = Pair_ord 4 (Pair_ord g h)` carries no arity-of-g information). Mechanising it requires a wf-recursive `pr_arity` via `define_wf_lt` + a ~150-line `PR_ARITY_MONO` proof analogous to `SUBSTITUTE_P_MONO`. (Attempted; the MONO ended up sorry'd and was reverted.)
+- Even after fixing the body, discharging the four non-recursive cases `pr_arity X_sym = literal` against a SELECT body needs either a `SELECT_UNIQUE` helper (pyzar has only `SELECT_AX`) or ~30 lines per lemma of manual SELECT-uniqueness reasoning via constructor disjointness on nat0 literals.
+
+**Three forks for the follow-up (pick one before resuming):**
+1. **Punt for now.** Move to Layer 5 and revisit later. No downstream module consumes `pr_arity`, so the placeholder is safe.
+2. **Wf-recursive `pr_arity` + full MONO.** ~250-400 lines. Requires a 2-binder Pair_ord-shape MONO step (like `_mono_iff_value_binary_pw_step` but for `Pair_ord (lit) (Pair_ord a b)` not a single ctor).
+3. **Weaken `PR_ARITY_PROJ` / `_REC`.** Add manual SELECT-uniqueness lemmas, discharge ZERO/ADJ/IF_IN at full fidelity, restate PROJ and REC as `pr_arity X = 0` to match the non-recursive body. Closes all 5 sorries but loses the +1 semantics.
+
+**DSL friction newly observed (Layer 4 part 1):**
+- There is no "unfold-DEF-and-prove-a-disjunct" idiom — each IS_PR_SYM lemma is a 4-line ritual (have eq, build the existential leaf, `by_disj`, `by_unfold`). A `by_unfold_disj(IS_PR_SYM_DEF, witness=...)` helper would collapse it.
+- `by_disj_witness` is single-binder; the 2-binder existential leaves (proj's `?i n.`, rec's `?g h.`) need an explicit `by_exists` step to produce the existential separately, then `by_disj` it into the chain.
+- Variable shadowing: when the outer fixed vars are `i n` and the existential leaf is `?i n. ...`, the parser alpha-renames the bound names to `i' n'`. `by_unfold`'s alpha-match then fails. Fix: use fresh bound names (`ii nn`, `gg hh`) in the user-side body string so the renaming aligns by accident-of-naming.
 
 ---
 
@@ -217,16 +243,34 @@ Same path but stop at Layer 9. G2 (Layer 10) is independently the most expensive
 
 2. **Sigma_1 fragment definition.** `IS_SIGMA1_DEF` and `SIGMA1_HOLDS_DEF` are stub `T`-bodies. Layer 9 needs real definitions; this is a small design task that hasn't been done.
 
-3. **`Tup_pt` recursion inside `is_pterm` / `free_in_p` / `substitute_p`.** The args-list recursion lives directly in the main recogniser bodies via a `Tup_pt`-disjunct that recurses on both head and tail. Verify the `nat0_lt` size argument goes through `NAT0_LT_PAIR_ORD_L/R` for both projections before relying on Layer 2's App_pt AT-equation.
+3. **`Tup_pt` recursion inside `is_pterm` / `free_in_p` / `substitute_p`.** The args-list recursion lives directly in the main recogniser bodies via a `Tup_pt`-disjunct that recurses on both head and tail. Verify the `nat0_lt` size argument goes through `NAT0_LT_PAIR_ORD_L/R` for both projections before relying on Layer 2's App_pt AT-equation. **Verified during Layer 2.**
 
-4. **`substitute_pr` / `numeral_pr` / `diag_pr` / `Proof_PRST_pr` defining equations.** Currently all `0`. Their real bodies are base-layer compositions; building them is a substantial chunk of Layer 0 (~200 lines on its own).
+4. **`substitute_pr` / `numeral_pr` / `diag_pr` / `Proof_PRST_pr` defining equations.** Currently all `0` / placeholder compositions. Their real bodies are base-layer compositions; building them is a substantial chunk of Layer 0 (~200 lines on its own).
 
-5. **Forward declarations across module boundaries.** `is_pr_sym` / `pr_arity` are defined in `prst_syntax.py` but semantically belong in `prst_pr.py`. Confirm the parser is happy with the redefinition pattern before committing to Layer 4 proofs.
+5. **Forward declarations across module boundaries.** `is_pr_sym` / `pr_arity` are defined in `prst_syntax.py` but semantically belong in `prst_pr.py`. **Resolved in Layer 4 part 1:** the real `IS_PR_SYM_DEF` body lives in `prst_syntax.py` and uses bare nat0 literals / `Pair_ord` shapes (no reference to `zero_sym`/`adj_sym`/…), so the forward-decl is self-contained.
 
-6. **`hf_repr_core.numeral` reuse.** PRST currently imports `numeral` and `substitute` from `hf_repr_core` / `hf_syntax` for the eval lemmas. Confirm those carry over to the shared nat0 encoding without re-proof — the file comment claims they do, but `PROV_PRST_SUBSTITUTE_EVAL` is the load-bearing place where it has to be true.
+6. **`pr_arity` recursive case.** *(New, Layer 4.)* `PR_ARITY_REC`'s intended statement is recursive on `g`; the encoding `rec_sym g h = Pair_ord 4 (Pair_ord g h)` carries no arity-of-g information, so mechanising `pr_arity` faithfully forces a `define_wf_lt` setup + a ~150-line `PR_ARITY_MONO`. Three forks are listed in the Layer 4 section. Resolution needed before Layer 5 *only if* downstream code starts consuming `pr_arity` — currently nothing does.
+
+7. **`hf_repr_core.numeral` reuse.** PRST currently imports `numeral` and `substitute` from `hf_repr_core` / `hf_syntax` for the eval lemmas. Confirm those carry over to the shared nat0 encoding without re-proof — the file comment claims they do, but `PROV_PRST_SUBSTITUTE_EVAL` is the load-bearing place where it has to be true.
 
 ---
 
 ## Recommended first commit
 
 Land Layer 0 + Layer 1 + Layer 3 together — they unblock Layer 2 (the largest leaf layer) and Layer 4 (the registry), and are individually small enough to review in one pass. ~150 lines of real proofs + ~150 lines of replaced definition bodies. After that, Layer 2 is a single dedicated commit (~250 lines).
+
+---
+
+## Progress log (commit trail)
+
+- `bdbde63` Layer 0 — definition bodies plugged in (prst_pr, prst_proof).
+- `e32f139` Layer 1 — 11 constructor lemmas in prst_syntax.
+- `adf6bd6` Layer 2 start — IS_PTERM_MONO + 2 AT-equations.
+- `9e94ca1` derive_rec_eq family parameterised by `CtorRegistry`.
+- `65dad2d` Layer 2 finish — 19 prst_syntax sorries cleared.
+- `1d74a37` Layer 3 — 3 prst_connectives sorries cleared.
+- `92a9994` Layer 4 part 1 — real IS_PR_SYM body + 5 IS_PR_SYM_* lemmas.
+- `18f81a3` Layer 4 cleanup — drop wf-lt scaffolding from pr_arity (avoided a sorry'd MONO without unlocking any PR_ARITY_* lemma).
+
+**Cleared:** 27 sorries (19 in prst_syntax + 3 in prst_connectives + 5 IS_PR_SYM in prst_pr).
+**Remaining:** 54 sorries (13 in prst_pr, 20 in prst_proof, 7 in prst_repr, 6 in prst_godel1, 8 in prst_godel2). prst_proof grew by 5 versus the plan's original count because Layer 0 introduced new MONO obligations (Proof_PRST + Proof_PRST_pr defining equations).
