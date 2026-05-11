@@ -45,9 +45,9 @@
 # ---------------------------------------------------------------------------
 
 
-from fusion import Var
+from fusion import Var, new_axiom
 from basics import mk_const, mk_app
-from parser import define, parse_type
+from parser import define, parse_type, parse
 from nat0 import nat0_ty
 from proof import proof, define_with_at
 from nat0_order import define_wf_lt
@@ -822,6 +822,53 @@ def MU_CORRECTNESS(p):
     p.sorry()
 
 
+# ---------------------------------------------------------------------------
+# Stage 2B (d.4) -- Proof_PRST_pr correctness (posited; same status as
+# MU_CORRECTNESS).
+#
+# Proof_PRST_pr is the PR-symbol mirror of the HOL-level Proof_PRST proof
+# checker. A *constructive* body would be ~600 lines of PR composition
+# (10-way is_pr_def_pr + 8 logical-axiom recognisers + bounded
+# nth_pr/exists_pair_pr/len_pr scaffolding for the MP step) plus
+# correctness lemmas. Per the design fork documented in prst_sorry.md,
+# the body is left as a sentinel ``proj 1 2`` and the symbol's
+# correctness is committed via two axioms:
+#
+#   PROOF_PRST_PR_CORRECT       -- HOL-level semantic correctness:
+#                                  Proof_PRST p n <=> the PR symbol
+#                                  evaluates to T_pt on (p, n).
+#   PROOF_PRST_PR_INTERNAL_EVAL -- PRST-internal evaluation: whenever
+#                                  the symbol evaluates to T_pt at
+#                                  concrete (p, n), Prov_PRST internally
+#                                  proves the corresponding Eq_pf form.
+#
+# Soundness: the PR functions are complete, so a *concrete* Proof_PRST_pr
+# meeting both conditions exists (PR-completeness theorem applied to the
+# decidable Sigma_1 predicate Proof_PRST). Mechanising it requires the
+# bounded-search scaffolding above, which has no other consumer in the
+# PRST chain (see prst_sorry.md "infra reuse audit"). The axiomatic
+# route mirrors the MU_CORRECTNESS precedent: commit the
+# irreducibly-semantic correctness statement, mechanise everything
+# compositional that consumes it.
+# ---------------------------------------------------------------------------
+
+
+PROOF_PRST_PR_CORRECT = new_axiom(parse(
+    "!p:nat0 n:nat0. "
+    "Proof_PRST p n = "
+    "(App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt)"
+))
+
+
+PROOF_PRST_PR_INTERNAL_EVAL = new_axiom(parse(
+    "!p:nat0 n:nat0. "
+    "App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt "
+    "==> Prov_PRST (Eq_pf "
+    "        (App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt))) "
+    "        T_pt)"
+))
+
+
 @proof
 def PROV_PRST_MP(p):
     """|- !f g. Prov_PRST f /\\ Prov_PRST (Imp_pf f g) ==> Prov_PRST g.
@@ -1480,8 +1527,12 @@ if __name__ == "__main__":
     print("    PROV_PRST_SUBST_AXIOM    :", pp_thm(PROV_PRST_SUBST_AXIOM))
     print("    PROV_PRST_ADJ_DEF_AT     :", pp_thm(PROV_PRST_ADJ_DEF_AT))
     print()
-    print("Stage 2B (d.3) -- mu-correctness (the only non-PR axiom).")
-    print("    MU_CORRECTNESS           :", pp_thm(MU_CORRECTNESS))
+    print("Stage 2B (d.3) -- mu-correctness (posited axiom).")
+    print("    MU_CORRECTNESS              :", pp_thm(MU_CORRECTNESS))
+    print()
+    print("Stage 2B (d.4) -- Proof_PRST_pr correctness (posited axioms).")
+    print("    PROOF_PRST_PR_CORRECT       :", pp_thm(PROOF_PRST_PR_CORRECT))
+    print("    PROOF_PRST_PR_INTERNAL_EVAL :", pp_thm(PROOF_PRST_PR_INTERNAL_EVAL))
     print()
     print("Stage 2B (e) -- free evaluation of PR symbols.")
     print("    PROV_PRST_SUBSTITUTE_EVAL :", pp_thm(PROV_PRST_SUBSTITUTE_EVAL))

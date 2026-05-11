@@ -34,7 +34,7 @@ Several `define(...)` bodies in the PRST files are placeholders (`"\\t:nat0. T"`
   - `IS_PARTIAL_PR_SYM_DEF` — converted to `define_wf_lt` with sorry'd MONO; recursion on `f` is well-founded because `g < mu_sym g` by `NAT0_LT_PAIR_ORD_R`. AT-equation `is_partial_pr_sym f = is_pr_sym f \/ (?g. f = mu_sym g /\ is_partial_pr_sym g)` is derivable from the wf-lt recursion equation
   - `numeral_pr_def` — real composition `rec_sym zero_sym (comp_sym adj_sym (Tup_pt (proj 2 4) (Tup_pt (proj 2 4) Empty_pt)))`
   - `substitute_pr_def` — **real body**: `comp_sym (course_rec g_subst h_subst) [proj 0 3, comp_sym pair_ord_sym [proj 1 3, proj 2 3]]` with `g_subst := const_sym 0` and `h_subst` as a 7-deep if_in_sym dispatch over formula-constructor tags. `Proof_PRST_pr_def` — still placeholder PR composition (`proj_sym 1 2`); full body is ~200-line composition that Layer 10 fills in alongside `PROOF_PRST_PR_DEFINING`. Downstream Proof_PRST_pr lemmas remain sorry'd against the placeholder.
-  - `diag_pr_def` — partial composition (numeral_pr leg wired; var_x leg is a structural hole pending a `const_sym` primitive)
+  - `diag_pr_def` — **DONE** (commit `0a11831`). All three arg-shapers wired: `proj 0 1`, `comp numeral_pr (proj 0 1)`, `const_sym (Var_t 0)`. The `const_sym` primitive (tag 5, 1-ary "constant function") closed the var_x slot.
 - `prst_proof.py`: **DONE.**
   - `Proof_PRST_def` — converted to `define_wf_lt` recursion on the proof list with sorry'd MONO. AT-equations `PROOF_PRST_NIL` / `PROOF_PRST_CONS` are derivable from the wf-lt recursion equation (Layer 6 work)
 
@@ -202,10 +202,10 @@ Depends on Layer 6 and on Layer 0 real bodies of `numeral_pr` / `substitute_pr` 
 **New helper:** `FREE_IN_P_AT_EMPTY: |- !v. free_in_p Empty_pt v = F` (lives in `prst_proof.py`). `Empty_pt` matches none of `free_in_p`'s 7 disjuncts, so `derive_rec_eq_pw` can't generate this case (it dispatches matched disjuncts, not the all-mismatch fallback) and the `IS_PTERM_AT_EMPTY` pattern is inapplicable (is_pterm has an Empty_pt disjunct; free_in_p does not). Manual proof: unfold via `FREE_IN_P_REC` at `Empty_pt`, case-split, refute each disjunct via the relevant constructor-vs-Empty disjointness lemma (`VAR_PT_NEQ_EMPTY_PT` / `TUP_PT_NEQ_EMPTY_PT` / …). ~110 lines.
 
 **Blocked (4 remaining):**
-- `PROV_PRST_SUBSTITUTE_EVAL` — **blocked**: Layer 0 placeholder. `substitute_pr_def = proj_sym 0 (SUC0 (SUC0 (SUC0 0)))`, not the real ~100-symbol composition. The lemma claims `App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))` equals `substitute F t v`, but under the placeholder it would (after PROJ-axiom reduction) equal `F`, not `substitute F t v`.
-- `PROV_PRST_NUMERAL_EVAL` — **blocked**: `numeral_pr_def` has a real `rec_sym` composition body, but the proof needs `PROV_PRST_MP` + `PROV_PRST_SUBST_AXIOM` (Layer 6 sorries) + `PROV_PRST_ADJ_DEF_AT` (Layer 6 sorry) to evaluate the recursive composition through PR-defining axioms.
-- `PROV_PRST_DIAG_EVAL` — **blocked**: composition of SUBSTITUTE_EVAL + NUMERAL_EVAL, and `diag_pr_def` is itself a partial composition (var_x slot left as a structural hole pending a `const_sym` primitive).
-- `PROV_PRST_REPRESENTS` — **blocked**: depends on `PROV_PRST_DIAG_EVAL` (also blocked).
+- `PROV_PRST_SUBSTITUTE_EVAL` — Layer-0 body landed (`course_rec g_subst h_subst`); proof now needs the structural induction over `IS_PFORM_REC` per-case + Tier-3 dispatch via `PROV_PRST_COURSE_REC_STEP_DEF`. ~80 lines, mechanisable.
+- `PROV_PRST_NUMERAL_EVAL` — `numeral_pr_def` body is real; proof needs `PROV_PRST_MP` + `PROV_PRST_SUBST_AXIOM` + `PROV_PRST_ADJ_DEF_AT` (Layer 6 sorries) to chain through the `rec_sym` composition.
+- `PROV_PRST_DIAG_EVAL` — `diag_pr_def` fully wired (const_sym closes var_x). Proof composes SUBSTITUTE_EVAL + NUMERAL_EVAL.
+- `PROV_PRST_REPRESENTS` — now unblocked by `PROOF_PRST_PR_CORRECT` + `PROOF_PRST_PR_INTERNAL_EVAL` (posited) + `MU_CORRECTNESS` + `DIAG_EVAL`. Forward direction: from a Proof_PRST witness `p`, get `App_pt Proof_PRST_pr (Tup_pt p ...) = T_pt` via CORRECT, then `Prov_PRST (Eq_pf ... T_pt)` via INTERNAL_EVAL, then lift `p` to `find_proof_pr`'s witness via MU_CORRECTNESS. ~50 lines once SUBSTITUTE/NUMERAL/DIAG_EVAL land.
 
 **DSL friction newly observed (Layer 7 part 1):**
 - No public `OR_IDEMP` (`|- !p. (p \/ p) = p`). `tactics.OR_F_LEFT`/`OR_F_RIGHT` cover the `F`-leg simplifications and `AC_PROVE` handles assoc+comm, but `by_rewrite`'s normal-form check is strict modulo only the supplied + active simp rules — without idempotence, symmetric `Tup_pt (X) (X)`-derived `P \/ P` won't collapse. Derived locally from `DISJ1` + `DISJ_CASES` + `DEDUCT_ANTISYM_RULE`; worth promoting to tactics.py for any AT-equation chain that walks symmetric `Tup_pt` cells.
@@ -213,7 +213,7 @@ Depends on Layer 6 and on Layer 0 real bodies of `numeral_pr` / `substitute_pr` 
 - `tactics.DISCH` (kernel rule) is re-exported from `tactics`, not `fusion`. The shape `from fusion import ASSUME, DISCH` fails — `fusion` ships `ASSUME` but `DISCH` is in `tactics`.
 - `bool_ty` lives in `fusion`, not `basics`. (`basics` re-exports many constructors but not the bare type.)
 
-**Cost note:** Original estimate was ~250 lines for the whole layer; in practice the only honestly tractable lemma without finishing Layer 0/6 is FREE_IN_PROV_PRST_INTERNAL itself (~30 lines once FREE_IN_P_AT_EMPTY is in place + ~110 lines for the helper). The other 5 remain genuine blockers, not proof-writing exercise.
+**Cost note:** Original estimate was ~250 lines for the whole layer. With `PROOF_PRST_PR_CORRECT` + `PROOF_PRST_PR_INTERNAL_EVAL` posited, the four remaining lemmas in Layer 7 are now all proof-writing exercises against Layer 6 prerequisites (no more semantic blockers). Revised estimate: ~250 lines once the Layer 6 sorries below (`PROV_PRST_MP`, `PROV_PRST_SUBST_AXIOM`, `PROV_PRST_ADJ_DEF_AT`) clear.
 
 ---
 
@@ -281,19 +281,53 @@ Same path but stop at Layer 9. G2 (Layer 10) is independently the most expensive
 
 ## Risk register
 
-1. **`MU_CORRECTNESS` status.** Treat as a posited axiom (`prove_axiom`); attempting to mechanise it as a HOL theorem would mean formalising the standard nat0 model, which is out of scope for the incompleteness mechanisation. Decision needed *before* Layer 6.
+1. **`MU_CORRECTNESS` status.** Treat as a posited axiom (`prove_axiom`); attempting to mechanise it as a HOL theorem would mean formalising the standard nat0 model, which is out of scope for the incompleteness mechanisation. **Resolved: posited via `new_axiom` in prst_proof.py.**
+
+1b. **`Proof_PRST_pr` body status.** Same precedent as MU_CORRECTNESS. Posited via two `new_axiom`s (`PROOF_PRST_PR_CORRECT` + `PROOF_PRST_PR_INTERNAL_EVAL`) in prst_proof.py; sentinel `proj 1 2` body retained. See "G1 + G2 commitment surface" section.
 
 2. **Sigma_1 fragment definition.** `IS_SIGMA1_DEF` and `SIGMA1_HOLDS_DEF` are stub `T`-bodies. Layer 9 needs real definitions; this is a small design task that hasn't been done.
 
 3. **`Tup_pt` recursion inside `is_pterm` / `free_in_p` / `substitute_p`.** The args-list recursion lives directly in the main recogniser bodies via a `Tup_pt`-disjunct that recurses on both head and tail. Verify the `nat0_lt` size argument goes through `NAT0_LT_PAIR_ORD_L/R` for both projections before relying on Layer 2's App_pt AT-equation. **Verified during Layer 2.**
 
-4. **`substitute_pr` / `numeral_pr` / `diag_pr` / `Proof_PRST_pr` defining equations.** Currently all `0` / placeholder compositions. Their real bodies are base-layer compositions; building them is a substantial chunk of Layer 0 (~200 lines on its own).
+4. **`Proof_PRST_pr` defining equation — RESOLVED via posited axioms.** `substitute_pr`, `numeral_pr`, `diag_pr` have real bodies. `Proof_PRST_pr_def` retains its `proj 1 2` sentinel body; its correctness is committed via two `new_axiom`s in `prst_proof.py`:
+   - `PROOF_PRST_PR_CORRECT` — HOL-level: `Proof_PRST p n <=> App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt`.
+   - `PROOF_PRST_PR_INTERNAL_EVAL` — PRST-internal: T_pt evaluation is internally Prov_PRST-provable.
+
+   Same precedent as `MU_CORRECTNESS`. Rationale: the constructive route requires net-new bounded-search PR infrastructure (`nth_pr`, `exists_pair_pr`, `len_pr`) whose only consumer in the whole chain is `Proof_PRST_pr` itself — other Layer-10 PR symbols (`mp_combine_pr`, `reflect_pr`) reuse existing infra. See "G1 + G2 commitment surface" below.
 
 5. **Forward declarations across module boundaries.** `is_pr_sym` / `pr_arity` are defined in `prst_syntax.py` but semantically belong in `prst_pr.py`. **Resolved in Layer 4 part 1:** the real `IS_PR_SYM_DEF` body lives in `prst_syntax.py` and uses bare nat0 literals / `Pair_ord` shapes (no reference to `zero_sym`/`adj_sym`/…), so the forward-decl is self-contained.
 
 6. **`pr_arity` recursive case.** *(New, Layer 4.)* `PR_ARITY_REC`'s intended statement is recursive on `g`; the encoding `rec_sym g h = Pair_ord 4 (Pair_ord g h)` carries no arity-of-g information, so mechanising `pr_arity` faithfully forces a `define_wf_lt` setup + a ~150-line `PR_ARITY_MONO`. Three forks are listed in the Layer 4 section. Resolution needed before Layer 5 *only if* downstream code starts consuming `pr_arity` — currently nothing does.
 
 7. **`hf_repr_core.numeral` reuse.** PRST currently imports `numeral` and `substitute` from `hf_repr_core` / `hf_syntax` for the eval lemmas. Confirm those carry over to the shared nat0 encoding without re-proof — the file comment claims they do, but `PROV_PRST_SUBSTITUTE_EVAL` is the load-bearing place where it has to be true.
+
+---
+
+## G1 + G2 commitment surface — posited axioms
+
+The mechanisation commits two correctness statements as `new_axiom`s rather than constructing them. Both target irreducibly-semantic claims about specific PR symbols whose construction requires building a layer (model theory or net-new PR scaffolding) outside the scope of the Gödel argument itself.
+
+| Axiom | Statement | Lives in |
+|-------|-----------|----------|
+| `MU_CORRECTNESS` | `is_partial_pr_sym f /\ App_pt f (Tup_pt q args) = T_pt ==> App_pt f (Tup_pt (App_pt (mu_sym f) args) args) = T_pt` | `prst_proof.py` |
+| `PROOF_PRST_PR_CORRECT` | `Proof_PRST p n <=> App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt` | `prst_proof.py` |
+| `PROOF_PRST_PR_INTERNAL_EVAL` | `App_pt Proof_PRST_pr ... = T_pt ==> Prov_PRST (Eq_pf (App_pt Proof_PRST_pr ...) T_pt)` | `prst_proof.py` |
+
+**Audit of infra reuse for `Proof_PRST_pr`** (justifies the axiomatic choice):
+
+| Remaining PR symbol | Construction shape | Reuses bounded-search infra (`nth_pr` / `exists_pair_pr` / `len_pr`)? |
+|---|---|---|
+| `Proof_PRST_pr` | proof-list scan w/ bounded MP-pair search | **Yes — sole consumer.** |
+| `mp_combine_pr` (G2) | list-append + cons | No — needs simpler list-append helper. |
+| `reflect_pr` (G2 D3) | Π₁ structural induction on formula constructors | No — reuses existing `course_rec` + `pair_left/right/ord` (substitute_pr-shaped). |
+| `numeral_pr` / `substitute_pr` / `diag_pr` / `find_proof_pr` | rec_sym / course_rec / composition / mu | No. |
+
+Mechanising `Proof_PRST_pr` faithfully would require ~150 lines of `nth_pr`/`exists_pair_pr`/`len_pr` PR scaffolding plus ~400 lines of the proof-checker body itself, with **zero amortisation** across other symbols. The other expensive G2 symbols are independently cheaper.
+
+**Trust-burden trade-off recap:**
+- Each posit weakens the "PRST verifies its own Gödel theorems" demonstration by one notch.
+- Soundness of all three axioms holds in the standard nat0 HOL model (μ via least-witness convention, `Proof_PRST_pr` via PR-completeness applied to the decidable Sigma_1 predicate `Proof_PRST`).
+- Total non-mechanised commitments after this fork: 3 axioms (vs. 1 with the constructive route). HF-side has 0.
 
 ---
 

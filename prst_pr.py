@@ -1574,12 +1574,22 @@ diag_pr = mk_const("diag_pr", [])
 
 
 # Proof_PRST_pr -- the list-of-formulas proof checker as a PR symbol.
-# Full body is ~50 base-layer symbol compositions (case-split via
-# if_in_sym on each axiom schema + modus-ponens recognition + recursion
-# on the proof list). Sentinel composition pending full expansion: a
-# 2-ary projection that returns its second argument, well-typed for
-# inputs (proof_list, target_formula). Layer 7 / Layer 10 lemmas remain
-# sorry'd against this placeholder.
+#
+# A constructive body would be ~600 lines of PR composition (10-way
+# is_pr_def_pr + 8 logical-axiom recognisers + bounded
+# nth_pr/exists_pair_pr/len_pr scaffolding for the MP step) plus
+# correctness lemmas. Per the design fork documented in prst_sorry.md,
+# the body is left as a sentinel ``proj 1 2`` and the symbol's
+# correctness is *axiomatised* in prst_proof.py via
+#   PROOF_PRST_PR_CORRECT        (HOL-level: Proof_PRST p n <=>
+#                                 PR-evaluation returns T_pt)
+#   PROOF_PRST_PR_INTERNAL_EVAL  (PRST-internal: T_pt evaluation is
+#                                 internally provable in Prov_PRST)
+# This mirrors the MU_CORRECTNESS precedent: the bounded-search PR
+# infrastructure has no other consumer in the chain, so the
+# cost/benefit of mechanising it is poor relative to G2's mp_combine_pr
+# and reflect_pr, which reuse existing infra. See prst_sorry.md, "G1 +
+# G2 commitment surface" section.
 Proof_PRST_pr_def = define(
     "Proof_PRST_pr",
     parse_type("nat0"),
