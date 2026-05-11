@@ -80,6 +80,7 @@ test-prst:
 	$(PY) prst_proof.py
 	$(PY) prst_repr.py
 	$(PY) prst_godel1.py
+	$(PY) prst_godel2.py
 
 # L7 -- golden: every theorem's pp(concl) matches the checked-in
 # `landau.golden`.  The kernel certifies inferences but cannot tell whether
