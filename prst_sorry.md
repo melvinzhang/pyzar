@@ -42,15 +42,15 @@ These are not `p.sorry()` calls, but every downstream AT-equation that "unfolds"
 
 ---
 
-## Layer 1 — `prst_syntax` constructor lemmas (4 sorries)
+## Layer 1 — `prst_syntax` constructor lemmas — **DONE**
 
-Free-standing; no dependencies beyond `hf_syntax`'s `Pair_ord` / `nat0_lt` machinery.
+All 11 constructor lemmas (5 App_pt + 6 Tup_pt) discharged inline in `prst_syntax.py`:
 
-- `NAT0_LT_APP_PT_L`, `NAT0_LT_APP_PT_R` — one or two `NAT0_LT_PAIR_ORD_L/R` + `NAT0_LT_TRANS` each
-- `APP_PT_INJ` — two `PAIR_ORD_INJ` invocations
-- `APP_PT_DISJOINT_VAR_T`, `APP_PT_DISJOINT_EMPTY` — tag-disjointness (SUC0^11 0 ≠ SUC0^2 0 ≠ 0)
+- `NAT0_LT_APP_PT_L/R`, `NAT0_LT_TUP_PT_L/R` — `NAT0_LT_PAIR_ORD_L/R` + `NAT0_LT_TRANS` chains
+- `APP_PT_INJ`, `TUP_PT_INJ` — two `PAIR_ORD_INJ` invocations each
+- `APP_PT_DISJOINT_VAR_T/EMPTY`, `TUP_PT_DISJOINT_VAR_T/EMPTY/APP_PT` — tag-disjointness via fresh `_prove_tag_neq` instances at (2, 11), (2, 12), (11, 12), plus `_NEQ_PAIR_ORD_ZERO` for the Empty_t cases
 
-**Cost:** ~50 lines. Pattern is identical to existing `hf_syntax` constructor lemmas; copy-paste-adapt.
+Reused private helpers from `hf_syntax`: `_prove_tag_neq`, `_NEQ_PAIR_ORD_ZERO`.
 
 ---
 

@@ -91,19 +91,28 @@ from basics import mk_const, mk_app
 from parser import define, parse_type
 from nat0 import nat0_ty
 from proof import proof, define_with_at
-from nat0_order import define_wf_lt
+from nat0_order import define_wf_lt, NAT0_LT_TRANS
+from hf_sets import PAIR_ORD_INJ, NAT0_LT_PAIR_ORD_L, NAT0_LT_PAIR_ORD_R
 from hf_syntax import (  # re-exported; PRST uses the same encoding for these
     Empty_t,  # noqa: F401  -- body of Empty_pt
-    Var_t,  # noqa: F401  -- body of Var_pt
+    Var_t,
     Eq_f,  # noqa: F401  -- body of Eq_pf
     Not_f,  # noqa: F401  -- body of Not_pf
     Imp_f,  # noqa: F401  -- body of Imp_pf
     In_a,  # noqa: F401  -- body of In_pa
-    VAR_T_AT,  # noqa: F401  -- re-export
+    VAR_T_AT,
     EQ_F_AT,  # noqa: F401  -- re-export
     NOT_F_AT,  # noqa: F401  -- re-export
     IMP_F_AT,  # noqa: F401  -- re-export
     IN_A_AT,  # noqa: F401  -- re-export
+    EMPTY_T_DEF,
+    # DSL friction: these are private helpers in hf_syntax (leading
+    # underscore), but they're load-bearing for every constructor-lemma
+    # module that mirrors the encoding scheme. Reaching in through the
+    # underscore convention is the pragmatic option; longer-term they
+    # should be promoted to public names.
+    _NEQ_PAIR_ORD_ZERO,
+    _prove_tag_neq,
 )
 
 
@@ -185,105 +194,393 @@ Tup_pt = mk_const("Tup_pt", [])
 # ---------------------------------------------------------------------------
 
 
+# Tag literals. App_pt has tag SUC0^11 0, Tup_pt has tag SUC0^12 0.
+# DSL friction: SUC0-chains must be nested in parens. ``"SUC0 " * n + "0"``
+# parses as a chain of applications of SUC0 to itself (type-incorrect);
+# need ``SUC0 (SUC0 (... 0))``.
+def _suc_chain(k):
+    s = "0"
+    for _ in range(k):
+        s = f"SUC0 ({s})"
+    return s
+
+
+_APP_PT_TAG = _suc_chain(11)
+_TUP_PT_TAG = _suc_chain(12)
+
+
 @proof
 def NAT0_LT_APP_PT_L(p):
-    """|- !f args. nat0_lt f (App_pt f args). STUB."""
-    p.goal("!f args. nat0_lt f (App_pt f args)", types={"f": nat0_ty, "args": nat0_ty})
-    p.sorry()
+    """|- !f args. nat0_lt f (App_pt f args)."""
+    from tactics import SYM, SPECL
+
+    p.goal(
+        "!f args. nat0_lt f (App_pt f args)",
+        types={"f": nat0_ty, "args": nat0_ty},
+    )
+    p.fix("f args")
+    app_at = SPECL([p._parse("f"), p._parse("args")], APP_PT_AT)
+    p.have("h1: nat0_lt f (Pair_ord f args)").by(NAT0_LT_PAIR_ORD_L, "f", "args")
+    p.have(
+        f"h2: nat0_lt (Pair_ord f args) "
+        f"(Pair_ord ({_APP_PT_TAG}) (Pair_ord f args))"
+    ).by(NAT0_LT_PAIR_ORD_R, f"({_APP_PT_TAG})", "Pair_ord f args")
+    p.have(
+        f"h3: nat0_lt f (Pair_ord ({_APP_PT_TAG}) (Pair_ord f args))"
+    ).by(
+        NAT0_LT_TRANS,
+        "f",
+        "Pair_ord f args",
+        f"Pair_ord ({_APP_PT_TAG}) (Pair_ord f args)",
+        "h1",
+        "h2",
+    )
+    p.thus("nat0_lt f (App_pt f args)").by_rewrite_of("h3", [SYM(app_at)])
 
 
 @proof
 def NAT0_LT_APP_PT_R(p):
-    """|- !f args. nat0_lt args (App_pt f args). STUB."""
+    """|- !f args. nat0_lt args (App_pt f args)."""
+    from tactics import SYM, SPECL
+
     p.goal(
         "!f args. nat0_lt args (App_pt f args)",
         types={"f": nat0_ty, "args": nat0_ty},
     )
-    p.sorry()
+    p.fix("f args")
+    app_at = SPECL([p._parse("f"), p._parse("args")], APP_PT_AT)
+    p.have("h1: nat0_lt args (Pair_ord f args)").by(
+        NAT0_LT_PAIR_ORD_R, "f", "args"
+    )
+    p.have(
+        f"h2: nat0_lt (Pair_ord f args) "
+        f"(Pair_ord ({_APP_PT_TAG}) (Pair_ord f args))"
+    ).by(NAT0_LT_PAIR_ORD_R, f"({_APP_PT_TAG})", "Pair_ord f args")
+    p.have(
+        f"h3: nat0_lt args (Pair_ord ({_APP_PT_TAG}) (Pair_ord f args))"
+    ).by(
+        NAT0_LT_TRANS,
+        "args",
+        "Pair_ord f args",
+        f"Pair_ord ({_APP_PT_TAG}) (Pair_ord f args)",
+        "h1",
+        "h2",
+    )
+    p.thus("nat0_lt args (App_pt f args)").by_rewrite_of("h3", [SYM(app_at)])
 
 
 @proof
 def APP_PT_INJ(p):
-    """|- !f1 a1 f2 a2. App_pt f1 a1 = App_pt f2 a2 ==> (f1 = f2 /\\ a1 = a2). STUB."""
+    """|- !f1 a1 f2 a2. App_pt f1 a1 = App_pt f2 a2 ==> (f1 = f2 /\\ a1 = a2)."""
+    from tactics import SPECL, CONJUNCT2
+
     p.goal(
         "!f1 a1 f2 a2. App_pt f1 a1 = App_pt f2 a2 ==> (f1 = f2 /\\ a1 = a2)",
         types={"f1": nat0_ty, "a1": nat0_ty, "f2": nat0_ty, "a2": nat0_ty},
     )
-    p.sorry()
+    p.fix("f1 a1 f2 a2")
+    p.assume("h: App_pt f1 a1 = App_pt f2 a2")
+    c1 = SPECL([p._parse("f1"), p._parse("a1")], APP_PT_AT)
+    c2 = SPECL([p._parse("f2"), p._parse("a2")], APP_PT_AT)
+    p.have(
+        f"h_po: Pair_ord ({_APP_PT_TAG}) (Pair_ord f1 a1) "
+        f"     = Pair_ord ({_APP_PT_TAG}) (Pair_ord f2 a2)"
+    ).by_rewrite_of("h", [c1, c2])
+    p.have(
+        f"h_outer: ({_APP_PT_TAG}) = ({_APP_PT_TAG}) /\\ "
+        f"Pair_ord f1 a1 = Pair_ord f2 a2"
+    ).by(
+        PAIR_ORD_INJ,
+        f"({_APP_PT_TAG})",
+        "Pair_ord f1 a1",
+        f"({_APP_PT_TAG})",
+        "Pair_ord f2 a2",
+        "h_po",
+    )
+    p.have("h_inner: Pair_ord f1 a1 = Pair_ord f2 a2").by_thm(
+        CONJUNCT2(p.fact("h_outer"))
+    )
+    p.have("h_split: f1 = f2 /\\ a1 = a2").by(
+        PAIR_ORD_INJ, "f1", "a1", "f2", "a2", "h_inner"
+    )
+    p.thus("f1 = f2 /\\ a1 = a2").by_thm(p.fact("h_split"))
+
+
+# Tag inequalities for the 3 disjoint-tag pairs we need.
+# hf_syntax._TAG_NEQS only ships pairs in {0..10}; the App_pt (11) and
+# Tup_pt (12) tags need fresh instances via _prove_tag_neq.
+_TAG_NEQ_VAR_APP = _prove_tag_neq("_TAG_NEQ_VAR_APP", 2, 11)
+_TAG_NEQ_VAR_TUP = _prove_tag_neq("_TAG_NEQ_VAR_TUP", 2, 12)
+_TAG_NEQ_APP_TUP = _prove_tag_neq("_TAG_NEQ_APP_TUP", 11, 12)
+_VAR_T_TAG = _suc_chain(2)
 
 
 @proof
 def APP_PT_DISJOINT_VAR_T(p):
-    """|- !f args v. ~(App_pt f args = Var_t v). STUB."""
+    """|- !f args v. ~(App_pt f args = Var_t v).
+
+    Tag-disjointness: App_pt has tag 11, Var_t has tag 2.
+    """
+    from tactics import SPECL, CONJUNCT1, SYM
+
     p.goal(
         "!f args v. ~(App_pt f args = Var_t v)",
         types={"f": nat0_ty, "args": nat0_ty, "v": nat0_ty},
     )
-    p.sorry()
+    p.fix("f args v")
+    app_at = SPECL([p._parse("f"), p._parse("args")], APP_PT_AT)
+    var_at = SPECL([p._parse("v")], VAR_T_AT)
+    with p.suppose("h: App_pt f args = Var_t v"):
+        p.have(
+            f"h_po: Pair_ord ({_APP_PT_TAG}) (Pair_ord f args) "
+            f"     = Pair_ord ({_VAR_T_TAG}) v"
+        ).by_rewrite_of("h", [app_at, var_at])
+        p.have(
+            f"h_inj: ({_APP_PT_TAG}) = ({_VAR_T_TAG}) /\\ Pair_ord f args = v"
+        ).by(
+            PAIR_ORD_INJ,
+            f"({_APP_PT_TAG})",
+            "Pair_ord f args",
+            f"({_VAR_T_TAG})",
+            "v",
+            "h_po",
+        )
+        p.have(f"h_tag: ({_APP_PT_TAG}) = ({_VAR_T_TAG})").by_thm(
+            CONJUNCT1(p.fact("h_inj"))
+        )
+        # _TAG_NEQ_VAR_APP is keyed (lo, hi) = (2, 11), so its conclusion
+        # is ~(SUC0^2 0 = SUC0^11 0). Flip h_tag to match.
+        p.have(f"h_tag_sym: ({_VAR_T_TAG}) = ({_APP_PT_TAG})").by_thm(
+            SYM(p.fact("h_tag"))
+        )
+        p.have(f"h_neq: ~(({_VAR_T_TAG}) = ({_APP_PT_TAG}))").by_thm(
+            _TAG_NEQ_VAR_APP
+        )
+        p.absurd().by_conj("h_neq", "h_tag_sym")
 
 
 @proof
 def APP_PT_DISJOINT_EMPTY(p):
-    """|- !f args. ~(App_pt f args = Empty_t). STUB."""
+    """|- !f args. ~(App_pt f args = Empty_t).
+
+    App_pt's code is ``Pair_ord 11 (Pair_ord f args)``; Pair_ord _ _ is
+    never 0 by _NEQ_PAIR_ORD_ZERO.
+    """
+    from tactics import SPECL
+
     p.goal(
         "!f args. ~(App_pt f args = Empty_t)",
         types={"f": nat0_ty, "args": nat0_ty},
     )
-    p.sorry()
+    p.fix("f args")
+    app_at = SPECL([p._parse("f"), p._parse("args")], APP_PT_AT)
+    with p.suppose("h: App_pt f args = Empty_t"):
+        p.have(
+            f"h_po: Pair_ord ({_APP_PT_TAG}) (Pair_ord f args) = 0"
+        ).by_rewrite_of("h", [app_at, EMPTY_T_DEF])
+        p.have(
+            f"h_neg: ~(Pair_ord ({_APP_PT_TAG}) (Pair_ord f args) = 0)"
+        ).by(_NEQ_PAIR_ORD_ZERO, f"({_APP_PT_TAG})", "Pair_ord f args")
+        p.absurd().by_conj("h_neg", "h_po")
 
 
 @proof
 def NAT0_LT_TUP_PT_L(p):
-    """|- !a b. nat0_lt a (Tup_pt a b). STUB."""
+    """|- !a b. nat0_lt a (Tup_pt a b)."""
+    from tactics import SYM, SPECL
+
     p.goal("!a b. nat0_lt a (Tup_pt a b)", types={"a": nat0_ty, "b": nat0_ty})
-    p.sorry()
+    p.fix("a b")
+    tup_at = SPECL([p._parse("a"), p._parse("b")], TUP_PT_AT)
+    p.have("h1: nat0_lt a (Pair_ord a b)").by(NAT0_LT_PAIR_ORD_L, "a", "b")
+    p.have(
+        f"h2: nat0_lt (Pair_ord a b) (Pair_ord ({_TUP_PT_TAG}) (Pair_ord a b))"
+    ).by(NAT0_LT_PAIR_ORD_R, f"({_TUP_PT_TAG})", "Pair_ord a b")
+    p.have(
+        f"h3: nat0_lt a (Pair_ord ({_TUP_PT_TAG}) (Pair_ord a b))"
+    ).by(
+        NAT0_LT_TRANS,
+        "a",
+        "Pair_ord a b",
+        f"Pair_ord ({_TUP_PT_TAG}) (Pair_ord a b)",
+        "h1",
+        "h2",
+    )
+    p.thus("nat0_lt a (Tup_pt a b)").by_rewrite_of("h3", [SYM(tup_at)])
 
 
 @proof
 def NAT0_LT_TUP_PT_R(p):
-    """|- !a b. nat0_lt b (Tup_pt a b). STUB."""
+    """|- !a b. nat0_lt b (Tup_pt a b)."""
+    from tactics import SYM, SPECL
+
     p.goal("!a b. nat0_lt b (Tup_pt a b)", types={"a": nat0_ty, "b": nat0_ty})
-    p.sorry()
+    p.fix("a b")
+    tup_at = SPECL([p._parse("a"), p._parse("b")], TUP_PT_AT)
+    p.have("h1: nat0_lt b (Pair_ord a b)").by(NAT0_LT_PAIR_ORD_R, "a", "b")
+    p.have(
+        f"h2: nat0_lt (Pair_ord a b) (Pair_ord ({_TUP_PT_TAG}) (Pair_ord a b))"
+    ).by(NAT0_LT_PAIR_ORD_R, f"({_TUP_PT_TAG})", "Pair_ord a b")
+    p.have(
+        f"h3: nat0_lt b (Pair_ord ({_TUP_PT_TAG}) (Pair_ord a b))"
+    ).by(
+        NAT0_LT_TRANS,
+        "b",
+        "Pair_ord a b",
+        f"Pair_ord ({_TUP_PT_TAG}) (Pair_ord a b)",
+        "h1",
+        "h2",
+    )
+    p.thus("nat0_lt b (Tup_pt a b)").by_rewrite_of("h3", [SYM(tup_at)])
 
 
 @proof
 def TUP_PT_INJ(p):
-    """|- !a1 b1 a2 b2. Tup_pt a1 b1 = Tup_pt a2 b2 ==> (a1 = a2 /\\ b1 = b2). STUB."""
+    """|- !a1 b1 a2 b2. Tup_pt a1 b1 = Tup_pt a2 b2 ==> (a1 = a2 /\\ b1 = b2)."""
+    from tactics import SPECL, CONJUNCT2
+
     p.goal(
         "!a1 b1 a2 b2. Tup_pt a1 b1 = Tup_pt a2 b2 ==> (a1 = a2 /\\ b1 = b2)",
         types={"a1": nat0_ty, "b1": nat0_ty, "a2": nat0_ty, "b2": nat0_ty},
     )
-    p.sorry()
+    p.fix("a1 b1 a2 b2")
+    p.assume("h: Tup_pt a1 b1 = Tup_pt a2 b2")
+    c1 = SPECL([p._parse("a1"), p._parse("b1")], TUP_PT_AT)
+    c2 = SPECL([p._parse("a2"), p._parse("b2")], TUP_PT_AT)
+    p.have(
+        f"h_po: Pair_ord ({_TUP_PT_TAG}) (Pair_ord a1 b1) "
+        f"     = Pair_ord ({_TUP_PT_TAG}) (Pair_ord a2 b2)"
+    ).by_rewrite_of("h", [c1, c2])
+    p.have(
+        f"h_outer: ({_TUP_PT_TAG}) = ({_TUP_PT_TAG}) /\\ "
+        f"Pair_ord a1 b1 = Pair_ord a2 b2"
+    ).by(
+        PAIR_ORD_INJ,
+        f"({_TUP_PT_TAG})",
+        "Pair_ord a1 b1",
+        f"({_TUP_PT_TAG})",
+        "Pair_ord a2 b2",
+        "h_po",
+    )
+    p.have("h_inner: Pair_ord a1 b1 = Pair_ord a2 b2").by_thm(
+        CONJUNCT2(p.fact("h_outer"))
+    )
+    p.have("h_split: a1 = a2 /\\ b1 = b2").by(
+        PAIR_ORD_INJ, "a1", "b1", "a2", "b2", "h_inner"
+    )
+    p.thus("a1 = a2 /\\ b1 = b2").by_thm(p.fact("h_split"))
 
 
 @proof
 def TUP_PT_DISJOINT_VAR_T(p):
-    """|- !a b v. ~(Tup_pt a b = Var_t v). STUB."""
+    """|- !a b v. ~(Tup_pt a b = Var_t v).
+
+    Tag-disjointness: Tup_pt has tag 12, Var_t has tag 2.
+    """
+    from tactics import SPECL, CONJUNCT1, SYM
+
     p.goal(
         "!a b v. ~(Tup_pt a b = Var_t v)",
         types={"a": nat0_ty, "b": nat0_ty, "v": nat0_ty},
     )
-    p.sorry()
+    p.fix("a b v")
+    tup_at = SPECL([p._parse("a"), p._parse("b")], TUP_PT_AT)
+    var_at = SPECL([p._parse("v")], VAR_T_AT)
+    with p.suppose("h: Tup_pt a b = Var_t v"):
+        p.have(
+            f"h_po: Pair_ord ({_TUP_PT_TAG}) (Pair_ord a b) "
+            f"     = Pair_ord ({_VAR_T_TAG}) v"
+        ).by_rewrite_of("h", [tup_at, var_at])
+        p.have(
+            f"h_inj: ({_TUP_PT_TAG}) = ({_VAR_T_TAG}) /\\ Pair_ord a b = v"
+        ).by(
+            PAIR_ORD_INJ,
+            f"({_TUP_PT_TAG})",
+            "Pair_ord a b",
+            f"({_VAR_T_TAG})",
+            "v",
+            "h_po",
+        )
+        p.have(f"h_tag: ({_TUP_PT_TAG}) = ({_VAR_T_TAG})").by_thm(
+            CONJUNCT1(p.fact("h_inj"))
+        )
+        # _TAG_NEQ_VAR_TUP : ~(SUC0^2 0 = SUC0^12 0). Flip to match.
+        p.have(f"h_tag_sym: ({_VAR_T_TAG}) = ({_TUP_PT_TAG})").by_thm(
+            SYM(p.fact("h_tag"))
+        )
+        p.have(f"h_neq: ~(({_VAR_T_TAG}) = ({_TUP_PT_TAG}))").by_thm(
+            _TAG_NEQ_VAR_TUP
+        )
+        p.absurd().by_conj("h_neq", "h_tag_sym")
 
 
 @proof
 def TUP_PT_DISJOINT_EMPTY(p):
-    """|- !a b. ~(Tup_pt a b = Empty_t). STUB."""
+    """|- !a b. ~(Tup_pt a b = Empty_t)."""
+    from tactics import SPECL
+
     p.goal("!a b. ~(Tup_pt a b = Empty_t)", types={"a": nat0_ty, "b": nat0_ty})
-    p.sorry()
+    p.fix("a b")
+    tup_at = SPECL([p._parse("a"), p._parse("b")], TUP_PT_AT)
+    with p.suppose("h: Tup_pt a b = Empty_t"):
+        p.have(
+            f"h_po: Pair_ord ({_TUP_PT_TAG}) (Pair_ord a b) = 0"
+        ).by_rewrite_of("h", [tup_at, EMPTY_T_DEF])
+        p.have(
+            f"h_neg: ~(Pair_ord ({_TUP_PT_TAG}) (Pair_ord a b) = 0)"
+        ).by(_NEQ_PAIR_ORD_ZERO, f"({_TUP_PT_TAG})", "Pair_ord a b")
+        p.absurd().by_conj("h_neg", "h_po")
 
 
 @proof
 def TUP_PT_DISJOINT_APP_PT(p):
     """|- !a b f args. ~(Tup_pt a b = App_pt f args).
 
-    Tag disjointness: Tup_pt has tag 12, App_pt has tag 11. STUB.
+    Tag-disjointness: Tup_pt has tag 12, App_pt has tag 11.
     """
+    from tactics import SPECL, CONJUNCT1
+
     p.goal(
         "!a b f args. ~(Tup_pt a b = App_pt f args)",
         types={"a": nat0_ty, "b": nat0_ty, "f": nat0_ty, "args": nat0_ty},
     )
-    p.sorry()
+    p.fix("a b f args")
+    tup_at = SPECL([p._parse("a"), p._parse("b")], TUP_PT_AT)
+    app_at = SPECL([p._parse("f"), p._parse("args")], APP_PT_AT)
+    with p.suppose("h: Tup_pt a b = App_pt f args"):
+        p.have(
+            f"h_po: Pair_ord ({_TUP_PT_TAG}) (Pair_ord a b) "
+            f"     = Pair_ord ({_APP_PT_TAG}) (Pair_ord f args)"
+        ).by_rewrite_of("h", [tup_at, app_at])
+        p.have(
+            f"h_inj: ({_TUP_PT_TAG}) = ({_APP_PT_TAG}) /\\ "
+            f"Pair_ord a b = Pair_ord f args"
+        ).by(
+            PAIR_ORD_INJ,
+            f"({_TUP_PT_TAG})",
+            "Pair_ord a b",
+            f"({_APP_PT_TAG})",
+            "Pair_ord f args",
+            "h_po",
+        )
+        p.have(f"h_tag: ({_TUP_PT_TAG}) = ({_APP_PT_TAG})").by_thm(
+            CONJUNCT1(p.fact("h_inj"))
+        )
+        # _TAG_NEQ_APP_TUP is keyed (lo, hi) = (11, 12), so its conclusion
+        # is ~(SUC0^11 0 = SUC0^12 0); matches h_tag directly (no SYM).
+        p.have(f"h_neq: ~(({_APP_PT_TAG}) = ({_TUP_PT_TAG}))").by_thm(
+            _TAG_NEQ_APP_TUP
+        )
+        # DSL friction: contradiction finder for `=` / `=` against
+        # different SUC0-encodings only triggers on operand match; here
+        # h_tag : a = b and h_neq : ~(b = a) differ by orientation, so we
+        # flip first.
+        from tactics import SYM as _SYM
+
+        p.have(f"h_tag_sym: ({_APP_PT_TAG}) = ({_TUP_PT_TAG})").by_thm(
+            _SYM(p.fact("h_tag"))
+        )
+        p.absurd().by_conj("h_neq", "h_tag_sym")
 
 
 # ---------------------------------------------------------------------------
