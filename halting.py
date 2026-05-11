@@ -507,27 +507,54 @@ def _prove_sk_step_F_at():
 _SK_STEP_F_AT = _prove_sk_step_F_at()
 
 
+def _lift_select_eq(r_var, pw_eq_th):
+    """Given ``|- P r = Q r`` with ``r`` free (and not in hypotheses),
+    return ``|- (@r. P r) = (@r. Q r)``.
+
+    Two-step lift: ``ABS`` over ``r`` to land on
+    ``(\\r. P r) = (\\r. Q r)``, then ``AP_TERM`` the polymorphic ``@``
+    constant instantiated at ``r``'s type.  Generic enough to promote
+    to ``tactics.py`` if more SELECT-recursive definitions arrive.
+    """
+    from tactics import AP_TERM as _AP_TERM
+    from fusion import ABS as _ABS, aty as _aty
+    abs_eq = _ABS(r_var, pw_eq_th)
+    eps_const = mk_const("@", [(r_var.ty, _aty)])
+    return _AP_TERM(eps_const, abs_eq)
+
+
 @proof
 def SK_STEP_MONO(p):
     """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
                  ==> _sk_step_F f n = _sk_step_F g n.
 
-    The body is ``@r. D1 \\/ D2 \\/ D3 \\/ D4`` where:
+    Body is ``@r. D1 \\/ D2 \\/ D3 \\/ D4``:
       D1 (K-redex), D2 (~K /\\ S-redex), D4 (~K /\\ ~S /\\ ~App /\\ r=t)
-        are f-free -- REFL on each.
-      D3 (~K /\\ ~S /\\ App-recursion) uses ``f a`` and ``f b`` at
-        a, b satisfying ``t = App_t a b``, hence a, b < n by
-        NAT0_LT_APP_T_L / NAT0_LT_APP_T_R, so the hypothesis gives
-        ``f a = g a`` and ``f b = g b``.  Substitute, get D3-g.
+        are f-free; REFL each.
+      D3 (~K /\\ ~S /\\ ?a b. n = App_t a b /\\ inner) uses ``f a`` and
+        ``f b``; for ``a, b < n`` (NAT0_LT_APP_T_L/R) the IH gives
+        ``f a = g a`` / ``f b = g b``.  Handled by
+        ``_mono_iff_value_binary_pw_step``.
 
-    To lift body-equality through the SELECT: prove pointwise
-    ``body[f, n, r] = body[g, n, r]`` at fresh r, GEN+ABS to function
-    equality, AP_TERM Eps to SELECT equality.
-
-    DSL friction: this pointwise + SELECT-lift step is mechanical but
-    has no DSL primitive -- expanded inline below.  Stub'd for now;
-    see TODO_SK_STEP_MONO.
+    Stitch per-disjunct iffs via ``or_chain_collapse``; lift through
+    the SELECT via ``_lift_select_eq``; chain through the two
+    SPECL'd ``_SK_STEP_F_AT`` equations.
     """
+    from tactics import (
+        AP_TERM as _AP_TERM,
+        SPECL as _SPECL,
+        TRANS as _TRANS,
+        SYM as _SYM,
+        or_chain_collapse as _or_collapse,
+    )
+    from hf_syntax import _mono_iff_value_binary_pw_step, _extract_nfg
+    from fusion import mk_comb as _mk_comb
+    from axioms import (
+        mk_and as _mk_and, mk_or as _mk_or, mk_not as _mk_not,
+        mk_exists as _mk_exists,
+    )
+    from basics import mk_eq as _mk_eq
+
     p.goal(
         "!f g n. (!k. nat0_lt k n ==> f k = g k) "
         "==> _sk_step_F f n = _sk_step_F g n",
@@ -538,17 +565,124 @@ def SK_STEP_MONO(p):
             "k": nat0_ty,
         },
     )
-    # DSL friction: monotonicity of SELECT-shaped value recursion is
-    # not factored into a reusable helper (unlike ``mono_iff_*`` for
-    # disjunctive bool bodies).  The proof requires:
-    #   1. Show pointwise body-equality at fresh r (case-splitting on
-    #      whether t = App_t a b, for the recursive disjunct).
-    #   2. ABS over r to get (\r. body_f) = (\r. body_g).
-    #   3. AP_TERM Eps to get SELECT-equality.
-    #   4. Chain through _SK_STEP_F_AT to land on _sk_step_F f n =
-    #      _sk_step_F g n.
-    # Sorried pending the dedicated helper.
-    p.sorry()
+    p.fix("f g n")
+    p.assume("h: !k. nat0_lt k n ==> f k = g k")
+    h_th = p.fact("h")
+    n_t, f_t, g_t, k_ty = _extract_nfg(h_th)
+    r_var = Var("r", nat0_ty)
+
+    # ---- Build the 4 disjuncts at fresh r, sharing structure -------------
+    # K-shape, S-shape, App-shape (used in negations and as targets).
+    x_v = Var("x", nat0_ty)
+    y_v = Var("y", nat0_ty)
+    z_v = Var("z", nat0_ty)
+    a_v = Var("a", nat0_ty)
+    b_v = Var("b", nat0_ty)
+    K_redex_body = _mk_eq(
+        n_t, mk_app(App_t, mk_app(App_t, K_t, x_v), y_v)
+    )
+    K_shape = _mk_exists(x_v, _mk_exists(y_v, K_redex_body))
+    S_redex_body = _mk_eq(
+        n_t,
+        mk_app(App_t, mk_app(App_t, mk_app(App_t, S_t, x_v), y_v), z_v),
+    )
+    S_shape = _mk_exists(x_v, _mk_exists(y_v, _mk_exists(z_v, S_redex_body)))
+    App_body = _mk_eq(n_t, mk_app(App_t, a_v, b_v))
+    App_shape = _mk_exists(a_v, _mk_exists(b_v, App_body))
+
+    # D1: ?x y. n = App_t (App_t K_t x) y /\ r = x
+    D1 = _mk_exists(
+        x_v,
+        _mk_exists(
+            y_v,
+            _mk_and(K_redex_body, _mk_eq(r_var, x_v)),
+        ),
+    )
+    # D2: ~K /\ ?x y z. n = App_t (App_t (App_t S_t x) y) z /\ r = App_t (App_t x z) (App_t y z)
+    S_reduct_val = mk_app(
+        App_t,
+        mk_app(App_t, x_v, z_v),
+        mk_app(App_t, y_v, z_v),
+    )
+    D2 = _mk_and(
+        _mk_not(K_shape),
+        _mk_exists(
+            x_v,
+            _mk_exists(
+                y_v,
+                _mk_exists(
+                    z_v,
+                    _mk_and(S_redex_body, _mk_eq(r_var, S_reduct_val)),
+                ),
+            ),
+        ),
+    )
+    # D3 (built from the rest_builder via the helper).
+    # D4: ~K /\ ~S /\ ~App /\ r = n
+    D4 = _mk_and(
+        _mk_not(K_shape),
+        _mk_and(
+            _mk_not(S_shape),
+            _mk_and(_mk_not(App_shape), _mk_eq(r_var, n_t)),
+        ),
+    )
+
+    # ---- Per-disjunct iffs -----------------------------------------------
+    eq_D1 = REFL(D1)
+    eq_D2 = REFL(D2)
+    eq_D4 = REFL(D4)
+
+    # _mono_iff_value_binary_pw_step's ``args`` are extra arguments
+    # applied AFTER the recursive call ``f w`` -- for our case
+    # ``f : nat0 -> nat0`` the recursive call is already complete at
+    # ``f a`` / ``f b``, so ``args=[]``.  ``r_var`` is captured by
+    # closure rather than threaded as an arg.
+    def _D3_rest_builder(fn, a, b, args):
+        fn_a = mk_app(fn, a)
+        fn_b = mk_app(fn, b)
+        da = _mk_and(
+            _mk_not(_mk_eq(fn_a, a)),
+            _mk_eq(r_var, mk_app(App_t, fn_a, b)),
+        )
+        db = _mk_and(
+            _mk_eq(fn_a, a),
+            _mk_and(
+                _mk_not(_mk_eq(fn_b, b)),
+                _mk_eq(r_var, mk_app(App_t, a, fn_b)),
+            ),
+        )
+        dc = _mk_and(
+            _mk_eq(fn_a, a),
+            _mk_and(_mk_eq(fn_b, b), _mk_eq(r_var, n_t)),
+        )
+        return _mk_or(da, _mk_or(db, dc))
+
+    eq_D3_inner = _mono_iff_value_binary_pw_step(
+        App_t,
+        NAT0_LT_APP_T_L, NAT0_LT_APP_T_R,
+        h_th,
+        args=[],
+        rest_builder=_D3_rest_builder,
+        recurses_l=True,
+    )
+    # |- (?a b. n = App_t a b /\ rest_f) = (?a b. n = App_t a b /\ rest_g)
+
+    # Prefix ~S, then ~K via partial-application AP_TERM on /\.
+    AND_C = mk_const("/\\", [])
+    eq_D3_with_ns = _AP_TERM(_mk_comb(AND_C, _mk_not(S_shape)), eq_D3_inner)
+    eq_D3 = _AP_TERM(_mk_comb(AND_C, _mk_not(K_shape)), eq_D3_with_ns)
+
+    # ---- Stitch via or_chain_collapse ------------------------------------
+    body_eq_at_r = _or_collapse([eq_D1, eq_D2, eq_D3, eq_D4])
+    # |- body[f, n, r] = body[g, n, r]   (r free)
+
+    # ---- Lift through SELECT and chain through _SK_STEP_F_AT -------------
+    select_eq = _lift_select_eq(r_var, body_eq_at_r)
+    spec_f = _SPECL([f_t, n_t], _SK_STEP_F_AT)
+    spec_g = _SPECL([g_t, n_t], _SK_STEP_F_AT)
+    final = _TRANS(spec_f, _TRANS(select_eq, _SYM(spec_g)))
+
+    p.thus("_sk_step_F f n = _sk_step_F g n").by_thm(final)
 
 
 # Well-founded recursive definition.
