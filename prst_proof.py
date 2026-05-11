@@ -813,19 +813,282 @@ Prov_PRST_internal = mk_const("Prov_PRST_internal", [])
 
 @proof
 def IS_PFORM_PROV_PRST_INTERNAL(p):
-    """|- is_pform Prov_PRST_internal. STUB."""
+    """|- is_pform Prov_PRST_internal. STUB.
+
+    BLOCKED (design hole, not a proof gap):
+      Prov_PRST_internal mentions `App_pt find_proof_pr (...)`, and
+      `find_proof_pr := mu_sym Proof_PRST_pr` (FIND_PROOF_PR_DEF in
+      prst_pr). is_pterm's App_pt branch requires `is_pr_sym fn`
+      (IS_PTERM_AT_APP), but IS_PR_SYM_DEF has only 5 disjuncts at tags
+      0/1/2/3/4 and `mu_sym f = Pair_ord 6 f` has tag 6. So
+      `is_pr_sym (mu_sym _) = F` under the current definitions, hence
+      `is_pterm (App_pt find_proof_pr _) = F`, hence
+      `is_pform Prov_PRST_internal = F`.
+      Resolution requires *either* widening IS_PR_SYM_DEF to admit
+      mu-symbols (mirroring is_partial_pr_sym), *or* relaxing
+      IS_PTERM's App branch to use is_partial_pr_sym. Both are design
+      changes that ripple through Layer 2; outside Layer 7's scope.
+    """
     p.goal("is_pform Prov_PRST_internal")
     p.sorry()
 
 
+# Helper: |- !v. free_in_p Empty_pt v = F.
+#
+# Empty_pt matches NONE of free_in_p's 7 disjuncts (the constructor
+# patterns Var_pt / Tup_pt / Eq_pf / In_pa / Not_pf / Imp_pf / App_pt),
+# so the recursive body collapses to F at Empty_pt. derive_rec_eq_pw
+# can't generate this case (it dispatches one matched disjunct, not the
+# all-mismatch fallback), and the IS_PTERM_AT_EMPTY pattern is also
+# inapplicable (is_pterm has an Empty_pt disjunct; free_in_p does not).
+#
+# Manual proof: unfold via FREE_IN_P_REC at Empty_pt, then refute each
+# of the 7 disjuncts via the constructor-vs-Empty disjointness lemma in
+# prst_syntax (VAR_PT_NEQ_EMPTY_PT / TUP_PT_NEQ_EMPTY_PT / ...).
+#
+# DSL friction:
+#  * No general "evaluate recursive body at a non-matched constructor
+#    to F" helper. The 7 cases are templatic but have to be spelled out.
+#  * `cases_on` with multi-binder existential leaves (`?a b. ...`)
+#    auto-introduces only the outermost binder. The second binder needs
+#    an explicit `p.choose(...)` inside the case.
+#  * `_h{n}` placeholder labels in `p.split("body", "(c_eq, _)")` don't
+#    survive across nested blocks reliably; we name the first conjunct
+#    explicitly and discard the rest with `_`.
+@proof
+def FREE_IN_P_AT_EMPTY(p):
+    """|- !v. free_in_p Empty_pt v = F."""
+    from tactics import SPEC, AP_THM, BETA_CONV, TRANS, SYM, EQF_INTRO
+    from basics import rand
+    from prst_syntax import (
+        FREE_IN_P_REC,
+        VAR_PT_NEQ_EMPTY_PT,
+        TUP_PT_NEQ_EMPTY_PT,
+        APP_PT_NEQ_EMPTY_PT,
+        EQ_PF_NEQ_EMPTY_PT,
+        IN_PA_NEQ_EMPTY_PT,
+        NOT_PF_NEQ_EMPTY_PT,
+        IMP_PF_NEQ_EMPTY_PT,
+    )
+
+    p.goal("!v. free_in_p Empty_pt v = F", types={"v": nat0_ty})
+    p.fix("v")
+
+    # eq_full: free_in_p Empty_pt v = <7-disjunct body[Empty_pt/n]>.
+    # FREE_IN_P_REC is `!n. free_in_p n = \v. body`; instantiate at n
+    # := Empty_pt, AP_THM at v, beta-reduce.
+    rec_empty_fn = SPEC(p._parse("Empty_pt"), FREE_IN_P_REC)
+    rec_at = AP_THM(rec_empty_fn, p._parse("v"))
+    rhs_beta = BETA_CONV(rand(rec_at._concl))
+    eq_full = TRANS(rec_at, rhs_beta)
+    body = (
+        "(?x. Empty_pt = Var_pt x /\\ v = x) \\/ "
+        "(?a b. Empty_pt = Tup_pt a b /\\ "
+        "        (free_in_p a v \\/ free_in_p b v)) \\/ "
+        "(?a b. Empty_pt = Eq_pf a b /\\ "
+        "        (free_in_p a v \\/ free_in_p b v)) \\/ "
+        "(?a b. Empty_pt = In_pa a b /\\ "
+        "        (free_in_p a v \\/ free_in_p b v)) \\/ "
+        "(?x. Empty_pt = Not_pf x /\\ free_in_p x v) \\/ "
+        "(?a b. Empty_pt = Imp_pf a b /\\ "
+        "        (free_in_p a v \\/ free_in_p b v)) \\/ "
+        "(?fn args. Empty_pt = App_pt fn args /\\ free_in_p args v)"
+    )
+    p.have(f"eq_full: free_in_p Empty_pt v = ({body})").by_thm(eq_full)
+
+    with p.have("neg: ~ free_in_p Empty_pt v").proof():
+        with p.suppose("h: free_in_p Empty_pt v"):
+            p.have(f"h_body: {body}").by_eq_mp("eq_full", "h")
+            with p.cases_on("h_body"):
+                # Var_pt: ?x. Empty_pt = Var_pt x /\ v = x.
+                with p.case("c1: ?x. Empty_pt = Var_pt x /\\ v = x"):
+                    p.split("x_eq", "(c_eq, _)")
+                    p.have("c_neq: ~(Var_pt x = Empty_pt)").by(
+                        VAR_PT_NEQ_EMPTY_PT, "x"
+                    )
+                    p.have("c_eq_sym: Var_pt x = Empty_pt").by_thm(
+                        SYM(p.fact("c_eq"))
+                    )
+                    p.absurd().by_conj("c_neq", "c_eq_sym")
+                # Tup_pt
+                with p.case(
+                    "c2: ?a b. Empty_pt = Tup_pt a b /\\ "
+                    "        (free_in_p a v \\/ free_in_p b v)"
+                ):
+                    p.choose("b", "a_eq")
+                    p.split("b_eq", "(c_eq, _)")
+                    p.have("c_neq: ~(Tup_pt a b = Empty_pt)").by(
+                        TUP_PT_NEQ_EMPTY_PT, "a", "b"
+                    )
+                    p.have("c_eq_sym: Tup_pt a b = Empty_pt").by_thm(
+                        SYM(p.fact("c_eq"))
+                    )
+                    p.absurd().by_conj("c_neq", "c_eq_sym")
+                # Eq_pf
+                with p.case(
+                    "c3: ?a b. Empty_pt = Eq_pf a b /\\ "
+                    "        (free_in_p a v \\/ free_in_p b v)"
+                ):
+                    p.choose("b", "a_eq")
+                    p.split("b_eq", "(c_eq, _)")
+                    p.have("c_neq: ~(Eq_pf a b = Empty_pt)").by(
+                        EQ_PF_NEQ_EMPTY_PT, "a", "b"
+                    )
+                    p.have("c_eq_sym: Eq_pf a b = Empty_pt").by_thm(
+                        SYM(p.fact("c_eq"))
+                    )
+                    p.absurd().by_conj("c_neq", "c_eq_sym")
+                # In_pa
+                with p.case(
+                    "c4: ?a b. Empty_pt = In_pa a b /\\ "
+                    "        (free_in_p a v \\/ free_in_p b v)"
+                ):
+                    p.choose("b", "a_eq")
+                    p.split("b_eq", "(c_eq, _)")
+                    p.have("c_neq: ~(In_pa a b = Empty_pt)").by(
+                        IN_PA_NEQ_EMPTY_PT, "a", "b"
+                    )
+                    p.have("c_eq_sym: In_pa a b = Empty_pt").by_thm(
+                        SYM(p.fact("c_eq"))
+                    )
+                    p.absurd().by_conj("c_neq", "c_eq_sym")
+                # Not_pf
+                with p.case(
+                    "c5: ?x. Empty_pt = Not_pf x /\\ free_in_p x v"
+                ):
+                    p.split("x_eq", "(c_eq, _)")
+                    p.have("c_neq: ~(Not_pf x = Empty_pt)").by(
+                        NOT_PF_NEQ_EMPTY_PT, "x"
+                    )
+                    p.have("c_eq_sym: Not_pf x = Empty_pt").by_thm(
+                        SYM(p.fact("c_eq"))
+                    )
+                    p.absurd().by_conj("c_neq", "c_eq_sym")
+                # Imp_pf
+                with p.case(
+                    "c6: ?a b. Empty_pt = Imp_pf a b /\\ "
+                    "        (free_in_p a v \\/ free_in_p b v)"
+                ):
+                    p.choose("b", "a_eq")
+                    p.split("b_eq", "(c_eq, _)")
+                    p.have("c_neq: ~(Imp_pf a b = Empty_pt)").by(
+                        IMP_PF_NEQ_EMPTY_PT, "a", "b"
+                    )
+                    p.have("c_eq_sym: Imp_pf a b = Empty_pt").by_thm(
+                        SYM(p.fact("c_eq"))
+                    )
+                    p.absurd().by_conj("c_neq", "c_eq_sym")
+                # App_pt
+                with p.case(
+                    "c7: ?fn args. Empty_pt = App_pt fn args /\\ "
+                    "        free_in_p args v"
+                ):
+                    p.choose("args", "fn_eq")
+                    p.split("args_eq", "(c_eq, _)")
+                    p.have("c_neq: ~(App_pt fn args = Empty_pt)").by(
+                        APP_PT_NEQ_EMPTY_PT, "fn", "args"
+                    )
+                    p.have("c_eq_sym: App_pt fn args = Empty_pt").by_thm(
+                        SYM(p.fact("c_eq"))
+                    )
+                    p.absurd().by_conj("c_neq", "c_eq_sym")
+
+    # ~P -> (P = F): EQF_INTRO yields `F = P`; SYM flips to `P = F`.
+    p.thus("free_in_p Empty_pt v = F").by_thm(SYM(EQF_INTRO(p.fact("neg"))))
+
+
 @proof
 def FREE_IN_PROV_PRST_INTERNAL(p):
-    """|- !v. free_in_p Prov_PRST_internal v <=> v = var_x. STUB."""
+    """|- !v. free_in_p Prov_PRST_internal v = (v = var_x).
+
+    Prov_PRST_internal unfolds to ``Eq_pf <lhs> T_pt`` where
+    <lhs> = App_pt Proof_PRST_pr (Tup_pt (App_pt find_proof_pr
+              (Tup_pt (Var_pt var_x) Empty_pt))
+            (Tup_pt (Var_pt var_x) Empty_pt)).
+
+    free_in_p reduction:
+      * On T_pt = App_pt adj_sym (Tup_pt Empty_pt (Tup_pt Empty_pt
+        Empty_pt)): everything bottoms out at Empty_pt, so free_in_p
+        T_pt v = F.
+      * On the lhs Eq_pf-LHS: free_in_p (App_pt _ args) v reduces to
+        free_in_p args v (FREE_IN_P_AT_APP, no constraint on the fn
+        slot -- contrast is_pterm which requires is_pr_sym). The two
+        Tup_pt cons cells each reduce to free_in_p (Var_pt var_x) v
+        \\/ free_in_p Empty_pt v = (v = var_x) \\/ F = (v = var_x).
+      * Result: (v = var_x) \\/ F = (v = var_x).
+
+    The free_in_p computation is independent of well-formedness, so
+    the IS_PFORM_PROV_PRST_INTERNAL design hole (mu_sym not in
+    is_pr_sym) does not block this lemma.
+    """
+    from prst_pr import T_PT_DEF, ADJ_PT_DEF
+    from prst_syntax import (
+        FREE_IN_P_AT_EQ,
+        FREE_IN_P_AT_APP,
+        FREE_IN_P_AT_TUP,
+        FREE_IN_P_AT_VAR,
+    )
+    from tactics import (
+        OR_F_LEFT,
+        OR_F_RIGHT,
+        DISJ_CASES,
+        DISJ1,
+        DEDUCT_ANTISYM_RULE,
+        GEN,
+        DISCH,
+    )
+    from fusion import Var, ASSUME, bool_ty
+    from basics import mk_app, mk_const
+
+    # Local OR_IDEMP: |- !p. (p \/ p) = p. Used to collapse the two
+    # copies of `(v = var_x) \/ F` that fall out of the symmetric
+    # `Tup_pt (App_pt find_proof_pr ...) (Tup_pt (Var_pt var_x) Empty_pt)`
+    # split. tactics.py ships OR_F_LEFT/RIGHT but not OR_IDEMP, and
+    # AC_PROVE handles assoc+comm but not idempotence.
+    #
+    # DSL friction: by_rewrite's normal-form check is strict modulo the
+    # supplied + active simp rules. Without OR_IDEMP, `(v=var_x) \/
+    # (v=var_x)` on the LHS won't collapse to match the bare `v=var_x`
+    # RHS even though they are obviously equivalent. Pyzar has no
+    # built-in propositional simplifier; idempotence is opt-in.
+    _pv = Var("p", bool_ty)
+    _or_pp = mk_app(mk_const("\\/", []), _pv, _pv)
+    _or_pp_th = ASSUME(_or_pp)
+    _p_imp_p = DISCH(_pv, ASSUME(_pv))
+    _OR_IDEMP = GEN(
+        _pv,
+        DEDUCT_ANTISYM_RULE(
+            DISJ1(ASSUME(_pv), _pv),  # p |- p \/ p
+            DISJ_CASES(_or_pp_th, _p_imp_p, _p_imp_p),  # p \/ p |- p
+        ),
+    )
+
     p.goal(
         "!v. free_in_p Prov_PRST_internal v = (v = var_x)",
         types={"v": nat0_ty},
     )
-    p.sorry()
+    p.fix("v")
+    # Applied-form of ADJ_PT_DEF at the concrete arguments used by T_pt.
+    # ADJ_PT_DEF is `Adj_pt = \a b. App_pt adj_sym ...`; rewriting with
+    # the lambda form alone wouldn't beta-reduce inside by_rewrite (the
+    # rewriter doesn't beta by default; that's by_rewrite_of(beta=True)
+    # / by_unfold territory). p.unfold delivers the post-beta applied
+    # equation at the concrete args directly.
+    adj_at = p.unfold(ADJ_PT_DEF, "Empty_pt", "Empty_pt")
+
+    p.thus("free_in_p Prov_PRST_internal v = (v = var_x)").by_rewrite([
+        prov_prst_internal_def,
+        T_PT_DEF,
+        adj_at,
+        FREE_IN_P_AT_EQ,
+        FREE_IN_P_AT_APP,
+        FREE_IN_P_AT_TUP,
+        FREE_IN_P_AT_VAR,
+        FREE_IN_P_AT_EMPTY,
+        OR_F_LEFT,
+        OR_F_RIGHT,
+        _OR_IDEMP,
+    ])
 
 
 @proof

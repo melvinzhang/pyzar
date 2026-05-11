@@ -1,13 +1,13 @@
 # PRST `p.sorry()` plan of attack
 
-Census across `prst_*.py` (39 sorries remaining; 19 + 3 + 5 + 7 + 8 = 42 cleared so far):
+Census across `prst_*.py` (38 sorries remaining; 19 + 3 + 5 + 7 + 8 + 1 = 43 cleared so far):
 
 | File | sorries | Role |
 |------|---------|------|
 | `prst_syntax.py` | 0 (was 19) | App_pt constructor + extended `is_pterm`/`is_pform`/`free_in_p`/`substitute_p` AT-equations and preservation lemmas — **DONE** |
 | `prst_connectives.py` | 0 (was 3) | `substitute_p` distribution over And/Or/Iff (alias-thin wrappers) — **DONE** (Layer 3) |
 | `prst_pr.py` | 5 (was 17) | PR-symbol registry + defining-equation axioms + `is_pr_def` recogniser + mu-closure — Layer 4 **partial** (5 PR_ARITY_* remaining), Layer 5 **DONE** |
-| `prst_proof.py` | 12 (was 15) | `Proof_PRST` / `Prov_PRST` + closure rules + per-axiom `PROV_PRST_*_DEF` corollaries + `MU_CORRECTNESS` + PR-eval lemmas + `Prov_PRST_internal` — Layer 6 **partial** (8 cleared) |
+| `prst_proof.py` | 11 (was 15) | `Proof_PRST` / `Prov_PRST` + closure rules + per-axiom `PROV_PRST_*_DEF` corollaries + `MU_CORRECTNESS` + PR-eval lemmas + `Prov_PRST_internal` — Layer 6 **partial** (8 cleared), Layer 7 **partial** (1 cleared: FREE_IN_PROV_PRST_INTERNAL) |
 | `prst_repr.py` | 7 | Boolean-tag disjointness + parametric representability schema + four headline representations |
 | `prst_godel1.py` | 6 | Diagonal lemma, Gödel sentence, consistency, Sigma_1-soundness, G1, essential undecidability |
 | `prst_godel2.py` | 8 | D1/D2/D3 derivability conditions, `mp_combine_pr` correctness, Löb, G2 |
@@ -185,18 +185,29 @@ Depends on Layer 0 real `Proof_PRST_def` body + Layers 1-5.
 
 ---
 
-## Layer 7 — `prst_proof` PR-eval + `Prov_PRST_internal` (5 sorries)
+## Layer 7 — `prst_proof` PR-eval + `Prov_PRST_internal` (5 sorries) — **partial: 1/6 cleared**
 
 Depends on Layer 6 and on Layer 0 real bodies of `numeral_pr` / `substitute_pr` / `diag_pr`.
 
-- `PROV_PRST_SUBSTITUTE_EVAL` — structural induction on `F` through five constructor cases; each case is one `PRST_REC_STEP` instance against `substitute_pr`'s defining equations
-- `PROV_PRST_NUMERAL_EVAL` — induction on `n`
-- `PROV_PRST_DIAG_EVAL` — composition of the previous two via `DIAG_PR_DEFINING`
-- `IS_PFORM_PROV_PRST_INTERNAL` — closure of `is_pform` under `Eq_pf` / `App_pt` (Layer 2)
-- `FREE_IN_PROV_PRST_INTERNAL` — same, for `free_in_p`
-- `PROV_PRST_REPRESENTS` — the headline representability theorem; ~80 lines per the file comment, both directions of the iff.
+**Done (1 cleared):**
+- `FREE_IN_PROV_PRST_INTERNAL` — one `by_rewrite` over the unfolded `Prov_PRST_internal` body, `T_pt`/`Adj_pt` definitions, the four FREE_IN_P_AT_* equations (EQ/APP/TUP/VAR), a new `FREE_IN_P_AT_EMPTY` helper, and boolean simp rules (OR_F_LEFT/RIGHT + a locally-derived OR_IDEMP). Independent of well-formedness, so the IS_PFORM design hole below doesn't block it.
 
-**Cost:** ~250 lines. This is where the PR-symbol-as-term design pays off: every "eval" lemma is a `PROV_PRST_REC_STEP`-driven walk, no trace sets.
+**New helper:** `FREE_IN_P_AT_EMPTY: |- !v. free_in_p Empty_pt v = F` (lives in `prst_proof.py`). `Empty_pt` matches none of `free_in_p`'s 7 disjuncts, so `derive_rec_eq_pw` can't generate this case (it dispatches matched disjuncts, not the all-mismatch fallback) and the `IS_PTERM_AT_EMPTY` pattern is inapplicable (is_pterm has an Empty_pt disjunct; free_in_p does not). Manual proof: unfold via `FREE_IN_P_REC` at `Empty_pt`, case-split, refute each disjunct via the relevant constructor-vs-Empty disjointness lemma (`VAR_PT_NEQ_EMPTY_PT` / `TUP_PT_NEQ_EMPTY_PT` / …). ~110 lines.
+
+**Blocked (5 remaining):**
+- `PROV_PRST_SUBSTITUTE_EVAL` — **blocked**: Layer 0 placeholder. `substitute_pr_def = proj_sym 0 (SUC0 (SUC0 (SUC0 0)))`, not the real ~100-symbol composition. The lemma claims `App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))` equals `substitute F t v`, but under the placeholder it would (after PROJ-axiom reduction) equal `F`, not `substitute F t v`.
+- `PROV_PRST_NUMERAL_EVAL` — **blocked**: `numeral_pr_def` has a real `rec_sym` composition body, but the proof needs `PROV_PRST_MP` + `PROV_PRST_SUBST_AXIOM` (Layer 6 sorries) + `PROV_PRST_ADJ_DEF_AT` (Layer 6 sorry) to evaluate the recursive composition through PR-defining axioms.
+- `PROV_PRST_DIAG_EVAL` — **blocked**: composition of SUBSTITUTE_EVAL + NUMERAL_EVAL, and `diag_pr_def` is itself a partial composition (var_x slot left as a structural hole pending a `const_sym` primitive).
+- `IS_PFORM_PROV_PRST_INTERNAL` — **blocked by design hole**: `Prov_PRST_internal` mentions `App_pt find_proof_pr (...)`, and `find_proof_pr := mu_sym Proof_PRST_pr`. `is_pterm`'s App_pt branch requires `is_pr_sym fn` (`IS_PTERM_AT_APP`), but `IS_PR_SYM_DEF` (prst_syntax.py L702) has 5 disjuncts at tags 0/1/2/3/4 and `mu_sym f = Pair_ord 6 f` (tag 6). Hence `is_pr_sym (mu_sym _) = F`, so `is_pterm (App_pt find_proof_pr _) = F`, hence `is_pform Prov_PRST_internal = F`. Resolution requires *either* widening `IS_PR_SYM_DEF` to admit mu-symbols (mirroring `is_partial_pr_sym`) *or* relaxing `is_pterm`'s App branch to use `is_partial_pr_sym`. Both ripple through Layer 2 (size lemmas, MONOs, the `_mono_iff_app_pt_step` factory's pred slot).
+- `PROV_PRST_REPRESENTS` — **blocked**: depends on `PROV_PRST_DIAG_EVAL` (also blocked).
+
+**DSL friction newly observed (Layer 7 part 1):**
+- No public `OR_IDEMP` (`|- !p. (p \/ p) = p`). `tactics.OR_F_LEFT`/`OR_F_RIGHT` cover the `F`-leg simplifications and `AC_PROVE` handles assoc+comm, but `by_rewrite`'s normal-form check is strict modulo only the supplied + active simp rules — without idempotence, symmetric `Tup_pt (X) (X)`-derived `P \/ P` won't collapse. Derived locally from `DISJ1` + `DISJ_CASES` + `DEDUCT_ANTISYM_RULE`; worth promoting to tactics.py for any AT-equation chain that walks symmetric `Tup_pt` cells.
+- `by_rewrite` doesn't beta-reduce by default. To use `ADJ_PT_DEF` (`Adj_pt = \a b. ...`) at concrete `Adj_pt Empty_pt Empty_pt`, the lambda-form rule alone produces `(\a b. ...) Empty_pt Empty_pt` and stalls. `p.unfold(ADJ_PT_DEF, "Empty_pt", "Empty_pt")` delivers the post-beta applied form. For chains that hit multiple Adj/comp applications, hand-build the applied form once per arg shape or use `by_unfold` / `by_rewrite_of(beta=True)`.
+- `tactics.DISCH` (kernel rule) is re-exported from `tactics`, not `fusion`. The shape `from fusion import ASSUME, DISCH` fails — `fusion` ships `ASSUME` but `DISCH` is in `tactics`.
+- `bool_ty` lives in `fusion`, not `basics`. (`basics` re-exports many constructors but not the bare type.)
+
+**Cost note:** Original estimate was ~250 lines for the whole layer; in practice the only honestly tractable lemma without finishing Layer 0/6 is FREE_IN_PROV_PRST_INTERNAL itself (~30 lines once FREE_IN_P_AT_EMPTY is in place + ~110 lines for the helper). The other 5 remain genuine blockers, not proof-writing exercise.
 
 ---
 
@@ -298,6 +309,7 @@ Land Layer 0 + Layer 1 + Layer 3 together — they unblock Layer 2 (the largest 
 - `18f81a3` Layer 4 cleanup — drop wf-lt scaffolding from pr_arity (avoided a sorry'd MONO without unlocking any PR_ARITY_* lemma).
 - `ad84a26` Layer 5 — 6 IS_PR_DEF_HOLDS_* + IS_PARTIAL_PR_SYM_MONO + IS_PARTIAL_PR_SYM_MU + new NAT0_LT_MU_SYM helper.
 - `2ab7431` Layer 6 part 1 — new PROOF_PRST_AT helper + PROOF_PRST_NIL + PROV_PRST_AXIOM + 6 PROV_PRST_*_DEF.
+- *(pending)* Layer 7 part 1 — new FREE_IN_P_AT_EMPTY helper + FREE_IN_PROV_PRST_INTERNAL. The other 5 Layer 7 sorries are documented as blockers (4 require Layer 0 real PR-symbol bodies; IS_PFORM_PROV_PRST_INTERNAL requires a design decision on whether `is_pr_sym` admits `mu_sym`).
 
-**Cleared:** 42 sorries (19 + 3 + 5 + 7 + 8).
-**Remaining:** 39 sorries (5 in prst_pr, 12 in prst_proof, 7 in prst_repr, 6 in prst_godel1, 8 in prst_godel2). prst_proof's Layer 6 has 6 sorries to go (MONO, CONS, ADJ_DEF_AT, MP, SUBST_AXIOM, MU_CORRECTNESS); Layer 7 owns the other 6.
+**Cleared:** 43 sorries (19 + 3 + 5 + 7 + 8 + 1).
+**Remaining:** 38 sorries (5 in prst_pr, 11 in prst_proof, 7 in prst_repr, 6 in prst_godel1, 8 in prst_godel2). prst_proof's Layer 6 has 6 sorries to go (MONO, CONS, ADJ_DEF_AT, MP, SUBST_AXIOM, MU_CORRECTNESS); Layer 7 owns 5 of the remaining 11 (1 cleared).
