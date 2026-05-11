@@ -315,6 +315,94 @@ _TAG_NEQ_APP_TUP = _prove_tag_neq("_TAG_NEQ_APP_TUP", 11, 12)
 _VAR_T_TAG = _suc_chain(2)
 
 
+# ---------------------------------------------------------------------------
+# Local mono-step helper: per-disjunct iff for the App_pt-shape disjunct
+# in ``_is_pterm_F``.
+#
+#   (?fn args. n = App_pt fn args /\ P fn /\ f args)
+#     = (?fn args. n = App_pt fn args /\ P fn /\ g args)
+#
+# DSL friction: hf_syntax ships ``mono_iff_binary_right_step`` for the
+# ``?a b. n = C a b /\ f b`` shape, but PRST's App_pt disjunct adds the
+# non-recursive ``is_pr_sym fn`` predicate between the constructor
+# equation and the recursive call. The standard helper doesn't accept an
+# extra conjunct, so we adapt its body inline.
+# ---------------------------------------------------------------------------
+
+
+def _mono_iff_app_pt_step(pred_const, size_lemma_r, hyp_th):
+    """``(?a b. n = App_pt a b /\\ P a /\\ f b)
+        = (?a b. n = App_pt a b /\\ P a /\\ g b)``
+    where ``P = pred_const`` is a unary predicate term independent of f/g.
+    """
+    from tactics import (
+        ASSUME, CHOOSE_WITNESS, CONJUNCT1, CONJUNCT2, CONJ, EQ_MP, EXISTS,
+        REWRITE_RULE, SPEC, SYM, MP, DEDUCT_ANTISYM_RULE,
+    )
+    from hf_syntax import _extract_nfg
+    from basics import mk_eq, rand, rator
+    from axioms import mk_and, mk_exists, dest_exists
+
+    n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
+    a_var = Var("a", k_ty)
+    b_var = Var("b", k_ty)
+    App_pt_t = mk_const("App_pt", [])
+
+    def _bodies(fn):
+        ctor_ab = mk_app(App_pt_t, a_var, b_var)
+        return mk_and(
+            mk_eq(n_t, ctor_ab),
+            mk_and(mk_app(pred_const, a_var), mk_app(fn, b_var)),
+        )
+
+    body_inner_l = _bodies(f_t)
+    body_inner_r = _bodies(g_t)
+
+    LHS = mk_exists(a_var, mk_exists(b_var, body_inner_l))
+    RHS = mk_exists(a_var, mk_exists(b_var, body_inner_r))
+
+    from basics import mk_abs
+
+    def _direction(src, target_inner_body, swap_fg):
+        h_top = ASSUME(src)
+        outer_pred = dest_exists(src)
+        chosen_outer = CHOOSE_WITNESS(outer_pred, h_top)
+        new_inner_pred = dest_exists(chosen_outer._concl)
+        chosen_inner = CHOOSE_WITNESS(new_inner_pred, chosen_outer)
+        n_eq_th = CONJUNCT1(chosen_inner)
+        rest = CONJUNCT2(chosen_inner)  # P a /\ f b
+        pred_th = CONJUNCT1(rest)        # P a
+        fb_th = CONJUNCT2(rest)          # f b
+        ctor_app = rand(n_eq_th._concl)
+        w_b = rand(ctor_app)
+        w_a = rand(rator(ctor_app))
+        sl_b = SPEC(w_b, SPEC(w_a, size_lemma_r))
+        lt_b_n = REWRITE_RULE([SYM(n_eq_th)], sl_b)
+        eq_b = MP(SPEC(w_b, hyp_th), lt_b_n)
+        if swap_fg:
+            gb_out = EQ_MP(SYM(eq_b), fb_th)
+        else:
+            gb_out = EQ_MP(eq_b, fb_th)
+        new_rest = CONJ(pred_th, gb_out)
+        new_body = CONJ(n_eq_th, new_rest)
+        target_fn = g_t if not swap_fg else f_t
+        target_outer_pred_body = mk_abs(a_var, mk_exists(b_var, target_inner_body))
+        inner_pred_aw = mk_abs(
+            b_var,
+            mk_and(
+                mk_eq(n_t, mk_app(App_pt_t, w_a, b_var)),
+                mk_and(mk_app(pred_const, w_a), mk_app(target_fn, b_var)),
+            ),
+        )
+        inner_th = EXISTS(inner_pred_aw, w_b, new_body)
+        outer_th = EXISTS(target_outer_pred_body, w_a, inner_th)
+        return outer_th
+
+    R_th = _direction(LHS, body_inner_r, swap_fg=False)
+    L_th = _direction(RHS, body_inner_l, swap_fg=True)
+    return DEDUCT_ANTISYM_RULE(L_th, R_th)
+
+
 @proof
 def APP_PT_DISJOINT_VAR_T(p):
     """|- !f args v. ~(App_pt f args = Var_t v).
@@ -639,8 +727,11 @@ _IS_PTERM_F = mk_const("_is_pterm_F", [])
 @proof
 def IS_PTERM_MONO(p):
     """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
-              ==> _is_pterm_F f n = _is_pterm_F g n. STUB (Layer 2).
+              ==> _is_pterm_F f n = _is_pterm_F g n.
     """
+    from tactics import REFL, or_chain_collapse
+    from hf_syntax import mono_iff_binary_step
+
     p.goal(
         "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> "
         "_is_pterm_F f n = _is_pterm_F g n",
@@ -651,10 +742,25 @@ def IS_PTERM_MONO(p):
             "k": nat0_ty,
         },
     )
-    p.sorry()
+    p.fix("f g n")
+    p.assume("h: !k. nat0_lt k n ==> f k = g k")
+    h_th = p.fact("h")
+
+    # Disjuncts: Empty_pt, Var_pt (both non-recursive), Tup_pt (binary
+    # recursion), App_pt (right recursion with is_pr_sym left guard).
+    eq_empty = REFL(p._parse("n = Empty_pt"))
+    eq_var = REFL(p._parse("?v. n = Var_pt v"))
+    eq_tup = mono_iff_binary_step(
+        Tup_pt, NAT0_LT_TUP_PT_L, NAT0_LT_TUP_PT_R, h_th
+    )
+    eq_app = _mono_iff_app_pt_step(is_pr_sym, NAT0_LT_APP_PT_R, h_th)
+    body_eq = or_chain_collapse([eq_empty, eq_var, eq_tup, eq_app])
+    p.thus("_is_pterm_F f n = _is_pterm_F g n").by_unfold(
+        body_eq, _IS_PTERM_F_DEF
+    )
 
 
-IS_PTERM_DEF, _IS_PTERM_REC = define_wf_lt(
+IS_PTERM_DEF, _IS_PTERM_REC_RAW = define_wf_lt(
     "is_pterm",
     parse_type("nat0 -> bool"),
     _IS_PTERM_F,
@@ -663,23 +769,88 @@ IS_PTERM_DEF, _IS_PTERM_REC = define_wf_lt(
 is_pterm = mk_const("is_pterm", [])
 
 
+# Unfold _is_pterm_F at the recursion equation to get a directly-usable
+# body recursion. Mirrors _unfold_rec_via_F_def in hf_syntax, inlined to
+# avoid the dependency on a hf-specific helper.
+def _unfold_prst_rec(rec_raw, F_def):
+    from axioms import dest_forall
+    from basics import rand
+    from tactics import SPEC, GEN, TRANS, REWRITE_CONV, BETA_NORM
+
+    forall_pred = dest_forall(rec_raw._concl)
+    n_local = forall_pred.bvar
+    spec = SPEC(n_local, rec_raw)
+    rhs = rand(spec._concl)
+    eq_unfold = REWRITE_CONV([F_def], rhs)
+    eq_beta = BETA_NORM(rand(eq_unfold._concl))
+    rhs_eq = TRANS(eq_unfold, eq_beta)
+    return GEN(n_local, TRANS(spec, rhs_eq))
+
+
+IS_PTERM_REC = _unfold_prst_rec(_IS_PTERM_REC_RAW, _IS_PTERM_F_DEF)
+
+
+# AT-equations: SPEC the unfolded REC at each constructor, simplify the
+# disjunction by exhibiting the matching disjunct (and refuting the rest
+# via constructor disjointness/injectivity).
+#
+# DSL friction: hf_syntax's ``derive_rec_eq`` automates exactly this
+# shape, but it's keyed on a private ``_CTORS`` registry that doesn't
+# include the PRST constructors. Extending the registry from this
+# module would require module-level mutation of hf_syntax internals
+# (since ``_CTORS`` is consumed at the call site, not lazily). The
+# pragmatic path is to write each AT-equation explicitly here using the
+# REC theorem -- about 20 lines per constructor.
 @proof
 def IS_PTERM_AT_EMPTY(p):
-    """|- is_pterm Empty_pt. STUB."""
+    """|- is_pterm Empty_pt."""
+    from tactics import SPEC, REFL, SYM
+
     p.goal("is_pterm Empty_pt")
-    p.sorry()
+    rec_at = SPEC(p._parse("Empty_pt"), IS_PTERM_REC)
+    body = "Empty_pt = Empty_pt \\/ " \
+           "(?v. Empty_pt = Var_pt v) \\/ " \
+           "(?a b. Empty_pt = Tup_pt a b /\\ is_pterm a /\\ is_pterm b) \\/ " \
+           "(?fn args. Empty_pt = App_pt fn args " \
+           "          /\\ is_pr_sym fn /\\ is_pterm args)"
+    p.have(f"rec_at: is_pterm Empty_pt = ({body})").by_thm(rec_at)
+    p.have("hr: Empty_pt = Empty_pt").by_thm(REFL(p._parse("Empty_pt")))
+    # Take the left disjunct; the rest of the disjunction is irrelevant.
+    p.have(f"disj: {body}").by_disj("hr")
+    p.thus("is_pterm Empty_pt").by_eq_mp(SYM(p.fact("rec_at")), "disj")
 
 
 @proof
 def IS_PTERM_AT_VAR(p):
-    """|- !v. is_pterm (Var_pt v). STUB."""
+    """|- !v. is_pterm (Var_pt v)."""
+    from tactics import SPEC, REFL, SYM
+
     p.goal("!v. is_pterm (Var_pt v)", types={"v": nat0_ty})
-    p.sorry()
+    p.fix("v")
+    rec_at = SPEC(p._parse("Var_pt v"), IS_PTERM_REC)
+    body = "Var_pt v = Empty_pt \\/ " \
+           "(?w. Var_pt v = Var_pt w) \\/ " \
+           "(?a b. Var_pt v = Tup_pt a b /\\ is_pterm a /\\ is_pterm b) \\/ " \
+           "(?fn args. Var_pt v = App_pt fn args " \
+           "          /\\ is_pr_sym fn /\\ is_pterm args)"
+    p.have(f"rec_at: is_pterm (Var_pt v) = ({body})").by_thm(rec_at)
+    # Witness the second disjunct: Var_pt v = Var_pt v.
+    p.have("hr: Var_pt v = Var_pt v").by_thm(REFL(p._parse("Var_pt v")))
+    p.have("hex: ?w. Var_pt v = Var_pt w").by_witness("v", "hr")
+    p.have(f"disj: {body}").by_disj("hex")
+    p.thus("is_pterm (Var_pt v)").by_eq_mp(SYM(p.fact("rec_at")), "disj")
 
 
 @proof
 def IS_PTERM_AT_TUP(p):
-    """|- !a b. is_pterm (Tup_pt a b) = (is_pterm a /\\ is_pterm b). STUB."""
+    """|- !a b. is_pterm (Tup_pt a b) = (is_pterm a /\\ is_pterm b). STUB.
+
+    Iff: the forward direction requires case-splitting the REC body's
+    4-disjunct and refuting Empty_pt / Var_pt / App_pt branches via
+    constructor disjointness, then extracting (a, b) from the Tup_pt
+    branch via TUP_PT_INJ. The reverse direction witnesses the Tup_pt
+    disjunct with (a, b) = (a, b). Pending; ~80 lines once written.
+    """
     p.goal(
         "!a b. is_pterm (Tup_pt a b) = (is_pterm a /\\ is_pterm b)",
         types={"a": nat0_ty, "b": nat0_ty},
@@ -691,8 +862,8 @@ def IS_PTERM_AT_TUP(p):
 def IS_PTERM_AT_APP(p):
     """|- !f args. is_pterm (App_pt f args) = (is_pr_sym f /\\ is_pterm args). STUB.
 
-    ``is_pr_sym`` lives in prst_pr. The well-foundedness of the
-    recursive call on ``args`` is by NAT0_LT_APP_PT_R.
+    Same pattern as IS_PTERM_AT_TUP; the App_pt branch's witness gives
+    is_pr_sym f /\\ is_pterm args.
     """
     p.goal(
         "!f args. is_pterm (App_pt f args) = (is_pr_sym f /\\ is_pterm args)",

@@ -54,17 +54,25 @@ Reused private helpers from `hf_syntax`: `_prove_tag_neq`, `_NEQ_PAIR_ORD_ZERO`.
 
 ---
 
-## Layer 2 — `prst_syntax` recogniser AT-equations (15 sorries)
+## Layer 2 — `prst_syntax` MONOs and AT-equations (~30 sorries, partial)
 
 Depends on Layer 0 real bodies + Layer 1 size lemmas.
 
-- `IS_PTERM_AT_EMPTY` / `_VAR` / `_APP` (3)
-- `IS_PFORM_AT_EQ` / `_IN` / `_NOT` / `_IMP` (4)
-- `FREE_IN_P_AT_VAR` / `_APP` (2)
-- `SUBSTITUTE_P_AT_VAR_HIT` / `_VAR_MISS` / `_APP` (3)
-- `SUBSTITUTE_P_PRESERVES_IS_PTERM`, `SUBSTITUTE_P_PRESERVES_IS_PFORM` (2)
+**Done:**
+- `IS_PTERM_MONO` — via `mono_iff_binary_step` (Tup_pt branch) + local helper `_mono_iff_app_pt_step` (for the `?a b. n = App_pt a b /\ is_pr_sym a /\ f b` shape, which isn't covered by existing `mono_iff_*` helpers because of the `is_pr_sym` left-predicate). MONOs for the other three recursors (`IS_PFORM_MONO`, `FREE_IN_P_MONO`, `SUBSTITUTE_P_MONO`) plus `IS_PARTIAL_PR_SYM_MONO`, `PROOF_PRST_MONO` are still sorry'd.
+- `IS_PTERM_AT_EMPTY`, `IS_PTERM_AT_VAR` — derived from `IS_PTERM_REC` (the unfolded recursion equation) by exhibiting the matching disjunct. Pattern: `SPEC` the REC, `REFL` the equation on the matching constructor, `by_disj` to lift to the full disjunction, `by_eq_mp` with `SYM(rec_at)`.
 
-**Cost:** ~250 lines. Each AT is one unfold of the recursion body via `define_with_at` machinery plus tag-disjointness; preservation lemmas are induction over `nat0_lt`.
+**Remaining (iff-shape ATs):** Each is ~80 lines once written.
+- `IS_PTERM_AT_TUP`, `IS_PTERM_AT_APP` — iff. Fwd direction case-splits the REC body's 4-disjunct, refuting non-matching branches via constructor disjointness lemmas and applying injectivity in the matching branch. Rev direction witnesses the matching disjunct.
+- `IS_PFORM_AT_EQ` / `_IN` / `_NOT` / `_IMP` — same iff pattern.
+- `FREE_IN_P_AT_*` — function-equality at the pointwise level (apply both sides at `v`).
+- `SUBSTITUTE_P_AT_*` — value-equality through a SELECT (`@r`) under two extra abstractions; needs the kernel-level `derive_rec_eq_select` machinery or hand-rolled witness construction.
+- `SUBSTITUTE_P_PRESERVES_IS_PTERM` / `_PFORM` — strong induction on the formula.
+
+**DSL friction observed:**
+- The `mono_iff_*` family doesn't cover the App_pt-with-pred shape (`?a b. n = C a b /\ P a /\ f b`); a fresh `_mono_iff_app_pt_step` had to be written from scratch (~70 lines).
+- The PRST formula-constructor aliases (Not_pf, Imp_pf, Eq_pf, In_pa) are fresh constants distinct from their hf_syntax originals (Not_f, etc.). Existing size lemmas like `NAT0_LT_NOT_F` are for the underlying constants, so `mono_iff_unary_step(Not_pf, NAT0_LT_NOT_F, ...)` won't fire — the ctor in the body and the ctor in the size lemma must match. PRST-side size lemmas need to be derived (or the body strings refactored to use the underlying constants).
+- `hf_syntax.derive_rec_eq` autogenerates AT-equations using a module-local `_CTORS` registry; PRST constructors aren't in that registry, and extending it would require module-level mutation of hf_syntax internals. AT-equations have to be proved manually.
 
 ⚠️ Watch the `App_pt` cases: the recursion call goes through the args slot directly (justified by `NAT0_LT_APP_PT_R`), with the binary `Tup_pt` cons cell unfolded inside `is_pterm` / `free_in_p` / `substitute_p` themselves.
 
