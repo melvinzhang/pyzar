@@ -22,6 +22,7 @@ layer -- substitution distributes through them without seeing any App).
 from basics import mk_const
 from parser import define, parse_type
 from proof import proof
+from tactics import SYM
 from hf_connectives import (
     And_f,  # noqa: F401  -- body of And_pf
     Or_f,  # noqa: F401  -- body of Or_pf
@@ -35,6 +36,10 @@ from prst_syntax import (
     Imp_pf,  # noqa: F401  -- parser alias
     substitute_p,  # noqa: F401  -- parser alias
     free_in_p,  # noqa: F401  -- parser alias for capture-avoidance
+    NOT_PF_DEF,
+    IMP_PF_DEF,
+    SUBSTITUTE_P_AT_NOT,
+    SUBSTITUTE_P_AT_IMP,
 )
 from nat0 import nat0_ty
 
@@ -67,40 +72,91 @@ Iff_pf = mk_const("Iff_pf", [])
 # ---------------------------------------------------------------------------
 
 
+# DSL friction: the PRST aliases (And_pf, Or_pf, Iff_pf, Not_pf, Imp_pf)
+# are fresh constants distinct from their hf_connectives bodies, and
+# SUBSTITUTE_P_AT_NOT / _IMP are stated at Not_pf / Imp_pf. The hf-side
+# *_F_AT unfolders produce Not_f / Imp_f, so we use SYM(NOT_PF_DEF) /
+# SYM(IMP_PF_DEF) to fold those back to Not_pf / Imp_pf before the
+# substitute_p AT-equations can fire. by_rewrite normalises rules
+# left-to-right, so feeding both unfold-the-And_pf-alias forward and
+# fold-Not_f/Imp_f-via-SYM in the same call avoids a loop because the
+# only Not_pf / Imp_pf producers are the SYM rules and the only Not_pf
+# / Imp_pf consumers are the substitute_p AT-equations.
 @proof
 def SUBSTITUTE_P_AT_AND(p):
     """|- !a b t v. substitute_p (And_pf a b) t v
-                    = And_pf (substitute_p a t v) (substitute_p b t v). STUB."""
+                    = And_pf (substitute_p a t v) (substitute_p b t v)."""
     p.goal(
         "!a b t v. substitute_p (And_pf a b) t v "
         "          = And_pf (substitute_p a t v) (substitute_p b t v)",
         types={"a": nat0_ty, "b": nat0_ty, "t": nat0_ty, "v": nat0_ty},
     )
-    p.sorry()
+    p.fix("a b t v")
+    p.thus(
+        "substitute_p (And_pf a b) t v "
+        "= And_pf (substitute_p a t v) (substitute_p b t v)"
+    ).by_rewrite(
+        [
+            AND_PF_DEF,
+            AND_F_AT,
+            SYM(NOT_PF_DEF),
+            SYM(IMP_PF_DEF),
+            SUBSTITUTE_P_AT_NOT,
+            SUBSTITUTE_P_AT_IMP,
+        ]
+    )
 
 
 @proof
 def SUBSTITUTE_P_AT_OR(p):
     """|- !a b t v. substitute_p (Or_pf a b) t v
-                    = Or_pf (substitute_p a t v) (substitute_p b t v). STUB."""
+                    = Or_pf (substitute_p a t v) (substitute_p b t v)."""
     p.goal(
         "!a b t v. substitute_p (Or_pf a b) t v "
         "          = Or_pf (substitute_p a t v) (substitute_p b t v)",
         types={"a": nat0_ty, "b": nat0_ty, "t": nat0_ty, "v": nat0_ty},
     )
-    p.sorry()
+    p.fix("a b t v")
+    p.thus(
+        "substitute_p (Or_pf a b) t v "
+        "= Or_pf (substitute_p a t v) (substitute_p b t v)"
+    ).by_rewrite(
+        [
+            OR_PF_DEF,
+            OR_F_AT,
+            SYM(NOT_PF_DEF),
+            SYM(IMP_PF_DEF),
+            SUBSTITUTE_P_AT_NOT,
+            SUBSTITUTE_P_AT_IMP,
+        ]
+    )
 
 
 @proof
 def SUBSTITUTE_P_AT_IFF(p):
     """|- !a b t v. substitute_p (Iff_pf a b) t v
-                    = Iff_pf (substitute_p a t v) (substitute_p b t v). STUB."""
+                    = Iff_pf (substitute_p a t v) (substitute_p b t v)."""
     p.goal(
         "!a b t v. substitute_p (Iff_pf a b) t v "
         "          = Iff_pf (substitute_p a t v) (substitute_p b t v)",
         types={"a": nat0_ty, "b": nat0_ty, "t": nat0_ty, "v": nat0_ty},
     )
-    p.sorry()
+    p.fix("a b t v")
+    # Iff unfolds via And, so we also need AND_F_AT to reach Not_f / Imp_f.
+    p.thus(
+        "substitute_p (Iff_pf a b) t v "
+        "= Iff_pf (substitute_p a t v) (substitute_p b t v)"
+    ).by_rewrite(
+        [
+            IFF_PF_DEF,
+            IFF_F_AT,
+            AND_F_AT,
+            SYM(NOT_PF_DEF),
+            SYM(IMP_PF_DEF),
+            SUBSTITUTE_P_AT_NOT,
+            SUBSTITUTE_P_AT_IMP,
+        ]
+    )
 
 
 if __name__ == "__main__":
