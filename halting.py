@@ -1328,27 +1328,103 @@ Omega_t = mk_const("Omega_t", [])
 def I_T_REDUCES(p):
     """|- !x. is_sk_term x ==> sk_iter (SUC0 (SUC0 0)) (App_t I_t x) = x.
 
-    I = SKK; SKK x reduces in two steps to x (one for S, one to drop the
-    spurious K-redex).
+    I = SKK; in two head steps:
+        sk_iter 0 (I x) = I x = App_t (App_t (App_t S_t K_t) K_t) x
+        sk_iter 1 (I x) = sk_step (I x) = App_t (App_t K_t x) (App_t K_t x)
+                                          (by SK_STEP_S at K_t, K_t, x)
+        sk_iter 2 (I x) = sk_step (App_t (App_t K_t x) (App_t K_t x)) = x
+                                          (by SK_STEP_K at x, App_t K_t x)
+
+    The is_sk_term hypothesis isn't actually used by the head-redex
+    rules -- they fire on any term of the right shape -- but it's
+    carried in the goal for interface consistency with downstream.
     """
+    from tactics import AP_TERM, SPEC, SPECL, TRANS, SYM
+
     p.goal("!x. is_sk_term x ==> sk_iter (SUC0 (SUC0 0)) (App_t I_t x) = x")
-    p.sorry()
+    p.fix("x")
+    p.assume("h_st: is_sk_term x")  # unused (see docstring)
+
+    # Step A: sk_iter 0 (App_t I_t x) = App_t I_t x.
+    p.have("h_iter0: sk_iter 0 (App_t I_t x) = App_t I_t x").by(
+        SK_ITER_ZERO, "App_t I_t x"
+    )
+
+    # Step B: sk_iter 1 = sk_step (sk_iter 0 ...) -- using SK_ITER_SUC at n=0.
+    p.have(
+        "h_iter1_raw: sk_iter (SUC0 0) (App_t I_t x) "
+        "= sk_step (sk_iter 0 (App_t I_t x))"
+    ).by(SK_ITER_SUC, "0", "App_t I_t x")
+    # Substitute Step A into the RHS to collapse the inner iter.
+    p.have(
+        "h_iter1: sk_iter (SUC0 0) (App_t I_t x) = sk_step (App_t I_t x)"
+    ).by_rewrite_of("h_iter1_raw", ["h_iter0"])
+
+    # Step C: sk_step (App_t I_t x) = App_t (App_t K_t x) (App_t K_t x).
+    # Unfold I_t via I_T_DEF to recognize the S-redex shape, then SK_STEP_S.
+    p.have(
+        "h_S: sk_step (App_t (App_t (App_t S_t K_t) K_t) x) "
+        "= App_t (App_t K_t x) (App_t K_t x)"
+    ).by(SK_STEP_S, "K_t", "K_t", "x")
+    # Fold (App_t S_t K_t) K_t back to I_t via SYM(I_T_DEF).
+    p.have(
+        "h_step_I: sk_step (App_t I_t x) "
+        "= App_t (App_t K_t x) (App_t K_t x)"
+    ).by_rewrite_of("h_S", [SYM(I_T_DEF)])
+
+    # Compose B + C: sk_iter 1 (App_t I_t x) = App_t (App_t K_t x) (App_t K_t x).
+    p.have(
+        "h_iter1_final: sk_iter (SUC0 0) (App_t I_t x) "
+        "= App_t (App_t K_t x) (App_t K_t x)"
+    ).by_thm(TRANS(p.fact("h_iter1"), p.fact("h_step_I")))
+
+    # Step D: sk_iter 2 = sk_step (sk_iter 1 ...) via SK_ITER_SUC at n=SUC0 0.
+    p.have(
+        "h_iter2_raw: sk_iter (SUC0 (SUC0 0)) (App_t I_t x) "
+        "= sk_step (sk_iter (SUC0 0) (App_t I_t x))"
+    ).by(SK_ITER_SUC, "SUC0 0", "App_t I_t x")
+    p.have(
+        "h_iter2: sk_iter (SUC0 (SUC0 0)) (App_t I_t x) "
+        "= sk_step (App_t (App_t K_t x) (App_t K_t x))"
+    ).by_rewrite_of("h_iter2_raw", ["h_iter1_final"])
+
+    # Step E: sk_step (App_t (App_t K_t x) (App_t K_t x)) = x by SK_STEP_K.
+    p.have(
+        "h_K: sk_step (App_t (App_t K_t x) (App_t K_t x)) = x"
+    ).by(SK_STEP_K, "x", "App_t K_t x")
+
+    p.thus("sk_iter (SUC0 (SUC0 0)) (App_t I_t x) = x").by_thm(
+        TRANS(p.fact("h_iter2"), p.fact("h_K"))
+    )
 
 
 @proof
 def OMEGA_T_SELF_LOOP(p):
     """|- sk_step Omega_t = Omega_t.
 
-    Proof:  Omega_t = App (S I I) (S I I)
-                  --> App (App I (S I I)) (App I (S I I))   (S-rule)
-                  -->* (S I I) (S I I)
-                   = Omega_t.
+    NOT TRUE under the current head-only ``sk_step`` -- documented
+    here for completeness.  Direct computation:
 
-    The "-->*" hides two I-reductions; for the leftmost-outermost step
-    we land back at Omega_t after exactly three steps, so the cleaner
-    invariant is ``sk_iter 3 Omega_t = Omega_t``.  Either form is fine
-    for OMEGA_NON_HALTING; we pick whichever matches sk_step's
-    definition.
+      Omega_t = App_t (SII) (SII), an S-redex with x=I_t, y=I_t, z=SII.
+      SK_STEP_S gives sk_step Omega_t = App_t (App_t I_t (SII))
+                                              (App_t I_t (SII)).
+      That term's head is ``App_t (App_t I_t (SII)) ...``: not a
+      K-redex (would need I_t = K_t; tag clash), not an S-redex
+      (would need I_t = App_t S_t _; tag clash).  So head-only
+      ``sk_step`` returns it unchanged -- a head-normal form that
+      is *not* Omega_t.
+
+    Fixing this requires upgrading ``sk_step`` to do congruence
+    reduction (descend into App_t children when no head redex
+    fires), which is a Stage 1 rework via ``define_wf_lt`` with a
+    4-disjunct body.  Under that semantics ``sk_iter 3 Omega_t =
+    Omega_t`` is the correct loop invariant; the single-step form
+    ``sk_step Omega_t = Omega_t`` is never true in any standard
+    SK reduction semantics (Omega has only one head step per cycle
+    and the cycle has length 3).
+
+    Marked sorry pending the Stage 1 congruence redo.  See
+    OMEGA_NON_HALTING below for the consequence.
     """
     p.goal("sk_step Omega_t = Omega_t")
     p.sorry()
@@ -1358,9 +1434,27 @@ def OMEGA_T_SELF_LOOP(p):
 def OMEGA_NON_HALTING(p):
     """|- ~ halts Omega_t.
 
-    From OMEGA_T_SELF_LOOP by induction on the step count:
-    sk_iter n Omega_t = Omega_t for every n, and Omega_t is not normal
-    (its head spine has an active S-redex).
+    NOT TRUE under the current head-only ``sk_step``.  By direct
+    computation (cf. OMEGA_T_SELF_LOOP), ``sk_iter 1 Omega_t =
+    App_t (App_t I_t (SII)) (App_t I_t (SII))`` which is head-normal,
+    so ``halts Omega_t`` holds under our IS_NORMAL_DEF.
+
+    Recovering this theorem requires both:
+      (1) Upgrading ``sk_step`` to congruence reduction (descends into
+          subterms when no head redex fires).  With that, ``sk_iter 3
+          Omega_t = Omega_t`` becomes the standard 3-cycle invariant.
+      (2) Redefining ``is_normal`` recursively as "no redex anywhere"
+          (not just no head redex), via ``define_wf_lt`` over the SK
+          term structure.
+
+    Both are Stage 1 reworks.  IS_NORMAL_CASES survives the change
+    (its statement aligns is_normal with sk_step's fixed points);
+    SK_STEP_K / SK_STEP_S re-derive from the new REC equation in a
+    few lines each, and IS_NORMAL_IMP_FIXED needs structural
+    induction.  Estimated impact: ~300 lines of redefinition +
+    re-proofs.
+
+    Marked sorry pending the Stage 1 redo.
     """
     p.goal("~ halts Omega_t")
     p.sorry()
