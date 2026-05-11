@@ -73,12 +73,14 @@ from prst_syntax import (
     App_pt,
     Tup_pt,  # noqa: F401  -- parser alias for args-tuple cons cells
     is_pterm,  # noqa: F401  -- parser alias
+    suc_chain,
 )
 from prst_pr_builders import (  # tier-1 readable-body helpers
     nat, pt_list, proj, comp, rec, app_pt as _app_pt_b, var_t,
     eq_pf as _eq_pf_b, imp_pf as _imp_pf_b, in_pa as _in_pa_b,
     not_pf as _not_pf_b, tup_pt as _tup_pt_b,
     pair_ord as _pair_ord_b,
+    adj_pt as _adj_pt_b,
 )
 
 
@@ -109,26 +111,26 @@ from prst_syntax import is_pr_sym, pr_arity  # noqa: F401, E402
 # ---------------------------------------------------------------------------
 
 
-ZERO_SYM_DEF = define("zero_sym", parse_type("nat0"), "0")
+ZERO_SYM_DEF = define("zero_sym", parse_type("nat0"), suc_chain(0))
 zero_sym = mk_const("zero_sym", [])
 
-ADJ_SYM_DEF = define("adj_sym", parse_type("nat0"), "SUC0 0")
+ADJ_SYM_DEF = define("adj_sym", parse_type("nat0"), suc_chain(1))
 adj_sym = mk_const("adj_sym", [])
 
 PROJ_SYM_DEF = define(
     "proj_sym",
     parse_type("nat0 -> nat0 -> nat0"),
-    "\\i:nat0. \\n:nat0. Pair_ord (SUC0 (SUC0 0)) (Pair_ord i n)",
+    f"\\i:nat0. \\n:nat0. Pair_ord ({suc_chain(2)}) (Pair_ord i n)",
 )
 proj_sym = mk_const("proj_sym", [])
 
-IF_IN_SYM_DEF = define("if_in_sym", parse_type("nat0"), "SUC0 (SUC0 (SUC0 0))")
+IF_IN_SYM_DEF = define("if_in_sym", parse_type("nat0"), suc_chain(3))
 if_in_sym = mk_const("if_in_sym", [])
 
 REC_SYM_DEF = define(
     "rec_sym",
     parse_type("nat0 -> nat0 -> nat0"),
-    "\\g:nat0. \\h:nat0. Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord g h)",
+    f"\\g:nat0. \\h:nat0. Pair_ord ({suc_chain(4)}) (Pair_ord g h)",
 )
 rec_sym = mk_const("rec_sym", [])
 
@@ -140,7 +142,7 @@ rec_sym = mk_const("rec_sym", [])
 CONST_SYM_DEF = define(
     "const_sym",
     parse_type("nat0 -> nat0"),
-    "\\c:nat0. Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) c",
+    f"\\c:nat0. Pair_ord ({suc_chain(5)}) c",
 )
 const_sym = mk_const("const_sym", [])
 
@@ -165,11 +167,48 @@ const_sym = mk_const("const_sym", [])
 COURSE_REC_SYM_DEF = define(
     "course_rec_sym",
     parse_type("nat0 -> nat0 -> nat0"),
-    "\\g:nat0. \\h:nat0. "
-    "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))) "
-    "         (Pair_ord g h)",
+    f"\\g:nat0. \\h:nat0. Pair_ord ({suc_chain(7)}) (Pair_ord g h)",
 )
 course_rec_sym = mk_const("course_rec_sym", [])
+
+# Pair_ord destructuring primitives at bare-literal tags 8 + 9 (course_rec
+# took tag 7; mu_sym is tag 6). Non-parametric (no carried payload), same
+# encoding shape as if_in_sym. Defining axioms (parametric in HOL-level
+# pair components a, b):
+#   App_pt pair_left_sym  (Tup_pt (Pair_ord a b) Empty_pt) = a
+#   App_pt pair_right_sym (Tup_pt (Pair_ord a b) Empty_pt) = b
+# Needed for the non-uniform App_pt case of substitute_pr (extract fn from
+# Pair_ord fn args while course_rec only descends uniformly), and for the
+# axiom-family pattern recognisers in Proof_PRST_pr's is_pr_axiom_pr.
+PAIR_LEFT_SYM_DEF = define(
+    "pair_left_sym",
+    parse_type("nat0"),
+    suc_chain(8),
+)
+pair_left_sym = mk_const("pair_left_sym", [])
+
+PAIR_RIGHT_SYM_DEF = define(
+    "pair_right_sym",
+    parse_type("nat0"),
+    suc_chain(9),
+)
+pair_right_sym = mk_const("pair_right_sym", [])
+
+# pair_ord_sym -- 2-ary Pair_ord constructor. Symmetric counterpart of
+# pair_left_sym / pair_right_sym (destructors). Encoded as bare literal
+# SUC0^10 0 = 10. Defining axiom:
+#   App_pt pair_ord_sym (Tup_pt a (Tup_pt b Empty_pt)) = Pair_ord a b
+# Needed for substitute_pr's outer composer to package (t, v) into a
+# single y_vec slot at PR level. Without it, the only path is to
+# re-encode substitute_pr's external interface as 1-ary with caller
+# pre-packing -- but diag_pr would still need PR-level pair construction
+# to feed substitute_pr, so the construct primitive is load-bearing.
+PAIR_ORD_SYM_DEF = define(
+    "pair_ord_sym",
+    parse_type("nat0"),
+    suc_chain(10),
+)
+pair_ord_sym = mk_const("pair_ord_sym", [])
 
 
 # ---------------------------------------------------------------------------
@@ -192,14 +231,15 @@ from prst_syntax import IS_PR_SYM_DEF  # noqa: E402
 
 _IS_PR_SYM_BODY = (
     "{sym} = 0 \\/ "
-    "{sym} = SUC0 0 \\/ "
-    "(?i n. {sym} = Pair_ord (SUC0 (SUC0 0)) (Pair_ord i n)) \\/ "
-    "{sym} = SUC0 (SUC0 (SUC0 0)) \\/ "
-    "(?g h. {sym} = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord g h)) \\/ "
-    "(?c. {sym} = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) c) \\/ "
-    "(?g h. {sym} = "
-    "  Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))) "
-    "           (Pair_ord g h))"
+    f"{{sym}} = {suc_chain(1)} \\/ "
+    f"(?i n. {{sym}} = Pair_ord ({suc_chain(2)}) (Pair_ord i n)) \\/ "
+    f"{{sym}} = {suc_chain(3)} \\/ "
+    f"(?g h. {{sym}} = Pair_ord ({suc_chain(4)}) (Pair_ord g h)) \\/ "
+    f"(?c. {{sym}} = Pair_ord ({suc_chain(5)}) c) \\/ "
+    f"(?g h. {{sym}} = Pair_ord ({suc_chain(7)}) (Pair_ord g h)) \\/ "
+    f"{{sym}} = {suc_chain(8)} \\/ "
+    f"{{sym}} = {suc_chain(9)} \\/ "
+    f"{{sym}} = {suc_chain(10)}"
 )
 
 
@@ -218,7 +258,7 @@ def IS_PR_SYM_ZERO(p):
 def IS_PR_SYM_ADJ(p):
     """|- is_pr_sym adj_sym."""
     p.goal("is_pr_sym adj_sym")
-    p.have("adj_eq: adj_sym = SUC0 0").by_thm(ADJ_SYM_DEF)
+    p.have(f"adj_eq: adj_sym = {suc_chain(1)}").by_thm(ADJ_SYM_DEF)
     p.have("h_body: " + _IS_PR_SYM_BODY.format(sym="adj_sym")).by_disj("adj_eq")
     p.thus("is_pr_sym adj_sym").by_unfold("h_body", IS_PR_SYM_DEF)
 
@@ -243,7 +283,7 @@ def IS_PR_SYM_PROJ(p):
     # `p.unfold` returns the beta-reduced specialization of PROJ_SYM_DEF.
     proj_eq_th = p.unfold(PROJ_SYM_DEF, "i", "n")
     p.have(
-        "proj_eq: proj_sym i n = Pair_ord (SUC0 (SUC0 0)) (Pair_ord i n)"
+        f"proj_eq: proj_sym i n = Pair_ord ({suc_chain(2)}) (Pair_ord i n)"
     ).by_thm(proj_eq_th)
     # DSL friction: by_disj_witness is single-binder; the existential
     # leaf here is `?i n. ...` (two binders), so we prove the
@@ -251,7 +291,7 @@ def IS_PR_SYM_PROJ(p):
     # Use fresh bound names `ii nn` to avoid shadowing the outer i, n
     # (otherwise by_unfold's alpha-match misses the unfolded `i' n'`).
     p.have(
-        "h_ex: ?ii nn. proj_sym i n = Pair_ord (SUC0 (SUC0 0)) (Pair_ord ii nn)"
+        f"h_ex: ?ii nn. proj_sym i n = Pair_ord ({suc_chain(2)}) (Pair_ord ii nn)"
     ).by_exists(["i", "n"], "proj_eq")
     p.have(
         "h_body: " + _IS_PR_SYM_BODY.format(sym="proj_sym i n").replace(
@@ -265,7 +305,7 @@ def IS_PR_SYM_PROJ(p):
 def IS_PR_SYM_IF_IN(p):
     """|- is_pr_sym if_in_sym."""
     p.goal("is_pr_sym if_in_sym")
-    p.have("if_in_eq: if_in_sym = SUC0 (SUC0 (SUC0 0))").by_thm(IF_IN_SYM_DEF)
+    p.have(f"if_in_eq: if_in_sym = {suc_chain(3)}").by_thm(IF_IN_SYM_DEF)
     p.have("h_body: " + _IS_PR_SYM_BODY.format(sym="if_in_sym")).by_disj(
         "if_in_eq"
     )
@@ -288,13 +328,11 @@ def IS_PR_SYM_REC(p):
     p.assume("_h_pr: is_pr_sym g /\\ is_pr_sym h")
     rec_eq_th = p.unfold(REC_SYM_DEF, "g", "h")
     p.have(
-        "rec_eq: rec_sym g h = "
-        "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord g h)"
+        f"rec_eq: rec_sym g h = Pair_ord ({suc_chain(4)}) (Pair_ord g h)"
     ).by_thm(rec_eq_th)
     # Fresh bound names to avoid shadowing outer g, h.
     p.have(
-        "h_ex: ?gg hh. rec_sym g h = "
-        "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord gg hh)"
+        f"h_ex: ?gg hh. rec_sym g h = Pair_ord ({suc_chain(4)}) (Pair_ord gg hh)"
     ).by_exists(["g", "h"], "rec_eq")
     p.have(
         "h_body: " + _IS_PR_SYM_BODY.format(sym="rec_sym g h").replace(
@@ -315,29 +353,27 @@ def IS_PR_SYM_CONST(p):
     p.fix("c")
     const_eq_th = p.unfold(CONST_SYM_DEF, "c")
     p.have(
-        "const_eq: const_sym c = "
-        "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) c"
+        f"const_eq: const_sym c = Pair_ord ({suc_chain(5)}) c"
     ).by_thm(const_eq_th)
     # Fresh bound name `cc` to avoid alpha-collision with the outer `c`.
     p.have(
-        "h_ex: ?cc. const_sym c = "
-        "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) cc"
+        f"h_ex: ?cc. const_sym c = Pair_ord ({suc_chain(5)}) cc"
     ).by_exists(["c"], "const_eq")
-    # Manual body string with the const disjunct renamed to ?cc.
-    # (Going through _IS_PR_SYM_BODY.format(...) here would require a
-    # fragile substring-replace; the inline form is clearer.)
+    # Inline body string: same shape as _IS_PR_SYM_BODY but with the
+    # const-disjunct binder renamed `?cc` to avoid alpha-collision with
+    # outer `c`. (A naive _IS_PR_SYM_BODY.format(sym="const_sym c") would
+    # rebind `?c` to the outer name.)
     body = (
         "const_sym c = 0 \\/ "
-        "const_sym c = SUC0 0 \\/ "
-        "(?i n. const_sym c = Pair_ord (SUC0 (SUC0 0)) (Pair_ord i n)) \\/ "
-        "const_sym c = SUC0 (SUC0 (SUC0 0)) \\/ "
-        "(?g h. const_sym c = "
-        "       Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord g h)) \\/ "
-        "(?cc. const_sym c = "
-        "      Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) cc) \\/ "
-        "(?g h. const_sym c = "
-        "       Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))) "
-        "                (Pair_ord g h))"
+        f"const_sym c = {suc_chain(1)} \\/ "
+        f"(?i n. const_sym c = Pair_ord ({suc_chain(2)}) (Pair_ord i n)) \\/ "
+        f"const_sym c = {suc_chain(3)} \\/ "
+        f"(?g h. const_sym c = Pair_ord ({suc_chain(4)}) (Pair_ord g h)) \\/ "
+        f"(?cc. const_sym c = Pair_ord ({suc_chain(5)}) cc) \\/ "
+        f"(?g h. const_sym c = Pair_ord ({suc_chain(7)}) (Pair_ord g h)) \\/ "
+        f"const_sym c = {suc_chain(8)} \\/ "
+        f"const_sym c = {suc_chain(9)} \\/ "
+        f"const_sym c = {suc_chain(10)}"
     )
     p.have("h_body: " + body).by_disj("h_ex")
     p.thus("is_pr_sym (const_sym c)").by_unfold("h_body", IS_PR_SYM_DEF)
@@ -360,15 +396,12 @@ def IS_PR_SYM_COURSE_REC(p):
     p.assume("_h_pr: is_pr_sym g /\\ is_pr_sym h")
     course_eq_th = p.unfold(COURSE_REC_SYM_DEF, "g", "h")
     p.have(
-        "course_eq: course_rec_sym g h = "
-        "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))) "
-        "         (Pair_ord g h)"
+        f"course_eq: course_rec_sym g h = Pair_ord ({suc_chain(7)}) (Pair_ord g h)"
     ).by_thm(course_eq_th)
     # Fresh bound names to avoid shadowing the outer g, h.
     p.have(
-        "h_ex: ?gg hh. course_rec_sym g h = "
-        "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))) "
-        "         (Pair_ord gg hh)"
+        f"h_ex: ?gg hh. course_rec_sym g h "
+        f"= Pair_ord ({suc_chain(7)}) (Pair_ord gg hh)"
     ).by_exists(["g", "h"], "course_eq")
     # IS_PR_SYM_BODY's rec disjunct also has `?g h.`/`Pair_ord g h`, so
     # the substring replaces touch *both* the rec and course_rec
@@ -385,6 +418,43 @@ def IS_PR_SYM_COURSE_REC(p):
 
 
 @proof
+def IS_PR_SYM_PAIR_LEFT(p):
+    """|- is_pr_sym pair_left_sym.
+
+    ``pair_left_sym = SUC0^8 0`` (PAIR_LEFT_SYM_DEF); bare-literal
+    disjunct in is_pr_sym's body, same shape as IS_PR_SYM_IF_IN.
+    """
+    p.goal("is_pr_sym pair_left_sym")
+    p.have(f"eq: pair_left_sym = {suc_chain(8)}").by_thm(PAIR_LEFT_SYM_DEF)
+    p.have("h_body: " + _IS_PR_SYM_BODY.format(sym="pair_left_sym")).by_disj(
+        "eq"
+    )
+    p.thus("is_pr_sym pair_left_sym").by_unfold("h_body", IS_PR_SYM_DEF)
+
+
+@proof
+def IS_PR_SYM_PAIR_RIGHT(p):
+    """|- is_pr_sym pair_right_sym."""
+    p.goal("is_pr_sym pair_right_sym")
+    p.have(f"eq: pair_right_sym = {suc_chain(9)}").by_thm(PAIR_RIGHT_SYM_DEF)
+    p.have("h_body: " + _IS_PR_SYM_BODY.format(sym="pair_right_sym")).by_disj(
+        "eq"
+    )
+    p.thus("is_pr_sym pair_right_sym").by_unfold("h_body", IS_PR_SYM_DEF)
+
+
+@proof
+def IS_PR_SYM_PAIR_ORD(p):
+    """|- is_pr_sym pair_ord_sym."""
+    p.goal("is_pr_sym pair_ord_sym")
+    p.have(f"eq: pair_ord_sym = {suc_chain(10)}").by_thm(PAIR_ORD_SYM_DEF)
+    p.have("h_body: " + _IS_PR_SYM_BODY.format(sym="pair_ord_sym")).by_disj(
+        "eq"
+    )
+    p.thus("is_pr_sym pair_ord_sym").by_unfold("h_body", IS_PR_SYM_DEF)
+
+
+@proof
 def PR_ARITY_ZERO(p):
     """|- pr_arity zero_sym = 0. STUB."""
     p.goal("pr_arity zero_sym = 0")
@@ -394,7 +464,7 @@ def PR_ARITY_ZERO(p):
 @proof
 def PR_ARITY_ADJ(p):
     """|- pr_arity adj_sym = SUC0 (SUC0 0). STUB."""
-    p.goal("pr_arity adj_sym = SUC0 (SUC0 0)")
+    p.goal(f"pr_arity adj_sym = {suc_chain(2)}")
     p.sorry()
 
 
@@ -411,7 +481,7 @@ def PR_ARITY_PROJ(p):
 @proof
 def PR_ARITY_IF_IN(p):
     """|- pr_arity if_in_sym = SUC0 (SUC0 (SUC0 (SUC0 0))). STUB."""
-    p.goal("pr_arity if_in_sym = SUC0 (SUC0 (SUC0 (SUC0 0)))")
+    p.goal(f"pr_arity if_in_sym = {suc_chain(4)}")
     p.sorry()
 
 
@@ -654,32 +724,43 @@ const_def_axiom_at = mk_const("const_def_axiom_at", [])
 
 
 # course_rec defining-equation axioms. Two axioms (base + step),
-# parametric like rec_*. The base is parametric in (g, h):
+# parametric like rec_*, with a y_vec slot (Var_t 0) for carrying
+# auxiliary args through every recursion level. The y_vec slot lets
+# downstream symbols like substitute_pr thread (t, v) through formula
+# recursion without packaging them into the recursion target.
 #
 #   course_rec_base_def_axiom_at g h
-#     := Eq_pf (App_pt (course_rec g h) (Tup_pt 0 Empty_pt))
-#              (App_pt g Empty_pt)
+#     := Eq_pf (App_pt (course_rec g h) (Tup_pt 0 (Tup_pt (Var_t 0) Empty_pt)))
+#              (App_pt g (Tup_pt (Var_t 0) Empty_pt))
 #
 # The step is parametric in (g, h, a, b) -- the HOL-level pair
 # components a, b are plugged directly into the encoded equation as
-# the concrete Pair_ord shape, eliminating any need for separate
-# pair_left / pair_right primitives at the syntactic level:
+# the concrete Pair_ord shape. y_vec (Var_t 0) is threaded into every
+# recursive call AND into the step function h:
 #
 #   course_rec_step_def_axiom_at g h a b
-#     := Eq_pf (App_pt (course_rec g h) (Tup_pt (Pair_ord a b) Empty_pt))
+#     := Eq_pf (App_pt (course_rec g h) (Tup_pt (Pair_ord a b)
+#                                              (Tup_pt (Var_t 0) Empty_pt)))
 #              (App_pt h (Tup_pt a (Tup_pt b
-#                          (Tup_pt (App_pt (course_rec g h) (Tup_pt a Empty_pt))
-#                                  (Tup_pt (App_pt (course_rec g h)
-                                            #   (Tup_pt b Empty_pt))
-#                                          Empty_pt)))))
+#                          (Tup_pt (App_pt (course_rec g h)
+#                                          (Tup_pt a (Tup_pt (Var_t 0)
+#                                                            Empty_pt)))
+#                          (Tup_pt (App_pt (course_rec g h)
+#                                          (Tup_pt b (Tup_pt (Var_t 0)
+#                                                            Empty_pt)))
+#                          (Tup_pt (Var_t 0) Empty_pt))))))
 #
-# The step's 4-binder structure (g, h, a, b) at IS_PR_DEF level is new
-# vs. rec_*'s 2-binder shape; by_exists generalises to the 4-witness
-# case via the existing ``by_exists([...], rules)`` API.
-def _course_rec_app(g_term, h_term, arg_term):
-    """Helper: App_pt (course_rec_sym g h) (Tup_pt arg Empty_pt) -- the
-    common shape inside both base and step axiom RHSs."""
-    return _app_pt_b(mk_app(mk_app(course_rec_sym, g_term), h_term), arg_term)
+# h is 5-ary: (a, b, rec_a, rec_b, y_vec). The step's 4-binder
+# structure (g, h, a, b) at IS_PR_DEF level is new vs. rec_*'s 2-binder
+# shape; by_exists generalises to the 4-witness case via the existing
+# ``by_exists([...], rules)`` API.
+def _course_rec_app(g_term, h_term, arg_term, y_term):
+    """Helper: ``App_pt (course_rec_sym g h) (Tup_pt arg (Tup_pt y Empty_pt))``
+    -- the common shape inside both base and step axiom RHSs."""
+    return mk_app(
+        mk_app(App_pt, mk_app(mk_app(course_rec_sym, g_term), h_term)),
+        pt_list(arg_term, y_term),
+    )
 
 
 COURSE_REC_BASE_DEF_AXIOM_AT_DEF = define(
@@ -687,8 +768,8 @@ COURSE_REC_BASE_DEF_AXIOM_AT_DEF = define(
     parse_type("nat0 -> nat0 -> nat0"),
     mk_abs(_g_var, mk_abs(_h_var,
         _eq_pf_b(
-            _course_rec_app(_g_var, _h_var, nat(0)),
-            _app_pt_b(_g_var),
+            _course_rec_app(_g_var, _h_var, nat(0), var_t(0)),
+            _app_pt_b(_g_var, var_t(0)),
         ),
     )),
 )
@@ -703,18 +784,77 @@ COURSE_REC_STEP_DEF_AXIOM_AT_DEF = define(
     mk_abs(_g_var, mk_abs(_h_var, mk_abs(_a_var_crec, mk_abs(_b_var_crec,
         _eq_pf_b(
             _course_rec_app(_g_var, _h_var,
-                            _pair_ord_b(_a_var_crec, _b_var_crec)),
+                            _pair_ord_b(_a_var_crec, _b_var_crec),
+                            var_t(0)),
             _app_pt_b(
                 _h_var,
                 _a_var_crec,
                 _b_var_crec,
-                _course_rec_app(_g_var, _h_var, _a_var_crec),
-                _course_rec_app(_g_var, _h_var, _b_var_crec),
+                _course_rec_app(_g_var, _h_var, _a_var_crec, var_t(0)),
+                _course_rec_app(_g_var, _h_var, _b_var_crec, var_t(0)),
+                var_t(0),
             ),
         ),
     )))),
 )
 course_rec_step_def_axiom_at = mk_const("course_rec_step_def_axiom_at", [])
+
+
+# pair_left / pair_right defining-equation axioms. Parametric in HOL-level
+# (a, b) -- the pair components are plugged directly into the encoded
+# equation as the concrete Pair_ord shape. No formal Var_t arg slot needed
+# (the singleton input list contains the concrete Pair_ord directly).
+#
+#   pair_left_def_axiom_at a b
+#     := Eq_pf (App_pt pair_left_sym  (Tup_pt (Pair_ord a b) Empty_pt)) a
+#   pair_right_def_axiom_at a b
+#     := Eq_pf (App_pt pair_right_sym (Tup_pt (Pair_ord a b) Empty_pt)) b
+PAIR_LEFT_DEF_AXIOM_AT_DEF = define(
+    "pair_left_def_axiom_at",
+    parse_type("nat0 -> nat0 -> nat0"),
+    mk_abs(_a_var_crec, mk_abs(_b_var_crec,
+        _eq_pf_b(
+            _app_pt_b(pair_left_sym,
+                      _pair_ord_b(_a_var_crec, _b_var_crec)),
+            _a_var_crec,
+        ),
+    )),
+)
+pair_left_def_axiom_at = mk_const("pair_left_def_axiom_at", [])
+
+PAIR_RIGHT_DEF_AXIOM_AT_DEF = define(
+    "pair_right_def_axiom_at",
+    parse_type("nat0 -> nat0 -> nat0"),
+    mk_abs(_a_var_crec, mk_abs(_b_var_crec,
+        _eq_pf_b(
+            _app_pt_b(pair_right_sym,
+                      _pair_ord_b(_a_var_crec, _b_var_crec)),
+            _b_var_crec,
+        ),
+    )),
+)
+pair_right_def_axiom_at = mk_const("pair_right_def_axiom_at", [])
+
+
+# pair_ord defining-equation axiom. Parametric in HOL-level (a, b) like
+# pair_left/right. Says: applied to the 2-arg list [a; b], pair_ord_sym
+# returns Pair_ord a b.
+#
+#   pair_ord_def_axiom_at a b
+#     := Eq_pf (App_pt pair_ord_sym (Tup_pt a (Tup_pt b Empty_pt)))
+#              (Pair_ord a b)
+PAIR_ORD_DEF_AXIOM_AT_DEF = define(
+    "pair_ord_def_axiom_at",
+    parse_type("nat0 -> nat0 -> nat0"),
+    mk_abs(_a_var_crec, mk_abs(_b_var_crec,
+        _eq_pf_b(
+            mk_app(mk_app(App_pt, pair_ord_sym),
+                   pt_list(_a_var_crec, _b_var_crec)),
+            _pair_ord_b(_a_var_crec, _b_var_crec),
+        ),
+    )),
+)
+pair_ord_def_axiom_at = mk_const("pair_ord_def_axiom_at", [])
 
 
 # ---------------------------------------------------------------------------
@@ -745,7 +885,10 @@ IS_PR_DEF_DEF = define(
     "(?g h. n = course_rec_base_def_axiom_at g h "
     "       /\\ is_pr_sym g /\\ is_pr_sym h) \\/ "
     "(?g h a b. n = course_rec_step_def_axiom_at g h a b "
-    "       /\\ is_pr_sym g /\\ is_pr_sym h)",
+    "       /\\ is_pr_sym g /\\ is_pr_sym h) \\/ "
+    "(?a b. n = pair_left_def_axiom_at a b) \\/ "
+    "(?a b. n = pair_right_def_axiom_at a b) \\/ "
+    "(?a b. n = pair_ord_def_axiom_at a b)",
 )
 is_pr_def = mk_const("is_pr_def", [])
 
@@ -771,7 +914,10 @@ _IS_PR_DEF_BODY = (
     "(?gg hh. {n} = course_rec_base_def_axiom_at gg hh "
     "         /\\ is_pr_sym gg /\\ is_pr_sym hh) \\/ "
     "(?gg hh aa bb. {n} = course_rec_step_def_axiom_at gg hh aa bb "
-    "         /\\ is_pr_sym gg /\\ is_pr_sym hh)"
+    "         /\\ is_pr_sym gg /\\ is_pr_sym hh) \\/ "
+    "(?aa bb. {n} = pair_left_def_axiom_at aa bb) \\/ "
+    "(?aa bb. {n} = pair_right_def_axiom_at aa bb) \\/ "
+    "(?aa bb. {n} = pair_ord_def_axiom_at aa bb)"
 )
 
 
@@ -1000,6 +1146,80 @@ def IS_PR_DEF_HOLDS_CONST(p):
     )
 
 
+@proof
+def IS_PR_DEF_HOLDS_PAIR_LEFT(p):
+    """|- !a b. is_pr_def (pair_left_def_axiom_at a b).
+
+    Unconditional 2-binder existential (no side condition on a, b).
+    Same proof shape as IS_PR_DEF_HOLDS_REC_BASE minus the is_pr_sym
+    hypotheses.
+    """
+    from tactics import REFL
+    p.goal(
+        "!a b. is_pr_def (pair_left_def_axiom_at a b)",
+        types={"a": nat0_ty, "b": nat0_ty},
+    )
+    p.fix("a b")
+    p.have(
+        "h_refl: pair_left_def_axiom_at a b = pair_left_def_axiom_at a b"
+    ).by_thm(REFL(p._parse("pair_left_def_axiom_at a b")))
+    p.have(
+        "h_ex: ?aa bb. pair_left_def_axiom_at a b = pair_left_def_axiom_at aa bb"
+    ).by_exists(["a", "b"], "h_refl")
+    p.have(
+        "h_body: " + _IS_PR_DEF_BODY.format(n="pair_left_def_axiom_at a b")
+    ).by_disj("h_ex")
+    p.thus("is_pr_def (pair_left_def_axiom_at a b)").by_unfold(
+        "h_body", IS_PR_DEF_DEF
+    )
+
+
+@proof
+def IS_PR_DEF_HOLDS_PAIR_RIGHT(p):
+    """|- !a b. is_pr_def (pair_right_def_axiom_at a b)."""
+    from tactics import REFL
+    p.goal(
+        "!a b. is_pr_def (pair_right_def_axiom_at a b)",
+        types={"a": nat0_ty, "b": nat0_ty},
+    )
+    p.fix("a b")
+    p.have(
+        "h_refl: pair_right_def_axiom_at a b = pair_right_def_axiom_at a b"
+    ).by_thm(REFL(p._parse("pair_right_def_axiom_at a b")))
+    p.have(
+        "h_ex: ?aa bb. pair_right_def_axiom_at a b = pair_right_def_axiom_at aa bb"
+    ).by_exists(["a", "b"], "h_refl")
+    p.have(
+        "h_body: " + _IS_PR_DEF_BODY.format(n="pair_right_def_axiom_at a b")
+    ).by_disj("h_ex")
+    p.thus("is_pr_def (pair_right_def_axiom_at a b)").by_unfold(
+        "h_body", IS_PR_DEF_DEF
+    )
+
+
+@proof
+def IS_PR_DEF_HOLDS_PAIR_ORD(p):
+    """|- !a b. is_pr_def (pair_ord_def_axiom_at a b)."""
+    from tactics import REFL
+    p.goal(
+        "!a b. is_pr_def (pair_ord_def_axiom_at a b)",
+        types={"a": nat0_ty, "b": nat0_ty},
+    )
+    p.fix("a b")
+    p.have(
+        "h_refl: pair_ord_def_axiom_at a b = pair_ord_def_axiom_at a b"
+    ).by_thm(REFL(p._parse("pair_ord_def_axiom_at a b")))
+    p.have(
+        "h_ex: ?aa bb. pair_ord_def_axiom_at a b = pair_ord_def_axiom_at aa bb"
+    ).by_exists(["a", "b"], "h_refl")
+    p.have(
+        "h_body: " + _IS_PR_DEF_BODY.format(n="pair_ord_def_axiom_at a b")
+    ).by_disj("h_ex")
+    p.thus("is_pr_def (pair_ord_def_axiom_at a b)").by_unfold(
+        "h_body", IS_PR_DEF_DEF
+    )
+
+
 # ---------------------------------------------------------------------------
 # Stage 2A (f) -- the *PR introduction* combinator (sketch only).
 #
@@ -1028,8 +1248,7 @@ def IS_PR_DEF_HOLDS_CONST(p):
 comp_sym_def = define(
     "comp_sym",
     parse_type("nat0 -> nat0 -> nat0"),  # comp_sym g hs (hs is a list of symbols)
-    "\\g:nat0. \\hs:nat0. Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) "
-    "                              (Pair_ord g hs)",
+    f"\\g:nat0. \\hs:nat0. Pair_ord ({suc_chain(5)}) (Pair_ord g hs)",
 )
 comp_sym = mk_const("comp_sym", [])
 
@@ -1065,7 +1284,7 @@ comp_sym = mk_const("comp_sym", [])
 mu_sym_def = define(
     "mu_sym",
     parse_type("nat0 -> nat0"),  # mu_sym f
-    "\\f:nat0. Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))) f",
+    f"\\f:nat0. Pair_ord ({suc_chain(6)}) f",
 )
 mu_sym = mk_const("mu_sym", [])
 
@@ -1096,8 +1315,8 @@ def NAT0_LT_MU_SYM(p):
     p.goal("!g. nat0_lt g (mu_sym g)", types={"g": nat0_ty})
     p.fix("g")
     # mu_sym g = Pair_ord 6 g; nat0_lt g (Pair_ord 6 g) by NAT0_LT_PAIR_ORD_R.
-    p.have("h_pair: nat0_lt g (Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))) g)").by(
-        NAT0_LT_PAIR_ORD_R, "SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))", "g"
+    p.have(f"h_pair: nat0_lt g (Pair_ord ({suc_chain(6)}) g)").by(
+        NAT0_LT_PAIR_ORD_R, suc_chain(6), "g"
     )
     # Specialize mu_sym_def at g via p.unfold so the rewrite is on the
     # applied form (not the bare abstraction): |- mu_sym g = Pair_ord 6 g.
@@ -1127,17 +1346,17 @@ def IS_PARTIAL_PR_SYM_MU(p):
     # mu_at_f: mu_sym f = Pair_ord 6 f.
     # Build the mu-branch of the body at n := mu_sym f, witness g := f.
     p.have(
-        "h_eq: mu_sym f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))) f"
+        f"h_eq: mu_sym f = Pair_ord ({suc_chain(6)}) f"
     ).by_thm(mu_at_f)
     p.have(
-        "h_ex: ?gg. mu_sym f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))) gg "
-        "        /\\ is_partial_pr_sym gg"
+        f"h_ex: ?gg. mu_sym f = Pair_ord ({suc_chain(6)}) gg "
+        f"        /\\ is_partial_pr_sym gg"
     ).by_exists(["f"], "h_eq", "h_part")
     # Disjunction body of _IS_PARTIAL_PR_SYM_F at n := mu_sym f.
     p.have(
-        "h_body: is_pr_sym (mu_sym f) "
-        "        \\/ (?gg. mu_sym f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))) gg "
-        "                  /\\ is_partial_pr_sym gg)"
+        f"h_body: is_pr_sym (mu_sym f) "
+        f"        \\/ (?gg. mu_sym f = Pair_ord ({suc_chain(6)}) gg "
+        f"                  /\\ is_partial_pr_sym gg)"
     ).by_disj("h_ex")
     # Bridge to _is_partial_pr_sym_F is_partial_pr_sym (mu_sym f).
     p.have(
@@ -1202,18 +1421,129 @@ numeral_pr_def = define(
 numeral_pr = mk_const("numeral_pr", [])
 
 
-# substitute_pr -- structural recursion on the formula tree. The
-# complete body is a comp_sym / rec_sym / if_in_sym chain (~100 lines)
-# discriminating on each formula constructor (Empty / Var / Tup / Eq /
-# In / Not / Imp / App) and recursing on subterms. Pending the full
-# expansion, model it here as the identity-like 3-ary composition that
-# returns its first argument -- well-typed and structurally valid, just
-# not yet the intended function. Downstream lemmas (Layer 7
-# PROV_PRST_SUBSTITUTE_EVAL) remain sorry'd against this placeholder.
+# ---------------------------------------------------------------------------
+# substitute_pr -- structural recursion on the formula tree via course_rec.
+#
+# Design:
+#   substitute_pr := comp_sym (course_rec g_subst h_subst) [F_proj, y_packer]
+# where:
+#   F_proj   = proj 0 3                              -- extract F
+#   y_packer = comp_sym pair_ord_sym [proj 1 3, proj 2 3]
+#              -- pack (t, v) into Pair_ord t v as the single y_vec slot
+#
+# g_subst (base case, course_rec input = 0 = Empty_pt): returns
+# Empty_pt = 0. Implemented as const_sym 0.
+#
+# h_subst (step case, course_rec input = Pair_ord a b): dispatches on
+# tag a via a nested if_in_sym chain across the formula constructors:
+#   a = 2  (Var_pt v):   if b ∈ {pair_right y_vec} then pair_left y_vec
+#                        else Pair_ord 2 b   (= Var_pt b)
+#   a = 5  (Eq_pf):      Pair_ord 5 rec_right
+#   a = 6  (Not_pf):     Pair_ord 6 rec_right
+#   a = 7  (Imp_pf):     Pair_ord 7 rec_right
+#   a = 10 (In_pa):      Pair_ord 10 rec_right
+#   a = 11 (App_pt):     Pair_ord 11 (Pair_ord (pair_left b) (pair_right rec_right))
+#                        -- non-uniform: keep fn unchanged, recurse only on args.
+#   a = 12 (Tup_pt):     Pair_ord 12 rec_right
+#   else:                Pair_ord rec_left rec_right
+#                        -- intermediate Pair_ord layer (binary constructor's
+#                        inner-pair-of-children level).
+#
+# y_vec carries Pair_ord t v throughout (packed by the outer comp_sym).
+# h_subst receives 5 args: (a, b, rec_left, rec_right, y_vec); extracts
+# via proj 0..4 of 5.
+# ---------------------------------------------------------------------------
+
+
+def _h_subst_const(value_term):
+    """PR symbol whose value at h_subst's 5-arg input is constant
+    ``value_term``. Wraps const_sym in a comp_sym + 1-arg projection so
+    its defining axiom (at 1-arg input) reduces at h_subst's 5-arg call
+    site."""
+    return comp(mk_app(const_sym, value_term), proj(0, 5))
+
+
+def _h_subst_if_eq(tag_val, then_pr, else_pr):
+    """Dispatch on (a == tag_val) where a is h_subst's first arg.
+    Uses if_in_sym test against the singleton set {tag_val} =
+    Adj_pt (nat tag_val) Empty_pt."""
+    singleton = _adj_pt_b(nat(tag_val), Empty_pt)
+    return comp(if_in_sym,
+                proj(0, 5),               # test: a
+                _h_subst_const(singleton),  # t_val: {tag_val}
+                then_pr,
+                else_pr)
+
+
+# Default case (intermediate Pair_ord, no constructor-tag dispatch
+# matched): Pair_ord rec_left rec_right.
+_h_subst_default = comp(pair_ord_sym, proj(2, 5), proj(3, 5))
+
+# Tup_pt case (a = 12): Pair_ord 12 rec_right.
+_h_subst_tup = comp(pair_ord_sym, _h_subst_const(nat(12)), proj(3, 5))
+
+# App_pt case (a = 11): Pair_ord 11 (Pair_ord (pair_left b) (pair_right rec_right)).
+_h_subst_app = comp(
+    pair_ord_sym,
+    _h_subst_const(nat(11)),
+    comp(pair_ord_sym,
+         comp(pair_left_sym, proj(1, 5)),
+         comp(pair_right_sym, proj(3, 5))),
+)
+
+# In_pa case (a = 10): Pair_ord 10 rec_right.
+_h_subst_in = comp(pair_ord_sym, _h_subst_const(nat(10)), proj(3, 5))
+
+# Imp_pf case (a = 7): Pair_ord 7 rec_right.
+_h_subst_imp = comp(pair_ord_sym, _h_subst_const(nat(7)), proj(3, 5))
+
+# Not_pf case (a = 6): Pair_ord 6 rec_right.
+_h_subst_not = comp(pair_ord_sym, _h_subst_const(nat(6)), proj(3, 5))
+
+# Eq_pf case (a = 5): Pair_ord 5 rec_right.
+_h_subst_eq = comp(pair_ord_sym, _h_subst_const(nat(5)), proj(3, 5))
+
+# Var_pt case (a = 2): if b ∈ {pair_right y_vec} then pair_left y_vec
+# else Pair_ord 2 b. The singleton {pair_right y_vec} is built at PR
+# level via Adj_pt with adj_sym applied to (pair_right y_vec, Empty_pt).
+_h_subst_var = comp(
+    if_in_sym,
+    proj(1, 5),                                          # b
+    comp(adj_sym,                                        # {pair_right y_vec}
+         comp(pair_right_sym, proj(4, 5)),
+         _h_subst_const(Empty_pt)),
+    comp(pair_left_sym, proj(4, 5)),                     # pair_left y_vec (= t)
+    comp(pair_ord_sym, _h_subst_const(nat(2)), proj(1, 5)),  # Pair_ord 2 b
+)
+
+# Nested if_in dispatch (Var → Eq → Not → Imp → In → App → Tup → default).
+_h_subst_body = _h_subst_if_eq(2,  _h_subst_var,
+                _h_subst_if_eq(5,  _h_subst_eq,
+                _h_subst_if_eq(6,  _h_subst_not,
+                _h_subst_if_eq(7,  _h_subst_imp,
+                _h_subst_if_eq(10, _h_subst_in,
+                _h_subst_if_eq(11, _h_subst_app,
+                _h_subst_if_eq(12, _h_subst_tup,
+                               _h_subst_default)))))))
+
+G_SUBST_DEF = define("g_subst", parse_type("nat0"),
+                     mk_app(const_sym, nat(0)))
+g_subst = mk_const("g_subst", [])
+
+H_SUBST_DEF = define("h_subst", parse_type("nat0"), _h_subst_body)
+h_subst = mk_const("h_subst", [])
+
+# substitute_pr := course_rec g_subst h_subst applied via outer comp_sym
+# that wires substitute_pr's 3-arg input (F, t, v) into course_rec's
+# 2-arg input (F, Pair_ord t v).
 substitute_pr_def = define(
     "substitute_pr",
     parse_type("nat0"),
-    proj(0, 3),
+    comp(
+        mk_app(mk_app(course_rec_sym, g_subst), h_subst),
+        proj(0, 3),                                       # F
+        comp(pair_ord_sym, proj(1, 3), proj(2, 3)),       # Pair_ord t v
+    ),
 )
 substitute_pr = mk_const("substitute_pr", [])
 

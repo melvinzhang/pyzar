@@ -203,17 +203,57 @@ def rec(g, h):
 def course_rec(g, h):
     """``course_rec_sym g h`` -- structural recursion on Pair_ord-decomposition.
 
-    Defining equations (via PR-defining axioms):
-      course_rec g h [0]           = g []
-      course_rec g h [Pair_ord a b]
-          = h [a; b; course_rec g h [a]; course_rec g h [b]].
+    Defining equations (via PR-defining axioms), with y_vec carried
+    through every recursion level:
+      course_rec g h [0, y]            = g [y]
+      course_rec g h [Pair_ord a b, y]
+          = h [a; b; course_rec g h [a, y]; course_rec g h [b, y]; y].
 
-    The step `h` receives the left/right components AND the recursive
-    values at each, so structural recursion on formula trees /
-    proof lists / etc. is a ~20-line composition without needing
-    separate pair_left / pair_right / get_tag primitives.
+    The step `h` is 5-ary: receives left/right components, recursive
+    values at each, AND y_vec. Lets substitute_pr / Proof_PRST_pr
+    thread (t, v) / target through formula recursion without
+    repackaging the recursion target.
     """
     return mk_app(_c("course_rec_sym"), g, h)
+
+
+def pair_left(t):
+    """``App_pt pair_left_sym (Tup_pt t Empty_pt)``.
+
+    Extract the left component of a Pair_ord-encoded input. Defining
+    axiom (parametric in a, b):
+        App_pt pair_left_sym (Tup_pt (Pair_ord a b) Empty_pt) = a.
+
+    Used inside substitute_pr's App_pt case to extract `fn` from
+    Pair_ord fn args, and inside Proof_PRST_pr's is_pr_axiom_pr to
+    inspect the axiom-family tag and payload components.
+    """
+    return mk_app(_c("App_pt"), _c("pair_left_sym"), pt_list(t))
+
+
+def pair_right(t):
+    """``App_pt pair_right_sym (Tup_pt t Empty_pt)``.
+
+    Extract the right component. Defining axiom:
+        App_pt pair_right_sym (Tup_pt (Pair_ord a b) Empty_pt) = b.
+    """
+    return mk_app(_c("App_pt"), _c("pair_right_sym"), pt_list(t))
+
+
+def pair_ord_pr(a, b):
+    """``App_pt pair_ord_sym (Tup_pt a (Tup_pt b Empty_pt))`` -- PR-level
+    Pair_ord constructor (symmetric counterpart of pair_left / pair_right).
+
+    Defining axiom (parametric in HOL-level a, b):
+        App_pt pair_ord_sym (Tup_pt a (Tup_pt b Empty_pt)) = Pair_ord a b.
+
+    Distinct from the kernel-term-level `pair_ord(a, b)` builder above,
+    which produces `Pair_ord a b` directly. `pair_ord_pr` produces a
+    PR-symbol application that EVALUATES to `Pair_ord a b` -- used when
+    the construction has to happen inside a PR composition (e.g.,
+    substitute_pr's outer composer packaging (t, v) into one y_vec).
+    """
+    return mk_app(_c("App_pt"), _c("pair_ord_sym"), pt_list(a, b))
 
 
 def comp(g, *args):

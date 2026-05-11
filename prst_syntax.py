@@ -155,6 +155,23 @@ In_pa = mk_const("In_pa", [])
 # ---------------------------------------------------------------------------
 
 
+# Parser-friendly nat0 literal builder. ``"SUC0 " * n + "0"`` parses as
+# repeated self-application of SUC0 (type-incorrect); the parser needs
+# fully-parenthesised ``SUC0 (SUC0 (... 0))``. ``suc_chain`` synthesises
+# that form. Used throughout prst_syntax / prst_pr for tag literals,
+# IS_PR_SYM body disjuncts, and AT-equation 'eq:' strings.
+def suc_chain(k):
+    """Build the parser-friendly nat0 literal ``SUC0 (SUC0 (... 0))`` (k Succs)."""
+    s = "0"
+    for _ in range(k):
+        s = f"SUC0 ({s})"
+    return s
+
+
+# Backwards-compat alias for the original private name.
+_suc_chain = suc_chain
+
+
 _f_n0 = Var("f", nat0_ty)
 _args_n0 = Var("args", nat0_ty)
 
@@ -163,9 +180,7 @@ APP_PT_DEF, APP_PT_AT = define_with_at(
     "App_pt",
     parse_type("nat0 -> nat0 -> nat0"),
     "\\f:nat0. \\args:nat0. "
-    "Pair_ord "
-    "(SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))))))) "
-    "(Pair_ord f args)",
+    f"Pair_ord ({suc_chain(11)}) (Pair_ord f args)",
 )
 App_pt = mk_const("App_pt", [])
 
@@ -178,9 +193,7 @@ TUP_PT_DEF, TUP_PT_AT = define_with_at(
     "Tup_pt",
     parse_type("nat0 -> nat0 -> nat0"),
     "\\a:nat0. \\b:nat0. "
-    "Pair_ord "
-    "(SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))))))))) "
-    "(Pair_ord a b)",
+    f"Pair_ord ({suc_chain(12)}) (Pair_ord a b)",
 )
 Tup_pt = mk_const("Tup_pt", [])
 
@@ -194,19 +207,9 @@ Tup_pt = mk_const("Tup_pt", [])
 # ---------------------------------------------------------------------------
 
 
-# Tag literals. App_pt has tag SUC0^11 0, Tup_pt has tag SUC0^12 0.
-# DSL friction: SUC0-chains must be nested in parens. ``"SUC0 " * n + "0"``
-# parses as a chain of applications of SUC0 to itself (type-incorrect);
-# need ``SUC0 (SUC0 (... 0))``.
-def _suc_chain(k):
-    s = "0"
-    for _ in range(k):
-        s = f"SUC0 ({s})"
-    return s
-
-
-_APP_PT_TAG = _suc_chain(11)
-_TUP_PT_TAG = _suc_chain(12)
+# Tag literals (consumed by NAT0_LT_APP_PT_L and NAT0_LT_TUP_PT_L below).
+_APP_PT_TAG = suc_chain(11)
+_TUP_PT_TAG = suc_chain(12)
 
 
 @proof
@@ -312,7 +315,7 @@ def APP_PT_INJ(p):
 _TAG_NEQ_VAR_APP = _prove_tag_neq("_TAG_NEQ_VAR_APP", 2, 11)
 _TAG_NEQ_VAR_TUP = _prove_tag_neq("_TAG_NEQ_VAR_TUP", 2, 12)
 _TAG_NEQ_APP_TUP = _prove_tag_neq("_TAG_NEQ_APP_TUP", 11, 12)
-_VAR_T_TAG = _suc_chain(2)
+_VAR_T_TAG = suc_chain(2)
 
 
 # ---------------------------------------------------------------------------
@@ -685,7 +688,7 @@ def TUP_PT_DISJOINT_APP_PT(p):
 # ---------------------------------------------------------------------------
 
 
-# Real bodies inlined verbatim (no recursion). The seven base PR symbols
+# Real bodies inlined verbatim (no recursion). The nine base PR symbols
 # encode as:
 #   zero_sym         = 0
 #   adj_sym          = SUC0 0                                          (= 1)
@@ -695,6 +698,9 @@ def TUP_PT_DISJOINT_APP_PT(p):
 #   const_sym c      = Pair_ord (SUC0^5 0) c                             (tag 5)
 #   course_rec_sym g h
 #                    = Pair_ord (SUC0^7 0) (Pair_ord g h)               (tag 7)
+#   pair_left_sym    = SUC0^8 0                                          (= 8)
+#   pair_right_sym   = SUC0^9 0                                          (= 9)
+#   pair_ord_sym     = SUC0^10 0                                         (= 10)
 # (`mu_sym f = Pair_ord 6 f` is the partial-PR extension, not is_pr_sym.)
 # Symbolic names (zero_sym, adj_sym, ...) live in prst_pr.py, so the
 # body below uses the underlying nat0 literals / Pair_ord shapes
@@ -705,23 +711,24 @@ def TUP_PT_DISJOINT_APP_PT(p):
 #
 # course_rec_sym is the Pair_ord-structural-recursion combinator (the
 # analogue of rec_sym but recursing on Pair_ord-decomposition rather
-# than Adj-decomposition). It folds destructuring + recursion into one
-# primitive: its step function receives the left/right components of
-# the input and the recursive values at each, so substitute_pr /
-# Proof_PRST_pr / diag_pr can be written as ~20-line compositions
-# without separate pair_left / pair_right / get_tag primitives.
+# than Adj-decomposition). pair_left_sym / pair_right_sym extract the
+# Pair_ord components; together with course_rec they let substitute_pr
+# / Proof_PRST_pr handle non-uniform formula constructors (App_pt's
+# fn slot in particular) without re-encoding.
 IS_PR_SYM_DEF = define(
     "is_pr_sym",
     parse_type("nat0 -> bool"),
     "\\f:nat0. "
     "f = 0 \\/ "
-    "f = SUC0 0 \\/ "
-    "(?i n. f = Pair_ord (SUC0 (SUC0 0)) (Pair_ord i n)) \\/ "
-    "f = SUC0 (SUC0 (SUC0 0)) \\/ "
-    "(?g h. f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 0)))) (Pair_ord g h)) \\/ "
-    "(?c. f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) c) \\/ "
-    "(?g h. f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))) "
-    "                    (Pair_ord g h))",
+    f"f = {suc_chain(1)} \\/ "
+    f"(?i n. f = Pair_ord ({suc_chain(2)}) (Pair_ord i n)) \\/ "
+    f"f = {suc_chain(3)} \\/ "
+    f"(?g h. f = Pair_ord ({suc_chain(4)}) (Pair_ord g h)) \\/ "
+    f"(?c. f = Pair_ord ({suc_chain(5)}) c) \\/ "
+    f"(?g h. f = Pair_ord ({suc_chain(7)}) (Pair_ord g h)) \\/ "
+    f"f = {suc_chain(8)} \\/ "
+    f"f = {suc_chain(9)} \\/ "
+    f"f = {suc_chain(10)}",
 )
 is_pr_sym = mk_const("is_pr_sym", [])
 
@@ -738,10 +745,9 @@ PR_ARITY_DEF = define(
     parse_type("nat0 -> nat0"),
     "\\f:nat0. @r:nat0. "
     "(f = 0 /\\ r = 0) \\/ "
-    "(f = SUC0 0 /\\ r = SUC0 (SUC0 0)) \\/ "
-    "(?i n. f = Pair_ord (SUC0 (SUC0 0)) (Pair_ord i n) /\\ r = n) \\/ "
-    "(f = SUC0 (SUC0 (SUC0 0)) "
-    " /\\ r = SUC0 (SUC0 (SUC0 (SUC0 0))))",
+    f"(f = {suc_chain(1)} /\\ r = {suc_chain(2)}) \\/ "
+    f"(?i n. f = Pair_ord ({suc_chain(2)}) (Pair_ord i n) /\\ r = n) \\/ "
+    f"(f = {suc_chain(3)} /\\ r = {suc_chain(4)})",
 )
 pr_arity = mk_const("pr_arity", [])
 
@@ -775,8 +781,7 @@ _IS_PARTIAL_PR_SYM_F_DEF = define(
     parse_type("(nat0 -> bool) -> nat0 -> bool"),
     "\\rec:nat0->bool. \\f:nat0. "
     "is_pr_sym f \\/ "
-    "(?g. f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))) g "
-    "      /\\ rec g)",
+    f"(?g. f = Pair_ord ({suc_chain(6)}) g /\\ rec g)",
 )
 _IS_PARTIAL_PR_SYM_F = mk_const("_is_partial_pr_sym_F", [])
 
@@ -812,7 +817,7 @@ def IS_PARTIAL_PR_SYM_MONO(p):
     # constant. Pair_ord-applied-at-6 is a Comb, not a Const, but the
     # factory handles it uniformly (rand stripping unwinds the
     # application chain).
-    six = p._parse("SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))")
+    six = p._parse(suc_chain(6))
     pair6 = mk_app(mk_const("Pair_ord", []), six)
     sz_pair6 = SPEC(six, NAT0_LT_PAIR_ORD_R)  # |- !b. nat0_lt b (Pair_ord 6 b)
     eq_mu = mono_iff_unary_step(pair6, sz_pair6, h_th)
@@ -847,8 +852,7 @@ def IS_PR_SYM_IMP_PARTIAL(p):
     p.assume("h: is_pr_sym f")
     p.have(
         "h_body: is_pr_sym f \\/ "
-        "(?g. f = Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))) g "
-        "      /\\ is_partial_pr_sym g)"
+        f"(?g. f = Pair_ord ({suc_chain(6)}) g /\\ is_partial_pr_sym g)"
     ).by_disj("h")
     p.have(
         "h_F: _is_partial_pr_sym_F is_partial_pr_sym f"

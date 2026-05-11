@@ -645,6 +645,66 @@ def PROV_PRST_COURSE_REC_STEP_DEF(p):
     )
 
 
+@proof
+def PROV_PRST_PAIR_LEFT_DEF(p):
+    """|- !a b. Prov_PRST (pair_left_def_axiom_at a b)."""
+    from prst_pr import (  # noqa: F401
+        IS_PR_DEF_HOLDS_PAIR_LEFT, pair_left_def_axiom_at,
+    )
+    p.goal(
+        "!a b. Prov_PRST (pair_left_def_axiom_at a b)",
+        types={"a": nat0_ty, "b": nat0_ty},
+    )
+    p.fix("a b")
+    p.have("h_pr_def: is_pr_def (pair_left_def_axiom_at a b)").by(
+        IS_PR_DEF_HOLDS_PAIR_LEFT, "a", "b"
+    )
+    _is_pr_axiom_from_pr_def(p, "pair_left_def_axiom_at a b", "h_pr_def")
+    p.thus("Prov_PRST (pair_left_def_axiom_at a b)").by(
+        PROV_PRST_AXIOM, "pair_left_def_axiom_at a b", "h_axiom"
+    )
+
+
+@proof
+def PROV_PRST_PAIR_RIGHT_DEF(p):
+    """|- !a b. Prov_PRST (pair_right_def_axiom_at a b)."""
+    from prst_pr import (  # noqa: F401
+        IS_PR_DEF_HOLDS_PAIR_RIGHT, pair_right_def_axiom_at,
+    )
+    p.goal(
+        "!a b. Prov_PRST (pair_right_def_axiom_at a b)",
+        types={"a": nat0_ty, "b": nat0_ty},
+    )
+    p.fix("a b")
+    p.have("h_pr_def: is_pr_def (pair_right_def_axiom_at a b)").by(
+        IS_PR_DEF_HOLDS_PAIR_RIGHT, "a", "b"
+    )
+    _is_pr_axiom_from_pr_def(p, "pair_right_def_axiom_at a b", "h_pr_def")
+    p.thus("Prov_PRST (pair_right_def_axiom_at a b)").by(
+        PROV_PRST_AXIOM, "pair_right_def_axiom_at a b", "h_axiom"
+    )
+
+
+@proof
+def PROV_PRST_PAIR_ORD_DEF(p):
+    """|- !a b. Prov_PRST (pair_ord_def_axiom_at a b)."""
+    from prst_pr import (  # noqa: F401
+        IS_PR_DEF_HOLDS_PAIR_ORD, pair_ord_def_axiom_at,
+    )
+    p.goal(
+        "!a b. Prov_PRST (pair_ord_def_axiom_at a b)",
+        types={"a": nat0_ty, "b": nat0_ty},
+    )
+    p.fix("a b")
+    p.have("h_pr_def: is_pr_def (pair_ord_def_axiom_at a b)").by(
+        IS_PR_DEF_HOLDS_PAIR_ORD, "a", "b"
+    )
+    _is_pr_axiom_from_pr_def(p, "pair_ord_def_axiom_at a b", "h_pr_def")
+    p.thus("Prov_PRST (pair_ord_def_axiom_at a b)").by(
+        PROV_PRST_AXIOM, "pair_ord_def_axiom_at a b", "h_axiom"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Stage 2B (d.2) -- substitute-into-axiom derived rule.
 #
@@ -798,14 +858,41 @@ def PROV_PRST_SUBSTITUTE_EVAL(p):
                                   (substitute F t v)).
 
     Where ``substitute`` on the RHS is HOL's substitute function (from
-    hf_syntax). The defining equations of substitute_pr (in prst_pr)
-    line up with the AT-equations of substitute, so this lemma is
-    proved by structural induction on F, dispatching to PRST_REC_STEP
-    at each constructor. STUB.
+    hf_syntax). substitute_pr now has a REAL body (course_rec + h_subst
+    dispatch) so the equation is no longer Layer-0-blocked. The proof
+    structure is strong structural induction on F with per-constructor
+    case analysis.
 
-    The "free representability" theorem: since substitute_pr is a term
-    constructor, its representability collapses to one defining-equation
-    lookup.
+    Dependency chain (what's needed for a real proof):
+
+    1. PROV_PRST_SUBST_AXIOM (Layer 6, sorry'd). Required to substitute
+       formal Var_t slots in the parametric defining axioms (PROV_PRST_
+       COURSE_REC_STEP_DEF, PROV_PRST_PROJ_DEF, etc.) at the concrete
+       (F, t, v) values for each reduction step.
+
+    2. PROV_PRST_MP (Layer 6, sorry'd). Required to chain conditional
+       axioms like IF_IN_TRUE/FALSE_DEF_AXIOM (which carry an In_pa /
+       ~In_pa antecedent) into the dispatch reduction at each formula-
+       tag case in h_subst.
+
+    3. PRST equality reasoning (reflexivity, transitivity, congruence).
+       Possibly derivable from the existing axiom infrastructure, but
+       no PROV_PRST_EQ_* helpers exist in prst_proof yet.
+
+    Once 1-3 land, the proof becomes ~80 lines:
+      - Strong induction on F via IS_PFORM_REC / IS_PTERM_REC.
+      - Base case (F = Empty_pt = 0): reduce
+        App_pt substitute_pr (Tup_pt 0 (Tup_pt t (Tup_pt v Empty_pt)))
+        via outer comp_sym → App_pt (course_rec g_subst h_subst)
+        (Tup_pt 0 (Tup_pt (Pair_ord t v) Empty_pt)) → App_pt g_subst
+        (Tup_pt (Pair_ord t v) Empty_pt) = 0 (by const_sym axiom).
+        Bridge to HOL: substitute Empty_pt t v = Empty_pt = 0 via the
+        SUBSTITUTE_P_AT_EMPTY equation.
+      - Step cases (F = Pair_ord a b for each formula-constructor tag a):
+        course_rec step axiom + h_subst dispatch at tag a + IH for
+        subterms. Each case ~10 lines.
+
+    STUB until prerequisites 1-3 land.
     """
     p.goal(
         "!F t v. Prov_PRST (Eq_pf "
