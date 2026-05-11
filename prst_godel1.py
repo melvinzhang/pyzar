@@ -23,14 +23,15 @@ sentence + consistency via the standard model). What changes is the
     the diagonal equivalence + representability + consistency /
     Sigma_1-soundness.
 
-  * Consistency (stage 6): same model construction as for HF (the
-    HOL-level model on ``nat0`` discharges HF1-HF5), PLUS one extra
-    soundness obligation per PR-defining-equation axiom. Each
-    obligation is uniform (the defining equation is a HOL theorem on
-    nat0 by construction, since the PR symbol's value is a HOL
-    function computed by HOL primitive recursion). ~150 lines vs
-    ~120 for HF; the modest increase is the only "tax" we pay for
-    the PR-symbol layer.
+  * Consistency (stage 6): different from HF. PRST has no HF1-HF5
+    axioms (set-theoretic content lives only in the standard HF
+    model, Jensen-Karp style), so the consistency obligation is just
+    one HOL-soundness theorem per registered PR-defining equation.
+    Each obligation is uniform: the defining equation is a HOL
+    theorem on nat0 by construction, since the PR symbol's value is
+    a HOL function computed by HOL primitive recursion. Estimate
+    ~80 lines (smaller than HF's ~120 because there are no
+    HF-axiom soundness obligations).
 
   * Sigma_1-soundness: arguably cheaper -- because the represented
     predicates are PR-evaluated by symbol unfolding rather than
@@ -219,12 +220,13 @@ def G_PRST_DIAGONAL_EQ(p):
 # ---------------------------------------------------------------------------
 # Stage 6 (PRST) -- consistency and Sigma_1-soundness.
 #
-# Consistency of PRST: same model as for HF (HOL-level model on nat0,
-# with HF1-HF5 each verified) plus one HOL theorem per registered PR
-# symbol's defining equation. Each defining equation is, by
-# construction, a HOL theorem on nat0 (the PR symbol's value is a HOL
-# function with the same recursion equations). Estimate ~150 lines
-# (HF model ~120 + PR-symbol soundness ~30).
+# Consistency of PRST: standard HF model on nat0, with one HOL
+# soundness theorem per registered PR-symbol defining equation. Each
+# defining equation is, by construction, a HOL theorem on nat0 (the
+# PR symbol's value is a HOL function with the same recursion
+# equations). No HF1-HF5 obligations (PRST has no set-theoretic
+# axioms; their truth in the model is inherited from the HF carrier
+# but not needed to certify any PRST axiom). Estimate ~80 lines.
 #
 # Sigma_1-soundness: same structure as for HF. ~80 lines.
 # ---------------------------------------------------------------------------
@@ -237,8 +239,9 @@ def PRST_CONSISTENT(p):
     Consistency: PRST does not prove ``0 = 1``. Proof via the standard
     HOL-level model on nat0 -- the model interprets every PRST term as
     its HOL value (each PR symbol's value is given by its HOL-side
-    definition in prst_pr; HF1-HF5 follow from membership lemmas in
-    hf_sets; logical axioms by tautological correctness). STUB.
+    definition in prst_pr); each defining equation is true in the
+    model by HOL-side primitive recursion; logical axioms by
+    tautological correctness. STUB.
     """
     p.goal("~ Prov_PRST (Eq_pf Empty_pt (Adj_pt Empty_pt Empty_pt))")
     p.sorry()
@@ -344,8 +347,8 @@ def PRST_ESSENTIALLY_UNDECIDABLE(p):
 #        recursive recognisers' App_pt cases.)
 #
 #   Stage 2 (proof system)                       ~900             ~400
-#       (PRST inherits is_hf_axiom / is_logical_axiom verbatim;
-#        adds is_pr_def + 7 base-layer defining equations.)
+#       (PRST inherits is_logical_axiom verbatim, drops HF1-HF5
+#        entirely, adds is_pr_def + 6 base-layer defining equations.)
 #
 #   Stage 3 (representability)                  ~7900            ~1150
 #       (PR symbols are first-class terms; no trace sets, no

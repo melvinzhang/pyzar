@@ -338,9 +338,10 @@ rec_step_def_axiom_at = mk_const("rec_step_def_axiom_at", [])
 # ---------------------------------------------------------------------------
 # Stage 2A (e) -- is_pr_def, the structural recogniser.
 #
-# Mirrors is_hf_axiom (which is a disjunction over the five HF axiom
-# slots). For PRST: the disjunction recognises any closed nat0 that
-# matches one of the seven defining-equation patterns.
+# Structural analog of HF's is_hf_axiom (which disjuncts over five HF
+# axiom slots), but for PRST: the disjunction recognises any closed
+# nat0 that matches one of the six defining-equation patterns (no adj
+# branch since adj_sym is primitive).
 #
 # Stub body: F. Real body is the disjunction listed below. The
 # IS_PR_DEF_HOLDS_* lemmas (one per axiom) discharge by tag analysis.
@@ -485,9 +486,8 @@ comp_sym = mk_const("comp_sym", [])
 # equation: one Prov_PRST equation via PRST_COMP_DEF.
 #
 # ``Proof_HF_pr`` -- decidable list-of-formulas proof checker; uses
-# ``is_pr_axiom`` (PRST analog of is_hf_axiom + is_logical_axiom +
-# is_pr_def), ``is_mp``, ``is_gen``. All primitive recursive. Total:
-# ~50 base-layer symbols composed.
+# ``is_pr_axiom`` (= is_pr_def \/ is_logical_axiom) and ``is_mp``.
+# All primitive recursive. Total: ~50 base-layer symbols composed.
 #
 # The full implementation costs ~600 lines vs ~2900 in hf_repr_thms.py
 # -- the saving comes from never needing trace sets or functionality

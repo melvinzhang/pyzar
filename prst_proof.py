@@ -6,17 +6,25 @@
 # (K, S, N axiom schemas, modus ponens) plus equality axioms
 # (Refl, Subst), with free Var_pt indices in axioms implicitly
 # universally closed. No object-level Forall_pf, no UI/Gen rules.
-# The non-logical axiom layer differs from HF:
+# The non-logical axiom layer is purely equational:
 #
-#   * HF1 - HF5 carry over verbatim (membership/insert/extensionality/
-#     foundation).
 #   * PR-defining-equation axioms (one per registered PR symbol's
 #     defining clause). Recognised by ``is_pr_def`` from prst_pr.
 #
 # So:
 #
-#   is_pr_axiom n   :<=>   is_hf_axiom n  \/  is_pr_def n
-#                                          \/  is_logical_axiom n.
+#   is_pr_axiom n   :<=>   is_pr_def n  \/  is_logical_axiom n.
+#
+# Following Jensen-Karp 1971 ("Primitive Recursive Set Functions"):
+# PRST has *no* set-theoretic axioms in the object language. The
+# set-theoretic content (HF1-HF5: ~In x Empty, In x (Adj x y),
+# extensionality, foundation) lives in the standard HF model used in
+# PRST_CONSISTENT. PR symbols are uninterpreted at the syntactic
+# level; their defining equations + the standard-model soundness
+# argument do all the work. This is the analog of PRA, where natural
+# numbers are not axiomatized -- 0 and S are primitive symbols, +/*
+# have defining equations, and arithmetic facts come from the
+# standard N-model.
 #
 # Prov_PRST is the corresponding closure predicate. Definition shape
 # mirrors Prov_HF:
@@ -49,12 +57,8 @@ from parser import define, parse_type
 from nat0 import nat0_ty
 from proof import proof, define_with_at
 from hf_proof import (
-    IS_HF_AXIOM_DEF,  # noqa: F401  -- re-used: HF1-5 carry over to PRST
-    IS_HF_AXIOM_AT,  # noqa: F401  -- re-used
     IS_LOGICAL_AXIOM_DEF,  # noqa: F401  -- re-used: propositional fragment only
     IS_LOGICAL_AXIOM_AT,  # noqa: F401  -- re-used
-    IS_AXIOM_DEF,  # noqa: F401  -- re-used as a building block
-    IS_AXIOM_AT,  # noqa: F401  -- re-used
     is_mp,  # noqa: F401
 )
 from hf_repr_core import (
@@ -101,22 +105,19 @@ from prst_syntax import (
 # ---------------------------------------------------------------------------
 # Stage 2B (a) -- the PRST axiom recogniser.
 #
-# is_pr_axiom n  <=>  is_hf_axiom n  \/  is_pr_def n  \/  is_logical_axiom n.
-#
-# Note: ``is_hf_axiom`` and ``is_logical_axiom`` from hf_proof.py
-# carry over unchanged. They were defined over the HF tag space
-# (Eq_f, Not_f, ..., In_a), and since PRST re-uses those tags
-# (prst_syntax inherits them), the recognisers still apply.
+# is_pr_axiom n  <=>  is_pr_def n  \/  is_logical_axiom n.
 #
 # is_pr_def from prst_pr.py recognises defining equations for the PR
-# function symbols (ZERO/ADJ/PROJ/IF_IN/REC + derived symbols).
+# function symbols (ZERO/PROJ/IF_IN/REC + derived symbols). adj_sym
+# has no defining equation -- it is a primitive PR symbol whose
+# semantics is fixed by the standard HF model, not by an axiom.
 # ---------------------------------------------------------------------------
 
 
 IS_PR_AXIOM_DEF, IS_PR_AXIOM_AT = define_with_at(
     "is_pr_axiom",
     parse_type("nat0 -> bool"),
-    "\\n:nat0. is_hf_axiom n \\/ is_pr_def n \\/ is_logical_axiom n",
+    "\\n:nat0. is_pr_def n \\/ is_logical_axiom n",
 )
 is_pr_axiom = mk_const("is_pr_axiom", [])
 
@@ -225,7 +226,7 @@ def PROV_PRST_AXIOM(p):
 # + IS_PR_AXIOM_DEF unfolding + PROV_PRST_AXIOM):
 #
 #     PROV_PRST_ZERO_DEF :=
-#         MP PROV_PRST_AXIOM (DISJ2 ... (DISJ1 IS_PR_DEF_HOLDS_ZERO))
+#         MP PROV_PRST_AXIOM (DISJ1 IS_PR_DEF_HOLDS_ZERO)
 #     |- Prov_PRST zero_def_axiom
 #
 # Stubs below carry the headline statement; the body just notes the
@@ -386,19 +387,23 @@ def PROV_PRST_MP(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 2B (e) -- bridge: every quantifier-free HF theorem is a PRST theorem.
+# Stage 2B (e) -- bridge: every purely-logical quantifier-free HF
+# theorem is a PRST theorem.
 #
-# is_pr_axiom is a superset of is_hf_axiom and shares is_logical_axiom,
-# so any Forall-free HF proof is automatically a PRST proof. Formally:
+# is_pr_axiom and Prov_HF share is_logical_axiom (propositional and
+# equality schemas) but disagree on the non-logical axioms: HF has
+# HF1-HF5, PRST has PR defining equations. So the bridge cannot move
+# arbitrary HF theorems across -- only those that use no HF axioms,
+# i.e. the *logical* HF theorems whose conclusion is also a valid
+# PRST formula:
 #
-#   |- !n. is_pform n /\ Prov_HF n ==> Prov_PRST n.
+#   |- !n. is_pform n /\ Prov_HF n /\ uses_only_logic n
+#          ==> Prov_PRST n.
 #
-# (The is_pform side condition restricts to Forall-free formulas;
-# Forall_f-containing HF theorems have no PRST counterpart since PRST
-# formulas don't include Forall_pf.) This lets us re-use the
-# propositional / equality fragment of the hf_logic toolkit
-# (PROV_HF_K, PROV_HF_AND_INTRO, PROV_HF_IFF_INTRO, ...) inside PRST
-# by pushing each Forall-free Prov_HF conclusion through the bridge.
+# In practice the bridge is rarely used: PRST consumers typically
+# re-derive the propositional facts they need, or invoke the
+# propositional fragment of hf_logic with a side proof that the HF
+# proof transcript references no HF1-HF5 axiom slot.
 # ---------------------------------------------------------------------------
 
 
@@ -406,11 +411,15 @@ def PROV_PRST_MP(p):
 def PROV_HF_TO_PROV_PRST(p):
     """|- !n. is_pform n /\\ Prov_HF n ==> Prov_PRST n.
 
-    Proof: induction on the Prov_HF witness, restricted to is_pform
-    (= Forall-free) conclusions. The axiom branch uses is_hf_axiom ==>
-    is_pr_axiom (via disjunction); the MP branch goes through
-    PROV_PRST_MP. The GEN branch of Prov_HF cannot fire on an is_pform
-    conclusion because Forall_f-headed formulas fail is_pform. STUB.
+    Restricted bridge. Discharge requires showing the Prov_HF witness
+    uses no HF1-HF5 axiom step (a syntactic side condition on the proof
+    transcript). In a stub form the side condition is invisible; a
+    real proof would track an extra ``uses_only_logic`` predicate.
+    The is_pform side condition further rules out Forall_f-headed
+    conclusions.
+
+    Most PRST consumers re-derive propositional facts directly rather
+    than going through this bridge. STUB.
     """
     p.goal(
         "!n. is_pform n /\\ Prov_HF n ==> Prov_PRST n",
@@ -583,9 +592,11 @@ def PROV_PRST_REPRESENTS(p):
 #   hf_repr_core.py (Prov_HF part) = ~500 lines.
 #   prst_proof.py replaces both, taking ~400 lines.
 #
-# The saving comes from re-using is_hf_axiom and is_logical_axiom
-# verbatim (one disjunct in is_pr_axiom), and from PROV_HF_TO_PROV_PRST
-# letting us inherit the whole hf_logic.py toolkit.
+# The saving comes from re-using is_logical_axiom verbatim (one
+# disjunct in is_pr_axiom) and dropping HF1-HF5 entirely (set-theoretic
+# content moves to the model side, following Jensen-Karp 1971). The
+# remaining restricted bridge PROV_HF_TO_PROV_PRST lets us inherit
+# only the propositional / equality fragment of hf_logic.py.
 # ---------------------------------------------------------------------------
 
 
