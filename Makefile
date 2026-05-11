@@ -7,7 +7,7 @@ GODEL_GOLDEN  := godel.golden
 GODEL_OUT     := godel.out
 
 .PHONY: test test-kernel test-tactics test-parser test-axioms test-proof \
-        test-theories test-golden update-golden lint flag-escapes \
+        test-theories test-prst test-golden update-golden lint flag-escapes \
         format clean
 
 THEORY_FILES := classical.py num.py nat.py frac.py rat_int.py
@@ -69,6 +69,17 @@ test-theories:
 	  $(PY) godel_first.py | tee -a $$raw; \
 	  grep -E '^[[:space:]]*[A-Z][A-Z0-9_]*[[:space:]]*:.*\|-' $$raw > $(GODEL_OUT); \
 	  rm -f $$raw
+
+# PRST stack -- run each module in dependency order. Sketch-level
+# (stubs throughout) so we just confirm everything loads and the
+# __main__ smoke-prints succeed.
+test-prst:
+	$(PY) prst_syntax.py
+	$(PY) prst_connectives.py
+	$(PY) prst_pr.py
+	$(PY) prst_proof.py
+	$(PY) prst_repr.py
+	$(PY) prst_godel1.py
 
 # L7 -- golden: every theorem's pp(concl) matches the checked-in
 # `landau.golden`.  The kernel certifies inferences but cannot tell whether
