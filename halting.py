@@ -2142,6 +2142,415 @@ def HALTS_SK_STEP_FWD(p):
     p.thus("halts (sk_step t)").by(_NORMAL_IMP_HALTS_STEP, "n", "t", "n_eq")
 
 
+# ---------------------------------------------------------------------------
+# Trajectory step lemmas for the Omega-shape.
+#
+#   SK_STEP_I_APP            :  |- !X. sk_step (App_t I_t X)
+#                                    = App_t (App_t K_t X) (App_t K_t X)
+#       I_t = App_t (App_t S_t K_t) K_t, so ``App_t I_t X`` is an
+#       S-redex (in disguise) with x=K_t, y=K_t, z=X.
+#
+#   TRAJ_STEP_OMEGA_SHAPE    :  |- !X. sk_step (App_t (App_t I_t X) (App_t I_t X))
+#                                    = App_t (App_t (App_t K_t X) (App_t K_t X))
+#                                            (App_t I_t X)
+#       Top is App_t a b with a = b = App_t I_t X, neither K- nor
+#       S-redex at top (I_t doesn't unify with K_t or App_t S_t _),
+#       so D3 fires.  ``sk_step a`` reduces via SK_STEP_I_APP, so
+#       descend-L wins.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def SK_STEP_I_APP(p):
+    """|- !X. sk_step (App_t I_t X) = App_t (App_t K_t X) (App_t K_t X).
+
+    Unfold I_t via I_T_DEF to expose an S-redex with x=K_t, y=K_t, z=X;
+    apply SK_STEP_S; fold ``App_t (App_t S_t K_t) K_t`` back to I_t.
+    """
+    p.goal("!X. sk_step (App_t I_t X) = App_t (App_t K_t X) (App_t K_t X)")
+    p.fix("X")
+    p.have(
+        "step_S: sk_step (App_t (App_t (App_t S_t K_t) K_t) X) "
+        "        = App_t (App_t K_t X) (App_t K_t X)"
+    ).by(SK_STEP_S, "K_t", "K_t", "X")
+    p.thus(
+        "sk_step (App_t I_t X) = App_t (App_t K_t X) (App_t K_t X)"
+    ).by_rewrite_of("step_S", [SYM(I_T_DEF)])
+
+
+@proof
+def TRAJ_STEP_OMEGA_SHAPE(p):
+    """|- !X. sk_step (App_t (App_t I_t X) (App_t I_t X))
+              = App_t (App_t (App_t K_t X) (App_t K_t X)) (App_t I_t X).
+
+    First step of the Omega-shape trajectory cycle.  Top of the input is
+    App_t a b with a = b = App_t I_t X.  Refute the K- and S- top-disjuncts
+    via I_T_DEF + APP_T_INJ + {K,S}_T_NEQ_APP_T (I_t doesn't structurally
+    unify with K_t or App_t S_t _).  D3 fires; sk_step a = App_t (App_t
+    K_t X) (App_t K_t X) by SK_STEP_I_APP, hence ``descend-L`` -- giving
+    the claimed value.
+    """
+    from tactics import CONJ as _CONJ, CONJUNCT1 as _C1, CONJUNCT2 as _C2, TRANS
+    from tactics import AP_TERM, AP_THM
+    p.goal(
+        "!X. sk_step (App_t (App_t I_t X) (App_t I_t X)) "
+        "    = App_t (App_t (App_t K_t X) (App_t K_t X)) (App_t I_t X)"
+    )
+    p.fix("X")
+    t = "App_t (App_t I_t X) (App_t I_t X)"
+    sk_t = f"sk_step ({t})"
+    val = "App_t (App_t (App_t K_t X) (App_t K_t X)) (App_t I_t X)"
+
+    # ---- sub-lemma: sk_step (App_t I_t X) = (K X)(K X) ---------------
+    p.have(
+        "sk_IX: sk_step (App_t I_t X) = App_t (App_t K_t X) (App_t K_t X)"
+    ).by(SK_STEP_I_APP, "X")
+
+    # ---- not_kred:  ~(?a b. t = App_t (App_t K_t a) b) ---------------
+    with p.have(
+        f"not_kred: ~(?a b. {t} = App_t (App_t K_t a) b)"
+    ).proof():
+        with p.suppose(f"ex_kred: ?a b. {t} = App_t (App_t K_t a) b"):
+            p.choose("a", from_="ex_kred")
+            p.choose("b", from_="a_eq")
+            # b_eq : t = App_t (App_t K_t a) b
+            p.have(
+                "h_o: App_t I_t X = App_t K_t a /\\ App_t I_t X = b"
+            ).by(
+                APP_T_INJ, "App_t I_t X", "App_t I_t X",
+                "App_t K_t a", "b", "b_eq",
+            )
+            p.have("h_IX: App_t I_t X = App_t K_t a").by_thm(_C1(p.fact("h_o")))
+            p.have("h_IK: I_t = K_t /\\ X = a").by(
+                APP_T_INJ, "I_t", "X", "K_t", "a", "h_IX"
+            )
+            p.have("h_eq_IK: I_t = K_t").by_thm(_C1(p.fact("h_IK")))
+            # I_T_DEF: I_t = App_t (App_t S_t K_t) K_t.
+            p.have(
+                "h_AK: App_t (App_t S_t K_t) K_t = K_t"
+            ).by_thm(TRANS(SYM(I_T_DEF), p.fact("h_eq_IK")))
+            p.have(
+                "h_neq: ~(K_t = App_t (App_t S_t K_t) K_t)"
+            ).by(K_T_NEQ_APP_T, "App_t S_t K_t", "K_t")
+            p.have(
+                "h_sym: K_t = App_t (App_t S_t K_t) K_t"
+            ).by_thm(SYM(p.fact("h_AK")))
+            p.absurd().by_conj("h_neq", "h_sym")
+
+    # ---- not_sred:  ~(?a b c. t = App_t (App_t (App_t S_t a) b) c) ----
+    with p.have(
+        f"not_sred: ~(?a b c. {t} = App_t (App_t (App_t S_t a) b) c)"
+    ).proof():
+        with p.suppose(
+            f"ex_sred: ?a b c. {t} = App_t (App_t (App_t S_t a) b) c"
+        ):
+            p.choose("a", from_="ex_sred")
+            p.choose("b", from_="a_eq")
+            p.choose("c", from_="b_eq")
+            # c_eq : t = App_t (App_t (App_t S_t a) b) c
+            p.have(
+                "h_o: App_t I_t X = App_t (App_t S_t a) b "
+                "     /\\ App_t I_t X = c"
+            ).by(
+                APP_T_INJ, "App_t I_t X", "App_t I_t X",
+                "App_t (App_t S_t a) b", "c", "c_eq",
+            )
+            p.have(
+                "h_IX: App_t I_t X = App_t (App_t S_t a) b"
+            ).by_thm(_C1(p.fact("h_o")))
+            p.have(
+                "h_IS: I_t = App_t S_t a /\\ X = b"
+            ).by(APP_T_INJ, "I_t", "X", "App_t S_t a", "b", "h_IX")
+            p.have("h_eq_IS: I_t = App_t S_t a").by_thm(_C1(p.fact("h_IS")))
+            p.have(
+                "h_ASKK: App_t (App_t S_t K_t) K_t = App_t S_t a"
+            ).by_thm(TRANS(SYM(I_T_DEF), p.fact("h_eq_IS")))
+            p.have(
+                "h_inj: App_t S_t K_t = S_t /\\ K_t = a"
+            ).by(APP_T_INJ, "App_t S_t K_t", "K_t", "S_t", "a", "h_ASKK")
+            p.have("h_ASK: App_t S_t K_t = S_t").by_thm(_C1(p.fact("h_inj")))
+            p.have(
+                "h_neq: ~(S_t = App_t S_t K_t)"
+            ).by(S_T_NEQ_APP_T, "S_t", "K_t")
+            p.have(
+                "h_sym: S_t = App_t S_t K_t"
+            ).by_thm(SYM(p.fact("h_ASK")))
+            p.absurd().by_conj("h_neq", "h_sym")
+
+    # ---- not_fixed_IX:  ~(sk_step (App_t I_t X) = App_t I_t X) -------
+    # Used to (a) prove descend-L (the firing inner sub-branch), and
+    # (b) refute descend-R and both-fixed sub-branches in the D3 case.
+    with p.have(
+        "not_fixed_IX: ~(sk_step (App_t I_t X) = App_t I_t X)"
+    ).proof():
+        with p.suppose("hf: sk_step (App_t I_t X) = App_t I_t X"):
+            # sk_IX : sk_step (App_t I_t X) = (K X)(K X)
+            # hf    : sk_step (App_t I_t X) = App_t I_t X
+            # combine: (K X)(K X) = App_t I_t X.
+            p.have(
+                "h: App_t (App_t K_t X) (App_t K_t X) = App_t I_t X"
+            ).by_thm(TRANS(SYM(p.fact("sk_IX")), p.fact("hf")))
+            # APP_T_INJ -> App_t K_t X = I_t.
+            p.have(
+                "h_o: App_t K_t X = I_t /\\ App_t K_t X = X"
+            ).by(
+                APP_T_INJ, "App_t K_t X", "App_t K_t X", "I_t", "X", "h"
+            )
+            p.have("h_KX_I: App_t K_t X = I_t").by_thm(_C1(p.fact("h_o")))
+            # I_T_DEF -> App_t K_t X = App_t (App_t S_t K_t) K_t.
+            p.have(
+                "h_KX_ASKK: App_t K_t X = App_t (App_t S_t K_t) K_t"
+            ).by_thm(TRANS(p.fact("h_KX_I"), I_T_DEF))
+            # APP_T_INJ -> K_t = App_t S_t K_t, refuted by K_T_NEQ_APP_T.
+            p.have(
+                "h_inj: K_t = App_t S_t K_t /\\ X = K_t"
+            ).by(APP_T_INJ, "K_t", "X", "App_t S_t K_t", "K_t", "h_KX_ASKK")
+            p.have("h_K_ASK: K_t = App_t S_t K_t").by_thm(_C1(p.fact("h_inj")))
+            p.have(
+                "h_neq: ~(K_t = App_t S_t K_t)"
+            ).by(K_T_NEQ_APP_T, "S_t", "K_t")
+            p.absurd().by_conj("h_neq", "h_K_ASK")
+
+    # ---- Build the D3 disjunct (firing) at r := val ------------------
+    # D3 inner sub-disjunct (descend-L):
+    #   ~(sk_step a = a) /\ val = App_t (sk_step a) b
+    # at a = b = App_t I_t X.
+    #
+    # The second conjunct ``val = App_t (sk_step (App_t I_t X)) (App_t I_t X)``
+    # follows from ``sk_IX`` by AP_THM(AP_TERM(App_t, sk_IX), App_t I_t X)
+    # then SYM.
+    val_eq = AP_THM(
+        AP_TERM(p._parse("App_t"), SYM(p.fact("sk_IX"))),
+        p._parse("App_t I_t X"),
+    )
+    p.have(
+        f"val_eq: ({val}) = App_t (sk_step (App_t I_t X)) (App_t I_t X)"
+    ).by_thm(val_eq)
+
+    p.have(
+        f"descL: ~(sk_step (App_t I_t X) = App_t I_t X) /\\ "
+        f"({val}) = App_t (sk_step (App_t I_t X)) (App_t I_t X)"
+    ).by_thm(_CONJ(p.fact("not_fixed_IX"), p.fact("val_eq")))
+
+    # DISJ1 descL into the 3-disjunct inner-disjunction (after fixing a, b
+    # to App_t I_t X via the existential witness below).
+    p.have(
+        f"inner_disj_at_IX: "
+        f"(~(sk_step (App_t I_t X) = App_t I_t X) /\\ "
+        f" ({val}) = App_t (sk_step (App_t I_t X)) (App_t I_t X)) \\/ "
+        f"(sk_step (App_t I_t X) = App_t I_t X /\\ "
+        f" ~(sk_step (App_t I_t X) = App_t I_t X) /\\ "
+        f" ({val}) = App_t (App_t I_t X) (sk_step (App_t I_t X))) \\/ "
+        f"(sk_step (App_t I_t X) = App_t I_t X /\\ "
+        f" sk_step (App_t I_t X) = App_t I_t X /\\ "
+        f" ({val}) = ({t}))"
+    ).by_disj("descL")
+
+    # Build the existential: ?a b. t = App_t a b /\ inner_disjunction[a,b].
+    p.have(
+        f"ex_a_b: ?a b. ({t}) = App_t a b /\\ "
+        f"        ((~(sk_step a = a) /\\ ({val}) = App_t (sk_step a) b) \\/ "
+        f"         (sk_step a = a /\\ ~(sk_step b = b) /\\ "
+        f"          ({val}) = App_t a (sk_step b)) \\/ "
+        f"         (sk_step a = a /\\ sk_step b = b /\\ ({val}) = ({t})))"
+    ).by_exists(
+        ["App_t I_t X", "App_t I_t X"],
+        REFL(p._parse(t)),
+        "inner_disj_at_IX",
+    )
+
+    # Full D3 disjunct: ~K /\ ~S /\ ex_a_b.
+    K_shape = f"?a b. {t} = App_t (App_t K_t a) b"
+    S_shape = f"?a b c. {t} = App_t (App_t (App_t S_t a) b) c"
+    p.have(
+        f"inner_D3: ~({K_shape}) /\\ ~({S_shape}) /\\ "
+        f"(?a b. ({t}) = App_t a b /\\ "
+        f"       ((~(sk_step a = a) /\\ ({val}) = App_t (sk_step a) b) \\/ "
+        f"        (sk_step a = a /\\ ~(sk_step b = b) /\\ "
+        f"         ({val}) = App_t a (sk_step b)) \\/ "
+        f"        (sk_step a = a /\\ sk_step b = b /\\ ({val}) = ({t}))))"
+    ).by_thm(
+        _CONJ(p.fact("not_kred"), _CONJ(p.fact("not_sred"), p.fact("ex_a_b")))
+    )
+
+    # ---- Feed to _sk_step_select_at and case-analyze body ------------
+    body_th = _sk_step_select_at(p, t, val, "inner_D3")
+    p.have(f"body: {_sk_step_body(t, sk_t)}").by_thm(body_th)
+
+    # is_app: App-shape of t (refutes D4).
+    p.have(f"is_app: ?a b. {t} = App_t a b").by_exists(
+        ["App_t I_t X", "App_t I_t X"], REFL(p._parse(t))
+    )
+
+    D1, D2, D3, D4 = _sk_step_disjuncts(t, sk_t)
+    with p.cases_on("body"):
+        with p.case(f"h1: {D1}"):
+            # Refute via not_kred.
+            p.choose("b", from_="a_eq")
+            p.split("b_eq", "(h_app, _)")
+            p.have(
+                f"h_kred_ex: ?a b. {t} = App_t (App_t K_t a) b"
+            ).by_exists(["a", "b"], p.fact("h_app"))
+            p.absurd().by_conj("not_kred", "h_kred_ex")
+        with p.case(f"h2: {D2}"):
+            # Refute via not_sred.
+            p.split("h2", "(_, h2_ex)")
+            p.choose("a", from_="h2_ex")
+            p.choose("b", from_="a_eq")
+            p.choose("c", from_="b_eq")
+            p.split("c_eq", "(h_app, _)")
+            p.have(
+                f"h_sred_ex: ?a b c. {t} = App_t (App_t (App_t S_t a) b) c"
+            ).by_exists(["a", "b", "c"], p.fact("h_app"))
+            p.absurd().by_conj("not_sred", "h_sred_ex")
+        with p.case(f"h3: {D3}"):
+            # Firing case.  Inner case-split on the 3-sub-disjunction.
+            p.split("h3", "(_, _, h3_inner)")
+            # h3_inner : ?a b. t = App_t a b /\ (descL \/ descR \/ fixed)
+            p.choose("a", from_="h3_inner")
+            p.choose("b", from_="a_eq")
+            p.split("b_eq", "(h_app, h_inner)")
+            # APP_T_INJ on h_app : App_t I_t X = a /\ App_t I_t X = b.
+            p.have(
+                "h_inj: App_t I_t X = a /\\ App_t I_t X = b"
+            ).by(
+                APP_T_INJ, "App_t I_t X", "App_t I_t X", "a", "b", "h_app"
+            )
+            p.have("h_a_eq: App_t I_t X = a").by_thm(_C1(p.fact("h_inj")))
+            p.have("h_b_eq: App_t I_t X = b").by_thm(_C2(p.fact("h_inj")))
+            # sk_step a = sk_step (App_t I_t X) = (K X)(K X).
+            h_sk_a_th = TRANS(
+                SYM(AP_TERM(p._parse("sk_step"), p.fact("h_a_eq"))),
+                p.fact("sk_IX"),
+            )
+            p.have(
+                "h_sk_a: sk_step a = App_t (App_t K_t X) (App_t K_t X)"
+            ).by_thm(h_sk_a_th)
+
+            # Helper: if sk_step a = a, derive sk_step (App_t I_t X)
+            # = App_t I_t X, contradicting not_fixed_IX.
+            def _refute_fixed_a(fixed_a_lbl):
+                # sk_step (App_t I_t X) = sk_step a [AP_TERM at h_a_eq] = a [fixed_a] = App_t I_t X [SYM h_a_eq].
+                th = TRANS(
+                    TRANS(
+                        AP_TERM(p._parse("sk_step"), p.fact("h_a_eq")),
+                        p.fact(fixed_a_lbl),
+                    ),
+                    SYM(p.fact("h_a_eq")),
+                )
+                p.have(
+                    "h_fixed_IX: sk_step (App_t I_t X) = App_t I_t X"
+                ).by_thm(th)
+                p.absurd().by_conj("not_fixed_IX", "h_fixed_IX")
+
+            with p.cases_on("h_inner"):
+                with p.case(
+                    f"hcL: ~(sk_step a = a) /\\ ({sk_t}) = App_t (sk_step a) b"
+                ):
+                    p.split("hcL", "(_, h_sk_eq)")
+                    # h_sk_eq : sk_t = App_t (sk_step a) b.
+                    # Want: sk_t = val.
+                    # Compute: App_t (sk_step a) b
+                    #        = App_t ((K X)(K X)) b               [h_sk_a]
+                    #        = App_t ((K X)(K X)) (App_t I_t X)   [SYM h_b_eq]
+                    #        = val.
+                    rhs_eq = TRANS(
+                        AP_THM(
+                            AP_TERM(p._parse("App_t"), p.fact("h_sk_a")),
+                            p._parse("b"),
+                        ),
+                        AP_TERM(
+                            p._parse(f"App_t (App_t (App_t K_t X) (App_t K_t X))"),
+                            SYM(p.fact("h_b_eq")),
+                        ),
+                    )
+                    p.have(
+                        f"h_rhs: App_t (sk_step a) b = ({val})"
+                    ).by_thm(rhs_eq)
+                    p.thus(f"{sk_t} = {val}").by_thm(
+                        TRANS(p.fact("h_sk_eq"), p.fact("h_rhs"))
+                    )
+                with p.case(
+                    f"hcR: sk_step a = a /\\ ~(sk_step b = b) /\\ "
+                    f"({sk_t}) = App_t a (sk_step b)"
+                ):
+                    p.split("hcR", "(h_fixed_a, _, _)")
+                    _refute_fixed_a("h_fixed_a")
+                with p.case(
+                    f"hcF: sk_step a = a /\\ sk_step b = b /\\ ({sk_t}) = ({t})"
+                ):
+                    p.split("hcF", "(h_fixed_a, _, _)")
+                    _refute_fixed_a("h_fixed_a")
+        with p.case(f"h4: {D4}"):
+            p.split("h4", "(_, _, h_napp, _)")
+            p.absurd().by_conj("h_napp", "is_app")
+
+
+@proof
+def OMEGA_SHAPE_NOT_NORMAL(p):
+    """|- !X. ~ is_normal (App_t (App_t I_t X) (App_t I_t X)).
+
+    Generalises OMEGA_T_NOT_NORMAL.  By TRAJ_STEP_OMEGA_SHAPE,
+    sk_step on Omega-shape produces ((K X)(K X))(I X) which differs
+    structurally: equality would force App_t K_t X = I_t, contradicted
+    by I_T_DEF + APP_T_INJ + K_T_NEQ_APP_T.
+    """
+    from tactics import CONJUNCT1 as _C1, TRANS
+    p.goal("!X. ~ is_normal (App_t (App_t I_t X) (App_t I_t X))")
+    p.fix("X")
+    with p.suppose(
+        "h_norm: is_normal (App_t (App_t I_t X) (App_t I_t X))"
+    ):
+        p.have(
+            "h_eq: sk_step (App_t (App_t I_t X) (App_t I_t X)) "
+            "      = App_t (App_t I_t X) (App_t I_t X)"
+        ).by(
+            IS_NORMAL_IMP_FIXED,
+            "App_t (App_t I_t X) (App_t I_t X)",
+            "h_norm",
+        )
+        p.have(
+            "h_traj: sk_step (App_t (App_t I_t X) (App_t I_t X)) "
+            "        = App_t (App_t (App_t K_t X) (App_t K_t X)) (App_t I_t X)"
+        ).by(TRAJ_STEP_OMEGA_SHAPE, "X")
+        # (K X)(K X)(I X) = (I X)(I X).
+        p.have(
+            "h1: App_t (App_t (App_t K_t X) (App_t K_t X)) (App_t I_t X) "
+            "    = App_t (App_t I_t X) (App_t I_t X)"
+        ).by_thm(TRANS(SYM(p.fact("h_traj")), p.fact("h_eq")))
+        # APP_T_INJ on outer: (K X)(K X) = I X (and I X = I X).
+        p.have(
+            "h_o: App_t (App_t K_t X) (App_t K_t X) = App_t I_t X "
+            "     /\\ App_t I_t X = App_t I_t X"
+        ).by(
+            APP_T_INJ,
+            "App_t (App_t K_t X) (App_t K_t X)", "App_t I_t X",
+            "App_t I_t X", "App_t I_t X",
+            "h1",
+        )
+        p.have(
+            "h_K: App_t (App_t K_t X) (App_t K_t X) = App_t I_t X"
+        ).by_thm(_C1(p.fact("h_o")))
+        # APP_T_INJ: App_t K_t X = I_t.
+        p.have(
+            "h_inj: App_t K_t X = I_t /\\ App_t K_t X = X"
+        ).by(APP_T_INJ, "App_t K_t X", "App_t K_t X", "I_t", "X", "h_K")
+        p.have("h_KX_I: App_t K_t X = I_t").by_thm(_C1(p.fact("h_inj")))
+        # I_T_DEF: I_t = App_t (App_t S_t K_t) K_t.
+        p.have(
+            "h_unf: App_t K_t X = App_t (App_t S_t K_t) K_t"
+        ).by_thm(TRANS(p.fact("h_KX_I"), I_T_DEF))
+        # APP_T_INJ: K_t = App_t S_t K_t.
+        p.have(
+            "h_inj2: K_t = App_t S_t K_t /\\ X = K_t"
+        ).by(APP_T_INJ, "K_t", "X", "App_t S_t K_t", "K_t", "h_unf")
+        p.have("h_K_ASK: K_t = App_t S_t K_t").by_thm(_C1(p.fact("h_inj2")))
+        p.have(
+            "h_neq: ~(K_t = App_t S_t K_t)"
+        ).by(K_T_NEQ_APP_T, "S_t", "K_t")
+        p.absurd().by_conj("h_neq", "h_K_ASK")
+
+
 @proof
 def OMEGA_T_NOT_NORMAL(p):
     """|- ~ is_normal Omega_t.
@@ -2241,9 +2650,19 @@ def OMEGA_NON_HALTING(p):
         ``sk_size``, ``SK_SIZE_S``, ``SK_SIZE_K``, ``SK_SIZE_APP``,
         ``NAT0_LT_SUC0_N0PLUS_{L,R}``,
         ``SK_SIZE_GROWTH_OMEGA_SHAPE``.
-      Stage 3 (Omega first step + normality propagation)
+      Stage 3 (Omega first step + trajectory)
         ``OMEGA_T_STEP1``                 -- sk_step Omega_t computed.
-        ``OMEGA_T_NOT_NORMAL``            -- BASE CASE: rules out n = 0.
+        ``OMEGA_T_NOT_NORMAL``            -- base case (n = 0).
+        ``SK_STEP_I_APP``                 -- sk_step (App_t I_t X) computed
+                                             generically (X arbitrary).
+        ``TRAJ_STEP_OMEGA_SHAPE``         -- sk_step on Omega-shape:
+                                             (I X)(I X) --> ((K X)(K X))(I X).
+                                             Generic in X.
+        ``OMEGA_SHAPE_NOT_NORMAL``        -- !X. ~ is_normal (Omega-shape X).
+                                             Closes n = 1 (T1 is Omega-shape)
+                                             and any iter where Omega-shape
+                                             recurs.
+      Stage 3 (normality propagation)
         ``SK_ITER_PUSH``                  -- commute sk_step in/out of iter.
         ``IS_NORMAL_SK_STEP``             -- normality preserved forward.
         ``IS_NORMAL_SK_ITER_FIXED``       -- fixed point is fixed under iter.
@@ -2251,33 +2670,35 @@ def OMEGA_NON_HALTING(p):
 
     Remaining gap for the full proof:
 
-    The base case ``n = 0`` is closed by OMEGA_T_NOT_NORMAL.  The
-    general case ``n > 0`` requires showing that no state in the
-    Omega trajectory is a fixed point of sk_step, equivalently
-    ``!n. ~ is_normal (sk_iter n Omega_t)``.
+    With the shipped lemmas we can rule out the supposed halts witness
+    ``n_0`` for ``n_0 in {0, 1}`` (and any later Omega-shape iterate
+    via OMEGA_SHAPE_NOT_NORMAL).  Closing the remaining cases requires
+    characterising the non-Omega-shape states in the trajectory:
 
-    The cleanest path: compute the explicit 3-step transformation
-    that sends ``App_t (App_t I_t X) (App_t I_t X)`` to
-    ``App_t (App_t I_t (App_t I_t X)) (App_t I_t (App_t I_t X))``,
-    then combine with SK_SIZE_GROWTH_OMEGA_SHAPE to get
-    ``!k. nat0_lt (sk_size (sk_iter (3 * k + 1) Omega_t))
-                   (sk_size (sk_iter (3 * (k+1) + 1) Omega_t))``.
-    From any supposed fixed point at ``n0 >= 1``, derive
-    ``sk_iter (n0 + 3) Omega_t = sk_iter n0 Omega_t`` via
-    IS_NORMAL_SK_ITER_FIXED and contradict the strict-growth
-    sub-sequence.
+      Cycle 1 (3 steps from T1, X = SII):
+        T2  =  ((K SII)(K SII)) (I SII)
+        T3  =  SII (I SII)
+        T4  =  Omega-shape with X' = App_t I_t SII
 
-    The trajectory computation breaks down to three sk_step
-    case-splits (~80 lines each, mirroring SK_STEP_K / SK_STEP_S):
-      T1  =  App_t (I X) (I X)                             [given]
-      T2  =  App_t ((K X)(K X)) (I X)                      [descent-L: I X --> K X (K X)]
-      T3  =  App_t X (I X)                                 [descent-L: K X (K X) --> X]
-      T4  =  App_t (I (I X)) (I (I X))                     [top-level S-redex with z = I X]
-    Each step uses SK_STEP_REC at the appropriate term plus
-    APP_T_INJ chains to refute the wrong-disjunct guards.
+      Cycle k>=2 grows: cycle k takes ``2k+1`` steps because each
+      App_t I_t-layer in X needs to descend through one extra
+      reduction.  Specifically Omega-shape appears at iters
+      1, 4, 9, 16, ... (perfect squares).
 
-    Total estimated: ~300-400 lines of trajectory work.  Out of
-    scope for this turn; left as ``sorry``.
+    To finish OMEGA_NON_HALTING one option is the SIZE-based argument:
+      (a) Prove ``!t. P(t) ==> ?k. nat0_lt (sk_size t)
+                                      (sk_size (sk_iter k t))`` for
+          ``P(t) := ?X. t = Omega-shape X``.  Needs the trajectory
+          back to Omega-shape (cycle of length 2 sk_size+1 say), which
+          characterises the WHOLE cycle.
+      (b) Combine with IS_NORMAL_SK_ITER_FIXED: fixed point would
+          give constant size from n_0 onwards, contradicting (a).
+
+    Alternative -- give a separate non-normality lemma for each
+    non-Omega trajectory shape (T2-shape ``((K X)(K X)) (I X)`` and
+    T3-shape ``X (I X)`` where X has S-redex structure), then induct.
+
+    Either way ~200-400 lines more.  Out of scope for this turn.
     """
     p.goal("~ halts Omega_t")
     p.sorry()
