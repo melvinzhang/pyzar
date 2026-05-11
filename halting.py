@@ -1267,11 +1267,16 @@ def HALTS_AT(p):
 #   Omega_t := App_t D_t D_t                    -- canonical loop
 #
 # Reductions:
-#   I_t x   -->  x                              (S K K x --> K x (K x) --> x)
-#   Omega_t -->  Omega_t                        (one-step self-loop)
+#   I_t x   -->  x                              (S K K x --> K x (K x) --> x;
+#                                                see I_T_REDUCES, 2 steps)
+#   sk_step Omega_t  =  App_t (I_t SII) (I_t SII)
+#                                               (one S-redex step, NOT a
+#                                                self-loop; see OMEGA_T_STEP1)
 #
-# Hence Omega_t never reaches a normal form: every ``sk_iter n Omega_t``
-# equals Omega_t.
+# Hence Omega_t never reaches a normal form, but proving
+# ``~ halts Omega_t`` requires a size-measure on nat0 terms and a
+# 3-step strict-growth lemma -- see OMEGA_NON_HALTING's docstring for
+# the DSL friction inventory.
 # ---------------------------------------------------------------------------
 
 
@@ -1378,62 +1383,105 @@ def I_T_REDUCES(p):
 
 
 @proof
-def OMEGA_T_SELF_LOOP(p):
-    """|- sk_step Omega_t = Omega_t.
+def OMEGA_T_STEP1(p):
+    """|- sk_step Omega_t =
+           App_t (App_t I_t (App_t (App_t S_t I_t) I_t))
+                 (App_t I_t (App_t (App_t S_t I_t) I_t)).
 
-    NOT TRUE under the current head-only ``sk_step`` -- documented
-    here for completeness.  Direct computation:
+    Note (Stage 1 rework already shipped): the historical
+    ``OMEGA_T_SELF_LOOP`` aimed to state ``sk_step Omega_t =
+    Omega_t``.  That equation is provably FALSE in any standard SK
+    reduction semantics (Omega has multiple head steps per cycle, and
+    under our leftmost-outermost congruence ``sk_step`` the cycle
+    even strictly grows -- see OMEGA_NON_HALTING).  Replaced with the
+    concrete one-step theorem instead.
 
-      Omega_t = App_t (SII) (SII), an S-redex with x=I_t, y=I_t, z=SII.
-      SK_STEP_S gives sk_step Omega_t = App_t (App_t I_t (SII))
-                                              (App_t I_t (SII)).
-      That term's head is ``App_t (App_t I_t (SII)) ...``: not a
-      K-redex (would need I_t = K_t; tag clash), not an S-redex
-      (would need I_t = App_t S_t _; tag clash).  So head-only
-      ``sk_step`` returns it unchanged -- a head-normal form that
-      is *not* Omega_t.
-
-    Fixing this requires upgrading ``sk_step`` to do congruence
-    reduction (descend into App_t children when no head redex
-    fires), which is a Stage 1 rework via ``define_wf_lt`` with a
-    4-disjunct body.  Under that semantics ``sk_iter 3 Omega_t =
-    Omega_t`` is the correct loop invariant; the single-step form
-    ``sk_step Omega_t = Omega_t`` is never true in any standard
-    SK reduction semantics (Omega has only one head step per cycle
-    and the cycle has length 3).
-
-    Marked sorry pending the Stage 1 congruence redo.  See
-    OMEGA_NON_HALTING below for the consequence.
+    Direct computation via SK_STEP_S:
+      Omega_t = App_t (App_t (App_t S_t I_t) I_t) SII   [OMEGA_T_DEF]
+              = an S-redex with x=I_t, y=I_t, z=SII
+      sk_step Omega_t = App_t (App_t I_t SII) (App_t I_t SII)
+                                                        [by SK_STEP_S]
+    where SII = App_t (App_t S_t I_t) I_t.
     """
-    p.goal("sk_step Omega_t = Omega_t")
-    p.sorry()
+    # DSL friction: ``by_rewrite_of`` with ``SYM(OMEGA_T_DEF)`` folds
+    # the unfolded App_t-SII-SII shape on the LHS back to ``Omega_t``.
+    # No friction in the small; the surrounding analysis (computing
+    # the actual step) was the hard part, not the proof.
+    SII = "App_t (App_t S_t I_t) I_t"
+    p.goal(
+        "sk_step Omega_t = "
+        f"App_t (App_t I_t ({SII})) (App_t I_t ({SII}))"
+    )
+    # SK_STEP_S at x=I_t, y=I_t, z=SII:
+    #   sk_step (App_t (App_t (App_t S_t I_t) I_t) SII)
+    #     = App_t (App_t I_t SII) (App_t I_t SII).
+    p.have(
+        f"step_S: sk_step (App_t (App_t (App_t S_t I_t) I_t) ({SII})) "
+        f"         = App_t (App_t I_t ({SII})) (App_t I_t ({SII}))"
+    ).by(SK_STEP_S, "I_t", "I_t", SII)
+    # Fold App_t SII SII on the LHS back to Omega_t via SYM(OMEGA_T_DEF).
+    p.thus(
+        "sk_step Omega_t = "
+        f"App_t (App_t I_t ({SII})) (App_t I_t ({SII}))"
+    ).by_rewrite_of("step_S", [SYM(OMEGA_T_DEF)])
 
 
 @proof
 def OMEGA_NON_HALTING(p):
     """|- ~ halts Omega_t.
 
-    NOT TRUE under the current head-only ``sk_step``.  By direct
-    computation (cf. OMEGA_T_SELF_LOOP), ``sk_iter 1 Omega_t =
-    App_t (App_t I_t (SII)) (App_t I_t (SII))`` which is head-normal,
-    so ``halts Omega_t`` holds under our IS_NORMAL_DEF.
+    TRUE under the (now-shipped) leftmost-outermost congruence
+    ``sk_step``, but the proof requires machinery this module does
+    not yet provide.  Concrete sk_step trajectory (see
+    OMEGA_T_STEP1 for the first step):
 
-    Recovering this theorem requires both:
-      (1) Upgrading ``sk_step`` to congruence reduction (descends into
-          subterms when no head redex fires).  With that, ``sk_iter 3
-          Omega_t = Omega_t`` becomes the standard 3-cycle invariant.
-      (2) Redefining ``is_normal`` recursively as "no redex anywhere"
-          (not just no head redex), via ``define_wf_lt`` over the SK
-          term structure.
+      T0 = Omega_t                              = App_t SII SII
+      T1 = sk_step T0                           = App_t (I_t SII) (I_t SII)
+      T2 = sk_step T1                           = App_t ((K_t SII)(K_t SII)) (I_t SII)
+                                                  [descend-L: inner I_t SII fires
+                                                   as S-redex via I_T_DEF]
+      T3 = sk_step T2                           = App_t SII (I_t SII)
+                                                  [descend-L: K-redex fires]
+      T4 = sk_step T3                           = App_t (I_t (I_t SII)) (I_t (I_t SII))
+                                                  [top-level S-redex with
+                                                   x=I_t, y=I_t, z=I_t SII]
+      ...
+    where SII = App_t (App_t S_t I_t) I_t.  Each 3-step window
+    transforms ``App_t (I_t X) (I_t X)`` into ``App_t (I_t (I_t X))
+    (I_t (I_t X))`` -- the nesting depth on each side strictly grows
+    by one, so the term size strictly grows by a constant per cycle.
+    Therefore no ``sk_iter n Omega_t`` is a fixed point of sk_step,
+    so ``~ halts Omega_t``.
 
-    Both are Stage 1 reworks.  IS_NORMAL_CASES survives the change
-    (its statement aligns is_normal with sk_step's fixed points);
-    SK_STEP_K / SK_STEP_S re-derive from the new REC equation in a
-    few lines each, and IS_NORMAL_IMP_FIXED needs structural
-    induction.  Estimated impact: ~300 lines of redefinition +
-    re-proofs.
+    DSL friction blocking the proof (~200-300 lines without
+    additions):
 
-    Marked sorry pending the Stage 1 redo.
+    (1) No size measure on nat0-encoded SK terms.  Would need
+        ``sk_size t := if t = S_t \\/ t = K_t then 1 else
+                       1 + sk_size a + sk_size b  (when t = App_t a b)``
+        defined via ``define_wf_lt`` over a 3-disjunct body (S, K,
+        App).  ~40 lines plus a SK_SIZE_REC equation.
+
+    (2) No "size strictly grows by k under n steps" induction
+        scheme.  Standard pattern: lemma
+        ``!t. P t ==> sk_size (sk_iter 3 t) >= sk_size t + 2``
+        for ``P t = ?X. t = App_t (App_t I_t X) (App_t I_t X)``;
+        combined with ``Omega_t -->_1 P``-shape after one step
+        (OMEGA_T_STEP1), gives strict growth on a cofinal subsequence.
+        ~80 lines including the four redex case-splits.
+
+    (3) ``halts t`` is ``?n. is_normal (sk_iter n t)`` and
+        ``is_normal t`` is ``sk_step t = t``, so ``is_normal
+        (sk_iter n t)`` means a fixed point at step n -- which the
+        strict-growth lemma rules out.  ~30 lines of glue: pick the
+        witness n from ``halts Omega_t``, derive a contradiction
+        with ``sk_size (sk_iter (n + 3) Omega_t) > sk_size (sk_iter n
+        Omega_t)`` versus the supposed fixed point at n.
+
+    Total: ~150-300 lines including the size-measure infrastructure.
+    Out of scope for this turn; the rest of the file (Stage 4 onward)
+    is also unproved, so this sorry is consistent with the
+    development's current frontier.
     """
     p.goal("~ halts Omega_t")
     p.sorry()
