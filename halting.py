@@ -1382,6 +1382,484 @@ def I_T_REDUCES(p):
     )
 
 
+# ---------------------------------------------------------------------------
+# Stage 3b -- ``sk_size`` measure and arithmetic helpers for the
+# eventual OMEGA_NON_HALTING proof.
+#
+# Definition (well-founded recursion on Pair_ord depth, same as
+# ``sk_step``):
+#
+#   sk_size n  :=  if ?a b. n = App_t a b
+#                  then SUC0 (n0plus (sk_size a) (sk_size b))
+#                  else SUC0 0
+#
+# Unfolders:
+#   SK_SIZE_S    :  |- sk_size S_t = SUC0 0
+#   SK_SIZE_K    :  |- sk_size K_t = SUC0 0
+#   SK_SIZE_APP  :  |- !a b. sk_size (App_t a b)
+#                            = SUC0 (n0plus (sk_size a) (sk_size b))
+#
+# Strict-growth helper (used by OMEGA_NON_HALTING):
+#   SK_SIZE_GROWTH_OMEGA_SHAPE
+#                :  |- !t. nat0_lt (sk_size t)
+#                          (sk_size (App_t (App_t I_t t) (App_t I_t t)))
+#
+# DSL friction inventory for sk_size (compared to ``sk_step``, which
+# uses the same SELECT-shaped body but with four disjuncts):
+#   * ``sk_size`` only needs two disjuncts (``App_t a b`` vs. leaf),
+#     so MONO is half the length and we reuse
+#     ``mono_iff_value_binary_pw_step`` directly for the App_t branch.
+#   * The leaf disjunct is f-free, so its MONO contribution is REFL.
+#   * Unfolding equations re-use ``_select_via_rec`` and the
+#     ``_atom_neq_App_negations`` helper introduced for SK_STEP_LEAF_S/K.
+# ---------------------------------------------------------------------------
+
+
+_F_sk_size_ty = parse_type("(nat0 -> nat0) -> nat0 -> nat0")
+
+
+_SK_SIZE_F_DEF = define(
+    "_sk_size_F",
+    _F_sk_size_ty,
+    "\\f:nat0->nat0. \\n:nat0. "
+    "@r:nat0. "
+    "(?a b. n = App_t a b /\\ r = SUC0 (n0plus (f a) (f b))) \\/ "
+    "(~(?a b. n = App_t a b) /\\ r = SUC0 0)",
+)
+_SK_SIZE_F = mk_const("_sk_size_F", [])
+
+
+def _prove_sk_size_F_at():
+    """|- !f t. _sk_size_F f t = body[f, t]  (two BETAs).
+
+    DSL friction: this is the same shape as ``_prove_sk_step_F_at``
+    (and ``_prove_F_at`` in bits.py); a generic 2-BETA peel helper
+    would dedupe these three sites but doesn't exist yet.
+    """
+    from tactics import AP_THM, BETA_CONV, TRANS, GENL
+    f_var = Var("f", _sk_step_fn_ty)
+    t_var = Var("t", nat0_ty)
+    th_f = AP_THM(_SK_SIZE_F_DEF, f_var)
+    th_f_eq = TRANS(th_f, BETA_CONV(rand(th_f._concl)))
+    th_ft = AP_THM(th_f_eq, t_var)
+    th_ft_eq = TRANS(th_ft, BETA_CONV(rand(th_ft._concl)))
+    return GENL([f_var, t_var], th_ft_eq)
+
+
+_SK_SIZE_F_AT = _prove_sk_size_F_at()
+
+
+@proof
+def SK_SIZE_MONO(p):
+    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
+                ==> _sk_size_F f n = _sk_size_F g n.
+
+    Body is ``@r. D1 \\/ D2`` where:
+      D1 (?a b. n = App_t a b /\\ r = SUC0 (n0plus (f a) (f b)))
+        recurses through ``f a`` / ``f b``; the helper
+        ``mono_iff_value_binary_pw_step`` handles it directly.
+      D2 (~App-shape /\\ r = SUC0 0) is f-free; REFL.
+
+    Same stitching pattern as ``SK_STEP_MONO`` but with two disjuncts
+    instead of four.
+    """
+    from tactics import (
+        AP_TERM as _AP_TERM,
+        SPECL as _SPECL,
+        TRANS as _TRANS,
+        SYM as _SYM,
+        or_chain_collapse as _or_collapse,
+    )
+    from hf_syntax import _mono_iff_value_binary_pw_step, _extract_nfg
+    from axioms import mk_and as _mk_and, mk_not as _mk_not, mk_exists as _mk_exists
+    from basics import mk_eq as _mk_eq
+
+    p.goal(
+        "!f g n. (!k. nat0_lt k n ==> f k = g k) "
+        "==> _sk_size_F f n = _sk_size_F g n",
+        types={
+            "f": _sk_step_fn_ty,
+            "g": _sk_step_fn_ty,
+            "n": nat0_ty,
+            "k": nat0_ty,
+        },
+    )
+    p.fix("f g n")
+    p.assume("h: !k. nat0_lt k n ==> f k = g k")
+    h_th = p.fact("h")
+    n_t, f_t, g_t, _ = _extract_nfg(h_th)
+    r_var = Var("r", nat0_ty)
+    a_var = Var("a", nat0_ty)
+    b_var = Var("b", nat0_ty)
+
+    # App-shape (used in D2's negation).
+    App_body = _mk_eq(n_t, mk_app(App_t, a_var, b_var))
+    App_shape = _mk_exists(a_var, _mk_exists(b_var, App_body))
+
+    # D2 is f-free.
+    D2 = _mk_and(_mk_not(App_shape), _mk_eq(r_var, p._parse("SUC0 0")))
+    eq_D2 = REFL(D2)
+
+    # D1 = ?a b. n = App_t a b /\ r = SUC0 (n0plus (f a) (f b))
+    # ``rest_builder(fn, a, b, args)`` returns the conjunct after
+    # ``n = App_t a b /\ ...``; we want
+    # ``r = SUC0 (n0plus (fn a) (fn b))``.
+    SUC0_C = p._parse("SUC0")
+    N0PLUS_C = p._parse("n0plus")
+
+    def _D1_rest_builder(fn, a, b, args):
+        fa = mk_app(fn, a)
+        fb = mk_app(fn, b)
+        sum_ = mk_app(N0PLUS_C, fa, fb)
+        suc = mk_app(SUC0_C, sum_)
+        return _mk_eq(r_var, suc)
+
+    eq_D1 = _mono_iff_value_binary_pw_step(
+        App_t,
+        NAT0_LT_APP_T_L, NAT0_LT_APP_T_R,
+        h_th,
+        args=[],
+        rest_builder=_D1_rest_builder,
+        recurses_l=True,
+    )
+
+    body_eq_at_r = _or_collapse([eq_D1, eq_D2])
+    select_eq = _lift_select_eq(r_var, body_eq_at_r)
+    spec_f = _SPECL([f_t, n_t], _SK_SIZE_F_AT)
+    spec_g = _SPECL([g_t, n_t], _SK_SIZE_F_AT)
+    final = _TRANS(spec_f, _TRANS(select_eq, _SYM(spec_g)))
+
+    p.thus("_sk_size_F f n = _sk_size_F g n").by_thm(final)
+
+
+SK_SIZE_DEF, _SK_SIZE_REC_RAW = define_wf_lt(
+    "sk_size",
+    _sk_step_fn_ty,
+    _SK_SIZE_F,
+    SK_SIZE_MONO,
+)
+sk_size = mk_const("sk_size", [])
+
+
+# SK_SIZE_REC : |- !n. sk_size n = body[sk_size, n]
+SK_SIZE_REC = _unfold_rec_via_F_def(_SK_SIZE_REC_RAW, _SK_SIZE_F_DEF)
+
+
+def _sk_size_disjuncts(t, r):
+    """Return the two disjunct strings of ``_sk_size_F``'s body at
+    input ``t`` with the SELECT-bound variable substituted by ``r``.
+    Existential names ``a, b`` are chosen to avoid shadowing common
+    outer-scope names like ``x, y``.
+    """
+    D1 = f"(?a b. {t} = App_t a b /\\ {r} = SUC0 (n0plus (sk_size a) (sk_size b)))"
+    D2 = f"(~(?a b. {t} = App_t a b) /\\ {r} = SUC0 0)"
+    return [D1, D2]
+
+
+def _sk_size_body(t, r):
+    return " \\/ ".join(_sk_size_disjuncts(t, r))
+
+
+def _sk_size_select_at(p, t, witness_r, inner_branch_th):
+    """Mirror of ``_sk_step_select_at`` for sk_size's two-disjunct body."""
+    body_at_r = _sk_size_body(t, witness_r)
+    body_at_r_var = _sk_size_body(t, "r")
+    p.have(f"_size_disj_rhs: {body_at_r}").by_disj(inner_branch_th)
+    p.have(f"_size_ex: ?r. {body_at_r_var}").by_witness(
+        witness_r, "_size_disj_rhs"
+    )
+    return _select_via_rec(SK_SIZE_REC, [p._parse(t)], p.fact("_size_ex"))
+
+
+@proof
+def SK_SIZE_APP(p):
+    """|- !a b. sk_size (App_t a b) = SUC0 (n0plus (sk_size a) (sk_size b)).
+
+    The App-shape disjunct (D1) fires at the natural witness; D2 is
+    refuted by the obvious App-existence of the input.
+    """
+    from tactics import CONJ as _CONJ
+    from tactics import CONJUNCT1 as _C1, CONJUNCT2 as _C2  # noqa: F841
+    # DSL friction: ``_sk_size_disjuncts`` uses bound names ``a, b``, so
+    # the surface goal vars must avoid those.  We use ``u, v`` for the
+    # App_t arguments throughout this proof.
+    p.goal(
+        "!u v. sk_size (App_t u v) = SUC0 (n0plus (sk_size u) (sk_size v))"
+    )
+    p.fix("u v")
+    t = "App_t u v"
+    sk_t = f"sk_size ({t})"
+    witness = "SUC0 (n0plus (sk_size u) (sk_size v))"
+
+    # D1 inner at (u, v): ?a b. App_t u v = App_t a b /\ witness = SUC0 (n0plus (sk_size a) (sk_size b)).
+    p.have(
+        f"inner_app: ?a b. {t} = App_t a b /\\ "
+        f"            {witness} = SUC0 (n0plus (sk_size a) (sk_size b))"
+    ).by_exists(["u", "v"], REFL(p._parse(t)), REFL(p._parse(witness)))
+    body_th = _sk_size_select_at(p, t, witness, "inner_app")
+    p.have(f"body: {_sk_size_body(t, sk_t)}").by_thm(body_th)
+
+    # App existence at the input; refutes ~App guard in D2.
+    p.have(f"is_app: ?a b. {t} = App_t a b").by_exists(
+        ["u", "v"], REFL(p._parse(t))
+    )
+
+    D1, D2 = _sk_size_disjuncts(t, sk_t)
+    with p.cases_on("body"):
+        with p.case(f"h1: {D1}"):
+            # ?a b. App_t u v = App_t a b /\ sk_size (App_t u v) = SUC0 (n0plus (sk_size a) (sk_size b)).
+            # ``cases_on`` auto-chooses the outermost existential (a, registered
+            # via ``a_eq``); we choose ``b`` manually.
+            p.choose("b", from_="a_eq")
+            p.split("b_eq", "(h_app, h_sz)")
+            # APP_T_INJ: App_t u v = App_t a b ==> u = a /\ v = b.
+            p.have("h_o: u = a /\\ v = b").by(
+                APP_T_INJ, "u", "v", "a", "b", "h_app"
+            )
+            p.have("h_ua: u = a").by_thm(_C1(p.fact("h_o")))
+            p.have("h_vb: v = b").by_thm(_C2(p.fact("h_o")))
+            # Rewrite h_sz to put back u, v.
+            p.thus(
+                f"{sk_t} = SUC0 (n0plus (sk_size u) (sk_size v))"
+            ).by_rewrite_of("h_sz", [SYM(p.fact("h_ua")), SYM(p.fact("h_vb"))])
+        with p.case(f"h2: {D2}"):
+            p.split("h2", "(h_napp, _)")
+            p.absurd().by_conj("h_napp", "is_app")
+
+
+def _prove_sk_size_leaf(p, atom_str, atom_neq_lemma):
+    """Shared body of SK_SIZE_S / SK_SIZE_K.  Proves
+    ``sk_size <atom> = SUC0 0`` for atom in {S_t, K_t}.  The leaf
+    disjunct (D2) fires; D1 is refuted via the atom's non-App shape.
+    """
+    from tactics import CONJ as _CONJ
+    t = atom_str
+    sk_t = f"sk_size {t}"
+    # Reuse _atom_neq_App_negations to get nApp_<atom>: ~(?a b. atom = App_t a b)
+    # (the other two are unused here but cheap to derive).
+    _, _, nApp_lbl = _atom_neq_App_negations(p, t, atom_neq_lemma)
+    p.have(
+        f"inner_leaf: ~(?a b. {t} = App_t a b) /\\ SUC0 0 = SUC0 0"
+    ).by_thm(_CONJ(p.fact(nApp_lbl), REFL(p._parse("SUC0 0"))))
+    body_th = _sk_size_select_at(p, t, "SUC0 0", "inner_leaf")
+    p.have(f"body: {_sk_size_body(t, sk_t)}").by_thm(body_th)
+    D1, D2 = _sk_size_disjuncts(t, sk_t)
+    with p.cases_on("body"):
+        with p.case(f"h1: {D1}"):
+            # cases_on auto-chooses outer ``a``; we only choose ``b``.
+            p.choose("b", from_="a_eq")
+            p.split("b_eq", "(h_app, _)")
+            p.have(
+                f"h_app_ex: ?a b. {t} = App_t a b"
+            ).by_exists(["a", "b"], p.fact("h_app"))
+            p.absurd().by_conj(nApp_lbl, "h_app_ex")
+        with p.case(f"h2: {D2}"):
+            p.split("h2", "(_, h_sz)")
+            p.thus(f"{sk_t} = SUC0 0").by_thm(p.fact("h_sz"))
+
+
+@proof
+def SK_SIZE_S(p):
+    """|- sk_size S_t = SUC0 0.  D2 fires; D1 refuted via S_T_NEQ_APP_T."""
+    p.goal("sk_size S_t = SUC0 0")
+    _prove_sk_size_leaf(p, "S_t", S_T_NEQ_APP_T)
+
+
+@proof
+def SK_SIZE_K(p):
+    """|- sk_size K_t = SUC0 0.  Same shape as SK_SIZE_S."""
+    p.goal("sk_size K_t = SUC0 0")
+    _prove_sk_size_leaf(p, "K_t", K_T_NEQ_APP_T)
+
+
+# ---------------------------------------------------------------------------
+# Arithmetic helper: ``n0plus`` is strictly bounded by SUC0 over its
+# growth -- specifically ``nat0_lt a (SUC0 (n0plus a b))``.  This is the
+# core inequality used by SK_SIZE_GROWTH_OMEGA_SHAPE: ``sk_size t``
+# appears as one summand in ``sk_size (App_t (I_t t) (I_t t))`` and the
+# overall result is SUC0 of a sum that includes a strictly-positive
+# constant.
+#
+# Proof by induction on ``b``: base ``n0plus a 0 = a``, SUC0 a > a by
+# NAT0_LT_SUC0; step ``n0plus a (SUC0 b) = SUC0 (n0plus a b)``, lift IH
+# through one more SUC0 via NAT0_LT_TRANS.
+# ---------------------------------------------------------------------------
+
+
+from nat0_order import NAT0_LT_SUC0, NAT0_LT_TRANS  # noqa: E402
+from hf_sets import N0PLUS_BASE, N0PLUS_STEP  # noqa: E402
+
+
+@proof
+def NAT0_LT_SUC0_N0PLUS_L(p):
+    """|- !a b. nat0_lt a (SUC0 (n0plus a b)).
+
+    Pulled out as a named lemma so the growth proof reads cleanly.
+
+    DSL friction: ``by_rewrite_of`` with ``SYM`` of the n0plus equation
+    loops because REWRITE_CONV treats free vars as schematic.  We
+    do the substitution manually via two ``AP_TERM`` hops and
+    ``by_eq_mp``.
+    """
+    from tactics import AP_TERM as _APT
+    p.goal("!a b. nat0_lt a (SUC0 (n0plus a b))")
+    p.fix("a")
+    SUC0_C = p._parse("SUC0")
+    NAT0_LT_a = p._parse("nat0_lt a")
+    with p.induction("b"):
+        with p.base():
+            p.have("h_base: n0plus a 0 = a").by(N0PLUS_BASE, "a")
+            p.have("h_lt: nat0_lt a (SUC0 a)").by(NAT0_LT_SUC0, "a")
+            # eq_suc: SUC0 (n0plus a 0) = SUC0 a;
+            # eq_lt:  nat0_lt a (SUC0 (n0plus a 0)) = nat0_lt a (SUC0 a).
+            eq_suc = _APT(SUC0_C, p.fact("h_base"))
+            eq_lt = _APT(NAT0_LT_a, eq_suc)
+            p.thus("nat0_lt a (SUC0 (n0plus a 0))").by_eq_mp(eq_lt, "h_lt")
+        with p.step("IH"):
+            # ``induction("b")`` reuses ``b`` as the step variable.
+            p.have(
+                "h_step: n0plus a (SUC0 b) = SUC0 (n0plus a b)"
+            ).by(N0PLUS_STEP, "a", "b")
+            p.have(
+                "h_lt_one: nat0_lt (SUC0 (n0plus a b)) (SUC0 (SUC0 (n0plus a b)))"
+            ).by(NAT0_LT_SUC0, "SUC0 (n0plus a b)")
+            p.have(
+                "h_ih_lift: nat0_lt a (SUC0 (SUC0 (n0plus a b)))"
+            ).by(NAT0_LT_TRANS, "a", "SUC0 (n0plus a b)",
+                 "SUC0 (SUC0 (n0plus a b))", "IH", "h_lt_one")
+            eq_suc = _APT(SUC0_C, p.fact("h_step"))
+            eq_lt = _APT(NAT0_LT_a, eq_suc)
+            p.thus(
+                "nat0_lt a (SUC0 (n0plus a (SUC0 b)))"
+            ).by_eq_mp(eq_lt, "h_ih_lift")
+
+
+# ---------------------------------------------------------------------------
+# Strict-growth lemma for the Omega-shape:
+#   |- !t. nat0_lt (sk_size t) (sk_size (App_t (App_t I_t t) (App_t I_t t)))
+#
+# Direct computation:
+#   sk_size (App_t (App_t I_t t) (App_t I_t t))
+#     = SUC0 (n0plus (sk_size (App_t I_t t)) (sk_size (App_t I_t t)))
+#                                                       [SK_SIZE_APP]
+#   sk_size (App_t I_t t) = SUC0 (n0plus (sk_size I_t) (sk_size t))
+#                                                       [SK_SIZE_APP]
+# Therefore the result is SUC0 (n0plus (SUC0 X) (SUC0 X)) where
+# X = n0plus (sk_size I_t) (sk_size t); each summand strictly exceeds
+# ``sk_size t`` by NAT0_LT_SUC0_N0PLUS_L plus one SUC0 wrap.
+#
+# DSL friction: the chain of "SUC0 lifts" wants a ``nat0_lt_suc0_chain``
+# helper; without it we do three NAT0_LT_TRANS hops by hand.  Worth
+# packaging if a fourth use-site appears.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def NAT0_LT_SUC0_N0PLUS_R(p):
+    """|- !a b. nat0_lt b (SUC0 (n0plus a b)).
+
+    The right-summand companion to NAT0_LT_SUC0_N0PLUS_L.  Direct
+    induction on ``b``:
+      base: nat0_lt 0 (SUC0 (n0plus a 0)) = nat0_lt 0 (SUC0 a);
+            standard zero-vs-successor (NAT0_LT_0_SUC0 in nat0_order).
+      step: nat0_lt (SUC0 n) (SUC0 (n0plus a (SUC0 n)))
+            = nat0_lt (SUC0 n) (SUC0 (SUC0 (n0plus a n))) [N0PLUS_STEP];
+            from IH ``nat0_lt n (SUC0 (n0plus a n))`` lift via
+            NAT0_LT_SUC0_MONO.
+    """
+    from nat0_order import NAT0_LT_0_SUC0, NAT0_LT_SUC0_MONO
+    from tactics import AP_TERM as _APT
+    p.goal("!a b. nat0_lt b (SUC0 (n0plus a b))")
+    p.fix("a")
+    SUC0_C = p._parse("SUC0")
+    with p.induction("b"):
+        with p.base():
+            p.have("h_base: n0plus a 0 = a").by(N0PLUS_BASE, "a")
+            p.have("h_lt: nat0_lt 0 (SUC0 a)").by(NAT0_LT_0_SUC0, "a")
+            # eq_suc: SUC0 (n0plus a 0) = SUC0 a; lift via nat0_lt 0.
+            NAT0_LT_0 = p._parse("nat0_lt 0")
+            eq_suc = _APT(SUC0_C, p.fact("h_base"))
+            eq_lt = _APT(NAT0_LT_0, eq_suc)
+            p.thus("nat0_lt 0 (SUC0 (n0plus a 0))").by_eq_mp(eq_lt, "h_lt")
+        with p.step("IH"):
+            p.have(
+                "h_step: n0plus a (SUC0 b) = SUC0 (n0plus a b)"
+            ).by(N0PLUS_STEP, "a", "b")
+            p.have(
+                "h_mono: nat0_lt (SUC0 b) (SUC0 (SUC0 (n0plus a b)))"
+            ).by(NAT0_LT_SUC0_MONO, "b", "SUC0 (n0plus a b)", "IH")
+            NAT0_LT_SUCb = p._parse("nat0_lt (SUC0 b)")
+            eq_suc = _APT(SUC0_C, p.fact("h_step"))
+            eq_lt = _APT(NAT0_LT_SUCb, eq_suc)
+            p.thus(
+                "nat0_lt (SUC0 b) (SUC0 (n0plus a (SUC0 b)))"
+            ).by_eq_mp(eq_lt, "h_mono")
+
+
+@proof
+def SK_SIZE_GROWTH_OMEGA_SHAPE(p):
+    """|- !t. nat0_lt (sk_size t)
+                      (sk_size (App_t (App_t I_t t) (App_t I_t t))).
+
+    Two-hop chain via NAT0_LT_TRANS:
+      sk_size t
+        < sk_size (App_t I_t t)                           [NAT0_LT_SUC0_N0PLUS_R]
+        < sk_size (App_t (App_t I_t t) (App_t I_t t))     [NAT0_LT_SUC0_N0PLUS_L]
+    """
+    p.goal(
+        "!t. nat0_lt (sk_size t) "
+        "             (sk_size (App_t (App_t I_t t) (App_t I_t t)))"
+    )
+    p.fix("t")
+
+    # Step 1: sk_size (App_t I_t t) = SUC0 (n0plus (sk_size I_t) (sk_size t)).
+    p.have(
+        "sz_It: sk_size (App_t I_t t) "
+        "       = SUC0 (n0plus (sk_size I_t) (sk_size t))"
+    ).by(SK_SIZE_APP, "I_t", "t")
+
+    # sk_size t < SUC0 (n0plus (sk_size I_t) (sk_size t)) [_R at a=sk_size I_t, b=sk_size t].
+    p.have(
+        "h_lt_It_pre: nat0_lt (sk_size t) "
+        "             (SUC0 (n0plus (sk_size I_t) (sk_size t)))"
+    ).by(NAT0_LT_SUC0_N0PLUS_R, "sk_size I_t", "sk_size t")
+
+    # Fold RHS to sk_size (App_t I_t t).
+    p.have(
+        "h_lt_It: nat0_lt (sk_size t) (sk_size (App_t I_t t))"
+    ).by_rewrite_of("h_lt_It_pre", [SYM(p.fact("sz_It"))])
+
+    # Step 2: sk_size (App_t (App_t I_t t) (App_t I_t t))
+    #         = SUC0 (n0plus (sk_size (App_t I_t t)) (sk_size (App_t I_t t))).
+    p.have(
+        "sz_top: sk_size (App_t (App_t I_t t) (App_t I_t t)) "
+        "        = SUC0 (n0plus (sk_size (App_t I_t t)) (sk_size (App_t I_t t)))"
+    ).by(SK_SIZE_APP, "App_t I_t t", "App_t I_t t")
+
+    # sk_size (App_t I_t t) < SUC0 (n0plus (sk_size (App_t I_t t)) (sk_size (App_t I_t t)))
+    # [_L at a=sk_size (App_t I_t t), b=sk_size (App_t I_t t)].
+    p.have(
+        "h_lt_top_pre: nat0_lt (sk_size (App_t I_t t)) "
+        "              (SUC0 (n0plus (sk_size (App_t I_t t)) (sk_size (App_t I_t t))))"
+    ).by(NAT0_LT_SUC0_N0PLUS_L, "sk_size (App_t I_t t)", "sk_size (App_t I_t t)")
+    p.have(
+        "h_lt_top: nat0_lt (sk_size (App_t I_t t)) "
+        "                   (sk_size (App_t (App_t I_t t) (App_t I_t t)))"
+    ).by_rewrite_of("h_lt_top_pre", [SYM(p.fact("sz_top"))])
+
+    # Chain: sk_size t < sk_size (App_t I_t t) < sk_size (App_t (App_t I_t t) ...).
+    p.thus(
+        "nat0_lt (sk_size t) (sk_size (App_t (App_t I_t t) (App_t I_t t)))"
+    ).by(
+        NAT0_LT_TRANS,
+        "sk_size t",
+        "sk_size (App_t I_t t)",
+        "sk_size (App_t (App_t I_t t) (App_t I_t t))",
+        "h_lt_It",
+        "h_lt_top",
+    )
+
+
 @proof
 def OMEGA_T_STEP1(p):
     """|- sk_step Omega_t =
@@ -1453,35 +1931,47 @@ def OMEGA_NON_HALTING(p):
     Therefore no ``sk_iter n Omega_t`` is a fixed point of sk_step,
     so ``~ halts Omega_t``.
 
-    DSL friction blocking the proof (~200-300 lines without
-    additions):
+    Infrastructure already shipped (Stage 3b above):
+      * ``sk_size``                       -- nat0-term size measure.
+      * ``SK_SIZE_S``, ``SK_SIZE_K``,
+        ``SK_SIZE_APP``                   -- unfolding equations.
+      * ``NAT0_LT_SUC0_N0PLUS_L``,
+        ``NAT0_LT_SUC0_N0PLUS_R``         -- ``n0plus`` strict-bound
+                                             lemmas.
+      * ``SK_SIZE_GROWTH_OMEGA_SHAPE``    -- ``sk_size t <
+                                             sk_size (App_t (App_t I_t t)
+                                                            (App_t I_t t))``,
+                                             the key strict-growth
+                                             lemma.
+      * ``OMEGA_T_STEP1``                 -- explicit first step of
+                                             ``sk_step Omega_t``, lands
+                                             in the Omega-shape that
+                                             SK_SIZE_GROWTH consumes.
 
-    (1) No size measure on nat0-encoded SK terms.  Would need
-        ``sk_size t := if t = S_t \\/ t = K_t then 1 else
-                       1 + sk_size a + sk_size b  (when t = App_t a b)``
-        defined via ``define_wf_lt`` over a 3-disjunct body (S, K,
-        App).  ~40 lines plus a SK_SIZE_REC equation.
+    Remaining work for the full proof (estimate ~150-200 lines):
 
-    (2) No "size strictly grows by k under n steps" induction
-        scheme.  Standard pattern: lemma
-        ``!t. P t ==> sk_size (sk_iter 3 t) >= sk_size t + 2``
-        for ``P t = ?X. t = App_t (App_t I_t X) (App_t I_t X)``;
-        combined with ``Omega_t -->_1 P``-shape after one step
-        (OMEGA_T_STEP1), gives strict growth on a cofinal subsequence.
-        ~80 lines including the four redex case-splits.
+    (1) Two more concrete sk_step computations (T1 -> T2 -> T3) plus
+        a lemma showing the 3-step iterate from any
+        ``App_t (App_t I_t X) (App_t I_t X)`` reaches
+        ``App_t (App_t I_t (App_t I_t X)) (App_t I_t (App_t I_t X))``.
+        Each step is a SK_STEP_REC case-split, ~30-40 lines.
 
-    (3) ``halts t`` is ``?n. is_normal (sk_iter n t)`` and
-        ``is_normal t`` is ``sk_step t = t``, so ``is_normal
-        (sk_iter n t)`` means a fixed point at step n -- which the
-        strict-growth lemma rules out.  ~30 lines of glue: pick the
-        witness n from ``halts Omega_t``, derive a contradiction
-        with ``sk_size (sk_iter (n + 3) Omega_t) > sk_size (sk_iter n
-        Omega_t)`` versus the supposed fixed point at n.
+    (2) Induction on iteration count: bundle (1) with
+        SK_SIZE_GROWTH_OMEGA_SHAPE to derive
+        ``!k. nat0_lt (sk_size (sk_iter (3 * k) (sk_step Omega_t)))
+                       (sk_size (sk_iter (3 * (k + 1))
+                                          (sk_step Omega_t)))``.
+        ~40 lines.
 
-    Total: ~150-300 lines including the size-measure infrastructure.
-    Out of scope for this turn; the rest of the file (Stage 4 onward)
-    is also unproved, so this sorry is consistent with the
-    development's current frontier.
+    (3) From ``halts Omega_t`` pick witness ``n`` with
+        ``is_normal (sk_iter n Omega_t)`` i.e.
+        ``sk_step (sk_iter n Omega_t) = sk_iter n Omega_t``; chain
+        through SK_ITER_SUC to show
+        ``sk_iter (n + k) Omega_t = sk_iter n Omega_t`` for all k
+        (Peano-induction), then contradict (2)'s strict growth.
+        ~40 lines.
+
+    Out of scope for this turn; left as ``sorry``.
     """
     p.goal("~ halts Omega_t")
     p.sorry()
