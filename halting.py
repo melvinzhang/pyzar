@@ -7825,23 +7825,239 @@ def PAR_STEP_K_T_INV(p):
 
 
 # ---------------------------------------------------------------------------
+# Phase 4d -- Takahashi's complete-development function ``sk_bullet``.
+#
+# Defined by well-founded recursion on ``sk_size`` (same machinery as
+# ``sk_step``).  Contracts every redex visible at a node simultaneously:
+#
+#     sk_bullet S_t                          = S_t
+#     sk_bullet K_t                          = K_t
+#     sk_bullet (App_t (App_t K_t X) Y)      = sk_bullet X
+#     sk_bullet (App_t (App_t (App_t S_t X) Y) Z)
+#       = App_t (App_t (sk_bullet X) (sk_bullet Z))
+#               (App_t (sk_bullet Y) (sk_bullet Z))
+#     sk_bullet (App_t X Y) [otherwise]      = App_t (sk_bullet X) (sk_bullet Y)
+#
+# The body is a SELECT over four guarded disjuncts (K-redex, S-redex,
+# other-App, leaf), mirroring ``_sk_step_F``'s structure.  Atom unfolds
+# (S_t / K_t) fall into the leaf branch.
+#
+# The triangle property
+#     SK_BULLET_TRIANGLE : !A B. sk_par_step A B ==> sk_par_step B (sk_bullet A)
+# is the headline lemma; ``TRIANGLE_EXISTS`` packages it as the
+# existential consumed by ``PAR_STEP_DIAMOND`` / ``PAR_STEPS_STRIP`` /
+# ``PAR_STEPS_CONFLUENT``.
+#
+# The seven named theorems below ship as ``sorry`` stubs:
+#   * SK_BULLET_MONO       -- monotonicity premise for define_wf_lt
+#   * SK_BULLET_S_T        -- atom unfold (leaf branch)
+#   * SK_BULLET_K_T        -- atom unfold (leaf branch)
+#   * SK_BULLET_K_REDEX    -- K-redex unfold (D1 branch)
+#   * SK_BULLET_S_REDEX    -- S-redex unfold (D2 branch)
+#   * SK_BULLET_APP_OTHER  -- non-redex App congruence (D3 branch)
+#   * SK_BULLET_TRIANGLE   -- the triangle property (par_step induction)
+# Once these are discharged, ``TRIANGLE_EXISTS`` (and hence
+# ``PAR_STEP_DIAMOND`` etc.) follow without further sorries.
+# ---------------------------------------------------------------------------
+
+
+_SK_BULLET_F_DEF = define(
+    "_sk_bullet_F",
+    parse_type("(nat0 -> nat0) -> nat0 -> nat0"),
+    "\\f:nat0->nat0. \\t:nat0. "
+    "@r:nat0. "
+    "(?x y. t = App_t (App_t K_t x) y /\\ r = f x) \\/ "
+    "(~(?x y. t = App_t (App_t K_t x) y) /\\ "
+    " ?x y z. t = App_t (App_t (App_t S_t x) y) z /\\ "
+    "         r = App_t (App_t (f x) (f z)) (App_t (f y) (f z))) \\/ "
+    "(~(?x y. t = App_t (App_t K_t x) y) /\\ "
+    " ~(?x y z. t = App_t (App_t (App_t S_t x) y) z) /\\ "
+    " (?a b. t = App_t a b /\\ r = App_t (f a) (f b))) \\/ "
+    "(~(?x y. t = App_t (App_t K_t x) y) /\\ "
+    " ~(?x y z. t = App_t (App_t (App_t S_t x) y) z) /\\ "
+    " ~(?a b. t = App_t a b) /\\ r = t)",
+)
+_SK_BULLET_F = mk_const("_sk_bullet_F", [])
+
+
+@proof
+def SK_BULLET_MONO(p):
+    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
+                 ==> _sk_bullet_F f n = _sk_bullet_F g n.
+
+    *** SORRY STUB.  Monotonicity premise for ``define_wf_lt``.
+
+    Structure mirrors ``SK_STEP_MONO``: per-disjunct iffs stitched via
+    ``or_chain_collapse``, lifted through ``@r`` via
+    ``_lift_select_eq``, chained through SPECL'd ``_SK_BULLET_F_AT``
+    equations.  The four disjuncts:
+      D1 (K-redex)    : uses ``f x`` (one recursive call under ?x y).
+      D2 (S-redex)    : uses ``f x``, ``f y``, ``f z`` (three recursive
+                        calls under ?x y z) -- needs a ternary analogue
+                        of ``_mono_iff_value_binary_pw_step``.
+      D3 (other-App)  : uses ``f a``, ``f b`` -- direct mirror of
+                        SK_STEP_MONO's D3 with the descent collapsed
+                        into the single congruence ``r = App_t (f a) (f b)``.
+      D4 (leaf)       : f-free, REFL.
+    Cost: ~180 LOC including the ternary mono helper.
+    """
+    p.goal(
+        "!f g n. (!k. nat0_lt k n ==> f k = g k) "
+        "==> _sk_bullet_F f n = _sk_bullet_F g n",
+        types={
+            "f": _sk_step_fn_ty,
+            "g": _sk_step_fn_ty,
+            "n": nat0_ty,
+            "k": nat0_ty,
+        },
+    )
+    p.sorry()
+
+
+# Well-founded recursive definition.
+#   SK_BULLET_DEF      : |- sk_bullet = (@h. !n. h n = _sk_bullet_F h n)
+#   _SK_BULLET_REC_RAW : |- !n. sk_bullet n = _sk_bullet_F sk_bullet n
+SK_BULLET_DEF, _SK_BULLET_REC_RAW = define_wf_lt(
+    "sk_bullet",
+    _sk_step_fn_ty,
+    _SK_BULLET_F,
+    SK_BULLET_MONO,
+)
+sk_bullet = mk_const("sk_bullet", [])
+
+
+# SK_BULLET_REC : |- !n. sk_bullet n = body[sk_bullet, n]
+SK_BULLET_REC = _unfold_rec_via_F_def(_SK_BULLET_REC_RAW, _SK_BULLET_F_DEF)
+
+
+@proof
+def SK_BULLET_S_T(p):
+    """|- sk_bullet S_t = S_t.
+
+    *** SORRY STUB.  Atom unfold: the leaf disjunct (D4) fires with
+    ``r := S_t``; D1/D2/D3 are refuted via ``S_T_NEQ_APP_T`` (S_t is
+    not an App).  Mirrors ``SK_SIZE_S``'s shape, ~80 LOC.
+    """
+    p.goal("sk_bullet S_t = S_t")
+    p.sorry()
+
+
+@proof
+def SK_BULLET_K_T(p):
+    """|- sk_bullet K_t = K_t.
+
+    *** SORRY STUB.  Mirror of SK_BULLET_S_T via ``K_T_NEQ_APP_T``.
+    """
+    p.goal("sk_bullet K_t = K_t")
+    p.sorry()
+
+
+@proof
+def SK_BULLET_K_REDEX(p):
+    """|- !X Y. sk_bullet (App_t (App_t K_t X) Y) = sk_bullet X.
+
+    *** SORRY STUB.  K-redex unfold: D1 fires at the natural witness
+    ``r := sk_bullet X``; D2/D3/D4 are refuted by the K-redex shape of
+    the input.  ~100 LOC.
+    """
+    p.goal(
+        "!X:nat0. !Y:nat0. "
+        "sk_bullet (App_t (App_t K_t X) Y) = sk_bullet X"
+    )
+    p.sorry()
+
+
+@proof
+def SK_BULLET_S_REDEX(p):
+    """|- !X Y Z. sk_bullet (App_t (App_t (App_t S_t X) Y) Z)
+                  = App_t (App_t (sk_bullet X) (sk_bullet Z))
+                          (App_t (sk_bullet Y) (sk_bullet Z)).
+
+    *** SORRY STUB.  S-redex unfold: D2 fires (with the ~K guard
+    satisfied since S_t /= K_t at the App-of-App-of-App head); D3/D4
+    refuted by the S-redex shape; D1 refuted by the same S /= K head.
+    ~120 LOC.
+    """
+    p.goal(
+        "!X:nat0. !Y:nat0. !Z:nat0. "
+        "sk_bullet (App_t (App_t (App_t S_t X) Y) Z) = "
+        "App_t (App_t (sk_bullet X) (sk_bullet Z)) "
+        "      (App_t (sk_bullet Y) (sk_bullet Z))"
+    )
+    p.sorry()
+
+
+@proof
+def SK_BULLET_APP_OTHER(p):
+    """|- !X Y. ~(?A B. X = App_t K_t A /\\ Y = B) /\\
+                ~(?A B C. X = App_t (App_t S_t A) B /\\ Y = C)
+              ==> sk_bullet (App_t X Y) = App_t (sk_bullet X) (sk_bullet Y).
+
+    Wait -- the natural statement quantifies the *full* App_t (App_t K_t a) b
+    shape under the negation: ``~(?a b. App_t X Y = App_t (App_t K_t a) b)``
+    plus the S-counterpart.  Restated below.
+
+    *** SORRY STUB.  Non-redex App congruence: D3 fires (with the ~K
+    and ~S guards satisfied by the assumed negations); D1/D2 refuted by
+    those same negations; D4 refuted by the App shape.  ~120 LOC.
+    """
+    p.goal(
+        "!X:nat0. !Y:nat0. "
+        "~(?A:nat0. ?B:nat0. App_t X Y = App_t (App_t K_t A) B) /\\ "
+        "~(?A:nat0. ?B:nat0. ?C:nat0. "
+        "  App_t X Y = App_t (App_t (App_t S_t A) B) C) "
+        "==> sk_bullet (App_t X Y) = App_t (sk_bullet X) (sk_bullet Y)"
+    )
+    p.sorry()
+
+
+@proof
+def SK_BULLET_TRIANGLE(p):
+    """|- !A B. sk_par_step A B ==> sk_par_step B (sk_bullet A).
+
+    *** SORRY STUB.  Takahashi's triangle property.
+
+    Proof outline: impredicative induction on ``sk_par_step A B`` with
+    ``P := \\A B. sk_par_step B (sk_bullet A)``.  Closure conjuncts:
+
+      REFL  needs ``!A. sk_par_step A (sk_bullet A)`` as an auxiliary,
+            proved by structural induction on A using the five unfolds
+            (atoms / K-redex / S-redex / other-App).
+
+      K-rule  IHs ``sk_par_step X' (sk_bullet X)`` and
+            ``sk_par_step Y' (sk_bullet Y)`` combine with
+            SK_BULLET_K_REDEX to collapse the RHS to ``sk_bullet X``,
+            matching the first IH.
+
+      S-rule  IHs combine with SK_BULLET_S_REDEX; the three congruences
+            assemble via two PAR_STEP_APP applications.
+
+      APP-rule  Case-split on whether ``App_t X Y`` matches K-redex,
+            S-redex, or otherwise.  Redex cases require App-shape
+            par_step inversion lemmas (currently missing -- see the
+            ``Phase 4d (diamond) infrastructure`` block above).
+            Otherwise case is direct via SK_BULLET_APP_OTHER and
+            PAR_STEP_APP.
+
+    Cost: ~250 LOC once the App-shape inversions exist; ~400 LOC if
+    they have to be proved here.
+    """
+    p.goal(
+        "!A:nat0. !B:nat0. "
+        "sk_par_step A B ==> sk_par_step B (sk_bullet A)"
+    )
+    p.sorry()
+
+
+# ---------------------------------------------------------------------------
 # Phase 4d -- diamond / confluence theorems for ``sk_par_step``.
 #
-# Statement-only.  Discharge requires:
-#   * a complete-development function ``bullet : nat0 -> nat0`` defined
-#     by Takahashi's recipe (contract all redexes in parallel);
-#   * the triangle lemma ``sk_par_step X Y ==> sk_par_step Y (bullet X)``
-#     (structural induction on X using the App-shape par-step inversions
-#     -- the K/S-redex subcases re-use the atom inversions above);
-#   * diamond follows from triangle by taking W := bullet X;
-#   * strip then follows from diamond by induction on the RTC chain;
-#   * confluence (RTC version) follows from strip by another RTC
-#     induction.
-#
-# The bullet function and triangle lemma are deferred (each ~80 LOC of
-# DSL); these three theorems ship as ``sorry`` stubs so downstream code
-# (HALTS_PAR_STEPS_INVARIANT and other halts-preservation arguments)
-# can call them.
+# These three now follow without sorry from SK_BULLET_TRIANGLE (which
+# itself remains a stub):
+#   * TRIANGLE_EXISTS   -- existential wrapper over sk_bullet + triangle.
+#   * PAR_STEP_DIAMOND  -- W := sk_bullet X.
+#   * PAR_STEPS_STRIP   -- RTC induction on top of DIAMOND.
+#   * PAR_STEPS_CONFLUENT -- second RTC induction on top of STRIP.
 # ---------------------------------------------------------------------------
 
 
@@ -7849,34 +8065,23 @@ def PAR_STEP_K_T_INV(p):
 def TRIANGLE_EXISTS(p):
     """|- ?bullet. !A B. sk_par_step A B ==> sk_par_step B (bullet A).
 
-    *** STUB.  Existence of Takahashi's complete-development function
-    ``bullet`` together with the triangle property.
-
-    Bullet contracts every redex visible at a node simultaneously:
-        bullet S_t                          = S_t
-        bullet K_t                          = K_t
-        bullet (App_t (App_t K_t X) Y)      = bullet X
-        bullet (App_t (App_t (App_t S_t X) Y) Z)
-            = App_t (App_t (bullet X) (bullet Z))
-                    (App_t (bullet Y) (bullet Z))
-        bullet (App_t X Y) [otherwise]      = App_t (bullet X) (bullet Y)
-
-    Triangle: structural induction on A using the par-step inversion
-    lemmas at each shape.  Atom inversions (PAR_STEP_{S,K}_T_INV)
-    already exist; the App-shape inversions are the missing dependency.
-
-    Packaging the bullet function and triangle as a single existential
-    sidesteps the ``define_wf_lt`` boilerplate for now -- discharge
-    requires either inlining bullet via ``define`` and proving the
-    five unfolds + triangle (~250 LOC) or supplying a SELECT witness
-    that satisfies the property.
+    Witness: ``sk_bullet`` (the top-level complete-development function).
+    Body: ``SK_BULLET_TRIANGLE``.
     """
     p.goal(
         "?bullet:nat0->nat0. "
         "!A:nat0. !B:nat0. "
         "sk_par_step A B ==> sk_par_step B (bullet A)"
     )
-    p.sorry()
+    p.have(
+        "h_tri: !A:nat0. !B:nat0. "
+        "       sk_par_step A B ==> sk_par_step B (sk_bullet A)"
+    ).by_thm(SK_BULLET_TRIANGLE)
+    p.thus(
+        "?bullet:nat0->nat0. "
+        "!A:nat0. !B:nat0. "
+        "sk_par_step A B ==> sk_par_step B (bullet A)"
+    ).by_exists(["sk_bullet"], "h_tri")
 
 
 @proof
