@@ -10198,6 +10198,147 @@ def HALTS_PAR_STEPS_INVARIANT(p):
     p.thus("halts X = halts Y").by_iff("h_fwd", "h_bwd")
 
 
+# ---------------------------------------------------------------------------
+# Par-form halts (Option A scaffolding).
+#
+# halts_par t := ?N. sk_par_steps t N /\ is_normal N
+#
+# An alternative halting predicate stated over the non-deterministic
+# par-step relation.  The forward bridge
+#     halts t ==> halts_par t
+# is easy (SK_ITER_TO_PAR_STEPS + packaging).  The backward bridge
+#     halts_par t ==> halts t
+# is exactly STANDARDIZATION_NORMAL.
+#
+# Why introduce this: under halts_par, HALTS_PAR_STEPS_INVARIANT
+# becomes trivial (PAR_STEPS_TRANS + NORMAL_STABILITY_PAR_STEPS), and
+# the diagonal pipeline (DIAG_TERM is already par-form) connects without
+# routing through standardization.  The cost migrates to OMEGA_NON_HALTING,
+# whose par-form re-proof is OMEGA_NON_HALTING_PAR below.
+# ---------------------------------------------------------------------------
+
+
+# halts_par t := ?N. sk_par_steps t N /\ is_normal N.
+HALTS_PAR_DEF = define(
+    "halts_par",
+    parse_type("nat0 -> bool"),
+    "\\t:nat0. ?N:nat0. sk_par_steps t N /\\ is_normal N",
+)
+halts_par = mk_const("halts_par", [])
+
+
+@proof
+def HALTS_PAR_AT(p):
+    """|- !t. halts_par t = (?N. sk_par_steps t N /\\ is_normal N).
+
+    Direct unfold of HALTS_PAR_DEF via AP_THM + BETA -- mirrors HALTS_AT.
+    """
+    from tactics import AP_THM, BETA_CONV, TRANS, GEN
+
+    ap = AP_THM(HALTS_PAR_DEF, _n0_t_var)
+    bet = BETA_CONV(rand(ap._concl))
+    spec_th = TRANS(ap, bet)
+    p.goal("!t. halts_par t = (?N. sk_par_steps t N /\\ is_normal N)")
+    p.thus(
+        "!t. halts_par t = (?N. sk_par_steps t N /\\ is_normal N)"
+    ).by_thm(GEN(_n0_t_var, spec_th))
+
+
+@proof
+def OMEGA_NON_HALTING_PAR(p):
+    """|- ~ halts_par Omega_t.
+
+    *** STUB.  Par-form analogue of OMEGA_NON_HALTING: no par-descendant
+    of Omega_t is normal.  Unlike the existing iter-form proof, this
+    does NOT depend on STANDARDIZATION_NORMAL -- it closes by a structural
+    invariant on Omega's par-orbit.
+
+    Empirical input (``outside/sk_par.py``).  Under Takahashi complete
+    development (= "maximal" par-step), Omega's orbit is a strict
+    period-3 cycle of sk_size {27, 39, 63}:
+
+        Omega = (S I I (S I I))                              size 27
+              -bullet->  (I (S I I) (I (S I I)))             size 39   (T1)
+              -bullet->  ((K SII)(K SII) ((K SII)(K SII)))   size 63   (T2)
+              -bullet->  Omega.
+
+    Each orbit member has a visible top-level S- or K- redex (Omega: top
+    S-redex with x=I, y=I, z=SII; T1: S-redex inside each App_t I_t SII
+    leaf; T2: K-redex inside each App_t (App_t K_t SII) (App_t K_t SII)
+    leaf).  The non-deterministic par-step extends the orbit with
+    "mixed" descendants (one half fired, the other not) -- a depth-2
+    BFS sees 5 distinct shapes, all non-normal -- but the structural
+    pattern (each subterm is one of the three orbit shapes or built
+    from them by App-congruence over inert leaves) is preserved.
+
+    Proof sketch:
+
+      Define an inductive invariant ``omega_inv W`` carving out exactly
+      Omega's par-descendant set.  Two equivalent framings:
+
+        (a) Closed-form: ``omega_inv W`` iff every position in W either
+            (i)   is the SII pattern App_t (App_t S_t I_t) I_t,
+            (ii)  is the I-S-redex pattern App_t I_t M for some
+                  M satisfying omega_inv, or
+            (iii) is the K-redex pattern App_t (App_t K_t M) M' for
+                  some M, M' satisfying omega_inv,
+            and the outer-most App_t is one of these three shapes.
+
+        (b) Reachability: ``omega_inv W := sk_par_steps Omega_t W``,
+            i.e., literally the par-orbit.  Cleaner but its three
+            structural claims below have to be re-proved by induction
+            on the par_steps chain.
+
+      Either framing supports three structural claims:
+
+        (i)   omega_inv Omega_t.
+              Direct from Omega_t = SII SII = App_t (App_t (App_t S_t
+              I_t) I_t) (App_t (App_t S_t I_t) I_t) (the S-redex shape
+              at the outer level, with z = SII inert).
+
+        (ii)  omega_inv W /\\ sk_par_step W W' ==> omega_inv W'.
+              Case-split on par-step's closure rules.  REFL: trivial.
+              K-rule: matches W's K-redex shape (iii); the contraction
+              produces an SII-headed or I-headed term per case
+              analysis; in both cases omega_inv W'.  S-rule: matches
+              W's SII shape (i) or its expanded I-shape; contraction
+              produces the I-shape or K-shape respectively.  App-rule:
+              recurse -- the sub-terms are themselves omega_inv (or
+              inert SII leaves whose only par-descendant is themselves).
+
+        (iii) omega_inv W ==> ~is_normal W.
+              By cases on omega_inv's outer shape:
+                shape (i)  : exposes a top S-redex; close by
+                             IS_NORMAL_NOT_S_REDEX_SHAPE.
+                shape (ii) : App_t I_t M unfolds (via I_T_DEF) to a
+                             top S-redex (with x=K_t, y=K_t, z=M);
+                             same closer after rewriting.
+                shape (iii): exposes a top K-redex; close by
+                             IS_NORMAL_NOT_K_REDEX_SHAPE.
+
+      Closing the theorem.  Suppose ``halts_par Omega_t``; unfold to
+      ``?N. sk_par_steps Omega_t N /\\ is_normal N``; choose N.
+      Impredicative induction on the par-steps chain at
+        P A B := omega_inv A ==> omega_inv B
+      composes claims (i) and (ii) to yield omega_inv N.  Claim (iii)
+      gives ~is_normal N, contradicting the chosen witness.
+
+    Cost estimate: ~150-300 lines.  The bulk is claim (ii)'s par-step
+    case-split; reusing the SK_STEP_LEFT / IS_NORMAL_APP_DECOMP family
+    keeps the booking small.  No new background theorems needed; the
+    proof is entirely structural over par_step's closure rules and the
+    existing IS_NORMAL_NOT_{K,S}_REDEX_SHAPE lemmas.
+
+    Why this is strictly cheaper than STANDARDIZATION_NORMAL: the
+    invariant ``omega_inv`` is finite-state (three shape constructors),
+    so the case-split in (ii) is bounded.  Standardization needs to
+    relate two infinite-state reduction families (par-steps and
+    sk_iter).
+    """
+    p.goal("~ halts_par Omega_t")
+    p.sorry()
+
+
 @proof
 def HALTS_SK_STEP_APP_LEFT(p):
     """|- !X Y. halts (App_t X Y) = halts (App_t (sk_step X) Y).
