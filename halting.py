@@ -1971,17 +1971,35 @@ def HALTS_AT(p):
 # ---------------------------------------------------------------------------
 
 
-def sk_reduce(p, start, end, *, prefix="_sr"):
-    """Open a head-redex sk_iter trace.  See module-level comment above."""
-    return _SkReduce(p, start, end, prefix)
+def sk_reduce(p, start, end, *, prefix="_sr", extras=None):
+    """Open a head-redex sk_iter trace.  See module-level comment above.
+
+    ``extras`` (optional): close a *parametric* existential goal of shape
+    ``?n W1...Wm. sk_iter n start = end[W1...Wm] [/\\ side[W1...Wm]]``.
+    Pass a tuple ``(extra_witnesses, *side_facts)``:
+      * ``extra_witnesses`` -- list of term strings / kernel terms, one
+        per outer existential AFTER the iter index (so the existential
+        prefix is ``?n W1...Wm.`` with n outermost; ``end`` must already
+        be the form with the W-witnesses substituted in).
+      * ``side_facts`` -- zero or more fact-label/kernel-theorem
+        arguments proving each side conjunct (if the body is a
+        conjunction).  The trace's iter equation is supplied
+        automatically as the first by_exists rule.
+
+    The close uses ``by_exists([tower, *extras], iter_eq, *side_facts)``,
+    so by_exists's auto-CONJ-discharge handles the per-conjunct rule
+    matching.
+    """
+    return _SkReduce(p, start, end, prefix, extras)
 
 
 class _SkReduce:
-    def __init__(self, p, start, end, prefix):
+    def __init__(self, p, start, end, prefix, extras=None):
         self.p = p
         self.prefix = prefix
         self.start = p._parse(start) if isinstance(start, str) else start
         self.end = p._parse(end) if isinstance(end, str) else end
+        self.extras = extras
         self.current = self.start
         # SUC0-tower kernel term, grown on every step.
         self.tower = p._parse("0")
@@ -2102,6 +2120,28 @@ class _SkReduce:
             mk_app(self._sk_iter, self.tower, self.start),
             self.end,
         )
+
+        # Extras path: parametric existential ``?n W1...Wm. body[W, n]``.
+        # The tower closes the n existential; user supplies witnesses for
+        # the remaining W-existentials plus any side-conjunct facts.
+        # by_exists handles the by-conjunct dispatch.
+        if self.extras is not None and goal is not None:
+            extra_witnesses, *side_facts = self.extras
+            parsed_wits = [
+                self.p._parse(w) if isinstance(w, str) else w
+                for w in extra_witnesses
+            ]
+            side_ths = [
+                self.p.fact(f) if isinstance(f, str) else f
+                for f in side_facts
+            ]
+            self.p.thus(pp(goal)).by_exists(
+                [self.tower, *parsed_wits],
+                concrete_th,
+                *side_ths,
+            )
+            return
+
         if goal is not None and aconv(goal, concrete_term):
             self.p.thus(pp(concrete_term)).by_thm(concrete_th)
         elif goal is not None and aconv(goal, existential_term):
@@ -2598,6 +2638,143 @@ def NAT0_LT_SUC0_N0PLUS_R(p):
             p.thus(
                 "nat0_lt (SUC0 b) (SUC0 (n0plus a (SUC0 b)))"
             ).by_eq_mp(eq_lt, "h_mono")
+
+
+# ---------------------------------------------------------------------------
+# n0plus left-side recursion equations.  ``N0PLUS_BASE``/``N0PLUS_STEP``
+# in hf_sets handle the *right* argument (n0plus x 0 = x, n0plus x (SUC0 y)
+# = SUC0 (n0plus x y)).  For the SK_ITER_ADD induction on the outer count
+# we need the *left*-side mirror.  Each is a small induction on the right
+# argument, using the existing right-side equations and AP_TERM(SUC0).
+# ---------------------------------------------------------------------------
+
+
+@proof
+def N0PLUS_LEFT_ZERO(p):
+    """|- !m. n0plus 0 m = m.
+
+    Induction on m:
+      base m=0:  n0plus 0 0 = 0  [N0PLUS_BASE].
+      step:      n0plus 0 (SUC0 m) = SUC0 (n0plus 0 m)   [N0PLUS_STEP]
+                                   = SUC0 m              [IH, AP_TERM(SUC0)].
+    """
+    from tactics import AP_TERM as _APT
+    p.goal("!m. n0plus 0 m = m")
+    SUC0_C = p._parse("SUC0")
+    with p.induction("m"):
+        with p.base():
+            p.thus("n0plus 0 0 = 0").by(N0PLUS_BASE, "0")
+        with p.step("IH"):
+            p.have(
+                "h_step: n0plus 0 (SUC0 m) = SUC0 (n0plus 0 m)"
+            ).by(N0PLUS_STEP, "0", "m")
+            # AP_TERM SUC0 on IH: SUC0 (n0plus 0 m) = SUC0 m.
+            ih_suc = _APT(SUC0_C, p.fact("IH"))
+            p.have(
+                "ih_suc: SUC0 (n0plus 0 m) = SUC0 m"
+            ).by_thm(ih_suc)
+            # DSL friction: by_trans for two-step equation chains is
+            # cleaner than nested by_thm(TRANS(...)).
+            from tactics import TRANS as _TRANS
+            p.thus("n0plus 0 (SUC0 m) = SUC0 m").by_thm(
+                _TRANS(p.fact("h_step"), p.fact("ih_suc"))
+            )
+
+
+@proof
+def N0PLUS_SUC_L(p):
+    """|- !n m. n0plus (SUC0 n) m = SUC0 (n0plus n m).
+
+    Induction on m (with n fixed):
+      base m=0:  n0plus (SUC0 n) 0 = SUC0 n      [N0PLUS_BASE]
+                 SUC0 (n0plus n 0) = SUC0 n      [N0PLUS_BASE + AP_TERM]
+                 chain: both = SUC0 n.
+      step:      n0plus (SUC0 n) (SUC0 m)
+                  = SUC0 (n0plus (SUC0 n) m)     [N0PLUS_STEP]
+                  = SUC0 (SUC0 (n0plus n m))     [IH, AP_TERM(SUC0)]
+                  = SUC0 (n0plus n (SUC0 m))     [N0PLUS_STEP back + AP_TERM(SUC0)].
+    """
+    from tactics import AP_TERM as _APT, TRANS as _TRANS, SYM as _SYM
+    p.goal("!n m. n0plus (SUC0 n) m = SUC0 (n0plus n m)")
+    p.fix("n")
+    SUC0_C = p._parse("SUC0")
+    with p.induction("m"):
+        with p.base():
+            # LHS = n0plus (SUC0 n) 0 = SUC0 n by N0PLUS_BASE.
+            p.have(
+                "h_l: n0plus (SUC0 n) 0 = SUC0 n"
+            ).by(N0PLUS_BASE, "SUC0 n")
+            # RHS = SUC0 (n0plus n 0) = SUC0 n via N0PLUS_BASE + AP_TERM(SUC0).
+            p.have("h_r0: n0plus n 0 = n").by(N0PLUS_BASE, "n")
+            h_r_suc = _APT(SUC0_C, p.fact("h_r0"))
+            p.have("h_r: SUC0 (n0plus n 0) = SUC0 n").by_thm(h_r_suc)
+            # Chain: LHS = SUC0 n = RHS.
+            p.thus(
+                "n0plus (SUC0 n) 0 = SUC0 (n0plus n 0)"
+            ).by_thm(_TRANS(p.fact("h_l"), _SYM(p.fact("h_r"))))
+        with p.step("IH"):
+            # IH : n0plus (SUC0 n) m = SUC0 (n0plus n m).
+            # h_l: n0plus (SUC0 n) (SUC0 m) = SUC0 (n0plus (SUC0 n) m).
+            p.have(
+                "h_l: n0plus (SUC0 n) (SUC0 m) = SUC0 (n0plus (SUC0 n) m)"
+            ).by(N0PLUS_STEP, "SUC0 n", "m")
+            # AP_TERM(SUC0) on IH: SUC0 (n0plus (SUC0 n) m) = SUC0 (SUC0 (n0plus n m)).
+            ih_suc = _APT(SUC0_C, p.fact("IH"))
+            p.have(
+                "h_mid: SUC0 (n0plus (SUC0 n) m) = SUC0 (SUC0 (n0plus n m))"
+            ).by_thm(ih_suc)
+            # AP_TERM(SUC0) on SYM(N0PLUS_STEP at n, m):
+            #   SUC0 (SUC0 (n0plus n m)) = SUC0 (n0plus n (SUC0 m)).
+            p.have(
+                "h_step_r: n0plus n (SUC0 m) = SUC0 (n0plus n m)"
+            ).by(N0PLUS_STEP, "n", "m")
+            h_r_suc = _APT(SUC0_C, _SYM(p.fact("h_step_r")))
+            p.have(
+                "h_r: SUC0 (SUC0 (n0plus n m)) = SUC0 (n0plus n (SUC0 m))"
+            ).by_thm(h_r_suc)
+            # Chain three.
+            p.thus(
+                "n0plus (SUC0 n) (SUC0 m) = SUC0 (n0plus n (SUC0 m))"
+            ).by_thm(_TRANS(p.fact("h_l"), _TRANS(p.fact("h_mid"), p.fact("h_r"))))
+
+
+@proof
+def NAT0_LT_N0PLUS_MONO_R(p):
+    """|- !a b c. nat0_lt b c ==> nat0_lt (n0plus a b) (n0plus a c).
+
+    Right-argument strict monotonicity of n0plus.  Induction on the
+    difference c-b, or equivalently on c with case analysis -- simplest
+    is: induct on the inner gap by inducting on c while keeping b free.
+    Body uses N0PLUS_STEP (right-arg) and NAT0_LT_SUC0_MONO.
+
+    Used by OMEGA_TRAJ_I_DEPTH_STEP to convert per-layer size growth
+    ``sk_size (I_pow k SII) < sk_size (I_pow (SUC0 k) SII)`` into
+    Omega-shape size growth (a = sk_size of an I-application wrapper).
+
+    PROOF: straightforward ~25 lines once the right induction structure
+    is picked.  Currently sorried.
+    """
+    p.goal(
+        "!a b c. nat0_lt b c ==> nat0_lt (n0plus a b) (n0plus a c)"
+    )
+    p.sorry()
+
+
+@proof
+def NAT0_LT_N0PLUS_MONO_L(p):
+    """|- !a b c. nat0_lt a b ==> nat0_lt (n0plus a c) (n0plus b c).
+
+    Left-argument strict monotonicity of n0plus.  Easiest derivation:
+    once N0PLUS_COMM is in place, this is a one-line ``by_rewrite`` of
+    NAT0_LT_N0PLUS_MONO_R.  Without N0PLUS_COMM, prove by induction on
+    c using N0PLUS_BASE (right-arg base) and N0PLUS_STEP + NAT0_LT_SUC0_MONO.
+
+    PROOF: ~25 lines.  Currently sorried.
+    """
+    p.goal(
+        "!a b c. nat0_lt a b ==> nat0_lt (n0plus a c) (n0plus b c)"
+    )
+    p.sorry()
 
 
 @proof
@@ -3849,63 +4026,474 @@ def SK_ITER_PAST_NORMAL(p):
       sk_iter k (sk_iter n t) = sk_iter n t (under is_normal).
     Chain via TRANS.
     """
+    from tactics import TRANS as _TRANS
     p.goal(
         "!t n k. is_normal (sk_iter n t) "
         "        ==> sk_iter (n0plus k n) t = sk_iter n t"
+    )
+    p.fix("t n k")
+    p.assume("h_norm: is_normal (sk_iter n t)")
+    # SK_ITER_ADD at (k, n, t): sk_iter (n0plus k n) t = sk_iter k (sk_iter n t).
+    p.have(
+        "h_add: sk_iter (n0plus k n) t = sk_iter k (sk_iter n t)"
+    ).by(SK_ITER_ADD, "k", "n", "t")
+    # IS_NORMAL_SK_ITER_FIXED at (k, sk_iter n t):
+    #   is_normal (sk_iter n t) ==> sk_iter k (sk_iter n t) = sk_iter n t.
+    p.have(
+        "h_fix: sk_iter k (sk_iter n t) = sk_iter n t"
+    ).by(IS_NORMAL_SK_ITER_FIXED, "k", "sk_iter n t", "h_norm")
+    # Chain.
+    p.thus(
+        "sk_iter (n0plus k n) t = sk_iter n t"
+    ).by_thm(_TRANS(p.fact("h_add"), p.fact("h_fix")))
+
+
+# ---------------------------------------------------------------------------
+# I-depth recursive constructor and the peel induction.
+#
+# The Omega trajectory has Omega-shape returns at iters 1, 4, 9, ... where
+# the kth return is at Omega-shape (I^k SII).  To prove "returns to some
+# Omega-shape with strictly larger size" inductively, we need to talk
+# about ``I^k SII`` as a function of k.  Define ``I_pow`` by primitive
+# recursion on the depth:
+#
+#   I_pow 0       X = X
+#   I_pow (SUC0 k) X = App_t I_t (I_pow k X)
+#
+# Then the peel induction lemma OMEGA_PEEL captures the variable-length
+# trace from ``App_t (I_pow k SII) (App_t I_t W)`` to Omega-shape (I W),
+# inducting on k.
+# ---------------------------------------------------------------------------
+
+
+_n0_X_var = Var("X", nat0_ty)
+_n0_k_ip = Var("k", nat0_ty)
+_n0_a_ip = Var("a", parse_type("nat0 -> nat0"))
+
+# c : nat0 -> nat0 = \X. X
+_c_I_pow = mk_abs(_n0_X_var, _n0_X_var)
+# h : nat0 -> (nat0 -> nat0) -> (nat0 -> nat0)
+#   = \k. \a. \X. App_t I_t (a X)
+_h_I_pow = mk_abs(
+    _n0_k_ip,
+    mk_abs(
+        _n0_a_ip,
+        mk_abs(_n0_X_var, mk_app(App_t, I_t, mk_app(_n0_a_ip, _n0_X_var))),
+    ),
+)
+
+I_POW_BASE, I_POW_STEP = define_unary_0(
+    "I_pow",
+    parse_type("nat0 -> nat0 -> nat0"),
+    _c_I_pow,
+    _h_I_pow,
+    result_ty=parse_type("nat0 -> nat0"),
+)
+I_pow = mk_const("I_pow", [])
+# I_POW_BASE : |- I_pow 0 = (\X. X)
+# I_POW_STEP : |- !k. I_pow (SUC0 k) = (\X. App_t I_t (I_pow k X))
+
+
+@proof
+def I_POW_ZERO(p):
+    """|- !X. I_pow 0 X = X.
+
+    AP_THM I_POW_BASE at X, BETA the RHS.
+    """
+    from tactics import AP_THM, BETA_CONV, TRANS, GEN
+    ap = AP_THM(I_POW_BASE, _n0_X_var)
+    bet = BETA_CONV(rand(ap._concl))
+    spec_th = TRANS(ap, bet)
+    p.goal("!X. I_pow 0 X = X")
+    p.thus("!X. I_pow 0 X = X").by_thm(GEN(_n0_X_var, spec_th))
+
+
+@proof
+def I_POW_SUC(p):
+    """|- !k X. I_pow (SUC0 k) X = App_t I_t (I_pow k X).
+
+    SPEC I_POW_STEP at k, AP_THM at X, BETA.
+    """
+    from tactics import AP_THM, BETA_CONV, TRANS, SPEC, GENL
+
+    k_var = Var("k", nat0_ty)
+    step_at_k = SPEC(k_var, I_POW_STEP)
+    ap = AP_THM(step_at_k, _n0_X_var)
+    bet = BETA_CONV(rand(ap._concl))
+    spec_th = TRANS(ap, bet)
+    p.goal("!k X. I_pow (SUC0 k) X = App_t I_t (I_pow k X)")
+    p.thus(
+        "!k X. I_pow (SUC0 k) X = App_t I_t (I_pow k X)"
+    ).by_thm(GENL([k_var, _n0_X_var], spec_th))
+
+
+@proof
+def OMEGA_PEEL_HEAD2(p):
+    """|- !X Y. ?n. sk_iter n (App_t (App_t I_t X) Y) = App_t X Y.
+
+    Two-step trace, independent of X and Y:
+      step 1: descend-L SK_STEP_I_APP (lifted via SK_STEP_LEFT) reduces
+              (App_t I_t X) Y -> ((K X)(K X)) Y.
+      step 2: SK_STEP_K_UNDER_LEFT fires the K-redex on the LHS,
+              ((K X)(K X)) Y -> X Y.
+
+    The three SK_STEP_LEFT guards depend only on I_t's structural
+    difference from K_t / App_t S_t _, dischargeable via APP_T_INJ +
+    I_T_DEF + atom-tag inequalities.  The SK_STEP_K_UNDER_LEFT guard
+    uses SK_NEQ_DEEP_LEFT_WRAP.
+
+    This is the inductive-step lemma for OMEGA_PEEL: each I_t layer
+    peeled from the head of ``App_t (I_pow k SII) (App_t I_t W)`` costs
+    exactly 2 sk_steps and the K-redex restoration drops us into the
+    structurally smaller ``App_t (I_pow (k-1) SII) (App_t I_t W)``.
+    """
+    from tactics import CONJUNCT1 as _C1, TRANS as _TRANS
+
+    p.goal(
+        "!X Y. ?n. sk_iter n (App_t (App_t I_t X) Y) = App_t X Y"
+    )
+    p.fix("X Y")
+
+    outer = "App_t (App_t I_t X) Y"
+
+    # ---- h1: ~K-shape at outer.
+    # ``App_t I_t X = App_t K_t a`` peels to ``I_t = K_t``; via I_T_DEF
+    # this gives ``App_t (App_t S_t K_t) K_t = K_t``, contradicting
+    # K_T_NEQ_APP_T.
+    with p.have(
+        f"h1: ~(?a b. {outer} = App_t (App_t K_t a) b)"
+    ).proof():
+        with p.suppose(f"ex_k: ?a b. {outer} = App_t (App_t K_t a) b"):
+            p.choose("a", from_="ex_k")
+            p.choose("b", from_="a_eq")
+            p.have(
+                "e1: App_t I_t X = App_t K_t a /\\ Y = b"
+            ).by(APP_T_INJ, "App_t I_t X", "Y", "App_t K_t a", "b", "b_eq")
+            p.have("e1a: App_t I_t X = App_t K_t a").by_thm(_C1(p.fact("e1")))
+            p.have("e2: I_t = K_t /\\ X = a").by(
+                APP_T_INJ, "I_t", "X", "K_t", "a", "e1a"
+            )
+            p.have("e_IK: I_t = K_t").by_thm(_C1(p.fact("e2")))
+            # Unfold I_t via I_T_DEF: App_t (App_t S_t K_t) K_t = K_t.
+            p.have(
+                "e_unf: App_t (App_t S_t K_t) K_t = K_t"
+            ).by_thm(_TRANS(SYM(I_T_DEF), p.fact("e_IK")))
+            p.have(
+                "e_sym: K_t = App_t (App_t S_t K_t) K_t"
+            ).by_thm(SYM(p.fact("e_unf")))
+            p.have(
+                "k_neq: ~(K_t = App_t (App_t S_t K_t) K_t)"
+            ).by(K_T_NEQ_APP_T, "App_t S_t K_t", "K_t")
+            p.absurd().by_conj("k_neq", "e_sym")
+
+    # ---- h2: ~S-shape at outer.
+    # Peels to ``I_t = App_t S_t a``; via I_T_DEF this gives
+    # ``App_t (App_t S_t K_t) K_t = App_t S_t a``, peel ``App_t S_t K_t = S_t``,
+    # contradicting S_T_NEQ_APP_T.
+    with p.have(
+        f"h2: ~(?a b c. {outer} = App_t (App_t (App_t S_t a) b) c)"
+    ).proof():
+        with p.suppose(
+            f"ex_s: ?a b c. {outer} = App_t (App_t (App_t S_t a) b) c"
+        ):
+            p.choose("a", from_="ex_s")
+            p.choose("b", from_="a_eq")
+            p.choose("c", from_="b_eq")
+            p.have(
+                "e1: App_t I_t X = App_t (App_t S_t a) b /\\ Y = c"
+            ).by(
+                APP_T_INJ, "App_t I_t X", "Y",
+                "App_t (App_t S_t a) b", "c", "c_eq",
+            )
+            p.have(
+                "e1a: App_t I_t X = App_t (App_t S_t a) b"
+            ).by_thm(_C1(p.fact("e1")))
+            p.have(
+                "e2: I_t = App_t S_t a /\\ X = b"
+            ).by(APP_T_INJ, "I_t", "X", "App_t S_t a", "b", "e1a")
+            p.have("e_IS: I_t = App_t S_t a").by_thm(_C1(p.fact("e2")))
+            p.have(
+                "e_unf: App_t (App_t S_t K_t) K_t = App_t S_t a"
+            ).by_thm(_TRANS(SYM(I_T_DEF), p.fact("e_IS")))
+            p.have(
+                "e_inj: App_t S_t K_t = S_t /\\ K_t = a"
+            ).by(APP_T_INJ, "App_t S_t K_t", "K_t", "S_t", "a", "e_unf")
+            p.have(
+                "e_ASK: App_t S_t K_t = S_t"
+            ).by_thm(_C1(p.fact("e_inj")))
+            p.have(
+                "e_sym: S_t = App_t S_t K_t"
+            ).by_thm(SYM(p.fact("e_ASK")))
+            p.have(
+                "s_neq: ~(S_t = App_t S_t K_t)"
+            ).by(S_T_NEQ_APP_T, "S_t", "K_t")
+            p.absurd().by_conj("s_neq", "e_sym")
+
+    # ---- h3: ~self-step on (App_t I_t X).
+    # SK_STEP_I_APP: sk_step (App_t I_t X) = (K X)(K X) != App_t I_t X
+    # by APP_T_INJ + I_T_DEF + K_T_NEQ_APP_T.
+    with p.have(
+        f"h3: ~(sk_step (App_t I_t X) = App_t I_t X)"
+    ).proof():
+        with p.suppose(f"hf: sk_step (App_t I_t X) = App_t I_t X"):
+            p.have(
+                "sk_IX: sk_step (App_t I_t X) "
+                "      = App_t (App_t K_t X) (App_t K_t X)"
+            ).by(SK_STEP_I_APP, "X")
+            p.have(
+                "e: App_t (App_t K_t X) (App_t K_t X) = App_t I_t X"
+            ).by_thm(_TRANS(SYM(p.fact("sk_IX")), p.fact("hf")))
+            p.have(
+                "e1: App_t K_t X = I_t /\\ App_t K_t X = X"
+            ).by(
+                APP_T_INJ, "App_t K_t X", "App_t K_t X",
+                "I_t", "X", "e",
+            )
+            p.have("e1a: App_t K_t X = I_t").by_thm(_C1(p.fact("e1")))
+            p.have(
+                "e_unf: App_t K_t X = App_t (App_t S_t K_t) K_t"
+            ).by_thm(_TRANS(p.fact("e1a"), I_T_DEF))
+            p.have(
+                "e_inj: K_t = App_t S_t K_t /\\ X = K_t"
+            ).by(
+                APP_T_INJ, "K_t", "X", "App_t S_t K_t", "K_t", "e_unf"
+            )
+            p.have("e_KS: K_t = App_t S_t K_t").by_thm(_C1(p.fact("e_inj")))
+            p.have(
+                "k_neq: ~(K_t = App_t S_t K_t)"
+            ).by(K_T_NEQ_APP_T, "S_t", "K_t")
+            p.absurd().by_conj("k_neq", "e_KS")
+
+    # ---- ns_step2: SK_STEP_K_UNDER_LEFT's not_self for step 2.
+    p.have(
+        "ns_step2: ~(X = App_t (App_t K_t X) (App_t K_t X))"
+    ).by(SK_NEQ_DEEP_LEFT_WRAP, "X", "K_t", "App_t K_t X")
+
+    # ---- 2-step trace via sk_reduce ---------------------------------------
+    with sk_reduce(p, outer, "App_t X Y") as r:
+        # Step 1: SK_STEP_LEFT at (u=App_t I_t X, v=Y).
+        # current = App_t (sk_step (App_t I_t X)) Y.
+        r.step(SK_STEP_LEFT, "App_t I_t X", "Y", mp=["h1", "h2", "h3"])
+        # Rewrite sk_step (App_t I_t X) to (K X)(K X) via SK_STEP_I_APP.
+        # current = App_t (App_t (App_t K_t X) (App_t K_t X)) Y.
+        r.rewrite(SK_STEP_I_APP)
+        # Step 2: SK_STEP_K_UNDER_LEFT at (x=X, y=App_t K_t X, z=Y).
+        # current = App_t X Y.
+        r.step(
+            SK_STEP_K_UNDER_LEFT,
+            "X", "App_t K_t X", "Y",
+            mp=["ns_step2"],
+        )
+
+
+@proof
+def OMEGA_PEEL(p):
+    """|- !k W. ?n. sk_iter n (App_t (I_pow k SII) (App_t I_t W))
+                  = App_t (App_t I_t (App_t I_t W)) (App_t I_t (App_t I_t W)).
+
+    SII = App_t (App_t S_t I_t) I_t.  The end is Omega-shape (I_t W),
+    independent of k.
+
+    Inductive trace lemma for Omega trajectory returns at I-depth k:
+    from ``App_t (I^k SII) (I W)``, some 2k+1 sk_steps reach
+    Omega-shape (I W).  Induction on k:
+
+      Base k=0: I_pow 0 SII = SII.  Start = SII (I W) -- top S-redex
+        with x=I_t, y=I_t, z=I W.  1 sk_step reaches (I (I W))(I (I W))
+        = Omega-shape (I W).
+
+      Step k -> k+1: I_pow (SUC0 k) SII = App_t I_t (I_pow k SII).
+        Start_{k+1} = (App_t I_t (I_pow k SII)) (App_t I_t W).
+        OMEGA_PEEL_HEAD2 at (X := I_pow k SII, Y := App_t I_t W) gives
+        a 2-step trace to ``App_t (I_pow k SII) (App_t I_t W)`` = start_k.
+        IH at W gives n_w sk_steps from start_k to end.  SK_ITER_ADD
+        chains: ``n0plus n_w m`` sk_steps from start_{k+1} reach end.
+    """
+    from tactics import TRANS as _TRANS, AP_TERM as _APT, AP_THM
+    SII = "App_t (App_t S_t I_t) I_t"
+    end = "App_t (App_t I_t (App_t I_t W)) (App_t I_t (App_t I_t W))"
+
+    p.goal(
+        f"!k. !W. ?n. sk_iter n (App_t (I_pow k ({SII})) (App_t I_t W)) = {end}"
+    )
+
+    with p.induction("k"):
+        with p.base():
+            p.fix("W")
+            start_0 = f"App_t (I_pow 0 ({SII})) (App_t I_t W)"
+            with sk_reduce(p, start_0, end) as r:
+                # I_POW_ZERO unfolds I_pow 0 SII -> SII in the running eq.
+                r.rewrite(I_POW_ZERO)
+                # current = App_t SII (App_t I_t W).  Top S-redex.
+                r.step(SK_STEP_S, "I_t", "I_t", "App_t I_t W")
+                # current = end.
+
+        with p.step("IH"):
+            # IH : !W. ?n. sk_iter n (App_t (I_pow k SII) (App_t I_t W)) = end.
+            p.fix("W")
+
+            head2_start = f"App_t (App_t I_t (I_pow k ({SII}))) (App_t I_t W)"
+            start_k = f"App_t (I_pow k ({SII})) (App_t I_t W)"
+            start_k1 = f"App_t (I_pow (SUC0 k) ({SII})) (App_t I_t W)"
+
+            # Unfold the head's I_pow layer: I_pow (SUC0 k) SII
+            # = App_t I_t (I_pow k SII).  Lift through App_t at (I W).
+            p.have(
+                f"pow_eq: I_pow (SUC0 k) ({SII}) "
+                f"        = App_t I_t (I_pow k ({SII}))"
+            ).by(I_POW_SUC, "k", SII)
+            # AP_TERM(App_t, pow_eq) then AP_THM at (App_t I_t W).
+            App_t_const = p._parse("App_t")
+            pow_eq_apt = _APT(App_t_const, p.fact("pow_eq"))
+            arg = p._parse("App_t I_t W")
+            pow_eq_app_th = AP_THM(pow_eq_apt, arg)
+            p.have(
+                f"pow_eq_app: {start_k1} = {head2_start}"
+            ).by_thm(pow_eq_app_th)
+
+            # OMEGA_PEEL_HEAD2 at (X := I_pow k SII, Y := App_t I_t W):
+            # 2-step trace head2_start -> start_k.
+            p.have(
+                f"h_head2: ?m. sk_iter m ({head2_start}) = {start_k}"
+            ).by(
+                OMEGA_PEEL_HEAD2, f"I_pow k ({SII})", "App_t I_t W"
+            )
+            p.choose("m", from_="h_head2")
+            # m_eq : sk_iter m head2_start = start_k.
+
+            # IH at W: n_w sk_steps from start_k to end.
+            p.have(
+                f"h_ih: ?n_w. sk_iter n_w ({start_k}) = {end}"
+            ).by("IH", "W")
+            p.choose("n_w", from_="h_ih")
+            # n_w_eq : sk_iter n_w start_k = end.
+
+            # SK_ITER_ADD: sk_iter (n0plus n_w m) head2_start
+            #            = sk_iter n_w (sk_iter m head2_start).
+            p.have(
+                f"h_add: sk_iter (n0plus n_w m) ({head2_start}) "
+                f"      = sk_iter n_w (sk_iter m ({head2_start}))"
+            ).by(SK_ITER_ADD, "n_w", "m", head2_start)
+
+            # AP_TERM(sk_iter n_w) on m_eq:
+            # sk_iter n_w (sk_iter m head2_start) = sk_iter n_w start_k.
+            sk_iter_nw = p._parse("sk_iter n_w")
+            iter_eq_th = _APT(sk_iter_nw, p.fact("m_eq"))
+            p.have(
+                f"h_mid: sk_iter n_w (sk_iter m ({head2_start})) "
+                f"      = sk_iter n_w ({start_k})"
+            ).by_thm(iter_eq_th)
+
+            # Chain: h_add . h_mid . n_w_eq.
+            p.have(
+                f"h_unf_eq: sk_iter (n0plus n_w m) ({head2_start}) = {end}"
+            ).by_thm(_TRANS(
+                p.fact("h_add"),
+                _TRANS(p.fact("h_mid"), p.fact("n_w_eq")),
+            ))
+
+            # Convert head2_start to start_k1 via pow_eq_app:
+            # sk_iter (n0plus n_w m) start_k1 = sk_iter (n0plus n_w m) head2_start.
+            sk_iter_total = p._parse("sk_iter (n0plus n_w m)")
+            folded_eq = _APT(sk_iter_total, p.fact("pow_eq_app"))
+            p.have(
+                f"h_fold: sk_iter (n0plus n_w m) ({start_k1}) "
+                f"      = sk_iter (n0plus n_w m) ({head2_start})"
+            ).by_thm(folded_eq)
+
+            # Final chain.
+            p.have(
+                f"h_final: sk_iter (n0plus n_w m) ({start_k1}) = {end}"
+            ).by_thm(_TRANS(p.fact("h_fold"), p.fact("h_unf_eq")))
+
+            # EXISTS at n0plus n_w m.
+            p.thus(
+                f"?n. sk_iter n ({start_k1}) = {end}"
+            ).by_witness("n0plus n_w m", "h_final")
+
+
+@proof
+def OMEGA_TO_X_IX(p):
+    """|- !X. sk_iter (SUC0 (SUC0 0)) (App_t (App_t I_t X) (App_t I_t X))
+              = App_t X (App_t I_t X).
+
+    Universal 2-step prefix of the Omega-shape trajectory:
+      T0 = Omega_shape X = (I X)(I X)
+      T1 = ((K X)(K X))(I X)                    [TRAJ_STEP_OMEGA_SHAPE]
+      T2 = X (I X)                              [SK_STEP_K_UNDER_LEFT at
+                                                 (x=X, y=K X, z=I X);
+                                                 not_self via
+                                                 SK_NEQ_DEEP_LEFT_WRAP]
+
+    Uniform in X -- independent of X's structure.  Combines with
+    OMEGA_PEEL (at W := X) inside OMEGA_TRAJ_I_DEPTH_STEP to give the
+    full Omega-shape (I^k SII) -> Omega-shape (I^(k+1) SII) trace.
+
+    Currently sorried; proof is ~30 lines of sk_reduce + one
+    SK_NEQ_DEEP_LEFT_WRAP discharge for the K-lift's not_self.
+    """
+    p.goal(
+        "!X. sk_iter (SUC0 (SUC0 0)) "
+        "     (App_t (App_t I_t X) (App_t I_t X)) "
+        "    = App_t X (App_t I_t X)"
     )
     p.sorry()
 
 
 @proof
-def OMEGA_SHAPE_TRAJ_RETURNS(p):
-    """|- !X. ?k Y. sk_iter k (App_t (App_t I_t X) (App_t I_t X))
-                    = App_t (App_t I_t Y) (App_t I_t Y)
-                  /\\ nat0_lt (sk_size (App_t (App_t I_t X) (App_t I_t X)))
-                              (sk_size (App_t (App_t I_t Y) (App_t I_t Y))).
+def OMEGA_TRAJ_I_DEPTH_STEP(p):
+    """|- !k. ?n. sk_iter n (App_t (App_t I_t (I_pow k SII))
+                                    (App_t I_t (I_pow k SII)))
+                = App_t (App_t I_t (I_pow (SUC0 k) SII))
+                        (App_t I_t (I_pow (SUC0 k) SII))
+              /\\ nat0_lt (sk_size (App_t (App_t I_t (I_pow k SII))
+                                           (App_t I_t (I_pow k SII))))
+                          (sk_size (App_t (App_t I_t (I_pow (SUC0 k) SII))
+                                           (App_t I_t (I_pow (SUC0 k) SII)))).
 
-    Trajectory-return-with-growth: from any Omega-shape, some number
-    of sk_steps later we are back at Omega-shape with strictly larger
-    size.  Witness: Y := App_t I_t X (one extra leading I_t).
+    Replaces the (false) universal OMEGA_SHAPE_TRAJ_RETURNS.  Step
+    lemma at I-depth k: from Omega-shape (I^k SII) some n sk_steps
+    reach Omega-shape (I^(k+1) SII), with strict size growth.
 
-    Concrete step counts:
+    SII = App_t (App_t S_t I_t) I_t.  Note both Omega-shape RHSs are
+    spelled out fully -- the LHS has ``I_pow k SII`` (not just X), the
+    RHS has ``I_pow (SUC0 k) SII``.  This concrete form is what
+    OMEGA_T_REACHES_LARGE_SIZE iterates.
 
-      X = SII:                          k = 3.
-        T0 := (I X)(I X)
-        T1 := sk_step T0 = ((K X)(K X))(I X)   [TRAJ_STEP_OMEGA_SHAPE]
-        T2 := sk_step T1 = X (I X)              [descend-L: K-redex]
-        T3 := sk_step T2 = (I (I X))(I (I X))   [TOP S-redex of SII (IX)
-                                                 with x=I_t, y=I_t,
-                                                 z=I_t X; SK_STEP_S]
-                                                = Omega-shape (I_t X).
+    Proof composes OMEGA_TO_X_IX + OMEGA_PEEL:
+      * OMEGA_TO_X_IX at X := I_pow k SII gives 2 sk_steps to
+        ``(I_pow k SII) (App_t I_t (I_pow k SII))``.
+      * OMEGA_PEEL at (k, W := I_pow k SII) gives further n' sk_steps
+        to ``(I (I (I_pow k SII)))(I (I (I_pow k SII)))``.
+        Rewrite ``App_t I_t (I_pow k SII)`` to ``I_pow (SUC0 k) SII``
+        via SYM(I_POW_SUC); the end becomes Omega-shape (I_pow (SUC0 k) SII).
+      * SK_ITER_ADD chains: n0plus n' 2 sk_steps total.
 
-      X = App_t I_t Z (any Z):           5 step header before recursing.
-        T1, T2 as above; T2 = (I Z)(I (IZ)).
-        T3 = ((K Z)(K Z))(I (IZ))         [descend-L: SK_STEP_I_APP on (IZ)]
-        T4 = Z (I (IZ))                   [descend-L: K-redex]
-        ... now structurally identical to (Z (I Z')) with Z' = I_t X --
-        but with one fewer App_t I_t layer in the head.  Recurse on Z.
+    Size_lt: builds from SK_SIZE_GROWTH_OMEGA_SHAPE at t := I_pow k SII
+    and the strict layer growth ``sk_size (I_pow k SII)
+    < sk_size (App_t I_t (I_pow k SII)) = sk_size (I_pow (SUC0 k) SII)``,
+    lifted to Omega-shapes via NAT0_LT_N0PLUS_MONO_L /
+    NAT0_LT_N0PLUS_MONO_R + NAT0_LT_SUC0_MONO + SK_SIZE_APP.
 
-    Proof strategy: structural / well-founded induction on
-    ``sk_size X`` (any measure that strictly decreases when stripping
-    the outermost I_t).
-
-    Strict-size component: SK_SIZE_GROWTH_OMEGA_SHAPE specialised at
-    t = App_t I_t X gives
-      sk_size (App_t I_t X) < sk_size (App_t (App_t I_t (App_t I_t X))
-                                              (App_t I_t (App_t I_t X)))
-    and SK_SIZE_GROWTH_OMEGA_SHAPE at t = X gives
-      sk_size X < sk_size (Omega-shape X)
-    which (one SK_SIZE_APP unfold) suffices for the
-    Omega-shape X < Omega-shape (I X) comparison.
-
-    Estimated ~~100-200 lines once the peel induction is fully spelled
-    out (the per-layer descent and S-redex bookkeeping is the bulk).
+    Estimated: ~80 lines once OMEGA_TO_X_IX and the n0plus monos land.
+    Note: this is NOT a single head-redex trace -- it composes two
+    pre-proved traces (OMEGA_TO_X_IX + OMEGA_PEEL) via SK_ITER_ADD --
+    so ``sk_reduce`` is not the right tool here.  Close directly with
+    ``p.thus(...).by_witness("n0plus n' (SUC0 (SUC0 0))", h_conj)``
+    where ``h_conj`` is the CONJ of the iter equation and size_lt
+    built from kernel-level TRANS and the size lemmas.  Currently
+    sorried.
     """
     p.goal(
-        "!X. ?k Y. sk_iter k (App_t (App_t I_t X) (App_t I_t X)) "
-        "          = App_t (App_t I_t Y) (App_t I_t Y) "
-        "        /\\ nat0_lt (sk_size (App_t (App_t I_t X) (App_t I_t X))) "
-        "                    (sk_size (App_t (App_t I_t Y) (App_t I_t Y)))"
+        "!k. ?n. sk_iter n (App_t (App_t I_t (I_pow k (App_t (App_t S_t I_t) I_t))) "
+        "                          (App_t I_t (I_pow k (App_t (App_t S_t I_t) I_t)))) "
+        "        = App_t (App_t I_t (I_pow (SUC0 k) (App_t (App_t S_t I_t) I_t))) "
+        "                (App_t I_t (I_pow (SUC0 k) (App_t (App_t S_t I_t) I_t))) "
+        "      /\\ nat0_lt "
+        "             (sk_size (App_t (App_t I_t (I_pow k (App_t (App_t S_t I_t) I_t))) "
+        "                              (App_t I_t (I_pow k (App_t (App_t S_t I_t) I_t))))) "
+        "             (sk_size (App_t (App_t I_t (I_pow (SUC0 k) (App_t (App_t S_t I_t) I_t))) "
+        "                              (App_t I_t (I_pow (SUC0 k) (App_t (App_t S_t I_t) I_t)))))"
     )
     p.sorry()
 
@@ -3918,54 +4506,48 @@ def OMEGA_T_REACHES_LARGE_SIZE(p):
                                                    (App_t I_t X))).
 
     For any size threshold N and any iter-offset L, there is an
-    Omega-shape iterate at index ``n0plus k L`` (i.e. >= L) with
-    size > N.
+    Omega-shape iterate at index ``n0plus k L`` (so >= L) with size > N.
 
-    The offset-by-L formulation is what later combines with
-    SK_ITER_PAST_NORMAL: plug L = n0 (the halts-witness) and the
-    iterate index becomes ``n0plus k n0``, exactly the shape
-    SK_ITER_PAST_NORMAL collapses.
+    Plugged into OMEGA_NON_HALTING at (N, L) := (sk_size (sk_iter n0
+    Omega_t), n0), where n0 is the halts witness.  The witness X is
+    in the trajectory image, so always of the form ``I_pow d SII`` for
+    some d.
 
-    Induction on ``N``:
-      base N = 0:
-        OMEGA_T_STEP1 + SK_ITER_SUC give
-          sk_iter (SUC0 0) Omega_t = sk_step Omega_t
-                                   = App_t (I_t SII) (I_t SII).
-        Witness k = SUC0 L, X = SII (assuming we can absorb the L
-        offset).  More carefully: the witness for k is chosen so
-        that ``n0plus k L = SUC0 L`` -- this needs an "absorb a
-        suffix" reduction that itself is small.  Alternatively, lift
-        the base to "n0plus (SUC0 0) L is an iterate index reaching
-        Omega-shape" via applying SK_ITER_PAST_NORMAL-like padding
-        when L > 1 (no -- Omega_t is non-normal so we cannot rely on
-        idempotence; instead we run OMEGA_SHAPE_TRAJ_RETURNS L times
-        from T1 = Omega-shape SII to absorb the offset).
-        nat0_lt 0 (sk_size (Omega-shape SII)) is immediate from
-        SK_SIZE_APP (sk_size of an App_t is SUC0 _, hence > 0).
+    Induction strategy (post-restatement to use OMEGA_TRAJ_I_DEPTH_STEP):
 
-      step N = SUC0 N':
-        From IH: k_0, X_0 with
-          sk_iter (n0plus k_0 L) Omega_t = Omega-shape X_0
-          /\\ nat0_lt N' (sk_size (Omega-shape X_0)).
-        Apply OMEGA_SHAPE_TRAJ_RETURNS at X_0:
-          k_1, Y with
-            sk_iter k_1 (Omega-shape X_0) = Omega-shape Y
-            /\\ nat0_lt (sk_size (Omega-shape X_0))
-                        (sk_size (Omega-shape Y)).
-        New k := n0plus k_1 k_0; chain through SK_ITER_ADD:
-          sk_iter (n0plus k L) Omega_t
-            = sk_iter (n0plus (n0plus k_1 k_0) L) Omega_t
-            = sk_iter k_1 (sk_iter (n0plus k_0 L) Omega_t)    [assoc + ADD]
-            = sk_iter k_1 (Omega-shape X_0)                    [IH]
-            = Omega-shape Y.
-        Size: N' < sk_size (Omega-shape X_0) < sk_size (Omega-shape Y),
-        so NAT0_LT_TRANS gives N' < sk_size (Omega-shape Y); plus
-        N = SUC0 N' < sk_size (Omega-shape Y) by NAT0_LT_SUC0_MONO
-        on the strict gap.  (Mind the SUC0-step: TRAJ_RETURNS gives
-        strict-lt, and SUC0-lifting N' -> N consumes one step of
-        the gap.  When the gap is one, this case might need an
-        extra TRAJ_RETURNS iteration -- fold two cycles into one in
-        the worst case.  Documented as a 5-line bookkeeping hop.)
+      Bootstrap (from OMEGA_T_STEP1):
+        sk_iter (SUC0 0) Omega_t = App_t (App_t I_t SII) (App_t I_t SII)
+                                 = Omega-shape (I_pow 0 SII).
+        Pad to offset L via 0 returns at depth 0 -- requires either
+        absorbing L into the witness or chaining L applications of
+        OMEGA_TRAJ_I_DEPTH_STEP from the base.
+
+      Induction on the I-depth d such that
+        sk_iter (n0plus k(d) L) Omega_t = Omega-shape (I_pow d SII)
+        /\\ nat0_lt N(d) (sk_size (Omega-shape (I_pow d SII)))
+      where k(d) and N(d) grow with d.
+
+      step d -> d+1:
+        OMEGA_TRAJ_I_DEPTH_STEP at d gives k_step, with
+          sk_iter k_step (Omega-shape (I_pow d SII))
+            = Omega-shape (I_pow (SUC0 d) SII)
+          /\\ nat0_lt (sk_size (Omega-shape (I_pow d SII)))
+                      (sk_size (Omega-shape (I_pow (SUC0 d) SII))).
+        SK_ITER_ADD chains the iter counts:
+          sk_iter (n0plus k_step k(d)) L Omega_t
+            = sk_iter k_step (Omega-shape (I_pow d SII))
+            = Omega-shape (I_pow (SUC0 d) SII).
+        Size accumulates via NAT0_LT_TRANS.
+
+      To reach an arbitrary threshold N: iterate the step until
+      sk_size (Omega-shape (I_pow d SII)) > N.  This is a separate
+      strong induction on N choosing d.
+
+    Witness X = I_pow d SII for d chosen large enough.
+
+    Currently sorried; proof is the outer induction on N driving an
+    inner iteration of OMEGA_TRAJ_I_DEPTH_STEP.  Estimated ~80-120
+    lines once the I-depth step lemma and the n0plus monos land.
     """
     p.goal(
         "!N L. ?k X. sk_iter (n0plus k L) Omega_t "
