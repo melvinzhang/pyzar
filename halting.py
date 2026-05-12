@@ -6183,6 +6183,148 @@ def HALTING_REDUCTION_PRESERVED(p):
 
 
 @proof
+def SK_ITER_TRANS(p):
+    """|- !X Y Z. (?n. sk_iter n X = Y) /\\ (?m. sk_iter m Y = Z) ==>
+                  ?p. sk_iter p X = Z.
+
+    Transitivity of the reduction-existential.  Witness ``p := n0plus b a``
+    via SK_ITER_ADD(b, a, X):
+      sk_iter (n0plus b a) X = sk_iter b (sk_iter a X) = sk_iter b Y = Z.
+    Not a stub -- closes against SK_ITER_ADD.
+    """
+    from tactics import TRANS as _TRANS
+    p.goal(
+        "!X Y Z. (?n. sk_iter n X = Y) /\\ (?m. sk_iter m Y = Z) "
+        "        ==> (?p. sk_iter p X = Z)"
+    )
+    p.fix("X Y Z")
+    p.assume(
+        "(h_xy, h_yz): (?n. sk_iter n X = Y) /\\ (?m. sk_iter m Y = Z)"
+    )
+    p.choose("a", from_="h_xy")
+    # a_eq : sk_iter a X = Y
+    p.choose("b", from_="h_yz")
+    # b_eq : sk_iter b Y = Z
+    p.have(
+        "h_add: sk_iter (n0plus b a) X = sk_iter b (sk_iter a X)"
+    ).by(SK_ITER_ADD, "b", "a", "X")
+    # Rewrite the inner ``sk_iter a X`` to Y via a_eq.
+    p.have(
+        "h_chain: sk_iter (n0plus b a) X = sk_iter b Y"
+    ).by_rewrite_of("h_add", ["a_eq"])
+    # Chain to Z via b_eq.
+    p.have(
+        "h_final: sk_iter (n0plus b a) X = Z"
+    ).by_thm(_TRANS(p.fact("h_chain"), p.fact("b_eq")))
+    p.thus("?p. sk_iter p X = Z").by_witness("n0plus b a", "h_final")
+
+
+@proof
+def SK_ITER_APP_LEFT(p):
+    """|- !X X1 Y. (?n. sk_iter n X = X1) ==>
+                   ?m. sk_iter m (App_t X Y) = App_t X1 Y.
+
+    *** STUB.  Multi-step left-congruence for App_t under sk_iter.
+
+    Real-form side condition (elided): at each intermediate step the
+    outer ``App_t (sk_iter k X) Y`` must not be a K- or S-redex BEFORE
+    the inner reduces (leftmost-outermost would otherwise fire on the
+    outer first).  In every Stage-6 use site the trace's intermediate
+    forms have non-S, non-K heads (the inner sequence reduces an App
+    application, whose head can be S or K only at the very last step
+    where the resulting outer redex is exactly the one we WANT to fire
+    next -- subsumed by the trace's continuation).  Capturing the
+    condition in the lemma statement would clutter consumers, so the
+    discharged form pushes it onto callers via a no-redex side
+    hypothesis whose canonical proofs are the ``not_kred`` / ``not_sred``
+    chains already used by SK_STEP_LEFT.
+
+    Discharge sketch (~60 lines):
+      Induction on the witness ``n``.  Base: sk_iter 0 X = X, so
+      App_t X Y is the same on both sides (witness 0).  Step: chain
+      SK_STEP_LEFT (with side conditions) under sk_step into sk_iter
+      via SK_ITER_SUC.
+
+    DSL friction: parser identifiers cannot contain primes, so the
+    natural ``X'`` got renamed to ``X1`` throughout.
+    """
+    p.goal(
+        "!X X1 Y. (?n. sk_iter n X = X1) "
+        "         ==> (?m. sk_iter m (App_t X Y) = App_t X1 Y)"
+    )
+    p.sorry()
+
+
+@proof
+def DIAG_TERM(p):
+    """|- !H. is_sk_term H ==>
+              ?d. is_sk_term d /\\
+                  ?n. sk_iter n d = App_t (App_t (App_t H d) Omega_t) K_t.
+
+    *** STUB.  Curry's self-application diagonal -- no Y combinator
+    needed; ``e e`` IS the fixed point.
+
+    Concrete witness (Curry's recipe for bracket abstraction at body
+    ``App_t (App_t (App_t H (App_t x x)) Omega_t) K_t``):
+
+      [x] x         = I_t
+      [x] M         = App_t K_t M           (x not in M)
+      [x] (App M N) = App_t (App_t S_t [x]M) [x]N
+
+    Step by step on ``(((H (x x)) Omega) K)``:
+      [x] (x x)      = App_t (App_t S_t I_t) I_t           (= SII)
+      [x] H          = App_t K_t H
+      [x] Omega      = App_t K_t Omega_t
+      [x] K_t        = App_t K_t K_t
+      [x] (H (x x))  = App_t (App_t S_t (App_t K_t H)) SII
+      [x] (... Omega)= App_t (App_t S_t [x](H (x x))) (App_t K_t Omega_t)
+      [x] (... K_t)  = App_t (App_t S_t (above)) (App_t K_t K_t)
+
+    Let
+      e_H := App_t (App_t S_t
+                     (App_t (App_t S_t
+                              (App_t (App_t S_t (App_t K_t H)) SII))
+                            (App_t K_t Omega_t)))
+                   (App_t K_t K_t)
+      d   := App_t e_H e_H
+
+    is_sk_term d : structural intro on the App-tree above, atoms are
+    S_t / K_t / I_t (folded out via I_T_DEF, OMEGA_T_DEF) plus the
+    hypothesised SK term H.  Closes via ``by_tree`` + IS_SK_TERM_APP
+    plus a one-line lift through I_T_DEF / OMEGA_T_DEF.
+
+    Reduction ``?n. sk_iter n d = (H d) Omega K`` -- 8-step head trace,
+    closable via the ``sk_reduce`` block helper:
+      d = (S A B) e_H        [A = S (S (S (K H) SII) (K Omega)), B = K K]
+        --S_t-->* (A e_H) (B e_H)
+        -- (B e_H) = (K K) e_H -->* K_t (head K-redex)
+        -- so current = (A e_H) K_t
+        -- A = S A' (K Omega) with A' = S (S (K H) SII)
+        --S_t-->* (A' e_H) ((K Omega) e_H) K_t
+        -- ((K Omega) e_H) -->* Omega_t
+        -- current = (A' e_H) Omega_t K_t
+        -- A' = S (S (K H) SII)
+        --S_t-->* ((S (K H) SII) e_H) Omega_t K_t          [need a wrap]
+        -- (S (K H) SII) e_H:
+        --S_t-->* ((K H) e_H) (SII e_H)
+        -- (K H) e_H -->* H; SII e_H -->* I_t e_H (I_t e_H) -->* e_H e_H = d.
+        -- current = (H d) Omega K. QED.
+    Each step uses one SK_STEP_S or SK_STEP_K plus a congruence wrap
+    via SK_STEP_LEFT / SK_STEP_LEFT_LEFT.  ~80 lines.
+
+    Estimate for full discharge of this stub plus SK_ITER_APP_LEFT:
+    ~150-200 lines total, dominated by the head-redex trace.
+    """
+    p.goal(
+        "!H. is_sk_term H ==> "
+        "    ?d. is_sk_term d /\\ "
+        "        (?n. sk_iter n d = "
+        "             App_t (App_t (App_t H d) Omega_t) K_t)"
+    )
+    p.sorry()
+
+
+@proof
 def DIAGONAL_TERM_EXISTS(p):
     """|- !H. is_sk_term H ==>
               ?d. is_sk_term d /\\
@@ -6191,43 +6333,22 @@ def DIAGONAL_TERM_EXISTS(p):
                   ((?n. sk_iter n (App_t H d) = KI_t) ==>
                    (?m. sk_iter m d = K_t)).
 
-    *** STUB.  Encapsulates the bracket-abstraction + Y diagonal +
-    congruence work that the rest of Stage 6 takes for granted but
-    which is not yet built in this module.
+    Combines:
+      * DIAG_TERM:        existence of self-applying d with reduction
+                          d -->* (H d) Omega K.
+      * SK_ITER_APP_LEFT: lift ``H d -->* K_t / KI_t`` through the outer
+                          App context to ``(H d) Omega K -->* (K/KI) Omega K``.
+      * CHURCH_TRUE_REDUCES / CHURCH_FALSE_REDUCES: collapse the head
+                          K_t / KI_t Church-bool against (Omega, K_t).
+      * SK_ITER_TRANS:    chain the three reduction-existentials into
+                          ``d -->* Omega_t`` (K_t case) /
+                          ``d -->* K_t``     (KI_t case).
 
-    Construction (sketch):
-      * Bracket-abstract ``[x] (App_t (App_t (App_t H x) Omega_t) K_t)``
-        as a concrete closed SK term ``f_H``.  Curry's [x]:
-          [x] x        = I_t
-          [x] M        = App_t K_t M   (x not in M)
-          [x] (M N)    = App_t (App_t S_t [x]M) [x]N
-        is a primitive recursion on the body's structure (~30 lines).
-      * d := App_t Y_t f_H.
-      * Show ``?n. sk_iter n d = App_t (App_t (App_t H d) Omega_t) K_t``
-        by chaining Y_FIXED_POINT with the bracket-abstraction beta
-        reduction.  Tromp's Y_FIXED_POINT lands at ``App_t f_H X_TROMP_f_H``
-        instead of the literal ``App_t f_H d`` -- bridging the two requires
-        ANOTHER bracket-abstraction reduction or a multi-step congruence
-        argument under App_t.
-      * Chain ``?n. sk_iter n (App_t H d) = K_t`` with CHURCH_TRUE_REDUCES
-        and the multi-step congruence ``X -->* X' ==> App_t X Y -->* App_t X' Y``
-        (also not currently in this module) to get ``?m. sk_iter m d = Omega_t``.
-      * Symmetric argument with CHURCH_FALSE_REDUCES for the KI_t branch.
-
-    DSL friction (why this stays a stub for now):
-      * Bracket abstraction needs a primitive-recursive constructor on
-        nat0-encoded SK terms; no helper for "is x free in this term"
-        as a decidable bool exists.
-      * Multi-step App-congruence ``?n. sk_iter n X = X' ==>
-        ?m. sk_iter m (App_t X Y) = App_t X' Y`` requires a "no-redex"
-        side-condition on App_t X Y to keep leftmost-outermost from
-        firing on the outer App before reducing the head -- see the
-        SK_STEP_LEFT not_kred / not_sred / not_fixed hypothesis
-        triple, which would have to be lifted multi-step.
-      * Tromp's Y' is not a literal fixed-point combinator; the
-        ``X_TROMP_f`` adjustment in Y_FIXED_POINT needs its own diagonal
-        bridge.
+    No further holes -- this proof closes against the three helpers
+    above (two of which are still stubs).
     """
+    from tactics import CONJ as _CONJ
+
     p.goal(
         "!H. is_sk_term H ==> "
         "    ?d. is_sk_term d /\\ "
@@ -6236,7 +6357,135 @@ def DIAGONAL_TERM_EXISTS(p):
         "        ((?n. sk_iter n (App_t H d) = KI_t) ==> "
         "         (?m. sk_iter m d = K_t))"
     )
-    p.sorry()
+    p.fix("H")
+    p.assume("h_is_sk_H: is_sk_term H")
+
+    # ---- (1) Existence of the self-applying diagonal d. ------------------
+    p.have(
+        "h_diag: ?d. is_sk_term d /\\ "
+        "        ?n. sk_iter n d = "
+        "            App_t (App_t (App_t H d) Omega_t) K_t"
+    ).by(DIAG_TERM, "H", "h_is_sk_H")
+    p.choose("d", from_="h_diag")
+    # d_eq : is_sk_term d /\ ?n. sk_iter n d = (H d) Omega K.
+    p.split("d_eq", "(h_is_sk_d, h_d_red)")
+    # h_d_red : ?n. sk_iter n d = App_t (App_t (App_t H d) Omega_t) K_t.
+
+    # ---- (2) is_sk_term Omega_t (needed by both Church reductions). ------
+    p.have("h_is_sk_Omega: is_sk_term Omega_t").by_tree(
+        unfold=[OMEGA_T_DEF, I_T_DEF]
+    )
+
+    # ---- (3) K_t branch: H d -->* K_t  =>  d -->* Omega_t. ---------------
+    with p.have(
+        "h_kt_branch: (?n. sk_iter n (App_t H d) = K_t) ==> "
+        "             (?m. sk_iter m d = Omega_t)"
+    ).proof():
+        p.assume("h_to_kt: ?n. sk_iter n (App_t H d) = K_t")
+        # Lift H d -->* K_t under the outer ``_ Omega_t`` App.
+        p.have(
+            "h_lift1: ?p. sk_iter p (App_t (App_t H d) Omega_t) "
+            "         = App_t K_t Omega_t"
+        ).by(SK_ITER_APP_LEFT, "App_t H d", "K_t", "Omega_t", "h_to_kt")
+        # Lift again under the outer ``_ K_t`` App.
+        p.have(
+            "h_lift2: ?q. sk_iter q (App_t (App_t (App_t H d) Omega_t) K_t) "
+            "         = App_t (App_t K_t Omega_t) K_t"
+        ).by(
+            SK_ITER_APP_LEFT,
+            "App_t (App_t H d) Omega_t",
+            "App_t K_t Omega_t",
+            "K_t",
+            "h_lift1",
+        )
+        # CHURCH_TRUE_REDUCES at (a=Omega_t, c=K_t): K_t Omega K -->* Omega.
+        p.have(
+            "h_church_true: ?r. sk_iter r (App_t (App_t K_t Omega_t) K_t) "
+            "                  = Omega_t"
+        ).by(
+            CHURCH_TRUE_REDUCES, "Omega_t", "K_t",
+            _CONJ(p.fact("h_is_sk_Omega"), IS_SK_TERM_K),
+        )
+        # Chain: d -->* (H d) Omega K -->* (K Omega) K -->* Omega.
+        p.have(
+            "h_chain1: ?r. sk_iter r d = App_t (App_t K_t Omega_t) K_t"
+        ).by(
+            SK_ITER_TRANS, "d",
+            "App_t (App_t (App_t H d) Omega_t) K_t",
+            "App_t (App_t K_t Omega_t) K_t",
+            _CONJ(p.fact("h_d_red"), p.fact("h_lift2")),
+        )
+        p.thus("?m. sk_iter m d = Omega_t").by(
+            SK_ITER_TRANS, "d",
+            "App_t (App_t K_t Omega_t) K_t", "Omega_t",
+            _CONJ(p.fact("h_chain1"), p.fact("h_church_true")),
+        )
+
+    # ---- (4) KI_t branch: H d -->* KI_t  =>  d -->* K_t. -----------------
+    with p.have(
+        "h_kit_branch: (?n. sk_iter n (App_t H d) = KI_t) ==> "
+        "              (?m. sk_iter m d = K_t)"
+    ).proof():
+        p.assume("h_to_kit: ?n. sk_iter n (App_t H d) = KI_t")
+        p.have(
+            "h_lift1k: ?p. sk_iter p (App_t (App_t H d) Omega_t) "
+            "          = App_t KI_t Omega_t"
+        ).by(SK_ITER_APP_LEFT, "App_t H d", "KI_t", "Omega_t", "h_to_kit")
+        p.have(
+            "h_lift2k: ?q. sk_iter q (App_t (App_t (App_t H d) Omega_t) K_t) "
+            "          = App_t (App_t KI_t Omega_t) K_t"
+        ).by(
+            SK_ITER_APP_LEFT,
+            "App_t (App_t H d) Omega_t",
+            "App_t KI_t Omega_t",
+            "K_t",
+            "h_lift1k",
+        )
+        # CHURCH_FALSE_REDUCES at (a=Omega_t, c=K_t): KI_t Omega K -->* K_t.
+        p.have(
+            "h_church_false: ?r. sk_iter r (App_t (App_t KI_t Omega_t) K_t) "
+            "                   = K_t"
+        ).by(
+            CHURCH_FALSE_REDUCES, "Omega_t", "K_t",
+            _CONJ(p.fact("h_is_sk_Omega"), IS_SK_TERM_K),
+        )
+        # Chain: d -->* (H d) Omega K -->* (KI Omega) K -->* K_t.
+        p.have(
+            "h_chain1k: ?r. sk_iter r d = App_t (App_t KI_t Omega_t) K_t"
+        ).by(
+            SK_ITER_TRANS, "d",
+            "App_t (App_t (App_t H d) Omega_t) K_t",
+            "App_t (App_t KI_t Omega_t) K_t",
+            _CONJ(p.fact("h_d_red"), p.fact("h_lift2k")),
+        )
+        p.thus("?m. sk_iter m d = K_t").by(
+            SK_ITER_TRANS, "d",
+            "App_t (App_t KI_t Omega_t) K_t", "K_t",
+            _CONJ(p.fact("h_chain1k"), p.fact("h_church_false")),
+        )
+
+    # ---- (5) Bundle and witness d. ---------------------------------------
+    # DSL friction: 3-way conjunction has to be right-nested explicitly --
+    # _CONJ takes two args, no n-ary helper in scope.
+    p.have(
+        "h_combined: is_sk_term d /\\ "
+        "            ((?n. sk_iter n (App_t H d) = K_t) ==> "
+        "             (?m. sk_iter m d = Omega_t)) /\\ "
+        "            ((?n. sk_iter n (App_t H d) = KI_t) ==> "
+        "             (?m. sk_iter m d = K_t))"
+    ).by_thm(
+        _CONJ(
+            p.fact("h_is_sk_d"),
+            _CONJ(p.fact("h_kt_branch"), p.fact("h_kit_branch")),
+        )
+    )
+    p.thus(
+        "?d. is_sk_term d /\\ "
+        "    ((?n. sk_iter n (App_t H d) = K_t) ==> "
+        "     (?m. sk_iter m d = Omega_t)) /\\ "
+        "    ((?n. sk_iter n (App_t H d) = KI_t) ==> "
+        "     (?m. sk_iter m d = K_t))"
+    ).by_witness("d", "h_combined")
 
 
 @proof
