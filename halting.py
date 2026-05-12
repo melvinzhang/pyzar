@@ -2621,6 +2621,40 @@ def IS_NORMAL_I_T(p):
     p.thus("is_normal I_t").by_unfold("step_I", IS_NORMAL_DEF)
 
 
+@proof
+def SK_STEP_K_DESC_RIGHT(p):
+    """|- !Z. ~(sk_step Z = Z)
+              ==> sk_step (App_t K_t Z) = App_t K_t (sk_step Z).
+
+    Single-arg K (i.e. K_t applied to one argument) is NOT a K-redex
+    (K-redex needs ``App_t (App_t K_t _) _``).  With K_t-headed App
+    not matching either head-redex shape and K_t leaf-normal, when
+    the argument Z is non-fixed, ``sk_step`` descends right by
+    ``SK_STEP_RIGHT``.
+    """
+    p.goal(
+        "!Z. ~(sk_step Z = Z) ==> "
+        "    sk_step (App_t K_t Z) = App_t K_t (sk_step Z)"
+    )
+    p.fix("Z")
+    p.assume("not_fixed: ~(sk_step Z = Z)")
+    shape_neq(
+        p, "not_kred",
+        "~(?a b. App_t K_t Z = App_t (App_t K_t a) b)",
+    )
+    shape_neq(
+        p, "not_sred",
+        "~(?a b c. App_t K_t Z = App_t (App_t (App_t S_t a) b) c)",
+    )
+    p.thus(
+        "sk_step (App_t K_t Z) = App_t K_t (sk_step Z)"
+    ).by(
+        SK_STEP_RIGHT, "K_t", "Z",
+        "not_kred", "not_sred",
+        SK_STEP_LEAF_K, "not_fixed",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Stage 3b -- ``sk_size`` measure and arithmetic helpers for the
 # eventual OMEGA_NON_HALTING proof.
@@ -6875,30 +6909,147 @@ def DIAG_TERM(p):
 
 
 @proof
+def OMEGA_T_NOT_FIXED(p):
+    """|- !n. ~(sk_step (sk_iter n Omega_t) = sk_iter n Omega_t).
+
+    Pointwise corollary of OMEGA_NON_HALTING: if any iterate of
+    Omega were sk_step-fixed it would be normal by IS_NORMAL_DEF,
+    contradicting ``~halts Omega_t`` via the HALTS_AT witness.
+    """
+    p.goal("!n. ~(sk_step (sk_iter n Omega_t) = sk_iter n Omega_t)")
+    p.fix("n")
+    with p.suppose(
+        "h_fixed: sk_step (sk_iter n Omega_t) = sk_iter n Omega_t"
+    ):
+        p.have("h_norm: is_normal (sk_iter n Omega_t)").by_unfold(
+            "h_fixed", IS_NORMAL_DEF
+        )
+        p.have("h_ex: ?m. is_normal (sk_iter m Omega_t)").by_witness(
+            "n", "h_norm"
+        )
+        p.have("h_halts: halts Omega_t").by_eq_mp(
+            SPEC(p._parse("Omega_t"), HALTS_AT), "h_ex"
+        )
+        p.absurd().by_conj("h_halts", OMEGA_NON_HALTING)
+
+
+@proof
+def SK_ITER_K_OMEGA_SHAPE(p):
+    """|- !n. sk_iter n (App_t K_t Omega_t) = App_t K_t (sk_iter n Omega_t).
+
+    ``K_t Omega`` is single-arg K (not a redex); leftmost-outermost
+    ``sk_step`` descends right indefinitely.  Each step preserves the
+    ``App_t K_t _`` shape since SK_STEP_K_DESC_RIGHT fires whenever
+    the right child is non-fixed -- and Omega's iterates are all
+    non-fixed by OMEGA_T_NOT_FIXED.
+    """
+    p.goal(
+        "!n. sk_iter n (App_t K_t Omega_t) = App_t K_t (sk_iter n Omega_t)"
+    )
+    with p.induction("n"):
+        with p.base():
+            p.thus(
+                "sk_iter 0 (App_t K_t Omega_t) = App_t K_t (sk_iter 0 Omega_t)"
+            ).by_rewrite([SK_ITER_ZERO])
+        with p.step("IH"):
+            # IH:   sk_iter n (App_t K_t Omega_t) = App_t K_t (sk_iter n Omega_t).
+            # Goal: sk_iter (SUC0 n) (App_t K_t Omega_t)
+            #         = App_t K_t (sk_iter (SUC0 n) Omega_t).
+            p.have(
+                "h_not_fixed: "
+                "~(sk_step (sk_iter n Omega_t) = sk_iter n Omega_t)"
+            ).by(OMEGA_T_NOT_FIXED, "n")
+            # SK_STEP_K_DESC_RIGHT at Z = sk_iter n Omega_t.
+            p.have(
+                "h_desc: sk_step (App_t K_t (sk_iter n Omega_t)) "
+                "      = App_t K_t (sk_step (sk_iter n Omega_t))"
+            ).by(SK_STEP_K_DESC_RIGHT, "sk_iter n Omega_t", "h_not_fixed")
+            # Rewrite chain:
+            #   sk_iter (SUC n) (App K Omega)
+            #     = sk_step (sk_iter n (App K Omega))   [SK_ITER_SUC]
+            #     = sk_step (App K (sk_iter n Omega))   [IH]
+            #     = App K (sk_step (sk_iter n Omega))   [h_desc]
+            #     = App K (sk_iter (SUC n) Omega)       [SYM SK_ITER_SUC]
+            p.thus(
+                "sk_iter (SUC0 n) (App_t K_t Omega_t) "
+                "= App_t K_t (sk_iter (SUC0 n) Omega_t)"
+            ).by_rewrite([SK_ITER_SUC, "IH", "h_desc"])
+
+
+@proof
 def HALTS_K_OMEGA_FALSE(p):
     """|- ~halts (App_t K_t Omega_t).
 
-    *** STUB.  ``K_t Omega`` is a one-arg K (NOT a redex since K needs
-    two args), so leftmost-outermost descends right into Omega.  By
-    induction:
-        sk_iter n (App_t K_t Omega_t) = App_t K_t (sk_iter n Omega_t).
-    is_normal (App_t K_t Z) iff Z is normal (K is a leaf normal form
-    and the App has no redex when its left is K and its right is non-
-    normal).  But by OMEGA_NON_HALTING, no iterate of Omega is normal.
-    So no iterate of K_t Omega is normal, hence ~halts (K_t Omega).
-
-    Real-discharge sketch (~40 lines):
-      * Lemma: sk_step (App_t K_t Z) = App_t K_t (sk_step Z) when Z
-        is not normal.  Discharge from SK_STEP_RIGHT with the K-non-
-        redex / non-S-redex / K-not-fixed conditions all easy.
-      * Iterate to get the sk_iter form.
-      * Decompose is_normal (App K_t Z) -- under leftmost-outermost,
-        App K_t Z is normal iff sk_step (App K_t Z) = App K_t Z, iff
-        sk_step Z = Z (since K is normal), iff is_normal Z.
-      * Conclude from OMEGA_NON_HALTING.
+    ``K_t Omega`` is a one-arg K (not a K-redex; K-redex needs two
+    args), so leftmost-outermost ``sk_step`` descends right into
+    Omega indefinitely.  If a witness ``n`` made
+    ``sk_iter n (App_t K_t Omega_t)`` normal, by SK_ITER_K_OMEGA_SHAPE
+    that iterate equals ``App_t K_t (sk_iter n Omega_t)``, so
+    ``sk_step (App_t K_t (sk_iter n Omega_t)) = App_t K_t (sk_iter n Omega_t)``.
+    SK_STEP_K_DESC_RIGHT rewrites the LHS to
+    ``App_t K_t (sk_step (sk_iter n Omega_t))``; APP_T_INJ peels the
+    common ``App_t K_t`` and yields ``sk_step (sk_iter n Omega_t)
+    = sk_iter n Omega_t``, contradicting OMEGA_T_NOT_FIXED.
     """
+    from tactics import CONJUNCT2 as _C2
     p.goal("~halts (App_t K_t Omega_t)")
-    p.sorry()
+    with p.suppose("h_halts: halts (App_t K_t Omega_t)"):
+        # Extract a normal iterate.
+        p.have(
+            "h_ex: ?n. is_normal (sk_iter n (App_t K_t Omega_t))"
+        ).by_eq_mp(
+            SPEC(p._parse("App_t K_t Omega_t"), HALTS_AT), "h_halts"
+        )
+        p.choose("n", from_="h_ex")
+        # n_eq: is_normal (sk_iter n (App_t K_t Omega_t)).
+
+        # Reshape the iterate.
+        p.have(
+            "h_shape: sk_iter n (App_t K_t Omega_t) "
+            "       = App_t K_t (sk_iter n Omega_t)"
+        ).by(SK_ITER_K_OMEGA_SHAPE, "n")
+        p.have(
+            "h_norm_K: is_normal (App_t K_t (sk_iter n Omega_t))"
+        ).by_eq_mp(AP_TERM(is_normal, p.fact("h_shape")), "n_eq")
+        # Unfold is_normal to sk_step-fixed form.
+        p.have(
+            "h_fixed_K: sk_step (App_t K_t (sk_iter n Omega_t)) "
+            "         = App_t K_t (sk_iter n Omega_t)"
+        ).by_unfold("h_norm_K", IS_NORMAL_DEF)
+
+        # The Omega iterate itself is not sk_step-fixed.
+        p.have(
+            "h_not_fixed: "
+            "~(sk_step (sk_iter n Omega_t) = sk_iter n Omega_t)"
+        ).by(OMEGA_T_NOT_FIXED, "n")
+
+        # Descend-right rewrite of the LHS.
+        p.have(
+            "h_desc: sk_step (App_t K_t (sk_iter n Omega_t)) "
+            "      = App_t K_t (sk_step (sk_iter n Omega_t))"
+        ).by(SK_STEP_K_DESC_RIGHT, "sk_iter n Omega_t", "h_not_fixed")
+
+        # Combine: App K (sk_step (sk_iter n Omega)) = App K (sk_iter n Omega).
+        p.have(
+            "h_eq: App_t K_t (sk_step (sk_iter n Omega_t)) "
+            "    = App_t K_t (sk_iter n Omega_t)"
+        ).by_thm(TRANS(SYM(p.fact("h_desc")), p.fact("h_fixed_K")))
+
+        # Peel the common App_t K_t with APP_T_INJ.
+        p.have(
+            "h_inj: K_t = K_t /\\ "
+            "       sk_step (sk_iter n Omega_t) = sk_iter n Omega_t"
+        ).by(
+            APP_T_INJ,
+            "K_t", "sk_step (sk_iter n Omega_t)",
+            "K_t", "sk_iter n Omega_t",
+            "h_eq",
+        )
+        p.have(
+            "h_inner: sk_step (sk_iter n Omega_t) = sk_iter n Omega_t"
+        ).by_thm(_C2(p.fact("h_inj")))
+
+        p.absurd().by_conj("h_not_fixed", "h_inner")
 
 
 @proof
