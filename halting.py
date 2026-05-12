@@ -2742,19 +2742,77 @@ def N0PLUS_SUC_L(p):
 def N0PLUS_ASSOC(p):
     """|- !a b c. n0plus (n0plus a b) c = n0plus a (n0plus b c).
 
-    Standard nat0 associativity.  Routine induction on c using N0PLUS_BASE
-    (right-arg) and N0PLUS_STEP + AP_TERM(SUC0).  Currently sorried; ~25
-    lines.
-
-    Used by OMEGA_DEPTH_SEQ to absorb a depth-step's iter count ``m`` into
-    the inductively-maintained ``n0plus j d`` witness shape: after a step,
-    new iter ``= n0plus m (SUC0 (n0plus j d)) = SUC0 (n0plus (n0plus m j) d)``
-    which requires one ASSOC rewrite under the outer SUC0.
+    Standard nat0 associativity.  Induct on ``c`` with ``a, b`` free:
+      base c=0:  both sides reduce to ``n0plus a b`` via N0PLUS_BASE
+                 (right-arg) applied twice -- on the outer c and on the
+                 inner ``n0plus b 0``.
+      step:      LHS = SUC0 (n0plus (n0plus a b) c)   [N0PLUS_STEP at outer c]
+                     = SUC0 (n0plus a (n0plus b c))   [IH, AP_TERM SUC0]
+                 RHS = n0plus a (SUC0 (n0plus b c))   [N0PLUS_STEP inside
+                                                       + AP_TERM(n0plus a)]
+                     = SUC0 (n0plus a (n0plus b c))   [N0PLUS_STEP].
+                 Chain via TRANS.
     """
+    from tactics import (
+        AP_TERM as _APT,
+        TRANS as _TRANS,
+        SYM as _SYM,
+    )
+
     p.goal(
         "!a b c. n0plus (n0plus a b) c = n0plus a (n0plus b c)"
     )
-    p.sorry()
+    p.fix("a b")
+    SUC0_C = p._parse("SUC0")
+    n0plus_a = p._parse("n0plus a")
+    with p.induction("c"):
+        with p.base():
+            p.have(
+                "h_l: n0plus (n0plus a b) 0 = n0plus a b"
+            ).by(N0PLUS_BASE, "n0plus a b")
+            p.have("h_b0: n0plus b 0 = b").by(N0PLUS_BASE, "b")
+            # AP_TERM(n0plus a) on h_b0: n0plus a (n0plus b 0) = n0plus a b.
+            h_r = _APT(n0plus_a, p.fact("h_b0"))
+            p.have(
+                "h_r: n0plus a (n0plus b 0) = n0plus a b"
+            ).by_thm(h_r)
+            p.thus(
+                "n0plus (n0plus a b) 0 = n0plus a (n0plus b 0)"
+            ).by_thm(_TRANS(p.fact("h_l"), _SYM(p.fact("h_r"))))
+        with p.step("IH"):
+            # LHS step: n0plus (n0plus a b) (SUC0 c) = SUC0 (n0plus (n0plus a b) c).
+            p.have(
+                "h_l_step: n0plus (n0plus a b) (SUC0 c) "
+                "          = SUC0 (n0plus (n0plus a b) c)"
+            ).by(N0PLUS_STEP, "n0plus a b", "c")
+            # IH lifted by SUC0: SUC0 (n0plus (n0plus a b) c) = SUC0 (n0plus a (n0plus b c)).
+            ih_lift = _APT(SUC0_C, p.fact("IH"))
+            p.have(
+                "h_l_ih: SUC0 (n0plus (n0plus a b) c) "
+                "       = SUC0 (n0plus a (n0plus b c))"
+            ).by_thm(ih_lift)
+            # RHS step: n0plus b (SUC0 c) = SUC0 (n0plus b c); lift by n0plus a.
+            p.have(
+                "h_bs: n0plus b (SUC0 c) = SUC0 (n0plus b c)"
+            ).by(N0PLUS_STEP, "b", "c")
+            h_r_inner = _APT(n0plus_a, p.fact("h_bs"))
+            p.have(
+                "h_r_inner: n0plus a (n0plus b (SUC0 c)) "
+                "          = n0plus a (SUC0 (n0plus b c))"
+            ).by_thm(h_r_inner)
+            # n0plus a (SUC0 (n0plus b c)) = SUC0 (n0plus a (n0plus b c)).
+            p.have(
+                "h_r_step: n0plus a (SUC0 (n0plus b c)) "
+                "         = SUC0 (n0plus a (n0plus b c))"
+            ).by(N0PLUS_STEP, "a", "n0plus b c")
+            # Chain LHS = ... = SUC0 (n0plus a (n0plus b c)) = ... = RHS.
+            p.thus(
+                "n0plus (n0plus a b) (SUC0 c) "
+                "= n0plus a (n0plus b (SUC0 c))"
+            ).by_thm(_TRANS(
+                _TRANS(p.fact("h_l_step"), p.fact("h_l_ih")),
+                _TRANS(_SYM(p.fact("h_r_step")), _SYM(p.fact("h_r_inner"))),
+            ))
 
 
 @proof
@@ -2762,24 +2820,129 @@ def N0PLUS_DECOMP(p):
     """|- !L n. ~(nat0_lt n L) ==> ?k. n = n0plus k L.
 
     Decomposition: any ``n >= L`` factors as ``k + L``.  Equivalent to nat0
-    subtraction's existence half.  Currently sorried; ~40 lines by L-
-    induction:
+    subtraction's existence half.  Induct on ``L`` with ``n`` free:
 
       Base L=0: ?k. n = n0plus k 0 -- witness k := n via N0PLUS_BASE.
-      Step L -> SUC0 L: hypothesis ~(nat0_lt n (SUC0 L)).
-        From ~(nat0_lt 0 (SUC0 L)) impossible (NAT0_LT_0_SUC0), so n != 0;
-        NAT0_NEQ_ZERO_PRED gives n = SUC0 d.  Contrapositive of
-        NAT0_LT_SUC0_MONO turns ~(nat0_lt (SUC0 d) (SUC0 L)) into
-        ~(nat0_lt d L); IH yields ?k. d = n0plus k L.  Then
-        n = SUC0 d = SUC0 (n0plus k L) = n0plus k (SUC0 L) (SYM N0PLUS_STEP).
+      Step L -> SUC0 L: from ~(nat0_lt n (SUC0 L)).
+        * n != 0, else ~(nat0_lt 0 (SUC0 L)) contradicts NAT0_LT_0_SUC0.
+          NAT0_NEQ_ZERO_PRED gives ?dp. n = SUC0 dp.
+        * ~(nat0_lt (SUC0 dp) (SUC0 L)) -- substitute the predecessor form
+          into the original hypothesis.
+        * Contrapositive of NAT0_LT_SUC0_MONO turns this into
+          ~(nat0_lt dp L).
+        * IH at dp yields ?k. dp = n0plus k L; lift via SYM(N0PLUS_STEP):
+          n = SUC0 dp = SUC0 (n0plus k L) = n0plus k (SUC0 L).
 
     Used by OMEGA_T_REACHES_LARGE_SIZE to recover the public-form witness
     ``k`` once the depth induction guarantees ``n >= L``.
     """
+    from tactics import (
+        AP_TERM as _APT,
+        TRANS as _TRANS,
+        SYM as _SYM,
+    )
+    from nat0_order import (
+        NAT0_LT_0_SUC0,
+        NAT0_LT_SUC0_MONO,
+        NAT0_NEQ_ZERO_PRED,
+    )
+
     p.goal(
         "!L n. ~(nat0_lt n L) ==> ?k. n = n0plus k L"
     )
-    p.sorry()
+    SUC0_C = p._parse("SUC0")
+    with p.induction("L"):
+        with p.base():
+            p.fix("n")
+            p.assume("h_not: ~(nat0_lt n 0)")
+            # n = n0plus n 0 by N0PLUS_BASE; witness k := n.
+            p.have("h_base: n0plus n 0 = n").by(N0PLUS_BASE, "n")
+            p.have("h_n_eq: n = n0plus n 0").by_thm(_SYM(p.fact("h_base")))
+            p.thus("?k. n = n0plus k 0").by_witness("n", "h_n_eq")
+        with p.step("IH"):
+            # IH : !n. ~(nat0_lt n L) ==> ?k. n = n0plus k L.
+            p.fix("n")
+            p.assume("h_not: ~(nat0_lt n (SUC0 L))")
+            # n != 0: else NAT0_LT_0_SUC0 contradicts h_not.
+            with p.have("h_n_neq_0: ~(n = 0)").proof():
+                with p.suppose("h_eq_0: n = 0"):
+                    p.have(
+                        "h_lt_0_SUC0_L: nat0_lt 0 (SUC0 L)"
+                    ).by(NAT0_LT_0_SUC0, "L")
+                    # AP_THM rewrite to put n on the LHS of the lt:
+                    # nat0_lt 0 (SUC0 L) = nat0_lt n (SUC0 L) under h_eq_0 (SYM).
+                    nat0_lt_SUC0_L = p._parse("\\u. nat0_lt u (SUC0 L)")
+                    # DSL friction: by_rewrite_of with the choose-style or hypothetical
+                    # eq ``h_eq_0: n = 0`` is direction-sensitive.  Use AP_THM on a
+                    # constructed lambda to lift the substitution explicitly.
+                    from tactics import BETA_CONV
+                    # Skip lambda; just AP_TERM nat0_lt then AP_THM at (SUC0 L).
+                    from tactics import AP_THM as _AP_THM
+                    # nat0_lt n = nat0_lt 0 (AP_TERM nat0_lt h_eq_0).
+                    eq_fn = _APT(p._parse("nat0_lt"), p.fact("h_eq_0"))
+                    # Then AP_THM at SUC0 L: nat0_lt n (SUC0 L) = nat0_lt 0 (SUC0 L).
+                    eq_at = _AP_THM(eq_fn, p._parse("SUC0 L"))
+                    p.have(
+                        "h_eq_lt: nat0_lt n (SUC0 L) = nat0_lt 0 (SUC0 L)"
+                    ).by_thm(eq_at)
+                    p.have(
+                        "h_lt_at_n: nat0_lt n (SUC0 L)"
+                    ).by_eq_mp(_SYM(p.fact("h_eq_lt")), "h_lt_0_SUC0_L")
+                    p.absurd().by_conj("h_not", "h_lt_at_n")
+            # NAT0_NEQ_ZERO_PRED: ?dp. n = SUC0 dp.
+            p.have(
+                "h_pred: ?dp:nat0. n = SUC0 dp"
+            ).by(NAT0_NEQ_ZERO_PRED, "n", "h_n_neq_0")
+            p.choose("dp", from_="h_pred")
+            # dp_eq : n = SUC0 dp.
+
+            # Lift h_not to ``~(nat0_lt (SUC0 dp) (SUC0 L))`` by substituting n.
+            # Build the rewrite equation via AP_THM(AP_TERM(nat0_lt, dp_eq), SUC0 L).
+            from tactics import AP_THM as _AP_THM
+            eq_fn = _APT(p._parse("nat0_lt"), p.fact("dp_eq"))
+            eq_at = _AP_THM(eq_fn, p._parse("SUC0 L"))
+            # eq_at : nat0_lt n (SUC0 L) = nat0_lt (SUC0 dp) (SUC0 L).
+            # Apply to h_not's body via AP_TERM(~).  DSL friction: ``~`` does
+            # not parse as a standalone term, so build the kernel ``Const("~")``
+            # directly with mk_const.
+            not_eq = _APT(mk_const("~", []), eq_at)
+            # not_eq : ~(nat0_lt n (SUC0 L)) = ~(nat0_lt (SUC0 dp) (SUC0 L)).
+            p.have(
+                "h_not_succ: ~(nat0_lt (SUC0 dp) (SUC0 L))"
+            ).by_eq_mp(not_eq, "h_not")
+
+            # Contrapositive of NAT0_LT_SUC0_MONO turns this into ~(nat0_lt dp L).
+            with p.have("h_not_dp_L: ~(nat0_lt dp L)").proof():
+                with p.suppose("h_dp_L: nat0_lt dp L"):
+                    p.have(
+                        "h_succ: nat0_lt (SUC0 dp) (SUC0 L)"
+                    ).by(NAT0_LT_SUC0_MONO, "dp", "L", "h_dp_L")
+                    p.absurd().by_conj("h_not_succ", "h_succ")
+
+            # Apply IH at dp.
+            p.have(
+                "h_ih: ?k. dp = n0plus k L"
+            ).by("IH", "dp", "h_not_dp_L")
+            p.choose("k", from_="h_ih")
+            # k_eq : dp = n0plus k L.
+
+            # Build n = n0plus k (SUC0 L):
+            #   n = SUC0 dp                        (dp_eq)
+            #     = SUC0 (n0plus k L)              (AP_TERM SUC0 k_eq)
+            #     = n0plus k (SUC0 L)              (SYM N0PLUS_STEP at k, L).
+            suc_k = _APT(SUC0_C, p.fact("k_eq"))
+            # suc_k : SUC0 dp = SUC0 (n0plus k L).
+            p.have(
+                "h_step_eq: n0plus k (SUC0 L) = SUC0 (n0plus k L)"
+            ).by(N0PLUS_STEP, "k", "L")
+            # Chain: n = SUC0 dp = SUC0 (n0plus k L) = n0plus k (SUC0 L).
+            p.have(
+                "h_n_eq: n = n0plus k (SUC0 L)"
+            ).by_thm(_TRANS(
+                p.fact("dp_eq"),
+                _TRANS(suc_k, _SYM(p.fact("h_step_eq"))),
+            ))
+            p.thus("?k. n = n0plus k (SUC0 L)").by_witness("k", "h_n_eq")
 
 
 # OMEGA_DEPTH_SEQ moved to just before OMEGA_T_REACHES_LARGE_SIZE (it
@@ -4893,18 +5056,265 @@ def OMEGA_DEPTH_SEQ(p):
           >= SUC0 d.  Derive via NAT0_NEQ_ZERO_PRED on m and NAT0_LT_SUC0_MONO
           on n_d >= d.
     """
+    from tactics import (
+        AP_TERM as _APT,
+        AP_THM as _AP_THM,
+        TRANS as _TRANS,
+        SYM as _SYM,
+        MK_COMB as _MK,
+        CONJ as _CONJ,
+    )
+    from nat0_order import (
+        NAT0_LT_0_SUC0,
+        NAT0_LT_SUC0_INSERT,
+        NAT0_LT_SUC0_MONO,
+        NAT0_NEQ_ZERO_PRED,
+        NAT0_LT_NOT_REFL,
+    )
+
     SII = "App_t (App_t S_t I_t) I_t"
-    Xd = f"I_pow d ({SII})"
-    Td = f"App_t (App_t I_t ({Xd})) (App_t I_t ({Xd}))"
+
+    def Td(ds):
+        return (
+            f"App_t (App_t I_t (I_pow ({ds}) ({SII}))) "
+            f"(App_t I_t (I_pow ({ds}) ({SII})))"
+        )
+
+    Td_d = Td("d")
+    Td_sd = Td("SUC0 d")
+    Td_0 = Td("0")
+    SUC0_C = p._parse("SUC0")
+    App_t_C = p._parse("App_t")
+    App_t_I_t = p._parse("App_t I_t")
+
     # DSL friction: ``=`` is lower precedence than ``/\\``, so
     # ``A = B /\\ C`` parses as ``A = (B /\\ C)`` -- wrap the equation in
     # parens to keep it as a single conjunct.
     p.goal(
-        f"!d. ?n. (sk_iter n Omega_t = {Td}) "
-        f"     /\\ nat0_lt d (sk_size ({Td})) "
+        f"!d. ?n. (sk_iter n Omega_t = {Td_d}) "
+        f"     /\\ nat0_lt d (sk_size ({Td_d})) "
         f"     /\\ nat0_lt d (SUC0 n)"
     )
-    p.sorry()
+    with p.induction("d"):
+        with p.base():
+            # n := SUC0 0.  Trace: sk_iter (SUC0 0) Omega_t
+            # = sk_step (sk_iter 0 Omega_t) = sk_step Omega_t
+            # = App_t (App_t I_t SII) (App_t I_t SII)         [OMEGA_T_STEP1]
+            # = App_t (App_t I_t (I_pow 0 SII)) (..)          [SYM I_POW_ZERO]
+            p.have(
+                "b_iter1: sk_iter (SUC0 0) Omega_t "
+                "         = sk_step (sk_iter 0 Omega_t)"
+            ).by(SK_ITER_SUC, "0", "Omega_t")
+            p.have("b_iter0: sk_iter 0 Omega_t = Omega_t").by(
+                SK_ITER_ZERO, "Omega_t"
+            )
+            # AP_TERM sk_step on b_iter0 to align inside b_iter1.
+            b_inner = _APT(p._parse("sk_step"), p.fact("b_iter0"))
+            p.have(
+                f"b_iter1_step: sk_iter (SUC0 0) Omega_t = sk_step Omega_t"
+            ).by_thm(_TRANS(p.fact("b_iter1"), b_inner))
+            # b_step: sk_step Omega_t = App_t (App_t I_t SII) (App_t I_t SII).
+            p.have(
+                f"b_step: sk_step Omega_t = "
+                f"App_t (App_t I_t ({SII})) (App_t I_t ({SII}))"
+            ).by_thm(OMEGA_T_STEP1)
+            # I_POW_ZERO at SII: I_pow 0 SII = SII.
+            p.have(
+                f"b_pow0: I_pow 0 ({SII}) = ({SII})"
+            ).by(I_POW_ZERO, SII)
+            # Fold SII -> I_pow 0 SII (SYM, lifted by AP_TERM App_t I_t).
+            e_inner = _APT(App_t_I_t, _SYM(p.fact("b_pow0")))
+            # e_inner : App_t I_t SII = App_t I_t (I_pow 0 SII).
+            # MK_COMB on (App_t lifted, e_inner) gives Td(SII) = Td(I_pow 0 SII).
+            e_top = _MK(_APT(App_t_C, e_inner), e_inner)
+            p.have(
+                f"b_fold: App_t (App_t I_t ({SII})) (App_t I_t ({SII})) "
+                f"        = {Td_0}"
+            ).by_thm(e_top)
+            # Chain: sk_iter (SUC0 0) Omega_t = Td(0).
+            p.have(
+                f"b_iter_eq: sk_iter (SUC0 0) Omega_t = {Td_0}"
+            ).by_thm(_TRANS(
+                p.fact("b_iter1_step"),
+                _TRANS(p.fact("b_step"), p.fact("b_fold")),
+            ))
+
+            # size > 0: sk_size Td_0 = SUC0 (...) by SK_SIZE_APP; NAT0_LT_0_SUC0.
+            p.have(
+                f"b_sz: sk_size ({Td_0}) "
+                f"      = SUC0 (n0plus (sk_size (App_t I_t (I_pow 0 ({SII})))) "
+                f"                      (sk_size (App_t I_t (I_pow 0 ({SII})))))"
+            ).by(
+                SK_SIZE_APP,
+                f"App_t I_t (I_pow 0 ({SII}))",
+                f"App_t I_t (I_pow 0 ({SII}))",
+            )
+            p.have(
+                f"b_lt_pre: nat0_lt 0 "
+                f"          (SUC0 (n0plus (sk_size (App_t I_t (I_pow 0 ({SII})))) "
+                f"                         (sk_size (App_t I_t (I_pow 0 ({SII}))))))"
+            ).by(
+                NAT0_LT_0_SUC0,
+                f"n0plus (sk_size (App_t I_t (I_pow 0 ({SII})))) "
+                f"        (sk_size (App_t I_t (I_pow 0 ({SII}))))",
+            )
+            p.have(
+                f"b_size_gt: nat0_lt 0 (sk_size ({Td_0}))"
+            ).by_rewrite_of("b_lt_pre", [_SYM(p.fact("b_sz"))])
+
+            # 0 < SUC0 (SUC0 0): NAT0_LT_0_SUC0 at m := SUC0 0.
+            p.have(
+                "b_iter_ge: nat0_lt 0 (SUC0 (SUC0 0))"
+            ).by(NAT0_LT_0_SUC0, "SUC0 0")
+
+            # Build conjunction and EXISTS-introduce at n := SUC0 0.
+            p.have(
+                f"b_conj: (sk_iter (SUC0 0) Omega_t = {Td_0}) "
+                f"        /\\ nat0_lt 0 (sk_size ({Td_0})) "
+                f"        /\\ nat0_lt 0 (SUC0 (SUC0 0))"
+            ).by_thm(_CONJ(
+                p.fact("b_iter_eq"),
+                _CONJ(p.fact("b_size_gt"), p.fact("b_iter_ge")),
+            ))
+            p.thus(
+                f"?n. (sk_iter n Omega_t = {Td_0}) "
+                f"    /\\ nat0_lt 0 (sk_size ({Td_0})) "
+                f"    /\\ nat0_lt 0 (SUC0 n)"
+            ).by_witness("SUC0 0", "b_conj")
+
+        with p.step("IH"):
+            # IH : ?n. (sk_iter n Omega_t = Td_d) /\ nat0_lt d (sk_size Td_d)
+            #         /\ nat0_lt d (SUC0 n).
+            p.choose("n_d", from_="IH")
+            p.split("n_d_eq", "(h_iter_d, h_size_d, h_d_le_nd)")
+
+            # OMEGA_TRAJ_I_DEPTH_STEP at d.
+            p.have(
+                f"h_traj: ?m. (sk_iter m ({Td_d}) = {Td_sd}) "
+                f"         /\\ nat0_lt (sk_size ({Td_d})) (sk_size ({Td_sd}))"
+            ).by(OMEGA_TRAJ_I_DEPTH_STEP, "d")
+            p.choose("m", from_="h_traj")
+            p.split("m_eq", "(h_iter_step, h_size_lt)")
+
+            # ---- m != 0 (else sk_iter m fixes the term, contradicting size_lt).
+            with p.have("h_m_neq_0: ~(m = 0)").proof():
+                with p.suppose("h_m0: m = 0"):
+                    # sk_iter m Td_d = sk_iter 0 Td_d  (substitute m via AP_TERM/AP_THM).
+                    e_fn = _APT(p._parse("sk_iter"), p.fact("h_m0"))
+                    e_at = _AP_THM(e_fn, p._parse(Td_d))
+                    # e_at : sk_iter m Td_d = sk_iter 0 Td_d.
+                    p.have(
+                        f"h_iter0_step: sk_iter 0 ({Td_d}) = {Td_sd}"
+                    ).by_thm(_TRANS(_SYM(e_at), p.fact("h_iter_step")))
+                    p.have(
+                        f"h_zero: sk_iter 0 ({Td_d}) = ({Td_d})"
+                    ).by(SK_ITER_ZERO, Td_d)
+                    p.have(
+                        f"h_eq_T: ({Td_d}) = ({Td_sd})"
+                    ).by_thm(_TRANS(
+                        _SYM(p.fact("h_zero")),
+                        p.fact("h_iter0_step"),
+                    ))
+                    h_size_eq = _APT(p._parse("sk_size"), p.fact("h_eq_T"))
+                    # h_size_eq : sk_size Td_d = sk_size Td_sd.
+                    # Rewrite h_size_lt (replace sk_size Td_sd by sk_size Td_d).
+                    p.have(
+                        f"h_lt_self: nat0_lt (sk_size ({Td_d})) "
+                        f"                    (sk_size ({Td_d}))"
+                    ).by_rewrite_of("h_size_lt", [_SYM(h_size_eq)])
+                    p.have(
+                        f"h_not_refl: ~(nat0_lt (sk_size ({Td_d})) "
+                        f"                       (sk_size ({Td_d})))"
+                    ).by(NAT0_LT_NOT_REFL, f"sk_size ({Td_d})")
+                    p.absurd().by_conj("h_not_refl", "h_lt_self")
+
+            # m = SUC0 mp.
+            p.have(
+                "h_m_pred: ?mp:nat0. m = SUC0 mp"
+            ).by(NAT0_NEQ_ZERO_PRED, "m", "h_m_neq_0")
+            p.choose("mp", from_="h_m_pred")
+
+            # h_m_split : n0plus m n_d = SUC0 (n0plus mp n_d).
+            # Derive via AP_TERM(n0plus, mp_eq) + AP_THM(n_d) chained with N0PLUS_SUC_L.
+            e_fn = _APT(p._parse("n0plus"), p.fact("mp_eq"))
+            e_at = _AP_THM(e_fn, p._parse("n_d"))
+            # e_at : n0plus m n_d = n0plus (SUC0 mp) n_d.
+            p.have(
+                "h_sucL: n0plus (SUC0 mp) n_d = SUC0 (n0plus mp n_d)"
+            ).by(N0PLUS_SUC_L, "mp", "n_d")
+            p.have(
+                "h_m_split: n0plus m n_d = SUC0 (n0plus mp n_d)"
+            ).by_thm(_TRANS(e_at, p.fact("h_sucL")))
+
+            # ---- new iter eq: sk_iter (n0plus m n_d) Omega_t = Td_sd.
+            p.have(
+                f"h_add: sk_iter (n0plus m n_d) Omega_t "
+                f"       = sk_iter m (sk_iter n_d Omega_t)"
+            ).by(SK_ITER_ADD, "m", "n_d", "Omega_t")
+            # AP_TERM(sk_iter m) on h_iter_d.
+            e_mid = _APT(p._parse("sk_iter m"), p.fact("h_iter_d"))
+            # e_mid : sk_iter m (sk_iter n_d Omega_t) = sk_iter m Td_d.
+            p.have(
+                f"h_iter_new: sk_iter (n0plus m n_d) Omega_t = {Td_sd}"
+            ).by_thm(_TRANS(
+                p.fact("h_add"),
+                _TRANS(e_mid, p.fact("h_iter_step")),
+            ))
+
+            # ---- size > SUC0 d: NAT0_LT_SUC0_INSERT(d < size_d, size_d < size_sd).
+            p.have(
+                f"h_size_new: nat0_lt (SUC0 d) (sk_size ({Td_sd}))"
+            ).by(
+                NAT0_LT_SUC0_INSERT,
+                "d",
+                f"sk_size ({Td_d})",
+                f"sk_size ({Td_sd})",
+                "h_size_d",
+                "h_size_lt",
+            )
+
+            # ---- iter >= SUC0 d: nat0_lt (SUC0 d) (SUC0 (n0plus m n_d)).
+            # n_d < SUC0 (n0plus mp n_d) via NAT0_LT_SUC0_N0PLUS_R.
+            p.have(
+                "h_nd_lt: nat0_lt n_d (SUC0 (n0plus mp n_d))"
+            ).by(NAT0_LT_SUC0_N0PLUS_R, "mp", "n_d")
+            # NAT0_LT_SUC0_MONO: SUC0 n_d < SUC0 (SUC0 (n0plus mp n_d)).
+            p.have(
+                "h_snd_lt: nat0_lt (SUC0 n_d) (SUC0 (SUC0 (n0plus mp n_d)))"
+            ).by(
+                NAT0_LT_SUC0_MONO,
+                "n_d", "SUC0 (n0plus mp n_d)", "h_nd_lt",
+            )
+            # NAT0_LT_SUC0_INSERT(d < SUC0 n_d, SUC0 n_d < SUC0 (SUC0 (n0plus mp n_d))):
+            #   SUC0 d < SUC0 (SUC0 (n0plus mp n_d)).
+            p.have(
+                "h_sd_lt: nat0_lt (SUC0 d) (SUC0 (SUC0 (n0plus mp n_d)))"
+            ).by(
+                NAT0_LT_SUC0_INSERT,
+                "d", "SUC0 n_d", "SUC0 (SUC0 (n0plus mp n_d))",
+                "h_d_le_nd", "h_snd_lt",
+            )
+            # Fold SUC0 (n0plus mp n_d) back to (n0plus m n_d) via SYM(h_m_split).
+            # AP_TERM SUC0: SUC0 (n0plus m n_d) = SUC0 (SUC0 (n0plus mp n_d)).
+            e_suc = _APT(SUC0_C, p.fact("h_m_split"))
+            p.have(
+                "h_iter_ge: nat0_lt (SUC0 d) (SUC0 (n0plus m n_d))"
+            ).by_rewrite_of("h_sd_lt", [_SYM(e_suc)])
+
+            # Conjoin and EXISTS-introduce at n := n0plus m n_d.
+            p.have(
+                f"h_conj: (sk_iter (n0plus m n_d) Omega_t = {Td_sd}) "
+                f"        /\\ nat0_lt (SUC0 d) (sk_size ({Td_sd})) "
+                f"        /\\ nat0_lt (SUC0 d) (SUC0 (n0plus m n_d))"
+            ).by_thm(_CONJ(
+                p.fact("h_iter_new"),
+                _CONJ(p.fact("h_size_new"), p.fact("h_iter_ge")),
+            ))
+            p.thus(
+                f"?n. (sk_iter n Omega_t = {Td_sd}) "
+                f"    /\\ nat0_lt (SUC0 d) (sk_size ({Td_sd})) "
+                f"    /\\ nat0_lt (SUC0 d) (SUC0 n)"
+            ).by_witness("n0plus m n_d", "h_conj")
 
 
 @proof
