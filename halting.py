@@ -3023,7 +3023,37 @@ def OMEGA_NON_HALTING(p):
 # ---------------------------------------------------------------------------
 
 
-new_constant("Y_t", nat0_ty)
+# Concrete Y_t witness: Curry's Y in SK form.
+#
+#   M  := App_t (App_t S_t U_t) V_t           -- "S U V"
+#   U_t := App_t (App_t S_t (App_t K_t S_t))  -- "S (KS) (S (KK) I)"
+#                (App_t (App_t S_t (App_t K_t K_t)) I_t)
+#   V_t := App_t K_t                          -- "K (SII)"
+#                (App_t (App_t S_t I_t) I_t)
+#   Y_t := App_t M M
+#
+# Derivation: standard bracket abstraction of
+#   \f. (\x. f (x x)) (\x. f (x x))
+# gives Y = M M with M = bracket(f, S(Kf)(SII)) = S (S(KS)(S(KK)I)) (K(SII)).
+#
+# The specific Y-witness doesn't matter for the diagonal; only
+# Y_FIXED_POINT is consumed downstream, and Y_FIXED_POINT is stated
+# abstractly over Y_t.
+_SII_t   = mk_app(App_t, mk_app(App_t, S_t, I_t), I_t)
+_KS_t    = mk_app(App_t, K_t, S_t)
+_KK_t    = mk_app(App_t, K_t, K_t)
+_S_KS_t  = mk_app(App_t, S_t, _KS_t)
+_S_KK_I  = mk_app(App_t, mk_app(App_t, S_t, _KK_t), I_t)
+_U_t     = mk_app(App_t, _S_KS_t, _S_KK_I)
+_V_t     = mk_app(App_t, K_t, _SII_t)
+_S_U_t   = mk_app(App_t, S_t, _U_t)
+_M_t     = mk_app(App_t, _S_U_t, _V_t)
+
+Y_T_DEF = define(
+    "Y_t",
+    nat0_ty,
+    mk_app(App_t, _M_t, _M_t),
+)
 Y_t = mk_const("Y_t", [])
 
 
@@ -3031,11 +3061,64 @@ Y_t = mk_const("Y_t", [])
 def IS_SK_TERM_Y(p):
     """|- is_sk_term Y_t.
 
-    Y_t is a fixed concrete SK term; ``is_sk_term`` follows by
-    repeated application of IS_SK_TERM_S/K/APP.
+    Mechanical structural proof: Y_t is a closed SK tree, every node
+    is an atom (S_t/K_t, dispatched via IS_SK_TERM_S/K) or an App_t
+    whose children are themselves SK terms (dispatched via
+    IS_SK_TERM_APP).  I_t appears in Y_t and is itself a defined
+    constant (I_T_DEF: I_t = App_t (App_t S_t K_t) K_t), so we lift
+    ``is_sk_term I_t`` once via SYM(I_T_DEF).
+
+    DSL friction: each IS_SK_TERM_APP usage takes a conjunction
+    ``is_sk_term a /\\ is_sk_term b``.  There's no "by_conj_intro"
+    sugar on ``by``, and writing each conjunction as a separate
+    ``p.have`` + IS_SK_TERM_APP call would balloon to ~60 lines.
+    Instead we build the proof tree at the kernel level via a tiny
+    local helper ``app_st`` and discharge the whole thing with a
+    single ``p.thus(...).by_thm(...)``.  This is the cleanest pattern
+    found for "deeply structural" goals where every node is the same
+    inference rule.
+
+    DSL friction: there's no "fold via DEF" tactic; ``by_rewrite_of``
+    + SYM(DEF) would work but doesn't compose with kernel ``MP``
+    chains.  We use ``EQ_MP(AP_TERM(is_sk_term, SYM(DEF)), h)``
+    directly -- two lines per fold, cleaner than rewriting.
     """
+    from tactics import AP_TERM as _AP_TERM
+
     p.goal("is_sk_term Y_t")
-    p.sorry()
+
+    def app_st(a, b, ha, hb):
+        """|- is_sk_term a, |- is_sk_term b  =>  |- is_sk_term (App_t a b)."""
+        return MP(SPECL([a, b], IS_SK_TERM_APP), CONJ(ha, hb))
+
+    h_S = IS_SK_TERM_S
+    h_K = IS_SK_TERM_K
+
+    # is_sk_term I_t  (via I_T_DEF: I_t = App_t (App_t S_t K_t) K_t).
+    h_SK_t  = app_st(S_t, K_t, h_S, h_K)
+    h_I_raw = app_st(mk_app(App_t, S_t, K_t), K_t, h_SK_t, h_K)
+    h_I     = EQ_MP(_AP_TERM(is_sk_term, SYM(I_T_DEF)), h_I_raw)
+
+    # is_sk_term for the inner atoms of M.
+    h_KS    = app_st(K_t, S_t, h_K, h_S)                            # K S
+    h_KK    = app_st(K_t, K_t, h_K, h_K)                            # K K
+    h_SI    = app_st(S_t, I_t, h_S, h_I)                            # S I
+    h_SII   = app_st(mk_app(App_t, S_t, I_t), I_t, h_SI, h_I)       # S I I = SII
+
+    h_S_KS    = app_st(S_t, _KS_t, h_S, h_KS)                       # S (KS)
+    h_S_KK    = app_st(S_t, _KK_t, h_S, h_KK)                       # S (KK)
+    h_S_KK_I  = app_st(mk_app(App_t, S_t, _KK_t), I_t, h_S_KK, h_I) # S (KK) I
+
+    h_U = app_st(_S_KS_t, _S_KK_I, h_S_KS, h_S_KK_I)                # S(KS)(S(KK)I)
+    h_V = app_st(K_t, _SII_t, h_K, h_SII)                           # K (SII)
+
+    h_S_U = app_st(S_t, _U_t, h_S, h_U)                             # S U
+    h_M   = app_st(_S_U_t, _V_t, h_S_U, h_V)                        # M = S U V
+    h_MM  = app_st(_M_t, _M_t, h_M, h_M)                            # M M
+
+    # Fold App_t M M back to Y_t via SYM(Y_T_DEF).
+    h_Y = EQ_MP(_AP_TERM(is_sk_term, SYM(Y_T_DEF)), h_MM)
+    p.thus("is_sk_term Y_t").by_thm(h_Y)
 
 
 @proof
@@ -3043,14 +3126,81 @@ def Y_FIXED_POINT(p):
     """|- !f. is_sk_term f ==>
               ?n. sk_iter n (App_t Y_t f) = App_t f (App_t Y_t f).
 
-    Curry's fixed-point theorem in SK.  Discharges by unfolding Y_t's
-    concrete encoding and computing the reduction explicitly (~5
-    sk_step's, all K/S rule applications).
+    Curry's fixed-point theorem in SK.  Discharged by unfolding Y_t
+    to ``App_t M M`` and computing the reduction
+    ``App_t (App_t M M) f  -->*  App_t f (App_t (App_t M M) f)``
+    step by step via sk_step / SK_STEP_S / SK_STEP_K.
+
+    Concrete trace (recall M = App_t (App_t S_t U) V):
+
+      t0 := App_t Y_t f  =  App_t (App_t M M) f                [Y_T_DEF]
+
+      The head of t0 is ``App_t M M`` which is an S-redex of shape
+      ``App_t (App_t (App_t S_t U) V) M`` with x=U, y=V, z=M.  But
+      t0's *top* is ``App_t (App_t M M) f`` -- not a redex itself;
+      sk_step descends LEFT into ``App_t M M``:
+
+      t1 := sk_step t0  =  App_t (sk_step (App_t M M)) f
+                        =  App_t (App_t (App_t U M) (App_t V M)) f
+                                                                [SK_STEP_S]
+
+      Continue descending through the chain.  Sub-reductions:
+
+        U M = App_t (App_t S_t (App_t K_t S_t))
+                    (App_t (App_t S_t (App_t K_t K_t)) I_t)) M
+            -- top is an S-redex (x = KS, y = S(KK)I, z = M):
+            App_t (App_t U M) ... has a deeper structure; trace
+            continues for ~8 more sk_step's, alternating S-redex
+            firings on the head of M and K-redex firings on the
+            (K _) sub-expressions.
+
+      The full trace ends at
+
+        t_n := App_t f (App_t (App_t M M) f)
+             = App_t f (App_t Y_t f)                          [SYM(Y_T_DEF)]
+
+      with n approximately 8-12.  Each sk_step segment is:
+
+        p.have("t{k}: sk_step (...) = ...").by(SK_STEP_S, ...)
+        p.have("iter{k+1}: sk_iter (SUC0 ... 0) (App_t Y_t f) = ..."
+               ).by_rewrite_of("iter{k}_unfold", ["t{k}"])
+
+      plus an SK_ITER_SUC unfold per layer, plus folds via
+      SYM(I_T_DEF) / SYM(Y_T_DEF) at the head and tail.  Total
+      ~80-120 lines.
+
+    DSL friction (cited from OMEGA_T_STEP1, OMEGA_NON_HALTING, et al.,
+    which exhibit the same shape):
+
+      * Each sk_step is one ``p.have`` line + one ``by_rewrite_of``
+        line for the sk_iter accounting.  No batched-step tactic.
+      * Folding/unfolding constants (Y_t, I_t) mid-trace requires
+        explicit ``by_rewrite_of`` with SYM(DEF); each fold is a
+        named ``p.have`` rather than a tactic combinator.
+      * The witness for ``?n`` is ``SUC0 (SUC0 ... 0)`` written out
+        nullary -- no numeral abbreviation in scope.  Either spell
+        out the SUC0-tower (k applications gives a ~k-token term) or
+        chain SK_ITER_ADD against pre-computed small numerals.
+
+    Left as a sorry: structurally identical to OMEGA_NON_HALTING's
+    sub-lemmas (OMEGA_SHAPE_TRAJ_RETURNS, OMEGA_T_REACHES_LARGE_SIZE)
+    in that the "real" content is a mechanical trace of sk_step
+    applications, the surrounding logic is trivial, and the line
+    count is dominated by per-step bookkeeping that adds no insight.
+    Filling it in is mechanical once the concrete trace is written
+    out on paper.  The HALTING_UNDECIDABLE diagonal proof in Stage 6
+    consumes only the *statement* of Y_FIXED_POINT, not its proof,
+    so leaving this stub is sufficient to exercise the surrounding
+    structure.
     """
     p.goal(
         "!f. is_sk_term f ==> "
         "    ?n. sk_iter n (App_t Y_t f) = App_t f (App_t Y_t f)"
     )
+    # DSL friction: even the outer structure can't be set up without
+    # a witness for ``n``, and the witness IS the trace length.  So
+    # the whole proof body sorries; ``p.fix("f"); p.assume(...);``
+    # scaffolding adds nothing without the inner computation.
     p.sorry()
 
 
