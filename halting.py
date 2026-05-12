@@ -1260,6 +1260,244 @@ def SK_STEP_RIGHT(p):
             p.absurd().by_conj("h_napp", "is_app")
 
 
+@proof
+def SK_STEP_K_UNDER_LEFT(p):
+    """|- !x y z. ~(x = App_t (App_t K_t x) y) ==>
+                  sk_step (App_t (App_t (App_t K_t x) y) z) = App_t x z.
+
+    Composed congruence: a K-redex sitting one App deep on the left.
+    Internally: ``SK_STEP_LEFT`` at ``(App_t (App_t K_t x) y, z)`` to
+    descend, then ``SK_STEP_K`` at ``(x, y)`` to fire the inner K-redex.
+
+    The two structural guard hypotheses of ``SK_STEP_LEFT`` (~K-shape
+    and ~S-shape at the outer term) are discharged inline from the
+    concrete outer shape via the APP_T_INJ + K_T_NEQ_APP_T /
+    S_T_NEQ_K_T chain.  Only the third guard -- non-normality of the
+    inner K-redex, equivalent to ``~(x = App_t (App_t K_t x) y)`` after
+    one ``SK_STEP_K`` evaluation -- is exposed as a hypothesis because
+    it depends on ``x``.
+
+    Use this in place of a raw ``SK_STEP_LEFT`` whenever the descend
+    target is a K-redex; the caller only needs to discharge the
+    self-equality hypothesis (typically obvious by shape inspection of
+    a concrete ``x``).
+    """
+    from tactics import CONJ as _CONJ, CONJUNCT1 as _C1, CONJUNCT2 as _C2, TRANS
+
+    p.goal(
+        "!x y z. ~(x = App_t (App_t K_t x) y) ==> "
+        "        sk_step (App_t (App_t (App_t K_t x) y) z) = App_t x z"
+    )
+    p.fix("x y z")
+    p.assume("not_self: ~(x = App_t (App_t K_t x) y)")
+
+    outer = "App_t (App_t (App_t K_t x) y) z"
+    inner = "App_t (App_t K_t x) y"
+
+    # H1: ~K-shape at outer.
+    with p.have(
+        f"h1: ~(?p q. {outer} = App_t (App_t K_t p) q)"
+    ).proof():
+        with p.suppose(f"ex_k: ?p q. {outer} = App_t (App_t K_t p) q"):
+            p.choose("p_w", from_="ex_k")
+            p.choose("q_w", from_="p_w_eq")
+            p.have(f"e1: {inner} = App_t K_t p_w /\\ z = q_w").by(
+                APP_T_INJ, inner, "z", "App_t K_t p_w", "q_w", "q_w_eq"
+            )
+            p.have(f"e1a: {inner} = App_t K_t p_w").by_thm(_C1(p.fact("e1")))
+            p.have("e2: App_t K_t x = K_t /\\ y = p_w").by(
+                APP_T_INJ, "App_t K_t x", "y", "K_t", "p_w", "e1a"
+            )
+            p.have("e2a: App_t K_t x = K_t").by_thm(_C1(p.fact("e2")))
+            p.have("k_neq: ~(K_t = App_t K_t x)").by(K_T_NEQ_APP_T, "K_t", "x")
+            p.have("k_eq: K_t = App_t K_t x").by_thm(SYM(p.fact("e2a")))
+            p.absurd().by_conj("k_neq", "k_eq")
+
+    # H2: ~S-shape at outer.
+    with p.have(
+        f"h2: ~(?p q r. {outer} = App_t (App_t (App_t S_t p) q) r)"
+    ).proof():
+        with p.suppose(
+            f"ex_s: ?p q r. {outer} = App_t (App_t (App_t S_t p) q) r"
+        ):
+            p.choose("p_w", from_="ex_s")
+            p.choose("q_w", from_="p_w_eq")
+            p.choose("r_w", from_="q_w_eq")
+            p.have(f"e1: {inner} = App_t (App_t S_t p_w) q_w /\\ z = r_w").by(
+                APP_T_INJ, inner, "z",
+                "App_t (App_t S_t p_w) q_w", "r_w", "r_w_eq",
+            )
+            p.have(
+                f"e1a: {inner} = App_t (App_t S_t p_w) q_w"
+            ).by_thm(_C1(p.fact("e1")))
+            p.have("e2: App_t K_t x = App_t S_t p_w /\\ y = q_w").by(
+                APP_T_INJ, "App_t K_t x", "y",
+                "App_t S_t p_w", "q_w", "e1a",
+            )
+            p.have(
+                "e2a: App_t K_t x = App_t S_t p_w"
+            ).by_thm(_C1(p.fact("e2")))
+            p.have("e3: K_t = S_t /\\ x = p_w").by(
+                APP_T_INJ, "K_t", "x", "S_t", "p_w", "e2a"
+            )
+            p.have("k_eq_s: K_t = S_t").by_thm(_C1(p.fact("e3")))
+            p.have("s_eq_k: S_t = K_t").by_thm(SYM(p.fact("k_eq_s")))
+            p.absurd().by_conj(S_T_NEQ_K_T, "s_eq_k")
+
+    # H3: ~(sk_step inner = inner) -- reduces to ~(x = inner) via SK_STEP_K.
+    with p.have(f"h3: ~(sk_step ({inner}) = {inner})").proof():
+        with p.suppose(f"h_eq: sk_step ({inner}) = {inner}"):
+            p.have(f"sk_inner: sk_step ({inner}) = x").by(
+                SK_STEP_K, "x", "y"
+            )
+            p.have(f"x_eq_inner: x = {inner}").by_thm(
+                TRANS(SYM(p.fact("sk_inner")), p.fact("h_eq"))
+            )
+            p.absurd().by_conj("not_self", "x_eq_inner")
+
+    # Apply SK_STEP_LEFT and SK_STEP_K, then compose.
+    p.have(
+        f"left_step: sk_step ({outer}) = App_t (sk_step ({inner})) z"
+    ).by(SK_STEP_LEFT, inner, "z", "h1", "h2", "h3")
+    p.have(f"k_step: sk_step ({inner}) = x").by(SK_STEP_K, "x", "y")
+    p.thus(f"sk_step ({outer}) = App_t x z").by_rewrite_of(
+        "left_step", ["k_step"]
+    )
+
+
+@proof
+def SK_STEP_S_UNDER_LEFT(p):
+    """|- !x y z w. ~(App_t (App_t x z) (App_t y z) =
+                       App_t (App_t (App_t S_t x) y) z) ==>
+                     sk_step (App_t (App_t (App_t (App_t S_t x) y) z) w)
+                       = App_t (App_t (App_t x z) (App_t y z)) w.
+
+    Composed congruence: an S-redex sitting one App deep on the left.
+    Sister of ``SK_STEP_K_UNDER_LEFT``: descend via ``SK_STEP_LEFT`` at
+    ``(App_t (App_t (App_t S_t x) y) z, w)``, then ``SK_STEP_S`` at
+    ``(x, y, z)`` fires the inner S-redex.
+
+    Structural guards on the outer term (~K-shape, ~S-shape) are
+    discharged inline -- the outer first-arg ``App_t (App_t (App_t S_t
+    x) y) z`` differs from both ``K_t`` (via APP_T_INJ + K_T_NEQ_APP_T)
+    and ``App_t S_t _`` (via APP_T_INJ + S_T_NEQ_APP_T at the third
+    level).  Only the non-normality guard -- that the S-redex's
+    contractum doesn't coincide with the redex itself -- is exposed,
+    since it depends on ``x, y, z``.
+    """
+    from tactics import CONJUNCT1 as _C1, TRANS
+
+    p.goal(
+        "!x y z w. ~(App_t (App_t x z) (App_t y z) = "
+        "             App_t (App_t (App_t S_t x) y) z) ==> "
+        "          sk_step (App_t (App_t (App_t (App_t S_t x) y) z) w) "
+        "          = App_t (App_t (App_t x z) (App_t y z)) w"
+    )
+    p.fix("x y z w")
+    p.assume(
+        "not_self: ~(App_t (App_t x z) (App_t y z) "
+        "          = App_t (App_t (App_t S_t x) y) z)"
+    )
+
+    inner = "App_t (App_t (App_t S_t x) y) z"
+    outer = f"App_t ({inner}) w"
+    contract = "App_t (App_t x z) (App_t y z)"
+
+    # H1: ~K-shape at outer.  APP_T_INJ peels:
+    #   App_t inner w = App_t (App_t K_t p) q   →   inner = App_t K_t p
+    #   App_t (App_t S_t x) y = K_t   →   K_t = App_t (App_t S_t x) y
+    # contradicts K_T_NEQ_APP_T.
+    with p.have(
+        f"h1: ~(?p q. {outer} = App_t (App_t K_t p) q)"
+    ).proof():
+        with p.suppose(f"ex_k: ?p q. {outer} = App_t (App_t K_t p) q"):
+            p.choose("p_w", from_="ex_k")
+            p.choose("q_w", from_="p_w_eq")
+            p.have(f"e1: {inner} = App_t K_t p_w /\\ w = q_w").by(
+                APP_T_INJ, inner, "w", "App_t K_t p_w", "q_w", "q_w_eq"
+            )
+            p.have(f"e1a: {inner} = App_t K_t p_w").by_thm(_C1(p.fact("e1")))
+            p.have(
+                "e2: App_t (App_t S_t x) y = K_t /\\ z = p_w"
+            ).by(
+                APP_T_INJ, "App_t (App_t S_t x) y", "z", "K_t", "p_w", "e1a"
+            )
+            p.have(
+                "e2a: App_t (App_t S_t x) y = K_t"
+            ).by_thm(_C1(p.fact("e2")))
+            p.have("k_neq: ~(K_t = App_t (App_t S_t x) y)").by(
+                K_T_NEQ_APP_T, "App_t S_t x", "y"
+            )
+            p.have("k_eq: K_t = App_t (App_t S_t x) y").by_thm(
+                SYM(p.fact("e2a"))
+            )
+            p.absurd().by_conj("k_neq", "k_eq")
+
+    # H2: ~S-shape at outer.  APP_T_INJ peels three levels:
+    #   App_t inner w = App_t (App_t (App_t S_t p) q) r
+    #     →   inner = App_t (App_t S_t p) q
+    #   App_t (App_t S_t x) y = App_t S_t p
+    #     →   App_t S_t x = S_t
+    # contradicts S_T_NEQ_APP_T.
+    with p.have(
+        f"h2: ~(?p q r. {outer} = App_t (App_t (App_t S_t p) q) r)"
+    ).proof():
+        with p.suppose(
+            f"ex_s: ?p q r. {outer} = App_t (App_t (App_t S_t p) q) r"
+        ):
+            p.choose("p_w", from_="ex_s")
+            p.choose("q_w", from_="p_w_eq")
+            p.choose("r_w", from_="q_w_eq")
+            p.have(f"e1: {inner} = App_t (App_t S_t p_w) q_w /\\ w = r_w").by(
+                APP_T_INJ, inner, "w",
+                "App_t (App_t S_t p_w) q_w", "r_w", "r_w_eq",
+            )
+            p.have(f"e1a: {inner} = App_t (App_t S_t p_w) q_w").by_thm(
+                _C1(p.fact("e1"))
+            )
+            p.have(
+                "e2: App_t (App_t S_t x) y = App_t S_t p_w /\\ z = q_w"
+            ).by(
+                APP_T_INJ, "App_t (App_t S_t x) y", "z",
+                "App_t S_t p_w", "q_w", "e1a",
+            )
+            p.have("e2a: App_t (App_t S_t x) y = App_t S_t p_w").by_thm(
+                _C1(p.fact("e2"))
+            )
+            p.have("e3: App_t S_t x = S_t /\\ y = p_w").by(
+                APP_T_INJ, "App_t S_t x", "y", "S_t", "p_w", "e2a"
+            )
+            p.have("e3a: App_t S_t x = S_t").by_thm(_C1(p.fact("e3")))
+            p.have("s_neq: ~(S_t = App_t S_t x)").by(
+                S_T_NEQ_APP_T, "S_t", "x"
+            )
+            p.have("s_eq: S_t = App_t S_t x").by_thm(SYM(p.fact("e3a")))
+            p.absurd().by_conj("s_neq", "s_eq")
+
+    # H3: ~(sk_step inner = inner) -- by SK_STEP_S, sk_step inner = contract;
+    # then contract = inner contradicts not_self.
+    with p.have(f"h3: ~(sk_step ({inner}) = {inner})").proof():
+        with p.suppose(f"h_eq: sk_step ({inner}) = {inner}"):
+            p.have(f"sk_inner: sk_step ({inner}) = {contract}").by(
+                SK_STEP_S, "x", "y", "z"
+            )
+            p.have(f"c_eq_inner: {contract} = {inner}").by_thm(
+                TRANS(SYM(p.fact("sk_inner")), p.fact("h_eq"))
+            )
+            p.absurd().by_conj("not_self", "c_eq_inner")
+
+    # Apply SK_STEP_LEFT then SK_STEP_S, then compose.
+    p.have(
+        f"left_step: sk_step ({outer}) = App_t (sk_step ({inner})) w"
+    ).by(SK_STEP_LEFT, inner, "w", "h1", "h2", "h3")
+    p.have(f"s_step: sk_step ({inner}) = {contract}").by(
+        SK_STEP_S, "x", "y", "z"
+    )
+    p.thus(f"sk_step ({outer}) = App_t ({contract}) w").by_rewrite_of(
+        "left_step", ["s_step"]
+    )
+
+
 def _atom_neq_App_negations(p, atom, atom_neq_lemma):
     """For an atom term (S_t or K_t), prove the three "atom is not
     App_t-shaped" existentials:
@@ -3619,14 +3857,14 @@ def CHURCH_FALSE_REDUCES(p):
 
     KI_t a c = K I a c -->* I c -->* c.
 
-    Exercises the descend-left congruence ``SK_STEP_LEFT``: after
-    unfolding KI_t the K-redex sits one App deep, so step 1 is a
-    descend with three discharged hypotheses (~K-shape, ~S-shape,
-    ~normality of the inner K-redex).  Subsequent steps are head
-    reductions: rewrite the inner ``sk_step (K I a) = I``, then unfold
-    I_t into the S-redex and head-step S then K.
+    Trace via ``sk_reduce``: unfold KI_t to expose the K-redex one App
+    deep, fire it with the composed ``SK_STEP_K_UNDER_LEFT`` lemma, then
+    unfold I_t into the S-redex and head-step S then K.  The single
+    hypothesis ``SK_STEP_K_UNDER_LEFT`` requires -- that the K-redex's
+    output ``I_t`` is not equal to the redex itself -- is discharged
+    inline via APP_T_INJ over the unfolded I_t.
     """
-    from tactics import CONJ as _CONJ, CONJUNCT1 as _C1, CONJUNCT2 as _C2, TRANS
+    from tactics import CONJUNCT1 as _C1, TRANS
 
     p.goal(
         "!a c. is_sk_term a /\\ is_sk_term c ==> "
@@ -3635,110 +3873,34 @@ def CHURCH_FALSE_REDUCES(p):
     p.fix("a c")
     p.assume("h_st: is_sk_term a /\\ is_sk_term c")  # unused
 
-    # ---- Discharge the three SK_STEP_LEFT hypotheses at the outer term
-    #      App_t (App_t (App_t K_t I_t) a) c.
-    outer = "App_t (App_t (App_t K_t I_t) a) c"
-    inner_left = "App_t (App_t K_t I_t) a"
-
-    # H1: ~(?p q. outer = App_t (App_t K_t p) q).
-    #     APP_T_INJ chain peels to App_t K_t I_t = K_t, then K_T_NEQ_APP_T.
+    # Discharge SK_STEP_K_UNDER_LEFT's single hypothesis at x := I_t, y := a:
+    #     ~(I_t = App_t (App_t K_t I_t) a).
+    # Unfold I_t on the LHS, then APP_T_INJ peels to S_t = K_t.
     with p.have(
-        f"h1: ~(?p q. {outer} = App_t (App_t K_t p) q)"
+        "not_self: ~(I_t = App_t (App_t K_t I_t) a)"
     ).proof():
-        with p.suppose(f"ex_k: ?p q. {outer} = App_t (App_t K_t p) q"):
-            p.choose("p_w", from_="ex_k")
-            p.choose("q_w", from_="p_w_eq")
+        with p.suppose("h_eq: I_t = App_t (App_t K_t I_t) a"):
             p.have(
-                f"e1: {inner_left} = App_t K_t p_w /\\ c = q_w"
-            ).by(APP_T_INJ, inner_left, "c", "App_t K_t p_w", "q_w", "q_w_eq")
-            p.have(f"e1a: {inner_left} = App_t K_t p_w").by_thm(_C1(p.fact("e1")))
-            p.have("e2: App_t K_t I_t = K_t /\\ a = p_w").by(
-                APP_T_INJ, "App_t K_t I_t", "a", "K_t", "p_w", "e1a"
-            )
-            p.have("e2a: App_t K_t I_t = K_t").by_thm(_C1(p.fact("e2")))
-            p.have("k_neq: ~(K_t = App_t K_t I_t)").by(
-                K_T_NEQ_APP_T, "K_t", "I_t"
-            )
-            p.have("k_eq: K_t = App_t K_t I_t").by_thm(SYM(p.fact("e2a")))
-            p.absurd().by_conj("k_neq", "k_eq")
-
-    # H2: ~(?p q r. outer = App_t (App_t (App_t S_t p) q) r).
-    #     APP_T_INJ peels to App_t K_t I_t = App_t S_t p, then K_t = S_t,
-    #     contradicting S_T_NEQ_K_T.
-    with p.have(
-        f"h2: ~(?p q r. {outer} = App_t (App_t (App_t S_t p) q) r)"
-    ).proof():
-        with p.suppose(
-            f"ex_s: ?p q r. {outer} = App_t (App_t (App_t S_t p) q) r"
-        ):
-            p.choose("p_w", from_="ex_s")
-            p.choose("q_w", from_="p_w_eq")
-            p.choose("r_w", from_="q_w_eq")
-            p.have(
-                f"e1: {inner_left} = App_t (App_t S_t p_w) q_w /\\ c = r_w"
-            ).by(
-                APP_T_INJ, inner_left, "c",
-                "App_t (App_t S_t p_w) q_w", "r_w", "r_w_eq",
-            )
-            p.have(
-                f"e1a: {inner_left} = App_t (App_t S_t p_w) q_w"
-            ).by_thm(_C1(p.fact("e1")))
-            p.have(
-                "e2: App_t K_t I_t = App_t S_t p_w /\\ a = q_w"
-            ).by(
-                APP_T_INJ, "App_t K_t I_t", "a",
-                "App_t S_t p_w", "q_w", "e1a",
-            )
-            p.have(
-                "e2a: App_t K_t I_t = App_t S_t p_w"
-            ).by_thm(_C1(p.fact("e2")))
-            p.have("e3: K_t = S_t /\\ I_t = p_w").by(
-                APP_T_INJ, "K_t", "I_t", "S_t", "p_w", "e2a"
-            )
-            p.have("k_eq_s: K_t = S_t").by_thm(_C1(p.fact("e3")))
-            p.have("s_eq_k: S_t = K_t").by_thm(SYM(p.fact("k_eq_s")))
-            p.absurd().by_conj(S_T_NEQ_K_T, "s_eq_k")
-
-    # H3: ~(sk_step inner_left = inner_left).
-    #     sk_step inner_left = I_t (SK_STEP_K); then I_t = inner_left would
-    #     give App_t (App_t S_t K_t) K_t = App_t (App_t K_t I_t) a after
-    #     unfolding I_t, and APP_T_INJ peels to S_t = K_t (contradiction).
-    with p.have(
-        f"h3: ~(sk_step ({inner_left}) = {inner_left})"
-    ).proof():
-        with p.suppose(f"h_eq: sk_step ({inner_left}) = {inner_left}"):
-            p.have(
-                f"sk_inner: sk_step ({inner_left}) = I_t"
-            ).by(SK_STEP_K, "I_t", "a")
-            p.have(f"i_eq: I_t = {inner_left}").by_thm(
-                TRANS(SYM(p.fact("sk_inner")), p.fact("h_eq"))
-            )
-            # Unfold the LHS via I_T_DEF: I_t = App_t (App_t S_t K_t) K_t.
-            p.have(
-                f"unf_eq: App_t (App_t S_t K_t) K_t = {inner_left}"
-            ).by_thm(TRANS(SYM(I_T_DEF), p.fact("i_eq")))
-            p.have(
-                "e1: App_t S_t K_t = App_t K_t I_t /\\ K_t = a"
-            ).by(
+                "unf_eq: App_t (App_t S_t K_t) K_t = App_t (App_t K_t I_t) a"
+            ).by_thm(TRANS(SYM(I_T_DEF), p.fact("h_eq")))
+            p.have("e1: App_t S_t K_t = App_t K_t I_t /\\ K_t = a").by(
                 APP_T_INJ, "App_t S_t K_t", "K_t",
                 "App_t K_t I_t", "a", "unf_eq",
             )
-            p.have(
-                "e1a: App_t S_t K_t = App_t K_t I_t"
-            ).by_thm(_C1(p.fact("e1")))
+            p.have("e1a: App_t S_t K_t = App_t K_t I_t").by_thm(
+                _C1(p.fact("e1"))
+            )
             p.have("e2: S_t = K_t /\\ K_t = I_t").by(
                 APP_T_INJ, "S_t", "K_t", "K_t", "I_t", "e1a"
             )
             p.have("s_eq_k: S_t = K_t").by_thm(_C1(p.fact("e2")))
             p.absurd().by_conj(S_T_NEQ_K_T, "s_eq_k")
 
-    # ---- Build the trace via sk_reduce.
+    # Build the trace via sk_reduce.
     with sk_reduce(p, "App_t (App_t KI_t a) c", "c") as r:
         r.rewrite(KI_T_DEF)
         # current = App_t (App_t (App_t K_t I_t) a) c.
-        r.step(SK_STEP_LEFT, inner_left, "c", mp=["h1", "h2", "h3"])
-        # current = App_t (sk_step (App_t (App_t K_t I_t) a)) c.
-        r.rewrite(SK_STEP_K)
+        r.step(SK_STEP_K_UNDER_LEFT, "I_t", "a", "c", mp=["not_self"])
         # current = App_t I_t c.
         r.rewrite(I_T_DEF)
         # current = App_t (App_t (App_t S_t K_t) K_t) c.
