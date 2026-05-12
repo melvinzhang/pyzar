@@ -192,7 +192,8 @@ conclusion is fixed by the args, no need to repeat it in the spec).
 
 * `.by_thm(th)` — direct: `th` already proves the term.
 * `.by(just, *args)` — SPEC/MP chain (term arg → `SPEC`, fact arg → `MP`); or callable; simp-aware.
-* `.by_match(just, *args)` — backward-chaining: foralls inferred by first-order matching against goal + facts; `...` (Ellipsis) at an antecedent slot auto-derives a reflexive claim via `register_refl_prover`.
+* `.by_match(just, *args)` — backward-chaining: foralls inferred by first-order matching against goal + facts; `...` (Ellipsis) at an antecedent slot auto-derives a reflexive claim via `register_refl_prover`. Conjunctive antecedents (`A /\ B ==> C`, right-associated) auto-CONJ: pass one fact per atomic conjunct and `by_match` builds the `CONJ` chain at MP time. A single fact alpha-matching the whole conjunction is also accepted (back-compat).
+* `.by_tree(*, unfold=())` — structural-intro for `P term` goals: walks `term` and dispatches each node via the `IntroSet` registered for `P` (atoms by `aconv`, binary App-style constructor by recursion + `CONJ` + `MP`). `unfold` is an optional list of definitional equations applied via `REWRITE_CONV` to fixpoint on `term` before the walk, then folded back via `EQ_MP(SYM(AP_TERM(P, eq)), ...)` at the end. Use to see past folded constants whose unfolded shape is a registered tree (e.g. `is_sk_term Y_t` with `unfold=[Y_T_DEF, I_T_DEF]`).
 * `.by_rewrite(rules, *, ac=None, ac_rules=())` — `REWRITE_PROVE(rules + active simp set, term, ac=ac)`.
 * `.by_rewrite_of(ref, rules, *, ac=None, beta=False, op=...)` — rewrite source `ref` to the have-term via shared normal form.
 * `.by_unfold(src, *defs)` — `by_rewrite_of` with `beta=True` — bridge unfolded ↔ defined-symbol forms.
@@ -547,6 +548,16 @@ target shape is `op a1 ... an a1 ... an` (binary `op t t` is the
 `=` is native (`REFL`); derived relations like `>=` / `<=` and
 multi-arg "self-equal" heads (e.g. Landau's 4-ary `feq`) register
 their own builders.
+
+### Structural-intro sets — `register_intro_set(pred, *, atoms, app)`
+
+`pred` is the unary predicate constant (`is_sk_term`, `is_normal`,
+…); `atoms` is a list of `(atom_term, |- pred atom_term)` pairs (true
+atoms + leaf-like macros); `app` is `(app_const, |- !a b. pred a /\
+pred b ==> pred (app_const a b))`. Consumed by `_Have.by_tree`,
+which dispatches each node of the goal's argument term to an atom
+rule (matched by `aconv`) or the App-rule (recursive + auto-CONJ).
+One IntroSet per predicate; re-registering overrides.
 
 ### Assume patterns — `register_pattern_handler(pat_type, handler)`
 
