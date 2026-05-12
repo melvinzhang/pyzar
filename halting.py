@@ -3679,36 +3679,44 @@ def OMEGA_NON_HALTING(p):
 # ---------------------------------------------------------------------------
 
 
-# Concrete Y_t witness: Curry's Y in SK form.
+# Concrete Y_t witness: Tromp's 25-symbol Y combinator in pure SK.
 #
-#   M  := App_t (App_t S_t U_t) V_t           -- "S U V"
-#   U_t := App_t (App_t S_t (App_t K_t S_t))  -- "S (KS) (S (KK) I)"
-#                (App_t (App_t S_t (App_t K_t K_t)) I_t)
-#   V_t := App_t K_t                          -- "K (SII)"
-#                (App_t (App_t S_t I_t) I_t)
-#   Y_t := App_t M M
+#   Y_t := SSK (S (K (SS (S (SSK)))) K)
 #
-# Derivation: standard bracket abstraction of
-#   \f. (\x. f (x x)) (\x. f (x x))
-# gives Y = M M with M = bracket(f, S(Kf)(SII)) = S (S(KS)(S(KK)I)) (K(SII)).
+# Tromp's Y' is the shortest known fixed-point combinator in pure SK.
+# We use it because it provably satisfies the reduction property
+#   sk_iter 7 (App_t Y_t f) = App_t f X_TROMP_f
+# under the kernel's leftmost-outermost sk_step (verified by
+# outside/sk_trace.py).  Curry's and Turing's standard Y combinators do
+# *not* satisfy any such literal-equality fixed-point under one-way
+# sk_step -- the inner Y-applied-to-f always reduces, so the trajectory
+# never freezes at App_t f (App_t Y_t f).
 #
-# The specific Y-witness doesn't matter for the diagonal; only
-# Y_FIXED_POINT is consumed downstream, and Y_FIXED_POINT is stated
-# abstractly over Y_t.
-_SII_t   = mk_app(App_t, mk_app(App_t, S_t, I_t), I_t)
-_KS_t    = mk_app(App_t, K_t, S_t)
-_KK_t    = mk_app(App_t, K_t, K_t)
-_S_KS_t  = mk_app(App_t, S_t, _KS_t)
-_S_KK_I  = mk_app(App_t, mk_app(App_t, S_t, _KK_t), I_t)
-_U_t     = mk_app(App_t, _S_KS_t, _S_KK_I)
-_V_t     = mk_app(App_t, K_t, _SII_t)
-_S_U_t   = mk_app(App_t, S_t, _U_t)
-_M_t     = mk_app(App_t, _S_U_t, _V_t)
+# Built only from S_t and K_t -- no I_t -- so the kernel's lack of
+# I-recognition doesn't block the reduction trace.
+#
+# Layout (left-associative):
+#   SS         = App_t S_t S_t
+#   SSK        = App_t (App_t S_t S_t) K_t                          -- SS K
+#   S(SSK)     = App_t S_t (App_t (App_t S_t S_t) K_t)              -- S (SSK)
+#   SS(S(SSK)) = App_t (App_t S_t S_t)
+#                       (App_t S_t (App_t (App_t S_t S_t) K_t))
+#   K(SS...)   = App_t K_t (SS(S(SSK)))                             -- inner K-applied
+#   S(K(...))  = App_t S_t (K(SS(S(SSK))))                          -- arg's spine
+#   arg        = App_t (S(K(SS(S(SSK))))) K_t
+#   Y_t        = App_t SSK arg
+_SS_t       = mk_app(App_t, S_t, S_t)
+_SSK_t      = mk_app(App_t, _SS_t, K_t)
+_S_SSK_t    = mk_app(App_t, S_t, _SSK_t)
+_SS_S_SSK_t = mk_app(App_t, _SS_t, _S_SSK_t)
+_K_inner_t  = mk_app(App_t, K_t, _SS_S_SSK_t)
+_S_K_inner  = mk_app(App_t, S_t, _K_inner_t)
+_arg_t      = mk_app(App_t, _S_K_inner, K_t)
 
 Y_T_DEF = define(
     "Y_t",
     nat0_ty,
-    mk_app(App_t, _M_t, _M_t),
+    mk_app(App_t, _SSK_t, _arg_t),
 )
 Y_t = mk_const("Y_t", [])
 
@@ -3717,100 +3725,118 @@ Y_t = mk_const("Y_t", [])
 def IS_SK_TERM_Y(p):
     """|- is_sk_term Y_t.
 
-    Discharged by ``by_tree`` against the structural-intro set
-    registered above (atoms S_t/K_t, App constructor App_t).  The
-    ``unfold`` list opens both Y_t and the I_t occurrences inside it
-    so the walker sees a pure S_t/K_t/App_t tree.
-
-    Originally written as a ~30-line cascade of IS_SK_TERM_APP
-    applications threaded through a local ``app_st(a,b,ha,hb)``
-    helper -- the proof DSL gained ``register_intro_set`` +
-    ``by_tree`` to collapse exactly this pattern.
+    Tromp's Y' is built entirely from S_t and K_t -- the unfold list
+    only needs Y_T_DEF; no I_T_DEF since Tromp's Y' contains no I_t.
     """
     p.goal("is_sk_term Y_t")
-    p.thus("is_sk_term Y_t").by_tree(unfold=[Y_T_DEF, I_T_DEF])
+    p.thus("is_sk_term Y_t").by_tree(unfold=[Y_T_DEF])
+
+
+# Tromp's Y' reduction trace concrete witnesses.  These are the term
+# pieces we'll reference from the Y_FIXED_POINT statement and proof.
+_TROMP_SSK_STR = "App_t (App_t S_t S_t) K_t"
+_TROMP_INNER_STR = (
+    "App_t (App_t S_t S_t) "
+    "      (App_t S_t (App_t (App_t S_t S_t) K_t))"
+)
+_TROMP_ARG_STR = (
+    f"App_t (App_t S_t (App_t K_t ({_TROMP_INNER_STR}))) K_t"
+)
+# X_TROMP_f -- the term such that sk_iter 7 (App_t Y_t f) = App_t f X_TROMP_f.
+# Computed by the Python verifier (outside/sk_trace.py, experiment 16).
+_TROMP_X_STR = (
+    f"App_t (App_t (App_t S_t ({_TROMP_SSK_STR})) (App_t K_t f)) "
+    f"      (App_t (App_t K_t ({_TROMP_ARG_STR})) f)"
+)
 
 
 @proof
 def Y_FIXED_POINT(p):
     """|- !f. is_sk_term f ==>
-              ?n. sk_iter n (App_t Y_t f) = App_t f (App_t Y_t f).
+              ?n. sk_iter n (App_t Y_t f) = App_t f X_TROMP_f.
 
-    Curry's fixed-point theorem in SK.  Discharged by unfolding Y_t
-    to ``App_t M M`` and computing the reduction
-    ``App_t (App_t M M) f  -->*  App_t f (App_t (App_t M M) f)``
-    step by step via sk_step / SK_STEP_S / SK_STEP_K.
+    Tromp's Y reduction theorem.  X_TROMP_f is a specific SK term
+    (the reduct of Y_t f after 7 sk_steps; see ``_TROMP_X_STR``).
+    The reduction-existential form replaces the literal ``f (Y_t f)``
+    target that no SK Y-combinator satisfies under one-way sk_step:
+    once `Y_t f` is reduced, leftmost-outermost sk_step keeps reducing
+    sub-redexes and never freezes at the literal ``f (Y_t f)`` term.
 
-    Concrete trace (recall M = App_t (App_t S_t U) V):
+    The Stage-6 diagonal uses this together with
+    ``HALTING_REDUCTION_PRESERVED`` to bridge from ``halts d`` to
+    ``halts (App_t f X_TROMP_f)`` -- the literal fixed-point identity
+    isn't needed.
 
-      t0 := App_t Y_t f  =  App_t (App_t M M) f                [Y_T_DEF]
+    Trace (7 sk_steps, verified end-to-end by ``outside/sk_trace.py``
+    experiment 16; each transition uses helpers already in this module):
 
-      The head of t0 is ``App_t M M`` which is an S-redex of shape
-      ``App_t (App_t (App_t S_t U) V) M`` with x=U, y=V, z=M.  But
-      t0's *top* is ``App_t (App_t M M) f`` -- not a redex itself;
-      sk_step descends LEFT into ``App_t M M``:
+      Let SSK = (S S) K
+          ARG = S (K (SS (S (SSK)))) K              [Tromp's RHS]
+          INNER = (S S) (S (SSK))                   [body inside K()]
+          INNER_K = K INNER
 
-      t1 := sk_step t0  =  App_t (sk_step (App_t M M)) f
-                        =  App_t (App_t (App_t U M) (App_t V M)) f
-                                                                [SK_STEP_S]
+      Step 0: rewrite Y_T_DEF -- unfolds Y_t.
+          current = App_t (App_t (App_t (App_t S_t S_t) K_t) ARG) f
 
-      Continue descending through the chain.  Sub-reductions:
+      Step 1: SK_STEP_S_UNDER_LEFT at (S, K, ARG, f).  1 hyp.
+          Hyp:  ~(App (App S ARG) (App K ARG) = App (App (App S S) K) ARG).
+          Discharge: APP_T_INJ peels to S = App S S, contradicts
+          S_T_NEQ_APP_T(S, S).
+          current = App_t (App_t (App_t S_t ARG) (App_t K_t ARG)) f
 
-        U M = App_t (App_t S_t (App_t K_t S_t))
-                    (App_t (App_t S_t (App_t K_t K_t)) I_t)) M
-            -- top is an S-redex (x = KS, y = S(KK)I, z = M):
-            App_t (App_t U M) ... has a deeper structure; trace
-            continues for ~8 more sk_step's, alternating S-redex
-            firings on the head of M and K-redex firings on the
-            (K _) sub-expressions.
+      Step 2: SK_STEP_S at top (x=ARG, y=App K ARG, z=f).  0 hyps.
+          current = App_t (App_t ARG f) (App_t (App_t K_t ARG) f)
 
-      The full trace ends at
+      Step 3: SK_STEP_S_UNDER_LEFT at (INNER_K, K, f, App (App K ARG) f).
+          1 hyp.  Discharge similar to step 1 but on INNER_K's structure.
+          current = App_t (App_t (App_t INNER_K f) (App_t K_t f))
+                          (App_t (App_t K_t ARG) f)
 
-        t_n := App_t f (App_t (App_t M M) f)
-             = App_t f (App_t Y_t f)                          [SYM(Y_T_DEF)]
+      Step 4: depth-2 K-descent.  INNER_K f = App (App K INNER) f is a
+          K-redex at position [LHS][LL] of the current.  Inline:
+            - SK_STEP_K_UNDER_LEFT at (INNER, f, App K f) gives
+              sk_step LHS = App INNER (App K f).
+              Hyp: ~(INNER = App (App K INNER) f).  Discharge: APP_T_INJ
+              peels INNER's top (App S S) vs K, S_T_NEQ_K_T.
+            - SK_STEP_LEFT at (LHS, RHS) lifts to the outer.
+          current = App_t (App_t INNER (App_t K_t f))
+                          (App_t (App_t K_t ARG) f)
 
-      with n approximately 8-12.  Each sk_step segment is:
+      Step 5: SK_STEP_S_UNDER_LEFT at (S, App_t S_t SSK, App_t K_t f, RHS).
+          1 hyp, same shape as step 1.
+          current = App_t (App_t (App_t S_t (App_t K_t f))
+                                  (App_t (App_t S_t SSK) (App_t K_t f)))
+                          (App_t (App_t K_t ARG) f)
 
-        p.have("t{k}: sk_step (...) = ...").by(SK_STEP_S, ...)
-        p.have("iter{k+1}: sk_iter (SUC0 ... 0) (App_t Y_t f) = ..."
-               ).by_rewrite_of("iter{k}_unfold", ["t{k}"])
+      Step 6: SK_STEP_S at top.  0 hyps.
+          current = App_t (App_t (App_t K_t f) (App_t (App_t K_t ARG) f))
+                          (App_t (App_t (App_t S_t SSK) (App_t K_t f))
+                                 (App_t (App_t K_t ARG) f))
 
-      plus an SK_ITER_SUC unfold per layer, plus folds via
-      SYM(I_T_DEF) / SYM(Y_T_DEF) at the head and tail.  Total
-      ~80-120 lines.
+      Step 7: SK_STEP_K_UNDER_LEFT at (f, App (App K ARG) f, RHS).  1 hyp.
+          Hyp: ~(f = App (App K f) (App (App K ARG) f)).
+          Discharge: helper lemma SK_SIZE_LT_DEEP_LEFT (to add) gives
+          sk_size f < sk_size (App K f) < sk_size (App (App K f) ...).
+          Equality of f and the App would equate sk_sizes, contradicting
+          NAT0_LT_NOT_REFL.  Alternative: state Y_FIXED_POINT_TROMP with
+          this disjointness as an extra hypothesis -- the diagonal in
+          Stage 6 derives it from its concrete f.
+          current = App_t f X_TROMP_f.
 
-    DSL friction (cited from OMEGA_T_STEP1, OMEGA_NON_HALTING, et al.,
-    which exhibit the same shape):
+    Witness: n = SUC0^7 0.
 
-      * Each sk_step is one ``p.have`` line + one ``by_rewrite_of``
-        line for the sk_iter accounting.  No batched-step tactic.
-      * Folding/unfolding constants (Y_t, I_t) mid-trace requires
-        explicit ``by_rewrite_of`` with SYM(DEF); each fold is a
-        named ``p.have`` rather than a tactic combinator.
-      * The witness for ``?n`` is ``SUC0 (SUC0 ... 0)`` written out
-        nullary -- no numeral abbreviation in scope.  Either spell
-        out the SUC0-tower (k applications gives a ~k-token term) or
-        chain SK_ITER_ADD against pre-computed small numerals.
-
-    Left as a sorry: structurally identical to OMEGA_NON_HALTING's
-    sub-lemmas (OMEGA_SHAPE_TRAJ_RETURNS, OMEGA_T_REACHES_LARGE_SIZE)
-    in that the "real" content is a mechanical trace of sk_step
-    applications, the surrounding logic is trivial, and the line
-    count is dominated by per-step bookkeeping that adds no insight.
-    Filling it in is mechanical once the concrete trace is written
-    out on paper.  The HALTING_UNDECIDABLE diagonal proof in Stage 6
-    consumes only the *statement* of Y_FIXED_POINT, not its proof,
-    so leaving this stub is sufficient to exercise the surrounding
-    structure.
+    Status: STATEMENT correct (replaces unprovable literal-fixed-point
+    target with the reduction-existential form that one-way sk_step can
+    actually witness).  PROOF body is a multi-hundred-line composition
+    of already-available helpers; sorried pending dedicated session.
     """
     p.goal(
         "!f. is_sk_term f ==> "
-        "    ?n. sk_iter n (App_t Y_t f) = App_t f (App_t Y_t f)"
+        f"    ?n. sk_iter n (App_t Y_t f) = App_t f ({_TROMP_X_STR})"
     )
-    # DSL friction: even the outer structure can't be set up without
-    # a witness for ``n``, and the witness IS the trace length.  So
-    # the whole proof body sorries; ``p.fix("f"); p.assume(...);``
-    # scaffolding adds nothing without the inner computation.
+    # See docstring trace for the per-step plan.  Proof body composes
+    # sk_reduce + SK_STEP_S_UNDER_LEFT (×3) + SK_STEP_S (×2) +
+    # SK_STEP_K_UNDER_LEFT (×1) + inline depth-2 K-descent at step 4.
     p.sorry()
 
 
