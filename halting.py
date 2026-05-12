@@ -8163,26 +8163,120 @@ def SK_BULLET_S_REDEX(p):
 
 @proof
 def SK_BULLET_APP_OTHER(p):
-    """|- !X Y. ~(?A B. X = App_t K_t A /\\ Y = B) /\\
-                ~(?A B C. X = App_t (App_t S_t A) B /\\ Y = C)
-              ==> sk_bullet (App_t X Y) = App_t (sk_bullet X) (sk_bullet Y).
+    """|- !X Y.
+            ~(?a b. App_t X Y = App_t (App_t K_t a) b) /\\
+            ~(?a b c. App_t X Y = App_t (App_t (App_t S_t a) b) c)
+          ==> sk_bullet (App_t X Y) = App_t (sk_bullet X) (sk_bullet Y).
 
-    Wait -- the natural statement quantifies the *full* App_t (App_t K_t a) b
-    shape under the negation: ``~(?a b. App_t X Y = App_t (App_t K_t a) b)``
-    plus the S-counterpart.  Restated below.
+    Non-redex App congruence: D3 fires at the natural witness
+    (a, b) := (X, Y); D1 and D2 directly carry the K-/S-redex existence
+    needed to contradict the assumed negations; D4 carries the ~App
+    guard, refuted by ``is_app``.
 
-    *** SORRY STUB.  Non-redex App congruence: D3 fires (with the ~K
-    and ~S guards satisfied by the assumed negations); D1/D2 refuted by
-    those same negations; D4 refuted by the App shape.  ~120 LOC.
+    Structure mirrors SK_STEP_LEFT but is simpler -- bullet's D3 has a
+    single ``r = App_t (sk_bullet a) (sk_bullet b)`` payload (no nested
+    descend-left/descend-right/fixed split), so once X = a3 and Y = b3
+    are pinned via APP_T_INJ a single by_rewrite_of suffices.
+
+    DSL friction: the negation antecedents use lowercase ``a b c`` as
+    existential bvars (matching SK_STEP_LEFT's convention) rather than
+    the original stub's uppercase ``A B C`` -- alpha-equivalent, but the
+    lowercase form aligns with ``_sk_bullet_disjuncts``' bvar choice so
+    ``by_conj("not_kred", "h_kred")`` matches without surprise.
     """
+    from tactics import CONJ as _CONJ, CONJUNCT1 as _C1, CONJUNCT2 as _C2
     p.goal(
         "!X:nat0. !Y:nat0. "
-        "~(?A:nat0. ?B:nat0. App_t X Y = App_t (App_t K_t A) B) /\\ "
-        "~(?A:nat0. ?B:nat0. ?C:nat0. "
-        "  App_t X Y = App_t (App_t (App_t S_t A) B) C) "
+        "~(?a b. App_t X Y = App_t (App_t K_t a) b) /\\ "
+        "~(?a b c. App_t X Y = App_t (App_t (App_t S_t a) b) c) "
         "==> sk_bullet (App_t X Y) = App_t (sk_bullet X) (sk_bullet Y)"
     )
-    p.sorry()
+    p.fix("X Y")
+    p.assume(
+        "(not_kred, not_sred): "
+        "~(?a b. App_t X Y = App_t (App_t K_t a) b) /\\ "
+        "~(?a b c. App_t X Y = App_t (App_t (App_t S_t a) b) c)"
+    )
+
+    t = "App_t X Y"
+    sk_t = f"sk_bullet ({t})"
+    val = "App_t (sk_bullet X) (sk_bullet Y)"
+    K_shape = f"?a b. {t} = App_t (App_t K_t a) b"
+    S_shape = f"?a b c. {t} = App_t (App_t (App_t S_t a) b) c"
+
+    # D3 inner witness at (a, b) := (X, Y), r := val.
+    p.have(
+        f"inner_ex: ?a b. {t} = App_t a b /\\ "
+        f"          {val} = App_t (sk_bullet a) (sk_bullet b)"
+    ).by_exists(
+        ["X", "Y"], REFL(p._parse(t)), REFL(p._parse(val))
+    )
+    p.have(
+        f"inner_d3: ~({K_shape}) /\\ ~({S_shape}) /\\ "
+        f"          (?a b. {t} = App_t a b /\\ "
+        f"                 {val} = App_t (sk_bullet a) (sk_bullet b))"
+    ).by_thm(
+        _CONJ(
+            p.fact("not_kred"),
+            _CONJ(p.fact("not_sred"), p.fact("inner_ex")),
+        )
+    )
+
+    body_th = _sk_bullet_select_at(p, t, val, "inner_d3")
+    p.have(f"body: {_sk_bullet_body(t, sk_t)}").by_thm(body_th)
+
+    # App-shape witness for D4 contradiction.
+    p.have(f"is_app: ?a b. {t} = App_t a b").by_exists(
+        ["X", "Y"], REFL(p._parse(t))
+    )
+
+    D1, D2, D3, D4 = _sk_bullet_disjuncts(t, sk_t)
+    with p.cases_on("body"):
+        with p.case(f"h1: {D1}"):
+            # D1 itself is the K-redex existence (with payload r=sk_bullet a
+            # tacked on); peel the ``/\\ r = sk_bullet a`` to recover the
+            # bare K-shape and contradict not_kred.
+            p.choose("a_d1", from_="h1")
+            p.choose("b_d1", from_="a_d1_eq")
+            p.split("b_d1_eq", "(h_app, _)")
+            p.have(f"h_kred: {K_shape}").by_exists(
+                ["a_d1", "b_d1"], "h_app"
+            )
+            p.absurd().by_conj("not_kred", "h_kred")
+        with p.case(f"h2: {D2}"):
+            # D2 has ~K guard upfront; strip it, the remaining triple
+            # existential is the S-redex existence (modulo payload).
+            p.split("h2", "(_, h2_ex)")
+            p.choose("a_d2", from_="h2_ex")
+            p.choose("b_d2", from_="a_d2_eq")
+            p.choose("c_d2", from_="b_d2_eq")
+            p.split("c_d2_eq", "(h_app, _)")
+            p.have(f"h_sred: {S_shape}").by_exists(
+                ["a_d2", "b_d2", "c_d2"], "h_app"
+            )
+            p.absurd().by_conj("not_sred", "h_sred")
+        with p.case(f"h3: {D3}"):
+            # The firing branch.  Strip the two leading negations
+            # (already known), then unpack the App-existential and
+            # pin X=a3, Y=b3 via APP_T_INJ.
+            p.split("h3", "(_, _, h3_ex)")
+            p.choose("a3", from_="h3_ex")
+            p.choose("b3", from_="a3_eq")
+            p.split("b3_eq", "(h_app, h_sk)")
+            p.have("h_inj: X = a3 /\\ Y = b3").by(
+                APP_T_INJ, "X", "Y", "a3", "b3", "h_app"
+            )
+            p.have("h_Xa: X = a3").by_thm(_C1(p.fact("h_inj")))
+            p.have("h_Yb: Y = b3").by_thm(_C2(p.fact("h_inj")))
+            # h_sk: sk_t = App_t (sk_bullet a3) (sk_bullet b3).
+            # The two SYMs rewrite a3 -> X, b3 -> Y in the source.
+            p.thus(f"{sk_t} = {val}").by_rewrite_of(
+                "h_sk",
+                [SYM(p.fact("h_Xa")), SYM(p.fact("h_Yb"))],
+            )
+        with p.case(f"h4: {D4}"):
+            p.split("h4", "(_, _, h_napp, _)")
+            p.absurd().by_conj("h_napp", "is_app")
 
 
 @proof
