@@ -7869,18 +7869,114 @@ def PAR_STEPS_STRIP(p):
     """|- !X Y Z. sk_par_step X Y /\\ sk_par_steps X Z
                    ==> ?W. sk_par_steps Y W /\\ sk_par_step Z W.
 
-    *** STUB.  Strip lemma: combine a one-step par-step with an RTC
-    chain by closing the diamond at each joint.  Discharge: induct on
-    the RTC chain ``sk_par_steps X Z`` (instantiate the impredicative P
-    with ``\\A B. !Y. sk_par_step A Y ==> ?W. sk_par_steps Y W /\\
-    sk_par_step B W``); REFL base + STEP case use PAR_STEP_DIAMOND.
+    Strip lemma: combine a one-step par-step with an RTC chain by
+    closing the diamond at each joint.  Impredicative induction on the
+    RTC chain ``sk_par_steps X Z`` -- instantiate the encoding's P
+    with
+        \\A B. !V. sk_par_step A V ==>
+                   ?W. sk_par_steps V W /\\ sk_par_step B W.
+    REFL: take W := V (PAR_STEPS_REFL + the given step).
+    STEP: given A→B and IH at B; for V from sk_par_step A V,
+          PAR_STEP_DIAMOND on (A→B, A→V) finds U; IH at U yields W;
+          chain V→U + U→*W via PAR_STEPS_STEP gives V→*W.
     """
+    from tactics import BETA_RULE
     p.goal(
         "!X:nat0. !Y:nat0. !Z:nat0. "
         "sk_par_step X Y /\\ sk_par_steps X Z ==> "
         "?W:nat0. sk_par_steps Y W /\\ sk_par_step Z W"
     )
-    p.sorry()
+    p.fix("X Y Z")
+    p.assume(
+        "(h_XY, h_XZ): sk_par_step X Y /\\ sk_par_steps X Z"
+    )
+
+    spec_XZ = unfold_def_at(
+        SK_PAR_STEPS_DEF, p._parse("X"), p._parse("Z")
+    )
+    h_forall = EQ_MP(spec_XZ, p.fact("h_XZ"))
+
+    P_lifted = p._parse(
+        "\\A:nat0. \\B:nat0. "
+        "!V:nat0. sk_par_step A V ==> "
+        "?W:nat0. sk_par_steps V W /\\ sk_par_step B W"
+    )
+    inst = SPEC(P_lifted, h_forall)
+    inst_beta = BETA_RULE(inst)
+
+    # REFL closure -- bvar Zb to dodge outer Z.
+    with p.have(
+        "lifted_refl: !Zb:nat0. "
+        "!V:nat0. sk_par_step Zb V ==> "
+        "?W:nat0. sk_par_steps V W /\\ sk_par_step Zb W"
+    ).proof():
+        p.fix("Zb V")
+        p.assume("h_ZbV: sk_par_step Zb V")
+        p.have("h_VV: sk_par_steps V V").by(PAR_STEPS_REFL, "V")
+        p.thus(
+            "?W:nat0. sk_par_steps V W /\\ sk_par_step Zb W"
+        ).by_exists(["V"], "h_VV", "h_ZbV")
+
+    # STEP closure -- bvars a b c to dodge outer.
+    with p.have(
+        "lifted_step: !a:nat0. !b:nat0. !c:nat0. "
+        "sk_par_step a b /\\ "
+        "(!V:nat0. sk_par_step b V ==> "
+        "    ?W:nat0. sk_par_steps V W /\\ sk_par_step c W) ==> "
+        "(!V:nat0. sk_par_step a V ==> "
+        "    ?W:nat0. sk_par_steps V W /\\ sk_par_step c W)"
+    ).proof():
+        p.fix("a b c")
+        p.assume(
+            "(h_ab, h_IH): sk_par_step a b /\\ "
+            "(!V. sk_par_step b V ==> "
+            "    ?W. sk_par_steps V W /\\ sk_par_step c W)"
+        )
+        p.fix("V")
+        p.assume("h_aV: sk_par_step a V")
+        p.have(
+            "h_conj_diam: sk_par_step a b /\\ sk_par_step a V"
+        ).by_thm(CONJ(p.fact("h_ab"), p.fact("h_aV")))
+        p.have(
+            "h_diam: ?U. sk_par_step b U /\\ sk_par_step V U"
+        ).by(PAR_STEP_DIAMOND, "a", "b", "V", "h_conj_diam")
+        p.choose("U", from_="h_diam")
+        p.split("U_eq", "(h_bU, h_VU)")
+        p.have(
+            "h_IH_at: ?W. sk_par_steps U W /\\ sk_par_step c W"
+        ).by("h_IH", "U", "h_bU")
+        p.choose("W", from_="h_IH_at")
+        p.split("W_eq", "(h_UW, h_cW)")
+        p.have(
+            "h_conj_chain: sk_par_step V U /\\ sk_par_steps U W"
+        ).by_thm(CONJ(p.fact("h_VU"), p.fact("h_UW")))
+        p.have(
+            "h_VW: sk_par_steps V W"
+        ).by(PAR_STEPS_STEP, "V", "U", "W", "h_conj_chain")
+        p.thus(
+            "?W:nat0. sk_par_steps V W /\\ sk_par_step c W"
+        ).by_exists(["W"], "h_VW", "h_cW")
+
+    p.have(
+        "lifted_cl: "
+        "(!Zb:nat0. !V:nat0. sk_par_step Zb V ==> "
+        "    ?W:nat0. sk_par_steps V W /\\ sk_par_step Zb W) /\\ "
+        "(!a:nat0. !b:nat0. !c:nat0. "
+        "    sk_par_step a b /\\ "
+        "    (!V:nat0. sk_par_step b V ==> "
+        "        ?W:nat0. sk_par_steps V W /\\ sk_par_step c W) ==> "
+        "    (!V:nat0. sk_par_step a V ==> "
+        "        ?W:nat0. sk_par_steps V W /\\ sk_par_step c W))"
+    ).by_thm(CONJ(p.fact("lifted_refl"), p.fact("lifted_step")))
+
+    p.have(
+        "h_PXZ: !V:nat0. sk_par_step X V ==> "
+        "       ?W:nat0. sk_par_steps V W /\\ sk_par_step Z W"
+    ).by_thm(MP(inst_beta, p.fact("lifted_cl")))
+
+    p.thus(
+        "?W:nat0. sk_par_steps Y W /\\ sk_par_step Z W"
+    ).by("h_PXZ", "Y", "h_XY")
 
 
 @proof
