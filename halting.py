@@ -8295,44 +8295,212 @@ def SK_ITER_TO_PAR_STEPS(p):
 def IS_NORMAL_NOT_K_REDEX_SHAPE(p):
     """|- !M N. ~is_normal (App_t (App_t K_t M) N).
 
-    *** STUB.  A K-redex is never sk_step-fixed: SK_STEP_K fires the
-    contraction, yielding M -- which differs from
-    ``App_t (App_t K_t M) N`` by a strict-subterm (sk_size) argument
-    that has no fixed-point in nat0.
+    Size argument.  Suppose ``is_normal (App_t (App_t K_t M) N)``.
+    Then ``sk_step (K-redex) = K-redex`` (IS_NORMAL_IMP_FIXED) while
+    ``sk_step (K-redex) = M`` (SK_STEP_K); hence
+    ``M = App_t (App_t K_t M) N``.  Apply SK_SIZE_LT_DEEP_LEFT
+    (sk_size M < sk_size (App_t (App_t K_t M) N)) and substitute via
+    the equation -- yields ``sk_size M < sk_size M``, contradicting
+    ``NAT0_LT_NOT_REFL``.
     """
+    from nat0_order import NAT0_LT_NOT_REFL
     p.goal("!M:nat0. !N:nat0. ~is_normal (App_t (App_t K_t M) N)")
-    p.sorry()
+    p.fix("M N")
+    with p.suppose("h_norm: is_normal (App_t (App_t K_t M) N)"):
+        p.have(
+            "h_fixed: sk_step (App_t (App_t K_t M) N) "
+            "         = App_t (App_t K_t M) N"
+        ).by(
+            IS_NORMAL_IMP_FIXED, "App_t (App_t K_t M) N", "h_norm"
+        )
+        p.have(
+            "h_step: sk_step (App_t (App_t K_t M) N) = M"
+        ).by(SK_STEP_K, "M", "N")
+        p.have(
+            "h_M_eq: M = App_t (App_t K_t M) N"
+        ).by_thm(TRANS(SYM(p.fact("h_step")), p.fact("h_fixed")))
+        p.have(
+            "h_lt: nat0_lt (sk_size M) "
+            "      (sk_size (App_t (App_t K_t M) N))"
+        ).by(SK_SIZE_LT_DEEP_LEFT, "M", "K_t", "N")
+        p.have(
+            "h_self_lt: nat0_lt (sk_size M) (sk_size M)"
+        ).by_rewrite_of("h_lt", [SYM(p.fact("h_M_eq"))])
+        p.have(
+            "h_nrefl: ~nat0_lt (sk_size M) (sk_size M)"
+        ).by(NAT0_LT_NOT_REFL, "sk_size M")
+        p.absurd().by_conj("h_nrefl", "h_self_lt")
 
 
 @proof
 def IS_NORMAL_NOT_S_REDEX_SHAPE(p):
     """|- !M N P. ~is_normal (App_t (App_t (App_t S_t M) N) P).
 
-    *** STUB.  Same shape-clash argument as IS_NORMAL_NOT_K_REDEX_SHAPE:
-    SK_STEP_S fires, producing a term strictly larger by sk_size than
-    any fixed-point of the construction could allow.
+    Size argument via APP_T_INJ.  From ``is_normal (S-redex)`` derive
+    ``App_t (App_t M P) (App_t N P) = App_t (App_t (App_t S_t M) N) P``
+    (IS_NORMAL_IMP_FIXED + SK_STEP_S).  Outer APP_T_INJ exposes the
+    right-conjunct ``App_t N P = P`` -- P would be a strict superterm
+    of itself.  SK_SIZE_LT_APP_RIGHT + NAT0_LT_NOT_REFL on P contradicts.
     """
+    from nat0_order import NAT0_LT_NOT_REFL
     p.goal(
         "!M:nat0. !N:nat0. !P:nat0. "
         "~is_normal (App_t (App_t (App_t S_t M) N) P)"
     )
-    p.sorry()
+    p.fix("M N P")
+    with p.suppose(
+        "h_norm: is_normal (App_t (App_t (App_t S_t M) N) P)"
+    ):
+        p.have(
+            "h_fixed: "
+            "sk_step (App_t (App_t (App_t S_t M) N) P) "
+            "= App_t (App_t (App_t S_t M) N) P"
+        ).by(
+            IS_NORMAL_IMP_FIXED,
+            "App_t (App_t (App_t S_t M) N) P",
+            "h_norm",
+        )
+        p.have(
+            "h_step: "
+            "sk_step (App_t (App_t (App_t S_t M) N) P) "
+            "= App_t (App_t M P) (App_t N P)"
+        ).by(SK_STEP_S, "M", "N", "P")
+        p.have(
+            "h_eq: App_t (App_t M P) (App_t N P) "
+            "      = App_t (App_t (App_t S_t M) N) P"
+        ).by_thm(
+            TRANS(SYM(p.fact("h_step")), p.fact("h_fixed"))
+        )
+        # Outer APP_T_INJ -- pick the right conjunct App_t N P = P.
+        p.have(
+            "h_inj: App_t M P = App_t (App_t S_t M) N "
+            "       /\\ App_t N P = P"
+        ).by(
+            APP_T_INJ,
+            "App_t M P", "App_t N P",
+            "App_t (App_t S_t M) N", "P",
+            "h_eq",
+        )
+        p.split("h_inj", "(_, h_NP)")
+        p.have("h_P_eq: P = App_t N P").by_thm(SYM(p.fact("h_NP")))
+        p.have(
+            "h_lt: nat0_lt (sk_size P) (sk_size (App_t N P))"
+        ).by(SK_SIZE_LT_APP_RIGHT, "P", "N")
+        p.have(
+            "h_self_lt: nat0_lt (sk_size P) (sk_size P)"
+        ).by_rewrite_of("h_lt", [SYM(p.fact("h_P_eq"))])
+        p.have(
+            "h_nrefl: ~nat0_lt (sk_size P) (sk_size P)"
+        ).by(NAT0_LT_NOT_REFL, "sk_size P")
+        p.absurd().by_conj("h_nrefl", "h_self_lt")
 
 
 @proof
 def IS_NORMAL_APP_DECOMP(p):
     """|- !A B. is_normal (App_t A B) ==> is_normal A /\\ is_normal B.
 
-    *** STUB.  When ``App_t A B`` is sk_step-fixed and the App is
-    neither a K- nor S-redex, sk_step descends (left, then right).
-    A fixed point of that descent forces ``sk_step A = A`` and
-    ``sk_step B = B``.
+    From ``is_normal (App_t A B)`` derive that the outer App is neither
+    a K- nor S-redex (via IS_NORMAL_NOT_{K,S}_REDEX_SHAPE, by
+    contradicting an assumed redex shape).  Then SK_STEP_LEFT with the
+    two not-redex preconditions forces ``sk_step A = A`` by
+    contradiction; SK_STEP_RIGHT chains in the established
+    ``sk_step A = A`` to force ``sk_step B = B``.  Fold both back to
+    ``is_normal`` via IS_NORMAL_DEF.
     """
     p.goal(
         "!A:nat0. !B:nat0. "
         "is_normal (App_t A B) ==> is_normal A /\\ is_normal B"
     )
-    p.sorry()
+    p.fix("A B")
+    p.assume("h_norm_AB: is_normal (App_t A B)")
+    p.have(
+        "h_fixed: sk_step (App_t A B) = App_t A B"
+    ).by(IS_NORMAL_IMP_FIXED, "App_t A B", "h_norm_AB")
+
+    # not-K-redex precondition.
+    with p.have(
+        "not_kred: ~(?a b. App_t A B = App_t (App_t K_t a) b)"
+    ).proof():
+        with p.suppose(
+            "h_kred: ?a b. App_t A B = App_t (App_t K_t a) b"
+        ):
+            p.choose("a", from_="h_kred")
+            p.choose("b", from_="a_eq")
+            p.have(
+                "h_norm_kred: is_normal (App_t (App_t K_t a) b)"
+            ).by_rewrite_of("h_norm_AB", ["b_eq"])
+            p.have(
+                "h_not_norm: ~is_normal (App_t (App_t K_t a) b)"
+            ).by(IS_NORMAL_NOT_K_REDEX_SHAPE, "a", "b")
+            p.absurd().by_conj("h_not_norm", "h_norm_kred")
+
+    # not-S-redex precondition.
+    with p.have(
+        "not_sred: ~(?a b c. "
+        "App_t A B = App_t (App_t (App_t S_t a) b) c)"
+    ).proof():
+        with p.suppose(
+            "h_sred: ?a b c. "
+            "App_t A B = App_t (App_t (App_t S_t a) b) c"
+        ):
+            p.choose("a", from_="h_sred")
+            p.choose("b", from_="a_eq")
+            p.choose("c", from_="b_eq")
+            p.have(
+                "h_norm_sred: "
+                "is_normal (App_t (App_t (App_t S_t a) b) c)"
+            ).by_rewrite_of("h_norm_AB", ["c_eq"])
+            p.have(
+                "h_not_norm: "
+                "~is_normal (App_t (App_t (App_t S_t a) b) c)"
+            ).by(IS_NORMAL_NOT_S_REDEX_SHAPE, "a", "b", "c")
+            p.absurd().by_conj("h_not_norm", "h_norm_sred")
+
+    # sk_step A = A by contradiction via SK_STEP_LEFT.
+    with p.have("h_step_A: sk_step A = A").by_contradiction("h_neg_A"):
+        p.have(
+            "h_left: sk_step (App_t A B) = App_t (sk_step A) B"
+        ).by(
+            SK_STEP_LEFT, "A", "B",
+            "not_kred", "not_sred", "h_neg_A",
+        )
+        p.have(
+            "h_App_eq: App_t (sk_step A) B = App_t A B"
+        ).by_thm(TRANS(SYM(p.fact("h_left")), p.fact("h_fixed")))
+        p.have(
+            "h_inj: sk_step A = A /\\ B = B"
+        ).by(APP_T_INJ, "sk_step A", "B", "A", "B", "h_App_eq")
+        p.split("h_inj", "(h_eq_A, _)")
+        p.absurd().by_conj("h_neg_A", "h_eq_A")
+
+    p.have("h_norm_A: is_normal A").by_unfold(
+        "h_step_A", IS_NORMAL_DEF
+    )
+
+    # sk_step B = B by contradiction via SK_STEP_RIGHT.
+    with p.have("h_step_B: sk_step B = B").by_contradiction("h_neg_B"):
+        p.have(
+            "h_right: sk_step (App_t A B) = App_t A (sk_step B)"
+        ).by(
+            SK_STEP_RIGHT, "A", "B",
+            "not_kred", "not_sred", "h_step_A", "h_neg_B",
+        )
+        p.have(
+            "h_App_eq: App_t A (sk_step B) = App_t A B"
+        ).by_thm(TRANS(SYM(p.fact("h_right")), p.fact("h_fixed")))
+        p.have(
+            "h_inj: A = A /\\ sk_step B = B"
+        ).by(APP_T_INJ, "A", "sk_step B", "A", "B", "h_App_eq")
+        p.split("h_inj", "(_, h_eq_B)")
+        p.absurd().by_conj("h_neg_B", "h_eq_B")
+
+    p.have("h_norm_B: is_normal B").by_unfold(
+        "h_step_B", IS_NORMAL_DEF
+    )
+
+    p.thus("is_normal A /\\ is_normal B").by_thm(
+        CONJ(p.fact("h_norm_A"), p.fact("h_norm_B"))
+    )
 
 
 @proof
