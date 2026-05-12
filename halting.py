@@ -2536,6 +2536,33 @@ Omega_t = mk_const("Omega_t", [])
 
 
 @proof
+def IS_SK_TERM_I_T(p):
+    """|- is_sk_term I_t.  Unfolds I_t to ``App_t (App_t S_t K_t) K_t``
+    and applies the structural-intro tree (S_t, K_t leaves + App_t)."""
+    p.goal("is_sk_term I_t")
+    p.thus("is_sk_term I_t").by_tree(unfold=[I_T_DEF])
+
+
+@proof
+def IS_SK_TERM_KI_T(p):
+    """|- is_sk_term KI_t.  ``KI_t = App_t K_t I_t`` -- one App over a
+    leaf (K_t) and the I_t combinator (which unfolds to atoms)."""
+    p.goal("is_sk_term KI_t")
+    p.thus("is_sk_term KI_t").by_tree(unfold=[KI_T_DEF, I_T_DEF])
+
+
+@proof
+def IS_SK_TERM_OMEGA_T(p):
+    """|- is_sk_term Omega_t.
+
+    ``Omega_t = App_t (App_t (App_t S_t I_t) I_t) (App_t (App_t S_t I_t) I_t)``;
+    structural-intro through OMEGA_T_DEF + I_T_DEF.
+    """
+    p.goal("is_sk_term Omega_t")
+    p.thus("is_sk_term Omega_t").by_tree(unfold=[OMEGA_T_DEF, I_T_DEF])
+
+
+@proof
 def I_T_REDUCES(p):
     """|- !x. is_sk_term x ==> sk_iter (SUC0 (SUC0 0)) (App_t I_t x) = x.
 
@@ -6850,55 +6877,90 @@ def DIAG_TERM(p):
               ?d. is_sk_term d /\\
                   ?n. sk_iter n d = App_t (App_t H d) Omega_t.
 
-    *** STUB.  Curry's self-application diagonal -- no Y combinator
-    needed; ``e e`` IS the fixed point.
+    *** STUB -- BLOCKED ON PHASE 4 (parallel reduction / Church-Rosser).
 
-    Concrete witness (Curry's recipe for bracket abstraction at body
-    ``App_t (App_t H (App_t x x)) Omega_t``; 2 App layers, not 3 --
-    we removed the outer ``K_t`` wrap because the differentiator
-    ``halts (K_t Omega) = F`` vs. ``halts (KI_t Omega) = T`` already
-    breaks symmetry without it):
+    Curry's diagonal works in the SK *equational* theory: e_H e_H =
+    (H (e_H e_H)) Omega = (H d) Omega via two β-equivalent steps.
+    Under our ``sk_step`` (which is *strictly leftmost-outermost*,
+    not full β), the literal equality ``sk_iter n d = (H d) Omega``
+    fails to materialize for the standard witness.
 
-      [x] x         = I_t
-      [x] M         = App_t K_t M           (x not in M)
-      [x] (App M N) = App_t (App_t S_t [x]M) [x]N
+    Direct LMO simulation of Curry's witness
+        e_H := App_t (App_t S_t (App_t (App_t S_t (App_t K_t H))
+                                       (App_t (App_t S_t I_t) I_t)))
+                     (App_t K_t Omega_t)
+        d   := App_t e_H e_H
+    (verified in ``outside/sk_trace.py`` -- see also /tmp probe
+    scripts in this branch's history) shows the LMO trace diverges:
 
-    Step-by-step on ``(App (App H (App x x)) Omega)``:
-      [x] (x x)        = App_t (App_t S_t I_t) I_t           (= SII)
-      [x] (H (x x))    = App_t (App_t S_t (App_t K_t H)) SII
-      [x] ((H (x x)) Omega)
-                       = App_t (App_t S_t [x](H (x x))) (App_t K_t Omega_t)
+      step 0: d = (S A B) e_H               [A = S (K H) SII, B = K Omega]
+      step 1: --S top--> (A e_H) (B e_H)
+      step 2: descend left (A e_H is an S-redex), fire S
+              --> ((K H) e_H) (SII e_H)) (B e_H)
+      step 3: descend left to (K H) e_H, fire K
+              --> (H (SII e_H)) (B e_H)
+      step 4: (B e_H) becomes a redex now that left is "fixed"
+              modulo opaque H.  Under SK_STEP_RIGHT (left fixed,
+              right non-fixed), descend right and fire (K Omega) e_H
+              --> (H (SII e_H)) Omega
+      step 5: stuck if I_t folded, else descend into (SII e_H)
+              --> H ((I e_H)(I e_H)) Omega
+      step 6+: (I e_H) reduces (under unfolded I) to a (K e_H)(K e_H)
+              -- which reduces to e_H -- but the OUTER LMO descends
+              into the leftmost I e_H position FIRST, and the K-redex
+              there reduces the wrapper to a *different* sub-tree.
+              The "back to e_H = d" identity never materializes
+              literally: each round adds one more H layer
+              (steps 9, 17, 25, ... show "(H ((H ((H (...)))))" with
+              one extra H per cycle).
 
-    Let
-      e_H := App_t (App_t S_t
-                     (App_t (App_t S_t (App_t K_t H))
-                            (App_t (App_t S_t I_t) I_t)))
-                   (App_t K_t Omega_t)
-      d   := App_t e_H e_H
+    Root cause.  Curry's diagonal needs *substitution* (a single β
+    step contracts ``(λx.M) e_H`` to ``M[e_H/x]``, putting ``d`` at
+    every ``(x x)`` site simultaneously).  LMO ``sk_step`` only
+    contracts *one* redex per step and never copies sub-terms -- so
+    the ``(x x)`` positions get expanded incrementally, and the
+    "duplicate to recover d" identity is never reached as a literal
+    sk_iter equation.
 
-    is_sk_term d : structural intro on the App-tree above, atoms are
-    S_t / K_t / I_t (folded out via I_T_DEF) plus the hypothesised
-    SK term H.  Closes via ``by_tree`` + IS_SK_TERM_APP, plus a one-
-    line lift through I_T_DEF.
+    Discharge options (require Phase 4 machinery):
 
-    Reduction ``?n. sk_iter n d = (H d) Omega`` -- ~6 head sk_steps:
-      d = (S A B) e_H        [A = S (S (K H) SII), B = K Omega]
-        --S_t--> (A e_H) (B e_H)
-        -- (B e_H) = (K Omega) e_H --K_t--> Omega
-        -- current = (A e_H) Omega
-        --S_t--> ((S (K H) SII) e_H) Omega
-        --S_t--> ((K H) e_H) (SII e_H) Omega
-        -- (K H) e_H --K_t--> H
-        -- SII e_H = (S I I) e_H --S--> (I e_H) (I e_H)
-        -- (I e_H) -->* e_H -->* e_H, both sides reduce to e_H
-        -- (I e_H) (I e_H) -->* e_H e_H = d
-        -- current = H d Omega. QED.
-    Each step uses one SK_STEP_S or SK_STEP_K plus a congruence wrap
-    via SK_STEP_LEFT / SK_STEP_LEFT_LEFT.  ~60 lines.
+    A. Reformulate DIAG_TERM to use parallel reduction
+       ``sk_par_steps d (App_t (App_t H d) Omega_t)``.  Curry's
+       diagonal IS one parallel step (single β = contract all
+       redexes simultaneously).  HALTING_REDUCTION_PRESERVED would
+       then need a sk_par_steps variant (``HALTS_PAR_STEPS_INVARIANT``,
+       a Phase 4 stub).
 
-    Estimate for full discharge of this stub plus the Church-Rosser /
-    Standardization sub-development for HALTS_SK_STEP_APP_LEFT:
-    ~500 lines total (dominated by Church-Rosser).
+    B. Prove DIAG_TERM via standardization: from the parallel-
+       reduction equation, the standardization theorem yields a
+       leftmost-outermost trace to a normal form (when one exists)
+       -- but our target ``(H d) Omega`` isn't normal, so plain
+       standardization doesn't directly apply.  A Church-Rosser
+       argument suffices: ``d`` and ``(H d) Omega`` par-reduce to a
+       common term (by 1-step β + reflexivity), hence by confluence
+       there's some W with d -->* W and (H d) Omega -->* W -- this
+       gives halts d = halts ((H d) Omega) via Phase 4f's
+       HALTS_PAR_STEPS_INVARIANT, even though no direct sk_iter
+       equation exists.
+
+    C. Use Tromp's Y_t at a cleverly-chosen f.  Y_FIXED_POINT gives
+       sk_iter 7 (Y_t f) = App_t f X_TROMP_f.  Pick f such that
+       App_t f X_TROMP_f *equals* App_t (App_t H (Y_t f)) Omega_t.
+       The APP_T_INJ split requires f = App_t H (Y_t f) AND
+       X_TROMP_f = Omega_t.  The second is impossible: X_TROMP_f is
+       fixed by Tromp's specific Y_t, and its structure doesn't
+       match Omega_t = App_t SII SII.
+
+    Recommended sequencing: ship Phase 4 (in particular 4a-4d:
+    sk_par_steps definitions + diamond/confluence), then revisit
+    DIAG_TERM under option A or B.
+
+    Useful infrastructure landed for Phase 4's reuse:
+      * IS_SK_TERM_I_T, IS_SK_TERM_KI_T, IS_SK_TERM_OMEGA_T
+        (Stage-3 leaf lemmas).
+      * The negation-by-head-clash helper ``shape_neq`` (used heavily
+        in Phase 1-2; Phase 4 will reuse it for the par-step
+        constructors' shape preconditions).
     """
     p.goal(
         "!H. is_sk_term H ==> "
