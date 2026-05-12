@@ -1498,6 +1498,154 @@ def SK_STEP_S_UNDER_LEFT(p):
     )
 
 
+@proof
+def SK_STEP_K_UNDER_LEFT_LEFT(p):
+    """|- !x y z w. ~(x = App_t (App_t K_t x) y) ==>
+                    sk_step (App_t (App_t (App_t (App_t K_t x) y) z) w)
+                      = App_t (App_t x z) w.
+
+    Depth-2 K congruence: a K-redex sitting two App layers deep on the
+    leftmost spine.  Composes SK_STEP_K_UNDER_LEFT (fires the inner
+    K-redex ``App_t (App_t (App_t K_t x) y) z -> App_t x z``) with
+    SK_STEP_LEFT (lifts that step through the outer App).
+
+    Single exposed hypothesis: the same self-equality guard as
+    SK_STEP_K_UNDER_LEFT's -- ``~(x = App_t (App_t K_t x) y)`` -- since
+    structural guards on the outer App are dischargeable internally
+    (its LHS root ``App_t (App_t (App_t K_t x) y) z`` differs from K_t
+    and App_t S_t _ via the same APP_T_INJ + atom-NEQ chain used in the
+    depth-1 sibling).
+
+    Used at Step 4 of Y_FIXED_POINT (replaces the in-trace "inline
+    SK_STEP_K_UNDER_LEFT + SK_STEP_LEFT" composition).
+    """
+    from tactics import CONJUNCT1 as _C1, TRANS as _TRANS
+
+    p.goal(
+        "!x y z w. ~(x = App_t (App_t K_t x) y) ==> "
+        "          sk_step (App_t (App_t (App_t (App_t K_t x) y) z) w) "
+        "          = App_t (App_t x z) w"
+    )
+    p.fix("x y z w")
+    p.assume("not_self_inner: ~(x = App_t (App_t K_t x) y)")
+
+    inner_lhs = "App_t (App_t (App_t K_t x) y) z"
+    outer = f"App_t ({inner_lhs}) w"
+    inner_val = "App_t x z"
+
+    # Fire the inner K-redex via the depth-1 sibling.
+    p.have(
+        f"inner_step: sk_step ({inner_lhs}) = {inner_val}"
+    ).by(SK_STEP_K_UNDER_LEFT, "x", "y", "z", "not_self_inner")
+
+    # H1 (~K-shape outer).  APP_T_INJ twice:
+    #   outer = App_t (App_t K_t p) q  ->  inner_lhs = App_t K_t p
+    #                                  ->  App_t (App_t K_t x) y = K_t.
+    # SYM and K_T_NEQ_APP_T close.
+    with p.have(f"h1: ~(?p q. {outer} = App_t (App_t K_t p) q)").proof():
+        with p.suppose(f"ex_k: ?p q. {outer} = App_t (App_t K_t p) q"):
+            p.choose("p_w", from_="ex_k")
+            p.choose("q_w", from_="p_w_eq")
+            p.have(f"e1: {inner_lhs} = App_t K_t p_w /\\ w = q_w").by(
+                APP_T_INJ, inner_lhs, "w", "App_t K_t p_w", "q_w", "q_w_eq"
+            )
+            p.have(f"e1a: {inner_lhs} = App_t K_t p_w").by_thm(
+                _C1(p.fact("e1"))
+            )
+            p.have(
+                "e2: App_t (App_t K_t x) y = K_t /\\ z = p_w"
+            ).by(
+                APP_T_INJ, "App_t (App_t K_t x) y", "z", "K_t", "p_w", "e1a"
+            )
+            p.have(
+                "e2a: App_t (App_t K_t x) y = K_t"
+            ).by_thm(_C1(p.fact("e2")))
+            p.have("k_neq: ~(K_t = App_t (App_t K_t x) y)").by(
+                K_T_NEQ_APP_T, "App_t K_t x", "y"
+            )
+            p.have("k_eq: K_t = App_t (App_t K_t x) y").by_thm(
+                SYM(p.fact("e2a"))
+            )
+            p.absurd().by_conj("k_neq", "k_eq")
+
+    # H2 (~S-shape outer).  APP_T_INJ three peels:
+    #   outer = App_t (App_t (App_t S_t p) q) r
+    #     ->  inner_lhs = App_t (App_t S_t p) q
+    #     ->  App_t (App_t K_t x) y = App_t S_t p
+    #     ->  App_t K_t x = S_t.
+    # SYM and S_T_NEQ_APP_T(K_t, x) close.
+    with p.have(
+        f"h2: ~(?p q r. {outer} = App_t (App_t (App_t S_t p) q) r)"
+    ).proof():
+        with p.suppose(
+            f"ex_s: ?p q r. {outer} = App_t (App_t (App_t S_t p) q) r"
+        ):
+            p.choose("p_w", from_="ex_s")
+            p.choose("q_w", from_="p_w_eq")
+            p.choose("r_w", from_="q_w_eq")
+            p.have(
+                f"e1: {inner_lhs} = App_t (App_t S_t p_w) q_w /\\ w = r_w"
+            ).by(
+                APP_T_INJ, inner_lhs, "w",
+                "App_t (App_t S_t p_w) q_w", "r_w", "r_w_eq",
+            )
+            p.have(
+                f"e1a: {inner_lhs} = App_t (App_t S_t p_w) q_w"
+            ).by_thm(_C1(p.fact("e1")))
+            p.have(
+                "e2: App_t (App_t K_t x) y = App_t S_t p_w /\\ z = q_w"
+            ).by(
+                APP_T_INJ, "App_t (App_t K_t x) y", "z",
+                "App_t S_t p_w", "q_w", "e1a",
+            )
+            p.have(
+                "e2a: App_t (App_t K_t x) y = App_t S_t p_w"
+            ).by_thm(_C1(p.fact("e2")))
+            p.have("e3: App_t K_t x = S_t /\\ y = p_w").by(
+                APP_T_INJ, "App_t K_t x", "y", "S_t", "p_w", "e2a"
+            )
+            p.have("e3a: App_t K_t x = S_t").by_thm(_C1(p.fact("e3")))
+            p.have("s_neq: ~(S_t = App_t K_t x)").by(
+                S_T_NEQ_APP_T, "K_t", "x"
+            )
+            p.have("s_eq: S_t = App_t K_t x").by_thm(SYM(p.fact("e3a")))
+            p.absurd().by_conj("s_neq", "s_eq")
+
+    # H3 (~self-step of inner_lhs).  ``inner_step`` rewrites
+    # sk_step inner_lhs to ``App_t x z``; suppose inner_lhs is a fixed
+    # point.  Then App_t x z = inner_lhs; APP_T_INJ peels x =
+    # App_t (App_t K_t x) y, contradicting not_self_inner.
+    # DSL friction: the analogous H3 block appears verbatim in
+    # SK_STEP_K_UNDER_LEFT (line 1348) and SK_STEP_S_UNDER_LEFT (1479).
+    # A small `_h3_inner_nonself(p, inner_step_eq, not_self)` helper
+    # would dedupe the three copies, but each variant differs in the
+    # APP_T_INJ peel depth -- pulling it out cleanly needs a small DSL
+    # on top of "peel-and-contradict".
+    with p.have(f"h3: ~(sk_step ({inner_lhs}) = {inner_lhs})").proof():
+        with p.suppose(f"h_eq: sk_step ({inner_lhs}) = {inner_lhs}"):
+            p.have(
+                f"val_eq_inner: {inner_val} = {inner_lhs}"
+            ).by_thm(_TRANS(SYM(p.fact("inner_step")), p.fact("h_eq")))
+            p.have(
+                "peel: x = App_t (App_t K_t x) y /\\ z = z"
+            ).by(
+                APP_T_INJ, "x", "z",
+                "App_t (App_t K_t x) y", "z", "val_eq_inner",
+            )
+            p.have("x_eq: x = App_t (App_t K_t x) y").by_thm(
+                _C1(p.fact("peel"))
+            )
+            p.absurd().by_conj("not_self_inner", "x_eq")
+
+    # SK_STEP_LEFT lifts the inner step through the outer App.
+    p.have(
+        f"left_step: sk_step ({outer}) = App_t (sk_step ({inner_lhs})) w"
+    ).by(SK_STEP_LEFT, inner_lhs, "w", "h1", "h2", "h3")
+    p.thus(f"sk_step ({outer}) = App_t ({inner_val}) w").by_rewrite_of(
+        "left_step", ["inner_step"]
+    )
+
+
 def _atom_neq_App_negations(p, atom, atom_neq_lemma):
     """For an atom term (S_t or K_t), prove the three "atom is not
     App_t-shaped" existentials:
@@ -2642,6 +2790,178 @@ def SK_SIZE_LT_DEEP_LEFT(p):
         "h_inner",
         "h_outer",
     )
+
+
+# ---------------------------------------------------------------------------
+# Self-inequality wrappers (irreflexivity corollaries).
+#
+# Each ~(t = App-expr containing t) follows from the matching
+# SK_SIZE_LT_* lemma via AP_TERM(sk_size) + NAT0_LT_NOT_REFL.  These are
+# the call-site form actually used to discharge SK_STEP_*_UNDER_LEFT
+# not_self hypotheses when ``t`` is universally quantified (no atom-tag
+# clash available).
+# ---------------------------------------------------------------------------
+
+
+from nat0_order import NAT0_LT_NOT_REFL  # noqa: E402
+
+
+@proof
+def SK_NEQ_APP_LEFT_WRAP(p):
+    """|- !t u. ~(t = App_t t u).
+
+    AP_TERM(sk_size) + SK_SIZE_LT_APP_LEFT + NAT0_LT_NOT_REFL.
+    """
+    p.goal("!t u. ~(t = App_t t u)")
+    p.fix("t u")
+    with p.suppose("h_eq: t = App_t t u"):
+        # AP_TERM(sk_size, h_eq) lifts h_eq through the sk_size head.
+        # DSL friction: AP_TERM is a raw tactic; ``by_cong(sk_size, "h_eq")``
+        # ought to do the same with a friendlier label, but the current
+        # by_cong dispatch (§4) needs a Var/Const head term first --
+        # ``sk_size`` is a Const here, so it works, but the spelling
+        # ``by_thm(AP_TERM(sk_size, p.fact("h_eq")))`` is what existing
+        # call sites use (cf. OMEGA_NON_HALTING line 3771), so we follow.
+        p.have(
+            "h_size_eq: sk_size t = sk_size (App_t t u)"
+        ).by_thm(AP_TERM(sk_size, p.fact("h_eq")))
+        p.have(
+            "h_lt: nat0_lt (sk_size t) (sk_size (App_t t u))"
+        ).by(SK_SIZE_LT_APP_LEFT, "t", "u")
+        # Fold ``sk_size (App_t t u)`` in h_lt back to ``sk_size t`` via
+        # SYM(h_size_eq) -- the same SYM-fold ceremony as in the size
+        # lemmas above.
+        p.have(
+            "h_lt_self: nat0_lt (sk_size t) (sk_size t)"
+        ).by_rewrite_of("h_lt", [SYM(p.fact("h_size_eq"))])
+        p.have(
+            "h_nrefl: ~(nat0_lt (sk_size t) (sk_size t))"
+        ).by(NAT0_LT_NOT_REFL, "sk_size t")
+        p.absurd().by_conj("h_nrefl", "h_lt_self")
+
+
+@proof
+def SK_NEQ_APP_RIGHT_WRAP(p):
+    """|- !t u. ~(t = App_t u t).
+
+    Mirror of SK_NEQ_APP_LEFT_WRAP via SK_SIZE_LT_APP_RIGHT.
+    """
+    p.goal("!t u. ~(t = App_t u t)")
+    p.fix("t u")
+    with p.suppose("h_eq: t = App_t u t"):
+        p.have(
+            "h_size_eq: sk_size t = sk_size (App_t u t)"
+        ).by_thm(AP_TERM(sk_size, p.fact("h_eq")))
+        p.have(
+            "h_lt: nat0_lt (sk_size t) (sk_size (App_t u t))"
+        ).by(SK_SIZE_LT_APP_RIGHT, "t", "u")
+        p.have(
+            "h_lt_self: nat0_lt (sk_size t) (sk_size t)"
+        ).by_rewrite_of("h_lt", [SYM(p.fact("h_size_eq"))])
+        p.have(
+            "h_nrefl: ~(nat0_lt (sk_size t) (sk_size t))"
+        ).by(NAT0_LT_NOT_REFL, "sk_size t")
+        p.absurd().by_conj("h_nrefl", "h_lt_self")
+
+
+@proof
+def SK_NEQ_DEEP_LEFT_WRAP(p):
+    """|- !t u v. ~(t = App_t (App_t u t) v).
+
+    The call-site form used at Step 7 of Y_FIXED_POINT.  AP_TERM(sk_size)
+    + SK_SIZE_LT_DEEP_LEFT + NAT0_LT_NOT_REFL.
+    """
+    p.goal("!t u v. ~(t = App_t (App_t u t) v)")
+    p.fix("t u v")
+    with p.suppose("h_eq: t = App_t (App_t u t) v"):
+        p.have(
+            "h_size_eq: sk_size t = sk_size (App_t (App_t u t) v)"
+        ).by_thm(AP_TERM(sk_size, p.fact("h_eq")))
+        p.have(
+            "h_lt: nat0_lt (sk_size t) (sk_size (App_t (App_t u t) v))"
+        ).by(SK_SIZE_LT_DEEP_LEFT, "t", "u", "v")
+        p.have(
+            "h_lt_self: nat0_lt (sk_size t) (sk_size t)"
+        ).by_rewrite_of("h_lt", [SYM(p.fact("h_size_eq"))])
+        p.have(
+            "h_nrefl: ~(nat0_lt (sk_size t) (sk_size t))"
+        ).by(NAT0_LT_NOT_REFL, "sk_size t")
+        p.absurd().by_conj("h_nrefl", "h_lt_self")
+
+
+# ---------------------------------------------------------------------------
+# Python helper: discharge the SK_STEP_S_UNDER_LEFT not_self hypothesis.
+#
+# Every call to SK_STEP_S_UNDER_LEFT at SPEC (x, y, z, w) leaves the
+# user owing
+#   ~(App_t (App_t x z) (App_t y z) = App_t (App_t (App_t S_t x) y) z).
+# The discharge is structurally identical at every site (and depends
+# only on z, never on x or y):
+#   * APP_T_INJ peels the equation to two conjuncts.
+#   * The right conjunct ``App_t y z = z`` is rejected by
+#     SK_NEQ_APP_RIGHT_WRAP at (t := z, u := y) -- the wrapped term
+#     can't equal its own subterm regardless of what y is.
+# Used 3x in Y_FIXED_POINT (Steps 1, 3, 5) and any other lifted-S call.
+# ---------------------------------------------------------------------------
+
+
+def _discharge_s_under_left_not_self(p, x, y, z, *, label):
+    """Register ``label`` proving ~(App_t (App_t x z) (App_t y z) =
+    App_t (App_t (App_t S_t x) y) z).
+
+    ``x``, ``y``, ``z`` are term strings (parsed in scope).  The proof
+    needs no structural assumption on x or y -- the contradiction lives
+    in the right conjunct (``App_t y z = z``), which is always size-
+    impossible by SK_NEQ_APP_RIGHT_WRAP.
+
+    DSL friction noted: this is a *Python* helper, not a proof
+    combinator.  The DSL has no mechanism to package "a frame-local
+    sub-proof that registers one fact" as a first-class lemma
+    parameterised by terms; pattern handlers (§9 register_pattern_handler)
+    plug into ``assume`` rather than ``have``.  An ``@have_macro``
+    decorator that lets a Python function emit a sequence of have/with
+    blocks targeted at a specific not_self shape would let this live as
+    a tactic rather than a free function.
+    """
+    from tactics import CONJUNCT2 as _C2
+    # DSL friction: term-string composition is by raw f-string concat,
+    # so non-atomic substitutes (e.g. ``x = "App_t K_t a"``) must be
+    # parenthesised at every interpolation -- otherwise the parser sees
+    # juxtaposed atoms (``App_t App_t K_t a``) which left-associates
+    # wrongly.  A ``mk_app("App_t", *parts)`` term-builder would do this
+    # at the term layer; for now we wrap inline.
+    px, py, pz = f"({x})", f"({y})", f"({z})"
+    contract = f"App_t (App_t {px} {pz}) (App_t {py} {pz})"
+    redex = f"App_t (App_t (App_t S_t {px}) {py}) {pz}"
+    with p.have(f"{label}: ~({contract} = {redex})").proof():
+        with p.suppose(f"h_eq: {contract} = {redex}"):
+            # Peel top App_t: contract = App_t (App_t x z) (App_t y z),
+            # redex = App_t (App_t (App_t S_t x) y) z.
+            p.have(
+                f"e1: App_t {px} {pz} = App_t (App_t S_t {px}) {py} /\\ "
+                f"    App_t {py} {pz} = {pz}"
+            ).by(
+                APP_T_INJ,
+                f"App_t {px} {pz}", f"App_t {py} {pz}",
+                f"App_t (App_t S_t {px}) {py}", pz,
+                "h_eq",
+            )
+            # Right conjunct: ``App_t y z = z`` -- contradicts
+            # SK_NEQ_APP_RIGHT_WRAP applied at (t := z, u := y).
+            p.have(f"e_yz: App_t {py} {pz} = {pz}").by_thm(
+                _C2(p.fact("e1"))
+            )
+            # DSL friction: ``by_conj`` matches P/~P by syntactic shape
+            # only -- it does NOT auto-SYM the equation, so we have to
+            # flip ``e_yz`` manually before pairing with the
+            # ``~(z = App_t y z)`` form returned by SK_NEQ_APP_RIGHT_WRAP.
+            # _simp_require's SYM tolerance (§4) helps inside
+            # have/thus finishing but not inside ``by_conj``.
+            p.have(f"e_zy: {pz} = App_t {py} {pz}").by_thm(SYM(p.fact("e_yz")))
+            p.have(f"z_neq: ~({pz} = App_t {py} {pz})").by(
+                SK_NEQ_APP_RIGHT_WRAP, pz, py
+            )
+            p.absurd().by_conj("z_neq", "e_zy")
 
 
 @proof
