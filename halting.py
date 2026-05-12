@@ -7621,6 +7621,84 @@ def PAR_STEP_K_T_INV(p):
     _par_step_atom_inv(p, "K_t", K_T_NEQ_APP_T)
 
 
+# ---------------------------------------------------------------------------
+# Phase 4d -- diamond / confluence theorems for ``sk_par_step``.
+#
+# Statement-only.  Discharge requires:
+#   * a complete-development function ``bullet : nat0 -> nat0`` defined
+#     by Takahashi's recipe (contract all redexes in parallel);
+#   * the triangle lemma ``sk_par_step X Y ==> sk_par_step Y (bullet X)``
+#     (structural induction on X using the App-shape par-step inversions
+#     -- the K/S-redex subcases re-use the atom inversions above);
+#   * diamond follows from triangle by taking W := bullet X;
+#   * strip then follows from diamond by induction on the RTC chain;
+#   * confluence (RTC version) follows from strip by another RTC
+#     induction.
+#
+# The bullet function and triangle lemma are deferred (each ~80 LOC of
+# DSL); these three theorems ship as ``sorry`` stubs so downstream code
+# (HALTS_PAR_STEPS_INVARIANT and other halts-preservation arguments)
+# can call them.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def PAR_STEP_DIAMOND(p):
+    """|- !X Y Z. sk_par_step X Y /\\ sk_par_step X Z
+                   ==> ?W. sk_par_step Y W /\\ sk_par_step Z W.
+
+    *** STUB.  Takahashi diamond for one-step parallel reduction.
+    Discharge: define ``bullet : nat0 -> nat0`` (complete-development
+    function), prove the triangle lemma ``sk_par_step X Y ==>
+    sk_par_step Y (bullet X)`` by structural induction on X, then take
+    W := bullet X and apply triangle to both branches.
+    """
+    p.goal(
+        "!X:nat0. !Y:nat0. !Z:nat0. "
+        "sk_par_step X Y /\\ sk_par_step X Z ==> "
+        "?W:nat0. sk_par_step Y W /\\ sk_par_step Z W"
+    )
+    p.sorry()
+
+
+@proof
+def PAR_STEPS_STRIP(p):
+    """|- !X Y Z. sk_par_step X Y /\\ sk_par_steps X Z
+                   ==> ?W. sk_par_steps Y W /\\ sk_par_step Z W.
+
+    *** STUB.  Strip lemma: combine a one-step par-step with an RTC
+    chain by closing the diamond at each joint.  Discharge: induct on
+    the RTC chain ``sk_par_steps X Z`` (instantiate the impredicative P
+    with ``\\A B. !Y. sk_par_step A Y ==> ?W. sk_par_steps Y W /\\
+    sk_par_step B W``); REFL base + STEP case use PAR_STEP_DIAMOND.
+    """
+    p.goal(
+        "!X:nat0. !Y:nat0. !Z:nat0. "
+        "sk_par_step X Y /\\ sk_par_steps X Z ==> "
+        "?W:nat0. sk_par_steps Y W /\\ sk_par_step Z W"
+    )
+    p.sorry()
+
+
+@proof
+def PAR_STEPS_CONFLUENT(p):
+    """|- !X Y Z. sk_par_steps X Y /\\ sk_par_steps X Z
+                   ==> ?W. sk_par_steps Y W /\\ sk_par_steps Z W.
+
+    *** STUB.  Church-Rosser for the RTC of parallel reduction.
+    Discharge: induct on ``sk_par_steps X Y`` (impredicative P :=
+    ``\\A B. !Z. sk_par_steps A Z ==> ?W. sk_par_steps B W /\\
+    sk_par_steps Z W``); REFL base trivial, STEP case uses
+    PAR_STEPS_STRIP plus PAR_STEPS_STEP to extend the chain.
+    """
+    p.goal(
+        "!X:nat0. !Y:nat0. !Z:nat0. "
+        "sk_par_steps X Y /\\ sk_par_steps X Z ==> "
+        "?W:nat0. sk_par_steps Y W /\\ sk_par_steps Z W"
+    )
+    p.sorry()
+
+
 @proof
 def HALTS_PAR_STEPS_INVARIANT(p):
     """|- !X Y. sk_par_steps X Y ==> halts X = halts Y.
@@ -7765,97 +7843,42 @@ def SK_ITER_APP_LEFT_HALTS(p):
 def DIAG_TERM(p):
     """|- !H. is_sk_term H ==>
               ?d. is_sk_term d /\\
-                  ?n. sk_iter n d = App_t (App_t H d) Omega_t.
+                  sk_par_steps d (App_t (App_t H d) Omega_t).
 
-    *** STUB -- BLOCKED ON PHASE 4 (parallel reduction / Church-Rosser).
+    *** STUB.  Curry's diagonal under parallel reduction.
 
-    Curry's diagonal works in the SK *equational* theory: e_H e_H =
-    (H (e_H e_H)) Omega = (H d) Omega via two β-equivalent steps.
-    Under our ``sk_step`` (which is *strictly leftmost-outermost*,
-    not full β), the literal equality ``sk_iter n d = (H d) Omega``
-    fails to materialize for the standard witness.
+    The literal ``sk_iter n d = (H d) Omega`` form is unprovable: LMO
+    ``sk_step`` contracts one redex at a time and never duplicates,
+    so the ``(x x)`` sites in Curry's witness expand incrementally
+    and never re-collapse to ``d``.  Parallel reduction sidesteps
+    this -- a single par-step contracts every visible redex
+    simultaneously, which is exactly the single-β substitution
+    Curry's diagonal needs.
 
-    Direct LMO simulation of Curry's witness
-        e_H := App_t (App_t S_t (App_t (App_t S_t (App_t K_t H))
-                                       (App_t (App_t S_t I_t) I_t)))
-                     (App_t K_t Omega_t)
+    Witness:
+        SII := S I_t I_t
+        e_H := S (S (K H) SII) (K Omega_t)
         d   := App_t e_H e_H
-    (verified in ``outside/sk_trace.py`` -- see also /tmp probe
-    scripts in this branch's history) shows the LMO trace diverges:
 
-      step 0: d = (S A B) e_H               [A = S (K H) SII, B = K Omega]
-      step 1: --S top--> (A e_H) (B e_H)
-      step 2: descend left (A e_H is an S-redex), fire S
-              --> ((K H) e_H) (SII e_H)) (B e_H)
-      step 3: descend left to (K H) e_H, fire K
-              --> (H (SII e_H)) (B e_H)
-      step 4: (B e_H) becomes a redex now that left is "fixed"
-              modulo opaque H.  Under SK_STEP_RIGHT (left fixed,
-              right non-fixed), descend right and fire (K Omega) e_H
-              --> (H (SII e_H)) Omega
-      step 5: stuck if I_t folded, else descend into (SII e_H)
-              --> H ((I e_H)(I e_H)) Omega
-      step 6+: (I e_H) reduces (under unfolded I) to a (K e_H)(K e_H)
-              -- which reduces to e_H -- but the OUTER LMO descends
-              into the leftmost I e_H position FIRST, and the K-redex
-              there reduces the wrapper to a *different* sub-tree.
-              The "back to e_H = d" identity never materializes
-              literally: each round adds one more H layer
-              (steps 9, 17, 25, ... show "(H ((H ((H (...)))))" with
-              one extra H per cycle).
-
-    Root cause.  Curry's diagonal needs *substitution* (a single β
-    step contracts ``(λx.M) e_H`` to ``M[e_H/x]``, putting ``d`` at
-    every ``(x x)`` site simultaneously).  LMO ``sk_step`` only
-    contracts *one* redex per step and never copies sub-terms -- so
-    the ``(x x)`` positions get expanded incrementally, and the
-    "duplicate to recover d" identity is never reached as a literal
-    sk_iter equation.
-
-    Discharge options (require Phase 4 machinery):
-
-    A. Reformulate DIAG_TERM to use parallel reduction
-       ``sk_par_steps d (App_t (App_t H d) Omega_t)``.  Curry's
-       diagonal IS one parallel step (single β = contract all
-       redexes simultaneously).  HALTING_REDUCTION_PRESERVED would
-       then need a sk_par_steps variant (``HALTS_PAR_STEPS_INVARIANT``,
-       a Phase 4 stub).
-
-    B. Prove DIAG_TERM via standardization: from the parallel-
-       reduction equation, the standardization theorem yields a
-       leftmost-outermost trace to a normal form (when one exists)
-       -- but our target ``(H d) Omega`` isn't normal, so plain
-       standardization doesn't directly apply.  A Church-Rosser
-       argument suffices: ``d`` and ``(H d) Omega`` par-reduce to a
-       common term (by 1-step β + reflexivity), hence by confluence
-       there's some W with d -->* W and (H d) Omega -->* W -- this
-       gives halts d = halts ((H d) Omega) via Phase 4f's
-       HALTS_PAR_STEPS_INVARIANT, even though no direct sk_iter
-       equation exists.
-
-    C. Use Tromp's Y_t at a cleverly-chosen f.  Y_FIXED_POINT gives
-       sk_iter 7 (Y_t f) = App_t f X_TROMP_f.  Pick f such that
-       App_t f X_TROMP_f *equals* App_t (App_t H (Y_t f)) Omega_t.
-       The APP_T_INJ split requires f = App_t H (Y_t f) AND
-       X_TROMP_f = Omega_t.  The second is impossible: X_TROMP_f is
-       fixed by Tromp's specific Y_t, and its structure doesn't
-       match Omega_t = App_t SII SII.
-
-    Recommended sequencing: ship Phase 4 (in particular 4a-4d:
-    sk_par_steps definitions + diamond/confluence), then revisit
-    DIAG_TERM under option A or B.
-
-    Useful infrastructure landed for Phase 4's reuse:
-      * IS_SK_TERM_I_T, IS_SK_TERM_KI_T, IS_SK_TERM_OMEGA_T
-        (Stage-3 leaf lemmas).
-      * The negation-by-head-clash helper ``shape_neq`` (used heavily
-        in Phase 1-2; Phase 4 will reuse it for the par-step
-        constructors' shape preconditions).
+    Discharge:
+      1. ``is_sk_term d`` by ``by_tree(unfold=[I_T_DEF, OMEGA_T_DEF])``
+         plus the leaf lemma for H.
+      2. ``sk_par_steps d (App_t (App_t H d) Omega_t)`` by a 5-link
+         par-step chain, each link a ``PAR_S`` / ``PAR_K`` /
+         ``PAR_APP`` congruence tree contracting all redexes visible
+         at that level:
+            d --> (A e_H) (B e_H)                       [outer S]
+              --> ((KH e_H) (SII e_H)) Omega_t          [inner S, K]
+              --> (H ((I_t e_H)(I_t e_H))) Omega_t      [KH-K, SII-S]
+              --> (H (((K e_H)(K e_H)) ((K e_H)(K e_H)))) Omega_t  [2x I-S]
+              --> (H (e_H e_H)) Omega_t                 [4x K-redex]
+              =   (H d) Omega_t.
+         Compose via ``PAR_STEPS_STEP``.
     """
     p.goal(
         "!H. is_sk_term H ==> "
         "    ?d. is_sk_term d /\\ "
-        "        (?n. sk_iter n d = App_t (App_t H d) Omega_t)"
+        "        sk_par_steps d (App_t (App_t H d) Omega_t)"
     )
     p.sorry()
 
@@ -8090,26 +8113,27 @@ def DIAGONAL_TERM_EXISTS(p):
     p.assume("h_is_sk_H: is_sk_term H")
 
     # ---- (1) Existence of the self-applying diagonal d. ------------------
+    # DIAG_TERM (option A) now produces a parallel-reduction witness:
+    # ``sk_par_steps d (App_t (App_t H d) Omega_t)`` instead of the literal
+    # ``sk_iter n d = ...`` equation (which is unprovable under LMO --
+    # see DIAG_TERM's historical-context block).
     p.have(
         "h_diag: ?d. is_sk_term d /\\ "
-        "        ?n. sk_iter n d = App_t (App_t H d) Omega_t"
+        "        sk_par_steps d (App_t (App_t H d) Omega_t)"
     ).by(DIAG_TERM, "H", "h_is_sk_H")
     p.choose("d", from_="h_diag")
-    # d_eq : is_sk_term d /\ ?n. sk_iter n d = (H d) Omega.
-    p.split("d_eq", "(h_is_sk_d, h_d_red)")
-    # h_d_red : ?n. sk_iter n d = App_t (App_t H d) Omega_t.
+    # d_eq : is_sk_term d /\ sk_par_steps d (App_t (App_t H d) Omega_t).
+    p.split("d_eq", "(h_is_sk_d, h_d_par)")
 
     # ---- (2) halts d = halts ((H d) Omega) -------------------------------
-    # HALTING_REDUCTION_PRESERVED needs a concrete n with sk_iter n d = u;
-    # choose the witness out of h_d_red.
-    p.choose("n0", from_="h_d_red")
-    # n0_eq : sk_iter n0 d = App_t (App_t H d) Omega_t.
+    # HALTS_PAR_STEPS_INVARIANT consumes the par_steps witness directly --
+    # no need to extract a concrete n.  (Was HALTING_REDUCTION_PRESERVED
+    # before option A.)
     p.have(
         "h_pres_d: halts d = halts (App_t (App_t H d) Omega_t)"
     ).by(
-        HALTING_REDUCTION_PRESERVED, "d",
-        "App_t (App_t H d) Omega_t", "n0",
-        _CONJ(p.fact("h_is_sk_d"), p.fact("n0_eq")),
+        HALTS_PAR_STEPS_INVARIANT,
+        "d", "App_t (App_t H d) Omega_t", "h_d_par",
     )
 
     # ---- (3) K_t branch: H d -->* K_t  =>  ~halts d. ---------------------
