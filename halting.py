@@ -7021,18 +7021,343 @@ def PAR_STEP_TO_STEPS(p):
     p.thus("sk_par_steps X Y").by(PAR_STEPS_STEP, "X", "Y", "Y", "h_conj")
 
 
+def _par_step_app_case(p):
+    """SK_PAR_STEP_TO_SK_STEP's App-but-not-K/S sub-case.  Three-way
+    sub-split on which child fixes:
+      - sk_step a /= a              -> descend-left  (SK_STEP_LEFT).
+      - sk_step a = a, sk_step b /= b -> descend-right (SK_STEP_RIGHT).
+      - both fixed                  -> App is fixed   (SK_STEP_APP_FIXED).
+
+    In each sub-case, PAR_APP combines IH(a) / IH(b) and PAR_REFL to
+    yield sk_par_step (App a b) <reduct>; rewriting via X = App a b and
+    sk_step X = <reduct> closes the goal.
+    """
+    from classical import EXCLUDED_MIDDLE
+    from tactics import CONJ as _CONJ, BETA_RULE
+    # 'a' auto-introduced by cases_on; manually choose b.
+    p.choose("b", from_="a_eq")
+    # b_eq : X = App_t a b.
+    # Lift the non-redex hypotheses from X to App_t a b via AP_TERM at
+    # the negation-shape predicate, then beta-normalize, then EQ_MP.
+    # (REWRITE_CONV's bottom-up rewriter no-ops on a b_eq with Var LHS
+    # under our walker; AP_TERM + BETA_RULE substitutes X cleanly.)
+    P_K = p._parse(
+        "\\x:nat0. ~(?u:nat0. ?v:nat0. x = App_t (App_t K_t u) v)"
+    )
+    h_nK_ab_thm = EQ_MP(
+        BETA_RULE(AP_TERM(P_K, p.fact("b_eq"))),
+        p.fact("h_nK"),
+    )
+    p.have(
+        "h_nK_ab: ~(?u v. App_t a b = App_t (App_t K_t u) v)"
+    ).by_thm(h_nK_ab_thm)
+    P_S = p._parse(
+        "\\x:nat0. ~(?u:nat0. ?v:nat0. ?w:nat0. "
+        "          x = App_t (App_t (App_t S_t u) v) w)"
+    )
+    h_nS_ab_thm = EQ_MP(
+        BETA_RULE(AP_TERM(P_S, p.fact("b_eq"))),
+        p.fact("h_nS"),
+    )
+    p.have(
+        "h_nS_ab: ~(?u v w. App_t a b = App_t (App_t (App_t S_t u) v) w)"
+    ).by_thm(h_nS_ab_thm)
+    # IH at a, b -- both have strictly smaller nat0_lt.
+    p.have(
+        "h_lt_a_AB: nat0_lt a (App_t a b)"
+    ).by(NAT0_LT_APP_T_L, "a", "b")
+    p.have(
+        "h_lt_b_AB: nat0_lt b (App_t a b)"
+    ).by(NAT0_LT_APP_T_R, "a", "b")
+    p.have("h_lt_a: nat0_lt a X").by_rewrite_of(
+        "h_lt_a_AB", [SYM(p.fact("b_eq"))]
+    )
+    p.have("h_lt_b: nat0_lt b X").by_rewrite_of(
+        "h_lt_b_AB", [SYM(p.fact("b_eq"))]
+    )
+    p.have("h_ih_a: sk_par_step a (sk_step a)").by("IH", "a", "h_lt_a")
+    p.have("h_ih_b: sk_par_step b (sk_step b)").by("IH", "b", "h_lt_b")
+    # 3-way sub-split via two nested LEMs.
+    with p.cases_on(EXCLUDED_MIDDLE, "sk_step a = a"):
+        with p.case("h_af: sk_step a = a"):
+            with p.cases_on(EXCLUDED_MIDDLE, "sk_step b = b"):
+                with p.case("h_bf: sk_step b = b"):
+                    # Both fixed -> sk_step X = X.
+                    p.have(
+                        "h_sk_AB: sk_step (App_t a b) = App_t a b"
+                    ).by(
+                        SK_STEP_APP_FIXED, "a", "b",
+                        "h_nK_ab", "h_nS_ab", "h_af", "h_bf",
+                    )
+                    p.have("h_sk_X: sk_step X = X").by_rewrite_of(
+                        "h_sk_AB", [SYM(p.fact("b_eq"))]
+                    )
+                    p.have("h_refl: sk_par_step X X").by(PAR_REFL, "X")
+                    # Both-fixed case: SYM(h_sk_X) is X = sk_step X.  We
+                    # can't use that as a rewrite rule (non-terminating
+                    # via X -> sk_step X -> sk_step (sk_step X) -> ...).
+                    # Use targeted AP_TERM at the RHS slot instead.
+                    p.thus("sk_par_step X (sk_step X)").by_thm(
+                        EQ_MP(
+                            AP_TERM(
+                                p._parse("sk_par_step X"),
+                                SYM(p.fact("h_sk_X")),
+                            ),
+                            p.fact("h_refl"),
+                        )
+                    )
+                with p.case("h_bnf: ~(sk_step b = b)"):
+                    # Descend-right.
+                    p.have(
+                        "h_sk_AB: sk_step (App_t a b) = "
+                        "         App_t a (sk_step b)"
+                    ).by(
+                        SK_STEP_RIGHT, "a", "b",
+                        "h_nK_ab", "h_nS_ab", "h_af", "h_bnf",
+                    )
+                    p.have(
+                        "h_sk_X: sk_step X = App_t a (sk_step b)"
+                    ).by_rewrite_of("h_sk_AB", [SYM(p.fact("b_eq"))])
+                    p.have("h_aa: sk_par_step a a").by(PAR_REFL, "a")
+                    p.have(
+                        "h_par_AB: sk_par_step (App_t a b) "
+                        "                     (App_t a (sk_step b))"
+                    ).by(
+                        PAR_APP, "a", "a", "b", "sk_step b",
+                        _CONJ(p.fact("h_aa"), p.fact("h_ih_b")),
+                    )
+                    p.have(
+                        "h_par_X_step: sk_par_step X (App_t a (sk_step b))"
+                    ).by_rewrite_of("h_par_AB", [SYM(p.fact("b_eq"))])
+                    p.thus("sk_par_step X (sk_step X)").by_rewrite_of(
+                        "h_par_X_step", [SYM(p.fact("h_sk_X"))]
+                    )
+        with p.case("h_anf: ~(sk_step a = a)"):
+            # Descend-left.
+            p.have(
+                "h_sk_AB: sk_step (App_t a b) = App_t (sk_step a) b"
+            ).by(
+                SK_STEP_LEFT, "a", "b",
+                "h_nK_ab", "h_nS_ab", "h_anf",
+            )
+            p.have(
+                "h_sk_X: sk_step X = App_t (sk_step a) b"
+            ).by_rewrite_of("h_sk_AB", [SYM(p.fact("b_eq"))])
+            p.have("h_bb: sk_par_step b b").by(PAR_REFL, "b")
+            p.have(
+                "h_par_AB: sk_par_step (App_t a b) "
+                "                     (App_t (sk_step a) b)"
+            ).by(
+                PAR_APP, "a", "sk_step a", "b", "b",
+                _CONJ(p.fact("h_ih_a"), p.fact("h_bb")),
+            )
+            p.have(
+                "h_par_X_step: sk_par_step X (App_t (sk_step a) b)"
+            ).by_rewrite_of("h_par_AB", [SYM(p.fact("b_eq"))])
+            p.thus("sk_par_step X (sk_step X)").by_rewrite_of(
+                "h_par_X_step", [SYM(p.fact("h_sk_X"))]
+            )
+
+
+def _par_step_leaf_case(p):
+    """SK_PAR_STEP_TO_SK_STEP's "X is not an App" sub-case.
+
+    From h_nK, h_nS, h_nApp build the D4-inner branch, hand it to
+    ``_sk_step_select_at`` to get ``body[X, sk_step X]``; cases_on
+    contradicts D1/D2/D3 via the not-shape hypotheses, leaving D4
+    which yields ``sk_step X = X``.  PAR_REFL closes.
+    """
+    from tactics import CONJ as _CONJ
+    p.have(
+        "inner_leaf: "
+        "~(?a b. X = App_t (App_t K_t a) b) /\\ "
+        "~(?a b c. X = App_t (App_t (App_t S_t a) b) c) /\\ "
+        "~(?a b. X = App_t a b) /\\ X = X"
+    ).by_thm(
+        _CONJ(
+            p.fact("h_nK"),
+            _CONJ(
+                p.fact("h_nS"),
+                _CONJ(p.fact("h_nApp"), REFL(p._parse("X"))),
+            ),
+        )
+    )
+    body_th = _sk_step_select_at(p, "X", "X", "inner_leaf")
+    p.have(f"body: {_sk_step_body('X', 'sk_step X')}").by_thm(body_th)
+    D1, D2, D3, D4 = _sk_step_disjuncts("X", "sk_step X")
+    with p.cases_on("body"):
+        with p.case(f"h1: {D1}"):
+            p.choose("u", from_="h1")
+            p.choose("v", from_="u_eq")
+            p.split("v_eq", "(h_app, _)")
+            p.have(
+                "h_kred_ex: ?a b. X = App_t (App_t K_t a) b"
+            ).by_exists(["u", "v"], "h_app")
+            p.absurd().by_conj("h_nK", "h_kred_ex")
+        with p.case(f"h2: {D2}"):
+            p.split("h2", "(_, h2_ex)")
+            p.choose("u", from_="h2_ex")
+            p.choose("v", from_="u_eq")
+            p.choose("w", from_="v_eq")
+            p.split("w_eq", "(h_app, _)")
+            p.have(
+                "h_sred_ex: ?a b c. X = "
+                "           App_t (App_t (App_t S_t a) b) c"
+            ).by_exists(["u", "v", "w"], "h_app")
+            p.absurd().by_conj("h_nS", "h_sred_ex")
+        with p.case(f"h3: {D3}"):
+            p.split("h3", "(_, _, h3_ex)")
+            p.choose("u", from_="h3_ex")
+            p.choose("v", from_="u_eq")
+            p.split("v_eq", "(h_app, _)")
+            p.have(
+                "h_app_ex: ?a b. X = App_t a b"
+            ).by_exists(["u", "v"], "h_app")
+            p.absurd().by_conj("h_nApp", "h_app_ex")
+        with p.case(f"h4: {D4}"):
+            p.split("h4", "(_, _, _, h_sk)")
+            # h_sk: sk_step X = X.  SYM as rewrite rule (X -> sk_step X)
+            # is non-terminating; use AP_TERM at the RHS slot.
+            p.have("h_refl: sk_par_step X X").by(PAR_REFL, "X")
+            p.thus("sk_par_step X (sk_step X)").by_thm(
+                EQ_MP(
+                    AP_TERM(
+                        p._parse("sk_par_step X"),
+                        SYM(p.fact("h_sk")),
+                    ),
+                    p.fact("h_refl"),
+                )
+            )
+
+
+@proof
+def SK_PAR_STEP_TO_SK_STEP(p):
+    """|- !X. sk_par_step X (sk_step X).
+
+    Single-step parallel reduction always relates X to its LMO ``sk_step``
+    reduct.  Proof by strong induction on X (over nat0_lt) with a
+    4-way case-split on X's shape:
+
+      * K-redex (X = App K a b):  PAR_K(a, a, b, b) + reflexivity on a, b.
+      * S-redex:                  PAR_S with reflexivities on a, b, c.
+      * generic App (~K, ~S):     3-way sub-split on which child is fixed,
+                                  applying PAR_APP with the right mix of
+                                  IH(a/b) and PAR_REFL.
+      * leaf (~K, ~S, ~App):      sk_step X = X via the D4-disjunct of the
+                                  SK_STEP_REC body, then PAR_REFL.
+
+    The descent rules SK_STEP_K / S / LEFT / RIGHT / APP_FIXED pin down
+    sk_step X's exact form in each case; PAR_K / S / APP / REFL build
+    the matching parallel-step.
+    """
+    from classical import EXCLUDED_MIDDLE
+    from tactics import CONJ as _CONJ
+    p.goal("!X:nat0. sk_par_step X (sk_step X)")
+    with p.strong_induction("X", "IH"):
+        # IH : !k. nat0_lt k X ==> sk_par_step k (sk_step k).
+        # ---- LEM split: is X a K-redex? -----------------------------------
+        with p.cases_on(EXCLUDED_MIDDLE, "?a b. X = App_t (App_t K_t a) b"):
+            with p.case("h_K: ?a b. X = App_t (App_t K_t a) b"):
+                # X = App K a b; sk_step X = a; sk_par_step X a via PAR_K.
+                # cases_on auto-introduces 'a' as a witness; we manually choose b.
+                p.choose("b", from_="a_eq")
+                # b_eq : X = App_t (App_t K_t a) b.
+                p.have(
+                    "h_sk_KAB: sk_step (App_t (App_t K_t a) b) = a"
+                ).by(SK_STEP_K, "a", "b")
+                p.have("h_sk_X: sk_step X = a").by_rewrite_of(
+                    "h_sk_KAB", [SYM(p.fact("b_eq"))]
+                )
+                p.have("h_aa: sk_par_step a a").by(PAR_REFL, "a")
+                p.have("h_bb: sk_par_step b b").by(PAR_REFL, "b")
+                p.have(
+                    "h_par_KAB: sk_par_step (App_t (App_t K_t a) b) a"
+                ).by(
+                    PAR_K, "a", "a", "b", "b",
+                    _CONJ(p.fact("h_aa"), p.fact("h_bb")),
+                )
+                # Rewrite step-by-step: first App K a b -> X, then a -> sk_step X.
+                # (Both simultaneously would rewrite the inner 'a' inside App K a b
+                # before the outer pattern matches.)
+                p.have("h_par_X_a: sk_par_step X a").by_rewrite_of(
+                    "h_par_KAB", [SYM(p.fact("b_eq"))]
+                )
+                p.thus("sk_par_step X (sk_step X)").by_rewrite_of(
+                    "h_par_X_a", [SYM(p.fact("h_sk_X"))]
+                )
+            with p.case("h_nK: ~(?a b. X = App_t (App_t K_t a) b)"):
+                # ---- LEM split: is X an S-redex? --------------------------
+                with p.cases_on(
+                    EXCLUDED_MIDDLE,
+                    "?a b c. X = App_t (App_t (App_t S_t a) b) c",
+                ):
+                    with p.case(
+                        "h_S: ?a b c. X = App_t (App_t (App_t S_t a) b) c"
+                    ):
+                        # 'a' auto-introduced; manually choose b, c.
+                        p.choose("b", from_="a_eq")
+                        p.choose("c", from_="b_eq")
+                        # c_eq : X = App_t (App_t (App_t S_t a) b) c.
+                        p.have(
+                            "h_sk_SABC: "
+                            "sk_step (App_t (App_t (App_t S_t a) b) c) = "
+                            "App_t (App_t a c) (App_t b c)"
+                        ).by(SK_STEP_S, "a", "b", "c")
+                        p.have(
+                            "h_sk_X: sk_step X = App_t (App_t a c) (App_t b c)"
+                        ).by_rewrite_of(
+                            "h_sk_SABC", [SYM(p.fact("c_eq"))]
+                        )
+                        p.have("h_aa: sk_par_step a a").by(PAR_REFL, "a")
+                        p.have("h_bb: sk_par_step b b").by(PAR_REFL, "b")
+                        p.have("h_cc: sk_par_step c c").by(PAR_REFL, "c")
+                        p.have(
+                            "h_par_SABC: "
+                            "sk_par_step (App_t (App_t (App_t S_t a) b) c) "
+                            "            (App_t (App_t a c) (App_t b c))"
+                        ).by(
+                            PAR_S, "a", "a", "b", "b", "c", "c",
+                            _CONJ(
+                                p.fact("h_aa"),
+                                _CONJ(p.fact("h_bb"), p.fact("h_cc")),
+                            ),
+                        )
+                        p.have(
+                            "h_par_X_acbc: sk_par_step X "
+                            "              (App_t (App_t a c) (App_t b c))"
+                        ).by_rewrite_of("h_par_SABC", [SYM(p.fact("c_eq"))])
+                        p.thus("sk_par_step X (sk_step X)").by_rewrite_of(
+                            "h_par_X_acbc", [SYM(p.fact("h_sk_X"))]
+                        )
+                    with p.case(
+                        "h_nS: ~(?a b c. X = "
+                        "       App_t (App_t (App_t S_t a) b) c)"
+                    ):
+                        # ---- LEM split: is X an App at all? ---------------
+                        with p.cases_on(
+                            EXCLUDED_MIDDLE, "?a b. X = App_t a b"
+                        ):
+                            with p.case("h_App: ?a b. X = App_t a b"):
+                                _par_step_app_case(p)
+                            with p.case("h_nApp: ~(?a b. X = App_t a b)"):
+                                _par_step_leaf_case(p)
+
+
 @proof
 def SK_STEP_TO_PAR_STEPS(p):
     """|- !X. sk_par_steps X (sk_step X).
 
-    *** STUB.  Single sk_step is a (one-step) parallel reduction, which
-    embeds into the reflexive-transitive closure ``sk_par_steps``.
-    Discharge in ~5 lines once the underlying ``sk_par_step`` /
-    ``sk_par_steps`` relations are defined and the one-step embedding
-    is proved as a lemma.
+    Trivial lift: SK_PAR_STEP_TO_SK_STEP gives the single-step relation;
+    PAR_STEP_TO_STEPS embeds it into the RTC.
     """
     p.goal("!X:nat0. sk_par_steps X (sk_step X)")
-    p.sorry()
+    p.fix("X")
+    p.have("h_par: sk_par_step X (sk_step X)").by(
+        SK_PAR_STEP_TO_SK_STEP, "X"
+    )
+    p.thus("sk_par_steps X (sk_step X)").by(
+        PAR_STEP_TO_STEPS, "X", "sk_step X", "h_par"
+    )
 
 
 @proof
@@ -7040,19 +7365,95 @@ def PAR_STEPS_APP_LEFT(p):
     """|- !X X1 Y. sk_par_steps X X1 ==>
                    sk_par_steps (App_t X Y) (App_t X1 Y).
 
-    *** STUB.  Left-App congruence for parallel-reduction's reflexive-
-    transitive closure.  In the abstract reduction system this is one
-    case of the structural-congruence rule for parallel reduction (the
-    other direction, right-App congruence, is symmetric and not used
-    by Stage 6).  Discharge ~30 lines: case-split on
-    ``sk_par_steps``'s defining cases (REFL vs. STEP), and lift the
-    one-step App-congruence rule for ``sk_par_step``.
+    Lift the par-step App-left congruence (provable for a single
+    parallel step via PAR_APP + PAR_REFL Y) through the RTC by
+    instantiating ``sk_par_steps``'s impredicative encoding with the
+    lifted relation P := \\A B. sk_par_steps (App_t A Y) (App_t B Y),
+    then verifying P satisfies the RTC closure conditions.
     """
+    from tactics import AP_THM as _AP_THM, BETA_CONV as _BETA, TRANS as _TRANS, BETA_RULE
     p.goal(
         "!X:nat0. !X1:nat0. !Y:nat0. sk_par_steps X X1 ==> "
         "         sk_par_steps (App_t X Y) (App_t X1 Y)"
     )
-    p.sorry()
+    p.fix("X X1 Y")
+    p.assume("h: sk_par_steps X X1")
+
+    # ---- Unfold h via SK_PAR_STEPS_DEF + beta -----------------------------
+    ap1 = _AP_THM(SK_PAR_STEPS_DEF, p._parse("X"))
+    bet1 = _BETA(rand(ap1._concl))
+    spec_X = _TRANS(ap1, bet1)
+    ap2 = _AP_THM(spec_X, p._parse("X1"))
+    bet2 = _BETA(rand(ap2._concl))
+    spec_XX1 = _TRANS(ap2, bet2)
+    # spec_XX1: sk_par_steps X X1 = !P. closures(P) ==> P X X1.
+    h_forall = EQ_MP(spec_XX1, p.fact("h"))
+
+    # ---- Instantiate at the lifted P --------------------------------------
+    P_lifted = p._parse(
+        "\\A:nat0. \\B:nat0. sk_par_steps (App_t A Y) (App_t B Y)"
+    )
+    inst = SPEC(P_lifted, h_forall)
+    inst_beta = BETA_RULE(inst)
+    # inst_beta:
+    #   (!Z. sk_par_steps (App Z Y) (App Z Y)) /\
+    #   (!A B C. sk_par_step A B /\
+    #            sk_par_steps (App B Y) (App C Y) ==>
+    #            sk_par_steps (App A Y) (App C Y))
+    #   ==> sk_par_steps (App X Y) (App X1 Y)
+
+    # ---- Prove the lifted closures ---------------------------------------
+    with p.have(
+        "lifted_refl: !Z:nat0. sk_par_steps (App_t Z Y) (App_t Z Y)"
+    ).proof():
+        p.fix("Z")
+        p.thus("sk_par_steps (App_t Z Y) (App_t Z Y)").by(
+            PAR_STEPS_REFL, "App_t Z Y"
+        )
+
+    with p.have(
+        "lifted_step: "
+        "!A:nat0. !B:nat0. !C:nat0. "
+        "sk_par_step A B /\\ sk_par_steps (App_t B Y) (App_t C Y) "
+        "==> sk_par_steps (App_t A Y) (App_t C Y)"
+    ).proof():
+        p.fix("A B C")
+        p.assume(
+            "(h_AB, h_BC): "
+            "sk_par_step A B /\\ sk_par_steps (App_t B Y) (App_t C Y)"
+        )
+        # Lift sk_par_step A B + refl Y to App-form via PAR_APP.
+        p.have("h_YY: sk_par_step Y Y").by(PAR_REFL, "Y")
+        p.have(
+            "h_conj: sk_par_step A B /\\ sk_par_step Y Y"
+        ).by_thm(CONJ(p.fact("h_AB"), p.fact("h_YY")))
+        p.have(
+            "h_App_AB: sk_par_step (App_t A Y) (App_t B Y)"
+        ).by(PAR_APP, "A", "B", "Y", "Y", "h_conj")
+        # Compose via PAR_STEPS_STEP.
+        p.have(
+            "h_conj2: sk_par_step (App_t A Y) (App_t B Y) /\\ "
+            "         sk_par_steps (App_t B Y) (App_t C Y)"
+        ).by_thm(CONJ(p.fact("h_App_AB"), p.fact("h_BC")))
+        p.thus(
+            "sk_par_steps (App_t A Y) (App_t C Y)"
+        ).by(
+            PAR_STEPS_STEP,
+            "App_t A Y", "App_t B Y", "App_t C Y",
+            "h_conj2",
+        )
+
+    p.have(
+        "lifted_cl: (!Z. sk_par_steps (App_t Z Y) (App_t Z Y)) /\\ "
+        "           (!A B C. sk_par_step A B /\\ "
+        "                    sk_par_steps (App_t B Y) (App_t C Y) ==> "
+        "                    sk_par_steps (App_t A Y) (App_t C Y))"
+    ).by_thm(CONJ(p.fact("lifted_refl"), p.fact("lifted_step")))
+
+    # MP inst_beta with the lifted closures.
+    p.thus(
+        "sk_par_steps (App_t X Y) (App_t X1 Y)"
+    ).by_thm(MP(inst_beta, p.fact("lifted_cl")))
 
 
 @proof
