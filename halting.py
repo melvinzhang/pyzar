@@ -8241,22 +8241,108 @@ def SK_ITER_TO_PAR_STEPS(p):
 
 
 @proof
+def NORMAL_STABILITY_PAR_STEP(p):
+    """|- !X Y. is_normal X /\\ sk_par_step X Y ==> Y = X.
+
+    *** STUB.  A single par-step from a normal term is the identity.
+
+    Discharge: case-split on X's shape.
+      * X = S_t  -- PAR_STEP_S_T_INV gives Y = S_t = X.
+      * X = K_t  -- PAR_STEP_K_T_INV gives Y = K_t.
+      * X = App_t A B -- par-step from an App must fire one of
+        PAR_REFL / PAR_K / PAR_S / PAR_APP.  PAR_K and PAR_S require
+        X to be a K- or S-redex; both contradict ``is_normal X``
+        (a redex's fixed-point is itself, contradicting the
+        contraction rule).  PAR_REFL gives Y = X directly.  PAR_APP
+        decomposes; recurse on children (both children normal from
+        ``is_normal (App_t A B)``, so each child par-step is
+        identity).
+
+    Requires App-shape par-step inversion lemmas not yet shipped.
+    """
+    p.goal(
+        "!X:nat0. !Y:nat0. is_normal X /\\ sk_par_step X Y ==> Y = X"
+    )
+    p.sorry()
+
+
+@proof
 def NORMAL_STABILITY_PAR_STEPS(p):
     """|- !X Y. is_normal X /\\ sk_par_steps X Y ==> Y = X.
 
-    *** STUB.  A par_steps chain from a normal term is the identity.
-
-    Discharge: factor through the single-step version
-    ``NORMAL_STABILITY_PAR_STEP : is_normal X /\\ sk_par_step X Y ==> Y = X``
-    (case-split on X's shape: atoms via PAR_STEP_{S,K}_T_INV; App via
-    the App-shape inversion -- the K/S rule branches contradict
-    is_normal X).  Then RTC-induct: REFL trivial; STEP combines the
-    single-step version with IH.
+    Lifts NORMAL_STABILITY_PAR_STEP through the RTC.  Impredicative
+    induction with P := ``\\A B. is_normal A ==> B = A``:
+      REFL : tautology.
+      STEP : a -> b given + IH ``is_normal b ==> c = b``; single-step
+             stability at (a, b) gives b = a, which transports
+             is_normal a to is_normal b; IH yields c = b; TRANS gives
+             c = a.
     """
+    from tactics import BETA_RULE
     p.goal(
         "!X:nat0. !Y:nat0. is_normal X /\\ sk_par_steps X Y ==> Y = X"
     )
-    p.sorry()
+    p.fix("X Y")
+    p.assume(
+        "(h_normX, h_XY): is_normal X /\\ sk_par_steps X Y"
+    )
+
+    spec_XY = unfold_def_at(
+        SK_PAR_STEPS_DEF, p._parse("X"), p._parse("Y")
+    )
+    h_forall = EQ_MP(spec_XY, p.fact("h_XY"))
+
+    P_lifted = p._parse(
+        "\\A:nat0. \\B:nat0. is_normal A ==> B = A"
+    )
+    inst = SPEC(P_lifted, h_forall)
+    inst_beta = BETA_RULE(inst)
+
+    with p.have(
+        "lifted_refl: !Zb:nat0. is_normal Zb ==> Zb = Zb"
+    ).proof():
+        p.fix("Zb")
+        p.assume("h: is_normal Zb")
+        p.thus("Zb = Zb").by_thm(REFL(p._parse("Zb")))
+
+    with p.have(
+        "lifted_step: !a:nat0. !b:nat0. !c:nat0. "
+        "sk_par_step a b /\\ (is_normal b ==> c = b) ==> "
+        "(is_normal a ==> c = a)"
+    ).proof():
+        p.fix("a b c")
+        p.assume(
+            "(h_ab, h_IH): sk_par_step a b /\\ (is_normal b ==> c = b)"
+        )
+        p.assume("h_norm_a: is_normal a")
+        p.have(
+            "h_conj: is_normal a /\\ sk_par_step a b"
+        ).by_thm(CONJ(p.fact("h_norm_a"), p.fact("h_ab")))
+        p.have("h_ba: b = a").by(
+            NORMAL_STABILITY_PAR_STEP, "a", "b", "h_conj"
+        )
+        # is_normal b via a -> b rewrite (rule SYM h_ba = a = b).
+        p.have("h_norm_b: is_normal b").by_rewrite_of(
+            "h_norm_a", [SYM(p.fact("h_ba"))]
+        )
+        p.have("h_cb: c = b").by("h_IH", "h_norm_b")
+        p.thus("c = a").by_thm(
+            TRANS(p.fact("h_cb"), p.fact("h_ba"))
+        )
+
+    p.have(
+        "lifted_cl: "
+        "(!Zb:nat0. is_normal Zb ==> Zb = Zb) /\\ "
+        "(!a:nat0. !b:nat0. !c:nat0. "
+        "    sk_par_step a b /\\ (is_normal b ==> c = b) ==> "
+        "    (is_normal a ==> c = a))"
+    ).by_thm(CONJ(p.fact("lifted_refl"), p.fact("lifted_step")))
+
+    p.have(
+        "h_PXY: is_normal X ==> Y = X"
+    ).by_thm(MP(inst_beta, p.fact("lifted_cl")))
+
+    p.thus("Y = X").by("h_PXY", "h_normX")
 
 
 @proof
