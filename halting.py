@@ -8292,29 +8292,189 @@ def SK_ITER_TO_PAR_STEPS(p):
 
 
 @proof
+def IS_NORMAL_NOT_K_REDEX_SHAPE(p):
+    """|- !M N. ~is_normal (App_t (App_t K_t M) N).
+
+    *** STUB.  A K-redex is never sk_step-fixed: SK_STEP_K fires the
+    contraction, yielding M -- which differs from
+    ``App_t (App_t K_t M) N`` by a strict-subterm (sk_size) argument
+    that has no fixed-point in nat0.
+    """
+    p.goal("!M:nat0. !N:nat0. ~is_normal (App_t (App_t K_t M) N)")
+    p.sorry()
+
+
+@proof
+def IS_NORMAL_NOT_S_REDEX_SHAPE(p):
+    """|- !M N P. ~is_normal (App_t (App_t (App_t S_t M) N) P).
+
+    *** STUB.  Same shape-clash argument as IS_NORMAL_NOT_K_REDEX_SHAPE:
+    SK_STEP_S fires, producing a term strictly larger by sk_size than
+    any fixed-point of the construction could allow.
+    """
+    p.goal(
+        "!M:nat0. !N:nat0. !P:nat0. "
+        "~is_normal (App_t (App_t (App_t S_t M) N) P)"
+    )
+    p.sorry()
+
+
+@proof
+def IS_NORMAL_APP_DECOMP(p):
+    """|- !A B. is_normal (App_t A B) ==> is_normal A /\\ is_normal B.
+
+    *** STUB.  When ``App_t A B`` is sk_step-fixed and the App is
+    neither a K- nor S-redex, sk_step descends (left, then right).
+    A fixed point of that descent forces ``sk_step A = A`` and
+    ``sk_step B = B``.
+    """
+    p.goal(
+        "!A:nat0. !B:nat0. "
+        "is_normal (App_t A B) ==> is_normal A /\\ is_normal B"
+    )
+    p.sorry()
+
+
+@proof
 def NORMAL_STABILITY_PAR_STEP(p):
     """|- !X Y. is_normal X /\\ sk_par_step X Y ==> Y = X.
 
-    *** STUB.  A single par-step from a normal term is the identity.
-
-    Discharge: case-split on X's shape.
-      * X = S_t  -- PAR_STEP_S_T_INV gives Y = S_t = X.
-      * X = K_t  -- PAR_STEP_K_T_INV gives Y = K_t.
-      * X = App_t A B -- par-step from an App must fire one of
-        PAR_REFL / PAR_K / PAR_S / PAR_APP.  PAR_K and PAR_S require
-        X to be a K- or S-redex; both contradict ``is_normal X``
-        (a redex's fixed-point is itself, contradicting the
-        contraction rule).  PAR_REFL gives Y = X directly.  PAR_APP
-        decomposes; recurse on children (both children normal from
-        ``is_normal (App_t A B)``, so each child par-step is
-        identity).
-
-    Requires App-shape par-step inversion lemmas not yet shipped.
+    Impredicative induction on the par-step at
+        P A B := is_normal A ==> B = A.
+    REFL : tautology.
+    K, S : vacuously true via IS_NORMAL_NOT_{K,S}_REDEX_SHAPE -- the
+           hypothesis ``is_normal (K-/S-redex)`` is contradictory, so
+           the implication's RHS holds via CONTR.
+    APP  : decompose ``is_normal (App_t A B)`` into ``is_normal A`` and
+           ``is_normal B`` via IS_NORMAL_APP_DECOMP, apply both IHs,
+           lift to ``App_t A1 B1 = App_t A B`` via MK_COMB congruence.
     """
+    from tactics import BETA_RULE, MK_COMB
     p.goal(
         "!X:nat0. !Y:nat0. is_normal X /\\ sk_par_step X Y ==> Y = X"
     )
-    p.sorry()
+    p.fix("X Y")
+    p.assume(
+        "(h_normX, h_XY): is_normal X /\\ sk_par_step X Y"
+    )
+
+    spec_XY = unfold_def_at(
+        SK_PAR_STEP_DEF, p._parse("X"), p._parse("Y")
+    )
+    h_forall = EQ_MP(spec_XY, p.fact("h_XY"))
+
+    P_lifted = p._parse(
+        "\\A:nat0. \\B:nat0. is_normal A ==> B = A"
+    )
+    inst = SPEC(P_lifted, h_forall)
+    inst_beta = BETA_RULE(inst)
+
+    # REFL closure.
+    with p.have(
+        "lifted_refl: !Zb:nat0. is_normal Zb ==> Zb = Zb"
+    ).proof():
+        p.fix("Zb")
+        p.assume("h: is_normal Zb")
+        p.thus("Zb = Zb").by_thm(REFL(p._parse("Zb")))
+
+    # K closure -- vacuous via IS_NORMAL_NOT_K_REDEX_SHAPE.
+    with p.have(
+        "lifted_K: !a:nat0. !y:nat0. !a1:nat0. !y1:nat0. "
+        "(is_normal a ==> a1 = a) /\\ (is_normal y ==> y1 = y) ==> "
+        "(is_normal (App_t (App_t K_t a) y) ==> "
+        " a1 = App_t (App_t K_t a) y)"
+    ).proof():
+        p.fix("a y a1 y1")
+        p.assume(
+            "(_h_a, _h_y): "
+            "(is_normal a ==> a1 = a) /\\ (is_normal y ==> y1 = y)"
+        )
+        p.assume("h_norm_K: is_normal (App_t (App_t K_t a) y)")
+        p.have(
+            "h_neg: ~is_normal (App_t (App_t K_t a) y)"
+        ).by(IS_NORMAL_NOT_K_REDEX_SHAPE, "a", "y")
+        p.absurd().by_conj("h_neg", "h_norm_K")
+
+    # S closure -- vacuous via IS_NORMAL_NOT_S_REDEX_SHAPE.
+    with p.have(
+        "lifted_S: !a:nat0. !b:nat0. !c:nat0. "
+        "!a1:nat0. !b1:nat0. !c1:nat0. "
+        "(is_normal a ==> a1 = a) /\\ (is_normal b ==> b1 = b) /\\ "
+        "(is_normal c ==> c1 = c) ==> "
+        "(is_normal (App_t (App_t (App_t S_t a) b) c) ==> "
+        " App_t (App_t a1 c1) (App_t b1 c1) = "
+        " App_t (App_t (App_t S_t a) b) c)"
+    ).proof():
+        p.fix("a b c a1 b1 c1")
+        p.assume(
+            "(_h_a, _h_b, _h_c): "
+            "(is_normal a ==> a1 = a) /\\ (is_normal b ==> b1 = b) /\\ "
+            "(is_normal c ==> c1 = c)"
+        )
+        p.assume(
+            "h_norm_S: is_normal (App_t (App_t (App_t S_t a) b) c)"
+        )
+        p.have(
+            "h_neg: ~is_normal (App_t (App_t (App_t S_t a) b) c)"
+        ).by(IS_NORMAL_NOT_S_REDEX_SHAPE, "a", "b", "c")
+        p.absurd().by_conj("h_neg", "h_norm_S")
+
+    # APP closure -- decompose is_normal, apply IHs, lift via congruence.
+    with p.have(
+        "lifted_APP: !a:nat0. !b:nat0. !a1:nat0. !b1:nat0. "
+        "(is_normal a ==> a1 = a) /\\ (is_normal b ==> b1 = b) ==> "
+        "(is_normal (App_t a b) ==> App_t a1 b1 = App_t a b)"
+    ).proof():
+        p.fix("a b a1 b1")
+        p.assume(
+            "(h_ih_a, h_ih_b): "
+            "(is_normal a ==> a1 = a) /\\ (is_normal b ==> b1 = b)"
+        )
+        p.assume("h_norm_ab: is_normal (App_t a b)")
+        p.have(
+            "h_dec: is_normal a /\\ is_normal b"
+        ).by(IS_NORMAL_APP_DECOMP, "a", "b", "h_norm_ab")
+        p.split("h_dec", "(h_norm_a, h_norm_b)")
+        p.have("h_a1: a1 = a").by("h_ih_a", "h_norm_a")
+        p.have("h_b1: b1 = b").by("h_ih_b", "h_norm_b")
+        # MK_COMB lifts (a1 = a, b1 = b) to (App_t a1 b1 = App_t a b).
+        eq_left = AP_TERM(p._parse("App_t"), p.fact("h_a1"))
+        p.thus("App_t a1 b1 = App_t a b").by_thm(
+            MK_COMB(eq_left, p.fact("h_b1"))
+        )
+
+    p.have(
+        "lifted_cl: "
+        "(!Zb:nat0. is_normal Zb ==> Zb = Zb) /\\ "
+        "(!a:nat0. !y:nat0. !a1:nat0. !y1:nat0. "
+        "    (is_normal a ==> a1 = a) /\\ (is_normal y ==> y1 = y) ==> "
+        "    (is_normal (App_t (App_t K_t a) y) ==> "
+        "     a1 = App_t (App_t K_t a) y)) /\\ "
+        "(!a:nat0. !b:nat0. !c:nat0. "
+        " !a1:nat0. !b1:nat0. !c1:nat0. "
+        "    (is_normal a ==> a1 = a) /\\ (is_normal b ==> b1 = b) /\\ "
+        "    (is_normal c ==> c1 = c) ==> "
+        "    (is_normal (App_t (App_t (App_t S_t a) b) c) ==> "
+        "     App_t (App_t a1 c1) (App_t b1 c1) = "
+        "     App_t (App_t (App_t S_t a) b) c)) /\\ "
+        "(!a:nat0. !b:nat0. !a1:nat0. !b1:nat0. "
+        "    (is_normal a ==> a1 = a) /\\ (is_normal b ==> b1 = b) ==> "
+        "    (is_normal (App_t a b) ==> App_t a1 b1 = App_t a b))"
+    ).by_thm(
+        CONJ(
+            p.fact("lifted_refl"),
+            CONJ(
+                p.fact("lifted_K"),
+                CONJ(p.fact("lifted_S"), p.fact("lifted_APP")),
+            ),
+        )
+    )
+
+    p.have(
+        "h_PXY: is_normal X ==> Y = X"
+    ).by_thm(MP(inst_beta, p.fact("lifted_cl")))
+
+    p.thus("Y = X").by("h_PXY", "h_normX")
 
 
 @proof
