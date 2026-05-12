@@ -7902,36 +7902,326 @@ def PAR_STEPS_CONFLUENT(p):
     p.sorry()
 
 
+# ---------------------------------------------------------------------------
+# Helpers feeding HALTS_PAR_STEPS_INVARIANT.
+#
+# Two real lemmas (PAR_STEPS_TRANS, SK_ITER_TO_PAR_STEPS) + two stubs
+# (NORMAL_STABILITY_PAR_STEPS, STANDARDIZATION_NORMAL) carry the
+# halts-preservation proof.  Splits the prior "bulk of SK meta-theory"
+# sorry into one provable wrapper plus two sharply-scoped stubs.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def PAR_STEPS_TRANS(p):
+    """|- !X Y Z. sk_par_steps X Y /\\ sk_par_steps Y Z
+                   ==> sk_par_steps X Z.
+
+    Transitivity of the par-step RTC.  Impredicative induction on the
+    first chain: instantiate the encoding's P with
+    ``\\A B. !W. sk_par_steps B W ==> sk_par_steps A W``.  REFL closure
+    is the identity, STEP closure prepends one par-step via
+    ``PAR_STEPS_STEP``.
+    """
+    p.goal(
+        "!X:nat0. !Y:nat0. !Z:nat0. "
+        "sk_par_steps X Y /\\ sk_par_steps Y Z ==> sk_par_steps X Z"
+    )
+    from tactics import BETA_RULE
+    p.fix("X Y Z")
+    p.assume(
+        "(h_XY, h_YZ): sk_par_steps X Y /\\ sk_par_steps Y Z"
+    )
+
+    # Unfold ``sk_par_steps X Y`` to its impredicative universal.
+    spec_XY = unfold_def_at(
+        SK_PAR_STEPS_DEF, p._parse("X"), p._parse("Y")
+    )
+    h_forall = EQ_MP(spec_XY, p.fact("h_XY"))
+
+    # SPEC at the lifted P; BETA_RULE cleans redexes.
+    P_lifted = p._parse(
+        "\\A:nat0. \\B:nat0. "
+        "!W:nat0. sk_par_steps B W ==> sk_par_steps A W"
+    )
+    inst = SPEC(P_lifted, h_forall)
+    inst_beta = BETA_RULE(inst)
+
+    # Lifted closures.  Bvars renamed to ``Zb / a b c w`` to dodge the
+    # outer ``X Y Z`` fixed names.
+    with p.have(
+        "lifted_refl: !Zb:nat0. "
+        "!w:nat0. sk_par_steps Zb w ==> sk_par_steps Zb w"
+    ).proof():
+        p.fix("Zb w")
+        p.assume("h: sk_par_steps Zb w")
+        p.thus("sk_par_steps Zb w").by_thm(p.fact("h"))
+
+    with p.have(
+        "lifted_step: !a:nat0. !b:nat0. !c:nat0. "
+        "sk_par_step a b /\\ "
+        "(!w:nat0. sk_par_steps c w ==> sk_par_steps b w) ==> "
+        "(!w:nat0. sk_par_steps c w ==> sk_par_steps a w)"
+    ).proof():
+        p.fix("a b c")
+        p.assume(
+            "(h_ab, h_IH): sk_par_step a b /\\ "
+            "(!w. sk_par_steps c w ==> sk_par_steps b w)"
+        )
+        p.fix("w")
+        p.assume("h_cw: sk_par_steps c w")
+        p.have("h_bw: sk_par_steps b w").by("h_IH", "w", "h_cw")
+        p.have(
+            "h_conj: sk_par_step a b /\\ sk_par_steps b w"
+        ).by_thm(CONJ(p.fact("h_ab"), p.fact("h_bw")))
+        p.thus("sk_par_steps a w").by(
+            PAR_STEPS_STEP, "a", "b", "w", "h_conj"
+        )
+
+    p.have(
+        "lifted_cl: "
+        "(!Zb:nat0. !w:nat0. sk_par_steps Zb w ==> sk_par_steps Zb w) /\\ "
+        "(!a:nat0. !b:nat0. !c:nat0. "
+        "    sk_par_step a b /\\ "
+        "    (!w. sk_par_steps c w ==> sk_par_steps b w) ==> "
+        "    (!w. sk_par_steps c w ==> sk_par_steps a w))"
+    ).by_thm(CONJ(p.fact("lifted_refl"), p.fact("lifted_step")))
+
+    p.have(
+        "h_PXY: !w:nat0. sk_par_steps Y w ==> sk_par_steps X w"
+    ).by_thm(MP(inst_beta, p.fact("lifted_cl")))
+
+    p.thus("sk_par_steps X Z").by("h_PXY", "Z", "h_YZ")
+
+
+@proof
+def SK_ITER_TO_PAR_STEPS(p):
+    """|- !n X. sk_par_steps X (sk_iter n X).
+
+    Induction on n.  Base: SK_ITER_ZERO + PAR_STEPS_REFL bridged via
+    AP_TERM on ``sk_iter 0 X = X``.  Step: ``SK_PAR_STEP_TO_SK_STEP``
+    plus ``PAR_STEP_TO_STEPS`` give a single-step extension; compose
+    with IH via ``PAR_STEPS_TRANS``; rewrite head via SK_ITER_SUC.
+    """
+    p.goal("!n:nat0. !X:nat0. sk_par_steps X (sk_iter n X)")
+    with p.induction("n"):
+        with p.base():
+            p.fix("X")
+            p.have("h_z: sk_iter 0 X = X").by(SK_ITER_ZERO, "X")
+            p.have("h_refl: sk_par_steps X X").by(PAR_STEPS_REFL, "X")
+            # DSL friction: rewriting X -> sk_iter 0 X loops, so we
+            # build the bridging equation explicitly via AP_TERM.
+            sps_X = mk_app(sk_par_steps, p._parse("X"))
+            eq_bridge = AP_TERM(sps_X, SYM(p.fact("h_z")))
+            p.thus("sk_par_steps X (sk_iter 0 X)").by_eq_mp(
+                eq_bridge, "h_refl"
+            )
+        with p.step("IH"):
+            p.fix("X")
+            p.have("h_ih: sk_par_steps X (sk_iter n X)").by("IH", "X")
+            p.have(
+                "h_suc: sk_iter (SUC0 n) X = sk_step (sk_iter n X)"
+            ).by(SK_ITER_SUC, "n", "X")
+            p.have(
+                "h_par: sk_par_step (sk_iter n X) (sk_step (sk_iter n X))"
+            ).by(SK_PAR_STEP_TO_SK_STEP, "sk_iter n X")
+            p.have(
+                "h_pss: sk_par_steps (sk_iter n X) (sk_step (sk_iter n X))"
+            ).by(
+                PAR_STEP_TO_STEPS,
+                "sk_iter n X", "sk_step (sk_iter n X)", "h_par",
+            )
+            p.have(
+                "h_conj: sk_par_steps X (sk_iter n X) /\\ "
+                "        sk_par_steps (sk_iter n X) "
+                "                     (sk_step (sk_iter n X))"
+            ).by_thm(CONJ(p.fact("h_ih"), p.fact("h_pss")))
+            p.have(
+                "h_trans: sk_par_steps X (sk_step (sk_iter n X))"
+            ).by(
+                PAR_STEPS_TRANS,
+                "X", "sk_iter n X", "sk_step (sk_iter n X)",
+                "h_conj",
+            )
+            p.thus(
+                "sk_par_steps X (sk_iter (SUC0 n) X)"
+            ).by_rewrite_of("h_trans", [SYM(p.fact("h_suc"))])
+
+
+@proof
+def NORMAL_STABILITY_PAR_STEPS(p):
+    """|- !X Y. is_normal X /\\ sk_par_steps X Y ==> Y = X.
+
+    *** STUB.  A par_steps chain from a normal term is the identity.
+
+    Discharge: factor through the single-step version
+    ``NORMAL_STABILITY_PAR_STEP : is_normal X /\\ sk_par_step X Y ==> Y = X``
+    (case-split on X's shape: atoms via PAR_STEP_{S,K}_T_INV; App via
+    the App-shape inversion -- the K/S rule branches contradict
+    is_normal X).  Then RTC-induct: REFL trivial; STEP combines the
+    single-step version with IH.
+    """
+    p.goal(
+        "!X:nat0. !Y:nat0. is_normal X /\\ sk_par_steps X Y ==> Y = X"
+    )
+    p.sorry()
+
+
+@proof
+def STANDARDIZATION_NORMAL(p):
+    """|- !X N. sk_par_steps X N /\\ is_normal N ==> ?n. sk_iter n X = N.
+
+    *** STUB.  Curry-Feys standardization specialized to normal-form
+    targets.
+
+    Discharge: induct on the par_steps chain.  At each parallel step
+    ``sk_par_step ti t(i+1)``, apply an inner-redex reordering argument
+    to show any par-step ending at a normal eventually reaches that
+    normal via leftmost-outermost ``sk_iter`` steps.  The normality of
+    the target is essential -- it pins the standardized trace's
+    endpoint so no inner residual redex remains to be reordered.
+    """
+    p.goal(
+        "!X:nat0. !N:nat0. "
+        "sk_par_steps X N /\\ is_normal N ==> "
+        "?n:nat0. sk_iter n X = N"
+    )
+    p.sorry()
+
+
 @proof
 def HALTS_PAR_STEPS_INVARIANT(p):
     """|- !X Y. sk_par_steps X Y ==> halts X = halts Y.
 
-    *** STUB.  THE Church-Rosser + Standardization payload.  Bundles:
-      * Confluence: ``sk_par_steps`` has the diamond property (proved
-        by induction on the structure of par-step derivations,
-        contracting "all redexes in parallel" gives the missing reduct).
-      * Church-Rosser: confluence + reflex-trans closure.
-      * Standardization (Curry-Feys): if a term has a normal form
-        reachable by some -->* sequence, leftmost-outermost reaches it.
-      * halts characterization: halts X <=> there exists a -->>p reduct
-        of X that is normal (using SK_ITER_TO_PAR_STEPS to embed
-        sk_iter's reductions into -->>p, plus standardization for the
-        converse).
+    Closes structurally from five dependencies:
+      * PAR_STEPS_CONFLUENT       -- Church-Rosser for sk_par_steps.
+      * PAR_STEPS_TRANS           -- chain composition.
+      * SK_ITER_TO_PAR_STEPS      -- sk_iter trajectories embed in
+                                      sk_par_steps.
+      * NORMAL_STABILITY_PAR_STEPS -- par_steps from a normal term goes
+                                       nowhere.
+      * STANDARDIZATION_NORMAL    -- par_steps into a normal form
+                                      yields an sk_iter equation.
 
-    With those four:
-      Forward (halts X ==> halts Y, given X -->>p Y):
-        halts X gives a normal form N reachable from X.  By confluence,
-        Y reaches some W with N -->>p W; since N is normal, W = N.  So
-        Y reaches N (a normal form), so halts Y (via standardization).
-      Backward: by confluence symmetrically (X -->>p Y, Y -->>p N for
-        N normal; so X -->>p N via transitivity, halts X).
+    Forward (halts X ==> halts Y):
+      halts X gives ``N = sk_iter n X`` normal.  SK_ITER_TO_PAR_STEPS:
+      ``sk_par_steps X N``.  CONFLUENT on (X →* N, X →* Y) gives some
+      W with ``sk_par_steps N W`` and ``sk_par_steps Y W``.  N normal +
+      NORMAL_STABILITY_PAR_STEPS forces ``W = N``.  So ``sk_par_steps
+      Y N``; STANDARDIZATION_NORMAL produces an ``m`` with ``sk_iter
+      m Y = N``, witnessing halts Y.
 
-    Discharge: this is the bulk of the SK meta-theory, ~400 lines if
-    developed from first principles in this module (most of the work
-    is in the diamond property for parallel reduction).
+    Backward: halts Y gives ``N = sk_iter m Y`` normal.  TRANS:
+      ``sk_par_steps X N``.  STANDARDIZATION_NORMAL produces ``n`` with
+      ``sk_iter n X = N``, witnessing halts X.
     """
-    p.goal("!X:nat0. !Y:nat0. sk_par_steps X Y ==> halts X = halts Y")
-    p.sorry()
+    p.goal(
+        "!X:nat0. !Y:nat0. sk_par_steps X Y ==> halts X = halts Y"
+    )
+    p.fix("X Y")
+    p.assume("h_XY: sk_par_steps X Y")
+
+    # Forward.
+    with p.have("h_fwd: halts X ==> halts Y").proof():
+        p.assume("h_hX: halts X")
+        p.have(
+            "h_hX_ex: ?n. is_normal (sk_iter n X)"
+        ).by_eq_mp(SPEC(p._parse("X"), HALTS_AT), "h_hX")
+        p.choose("n", from_="h_hX_ex")
+        p.have(
+            "h_XN: sk_par_steps X (sk_iter n X)"
+        ).by(SK_ITER_TO_PAR_STEPS, "n", "X")
+        p.have(
+            "h_conj_conf: sk_par_steps X (sk_iter n X) /\\ "
+            "             sk_par_steps X Y"
+        ).by_thm(CONJ(p.fact("h_XN"), p.fact("h_XY")))
+        p.have(
+            "h_diam: ?W. sk_par_steps (sk_iter n X) W /\\ "
+            "            sk_par_steps Y W"
+        ).by(
+            PAR_STEPS_CONFLUENT,
+            "X", "sk_iter n X", "Y",
+            "h_conj_conf",
+        )
+        p.choose("W", from_="h_diam")
+        p.split("W_eq", "(h_NW, h_YW)")
+        p.have(
+            "h_conj_stab: is_normal (sk_iter n X) /\\ "
+            "             sk_par_steps (sk_iter n X) W"
+        ).by_thm(CONJ(p.fact("n_eq"), p.fact("h_NW")))
+        p.have("h_W_eq: W = sk_iter n X").by(
+            NORMAL_STABILITY_PAR_STEPS,
+            "sk_iter n X", "W", "h_conj_stab",
+        )
+        p.have(
+            "h_YN: sk_par_steps Y (sk_iter n X)"
+        ).by_rewrite_of("h_YW", ["h_W_eq"])
+        p.have(
+            "h_conj_std: sk_par_steps Y (sk_iter n X) /\\ "
+            "            is_normal (sk_iter n X)"
+        ).by_thm(CONJ(p.fact("h_YN"), p.fact("n_eq")))
+        p.have(
+            "h_Y_iter: ?m. sk_iter m Y = sk_iter n X"
+        ).by(
+            STANDARDIZATION_NORMAL,
+            "Y", "sk_iter n X",
+            "h_conj_std",
+        )
+        p.choose("m", from_="h_Y_iter")
+        p.have(
+            "h_normY: is_normal (sk_iter m Y)"
+        ).by_rewrite_of("n_eq", [SYM(p.fact("m_eq"))])
+        p.have(
+            "h_hY_ex: ?k. is_normal (sk_iter k Y)"
+        ).by_witness("m", "h_normY")
+        p.thus("halts Y").by_eq_mp(
+            SYM(SPEC(p._parse("Y"), HALTS_AT)), "h_hY_ex"
+        )
+
+    # Backward.
+    with p.have("h_bwd: halts Y ==> halts X").proof():
+        p.assume("h_hY: halts Y")
+        p.have(
+            "h_hY_ex: ?n. is_normal (sk_iter n Y)"
+        ).by_eq_mp(SPEC(p._parse("Y"), HALTS_AT), "h_hY")
+        p.choose("m", from_="h_hY_ex")
+        p.have(
+            "h_YN: sk_par_steps Y (sk_iter m Y)"
+        ).by(SK_ITER_TO_PAR_STEPS, "m", "Y")
+        p.have(
+            "h_conj_t: sk_par_steps X Y /\\ "
+            "          sk_par_steps Y (sk_iter m Y)"
+        ).by_thm(CONJ(p.fact("h_XY"), p.fact("h_YN")))
+        p.have(
+            "h_XN: sk_par_steps X (sk_iter m Y)"
+        ).by(
+            PAR_STEPS_TRANS,
+            "X", "Y", "sk_iter m Y",
+            "h_conj_t",
+        )
+        p.have(
+            "h_conj_std: sk_par_steps X (sk_iter m Y) /\\ "
+            "            is_normal (sk_iter m Y)"
+        ).by_thm(CONJ(p.fact("h_XN"), p.fact("m_eq")))
+        p.have(
+            "h_X_iter: ?n. sk_iter n X = sk_iter m Y"
+        ).by(
+            STANDARDIZATION_NORMAL,
+            "X", "sk_iter m Y",
+            "h_conj_std",
+        )
+        p.choose("n", from_="h_X_iter")
+        p.have(
+            "h_normX: is_normal (sk_iter n X)"
+        ).by_rewrite_of("m_eq", [SYM(p.fact("n_eq"))])
+        p.have(
+            "h_hX_ex: ?k. is_normal (sk_iter k X)"
+        ).by_witness("n", "h_normX")
+        p.thus("halts X").by_eq_mp(
+            SYM(SPEC(p._parse("X"), HALTS_AT)), "h_hX_ex"
+        )
+
+    p.thus("halts X = halts Y").by_iff("h_fwd", "h_bwd")
 
 
 @proof
