@@ -179,6 +179,146 @@ def main():
     else:
         raise AssertionError("expected HolError for unmatchable conclusion")
 
+    # ---- _Have.by_match: auto-CONJ on conjunctive antecedents -----------
+    # Build a tiny rule ``|- !a b. P a /\\ P b ==> P (Op a b)`` with fresh
+    # constants. Then exercise:
+    #   (1) supply two atomic facts -- auto-built into a CONJ;
+    #   (2) supply one whole-conjunction fact -- back-compat path;
+    #   (3) supply atomic facts to a non-conjunctive antecedent -- still
+    #       works as before;
+    #   (4) wrong order -- still rejected.
+    from fusion import new_constant
+    from basics import mk_const
+    from parser import add_const
+
+    new_constant("_TestP", mk_fun_ty(num_ty, bool_ty))
+    new_constant("_TestOp", mk_fun_ty(num_ty, mk_fun_ty(num_ty, num_ty)))
+    TestP = mk_const("_TestP", [])
+    TestOp = mk_const("_TestOp", [])
+    add_const("_TestP", TestP)
+    add_const("_TestOp", TestOp)
+    a_v = mk_var("a", num_ty)
+    b_v = mk_var("b", num_ty)
+    # _TEST_APP_RULE : |- !a b. _TestP a /\ _TestP b ==> _TestP (_TestOp a b)
+    from axioms import mk_and, mk_imp
+    from fusion import new_axiom as _new_axiom
+    _TEST_APP_RULE = _new_axiom(
+        mk_forall(
+            a_v,
+            mk_forall(
+                b_v,
+                mk_imp(
+                    mk_and(mk_comb(TestP, a_v), mk_comb(TestP, b_v)),
+                    mk_comb(TestP, mk_app(TestOp, a_v, b_v)),
+                ),
+            ),
+        )
+    )
+    # Atoms for the predicate: |- _TestP 1.
+    _TEST_P_1 = _new_axiom(mk_comb(TestP, ONE))
+
+    # (1) Auto-CONJ: two atomic facts.
+    @proof
+    def BY_MATCH_AUTO_CONJ(p):
+        p.goal("_TestP (_TestOp 1 1)")
+        p.have("h1: _TestP 1").by_thm(_TEST_P_1)
+        p.have("h2: _TestP 1").by_thm(_TEST_P_1)
+        p.thus("_TestP (_TestOp 1 1)").by_match(_TEST_APP_RULE, "h1", "h2")
+
+    assert aconv(concl(BY_MATCH_AUTO_CONJ), mk_comb(TestP, mk_app(TestOp, ONE, ONE)))
+
+    # (2) Back-compat: single fact alpha-matching the whole conjunction.
+    @proof
+    def BY_MATCH_WHOLE_CONJ(p):
+        p.goal("_TestP (_TestOp 1 1)")
+        p.have("h1: _TestP 1").by_thm(_TEST_P_1)
+        p.have("h2: _TestP 1").by_thm(_TEST_P_1)
+        # Build the conjunction explicitly and feed as ONE fact.
+        from tactics import CONJ as _CONJ
+        p.have("hconj: _TestP 1 /\\ _TestP 1").by_thm(_CONJ(p.fact("h1"), p.fact("h2")))
+        p.thus("_TestP (_TestOp 1 1)").by_match(_TEST_APP_RULE, "hconj")
+
+    assert aconv(concl(BY_MATCH_WHOLE_CONJ), mk_comb(TestP, mk_app(TestOp, ONE, ONE)))
+
+    # (3) Sanity: non-conjunctive antecedent paths still work unchanged
+    # (covered by SATZ_17_BY_MATCH_ANT above).
+
+    # (4) Insufficient facts: only one atomic supplied for a 2-atom group.
+    p_err3 = Proof()
+    p_err3.goal("_TestP (_TestOp 1 1)")
+    p_err3.have("h1: _TestP 1").by_thm(_TEST_P_1)
+    try:
+        p_err3.thus("_TestP (_TestOp 1 1)").by_match(_TEST_APP_RULE, "h1")
+    except HolError:
+        pass
+    else:
+        raise AssertionError("expected HolError for insufficient atomic facts")
+
+    # ---- _Have.by_tree: structural-intro registry walkthrough ----------
+    # Re-use the fresh predicate above. Register an IntroSet, then
+    # discharge a 3-level tree with one tactic call.
+    from proof import register_intro_set
+    register_intro_set(
+        TestP,
+        atoms=[(ONE, _TEST_P_1)],
+        app=(TestOp, _TEST_APP_RULE),
+    )
+
+    # Tree: _TestOp (_TestOp 1 1) (_TestOp 1 (_TestOp 1 1)). Three internal
+    # App nodes, four leaves. The walker dispatches each.
+    inner = mk_app(TestOp, ONE, ONE)
+    deeper = mk_app(TestOp, ONE, inner)
+    tree = mk_app(TestOp, inner, deeper)
+
+    @proof
+    def BY_TREE_BASIC(p):
+        p.goal("_TestP (_TestOp (_TestOp 1 1) (_TestOp 1 (_TestOp 1 1)))")
+        p.thus("_TestP (_TestOp (_TestOp 1 1) (_TestOp 1 (_TestOp 1 1)))").by_tree()
+
+    assert aconv(concl(BY_TREE_BASIC), mk_comb(TestP, tree))
+
+    # by_tree with unfold: define a sugar constant _TestSugar := _TestOp 1 1
+    # and prove _TestP _TestSugar by unfolding through the definition.
+    from parser import define as _define
+    _TEST_SUGAR_DEF = _define("_TestSugar", num_ty, mk_app(TestOp, ONE, ONE))
+    TestSugar = mk_const("_TestSugar", [])
+
+    @proof
+    def BY_TREE_UNFOLD(p):
+        p.goal("_TestP _TestSugar")
+        p.thus("_TestP _TestSugar").by_tree(unfold=[_TEST_SUGAR_DEF])
+
+    assert aconv(concl(BY_TREE_UNFOLD), mk_comb(TestP, TestSugar))
+
+    # by_tree error: term outside the registered intro set (e.g. _TestOp
+    # applied to a free var that's neither an atom nor _TestOp-headed).
+    p_err4 = Proof()
+    p_err4.goal("_TestP _TestSugar")  # OK target...
+    foo_v = mk_var("foo", num_ty)
+    # ...but pass an unfold that produces a free var: skip by setting a
+    # bogus goal directly. Easier: try to prove _TestP foo (no atom match).
+    p_err5 = Proof()
+    p_err5.goal("_TestP foo")
+    try:
+        p_err5.thus("_TestP foo").by_tree()
+    except HolError:
+        pass
+    else:
+        raise AssertionError("expected HolError for unregistered tree leaf")
+
+    # by_tree error: predicate without a registered intro set.
+    new_constant("_TestQ", mk_fun_ty(num_ty, bool_ty))
+    TestQ = mk_const("_TestQ", [])
+    add_const("_TestQ", TestQ)
+    p_err6 = Proof()
+    p_err6.goal("_TestQ 1")
+    try:
+        p_err6.thus("_TestQ 1").by_tree()
+    except HolError:
+        pass
+    else:
+        raise AssertionError("expected HolError for unregistered predicate")
+
     # ---- p.let smoke tests (Isabelle-style) ----------------------------
 
     # (1) Basic round-trip via the lazy let: ``M 1`` (folded) is bridged

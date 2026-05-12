@@ -500,6 +500,92 @@ register_pattern_handler(PatName, _handle_name_pattern)
 register_pattern_handler(PatConj, _handle_conj_pattern)
 
 
+def _flatten_top_conj(tm):
+    """Right-associated /\\ flatten: ``A /\\ B /\\ C`` -> ``[A, B, C]``.
+
+    Stops at the first non-conjunctive node on the right spine, so
+    ``(A /\\ B) /\\ C`` -> ``[A /\\ B, C]`` (only the right spine is
+    expanded; left-grouped conjunctions are treated as single units).
+    """
+    if not is_conj(tm):
+        return [tm]
+    a, b = dest_conj(tm)
+    return [a] + _flatten_top_conj(b)
+
+
+# ---------------------------------------------------------------------------
+# Structural-intro registry: maps a unary predicate ``P`` to its atom
+# rules + its App-style recursive intro rule. Consumed by
+# ``_Have.by_tree``, which walks the goal's argument term and dispatches
+# to atom-rules at leaves and the App-intro rule at every binary
+# constructor node.
+#
+# Designed for inductively-defined sets where every member is either an
+# atom (finitely many) or built from smaller members by a single binary
+# constructor -- e.g. ``is_sk_term`` (atoms: S_t, K_t; constructor:
+# App_t), ``is_normal``, future ``is_lambda_term``. Multi-constructor
+# predicates (lists with [] / ::) can register multiple atom rules and a
+# single recursive constructor; the atom list also accepts "leaf-like"
+# defined constants (e.g. I_t, which unfolds to App_t S_t K_t K_t at the
+# kernel level but is opaque to the tree walker until unfolded).
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass
+class IntroSet:
+    """Structural-intro rules for a unary predicate.
+
+    Attributes:
+      pred:     kernel Const ``P : ty -> bool``.
+      atoms:    list of ``(atom_term, atom_thm)`` where ``atom_thm`` is
+                ``|- P atom_term``. Atom terms may be constants or
+                arbitrary closed terms (matched by ``aconv``).
+      app_const: kernel Const for the recursive constructor (e.g.
+                ``App_t : ty -> ty -> ty``).
+      app_thm:  ``|- !a b. P a /\\ P b ==> P (app_const a b)``.
+    """
+    pred: object
+    atoms: list
+    app_const: object
+    app_thm: object
+
+
+_INTRO_SETS = {}  # pred const name -> IntroSet
+
+
+def register_intro_set(pred, *, atoms, app):
+    """Register a structural-intro set for ``pred`` (a kernel ``Const``).
+
+    Args:
+      pred:  the unary predicate constant (e.g. ``is_sk_term``).
+      atoms: an iterable of ``(atom_term, atom_thm)`` pairs where
+             ``atom_thm`` proves ``pred atom_term``. Use this for
+             finitely many "leaf" inhabitants -- both true atoms
+             (``S_t``, ``K_t``) and convenience macros that should
+             appear as leaves in user trees (``I_t``).
+      app:   a ``(app_const, app_thm)`` pair where ``app_const`` is the
+             binary constructor and ``app_thm`` is
+             ``|- !a b. pred a /\\ pred b ==> pred (app_const a b)``.
+
+    Consumed by ``_Have.by_tree``. Re-registering the same predicate
+    overrides.
+    """
+    if not isinstance(pred, Const):
+        raise HolError(f"register_intro_set: pred must be a kernel Const, got {pred!r}")
+    app_const, app_thm = app
+    if not isinstance(app_const, Const):
+        raise HolError(
+            f"register_intro_set: app_const must be a kernel Const, got {app_const!r}"
+        )
+    atom_list = []
+    for entry in atoms:
+        atom_t, atom_th = entry
+        if not isinstance(atom_th, thm):
+            raise HolError(f"register_intro_set: atom theorem expected, got {atom_th!r}")
+        atom_list.append((atom_t, atom_th))
+    _INTRO_SETS[pred.name] = IntroSet(pred, atom_list, app_const, app_thm)
+
+
 # ---------------------------------------------------------------------------
 # Frame: a single open scope (root, induction body, base/step, case).
 # ---------------------------------------------------------------------------
@@ -2102,32 +2188,71 @@ class _Have:
         for _ in range(n_stripped):
             a_pat, cur = dest_imp(cur)
             ants.append(a_pat)
-        facts = []
-        auto_slots = []  # (facts_idx, ant_pat) for ``...`` placeholders
-        ant_idx = 0
+        # Expand each antecedent into its right-associated atomic
+        # conjuncts. A non-conjunctive antecedent yields a single-element
+        # group. When the user supplies one fact per atomic slot, the
+        # group is rebuilt into a CONJ chain at MP time; when the user
+        # supplies one fact alpha-matching the whole conjunction, the
+        # group accepts it directly (backward compatible).
+        ant_groups = [_flatten_top_conj(a) for a in ants]
+        n_groups = len(ant_groups)
+        # group_facts[i] is either:
+        #   ("whole", thm)        -- one fact matched the entire ants[i]
+        #   ("atoms", [thm, ...]) -- one fact per atomic slot (built into
+        #                            CONJ at MP time)
+        group_facts = [("atoms", [None] * len(g)) for g in ant_groups]
+        auto_slots = []  # (group_idx, sub_idx, atom_pat) for ``...``
+        group_idx = 0
+        sub_idx = 0
+
+        def _advance_atom():
+            nonlocal group_idx, sub_idx
+            sub_idx += 1
+            if sub_idx >= len(ant_groups[group_idx]):
+                group_idx += 1
+                sub_idx = 0
+
         for a in args:
             if a is Ellipsis:
-                if ant_idx >= len(ants):
+                if group_idx >= n_groups:
                     raise HolError("by_match: extra ... has no antecedent slot")
-                auto_slots.append((len(facts), ants[ant_idx]))
-                facts.append(None)
-                ant_idx += 1
+                atom_pat = ant_groups[group_idx][sub_idx]
+                auto_slots.append((group_idx, sub_idx, atom_pat))
+                _advance_atom()
                 continue
             resolved = p.coerce(a, accept_term=True)
             if isinstance(resolved, thm):
-                if ant_idx >= len(ants):
+                if group_idx >= n_groups:
                     raise HolError(
                         f"by_match: extra fact arg, no antecedent left: {a!r}"
                     )
-                ant_pat = ants[ant_idx]
                 fact_concl = rand(p.simp_normalize(resolved._concl)._concl)
-                if _term_match(ant_pat, fact_concl, vars_set, subst) is None:
-                    raise HolError(
-                        f"by_match: fact concl {pp(fact_concl)} "
-                        f"does not match antecedent {pp(ant_pat)}"
-                    )
-                facts.append(resolved)
-                ant_idx += 1
+                # If at start of a multi-atom group, also try matching
+                # the whole conjunction (backward compat for existing
+                # callers passing a single conjunction fact).
+                whole_matched = False
+                if sub_idx == 0 and len(ant_groups[group_idx]) > 1:
+                    trial = dict(subst)
+                    if (
+                        _term_match(
+                            ants[group_idx], fact_concl, vars_set, trial
+                        )
+                        is not None
+                    ):
+                        subst.update(trial)
+                        group_facts[group_idx] = ("whole", resolved)
+                        group_idx += 1
+                        sub_idx = 0
+                        whole_matched = True
+                if not whole_matched:
+                    atom_pat = ant_groups[group_idx][sub_idx]
+                    if _term_match(atom_pat, fact_concl, vars_set, subst) is None:
+                        raise HolError(
+                            f"by_match: fact concl {pp(fact_concl)} "
+                            f"does not match antecedent {pp(atom_pat)}"
+                        )
+                    group_facts[group_idx][1][sub_idx] = resolved
+                    _advance_atom()
             else:
                 v = next((v for v in vs if v not in subst), None)
                 if v is None:
@@ -2138,26 +2263,116 @@ class _Have:
         unbound = [v.name for v in vs if v not in subst]
         if unbound:
             raise HolError(f"by_match: forall vars not determined: {unbound}")
-        if ant_idx < len(ants):
+        if group_idx < n_groups:
+            remaining = n_groups - group_idx
             raise HolError(
-                f"by_match: {len(ants) - ant_idx} antecedent(s) lack a fact arg"
+                f"by_match: {remaining} antecedent(s) lack a fact arg"
             )
         if auto_slots:
             theta = [(subst[v], v) for v in vs]
             inst = vsubst(theta)
-            for slot, ant_pat in auto_slots:
-                claim = inst(ant_pat)
+            for g_idx, s_idx, atom_pat in auto_slots:
+                claim = inst(atom_pat)
                 refl_th = _try_refl(claim)
                 if refl_th is None:
                     raise HolError(
                         f"by_match: ... slot is not reflexively trivial: {pp(claim)}"
                     )
-                facts[slot] = refl_th
+                group_facts[g_idx][1][s_idx] = refl_th
         for v in vs:
             th = SPEC(subst[v], th)
-        for fact_th in facts:
+        for kind, payload in group_facts:
+            if kind == "whole":
+                fact_th = payload
+            else:
+                # Right-associative CONJ over the atomic facts.
+                fact_th = payload[-1]
+                for atom_th in reversed(payload[:-1]):
+                    fact_th = CONJ(atom_th, fact_th)
             th = p.simp_mp(th, fact_th)
         return self._finish(th)
+
+    def by_tree(self, *, unfold=()):
+        """Structural-intro tactic: walk the goal's argument term and
+        discharge it via a registered ``IntroSet`` (atom rules + a
+        binary App-style constructor rule).
+
+        Goal must be ``P arg`` for a predicate ``P`` registered via
+        ``register_intro_set``. The walker dispatches as follows at
+        each node of ``arg``:
+
+          * atom (``aconv`` against any registered atom): use the
+            atom's stored theorem directly.
+          * binary app ``App_t a b`` (where ``App_t`` is the registered
+            constructor): recurse on ``a`` and ``b``, then MP into
+            ``app_thm`` with a built ``CONJ(P a, P b)``.
+          * anything else: raise ``HolError``.
+
+        ``unfold`` is an optional iterable of definitional equations
+        (e.g. ``[Y_T_DEF, I_T_DEF]``); they are applied via
+        ``REWRITE_CONV`` to fixpoint on ``arg`` before the walk, then
+        folded back via ``EQ_MP(SYM(AP_TERM(P, eq)), ...)`` at the end.
+        Use this to see past folded constants whose unfolded shape is
+        a tree the IntroSet knows how to traverse.
+
+        Example -- ``is_sk_term Y_t`` with ``Y_t``, ``I_t`` both
+        defined::
+
+            p.thus("is_sk_term Y_t").by_tree(unfold=[Y_T_DEF, I_T_DEF])
+
+        Replaces what would otherwise be ~30 lines of explicit
+        ``IS_SK_TERM_APP``/``IS_SK_TERM_S``/``IS_SK_TERM_K`` chaining.
+        """
+        p = self.p
+        target = self.term
+        if not isinstance(target, Comb):
+            raise HolError(
+                f"by_tree: goal is not of shape `pred arg`: {pp(target)}"
+            )
+        pred = target.fun
+        arg = target.arg
+        if not isinstance(pred, Const) or pred.name not in _INTRO_SETS:
+            raise HolError(
+                f"by_tree: no intro set registered for predicate {pp(pred)}"
+            )
+        iset = _INTRO_SETS[pred.name]
+
+        rule_thms = [
+            p.coerce(r) if isinstance(r, str) else r for r in unfold
+        ]
+        if rule_thms:
+            unfold_eq = REWRITE_CONV(rule_thms, arg)  # |- arg = arg'
+            unfolded_arg = rand(unfold_eq._concl)
+        else:
+            unfold_eq = None
+            unfolded_arg = arg
+
+        def prove_tree(t):
+            for atom_t, atom_th in iset.atoms:
+                if aconv(t, atom_t):
+                    return atom_th
+            if (
+                isinstance(t, Comb)
+                and isinstance(t.fun, Comb)
+                and aconv(t.fun.fun, iset.app_const)
+            ):
+                a, b = t.fun.arg, t.arg
+                h_a = prove_tree(a)
+                h_b = prove_tree(b)
+                spec_th = SPEC(b, SPEC(a, iset.app_thm))
+                return MP(spec_th, CONJ(h_a, h_b))
+            raise HolError(
+                f"by_tree: cannot dispatch term under {iset.pred.name}: "
+                f"{pp(t)}"
+            )
+
+        th_unfolded = prove_tree(unfolded_arg)
+        if unfold_eq is not None:
+            ap = AP_TERM(pred, unfold_eq)  # |- pred arg = pred arg'
+            th_folded = EQ_MP(SYM(ap), th_unfolded)
+        else:
+            th_folded = th_unfolded
+        return self._finish(th_folded)
 
     def by_rewrite(self, rules, *, ac=None, ac_rules=()):
         """REWRITE_PROVE with the given rules, plus any active simp set.
