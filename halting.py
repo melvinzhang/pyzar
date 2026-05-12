@@ -1261,6 +1261,141 @@ def SK_STEP_RIGHT(p):
 
 
 @proof
+def SK_STEP_APP_FIXED(p):
+    """|- !u v.
+            ~(?a b. App_t u v = App_t (App_t K_t a) b)
+            ==> ~(?a b c. App_t u v = App_t (App_t (App_t S_t a) b) c)
+            ==> sk_step u = u
+            ==> sk_step v = v
+            ==> sk_step (App_t u v) = App_t u v.
+
+    Both-children-normal fixed point: when the outer App is neither a
+    K- nor an S-redex and both children are sk_step-fixed, D3-sub3
+    (the "no progress" inner branch) fires and ``sk_step`` returns
+    the App self-equal.  Mirrors ``SK_STEP_LEFT``/``SK_STEP_RIGHT``;
+    sub3 fires, sub1/sub2 contradict the two normality hypotheses.
+    """
+    from tactics import CONJ as _CONJ, CONJUNCT1 as _C1, CONJUNCT2 as _C2
+    p.goal(
+        "!u v. ~(?a b. App_t u v = App_t (App_t K_t a) b) ==> "
+        "      ~(?a b c. App_t u v = App_t (App_t (App_t S_t a) b) c) ==> "
+        "      sk_step u = u ==> "
+        "      sk_step v = v ==> "
+        "      sk_step (App_t u v) = App_t u v"
+    )
+    p.fix("u v")
+    p.assume("not_kred: ~(?a b. App_t u v = App_t (App_t K_t a) b)")
+    p.assume("not_sred: ~(?a b c. App_t u v = App_t (App_t (App_t S_t a) b) c)")
+    p.assume("norm_u: sk_step u = u")
+    p.assume("norm_v: sk_step v = v")
+
+    t = "App_t u v"
+    sk_t = f"sk_step ({t})"
+    val = t  # the App itself
+    K_shape = f"?a b. {t} = App_t (App_t K_t a) b"
+    S_shape = f"?a b c. {t} = App_t (App_t (App_t S_t a) b) c"
+
+    # Sub-disjunct 3: sk_step u = u /\ sk_step v = v /\ val = t.
+    p.have(
+        f"sub3: sk_step u = u /\\ sk_step v = v /\\ {val} = {t}"
+    ).by_thm(
+        _CONJ(
+            p.fact("norm_u"),
+            _CONJ(p.fact("norm_v"), REFL(p._parse(t))),
+        )
+    )
+    triple_at_uv = (
+        f"(~(sk_step u = u) /\\ {val} = App_t (sk_step u) v) \\/ "
+        f"(sk_step u = u /\\ ~(sk_step v = v) /\\ "
+        f" {val} = App_t u (sk_step v)) \\/ "
+        f"(sk_step u = u /\\ sk_step v = v /\\ {val} = {t})"
+    )
+    p.have(f"triple_uv: {triple_at_uv}").by_disj("sub3")
+
+    inner_ex = (
+        f"?a b. {t} = App_t a b /\\ "
+        f"((~(sk_step a = a) /\\ {val} = App_t (sk_step a) b) \\/ "
+        f" (sk_step a = a /\\ ~(sk_step b = b) /\\ "
+        f"  {val} = App_t a (sk_step b)) \\/ "
+        f" (sk_step a = a /\\ sk_step b = b /\\ {val} = {t}))"
+    )
+    p.have(f"inner_ex: {inner_ex}").by_exists(["u", "v"], "triple_uv")
+    p.have(
+        f"inner_d3: ~({K_shape}) /\\ ~({S_shape}) /\\ ({inner_ex})"
+    ).by_thm(
+        _CONJ(p.fact("not_kred"), _CONJ(p.fact("not_sred"), p.fact("inner_ex")))
+    )
+
+    body_th = _sk_step_select_at(p, t, val, "inner_d3")
+    p.have(f"body: {_sk_step_body(t, sk_t)}").by_thm(body_th)
+
+    p.have(f"is_app: ?a b. {t} = App_t a b").by_exists(
+        ["u", "v"], REFL(p._parse(t))
+    )
+
+    D1, D2, D3, D4 = _sk_step_disjuncts(t, sk_t)
+    with p.cases_on("body"):
+        with p.case(f"h1: {D1}"):
+            p.choose("a_d1", from_="h1")
+            p.choose("b_d1", from_="a_d1_eq")
+            p.split("b_d1_eq", "(h_app, _)")
+            p.have(f"h_kred: {K_shape}").by_exists(
+                ["a_d1", "b_d1"], "h_app"
+            )
+            p.absurd().by_conj("not_kred", "h_kred")
+        with p.case(f"h2: {D2}"):
+            p.split("h2", "(_, h2_ex)")
+            p.choose("a_d2", from_="h2_ex")
+            p.choose("b_d2", from_="a_d2_eq")
+            p.choose("c_d2", from_="b_d2_eq")
+            p.split("c_d2_eq", "(h_app, _)")
+            p.have(f"h_sred: {S_shape}").by_exists(
+                ["a_d2", "b_d2", "c_d2"], "h_app"
+            )
+            p.absurd().by_conj("not_sred", "h_sred")
+        with p.case(f"h3: {D3}"):
+            p.split("h3", "(_, _, h3_ex)")
+            p.choose("a3", from_="h3_ex")
+            p.choose("b3", from_="a3_eq")
+            p.split("b3_eq", "(h_app, h_triple)")
+            p.have("h_inj: u = a3 /\\ v = b3").by(
+                APP_T_INJ, "u", "v", "a3", "b3", "h_app"
+            )
+            p.have("h_ua: u = a3").by_thm(_C1(p.fact("h_inj")))
+            p.have("h_vb: v = b3").by_thm(_C2(p.fact("h_inj")))
+            with p.cases_on("h_triple"):
+                with p.case(
+                    f"hsub1: ~(sk_step a3 = a3) /\\ "
+                    f"       {sk_t} = App_t (sk_step a3) b3"
+                ):
+                    p.split("hsub1", "(h_nn_a, _)")
+                    # h_nn_a rewrites via a3 → u to ~(sk_step u = u),
+                    # contradicting norm_u.
+                    p.have("h_nn_u: ~(sk_step u = u)").by_rewrite_of(
+                        "h_nn_a", [SYM(p.fact("h_ua"))]
+                    )
+                    p.absurd().by_conj("h_nn_u", "norm_u")
+                with p.case(
+                    f"hsub2: sk_step a3 = a3 /\\ ~(sk_step b3 = b3) /\\ "
+                    f"       {sk_t} = App_t a3 (sk_step b3)"
+                ):
+                    p.split("hsub2", "(_, h_nn_b, _)")
+                    p.have("h_nn_v: ~(sk_step v = v)").by_rewrite_of(
+                        "h_nn_b", [SYM(p.fact("h_vb"))]
+                    )
+                    p.absurd().by_conj("h_nn_v", "norm_v")
+                with p.case(
+                    f"hsub3: sk_step a3 = a3 /\\ sk_step b3 = b3 /\\ "
+                    f"       {sk_t} = {t}"
+                ):
+                    p.split("hsub3", "(_, _, h_sk)")
+                    p.thus(f"{sk_t} = {val}").by_thm(p.fact("h_sk"))
+        with p.case(f"h4: {D4}"):
+            p.split("h4", "(_, _, h_napp, _)")
+            p.absurd().by_conj("h_napp", "is_app")
+
+
+@proof
 def SK_STEP_K_UNDER_LEFT(p):
     """|- !x y z. ~(x = App_t (App_t K_t x) y) ==>
                   sk_step (App_t (App_t (App_t K_t x) y) z) = App_t x z.
@@ -2224,6 +2359,158 @@ def I_T_REDUCES(p):
         r.rewrite(I_T_DEF)
         r.step(SK_STEP_S, "K_t", "K_t", "x")
         r.step(SK_STEP_K, "x", "App_t K_t x")
+
+
+@proof
+def IS_NORMAL_I_T(p):
+    """|- is_normal I_t.
+
+    ``I_t = App_t (App_t S_t K_t) K_t`` (via ``I_T_DEF``).  The outer
+    App is not a K-redex (head is ``App_t S_t K_t``, not ``K_t``) nor an
+    S-redex (only two nested Apps starting at ``S_t``, S-redex shape
+    needs three).  Both children are normal:
+      * ``App_t S_t K_t``: same no-redex argument applied recursively;
+        both ``S_t`` and ``K_t`` are leaf normal forms.
+      * ``K_t``: leaf normal (SK_STEP_LEAF_K).
+    Hence D3-sub3 fires twice (once at each App layer), yielding
+    ``sk_step I_t = I_t``.  Then ``by_unfold IS_NORMAL_DEF`` bridges
+    to ``is_normal I_t``.
+
+    DSL friction: the four "not a K/S redex of shape X" side conditions
+    here are pure first-order injectivity arguments
+    (APP_T_INJ + {S_T_NEQ_APP_T, S_T_NEQ_K_T}), but each requires its
+    own ``with p.suppose / p.choose`` boilerplate; no by_tactic exists
+    yet for "head-tag clash refutes a shape-existence."  An
+    ``@register_shape_neq_finder`` analogous to ``@contra_finder``
+    that pattern-matches on outer head constants and emits the choose+
+    inj chain would cut this proof roughly in half.
+    """
+    from tactics import CONJUNCT1 as _C1
+    p.goal("is_normal I_t")
+
+    # ---- inner-layer non-redex side conditions ---------------------------
+    inner = "App_t S_t K_t"
+    # ~(?a b. App_t S_t K_t = App_t (App_t K_t a) b):
+    #   APP_T_INJ peels the outer App.  Left child equates as
+    #   S_t = App_t K_t a; S_T_NEQ_APP_T closes.
+    with p.have(
+        f"not_kred_inner: ~(?a b. {inner} = App_t (App_t K_t a) b)"
+    ).proof():
+        with p.suppose(f"h: ?a b. {inner} = App_t (App_t K_t a) b"):
+            p.choose("a", from_="h")
+            p.choose("b", from_="a_eq")
+            p.have("h_o: S_t = App_t K_t a /\\ K_t = b").by(
+                APP_T_INJ, "S_t", "K_t", "App_t K_t a", "b", "b_eq"
+            )
+            p.have("h_s: S_t = App_t K_t a").by_thm(_C1(p.fact("h_o")))
+            p.have("h_neg: ~(S_t = App_t K_t a)").by(
+                S_T_NEQ_APP_T, "K_t", "a"
+            )
+            p.absurd().by_conj("h_neg", "h_s")
+    # ~(?a b c. App_t S_t K_t = App_t (App_t (App_t S_t a) b) c):
+    #   APP_T_INJ peels the outer App; S_t = App_t (App_t S_t a) b is
+    #   the left-child equality, S_T_NEQ_APP_T closes.
+    with p.have(
+        f"not_sred_inner: ~(?a b c. {inner} = App_t (App_t (App_t S_t a) b) c)"
+    ).proof():
+        with p.suppose(
+            f"h: ?a b c. {inner} = App_t (App_t (App_t S_t a) b) c"
+        ):
+            p.choose("a", from_="h")
+            p.choose("b", from_="a_eq")
+            p.choose("c", from_="b_eq")
+            p.have(
+                "h_o: S_t = App_t (App_t S_t a) b /\\ K_t = c"
+            ).by(
+                APP_T_INJ, "S_t", "K_t", "App_t (App_t S_t a) b", "c", "c_eq"
+            )
+            p.have("h_s: S_t = App_t (App_t S_t a) b").by_thm(
+                _C1(p.fact("h_o"))
+            )
+            p.have("h_neg: ~(S_t = App_t (App_t S_t a) b)").by(
+                S_T_NEQ_APP_T, "App_t S_t a", "b"
+            )
+            p.absurd().by_conj("h_neg", "h_s")
+
+    # Inner App is fixed by sk_step (both children leaf-normal).
+    p.have(
+        f"inner_fixed: sk_step ({inner}) = {inner}"
+    ).by(
+        SK_STEP_APP_FIXED, "S_t", "K_t",
+        "not_kred_inner", "not_sred_inner",
+        SK_STEP_LEAF_S, SK_STEP_LEAF_K,
+    )
+
+    # ---- outer-layer non-redex side conditions ---------------------------
+    outer = "App_t (App_t S_t K_t) K_t"
+    # ~(?a b. App_t (App_t S_t K_t) K_t = App_t (App_t K_t a) b):
+    #   Outer APP_T_INJ then inner APP_T_INJ reduces to S_t = K_t,
+    #   refuted by S_T_NEQ_K_T.
+    with p.have(
+        f"not_kred_outer: ~(?a b. {outer} = App_t (App_t K_t a) b)"
+    ).proof():
+        with p.suppose(f"h: ?a b. {outer} = App_t (App_t K_t a) b"):
+            p.choose("a", from_="h")
+            p.choose("b", from_="a_eq")
+            p.have(
+                "h_o: App_t S_t K_t = App_t K_t a /\\ K_t = b"
+            ).by(
+                APP_T_INJ, "App_t S_t K_t", "K_t",
+                "App_t K_t a", "b", "b_eq"
+            )
+            p.have("h_o1: App_t S_t K_t = App_t K_t a").by_thm(
+                _C1(p.fact("h_o"))
+            )
+            p.have("h_i: S_t = K_t /\\ K_t = a").by(
+                APP_T_INJ, "S_t", "K_t", "K_t", "a", "h_o1"
+            )
+            p.have("h_sk: S_t = K_t").by_thm(_C1(p.fact("h_i")))
+            p.absurd().by_conj(S_T_NEQ_K_T, "h_sk")
+    # ~(?a b c. App_t (App_t S_t K_t) K_t = App_t (App_t (App_t S_t a) b) c):
+    #   Outer APP_T_INJ then inner APP_T_INJ reduces to S_t = App_t S_t a,
+    #   refuted by S_T_NEQ_APP_T.
+    with p.have(
+        f"not_sred_outer: ~(?a b c. {outer} = App_t (App_t (App_t S_t a) b) c)"
+    ).proof():
+        with p.suppose(
+            f"h: ?a b c. {outer} = App_t (App_t (App_t S_t a) b) c"
+        ):
+            p.choose("a", from_="h")
+            p.choose("b", from_="a_eq")
+            p.choose("c", from_="b_eq")
+            p.have(
+                "h_o: App_t S_t K_t = App_t (App_t S_t a) b /\\ K_t = c"
+            ).by(
+                APP_T_INJ, "App_t S_t K_t", "K_t",
+                "App_t (App_t S_t a) b", "c", "c_eq"
+            )
+            p.have("h_o1: App_t S_t K_t = App_t (App_t S_t a) b").by_thm(
+                _C1(p.fact("h_o"))
+            )
+            p.have("h_i: S_t = App_t S_t a /\\ K_t = b").by(
+                APP_T_INJ, "S_t", "K_t", "App_t S_t a", "b", "h_o1"
+            )
+            p.have("h_s: S_t = App_t S_t a").by_thm(_C1(p.fact("h_i")))
+            p.have("h_neg: ~(S_t = App_t S_t a)").by(
+                S_T_NEQ_APP_T, "S_t", "a"
+            )
+            p.absurd().by_conj("h_neg", "h_s")
+
+    # Outer App is fixed by sk_step (both children fixed: inner by
+    # inner_fixed, K_t by SK_STEP_LEAF_K).
+    p.have(
+        f"outer_fixed: sk_step ({outer}) = {outer}"
+    ).by(
+        SK_STEP_APP_FIXED, "App_t S_t K_t", "K_t",
+        "not_kred_outer", "not_sred_outer",
+        "inner_fixed", SK_STEP_LEAF_K,
+    )
+
+    # Fold the unfolded shape back to I_t, then collapse via IS_NORMAL_DEF.
+    p.have("step_I: sk_step I_t = I_t").by_rewrite_of(
+        "outer_fixed", [SYM(I_T_DEF)]
+    )
+    p.thus("is_normal I_t").by_unfold("step_I", IS_NORMAL_DEF)
 
 
 # ---------------------------------------------------------------------------
@@ -6510,22 +6797,52 @@ def HALTS_K_OMEGA_FALSE(p):
 def HALTS_KI_OMEGA_TRUE(p):
     """|- halts (App_t KI_t Omega_t).
 
-    *** STUB.  ``KI_t Omega = App_t (App_t K_t I_t) Omega_t`` is a
-    top-level K-redex (form ``App_t (App_t K_t _) _`` with x=I_t,
-    y=Omega).  Fires in 1 sk_step to ``I_t``, which is normal
-    (App_t (App_t S_t K_t) K_t -- no redex at top, both children are
-    leaves).  Witness n = SUC0 0.
-
-    Real-discharge sketch (~30 lines):
-      * sk_step (App_t (App_t K_t I_t) Omega_t) = I_t via SK_STEP_K
-        at (I_t, Omega_t).
-      * Unfold KI_t via KI_T_DEF to surface the K_t-headed shape.
-      * Prove is_normal I_t by I_T_DEF unfold + SK_STEP analysis
-        (all children S_t / K_t are normal, top is not a redex).
-      * HALTS_AT witness SUC0 0.
+    ``KI_t Omega = App_t (App_t K_t I_t) Omega_t`` after unfolding
+    ``KI_T_DEF``, a top-level K-redex with x=I_t, y=Omega.  Fires in
+    one ``sk_step`` to ``I_t``, which is normal (``IS_NORMAL_I_T``).
+    Witness n = SUC0 0.
     """
     p.goal("halts (App_t KI_t Omega_t)")
-    p.sorry()
+
+    KIO = "App_t KI_t Omega_t"
+    KIO_unfolded = "App_t (App_t K_t I_t) Omega_t"
+
+    # One head K-step at (I_t, Omega_t).
+    p.have(
+        f"kstep: sk_step ({KIO_unfolded}) = I_t"
+    ).by(SK_STEP_K, "I_t", "Omega_t")
+
+    # sk_iter (SUC0 0) (App_t KI_t Omega_t)
+    #   = sk_step (sk_iter 0 (App_t KI_t Omega_t))   [SK_ITER_SUC]
+    #   = sk_step (App_t KI_t Omega_t)               [SK_ITER_ZERO]
+    #   = sk_step (App_t (App_t K_t I_t) Omega_t)    [KI_T_DEF]
+    #   = I_t                                         [kstep]
+    p.have(
+        f"iter_eq: sk_iter (SUC0 0) ({KIO}) = I_t"
+    ).by_rewrite([SK_ITER_SUC, SK_ITER_ZERO, KI_T_DEF, p.fact("kstep")])
+
+    # IS_NORMAL_I_T + iter_eq -> is_normal of the iter form.
+    p.have(
+        f"norm_iter: is_normal (sk_iter (SUC0 0) ({KIO}))"
+    ).by_thm(
+        EQ_MP(
+            SYM(AP_TERM(is_normal, p.fact("iter_eq"))),
+            IS_NORMAL_I_T,
+        )
+    )
+    # DSL friction: ``by_eq_mp(AP_TERM(is_normal, "iter_eq"), IS_NORMAL_I_T)``
+    # would be a cleaner one-liner, but ``by_eq_mp``'s sym-tolerance
+    # is on the FACT side (matching RHS-form facts to LHS-form goals);
+    # here the eq_th itself comes out RHS-of-fact = LHS-of-goal, so we
+    # SYM it manually before EQ_MP.
+
+    # HALTS_AT-witness path: ?n. is_normal (sk_iter n KIO) -> halts KIO.
+    p.have(
+        f"ex_norm: ?n. is_normal (sk_iter n ({KIO}))"
+    ).by_witness("SUC0 0", "norm_iter")
+    p.thus(f"halts ({KIO})").by_eq_mp(
+        SPEC(p._parse(KIO), HALTS_AT), "ex_norm"
+    )
 
 
 @proof
