@@ -47,6 +47,8 @@ test-theories:
 	$(PY) classical.py
 	$(PY) tg_set_theory.py
 	$(PY) num.py
+
+test-landau:
 	@set -o pipefail; \
 	  raw=$$(mktemp); \
 	  $(PY) nat.py | tee -a $$raw; \
@@ -54,6 +56,15 @@ test-theories:
 	  $(PY) rat_int.py | tee -a $$raw; \
 	  grep -E '^[[:space:]]*[A-Z][A-Z0-9_]*[[:space:]]*:.*\|-' $$raw > $(LANDAU_OUT); \
 	  rm -f $$raw
+	if diff -u $(LANDAU_GOLDEN) $(LANDAU_OUT); then \
+	  echo "Landau golden OK ($$(wc -l < $(LANDAU_GOLDEN)) theorems)."; \
+	else \
+	  echo ""; \
+	  echo "Landau golden mismatch -- inspect the diff above."; \
+	  exit 1; \
+	fi; \
+
+test-godel:
 	@set -o pipefail; \
 	  raw=$$(mktemp); \
 	  $(PY) nat0.py | tee -a $$raw; \
@@ -69,6 +80,13 @@ test-theories:
 	  $(PY) hf_godel1.py | tee -a $$raw; \
 	  grep -E '^[[:space:]]*[A-Z][A-Z0-9_]*[[:space:]]*:.*\|-' $$raw > $(GODEL_OUT); \
 	  rm -f $$raw
+	if diff -u $(GODEL_GOLDEN) $(GODEL_OUT); then \
+	  echo "Goedel golden OK ($$(wc -l < $(GODEL_GOLDEN)) theorems)."; \
+	else \
+	  echo ""; \
+	  echo "Goedel golden mismatch -- inspect the diff above."; \
+	  exit 1; \
+	fi; \
 
 # PRST stack -- run each module in dependency order. Sketch-level
 # (stubs throughout) so we just confirm everything loads and the
@@ -81,33 +99,6 @@ test-prst:
 	$(PY) prst_repr.py
 	$(PY) prst_godel1.py
 	$(PY) prst_godel2.py
-
-# L7 -- golden: every theorem's pp(concl) matches the checked-in
-# `landau.golden`.  The kernel certifies inferences but cannot tell whether
-# the stated goal is what Landau actually wrote, so this layer locks down
-# the statements against silent drift across refactors.  Run after a
-# reviewed transcription audit; regenerate via `make update-golden` when a
-# statement change is intentional.
-test-golden: test-theories
-	@status=0; \
-	if diff -u $(LANDAU_GOLDEN) $(LANDAU_OUT); then \
-	  echo "Landau golden OK ($$(wc -l < $(LANDAU_GOLDEN)) theorems)."; \
-	else \
-	  echo ""; \
-	  echo "Landau golden mismatch -- inspect the diff above."; \
-	  status=1; \
-	fi; \
-	if diff -u $(GODEL_GOLDEN) $(GODEL_OUT); then \
-	  echo "Goedel golden OK ($$(wc -l < $(GODEL_GOLDEN)) theorems)."; \
-	else \
-	  echo ""; \
-	  echo "Goedel golden mismatch -- inspect the diff above."; \
-	  status=1; \
-	fi; \
-	if [ $$status -ne 0 ]; then \
-	  echo "If the new statements are intentional, run: make update-golden"; \
-	  exit 1; \
-	fi
 
 # Regenerate the golden snapshots after an intentional statement change.
 # Requires test-theories to have produced fresh $(LANDAU_OUT)/$(GODEL_OUT).
