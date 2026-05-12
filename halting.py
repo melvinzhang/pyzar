@@ -6220,107 +6220,223 @@ def SK_ITER_TRANS(p):
 
 
 @proof
-def SK_ITER_APP_LEFT(p):
-    """|- !X X1 Y. (?n. sk_iter n X = X1) ==>
-                   ?m. sk_iter m (App_t X Y) = App_t X1 Y.
+def HALTS_SK_STEP_APP_LEFT(p):
+    """|- !X Y. halts (App_t X Y) = halts (App_t (sk_step X) Y).
 
-    *** STUB.  Multi-step left-congruence for App_t under sk_iter.
+    *** STUB.  Atomic halts-preservation under a single inner sk_step
+    inside the left position of an App.
 
-    Real-form side condition (elided): at each intermediate step the
-    outer ``App_t (sk_iter k X) Y`` must not be a K- or S-redex BEFORE
-    the inner reduces (leftmost-outermost would otherwise fire on the
-    outer first).  In every Stage-6 use site the trace's intermediate
-    forms have non-S, non-K heads (the inner sequence reduces an App
-    application, whose head can be S or K only at the very last step
-    where the resulting outer redex is exactly the one we WANT to fire
-    next -- subsumed by the trace's continuation).  Capturing the
-    condition in the lemma statement would clutter consumers, so the
-    discharged form pushes it onto callers via a no-redex side
-    hypothesis whose canonical proofs are the ``not_kred`` / ``not_sred``
-    chains already used by SK_STEP_LEFT.
+    Why this is the RIGHT atomic stub (vs. the original
+    ``SK_ITER_APP_LEFT`` -- which is provably FALSE in its unconditional
+    form): the multi-step *reduction* lift
+        ``?n. sk_iter n X = X1 ==> ?m. sk_iter m (App_t X Y) = App_t X1 Y``
+    fails because leftmost-outermost sk_step can fire the outer App as
+    a K- or S-redex BEFORE the inner X completes its reduction --
+    consider ``X = App_t K_t Omega_t`` (single-arg K applied to Omega),
+    ``Y`` arbitrary: ``App_t X Y = App_t (App_t K_t Omega_t) Y`` is a
+    top-level K-redex (x=Omega, y=Y), so sk_step fires it to Omega_t and
+    Y is permanently discarded; the trajectory never reaches
+    ``App_t X1 Y`` for any non-trivial X1 = sk_iter k X.
+    By contrast, *halts*-preservation is morally true via Church-Rosser
+    + Standardization for SK:
+        Forward (halts (App X Y) ==> halts (App (sk_step X) Y)):
+          If App X Y reaches a normal form, by Church-Rosser the
+          parallel reduct App (sk_step X) Y reaches the same normal
+          form.  By Standardization, sk_iter (which is leftmost-
+          outermost) finds that normal form.
+        Backward: symmetric, with one extra step inserted.
 
-    Discharge sketch (~60 lines):
-      Induction on the witness ``n``.  Base: sk_iter 0 X = X, so
-      App_t X Y is the same on both sides (witness 0).  Step: chain
-      SK_STEP_LEFT (with side conditions) under sk_step into sk_iter
-      via SK_ITER_SUC.
-
-    DSL friction: parser identifiers cannot contain primes, so the
-    natural ``X'`` got renamed to ``X1`` throughout.
+    Discharging this stub (~400-500 lines) requires the standard
+    Church-Rosser / Standardization development for SK:
+      * Parallel reduction =>p (one-step non-deterministic).
+      * Confluence of =>p via the diamond property.
+      * Multi-step =>>p, Church-Rosser.
+      * Standardization: leftmost-outermost normalizes any term that
+        has a normal form.
+      * halts X = (?Y. X =>>p Y /\\ is_normal Y) -- relating sk_iter
+        halts to the abstract halting predicate.
+    These are the standard meta-theorems for SK (and lambda calculus
+    by transfer); leaving them as a single stub keeps Stage 6 focused
+    on the diagonal itself.
     """
-    p.goal(
-        "!X X1 Y. (?n. sk_iter n X = X1) "
-        "         ==> (?m. sk_iter m (App_t X Y) = App_t X1 Y)"
-    )
+    p.goal("!X Y. halts (App_t X Y) = halts (App_t (sk_step X) Y)")
     p.sorry()
+
+
+@proof
+def SK_ITER_APP_LEFT_HALTS(p):
+    """|- !X X1 Y. (?n. sk_iter n X = X1) ==>
+                   halts (App_t X Y) = halts (App_t X1 Y).
+
+    Multi-step halts-preservation: if X reaches X1 under sk_iter,
+    then ``halts (App_t X Y) = halts (App_t X1 Y)`` for any Y.
+
+    Real proof (no sorry): induct an indexed form
+        ``halts (App_t X Y) = halts (App_t (sk_iter n X) Y)``
+    on n using HALTS_SK_STEP_APP_LEFT at the successor step, then
+    substitute ``sk_iter n X = X1`` to finish.
+    """
+    @proof
+    def _AT_N(pi):
+        """|- !n X Y. halts (App_t X Y) = halts (App_t (sk_iter n X) Y)."""
+        pi.goal(
+            "!n X Y. halts (App_t X Y) = halts (App_t (sk_iter n X) Y)"
+        )
+        with pi.induction("n"):
+            with pi.base():
+                pi.fix("X Y")
+                # sk_iter 0 X = X, both sides equal.  Rewrite RHS to LHS.
+                pi.thus(
+                    "halts (App_t X Y) = halts (App_t (sk_iter 0 X) Y)"
+                ).by_rewrite([SK_ITER_ZERO])
+            with pi.step("IH"):
+                pi.fix("X Y")
+                pi.have(
+                    "h_ih: halts (App_t X Y) = halts (App_t (sk_iter n X) Y)"
+                ).by("IH", "X", "Y")
+                pi.have(
+                    "h_step: halts (App_t (sk_iter n X) Y) "
+                    "        = halts (App_t (sk_step (sk_iter n X)) Y)"
+                ).by(HALTS_SK_STEP_APP_LEFT, "sk_iter n X", "Y")
+                pi.have(
+                    "h_suc: sk_iter (SUC0 n) X = sk_step (sk_iter n X)"
+                ).by(SK_ITER_SUC, "n", "X")
+                # Chain: halts (App X Y) -[h_ih]-> halts (App (sk_iter n X) Y)
+                #        -[h_step]-> halts (App (sk_step (sk_iter n X)) Y)
+                #        -[SYM h_suc, rewriting the head]-> halts (App (sk_iter (SUC0 n) X) Y).
+                pi.thus(
+                    "halts (App_t X Y) "
+                    "= halts (App_t (sk_iter (SUC0 n) X) Y)"
+                ).by_rewrite([
+                    "h_ih", "h_step", SYM(pi.fact("h_suc")),
+                ])
+
+    p.goal(
+        "!X X1 Y. (?n. sk_iter n X = X1) ==> "
+        "         halts (App_t X Y) = halts (App_t X1 Y)"
+    )
+    p.fix("X X1 Y")
+    p.assume("h_ex: ?n. sk_iter n X = X1")
+    p.choose("n", from_="h_ex")
+    # n_eq : sk_iter n X = X1.
+    p.have(
+        "h_at_n: halts (App_t X Y) = halts (App_t (sk_iter n X) Y)"
+    ).by(_AT_N, "n", "X", "Y")
+    p.thus(
+        "halts (App_t X Y) = halts (App_t X1 Y)"
+    ).by_rewrite_of("h_at_n", ["n_eq"])
 
 
 @proof
 def DIAG_TERM(p):
     """|- !H. is_sk_term H ==>
               ?d. is_sk_term d /\\
-                  ?n. sk_iter n d = App_t (App_t (App_t H d) Omega_t) K_t.
+                  ?n. sk_iter n d = App_t (App_t H d) Omega_t.
 
     *** STUB.  Curry's self-application diagonal -- no Y combinator
     needed; ``e e`` IS the fixed point.
 
     Concrete witness (Curry's recipe for bracket abstraction at body
-    ``App_t (App_t (App_t H (App_t x x)) Omega_t) K_t``):
+    ``App_t (App_t H (App_t x x)) Omega_t``; 2 App layers, not 3 --
+    we removed the outer ``K_t`` wrap because the differentiator
+    ``halts (K_t Omega) = F`` vs. ``halts (KI_t Omega) = T`` already
+    breaks symmetry without it):
 
       [x] x         = I_t
       [x] M         = App_t K_t M           (x not in M)
       [x] (App M N) = App_t (App_t S_t [x]M) [x]N
 
-    Step by step on ``(((H (x x)) Omega) K)``:
-      [x] (x x)      = App_t (App_t S_t I_t) I_t           (= SII)
-      [x] H          = App_t K_t H
-      [x] Omega      = App_t K_t Omega_t
-      [x] K_t        = App_t K_t K_t
-      [x] (H (x x))  = App_t (App_t S_t (App_t K_t H)) SII
-      [x] (... Omega)= App_t (App_t S_t [x](H (x x))) (App_t K_t Omega_t)
-      [x] (... K_t)  = App_t (App_t S_t (above)) (App_t K_t K_t)
+    Step-by-step on ``(App (App H (App x x)) Omega)``:
+      [x] (x x)        = App_t (App_t S_t I_t) I_t           (= SII)
+      [x] (H (x x))    = App_t (App_t S_t (App_t K_t H)) SII
+      [x] ((H (x x)) Omega)
+                       = App_t (App_t S_t [x](H (x x))) (App_t K_t Omega_t)
 
     Let
       e_H := App_t (App_t S_t
-                     (App_t (App_t S_t
-                              (App_t (App_t S_t (App_t K_t H)) SII))
-                            (App_t K_t Omega_t)))
-                   (App_t K_t K_t)
+                     (App_t (App_t S_t (App_t K_t H))
+                            (App_t (App_t S_t I_t) I_t)))
+                   (App_t K_t Omega_t)
       d   := App_t e_H e_H
 
     is_sk_term d : structural intro on the App-tree above, atoms are
-    S_t / K_t / I_t (folded out via I_T_DEF, OMEGA_T_DEF) plus the
-    hypothesised SK term H.  Closes via ``by_tree`` + IS_SK_TERM_APP
-    plus a one-line lift through I_T_DEF / OMEGA_T_DEF.
+    S_t / K_t / I_t (folded out via I_T_DEF) plus the hypothesised
+    SK term H.  Closes via ``by_tree`` + IS_SK_TERM_APP, plus a one-
+    line lift through I_T_DEF.
 
-    Reduction ``?n. sk_iter n d = (H d) Omega K`` -- 8-step head trace,
-    closable via the ``sk_reduce`` block helper:
-      d = (S A B) e_H        [A = S (S (S (K H) SII) (K Omega)), B = K K]
-        --S_t-->* (A e_H) (B e_H)
-        -- (B e_H) = (K K) e_H -->* K_t (head K-redex)
-        -- so current = (A e_H) K_t
-        -- A = S A' (K Omega) with A' = S (S (K H) SII)
-        --S_t-->* (A' e_H) ((K Omega) e_H) K_t
-        -- ((K Omega) e_H) -->* Omega_t
-        -- current = (A' e_H) Omega_t K_t
-        -- A' = S (S (K H) SII)
-        --S_t-->* ((S (K H) SII) e_H) Omega_t K_t          [need a wrap]
-        -- (S (K H) SII) e_H:
-        --S_t-->* ((K H) e_H) (SII e_H)
-        -- (K H) e_H -->* H; SII e_H -->* I_t e_H (I_t e_H) -->* e_H e_H = d.
-        -- current = (H d) Omega K. QED.
+    Reduction ``?n. sk_iter n d = (H d) Omega`` -- ~6 head sk_steps:
+      d = (S A B) e_H        [A = S (S (K H) SII), B = K Omega]
+        --S_t--> (A e_H) (B e_H)
+        -- (B e_H) = (K Omega) e_H --K_t--> Omega
+        -- current = (A e_H) Omega
+        --S_t--> ((S (K H) SII) e_H) Omega
+        --S_t--> ((K H) e_H) (SII e_H) Omega
+        -- (K H) e_H --K_t--> H
+        -- SII e_H = (S I I) e_H --S--> (I e_H) (I e_H)
+        -- (I e_H) -->* e_H -->* e_H, both sides reduce to e_H
+        -- (I e_H) (I e_H) -->* e_H e_H = d
+        -- current = H d Omega. QED.
     Each step uses one SK_STEP_S or SK_STEP_K plus a congruence wrap
-    via SK_STEP_LEFT / SK_STEP_LEFT_LEFT.  ~80 lines.
+    via SK_STEP_LEFT / SK_STEP_LEFT_LEFT.  ~60 lines.
 
-    Estimate for full discharge of this stub plus SK_ITER_APP_LEFT:
-    ~150-200 lines total, dominated by the head-redex trace.
+    Estimate for full discharge of this stub plus the Church-Rosser /
+    Standardization sub-development for HALTS_SK_STEP_APP_LEFT:
+    ~500 lines total (dominated by Church-Rosser).
     """
     p.goal(
         "!H. is_sk_term H ==> "
         "    ?d. is_sk_term d /\\ "
-        "        (?n. sk_iter n d = "
-        "             App_t (App_t (App_t H d) Omega_t) K_t)"
+        "        (?n. sk_iter n d = App_t (App_t H d) Omega_t)"
     )
+    p.sorry()
+
+
+@proof
+def HALTS_K_OMEGA_FALSE(p):
+    """|- ~halts (App_t K_t Omega_t).
+
+    *** STUB.  ``K_t Omega`` is a one-arg K (NOT a redex since K needs
+    two args), so leftmost-outermost descends right into Omega.  By
+    induction:
+        sk_iter n (App_t K_t Omega_t) = App_t K_t (sk_iter n Omega_t).
+    is_normal (App_t K_t Z) iff Z is normal (K is a leaf normal form
+    and the App has no redex when its left is K and its right is non-
+    normal).  But by OMEGA_NON_HALTING, no iterate of Omega is normal.
+    So no iterate of K_t Omega is normal, hence ~halts (K_t Omega).
+
+    Real-discharge sketch (~40 lines):
+      * Lemma: sk_step (App_t K_t Z) = App_t K_t (sk_step Z) when Z
+        is not normal.  Discharge from SK_STEP_RIGHT with the K-non-
+        redex / non-S-redex / K-not-fixed conditions all easy.
+      * Iterate to get the sk_iter form.
+      * Decompose is_normal (App K_t Z) -- under leftmost-outermost,
+        App K_t Z is normal iff sk_step (App K_t Z) = App K_t Z, iff
+        sk_step Z = Z (since K is normal), iff is_normal Z.
+      * Conclude from OMEGA_NON_HALTING.
+    """
+    p.goal("~halts (App_t K_t Omega_t)")
+    p.sorry()
+
+
+@proof
+def HALTS_KI_OMEGA_TRUE(p):
+    """|- halts (App_t KI_t Omega_t).
+
+    *** STUB.  ``KI_t Omega = App_t (App_t K_t I_t) Omega_t`` is a
+    top-level K-redex (form ``App_t (App_t K_t _) _`` with x=I_t,
+    y=Omega).  Fires in 1 sk_step to ``I_t``, which is normal
+    (App_t (App_t S_t K_t) K_t -- no redex at top, both children are
+    leaves).  Witness n = SUC0 0.
+
+    Real-discharge sketch (~30 lines):
+      * sk_step (App_t (App_t K_t I_t) Omega_t) = I_t via SK_STEP_K
+        at (I_t, Omega_t).
+      * Unfold KI_t via KI_T_DEF to surface the K_t-headed shape.
+      * Prove is_normal I_t by I_T_DEF unfold + SK_STEP analysis
+        (all children S_t / K_t are normal, top is not a redex).
+      * HALTS_AT witness SUC0 0.
+    """
+    p.goal("halts (App_t KI_t Omega_t)")
     p.sorry()
 
 
@@ -6328,34 +6444,31 @@ def DIAG_TERM(p):
 def DIAGONAL_TERM_EXISTS(p):
     """|- !H. is_sk_term H ==>
               ?d. is_sk_term d /\\
-                  ((?n. sk_iter n (App_t H d) = K_t) ==>
-                   (?m. sk_iter m d = Omega_t)) /\\
-                  ((?n. sk_iter n (App_t H d) = KI_t) ==>
-                   (?m. sk_iter m d = K_t)).
+                  ((?n. sk_iter n (App_t H d) = K_t)  ==> ~halts d) /\\
+                  ((?n. sk_iter n (App_t H d) = KI_t) ==>  halts d).
+
+    Halts-form diagonal.  ``d -->* (H d) Omega`` (TWO App layers; DIAG_TERM
+    no longer wraps with the outer K_t since the inner ``halts (K_t Omega)
+    = F`` vs. ``halts (KI_t Omega) = T`` already breaks symmetry).
 
     Combines:
-      * DIAG_TERM:        existence of self-applying d with reduction
-                          d -->* (H d) Omega K.
-      * SK_ITER_APP_LEFT: lift ``H d -->* K_t / KI_t`` through the outer
-                          App context to ``(H d) Omega K -->* (K/KI) Omega K``.
-      * CHURCH_TRUE_REDUCES / CHURCH_FALSE_REDUCES: collapse the head
-                          K_t / KI_t Church-bool against (Omega, K_t).
-      * SK_ITER_TRANS:    chain the three reduction-existentials into
-                          ``d -->* Omega_t`` (K_t case) /
-                          ``d -->* K_t``     (KI_t case).
+      * DIAG_TERM:                  self-applying d with d -->* (H d) Omega.
+      * HALTING_REDUCTION_PRESERVED: halts d = halts ((H d) Omega).
+      * SK_ITER_APP_LEFT_HALTS:     lift ``H d -->* K_t / KI_t`` to
+                                     ``halts ((H d) Omega) = halts (K_t/KI_t Omega)``.
+      * HALTS_K_OMEGA_FALSE:        ~halts (K_t Omega).
+      * HALTS_KI_OMEGA_TRUE:         halts (KI_t Omega).
 
-    No further holes -- this proof closes against the three helpers
-    above (two of which are still stubs).
+    No further holes here -- closes against the four stubs above plus
+    the already-discharged HALTING_REDUCTION_PRESERVED.
     """
-    from tactics import CONJ as _CONJ
+    from tactics import CONJ as _CONJ, TRANS as _TRANS, SYM as _SYM, EQ_MP
 
     p.goal(
         "!H. is_sk_term H ==> "
         "    ?d. is_sk_term d /\\ "
-        "        ((?n. sk_iter n (App_t H d) = K_t) ==> "
-        "         (?m. sk_iter m d = Omega_t)) /\\ "
-        "        ((?n. sk_iter n (App_t H d) = KI_t) ==> "
-        "         (?m. sk_iter m d = K_t))"
+        "        ((?n. sk_iter n (App_t H d) = K_t) ==> ~halts d) /\\ "
+        "        ((?n. sk_iter n (App_t H d) = KI_t) ==> halts d)"
     )
     p.fix("H")
     p.assume("h_is_sk_H: is_sk_term H")
@@ -6363,116 +6476,72 @@ def DIAGONAL_TERM_EXISTS(p):
     # ---- (1) Existence of the self-applying diagonal d. ------------------
     p.have(
         "h_diag: ?d. is_sk_term d /\\ "
-        "        ?n. sk_iter n d = "
-        "            App_t (App_t (App_t H d) Omega_t) K_t"
+        "        ?n. sk_iter n d = App_t (App_t H d) Omega_t"
     ).by(DIAG_TERM, "H", "h_is_sk_H")
     p.choose("d", from_="h_diag")
-    # d_eq : is_sk_term d /\ ?n. sk_iter n d = (H d) Omega K.
+    # d_eq : is_sk_term d /\ ?n. sk_iter n d = (H d) Omega.
     p.split("d_eq", "(h_is_sk_d, h_d_red)")
-    # h_d_red : ?n. sk_iter n d = App_t (App_t (App_t H d) Omega_t) K_t.
+    # h_d_red : ?n. sk_iter n d = App_t (App_t H d) Omega_t.
 
-    # ---- (2) is_sk_term Omega_t (needed by both Church reductions). ------
-    p.have("h_is_sk_Omega: is_sk_term Omega_t").by_tree(
-        unfold=[OMEGA_T_DEF, I_T_DEF]
+    # ---- (2) halts d = halts ((H d) Omega) -------------------------------
+    # HALTING_REDUCTION_PRESERVED needs a concrete n with sk_iter n d = u;
+    # choose the witness out of h_d_red.
+    p.choose("n0", from_="h_d_red")
+    # n0_eq : sk_iter n0 d = App_t (App_t H d) Omega_t.
+    p.have(
+        "h_pres_d: halts d = halts (App_t (App_t H d) Omega_t)"
+    ).by(
+        HALTING_REDUCTION_PRESERVED, "d",
+        "App_t (App_t H d) Omega_t", "n0",
+        _CONJ(p.fact("h_is_sk_d"), p.fact("n0_eq")),
     )
 
-    # ---- (3) K_t branch: H d -->* K_t  =>  d -->* Omega_t. ---------------
+    # ---- (3) K_t branch: H d -->* K_t  =>  ~halts d. ---------------------
     with p.have(
-        "h_kt_branch: (?n. sk_iter n (App_t H d) = K_t) ==> "
-        "             (?m. sk_iter m d = Omega_t)"
+        "h_kt_branch: (?n. sk_iter n (App_t H d) = K_t) ==> ~halts d"
     ).proof():
         p.assume("h_to_kt: ?n. sk_iter n (App_t H d) = K_t")
-        # Lift H d -->* K_t under the outer ``_ Omega_t`` App.
+        # SK_ITER_APP_LEFT_HALTS at (App_t H d, K_t, Omega_t):
+        #   halts (App_t (App_t H d) Omega_t) = halts (App_t K_t Omega_t).
         p.have(
-            "h_lift1: ?p. sk_iter p (App_t (App_t H d) Omega_t) "
-            "         = App_t K_t Omega_t"
-        ).by(SK_ITER_APP_LEFT, "App_t H d", "K_t", "Omega_t", "h_to_kt")
-        # Lift again under the outer ``_ K_t`` App.
+            "h_lift: halts (App_t (App_t H d) Omega_t) "
+            "        = halts (App_t K_t Omega_t)"
+        ).by(SK_ITER_APP_LEFT_HALTS, "App_t H d", "K_t", "Omega_t", "h_to_kt")
+        # Chain: halts d = halts ((H d) Omega) = halts (K_t Omega) = F.
         p.have(
-            "h_lift2: ?q. sk_iter q (App_t (App_t (App_t H d) Omega_t) K_t) "
-            "         = App_t (App_t K_t Omega_t) K_t"
-        ).by(
-            SK_ITER_APP_LEFT,
-            "App_t (App_t H d) Omega_t",
-            "App_t K_t Omega_t",
-            "K_t",
-            "h_lift1",
-        )
-        # CHURCH_TRUE_REDUCES at (a=Omega_t, c=K_t): K_t Omega K -->* Omega.
-        p.have(
-            "h_church_true: ?r. sk_iter r (App_t (App_t K_t Omega_t) K_t) "
-            "                  = Omega_t"
-        ).by(
-            CHURCH_TRUE_REDUCES, "Omega_t", "K_t",
-            _CONJ(p.fact("h_is_sk_Omega"), IS_SK_TERM_K),
-        )
-        # Chain: d -->* (H d) Omega K -->* (K Omega) K -->* Omega.
-        p.have(
-            "h_chain1: ?r. sk_iter r d = App_t (App_t K_t Omega_t) K_t"
-        ).by(
-            SK_ITER_TRANS, "d",
-            "App_t (App_t (App_t H d) Omega_t) K_t",
-            "App_t (App_t K_t Omega_t) K_t",
-            _CONJ(p.fact("h_d_red"), p.fact("h_lift2")),
-        )
-        p.thus("?m. sk_iter m d = Omega_t").by(
-            SK_ITER_TRANS, "d",
-            "App_t (App_t K_t Omega_t) K_t", "Omega_t",
-            _CONJ(p.fact("h_chain1"), p.fact("h_church_true")),
-        )
+            "h_chain: halts d = halts (App_t K_t Omega_t)"
+        ).by_thm(_TRANS(p.fact("h_pres_d"), p.fact("h_lift")))
+        # HALTS_K_OMEGA_FALSE: ~halts (K_t Omega_t).
+        # ~halts d follows by rewriting ~halts (App K_t Omega) under SYM h_chain.
+        # DSL friction: the goal is ~halts d, not an equation; using
+        # by_eq_mp with SYM(h_chain) inside ``~`` requires an explicit
+        # AP_TERM cong.  Cleanest: open a suppose-frame and contradict.
+        with p.suppose("h_halts_d: halts d"):
+            p.have(
+                "h_halts_K_Omega: halts (App_t K_t Omega_t)"
+            ).by_eq_mp("h_chain", "h_halts_d")
+            p.absurd().by_conj(HALTS_K_OMEGA_FALSE, "h_halts_K_Omega")
 
-    # ---- (4) KI_t branch: H d -->* KI_t  =>  d -->* K_t. -----------------
+    # ---- (4) KI_t branch: H d -->* KI_t  =>  halts d. --------------------
     with p.have(
-        "h_kit_branch: (?n. sk_iter n (App_t H d) = KI_t) ==> "
-        "              (?m. sk_iter m d = K_t)"
+        "h_kit_branch: (?n. sk_iter n (App_t H d) = KI_t) ==> halts d"
     ).proof():
         p.assume("h_to_kit: ?n. sk_iter n (App_t H d) = KI_t")
         p.have(
-            "h_lift1k: ?p. sk_iter p (App_t (App_t H d) Omega_t) "
-            "          = App_t KI_t Omega_t"
-        ).by(SK_ITER_APP_LEFT, "App_t H d", "KI_t", "Omega_t", "h_to_kit")
+            "h_liftk: halts (App_t (App_t H d) Omega_t) "
+            "         = halts (App_t KI_t Omega_t)"
+        ).by(SK_ITER_APP_LEFT_HALTS, "App_t H d", "KI_t", "Omega_t", "h_to_kit")
         p.have(
-            "h_lift2k: ?q. sk_iter q (App_t (App_t (App_t H d) Omega_t) K_t) "
-            "          = App_t (App_t KI_t Omega_t) K_t"
-        ).by(
-            SK_ITER_APP_LEFT,
-            "App_t (App_t H d) Omega_t",
-            "App_t KI_t Omega_t",
-            "K_t",
-            "h_lift1k",
-        )
-        # CHURCH_FALSE_REDUCES at (a=Omega_t, c=K_t): KI_t Omega K -->* K_t.
-        p.have(
-            "h_church_false: ?r. sk_iter r (App_t (App_t KI_t Omega_t) K_t) "
-            "                   = K_t"
-        ).by(
-            CHURCH_FALSE_REDUCES, "Omega_t", "K_t",
-            _CONJ(p.fact("h_is_sk_Omega"), IS_SK_TERM_K),
-        )
-        # Chain: d -->* (H d) Omega K -->* (KI Omega) K -->* K_t.
-        p.have(
-            "h_chain1k: ?r. sk_iter r d = App_t (App_t KI_t Omega_t) K_t"
-        ).by(
-            SK_ITER_TRANS, "d",
-            "App_t (App_t (App_t H d) Omega_t) K_t",
-            "App_t (App_t KI_t Omega_t) K_t",
-            _CONJ(p.fact("h_d_red"), p.fact("h_lift2k")),
-        )
-        p.thus("?m. sk_iter m d = K_t").by(
-            SK_ITER_TRANS, "d",
-            "App_t (App_t KI_t Omega_t) K_t", "K_t",
-            _CONJ(p.fact("h_chain1k"), p.fact("h_church_false")),
-        )
+            "h_chaink: halts d = halts (App_t KI_t Omega_t)"
+        ).by_thm(_TRANS(p.fact("h_pres_d"), p.fact("h_liftk")))
+        # HALTS_KI_OMEGA_TRUE gives halts (KI_t Omega); flip via SYM.
+        p.thus("halts d").by_eq_mp("h_chaink", HALTS_KI_OMEGA_TRUE)
 
     # ---- (5) Bundle and witness d. ---------------------------------------
-    # DSL friction: 3-way conjunction has to be right-nested explicitly --
-    # _CONJ takes two args, no n-ary helper in scope.
     p.have(
         "h_combined: is_sk_term d /\\ "
-        "            ((?n. sk_iter n (App_t H d) = K_t) ==> "
-        "             (?m. sk_iter m d = Omega_t)) /\\ "
-        "            ((?n. sk_iter n (App_t H d) = KI_t) ==> "
-        "             (?m. sk_iter m d = K_t))"
+        "            ((?n. sk_iter n (App_t H d) = K_t) ==> ~halts d) /\\ "
+        "            ((?n. sk_iter n (App_t H d) = KI_t) ==> halts d)"
     ).by_thm(
         _CONJ(
             p.fact("h_is_sk_d"),
@@ -6481,10 +6550,8 @@ def DIAGONAL_TERM_EXISTS(p):
     )
     p.thus(
         "?d. is_sk_term d /\\ "
-        "    ((?n. sk_iter n (App_t H d) = K_t) ==> "
-        "     (?m. sk_iter m d = Omega_t)) /\\ "
-        "    ((?n. sk_iter n (App_t H d) = KI_t) ==> "
-        "     (?m. sk_iter m d = K_t))"
+        "    ((?n. sk_iter n (App_t H d) = K_t) ==> ~halts d) /\\ "
+        "    ((?n. sk_iter n (App_t H d) = KI_t) ==> halts d)"
     ).by_witness("d", "h_combined")
 
 
@@ -6527,7 +6594,6 @@ def HALTING_UNDECIDABLE(p):
     discharged the diagonal closes without further holes.
     """
     from classical import EXCLUDED_MIDDLE
-    from tactics import CONJ as _CONJ
 
     p.goal("~ (?H. halts_decider H)")
     with p.suppose("h_ex: ?H. halts_decider H"):
@@ -6535,8 +6601,6 @@ def HALTING_UNDECIDABLE(p):
         # H_eq : halts_decider H.
 
         # ---- Unfold the halts_decider definition. ---------------------
-        # HALTS_DECIDER_DEF_THM at H gives the iff between halts_decider H
-        # and the unfolded conjunction.
         p.have(
             "h_thm: halts_decider H = "
             "       (is_sk_term H /\\ "
@@ -6552,23 +6616,19 @@ def HALTING_UNDECIDABLE(p):
         ).by_eq_mp("h_thm", "H_eq")
         p.split("h_unf", "(h_is_sk_H, h_decides)")
 
-        # ---- Build the diagonal term d. -------------------------------
-        # DIAGONAL_TERM_EXISTS packages the bracket-abstraction + Y + App-
-        # congruence work into a single (stubbed) existential.
+        # ---- Diagonal term d (halts-form). ----------------------------
+        # DIAGONAL_TERM_EXISTS produces ``~halts d`` (K_t branch) and
+        # ``halts d`` (KI_t branch) directly; no further reduction
+        # plumbing required at this site.
         p.have(
             "h_diag: ?d. is_sk_term d /\\ "
-            "        ((?n. sk_iter n (App_t H d) = K_t) ==> "
-            "         (?m. sk_iter m d = Omega_t)) /\\ "
-            "        ((?n. sk_iter n (App_t H d) = KI_t) ==> "
-            "         (?m. sk_iter m d = K_t))"
+            "        ((?n. sk_iter n (App_t H d) = K_t) ==> ~halts d) /\\ "
+            "        ((?n. sk_iter n (App_t H d) = KI_t) ==> halts d)"
         ).by(DIAGONAL_TERM_EXISTS, "H", "h_is_sk_H")
         p.choose("d", from_="h_diag")
-        # d_eq : is_sk_term d /\ (K_t ==> Omega_t) /\ (KI_t ==> K_t).
-        # DSL friction: 3-way conjunction split needs an explicit
-        # nesting pattern; the right-associated default works.
-        p.split("d_eq", "(h_is_sk_d, h_kt_impl, h_kit_impl)")
+        p.split("d_eq", "(h_is_sk_d, h_kt_to_nhalts, h_kit_to_halts)")
 
-        # ---- Apply the decider's promise at t := d. -------------------
+        # ---- Decider's promise specialised at t := d. -----------------
         p.have(
             "h_dec_d: (halts d ==> (?n. sk_iter n (App_t H d) = K_t)) /\\ "
             "         (~halts d ==> (?n. sk_iter n (App_t H d) = KI_t))"
@@ -6579,78 +6639,21 @@ def HALTING_UNDECIDABLE(p):
         with p.cases_on(EXCLUDED_MIDDLE, "halts d"):
             # ===== Case 1: halts d. ====================================
             with p.case("h_halts: halts d"):
-                # Decider hypothesis: App_t H d -->* K_t.
+                # H d -->* K_t (from decider) ==> ~halts d (diagonal).
                 p.have(
                     "h_to_kt: ?n. sk_iter n (App_t H d) = K_t"
                 ).by("h_halts_to_kt", "h_halts")
-                # DIAGONAL_TERM_EXISTS's K_t-branch: d -->* Omega_t.
-                p.have(
-                    "h_d_to_omega: ?m. sk_iter m d = Omega_t"
-                ).by("h_kt_impl", "h_to_kt")
-                p.choose("m1", from_="h_d_to_omega")
-                # m1_eq : sk_iter m1 d = Omega_t.
-                # HALTING_REDUCTION_PRESERVED at (d, Omega_t, m1):
-                #   is_sk_term d /\ sk_iter m1 d = Omega_t
-                #     ==> halts d = halts Omega_t.
-                p.have(
-                    "h_pres: halts d = halts Omega_t"
-                ).by(
-                    HALTING_REDUCTION_PRESERVED, "d", "Omega_t", "m1",
-                    _CONJ(p.fact("h_is_sk_d"), p.fact("m1_eq")),
-                )
-                # Flip h_halts to halts Omega_t.
-                p.have(
-                    "h_halts_omega: halts Omega_t"
-                ).by_eq_mp("h_pres", "h_halts")
-                # Contradict OMEGA_NON_HALTING.
-                p.absurd().by_conj(OMEGA_NON_HALTING, "h_halts_omega")
+                p.have("h_nhalts: ~halts d").by("h_kt_to_nhalts", "h_to_kt")
+                p.absurd().by_conj("h_nhalts", "h_halts")
 
             # ===== Case 2: ~halts d. ===================================
             with p.case("h_nhalts: ~halts d"):
-                # Decider hypothesis: App_t H d -->* KI_t.
+                # H d -->* KI_t (from decider) ==> halts d (diagonal).
                 p.have(
                     "h_to_kit: ?n. sk_iter n (App_t H d) = KI_t"
                 ).by("h_nhalts_to_kit", "h_nhalts")
-                # DIAGONAL_TERM_EXISTS's KI_t-branch: d -->* K_t.
-                p.have(
-                    "h_d_to_kt: ?m. sk_iter m d = K_t"
-                ).by("h_kit_impl", "h_to_kit")
-                p.choose("m2", from_="h_d_to_kt")
-                # m2_eq : sk_iter m2 d = K_t.
-                # HALTING_REDUCTION_PRESERVED at (d, K_t, m2):
-                #   halts d = halts K_t.
-                p.have(
-                    "h_pres: halts d = halts K_t"
-                ).by(
-                    HALTING_REDUCTION_PRESERVED, "d", "K_t", "m2",
-                    _CONJ(p.fact("h_is_sk_d"), p.fact("m2_eq")),
-                )
-                # halts K_t -- K_t is normal so witness 0 works.
-                # HALTS_AT K_t : halts K_t = ?n. is_normal (sk_iter n K_t).
-                # sk_iter 0 K_t = K_t (SK_ITER_ZERO); is_normal K_t (IS_NORMAL_K);
-                # so witness 0 + REFL.
-                p.have(
-                    "h_iter0_K: sk_iter 0 K_t = K_t"
-                ).by(SK_ITER_ZERO, "K_t")
-                # is_normal (sk_iter 0 K_t) by eq_mp on AP_TERM(is_normal, SYM h_iter0_K)
-                # applied to IS_NORMAL_K.
-                p.have(
-                    "h_norm_iter0: is_normal (sk_iter 0 K_t)"
-                ).by_eq_mp(
-                    AP_TERM(is_normal, p.fact("h_iter0_K")),
-                    IS_NORMAL_K,
-                )
-                p.have(
-                    "h_at_K: halts K_t = (?n. is_normal (sk_iter n K_t))"
-                ).by(HALTS_AT, "K_t")
-                p.have(
-                    "h_ex_K: ?n. is_normal (sk_iter n K_t)"
-                ).by_witness("0", "h_norm_iter0")
-                p.have("h_halts_K: halts K_t").by_eq_mp("h_at_K", "h_ex_K")
-                # Flip via SYM(h_pres): halts d.
-                p.have("h_halts_d: halts d").by_eq_mp("h_pres", "h_halts_K")
-                # Contradict h_nhalts.
-                p.absurd().by_conj("h_nhalts", "h_halts_d")
+                p.have("h_halts: halts d").by("h_kit_to_halts", "h_to_kit")
+                p.absurd().by_conj("h_nhalts", "h_halts")
 
 
 # ---------------------------------------------------------------------------
