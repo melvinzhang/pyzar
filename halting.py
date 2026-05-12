@@ -2742,39 +2742,189 @@ def N0PLUS_SUC_L(p):
 def NAT0_LT_N0PLUS_MONO_R(p):
     """|- !a b c. nat0_lt b c ==> nat0_lt (n0plus a b) (n0plus a c).
 
-    Right-argument strict monotonicity of n0plus.  Induction on the
-    difference c-b, or equivalently on c with case analysis -- simplest
-    is: induct on the inner gap by inducting on c while keeping b free.
-    Body uses N0PLUS_STEP (right-arg) and NAT0_LT_SUC0_MONO.
+    Right-argument strict monotonicity of n0plus.  Induct on ``c`` with
+    ``b`` free; the step uses NAT0_LT_SUC0_CASES to split
+    ``b < SUC0 c`` into ``b = c`` (NAT0_LT_SUC0) and ``b < c`` (IH +
+    NAT0_LT_TRANS).
 
     Used by OMEGA_TRAJ_I_DEPTH_STEP to convert per-layer size growth
     ``sk_size (I_pow k SII) < sk_size (I_pow (SUC0 k) SII)`` into
     Omega-shape size growth (a = sk_size of an I-application wrapper).
-
-    PROOF: straightforward ~25 lines once the right induction structure
-    is picked.  Currently sorried.
     """
+    from nat0_order import (
+        NAT0_LT_SUC0,
+        NAT0_LT_TRANS,
+        NAT0_NOT_LT_ZERO,
+        NAT0_LT_SUC0_CASES,
+    )
+    from tactics import AP_TERM as _APT, TRANS as _TRANS, SYM as _SYM
+
     p.goal(
         "!a b c. nat0_lt b c ==> nat0_lt (n0plus a b) (n0plus a c)"
     )
-    p.sorry()
+    p.fix("a")
+    # DSL friction: ``induction("c")`` peels only the outermost forall, but the
+    # public statement is ``!a b c.``.  We prove a (c, b)-swapped helper inside
+    # ``.proof()`` so c is induct-peelable, then specialize back at the end.
+    with p.have(
+        "swapped: !c b. nat0_lt b c "
+        "        ==> nat0_lt (n0plus a b) (n0plus a c)"
+    ).proof():
+        with p.induction("c"):
+            with p.base():
+                # Vacuous: ~(nat0_lt b 0).
+                p.fix("b")
+                p.assume("h: nat0_lt b 0")
+                p.have("h_not: ~(nat0_lt b 0)").by(NAT0_NOT_LT_ZERO, "b")
+                p.absurd().by_conj("h_not", "h")
+            with p.step("IH"):
+                # IH:  !b. nat0_lt b c ==> nat0_lt (n0plus a b) (n0plus a c)
+                # Goal: !b. nat0_lt b (SUC0 c) ==>
+                #            nat0_lt (n0plus a b) (n0plus a (SUC0 c))
+                p.fix("b")
+                p.assume("h_lt: nat0_lt b (SUC0 c)")
+                p.have(
+                    "h_step_R: n0plus a (SUC0 c) = SUC0 (n0plus a c)"
+                ).by(N0PLUS_STEP, "a", "c")
+                p.have(
+                    "h_cases: b = c \\/ nat0_lt b c"
+                ).by(NAT0_LT_SUC0_CASES, "b", "c", "h_lt")
+                with p.cases_on("h_cases"):
+                    with p.case("h_eq: b = c"):
+                        # Target collapses to nat0_lt (n0plus a b) (SUC0 (n0plus a b))
+                        # after substituting c := b on the right via SYM(h_eq).
+                        p.have(
+                            "h_succ: nat0_lt (n0plus a b) "
+                            "                (SUC0 (n0plus a b))"
+                        ).by(NAT0_LT_SUC0, "n0plus a b")
+                        # AP_TERM(n0plus a) on h_eq: n0plus a b = n0plus a c.
+                        h_n0_eq = _APT(p._parse("n0plus a"), p.fact("h_eq"))
+                        # SUC0-wrap: SUC0 (n0plus a b) = SUC0 (n0plus a c).
+                        h_suc_n0 = _APT(p._parse("SUC0"), h_n0_eq)
+                        # Chain with SYM(h_step_R):
+                        #   SUC0 (n0plus a b) = n0plus a (SUC0 c).
+                        h_chain = _TRANS(h_suc_n0, _SYM(p.fact("h_step_R")))
+                        # AP_TERM(nat0_lt (n0plus a b)) lifts the rhs swap.
+                        h_lt_eq = _APT(
+                            p._parse("nat0_lt (n0plus a b)"), h_chain
+                        )
+                        p.thus(
+                            "nat0_lt (n0plus a b) "
+                            "         (n0plus a (SUC0 c))"
+                        ).by_eq_mp(h_lt_eq, "h_succ")
+                    with p.case("h_lt_inner: nat0_lt b c"):
+                        # IH at b: nat0_lt (n0plus a b) (n0plus a c).
+                        p.have(
+                            "ih_b: nat0_lt (n0plus a b) (n0plus a c)"
+                        ).by("IH", "b", "h_lt_inner")
+                        p.have(
+                            "h_lt_one: nat0_lt (n0plus a c) "
+                            "                   (SUC0 (n0plus a c))"
+                        ).by(NAT0_LT_SUC0, "n0plus a c")
+                        p.have(
+                            "h_trans: nat0_lt (n0plus a b) "
+                            "                  (SUC0 (n0plus a c))"
+                        ).by(
+                            NAT0_LT_TRANS,
+                            "n0plus a b",
+                            "n0plus a c",
+                            "SUC0 (n0plus a c)",
+                            "ih_b",
+                            "h_lt_one",
+                        )
+                        # Fold SUC0 (n0plus a c) -> n0plus a (SUC0 c).
+                        h_fold = _APT(
+                            p._parse("nat0_lt (n0plus a b)"),
+                            _SYM(p.fact("h_step_R")),
+                        )
+                        p.thus(
+                            "nat0_lt (n0plus a b) "
+                            "         (n0plus a (SUC0 c))"
+                        ).by_eq_mp(h_fold, "h_trans")
+    # Recover the (a, b, c) public order from swapped (c, b).
+    p.fix("b c")
+    p.assume("h_bc: nat0_lt b c")
+    p.thus(
+        "nat0_lt (n0plus a b) (n0plus a c)"
+    ).by("swapped", "c", "b", "h_bc")
 
 
 @proof
 def NAT0_LT_N0PLUS_MONO_L(p):
     """|- !a b c. nat0_lt a b ==> nat0_lt (n0plus a c) (n0plus b c).
 
-    Left-argument strict monotonicity of n0plus.  Easiest derivation:
-    once N0PLUS_COMM is in place, this is a one-line ``by_rewrite`` of
-    NAT0_LT_N0PLUS_MONO_R.  Without N0PLUS_COMM, prove by induction on
-    c using N0PLUS_BASE (right-arg base) and N0PLUS_STEP + NAT0_LT_SUC0_MONO.
-
-    PROOF: ~25 lines.  Currently sorried.
+    Left-argument strict monotonicity of n0plus.  Induct on ``c``:
+    base via N0PLUS_BASE (right-arg) folds both summands to a, b;
+    step via N0PLUS_STEP + NAT0_LT_SUC0_MONO on the IH.
     """
+    from nat0_order import NAT0_LT_SUC0_MONO
+    from tactics import (
+        AP_TERM as _APT,
+        MK_COMB as _MK,
+        SYM as _SYM,
+    )
+
     p.goal(
         "!a b c. nat0_lt a b ==> nat0_lt (n0plus a c) (n0plus b c)"
     )
-    p.sorry()
+    # DSL friction: same swap as MONO_R -- prove (c, a, b)-ordered helper, then
+    # specialize back into the public (a, b, c) order.
+    with p.have(
+        "swapped: !c a b. nat0_lt a b "
+        "        ==> nat0_lt (n0plus a c) (n0plus b c)"
+    ).proof():
+        with p.induction("c"):
+            with p.base():
+                # Goal: !a b. nat0_lt a b ==> nat0_lt (n0plus a 0) (n0plus b 0).
+                p.fix("a b")
+                p.assume("h_lt: nat0_lt a b")
+                p.have("h_a: n0plus a 0 = a").by(N0PLUS_BASE, "a")
+                p.have("h_b: n0plus b 0 = b").by(N0PLUS_BASE, "b")
+                # Build  nat0_lt (n0plus a 0) (n0plus b 0) = nat0_lt a b
+                # via MK_COMB(AP_TERM(nat0_lt, h_a), h_b).
+                e1 = _APT(p._parse("nat0_lt"), p.fact("h_a"))
+                e2 = _MK(e1, p.fact("h_b"))
+                p.thus(
+                    "nat0_lt (n0plus a 0) (n0plus b 0)"
+                ).by_eq_mp(_SYM(e2), "h_lt")
+            with p.step("IH"):
+                # IH:  !a b. nat0_lt a b ==> nat0_lt (n0plus a c) (n0plus b c)
+                # Goal: !a b. nat0_lt a b ==>
+                #            nat0_lt (n0plus a (SUC0 c)) (n0plus b (SUC0 c))
+                p.fix("a b")
+                p.assume("h_lt: nat0_lt a b")
+                p.have(
+                    "ih_ab: nat0_lt (n0plus a c) (n0plus b c)"
+                ).by("IH", "a", "b", "h_lt")
+                p.have(
+                    "h_mono: nat0_lt (SUC0 (n0plus a c)) "
+                    "                (SUC0 (n0plus b c))"
+                ).by(
+                    NAT0_LT_SUC0_MONO,
+                    "n0plus a c",
+                    "n0plus b c",
+                    "ih_ab",
+                )
+                p.have(
+                    "h_step_a: n0plus a (SUC0 c) = SUC0 (n0plus a c)"
+                ).by(N0PLUS_STEP, "a", "c")
+                p.have(
+                    "h_step_b: n0plus b (SUC0 c) = SUC0 (n0plus b c)"
+                ).by(N0PLUS_STEP, "b", "c")
+                # nat0_lt (n0plus a (SUC0 c)) (n0plus b (SUC0 c))
+                #   = nat0_lt (SUC0 (n0plus a c)) (SUC0 (n0plus b c)).
+                e1 = _APT(p._parse("nat0_lt"), p.fact("h_step_a"))
+                e2 = _MK(e1, p.fact("h_step_b"))
+                p.thus(
+                    "nat0_lt (n0plus a (SUC0 c)) "
+                    "         (n0plus b (SUC0 c))"
+                ).by_eq_mp(e2, "h_mono")
+    # Specialize swapped at (c, a, b) to recover (a, b, c) public order.
+    p.fix("a b c")
+    p.assume("h_ab: nat0_lt a b")
+    p.thus(
+        "nat0_lt (n0plus a c) (n0plus b c)"
+    ).by("swapped", "c", "a", "b", "h_ab")
 
 
 @proof
@@ -4437,7 +4587,26 @@ def OMEGA_TO_X_IX(p):
         "     (App_t (App_t I_t X) (App_t I_t X)) "
         "    = App_t X (App_t I_t X)"
     )
-    p.sorry()
+    p.fix("X")
+    # T1 = sk_step T0 = ((K X)(K X))(I X)        [TRAJ_STEP_OMEGA_SHAPE]
+    # T2 = sk_step T1 = X (I X)                  [SK_STEP_K_UNDER_LEFT at
+    #                                              (x=X, y=K X, z=I X)]
+    # not_self for the K-lift: ~(X = App_t (App_t K_t X) (App_t K_t X)).
+    # SK_NEQ_DEEP_LEFT_WRAP at (t, u, v) := (X, K_t, App_t K_t X).
+    p.have(
+        "not_self: ~(X = App_t (App_t K_t X) (App_t K_t X))"
+    ).by(SK_NEQ_DEEP_LEFT_WRAP, "X", "K_t", "App_t K_t X")
+    with sk_reduce(
+        p,
+        "App_t (App_t I_t X) (App_t I_t X)",
+        "App_t X (App_t I_t X)",
+    ) as r:
+        r.step(TRAJ_STEP_OMEGA_SHAPE, "X")
+        r.step(
+            SK_STEP_K_UNDER_LEFT,
+            "X", "App_t K_t X", "App_t I_t X",
+            mp=["not_self"],
+        )
 
 
 @proof
@@ -4484,18 +4653,166 @@ def OMEGA_TRAJ_I_DEPTH_STEP(p):
     built from kernel-level TRANS and the size lemmas.  Currently
     sorried.
     """
-    p.goal(
-        "!k. ?n. sk_iter n (App_t (App_t I_t (I_pow k (App_t (App_t S_t I_t) I_t))) "
-        "                          (App_t I_t (I_pow k (App_t (App_t S_t I_t) I_t)))) "
-        "        = App_t (App_t I_t (I_pow (SUC0 k) (App_t (App_t S_t I_t) I_t))) "
-        "                (App_t I_t (I_pow (SUC0 k) (App_t (App_t S_t I_t) I_t))) "
-        "      /\\ nat0_lt "
-        "             (sk_size (App_t (App_t I_t (I_pow k (App_t (App_t S_t I_t) I_t))) "
-        "                              (App_t I_t (I_pow k (App_t (App_t S_t I_t) I_t))))) "
-        "             (sk_size (App_t (App_t I_t (I_pow (SUC0 k) (App_t (App_t S_t I_t) I_t))) "
-        "                              (App_t I_t (I_pow (SUC0 k) (App_t (App_t S_t I_t) I_t)))))"
+    from tactics import (
+        TRANS as _TRANS,
+        SYM as _SYM,
+        AP_TERM as _APT,
+        MK_COMB as _MK,
+        CONJ as _CONJ,
     )
-    p.sorry()
+    from nat0_order import NAT0_LT_SUC0_MONO, NAT0_LT_TRANS
+
+    SII = "App_t (App_t S_t I_t) I_t"
+    X = f"I_pow k ({SII})"
+    SX = f"I_pow (SUC0 k) ({SII})"
+    IX = f"App_t I_t ({X})"
+    IIX = f"App_t I_t ({IX})"
+    T0 = f"App_t ({IX}) ({IX})"
+    T_end_raw = f"App_t ({IIX}) ({IIX})"
+    T_end_goal = f"App_t (App_t I_t ({SX})) (App_t I_t ({SX}))"
+    # DSL friction: f-string composition with `n0plus X Y` requires each
+    # arg to already be parenthesised, otherwise the parser left-associates
+    # `n0plus sk_size ...` and the partial application breaks types.
+    sz_Y = f"(sk_size ({IX}))"
+    sz_IY = f"(sk_size ({IIX}))"
+
+    p.goal(
+        f"!k. ?n. sk_iter n ({T0}) = {T_end_goal} "
+        f"      /\\ nat0_lt (sk_size ({T0})) (sk_size ({T_end_goal}))"
+    )
+    p.fix("k")
+
+    # -- Trace: T0 -> T_end_raw via OMEGA_TO_X_IX (2 steps) + OMEGA_PEEL (n_p).
+    p.have(
+        f"step1: sk_iter (SUC0 (SUC0 0)) ({T0}) "
+        f"       = App_t ({X}) ({IX})"
+    ).by(OMEGA_TO_X_IX, X)
+
+    p.have(
+        f"h_peel: ?n_p. sk_iter n_p (App_t ({X}) ({IX})) = {T_end_raw}"
+    ).by(OMEGA_PEEL, "k", X)
+    p.choose("n_p", from_="h_peel")
+
+    # Chain via SK_ITER_ADD at (n_p, 2, T0):
+    #   sk_iter (n0plus n_p 2) T0 = sk_iter n_p (sk_iter 2 T0).
+    p.have(
+        f"h_add: sk_iter (n0plus n_p (SUC0 (SUC0 0))) ({T0}) "
+        f"       = sk_iter n_p (sk_iter (SUC0 (SUC0 0)) ({T0}))"
+    ).by(SK_ITER_ADD, "n_p", "SUC0 (SUC0 0)", T0)
+    # AP_TERM(sk_iter n_p) lifts step1 inside the SK_ITER_ADD chain.
+    h_inner_th = _APT(p._parse("sk_iter n_p"), p.fact("step1"))
+    p.have(
+        f"h_inner: sk_iter n_p (sk_iter (SUC0 (SUC0 0)) ({T0})) "
+        f"        = sk_iter n_p (App_t ({X}) ({IX}))"
+    ).by_thm(h_inner_th)
+    p.have(
+        f"h_raw: sk_iter (n0plus n_p (SUC0 (SUC0 0))) ({T0}) = {T_end_raw}"
+    ).by_thm(_TRANS(
+        p.fact("h_add"),
+        _TRANS(p.fact("h_inner"), p.fact("n_p_eq")),
+    ))
+
+    # -- Fold T_end_raw -> T_end_goal via I_POW_SUC.
+    # pow_eq: I_pow (SUC0 k) SII = App_t I_t (I_pow k SII), i.e. SX = IX.
+    p.have(
+        f"pow_eq: {SX} = {IX}"
+    ).by(I_POW_SUC, "k", SII)
+    # h_inner_eq: App_t I_t IX = App_t I_t SX, i.e. IIX = App_t I_t SX.
+    h_inner_eq_th = _APT(p._parse("App_t I_t"), _SYM(p.fact("pow_eq")))
+    p.have(
+        f"h_inner_eq: {IIX} = App_t I_t ({SX})"
+    ).by_thm(h_inner_eq_th)
+    # h_end_eq: T_end_raw = T_end_goal via MK_COMB on the two IIX slots.
+    h_end_eq_th = _MK(
+        _APT(p._parse("App_t"), p.fact("h_inner_eq")),
+        p.fact("h_inner_eq"),
+    )
+    p.have(f"h_end_eq: {T_end_raw} = {T_end_goal}").by_thm(h_end_eq_th)
+    p.have(
+        f"h_trace: sk_iter (n0plus n_p (SUC0 (SUC0 0))) ({T0}) = {T_end_goal}"
+    ).by_thm(_TRANS(p.fact("h_raw"), p.fact("h_end_eq")))
+
+    # -- Size growth: sk_size T0 < sk_size T_end_goal.
+    # Let Y = IX.  T0 = App_t Y Y; T_end_raw = App_t (I Y) (I Y); both summands
+    # of T_end_raw strictly exceed (sk_size Y) via NAT0_LT_SUC0_N0PLUS_R, lifted
+    # to n0plus by MONO_L + MONO_R + TRANS, then SUC0_MONO.
+    p.have(
+        f"sz_T0: sk_size ({T0}) "
+        f"       = SUC0 (n0plus {sz_Y} {sz_Y})"
+    ).by(SK_SIZE_APP, IX, IX)
+    p.have(
+        f"sz_T_end_raw: sk_size ({T_end_raw}) "
+        f"             = SUC0 (n0plus {sz_IY} {sz_IY})"
+    ).by(SK_SIZE_APP, IIX, IIX)
+    p.have(
+        f"sz_IY_eq: {sz_IY} "
+        f"          = SUC0 (n0plus (sk_size I_t) {sz_Y})"
+    ).by(SK_SIZE_APP, "I_t", IX)
+    # h_lt_Y_IY: sk_size Y < sk_size (I Y).
+    p.have(
+        f"h_lt_pre: nat0_lt {sz_Y} "
+        f"          (SUC0 (n0plus (sk_size I_t) {sz_Y}))"
+    ).by(NAT0_LT_SUC0_N0PLUS_R, "sk_size I_t", sz_Y)
+    p.have(
+        f"h_lt_Y_IY: nat0_lt {sz_Y} {sz_IY}"
+    ).by_rewrite_of("h_lt_pre", [_SYM(p.fact("sz_IY_eq"))])
+
+    # Lift Y < IY to the two-summand n0plus via MONO_L (left slot) then
+    # MONO_R (right slot), chained by TRANS.
+    p.have(
+        f"h_lt_L: nat0_lt (n0plus {sz_Y} {sz_Y}) "
+        f"                (n0plus {sz_IY} {sz_Y})"
+    ).by(
+        NAT0_LT_N0PLUS_MONO_L, sz_Y, sz_IY, sz_Y, "h_lt_Y_IY",
+    )
+    p.have(
+        f"h_lt_R: nat0_lt (n0plus {sz_IY} {sz_Y}) "
+        f"                (n0plus {sz_IY} {sz_IY})"
+    ).by(
+        NAT0_LT_N0PLUS_MONO_R, sz_IY, sz_Y, sz_IY, "h_lt_Y_IY",
+    )
+    p.have(
+        f"h_lt_sum: nat0_lt (n0plus {sz_Y} {sz_Y}) "
+        f"                  (n0plus {sz_IY} {sz_IY})"
+    ).by(
+        NAT0_LT_TRANS,
+        f"n0plus {sz_Y} {sz_Y}",
+        f"n0plus {sz_IY} {sz_Y}",
+        f"n0plus {sz_IY} {sz_IY}",
+        "h_lt_L", "h_lt_R",
+    )
+    p.have(
+        f"h_lt_suc: nat0_lt (SUC0 (n0plus {sz_Y} {sz_Y})) "
+        f"                  (SUC0 (n0plus {sz_IY} {sz_IY}))"
+    ).by(
+        NAT0_LT_SUC0_MONO,
+        f"n0plus {sz_Y} {sz_Y}",
+        f"n0plus {sz_IY} {sz_IY}",
+        "h_lt_sum",
+    )
+    p.have(
+        f"h_size_lt_raw: nat0_lt (sk_size ({T0})) (sk_size ({T_end_raw}))"
+    ).by_rewrite_of(
+        "h_lt_suc",
+        [_SYM(p.fact("sz_T0")), _SYM(p.fact("sz_T_end_raw"))],
+    )
+    h_size_eq_th = _APT(p._parse("sk_size"), p.fact("h_end_eq"))
+    p.have(
+        f"h_size_eq: sk_size ({T_end_raw}) = sk_size ({T_end_goal})"
+    ).by_thm(h_size_eq_th)
+    p.have(
+        f"h_size_lt: nat0_lt (sk_size ({T0})) (sk_size ({T_end_goal}))"
+    ).by_rewrite_of("h_size_lt_raw", [p.fact("h_size_eq")])
+
+    # Conjoin and EXISTS-introduce.
+    p.have(
+        f"h_conj: sk_iter (n0plus n_p (SUC0 (SUC0 0))) ({T0}) = {T_end_goal} "
+        f"        /\\ nat0_lt (sk_size ({T0})) (sk_size ({T_end_goal}))"
+    ).by_thm(_CONJ(p.fact("h_trace"), p.fact("h_size_lt")))
+    p.thus(
+        f"?n. sk_iter n ({T0}) = {T_end_goal} "
+        f"    /\\ nat0_lt (sk_size ({T0})) (sk_size ({T_end_goal}))"
+    ).by_witness("n0plus n_p (SUC0 (SUC0 0))", "h_conj")
 
 
 @proof
