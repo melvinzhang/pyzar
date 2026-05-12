@@ -7930,6 +7930,58 @@ sk_bullet = mk_const("sk_bullet", [])
 SK_BULLET_REC = _unfold_rec_via_F_def(_SK_BULLET_REC_RAW, _SK_BULLET_F_DEF)
 
 
+def _sk_bullet_disjuncts(t, r):
+    """Return the four disjunct strings of ``_sk_bullet_F``'s body at
+    input ``t`` with the SELECT-bound variable substituted by ``r``.
+
+    DSL friction: the F_DEF body uses ``x, y, z`` and ``a, b`` as the
+    existential bvars, but unfold-lemma callers commonly fix surface
+    vars ``X, Y, Z``.  We rename to ``a, b, c`` here (alpha-equivalent;
+    REC is up to bvar renaming) so the case-split disjuncts can be
+    pretty-printed without shadowing the surface vars.
+    """
+    K_shape = f"?a b. {t} = App_t (App_t K_t a) b"
+    S_shape = f"?a b c. {t} = App_t (App_t (App_t S_t a) b) c"
+    App_shape = f"?a b. {t} = App_t a b"
+    D1 = f"(?a b. {t} = App_t (App_t K_t a) b /\\ {r} = sk_bullet a)"
+    D2 = (
+        f"(~({K_shape}) /\\ "
+        f" ?a b c. {t} = App_t (App_t (App_t S_t a) b) c /\\ "
+        f"         {r} = App_t (App_t (sk_bullet a) (sk_bullet c)) "
+        f"                     (App_t (sk_bullet b) (sk_bullet c)))"
+    )
+    D3 = (
+        f"(~({K_shape}) /\\ ~({S_shape}) /\\ "
+        f" (?a b. {t} = App_t a b /\\ "
+        f"        {r} = App_t (sk_bullet a) (sk_bullet b)))"
+    )
+    D4 = (
+        f"(~({K_shape}) /\\ ~({S_shape}) /\\ "
+        f" ~({App_shape}) /\\ {r} = {t})"
+    )
+    return [D1, D2, D3, D4]
+
+
+def _sk_bullet_body(t, r):
+    return " \\/ ".join(_sk_bullet_disjuncts(t, r))
+
+
+def _sk_bullet_select_at(p, t, witness_r, inner_branch_th):
+    """Mirror of ``_sk_step_select_at`` for sk_bullet's 4-disjunct body.
+
+    Combines: ``ex: ?r. body[t, r]`` (DISJ-chain + EXISTS) with
+    ``_select_via_rec(SK_BULLET_REC, ...)`` to land on
+    ``|- body[t, sk_bullet t]``.
+    """
+    body_at_r = _sk_bullet_body(t, witness_r)
+    body_at_r_var = _sk_bullet_body(t, "r")
+    p.have(f"_bullet_disj_rhs: {body_at_r}").by_disj(inner_branch_th)
+    p.have(f"_bullet_ex: ?r. {body_at_r_var}").by_witness(
+        witness_r, "_bullet_disj_rhs"
+    )
+    return _select_via_rec(SK_BULLET_REC, [p._parse(t)], p.fact("_bullet_ex"))
+
+
 @proof
 def SK_BULLET_S_T(p):
     """|- sk_bullet S_t = S_t.
@@ -7973,18 +8025,140 @@ def SK_BULLET_S_REDEX(p):
                   = App_t (App_t (sk_bullet X) (sk_bullet Z))
                           (App_t (sk_bullet Y) (sk_bullet Z)).
 
-    *** SORRY STUB.  S-redex unfold: D2 fires (with the ~K guard
-    satisfied since S_t /= K_t at the App-of-App-of-App head); D3/D4
-    refuted by the S-redex shape; D1 refuted by the same S /= K head.
-    ~120 LOC.
+    S-redex disjunct (D2, guarded by ~K) fires at the natural witness.
+    D1 (K-branch) is refuted via ``not_kred`` (S-input's
+    App_t (App_t S_t X) Y head can't unify with App_t K_t _ by
+    APP_T_INJ + K_T_NEQ_APP_T at the inner App_t S_t X = K_t step).
+    D3 / D4 are refuted via the obvious S-redex existence of the
+    input.  Structure mirrors SK_STEP_S.
     """
+    from tactics import CONJ as _CONJ, CONJUNCT1 as _C1, CONJUNCT2 as _C2
     p.goal(
         "!X:nat0. !Y:nat0. !Z:nat0. "
         "sk_bullet (App_t (App_t (App_t S_t X) Y) Z) = "
         "App_t (App_t (sk_bullet X) (sk_bullet Z)) "
         "      (App_t (sk_bullet Y) (sk_bullet Z))"
     )
-    p.sorry()
+    p.fix("X Y Z")
+    t = "App_t (App_t (App_t S_t X) Y) Z"
+    sk_t = f"sk_bullet ({t})"
+    val = (
+        "App_t (App_t (sk_bullet X) (sk_bullet Z)) "
+        "      (App_t (sk_bullet Y) (sk_bullet Z))"
+    )
+
+    # not_kred: head App_t (App_t S_t X) Y can't match App_t K_t _.
+    # Two APP_T_INJ peels strip the outer/middle App layers and surface
+    # ``App_t S_t X = K_t``; SYM + K_T_NEQ_APP_T gives the contradiction.
+    with p.have(
+        f"not_kred: ~(?a b. {t} = App_t (App_t K_t a) b)"
+    ).proof():
+        with p.suppose(f"ex_kred: ?a b. {t} = App_t (App_t K_t a) b"):
+            p.choose("a", from_="ex_kred")
+            p.choose("b", from_="a_eq")
+            p.have(
+                "h_o: App_t (App_t S_t X) Y = App_t K_t a /\\ Z = b"
+            ).by(APP_T_INJ, "App_t (App_t S_t X) Y", "Z",
+                 "App_t K_t a", "b", "b_eq")
+            p.have(
+                "h_o1: App_t (App_t S_t X) Y = App_t K_t a"
+            ).by_thm(_C1(p.fact("h_o")))
+            p.have(
+                "h_m: App_t S_t X = K_t /\\ Y = a"
+            ).by(APP_T_INJ, "App_t S_t X", "Y", "K_t", "a", "h_o1")
+            p.have("ASx_eq_K: App_t S_t X = K_t").by_thm(_C1(p.fact("h_m")))
+            p.have("K_neq: ~(K_t = App_t S_t X)").by(
+                K_T_NEQ_APP_T, "S_t", "X"
+            )
+            p.have("K_eq: K_t = App_t S_t X").by_thm(
+                SYM(p.fact("ASx_eq_K"))
+            )
+            p.absurd().by_conj("K_neq", "K_eq")
+
+    # D2 inner witness at r := val.  Witness tuple is (X, Y, Z); the
+    # body's recursive ``sk_bullet a / b / c`` get substituted to
+    # ``sk_bullet X / Y / Z`` in the expected pattern.
+    p.have(
+        f"inner_S_inner: "
+        f"?a b c. {t} = App_t (App_t (App_t S_t a) b) c /\\ "
+        f"        {val} = App_t (App_t (sk_bullet a) (sk_bullet c)) "
+        f"                      (App_t (sk_bullet b) (sk_bullet c))"
+    ).by_exists(
+        ["X", "Y", "Z"], REFL(p._parse(t)), REFL(p._parse(val))
+    )
+    p.have(
+        f"inner_S: ~(?a b. {t} = App_t (App_t K_t a) b) /\\ "
+        f" (?a b c. {t} = App_t (App_t (App_t S_t a) b) c /\\ "
+        f"          {val} = App_t (App_t (sk_bullet a) (sk_bullet c)) "
+        f"                        (App_t (sk_bullet b) (sk_bullet c)))"
+    ).by_thm(_CONJ(p.fact("not_kred"), p.fact("inner_S_inner")))
+    body_th = _sk_bullet_select_at(p, t, val, "inner_S")
+    p.have(f"body: {_sk_bullet_body(t, sk_t)}").by_thm(body_th)
+
+    # is_sred: refutes ~S guards in D3, D4.
+    p.have(
+        f"is_sred: ?a b c. {t} = App_t (App_t (App_t S_t a) b) c"
+    ).by_exists(["X", "Y", "Z"], REFL(p._parse(t)))
+
+    D1, D2, D3, D4 = _sk_bullet_disjuncts(t, sk_t)
+    with p.cases_on("body"):
+        with p.case(f"h1: {D1}"):
+            # K-branch fires on an S-input: extract the (a, b) witnesses
+            # via cases_on's auto-choose + manual choose-b, then re-pack
+            # as ?a b. t = App_t (App_t K_t a) b to contradict not_kred.
+            p.choose("b", from_="a_eq")
+            p.split("b_eq", "(h_app, _)")
+            p.have(
+                f"h_kred_ex: ?a b. {t} = App_t (App_t K_t a) b"
+            ).by_exists(["a", "b"], p.fact("h_app"))
+            p.absurd().by_conj("not_kred", "h_kred_ex")
+        with p.case(f"h2: {D2}"):
+            # The firing branch: unpack the existential triple, then
+            # use APP_T_INJ three times to identify X=a, Y=b, Z=c, and
+            # rewrite ``h_sk: val = App_t (App_t (sk_bullet a) (sk_bullet c))
+            #                          (App_t (sk_bullet b) (sk_bullet c))``
+            # back into the surface (X, Y, Z) form.
+            p.split("h2", "(_, h2_ex)")
+            p.choose("a", from_="h2_ex")
+            p.choose("b", from_="a_eq")
+            p.choose("c", from_="b_eq")
+            p.split("c_eq", "(h_app, h_sk)")
+            p.have(
+                "h_o: App_t (App_t S_t X) Y = App_t (App_t S_t a) b /\\ "
+                "     Z = c"
+            ).by(APP_T_INJ, "App_t (App_t S_t X) Y", "Z",
+                 "App_t (App_t S_t a) b", "c", "h_app")
+            p.have(
+                "h_o1: App_t (App_t S_t X) Y = App_t (App_t S_t a) b"
+            ).by_thm(_C1(p.fact("h_o")))
+            p.have("h_Zc: Z = c").by_thm(_C2(p.fact("h_o")))
+            p.have(
+                "h_m: App_t S_t X = App_t S_t a /\\ Y = b"
+            ).by(APP_T_INJ, "App_t S_t X", "Y",
+                 "App_t S_t a", "b", "h_o1")
+            p.have(
+                "h_m1: App_t S_t X = App_t S_t a"
+            ).by_thm(_C1(p.fact("h_m")))
+            p.have("h_Yb: Y = b").by_thm(_C2(p.fact("h_m")))
+            p.have(
+                "h_i: S_t = S_t /\\ X = a"
+            ).by(APP_T_INJ, "S_t", "X", "S_t", "a", "h_m1")
+            p.have("h_Xa: X = a").by_thm(_C2(p.fact("h_i")))
+            # DSL friction: by_rewrite_of rewrites the *source* fact's
+            # surface form using the supplied SYM equations.  h_sk is
+            # ``sk_bullet t = App_t ... a ... b ... c ...``; the three
+            # SYMs turn it back to ``... X ... Y ... Z ...``.
+            p.thus(f"{sk_t} = {val}").by_rewrite_of(
+                "h_sk",
+                [SYM(p.fact("h_Xa")), SYM(p.fact("h_Yb")),
+                 SYM(p.fact("h_Zc"))],
+            )
+        with p.case(f"h3: {D3}"):
+            p.split("h3", "(_, h_ns, _)")
+            p.absurd().by_conj("h_ns", "is_sred")
+        with p.case(f"h4: {D4}"):
+            p.split("h4", "(_, h_ns, _, _)")
+            p.absurd().by_conj("h_ns", "is_sred")
 
 
 @proof
