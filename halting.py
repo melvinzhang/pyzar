@@ -4263,29 +4263,98 @@ def Y_FIXED_POINT(p):
 
       Step 7: SK_STEP_K_UNDER_LEFT at (f, App (App K ARG) f, RHS).  1 hyp.
           Hyp: ~(f = App (App K f) (App (App K ARG) f)).
-          Discharge: helper lemma SK_SIZE_LT_DEEP_LEFT (to add) gives
-          sk_size f < sk_size (App K f) < sk_size (App (App K f) ...).
-          Equality of f and the App would equate sk_sizes, contradicting
-          NAT0_LT_NOT_REFL.  Alternative: state Y_FIXED_POINT_TROMP with
-          this disjointness as an extra hypothesis -- the diagonal in
-          Stage 6 derives it from its concrete f.
+          Discharge: SK_NEQ_DEEP_LEFT_WRAP at (f, K_t, (K ARG) f) -- the
+          size-monotone irreflexivity corollary that says an unknown
+          subterm can't equal a strictly-larger App wrapping itself.
           current = App_t f X_TROMP_f.
 
-    Witness: n = SUC0^7 0.
-
-    Status: STATEMENT correct (replaces unprovable literal-fixed-point
-    target with the reduction-existential form that one-way sk_step can
-    actually witness).  PROOF body is a multi-hundred-line composition
-    of already-available helpers; sorried pending dedicated session.
+    Witness: n = SUC0^7 0.  Discharge of the 5 not_self hypotheses
+    factored: 3 ``_discharge_s_under_left_not_self`` calls (steps 1/3/5,
+    where the contradiction lives in the universal right-conjunct
+    ``App y z = z`` regardless of x's shape), 2 ``SK_NEQ_DEEP_LEFT_WRAP``
+    instantiations (steps 4/7).
     """
+    # Term-string shorthands for the trace.
+    SSK = _TROMP_SSK_STR                              # (S S) K
+    INNER = _TROMP_INNER_STR                          # (S S) (S (S S K))
+    INNER_K = f"App_t K_t ({INNER})"                  # K INNER
+    ARG = _TROMP_ARG_STR                              # S (K INNER) K
+    AKf = "App_t K_t f"                               # K f
+    AKAf = f"App_t (App_t K_t ({ARG})) f"             # (K ARG) f
+    ASSK = f"App_t S_t ({SSK})"                       # S (S S K) = S SSK
+    # ASSK_AKf = S SSK (K f); WW = (S SSK (K f)) ((K ARG) f) = X_TROMP_f.
+    ASSK_AKf = f"App_t ({ASSK}) ({AKf})"
+    WW = f"App_t ({ASSK_AKf}) ({AKAf})"
+
     p.goal(
         "!f. is_sk_term f ==> "
         f"    ?n. sk_iter n (App_t Y_t f) = App_t f ({_TROMP_X_STR})"
     )
-    # See docstring trace for the per-step plan.  Proof body composes
-    # sk_reduce + SK_STEP_S_UNDER_LEFT (×3) + SK_STEP_S (×2) +
-    # SK_STEP_K_UNDER_LEFT (×1) + inline depth-2 K-descent at step 4.
-    p.sorry()
+    p.fix("f")
+    p.assume("_h_st: is_sk_term f")  # unused -- the trace is pure rewriting.
+
+    # ---- Discharge the 5 not_self hypotheses up front. ----------------
+    # Steps 1/3/5 use SK_STEP_S_UNDER_LEFT, whose not_self has the shape
+    # ~(App (App x z) (App y z) = App (App (App S x) y) z) -- killed by
+    # the right-conjunct ``App y z = z`` (helper handles all three).
+    _discharge_s_under_left_not_self(p, "S_t", "K_t", ARG, label="ns1")
+    _discharge_s_under_left_not_self(p, INNER_K, "K_t", "f", label="ns3")
+    _discharge_s_under_left_not_self(p, "S_t", ASSK, AKf, label="ns5")
+
+    # Step 4: SK_STEP_K_UNDER_LEFT_LEFT's not_self_inner has the
+    # ``deep-left wrap`` shape -- SK_NEQ_DEEP_LEFT_WRAP at (INNER, K_t, f).
+    p.have(
+        f"ns4: ~(({INNER}) = App_t (App_t K_t ({INNER})) f)"
+    ).by(SK_NEQ_DEEP_LEFT_WRAP, INNER, "K_t", "f")
+
+    # Step 7: SK_STEP_K_UNDER_LEFT's not_self has the same deep-left
+    # wrap shape at (f, K_t, (K ARG) f).
+    p.have(
+        f"ns7: ~(f = App_t (App_t K_t f) ({AKAf}))"
+    ).by(SK_NEQ_DEEP_LEFT_WRAP, "f", "K_t", AKAf)
+
+    # ---- 7-step sk_reduce trace.  Witness n = SUC0^7 0. ---------------
+    with sk_reduce(p, "App_t Y_t f", f"App_t f ({_TROMP_X_STR})") as r:
+        # Step 0: align by unfolding Y_t -- no iter bump.
+        # current = App_t (App_t (App_t (App_t S_t S_t) K_t) ARG) f
+        r.rewrite(Y_T_DEF)
+
+        # Step 1: outer S-redex sits one App below f.
+        # current -> App_t (App_t (App_t S_t ARG) (App_t K_t ARG)) f
+        r.step(SK_STEP_S_UNDER_LEFT, "S_t", "K_t", ARG, "f", mp=["ns1"])
+
+        # Step 2: top S-redex (x=ARG, y=K ARG, z=f).
+        # current -> App_t (App_t ARG f) (App_t (App_t K_t ARG) f)
+        r.step(SK_STEP_S, ARG, f"App_t K_t ({ARG})", "f")
+
+        # Step 3: after expanding ARG, current's LHS is
+        # App_t (App_t (App_t S_t INNER_K) K_t) f -- a one-deep S-redex.
+        # current -> App_t (App_t (App_t INNER_K f) (App_t K_t f)) AKAf
+        r.step(SK_STEP_S_UNDER_LEFT, INNER_K, "K_t", "f", AKAf, mp=["ns3"])
+
+        # Step 4: depth-2 K-descent (INNER_K f = (K INNER) f, K-redex).
+        # current -> App_t (App_t INNER (App_t K_t f)) AKAf
+        r.step(
+            SK_STEP_K_UNDER_LEFT_LEFT, INNER, "f", AKf, AKAf,
+            mp=["ns4"],
+        )
+
+        # Step 5: INNER's spine is (S S) (S SSK), so the LHS is an
+        # under-left S-redex at (x=S_t, y=S SSK, z=K f, w=AKAf).
+        # current -> App_t (App_t (App_t S_t AKf) (App_t ASSK AKf)) AKAf
+        r.step(
+            SK_STEP_S_UNDER_LEFT, "S_t", ASSK, AKf, AKAf,
+            mp=["ns5"],
+        )
+
+        # Step 6: top S-redex (x=K f, y=ASSK (K f), z=AKAf).
+        # current -> App_t (App_t AKf AKAf) (App_t ASSK_AKf AKAf)
+        r.step(SK_STEP_S, AKf, ASSK_AKf, AKAf)
+
+        # Step 7: top is ((K f) AKAf) WW -- one-deep K-redex.
+        # current -> App_t f WW = App_t f X_TROMP_f.  sk_reduce close
+        # matches against the existential goal.
+        r.step(SK_STEP_K_UNDER_LEFT, "f", AKAf, WW, mp=["ns7"])
 
 
 # ---------------------------------------------------------------------------
