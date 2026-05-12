@@ -2516,6 +2516,134 @@ def SK_SIZE_GROWTH_OMEGA_SHAPE(p):
     )
 
 
+# ---------------------------------------------------------------------------
+# Size-monotone irreflexivity helpers.
+#
+# Used to discharge ``not_self`` hypotheses of the form
+# ``~(t = App_t ... t ...)`` by showing the App-wrapped term has strictly
+# greater sk_size than ``t``.  The hypotheses appear in Y_FIXED_POINT's
+# trace where ``t`` is universally quantified (an arbitrary SK term),
+# so the usual APP_T_INJ + atom-tag-clash discharge doesn't apply.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def SK_SIZE_LT_APP_LEFT(p):
+    """|- !t u. nat0_lt (sk_size t) (sk_size (App_t t u)).
+
+    Wrapping a term as the left child of an App strictly grows sk_size.
+    Direct: SK_SIZE_APP unfolds the RHS to
+    ``SUC0 (n0plus (sk_size t) (sk_size u))``, then
+    NAT0_LT_SUC0_N0PLUS_L at (a := sk_size t, b := sk_size u).
+    """
+    p.goal("!t u. nat0_lt (sk_size t) (sk_size (App_t t u))")
+    p.fix("t u")
+
+    # Unfold sk_size on the App_t.
+    p.have(
+        "sz_app: sk_size (App_t t u) "
+        "        = SUC0 (n0plus (sk_size t) (sk_size u))"
+    ).by(SK_SIZE_APP, "t", "u")
+
+    # NAT0_LT_SUC0_N0PLUS_L gives the lt in unfolded form.
+    p.have(
+        "h_pre: nat0_lt (sk_size t) "
+        "       (SUC0 (n0plus (sk_size t) (sk_size u)))"
+    ).by(NAT0_LT_SUC0_N0PLUS_L, "sk_size t", "sk_size u")
+
+    # DSL friction: by_rewrite_of orients each rule LHS -> RHS, so to fold
+    # ``SUC0 (n0plus ...)`` back into ``sk_size (App_t t u)`` we have to
+    # feed ``SYM(sz_app)`` rather than ``sz_app``.  A ``by_rewrite_of``
+    # variant that auto-orients (mirroring _simp_require's sym tolerance)
+    # would remove this small ceremony at every size-fold call site.
+    p.thus(
+        "nat0_lt (sk_size t) (sk_size (App_t t u))"
+    ).by_rewrite_of("h_pre", [SYM(p.fact("sz_app"))])
+
+
+@proof
+def SK_SIZE_LT_APP_RIGHT(p):
+    """|- !t u. nat0_lt (sk_size t) (sk_size (App_t u t)).
+
+    Wrapping a term as the *right* child of an App strictly grows
+    sk_size.  Mirror of SK_SIZE_LT_APP_LEFT via NAT0_LT_SUC0_N0PLUS_R.
+    """
+    p.goal("!t u. nat0_lt (sk_size t) (sk_size (App_t u t))")
+    p.fix("t u")
+
+    p.have(
+        "sz_app: sk_size (App_t u t) "
+        "        = SUC0 (n0plus (sk_size u) (sk_size t))"
+    ).by(SK_SIZE_APP, "u", "t")
+
+    p.have(
+        "h_pre: nat0_lt (sk_size t) "
+        "       (SUC0 (n0plus (sk_size u) (sk_size t)))"
+    ).by(NAT0_LT_SUC0_N0PLUS_R, "sk_size u", "sk_size t")
+
+    # Same fold-back via SYM(sz_app) as in SK_SIZE_LT_APP_LEFT.
+    p.thus(
+        "nat0_lt (sk_size t) (sk_size (App_t u t))"
+    ).by_rewrite_of("h_pre", [SYM(p.fact("sz_app"))])
+
+
+@proof
+def SK_SIZE_LT_DEEP_LEFT(p):
+    """|- !t u v. nat0_lt (sk_size t) (sk_size (App_t (App_t u t) v)).
+
+    Depth-2 size growth: wrapping ``t`` as the right child of an inner
+    App and then as the left child of an outer App strictly grows
+    sk_size by two SUC0/n0plus hops.
+
+    Two-hop chain via NAT0_LT_TRANS:
+      sk_size t
+        < sk_size (App_t u t)                  [SK_SIZE_LT_APP_RIGHT]
+        < sk_size (App_t (App_t u t) v)        [SK_SIZE_LT_APP_LEFT]
+
+    Discharges Step 7 of Y_FIXED_POINT: the SK_STEP_K_UNDER_LEFT guard
+    ``~(f = App_t (App_t K_t f) (App_t (App_t K_t ARG) f))`` follows by
+    AP_TERM(sk_size) + NAT0_LT_NOT_REFL on this chain.
+    """
+    p.goal(
+        "!t u v. nat0_lt (sk_size t) "
+        "                (sk_size (App_t (App_t u t) v))"
+    )
+    p.fix("t u v")
+
+    # Hop 1: sk_size t < sk_size (App_t u t).
+    # DSL friction: SK_SIZE_LT_APP_RIGHT is stated as ``!t u. ... App_t u t``,
+    # so the SPEC order is (t-arg-of-lemma := t, u-arg-of-lemma := u);
+    # the position of the *wrapped* variable in the conclusion is the
+    # first bound name regardless of which child it lives at.  A
+    # SK_SIZE_LT_APP variant that took (wrapper, wrapped) in surface
+    # order would read more naturally at call sites.
+    p.have(
+        "h_inner: nat0_lt (sk_size t) (sk_size (App_t u t))"
+    ).by(SK_SIZE_LT_APP_RIGHT, "t", "u")
+
+    # Hop 2: sk_size (App_t u t) < sk_size (App_t (App_t u t) v).
+    p.have(
+        "h_outer: nat0_lt (sk_size (App_t u t)) "
+        "                 (sk_size (App_t (App_t u t) v))"
+    ).by(SK_SIZE_LT_APP_LEFT, "App_t u t", "v")
+
+    # Compose via NAT0_LT_TRANS.  DSL friction: NAT0_LT_TRANS requires
+    # all three witness terms spelled out (a, b, c) before the two
+    # ordering facts -- a ``by_match`` overload that infers the middle
+    # term from the two facts' shapes would save the verbose middle
+    # ``sk_size (App_t u t)`` repetition here.
+    p.thus(
+        "nat0_lt (sk_size t) (sk_size (App_t (App_t u t) v))"
+    ).by(
+        NAT0_LT_TRANS,
+        "sk_size t",
+        "sk_size (App_t u t)",
+        "sk_size (App_t (App_t u t) v)",
+        "h_inner",
+        "h_outer",
+    )
+
+
 @proof
 def OMEGA_T_STEP1(p):
     """|- sk_step Omega_t =
