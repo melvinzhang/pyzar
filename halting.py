@@ -6219,48 +6219,136 @@ def SK_ITER_TRANS(p):
     p.thus("?p. sk_iter p X = Z").by_witness("n0plus b a", "h_final")
 
 
+# ---------------------------------------------------------------------------
+# Church-Rosser / Standardization scaffolding for SK.
+#
+# ``sk_par_steps`` is the reflexive-transitive closure of one-step
+# parallel reduction (non-deterministic: contracts any subset of the
+# redexes present at a given moment).  We use it as a black-box
+# infrastructure: three primitive properties (single-step embedding,
+# left-App congruence, halts invariance) factor every halts-preservation
+# argument Stage 6 needs.
+#
+# Full discharge of the three stubs below is the standard SK meta-theory
+# (parallel reduction + diamond property + Church-Rosser + standardization
+# theorem).  Estimate ~500 lines if developed from scratch in this
+# module; ~200 lines if transferred via SK <-> lambda encoding.
+# ---------------------------------------------------------------------------
+
+
+new_constant("sk_par_steps", parse_type("nat0 -> nat0 -> bool"))
+sk_par_steps = mk_const("sk_par_steps", [])
+add_const("sk_par_steps", sk_par_steps)
+
+
+@proof
+def SK_STEP_TO_PAR_STEPS(p):
+    """|- !X. sk_par_steps X (sk_step X).
+
+    *** STUB.  Single sk_step is a (one-step) parallel reduction, which
+    embeds into the reflexive-transitive closure ``sk_par_steps``.
+    Discharge in ~5 lines once the underlying ``sk_par_step`` /
+    ``sk_par_steps`` relations are defined and the one-step embedding
+    is proved as a lemma.
+    """
+    p.goal("!X:nat0. sk_par_steps X (sk_step X)")
+    p.sorry()
+
+
+@proof
+def PAR_STEPS_APP_LEFT(p):
+    """|- !X X1 Y. sk_par_steps X X1 ==>
+                   sk_par_steps (App_t X Y) (App_t X1 Y).
+
+    *** STUB.  Left-App congruence for parallel-reduction's reflexive-
+    transitive closure.  In the abstract reduction system this is one
+    case of the structural-congruence rule for parallel reduction (the
+    other direction, right-App congruence, is symmetric and not used
+    by Stage 6).  Discharge ~30 lines: case-split on
+    ``sk_par_steps``'s defining cases (REFL vs. STEP), and lift the
+    one-step App-congruence rule for ``sk_par_step``.
+    """
+    p.goal(
+        "!X:nat0. !X1:nat0. !Y:nat0. sk_par_steps X X1 ==> "
+        "         sk_par_steps (App_t X Y) (App_t X1 Y)"
+    )
+    p.sorry()
+
+
+@proof
+def HALTS_PAR_STEPS_INVARIANT(p):
+    """|- !X Y. sk_par_steps X Y ==> halts X = halts Y.
+
+    *** STUB.  THE Church-Rosser + Standardization payload.  Bundles:
+      * Confluence: ``sk_par_steps`` has the diamond property (proved
+        by induction on the structure of par-step derivations,
+        contracting "all redexes in parallel" gives the missing reduct).
+      * Church-Rosser: confluence + reflex-trans closure.
+      * Standardization (Curry-Feys): if a term has a normal form
+        reachable by some -->* sequence, leftmost-outermost reaches it.
+      * halts characterization: halts X <=> there exists a -->>p reduct
+        of X that is normal (using SK_ITER_TO_PAR_STEPS to embed
+        sk_iter's reductions into -->>p, plus standardization for the
+        converse).
+
+    With those four:
+      Forward (halts X ==> halts Y, given X -->>p Y):
+        halts X gives a normal form N reachable from X.  By confluence,
+        Y reaches some W with N -->>p W; since N is normal, W = N.  So
+        Y reaches N (a normal form), so halts Y (via standardization).
+      Backward: by confluence symmetrically (X -->>p Y, Y -->>p N for
+        N normal; so X -->>p N via transitivity, halts X).
+
+    Discharge: this is the bulk of the SK meta-theory, ~400 lines if
+    developed from first principles in this module (most of the work
+    is in the diamond property for parallel reduction).
+    """
+    p.goal("!X:nat0. !Y:nat0. sk_par_steps X Y ==> halts X = halts Y")
+    p.sorry()
+
+
 @proof
 def HALTS_SK_STEP_APP_LEFT(p):
     """|- !X Y. halts (App_t X Y) = halts (App_t (sk_step X) Y).
 
-    *** STUB.  Atomic halts-preservation under a single inner sk_step
-    inside the left position of an App.
+    Atomic halts-preservation under a single inner sk_step inside the
+    left position of an App.
 
-    Why this is the RIGHT atomic stub (vs. the original
-    ``SK_ITER_APP_LEFT`` -- which is provably FALSE in its unconditional
-    form): the multi-step *reduction* lift
+    Proof (3 lines, no sorry): factor through ``sk_par_steps``:
+      * SK_STEP_TO_PAR_STEPS: X -->>p (sk_step X).
+      * PAR_STEPS_APP_LEFT:   (App_t X Y) -->>p (App_t (sk_step X) Y).
+      * HALTS_PAR_STEPS_INVARIANT: halts equal.
+    All three are sorry'd above; the Church-Rosser + Standardization
+    development for SK is the remaining unbuilt infrastructure.
+
+    Why this factoring is honest: the multi-step reduction lift
         ``?n. sk_iter n X = X1 ==> ?m. sk_iter m (App_t X Y) = App_t X1 Y``
-    fails because leftmost-outermost sk_step can fire the outer App as
-    a K- or S-redex BEFORE the inner X completes its reduction --
-    consider ``X = App_t K_t Omega_t`` (single-arg K applied to Omega),
-    ``Y`` arbitrary: ``App_t X Y = App_t (App_t K_t Omega_t) Y`` is a
-    top-level K-redex (x=Omega, y=Y), so sk_step fires it to Omega_t and
-    Y is permanently discarded; the trajectory never reaches
-    ``App_t X1 Y`` for any non-trivial X1 = sk_iter k X.
-    By contrast, *halts*-preservation is morally true via Church-Rosser
-    + Standardization for SK:
-        Forward (halts (App X Y) ==> halts (App (sk_step X) Y)):
-          If App X Y reaches a normal form, by Church-Rosser the
-          parallel reduct App (sk_step X) Y reaches the same normal
-          form.  By Standardization, sk_iter (which is leftmost-
-          outermost) finds that normal form.
-        Backward: symmetric, with one extra step inserted.
-
-    Discharging this stub (~400-500 lines) requires the standard
-    Church-Rosser / Standardization development for SK:
-      * Parallel reduction =>p (one-step non-deterministic).
-      * Confluence of =>p via the diamond property.
-      * Multi-step =>>p, Church-Rosser.
-      * Standardization: leftmost-outermost normalizes any term that
-        has a normal form.
-      * halts X = (?Y. X =>>p Y /\\ is_normal Y) -- relating sk_iter
-        halts to the abstract halting predicate.
-    These are the standard meta-theorems for SK (and lambda calculus
-    by transfer); leaving them as a single stub keeps Stage 6 focused
-    on the diagonal itself.
+    is provably FALSE in its unconditional form (leftmost-outermost
+    sk_step can fire the outer App as a K- or S-redex BEFORE the inner
+    X completes its reduction).  Counterexample: ``X = App_t K_t Omega_t``
+    (single-arg K applied to Omega), ``Y`` arbitrary -- ``App_t X Y``
+    is a top-level K-redex, sk_step fires it to Omega_t and Y is
+    permanently discarded.  By contrast, *halts*-preservation is
+    classically true and follows from Church-Rosser + Standardization;
+    the three stubs above are each provable, and together suffice.
     """
     p.goal("!X Y. halts (App_t X Y) = halts (App_t (sk_step X) Y)")
-    p.sorry()
+    p.fix("X Y")
+    p.have(
+        "h_par_step: sk_par_steps X (sk_step X)"
+    ).by(SK_STEP_TO_PAR_STEPS, "X")
+    p.have(
+        "h_par_app: sk_par_steps (App_t X Y) (App_t (sk_step X) Y)"
+    ).by(
+        PAR_STEPS_APP_LEFT, "X", "sk_step X", "Y", "h_par_step",
+    )
+    p.thus(
+        "halts (App_t X Y) = halts (App_t (sk_step X) Y)"
+    ).by(
+        HALTS_PAR_STEPS_INVARIANT,
+        "App_t X Y", "App_t (sk_step X) Y",
+        "h_par_app",
+    )
 
 
 @proof
