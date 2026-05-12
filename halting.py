@@ -123,7 +123,7 @@ from nat0 import nat0_ty, ZERO, mk_suc0
 from nat0_order import define_wf_lt
 from proof import proof, define_with_at, register_intro_set
 from tactics import REFL, SPEC, SPECL, SYM, EQ_MP, DISJ1, DISJ2, CONJ, EXISTS, MP
-from tactics import AP_TERM, TRANS, REWRITE_CONV
+from tactics import AP_TERM, TRANS, REWRITE_CONV, BETA_NORM, unfold_def_at
 from axioms import mk_exists
 from hf_sets import Pair_ord
 from hf_syntax import (
@@ -7454,6 +7454,171 @@ def PAR_STEPS_APP_LEFT(p):
     p.thus(
         "sk_par_steps (App_t X Y) (App_t X1 Y)"
     ).by_thm(MP(inst_beta, p.fact("lifted_cl")))
+
+
+# ---------------------------------------------------------------------------
+# Phase 4d (diamond) infrastructure -- inversion lemmas for ``sk_par_step``.
+#
+# The impredicative encoding of ``sk_par_step`` admits inversion only via
+# careful P-instantiation: pick a Q such that ``closures(Q)`` is provable,
+# SPEC the unfolded universal at Q, and BETA_NORM the resulting redexes.
+# The two atom inversions below establish the technique; they are also
+# downstream prerequisites for the App-shape inversion lemmas needed by
+# the triangle / diamond proof in Phase 4d.
+# ---------------------------------------------------------------------------
+
+
+def _par_step_atom_inv(p, atom_str, atom_neq_app_t):
+    """Discharge ``!Y. sk_par_step <atom> Y ==> Y = <atom>`` for an
+    atomic SK constant (``S_t`` / ``K_t``).
+
+    Instantiates the impredicative ``P`` with
+    ``Q := \\A B. A = <atom> ==> B = <atom>``.  Closure for Q:
+
+    * REFL  ``!Z. Z = <atom> ==> Z = <atom>``        -- tautology.
+    * K     conclusion's first arg is ``App_t ...`` -- vacuous via
+            ``atom_neq_app_t`` (SYM-flip of the assumed ``App = atom``).
+    * S, APP  same shape-clash pattern.
+
+    DSL friction noted inline.
+    """
+    p.goal(f"!Y:nat0. sk_par_step {atom_str} Y ==> Y = {atom_str}")
+    p.fix("Y")
+    p.assume(f"h: sk_par_step {atom_str} Y")
+
+    # Unfold ``sk_par_step <atom> Y`` to the impredicative universal.
+    # DSL friction: ``by_def`` produces a registered fact, but we need
+    # to immediately SPEC at a lambda; the DSL exposes only term-applied
+    # SPEC via ``by_inst`` (which goes through ``_finish``).  Drop to
+    # kernel calls.
+    sps_unfold = unfold_def_at(
+        SK_PAR_STEP_DEF, p._parse(atom_str), p._parse("Y")
+    )
+    h_univ = EQ_MP(sps_unfold, p.fact("h"))
+
+    # SPEC at Q, then BETA_NORM the raw redexes that SPEC-at-a-lambda
+    # creates throughout the closures body and in the final ``Q <atom>
+    # Y`` application.
+    Q_tm = p._parse(
+        f"\\A:nat0. \\B:nat0. (A = {atom_str}) ==> (B = {atom_str})"
+    )
+    h_at_Q_raw = SPEC(Q_tm, h_univ)
+    h_at_Q = EQ_MP(BETA_NORM(h_at_Q_raw._concl), h_at_Q_raw)
+    p.have(f"h_at_Q: {pp(h_at_Q._concl)}").by_thm(h_at_Q)
+
+    # Prove the four closure conjuncts for Q.  DSL friction: BETA_NORM
+    # surfaces ``Y`` as one of the K-rule bvars, which would collide
+    # with our outer ``fix("Y")``.  We use ``M N M1 N1`` etc. as alpha-
+    # equivalent fresh names; the final ``CONJ`` matches mod aconv.
+
+    with p.have(
+        f"c_refl: !Z:nat0. Z = {atom_str} ==> Z = {atom_str}"
+    ).proof():
+        p.fix("Z")
+        p.assume(f"h_eq: Z = {atom_str}")
+        p.thus(f"Z = {atom_str}").by_thm(p.fact("h_eq"))
+
+    with p.have(
+        f"c_K: !M:nat0. !N:nat0. !M1:nat0. !N1:nat0. "
+        f"     (M = {atom_str} ==> M1 = {atom_str}) /\\ "
+        f"     (N = {atom_str} ==> N1 = {atom_str}) ==> "
+        f"     App_t (App_t K_t M) N = {atom_str} ==> M1 = {atom_str}"
+    ).proof():
+        p.fix("M N M1 N1")
+        p.assume(
+            f"(_imp_M, _imp_N): "
+            f"(M = {atom_str} ==> M1 = {atom_str}) /\\ "
+            f"(N = {atom_str} ==> N1 = {atom_str})"
+        )
+        p.assume(f"h_eq: App_t (App_t K_t M) N = {atom_str}")
+        p.have(
+            f"h_eq_sym: {atom_str} = App_t (App_t K_t M) N"
+        ).by_thm(SYM(p.fact("h_eq")))
+        p.have(
+            f"h_neg: ~({atom_str} = App_t (App_t K_t M) N)"
+        ).by(atom_neq_app_t, "App_t K_t M", "N")
+        p.absurd().by_conj("h_neg", "h_eq_sym")
+
+    with p.have(
+        f"c_S: !M:nat0. !N:nat0. !P:nat0. "
+        f"     !M1:nat0. !N1:nat0. !P1:nat0. "
+        f"     (M = {atom_str} ==> M1 = {atom_str}) /\\ "
+        f"     (N = {atom_str} ==> N1 = {atom_str}) /\\ "
+        f"     (P = {atom_str} ==> P1 = {atom_str}) ==> "
+        f"     App_t (App_t (App_t S_t M) N) P = {atom_str} ==> "
+        f"     App_t (App_t M1 P1) (App_t N1 P1) = {atom_str}"
+    ).proof():
+        p.fix("M N P M1 N1 P1")
+        p.assume(
+            f"(_imp_M, _imp_N, _imp_P): "
+            f"(M = {atom_str} ==> M1 = {atom_str}) /\\ "
+            f"(N = {atom_str} ==> N1 = {atom_str}) /\\ "
+            f"(P = {atom_str} ==> P1 = {atom_str})"
+        )
+        p.assume(f"h_eq: App_t (App_t (App_t S_t M) N) P = {atom_str}")
+        p.have(
+            f"h_eq_sym: {atom_str} = App_t (App_t (App_t S_t M) N) P"
+        ).by_thm(SYM(p.fact("h_eq")))
+        p.have(
+            f"h_neg: ~({atom_str} = App_t (App_t (App_t S_t M) N) P)"
+        ).by(atom_neq_app_t, "App_t (App_t S_t M) N", "P")
+        p.absurd().by_conj("h_neg", "h_eq_sym")
+
+    with p.have(
+        f"c_APP: !M:nat0. !N:nat0. !M1:nat0. !N1:nat0. "
+        f"       (M = {atom_str} ==> M1 = {atom_str}) /\\ "
+        f"       (N = {atom_str} ==> N1 = {atom_str}) ==> "
+        f"       App_t M N = {atom_str} ==> App_t M1 N1 = {atom_str}"
+    ).proof():
+        p.fix("M N M1 N1")
+        p.assume(
+            f"(_imp_M, _imp_N): "
+            f"(M = {atom_str} ==> M1 = {atom_str}) /\\ "
+            f"(N = {atom_str} ==> N1 = {atom_str})"
+        )
+        p.assume(f"h_eq: App_t M N = {atom_str}")
+        p.have(f"h_eq_sym: {atom_str} = App_t M N").by_thm(
+            SYM(p.fact("h_eq"))
+        )
+        p.have(f"h_neg: ~({atom_str} = App_t M N)").by(
+            atom_neq_app_t, "M", "N"
+        )
+        p.absurd().by_conj("h_neg", "h_eq_sym")
+
+    cl_th = CONJ(
+        p.fact("c_refl"),
+        CONJ(p.fact("c_K"), CONJ(p.fact("c_S"), p.fact("c_APP"))),
+    )
+    p.have(f"h_cl: {pp(cl_th._concl)}").by_thm(cl_th)
+
+    p.have(
+        f"h_imp: {atom_str} = {atom_str} ==> Y = {atom_str}"
+    ).by("h_at_Q", "h_cl")
+    p.have(f"h_refl: {atom_str} = {atom_str}").by_thm(
+        REFL(p._parse(atom_str))
+    )
+    p.thus(f"Y = {atom_str}").by("h_imp", "h_refl")
+
+
+@proof
+def PAR_STEP_S_T_INV(p):
+    """|- !Y. sk_par_step S_t Y ==> Y = S_t.
+
+    Atom inversion: a parallel step from ``S_t`` can only target
+    ``S_t``.  Used by Phase 4d's triangle / diamond and by the App-
+    shape inversion lemmas (when the closure-rule branch produces an
+    intermediate par-step from an atom head).
+    """
+    _par_step_atom_inv(p, "S_t", S_T_NEQ_APP_T)
+
+
+@proof
+def PAR_STEP_K_T_INV(p):
+    """|- !Y. sk_par_step K_t Y ==> Y = K_t.
+
+    Atom inversion -- mirror of ``PAR_STEP_S_T_INV``.
+    """
+    _par_step_atom_inv(p, "K_t", K_T_NEQ_APP_T)
 
 
 @proof
