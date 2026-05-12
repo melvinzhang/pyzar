@@ -2739,6 +2739,54 @@ def N0PLUS_SUC_L(p):
 
 
 @proof
+def N0PLUS_ASSOC(p):
+    """|- !a b c. n0plus (n0plus a b) c = n0plus a (n0plus b c).
+
+    Standard nat0 associativity.  Routine induction on c using N0PLUS_BASE
+    (right-arg) and N0PLUS_STEP + AP_TERM(SUC0).  Currently sorried; ~25
+    lines.
+
+    Used by OMEGA_DEPTH_SEQ to absorb a depth-step's iter count ``m`` into
+    the inductively-maintained ``n0plus j d`` witness shape: after a step,
+    new iter ``= n0plus m (SUC0 (n0plus j d)) = SUC0 (n0plus (n0plus m j) d)``
+    which requires one ASSOC rewrite under the outer SUC0.
+    """
+    p.goal(
+        "!a b c. n0plus (n0plus a b) c = n0plus a (n0plus b c)"
+    )
+    p.sorry()
+
+
+@proof
+def N0PLUS_DECOMP(p):
+    """|- !L n. ~(nat0_lt n L) ==> ?k. n = n0plus k L.
+
+    Decomposition: any ``n >= L`` factors as ``k + L``.  Equivalent to nat0
+    subtraction's existence half.  Currently sorried; ~40 lines by L-
+    induction:
+
+      Base L=0: ?k. n = n0plus k 0 -- witness k := n via N0PLUS_BASE.
+      Step L -> SUC0 L: hypothesis ~(nat0_lt n (SUC0 L)).
+        From ~(nat0_lt 0 (SUC0 L)) impossible (NAT0_LT_0_SUC0), so n != 0;
+        NAT0_NEQ_ZERO_PRED gives n = SUC0 d.  Contrapositive of
+        NAT0_LT_SUC0_MONO turns ~(nat0_lt (SUC0 d) (SUC0 L)) into
+        ~(nat0_lt d L); IH yields ?k. d = n0plus k L.  Then
+        n = SUC0 d = SUC0 (n0plus k L) = n0plus k (SUC0 L) (SYM N0PLUS_STEP).
+
+    Used by OMEGA_T_REACHES_LARGE_SIZE to recover the public-form witness
+    ``k`` once the depth induction guarantees ``n >= L``.
+    """
+    p.goal(
+        "!L n. ~(nat0_lt n L) ==> ?k. n = n0plus k L"
+    )
+    p.sorry()
+
+
+# OMEGA_DEPTH_SEQ moved to just before OMEGA_T_REACHES_LARGE_SIZE (it
+# references I_pow / Omega_t which are defined later in this file).
+
+
+@proof
 def NAT0_LT_N0PLUS_MONO_R(p):
     """|- !a b c. nat0_lt b c ==> nat0_lt (n0plus a b) (n0plus a c).
 
@@ -4816,6 +4864,50 @@ def OMEGA_TRAJ_I_DEPTH_STEP(p):
 
 
 @proof
+def OMEGA_DEPTH_SEQ(p):
+    """|- !d. ?n. (sk_iter n Omega_t
+                    = App_t (App_t I_t (I_pow d (App_t (App_t S_t I_t) I_t)))
+                            (App_t I_t (I_pow d (App_t (App_t S_t I_t) I_t))))
+              /\\ nat0_lt d (sk_size (Omega-shape (I_pow d SII)))
+              /\\ nat0_lt d (SUC0 n).
+
+    Depth-indexed sequence lemma: at every I-depth d there is an Omega-
+    trajectory iterate landing at Omega-shape (I_pow d SII), with
+    ``sk_size`` strictly exceeding d and iter count at least d.
+
+    Currently sorried; ~60 lines by induction on d:
+
+      Base d=0: n := SUC0 0.  iter eq from OMEGA_T_STEP1 + I_POW_ZERO fold;
+        size > 0 by NAT0_LT_0_SUC0 (after SK_SIZE_APP); 0 <= n via
+        NAT0_LT_0_SUC0 at m := 0.
+      Step d -> SUC0 d:
+        * From IH: n_d, iter eq at depth d, size_d > d, n_d >= d.
+        * OMEGA_TRAJ_I_DEPTH_STEP at d gives m, iter eq m steps from
+          Omega-shape (I_pow d SII) to Omega-shape (I_pow (SUC0 d) SII),
+          with size_d < size_{d+1}.
+        * SK_ITER_ADD chains: n_{d+1} := n0plus m n_d satisfies the iter
+          equation at depth (SUC0 d).
+        * size > SUC0 d: NAT0_LT_SUC0_INSERT(d < size_d, size_d < size_{d+1}).
+        * iter count >= SUC0 d: m != 0 (else sk_iter m fixes the term,
+          contradicting strict size growth), so n0plus m n_d >= SUC0 n_d
+          >= SUC0 d.  Derive via NAT0_NEQ_ZERO_PRED on m and NAT0_LT_SUC0_MONO
+          on n_d >= d.
+    """
+    SII = "App_t (App_t S_t I_t) I_t"
+    Xd = f"I_pow d ({SII})"
+    Td = f"App_t (App_t I_t ({Xd})) (App_t I_t ({Xd}))"
+    # DSL friction: ``=`` is lower precedence than ``/\\``, so
+    # ``A = B /\\ C`` parses as ``A = (B /\\ C)`` -- wrap the equation in
+    # parens to keep it as a single conjunct.
+    p.goal(
+        f"!d. ?n. (sk_iter n Omega_t = {Td}) "
+        f"     /\\ nat0_lt d (sk_size ({Td})) "
+        f"     /\\ nat0_lt d (SUC0 n)"
+    )
+    p.sorry()
+
+
+@proof
 def OMEGA_T_REACHES_LARGE_SIZE(p):
     """|- !N L. ?k X. sk_iter (n0plus k L) Omega_t
                        = App_t (App_t I_t X) (App_t I_t X)
@@ -4862,17 +4954,150 @@ def OMEGA_T_REACHES_LARGE_SIZE(p):
 
     Witness X = I_pow d SII for d chosen large enough.
 
-    Currently sorried; proof is the outer induction on N driving an
-    inner iteration of OMEGA_TRAJ_I_DEPTH_STEP.  Estimated ~80-120
-    lines once the I-depth step lemma and the n0plus monos land.
+    Currently sorried; needs ~150-200 lines on top of the now-landed
+    OMEGA_TRAJ_I_DEPTH_STEP + n0plus monos.  The headline blocker is the
+    ``n0plus k L`` shape of the iter index: deriving the witness ``k``
+    from "iter count exceeds L" is structurally nat0 subtraction, which
+    the codebase does not provide.  A minimal closure plan:
+
+      (a) N0PLUS_ASSOC -- ``!a b c. n0plus (n0plus a b) c
+                                  = n0plus a (n0plus b c)`` (~25 lines,
+          induct on c).  Needed to thread ``k`` through SK_ITER_ADD-
+          composed depth-step iterations: ``n0plus m (n0plus j L)
+          = n0plus (n0plus m j) L`` is what lets the maintained witness
+          ``k = j_d`` evolve as ``k' := n0plus m_d j_d`` per depth step.
+      (b) N0PLUS_DECOMP -- ``!L n. ~(nat0_lt n L) ==> ?k. n = n0plus k L``
+          (~40 lines, induct on L with NAT0_NEQ_ZERO_PRED +
+          NAT0_LT_SUC0_MONO contrapositive at the SUC0 L step).  Recovers
+          ``k`` once the iter count clears L.
+      (c) A weak monotone bound ``!d. ?n. sk_iter n Omega_t
+                = Omega-shape (I_pow d SII) /\\ nat0_lt d (SUC0 n)``
+          (~20 lines, induct on d) -- gives ``n >= d`` for the decomp
+          hypothesis.  m_d >= 1 per step follows from
+          OMEGA_TRAJ_I_DEPTH_STEP's size_lt (if m_d were 0, iter is
+          fixed, so size cannot strictly grow).
+      (d) Main: pick ``d := n0plus N L`` so both ``size > d > N`` and
+          ``n >= d >= L``.  Apply N0PLUS_DECOMP for k; conjoin and
+          witness.
     """
+    from tactics import (
+        SYM as _SYM,
+        TRANS as _TRANS,
+        AP_TERM as _APT,
+    )
+    from nat0_order import (
+        NAT0_LT_SUC0_CASES,
+        NAT0_LT_TRANS,
+        NAT0_LT_SUC0_INSERT,
+        NAT0_LT_SUC0_INV,
+        NAT0_LT_NOT_REFL,
+    )
+
+    SII = "App_t (App_t S_t I_t) I_t"
+    d = "n0plus N L"
+    Xd = f"I_pow ({d}) ({SII})"
+    Td = f"App_t (App_t I_t ({Xd})) (App_t I_t ({Xd}))"
+
     p.goal(
         "!N L. ?k X. sk_iter (n0plus k L) Omega_t "
         "             = App_t (App_t I_t X) (App_t I_t X) "
         "          /\\ nat0_lt N "
         "                      (sk_size (App_t (App_t I_t X) (App_t I_t X)))"
     )
-    p.sorry()
+    p.fix("N L")
+
+    # d := n0plus N L.  By NAT0_LT_SUC0_N0PLUS_{L,R}: N <= d and L <= d, in
+    # ``nat0_lt _ (SUC0 d)`` form.
+    p.have(
+        f"h_N_le_d: nat0_lt N (SUC0 ({d}))"
+    ).by(NAT0_LT_SUC0_N0PLUS_L, "N", "L")
+    p.have(
+        f"h_L_le_d: nat0_lt L (SUC0 ({d}))"
+    ).by(NAT0_LT_SUC0_N0PLUS_R, "N", "L")
+
+    # OMEGA_DEPTH_SEQ at d: pick iter index n with iter eq + size > d + n >= d.
+    # (Wrap iter equation in parens -- ``=`` is lower-prec than ``/\\``.)
+    p.have(
+        f"h_seq: ?n. (sk_iter n Omega_t = {Td}) "
+        f"        /\\ nat0_lt ({d}) (sk_size ({Td})) "
+        f"        /\\ nat0_lt ({d}) (SUC0 n)"
+    ).by(OMEGA_DEPTH_SEQ, d)
+    p.choose("n", from_="h_seq")
+    p.split("n_eq", "(h_iter, h_size_gt_d, h_d_le_n)")
+
+    # Lift d < size to N < size: case-split N <= d via NAT0_LT_SUC0_CASES.
+    p.have(
+        f"h_N_cases: N = ({d}) \\/ nat0_lt N ({d})"
+    ).by(NAT0_LT_SUC0_CASES, "N", d, "h_N_le_d")
+    with p.have(
+        f"h_size_gt_N: nat0_lt N (sk_size ({Td}))"
+    ).proof():
+        with p.cases_on("h_N_cases"):
+            with p.case(f"h_eq: N = ({d})"):
+                # Substitute d := N in h_size_gt_d via SYM(h_eq): d = N.
+                p.thus(
+                    f"nat0_lt N (sk_size ({Td}))"
+                ).by_rewrite_of("h_size_gt_d", [_SYM(p.fact("h_eq"))])
+            with p.case(f"h_lt: nat0_lt N ({d})"):
+                p.thus(
+                    f"nat0_lt N (sk_size ({Td}))"
+                ).by(
+                    NAT0_LT_TRANS, "N", d, f"sk_size ({Td})",
+                    "h_lt", "h_size_gt_d",
+                )
+
+    # ~(nat0_lt n L): from L <= d <= n, suppose n < L and chase to SUC0 n < SUC0 n.
+    with p.have("h_not_n_lt_L: ~(nat0_lt n L)").proof():
+        with p.suppose("h_n_lt_L: nat0_lt n L"):
+            # n < L /\ L < SUC0 d  =>  SUC0 n < SUC0 d  =>  n < d.
+            p.have(
+                f"h_sucN_lt_sucD: nat0_lt (SUC0 n) (SUC0 ({d}))"
+            ).by(
+                NAT0_LT_SUC0_INSERT, "n", "L", f"SUC0 ({d})",
+                "h_n_lt_L", "h_L_le_d",
+            )
+            p.have(
+                f"h_n_lt_d: nat0_lt n ({d})"
+            ).by(NAT0_LT_SUC0_INV, "n", d, "h_sucN_lt_sucD")
+            # n < d /\ d < SUC0 n  =>  SUC0 n < SUC0 n.
+            p.have(
+                "h_refl_lt: nat0_lt (SUC0 n) (SUC0 n)"
+            ).by(
+                NAT0_LT_SUC0_INSERT, "n", d, "SUC0 n",
+                "h_n_lt_d", "h_d_le_n",
+            )
+            p.have(
+                "h_nref: ~(nat0_lt (SUC0 n) (SUC0 n))"
+            ).by(NAT0_LT_NOT_REFL, "SUC0 n")
+            p.absurd().by_conj("h_nref", "h_refl_lt")
+
+    # N0PLUS_DECOMP at (L, n): extract k with n = n0plus k L.
+    p.have(
+        "h_decomp: ?k. n = n0plus k L"
+    ).by(N0PLUS_DECOMP, "L", "n", "h_not_n_lt_L")
+    p.choose("k", from_="h_decomp")
+
+    # Rewrite the iter equation: h_iter ``sk_iter n Omega_t = Td`` under
+    # k_eq ``n = n0plus k L``.
+    # DSL friction: ``by_rewrite_of("h_iter", ["k_eq"])`` loops, because
+    # ``k`` is a SELECT witness whose body still mentions ``n`` -- REWRITE_CONV
+    # diverges on the substitution.  Fall back to AP_TERM + AP_THM + TRANS.
+    from tactics import AP_THM as _AP_THM
+    h_iter_lift = _AP_THM(
+        _APT(p._parse("sk_iter"), p.fact("k_eq")),
+        p._parse("Omega_t"),
+    )
+    # h_iter_lift : sk_iter n Omega_t = sk_iter (n0plus k L) Omega_t.
+    p.have(
+        f"h_iter_kL: sk_iter (n0plus k L) Omega_t = {Td}"
+    ).by_thm(_TRANS(_SYM(h_iter_lift), p.fact("h_iter")))
+
+    # EXISTS-introduce (k, X := I_pow d SII).  by_exists auto-discharges each
+    # conjunct of the substituted body by alpha-matching the rules.
+    p.thus(
+        "?k X. sk_iter (n0plus k L) Omega_t = App_t (App_t I_t X) (App_t I_t X) "
+        "    /\\ nat0_lt N (sk_size (App_t (App_t I_t X) (App_t I_t X)))"
+    ).by_exists(["k", Xd], "h_iter_kL", "h_size_gt_N")
 
 
 @proof
