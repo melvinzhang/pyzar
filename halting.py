@@ -116,13 +116,15 @@ producing self-reference. Tarski's undefinability of truth is the same
 diagonal a third time.
 """
 
-from fusion import Var, new_constant
-from basics import mk_const, mk_app, mk_abs, rand
-from parser import define, parse_type, add_const
+from fusion import Var, new_constant, HolError
+from basics import mk_const, mk_app, mk_abs, mk_eq, rand, rator, aconv, dest_eq
+from parser import define, parse_type, add_const, pp
 from nat0 import nat0_ty, ZERO, mk_suc0
 from nat0_order import define_wf_lt
 from proof import proof, define_with_at, register_intro_set
 from tactics import REFL, SPEC, SPECL, SYM, EQ_MP, DISJ1, DISJ2, CONJ, EXISTS, MP
+from tactics import AP_TERM, TRANS, REWRITE_CONV
+from axioms import mk_exists
 from hf_sets import Pair_ord
 from hf_syntax import (
     _proof_lt_binary_left,
@@ -980,6 +982,283 @@ def SK_STEP_S(p):
             p.absurd().by_conj("h_ns", "is_sred")
 
 
+@proof
+def SK_STEP_LEFT(p):
+    """|- !u v.
+            ~(?a b. App_t u v = App_t (App_t K_t a) b)
+            ==> ~(?a b c. App_t u v = App_t (App_t (App_t S_t a) b) c)
+            ==> ~(sk_step u = u)
+            ==> sk_step (App_t u v) = App_t (sk_step u) v.
+
+    Descend-left congruence: when the outer App is neither a K- nor an
+    S-redex and the left child is non-normal, sk_step descends into the
+    left.  D3 (App-recurse) of the 4-disjunct body fires at the
+    descend-left sub-disjunct with witness (a, b) := (u, v); the
+    sub-disjunct's ``~(sk_step a = a)`` premise is exactly our third
+    hypothesis.  D1/D2 contradict the first two hypotheses, D4 the
+    obvious fact that ``App_t u v`` is an App.
+    """
+    from tactics import CONJ as _CONJ, CONJUNCT1 as _C1, CONJUNCT2 as _C2
+    p.goal(
+        "!u v. ~(?a b. App_t u v = App_t (App_t K_t a) b) ==> "
+        "      ~(?a b c. App_t u v = App_t (App_t (App_t S_t a) b) c) ==> "
+        "      ~(sk_step u = u) ==> "
+        "      sk_step (App_t u v) = App_t (sk_step u) v"
+    )
+    p.fix("u v")
+    p.assume("not_kred: ~(?a b. App_t u v = App_t (App_t K_t a) b)")
+    p.assume("not_sred: ~(?a b c. App_t u v = App_t (App_t (App_t S_t a) b) c)")
+    p.assume("not_norm_u: ~(sk_step u = u)")
+
+    t = "App_t u v"
+    sk_t = f"sk_step ({t})"
+    val = "App_t (sk_step u) v"
+    K_shape = f"?a b. {t} = App_t (App_t K_t a) b"
+    S_shape = f"?a b c. {t} = App_t (App_t (App_t S_t a) b) c"
+
+    # Build the descend-left D3-inner witness, at (a, b) := (u, v), r := val.
+    # Sub-disjunct 1: ~(sk_step u = u) /\ val = App_t (sk_step u) v.
+    p.have(
+        f"sub1: ~(sk_step u = u) /\\ {val} = App_t (sk_step u) v"
+    ).by_thm(_CONJ(p.fact("not_norm_u"), REFL(p._parse(val))))
+    triple_at_uv = (
+        f"(~(sk_step u = u) /\\ {val} = App_t (sk_step u) v) \\/ "
+        f"(sk_step u = u /\\ ~(sk_step v = v) /\\ "
+        f" {val} = App_t u (sk_step v)) \\/ "
+        f"(sk_step u = u /\\ sk_step v = v /\\ {val} = {t})"
+    )
+    p.have(f"triple_uv: {triple_at_uv}").by_disj("sub1")
+    inner_ex = (
+        f"?a b. {t} = App_t a b /\\ "
+        f"((~(sk_step a = a) /\\ {val} = App_t (sk_step a) b) \\/ "
+        f" (sk_step a = a /\\ ~(sk_step b = b) /\\ "
+        f"  {val} = App_t a (sk_step b)) \\/ "
+        f" (sk_step a = a /\\ sk_step b = b /\\ {val} = {t}))"
+    )
+    p.have(f"inner_ex: {inner_ex}").by_exists(["u", "v"], "triple_uv")
+    p.have(
+        f"inner_d3: ~({K_shape}) /\\ ~({S_shape}) /\\ ({inner_ex})"
+    ).by_thm(
+        _CONJ(p.fact("not_kred"), _CONJ(p.fact("not_sred"), p.fact("inner_ex")))
+    )
+
+    body_th = _sk_step_select_at(p, t, val, "inner_d3")
+    p.have(f"body: {_sk_step_body(t, sk_t)}").by_thm(body_th)
+
+    # App-shape witness for D4 contradiction.
+    p.have(f"is_app: ?a b. {t} = App_t a b").by_exists(
+        ["u", "v"], REFL(p._parse(t))
+    )
+
+    D1, D2, D3, D4 = _sk_step_disjuncts(t, sk_t)
+    with p.cases_on("body"):
+        with p.case(f"h1: {D1}"):
+            # D1 carries the K-redex existence directly.
+            p.choose("a_d1", from_="h1")
+            p.choose("b_d1", from_="a_d1_eq")
+            p.split("b_d1_eq", "(h_app, _)")
+            p.have(f"h_kred: {K_shape}").by_exists(
+                ["a_d1", "b_d1"], "h_app"
+            )
+            p.absurd().by_conj("not_kred", "h_kred")
+        with p.case(f"h2: {D2}"):
+            p.split("h2", "(_, h2_ex)")
+            p.choose("a_d2", from_="h2_ex")
+            p.choose("b_d2", from_="a_d2_eq")
+            p.choose("c_d2", from_="b_d2_eq")
+            p.split("c_d2_eq", "(h_app, _)")
+            p.have(f"h_sred: {S_shape}").by_exists(
+                ["a_d2", "b_d2", "c_d2"], "h_app"
+            )
+            p.absurd().by_conj("not_sred", "h_sred")
+        with p.case(f"h3: {D3}"):
+            p.split("h3", "(_, _, h3_ex)")
+            p.choose("a3", from_="h3_ex")
+            p.choose("b3", from_="a3_eq")
+            p.split("b3_eq", "(h_app, h_triple)")
+            # u = a3, v = b3 via APP_T_INJ.
+            p.have("h_inj: u = a3 /\\ v = b3").by(
+                APP_T_INJ, "u", "v", "a3", "b3", "h_app"
+            )
+            p.have("h_ua: u = a3").by_thm(_C1(p.fact("h_inj")))
+            p.have("h_vb: v = b3").by_thm(_C2(p.fact("h_inj")))
+            with p.cases_on("h_triple"):
+                with p.case(
+                    f"hsub1: ~(sk_step a3 = a3) /\\ "
+                    f"       {sk_t} = App_t (sk_step a3) b3"
+                ):
+                    p.split("hsub1", "(_, h_sk)")
+                    p.thus(f"{sk_t} = {val}").by_rewrite_of(
+                        "h_sk",
+                        [SYM(p.fact("h_ua")), SYM(p.fact("h_vb"))],
+                    )
+                with p.case(
+                    f"hsub2: sk_step a3 = a3 /\\ ~(sk_step b3 = b3) /\\ "
+                    f"       {sk_t} = App_t a3 (sk_step b3)"
+                ):
+                    p.split("hsub2", "(h_sk_a, _, _)")
+                    # sk_step a3 = a3; rewrite a3 → u gives sk_step u = u,
+                    # contradicting not_norm_u.
+                    p.have("h_sk_u: sk_step u = u").by_rewrite_of(
+                        "h_sk_a", [SYM(p.fact("h_ua"))]
+                    )
+                    p.absurd().by_conj("not_norm_u", "h_sk_u")
+                with p.case(
+                    f"hsub3: sk_step a3 = a3 /\\ sk_step b3 = b3 /\\ "
+                    f"       {sk_t} = {t}"
+                ):
+                    p.split("hsub3", "(h_sk_a, _, _)")
+                    p.have("h_sk_u: sk_step u = u").by_rewrite_of(
+                        "h_sk_a", [SYM(p.fact("h_ua"))]
+                    )
+                    p.absurd().by_conj("not_norm_u", "h_sk_u")
+        with p.case(f"h4: {D4}"):
+            p.split("h4", "(_, _, h_napp, _)")
+            p.absurd().by_conj("h_napp", "is_app")
+
+
+@proof
+def SK_STEP_RIGHT(p):
+    """|- !u v.
+            ~(?a b. App_t u v = App_t (App_t K_t a) b)
+            ==> ~(?a b c. App_t u v = App_t (App_t (App_t S_t a) b) c)
+            ==> sk_step u = u
+            ==> ~(sk_step v = v)
+            ==> sk_step (App_t u v) = App_t u (sk_step v).
+
+    Descend-right congruence: when the outer App is neither a K- nor an
+    S-redex, the left child is already normal, and the right child is
+    non-normal, sk_step descends into the right.  D3 of the 4-disjunct
+    body fires at the descend-right sub-disjunct with witness
+    (a, b) := (u, v).  Same dispatch shape as ``SK_STEP_LEFT``; sub2
+    fires, sub1 contradicts ``sk_step u = u`` (after ``a = u``), sub3
+    contradicts ``~(sk_step v = v)`` (after ``b = v``).
+    """
+    from tactics import CONJ as _CONJ, CONJUNCT1 as _C1, CONJUNCT2 as _C2
+    p.goal(
+        "!u v. ~(?a b. App_t u v = App_t (App_t K_t a) b) ==> "
+        "      ~(?a b c. App_t u v = App_t (App_t (App_t S_t a) b) c) ==> "
+        "      sk_step u = u ==> "
+        "      ~(sk_step v = v) ==> "
+        "      sk_step (App_t u v) = App_t u (sk_step v)"
+    )
+    p.fix("u v")
+    p.assume("not_kred: ~(?a b. App_t u v = App_t (App_t K_t a) b)")
+    p.assume("not_sred: ~(?a b c. App_t u v = App_t (App_t (App_t S_t a) b) c)")
+    p.assume("norm_u: sk_step u = u")
+    p.assume("not_norm_v: ~(sk_step v = v)")
+
+    t = "App_t u v"
+    sk_t = f"sk_step ({t})"
+    val = "App_t u (sk_step v)"
+    K_shape = f"?a b. {t} = App_t (App_t K_t a) b"
+    S_shape = f"?a b c. {t} = App_t (App_t (App_t S_t a) b) c"
+
+    # Build the descend-right D3-inner witness at (a, b) := (u, v), r := val.
+    # Sub-disjunct 2: sk_step u = u /\ ~(sk_step v = v) /\ val = App_t u (sk_step v).
+    p.have(
+        f"sub2: sk_step u = u /\\ ~(sk_step v = v) /\\ "
+        f"      {val} = App_t u (sk_step v)"
+    ).by_thm(
+        _CONJ(
+            p.fact("norm_u"),
+            _CONJ(p.fact("not_norm_v"), REFL(p._parse(val))),
+        )
+    )
+    triple_at_uv = (
+        f"(~(sk_step u = u) /\\ {val} = App_t (sk_step u) v) \\/ "
+        f"(sk_step u = u /\\ ~(sk_step v = v) /\\ "
+        f" {val} = App_t u (sk_step v)) \\/ "
+        f"(sk_step u = u /\\ sk_step v = v /\\ {val} = {t})"
+    )
+    p.have(f"triple_uv: {triple_at_uv}").by_disj("sub2")
+
+    inner_ex = (
+        f"?a b. {t} = App_t a b /\\ "
+        f"((~(sk_step a = a) /\\ {val} = App_t (sk_step a) b) \\/ "
+        f" (sk_step a = a /\\ ~(sk_step b = b) /\\ "
+        f"  {val} = App_t a (sk_step b)) \\/ "
+        f" (sk_step a = a /\\ sk_step b = b /\\ {val} = {t}))"
+    )
+    p.have(f"inner_ex: {inner_ex}").by_exists(["u", "v"], "triple_uv")
+    p.have(
+        f"inner_d3: ~({K_shape}) /\\ ~({S_shape}) /\\ ({inner_ex})"
+    ).by_thm(
+        _CONJ(p.fact("not_kred"), _CONJ(p.fact("not_sred"), p.fact("inner_ex")))
+    )
+
+    body_th = _sk_step_select_at(p, t, val, "inner_d3")
+    p.have(f"body: {_sk_step_body(t, sk_t)}").by_thm(body_th)
+
+    p.have(f"is_app: ?a b. {t} = App_t a b").by_exists(
+        ["u", "v"], REFL(p._parse(t))
+    )
+
+    D1, D2, D3, D4 = _sk_step_disjuncts(t, sk_t)
+    with p.cases_on("body"):
+        with p.case(f"h1: {D1}"):
+            p.choose("a_d1", from_="h1")
+            p.choose("b_d1", from_="a_d1_eq")
+            p.split("b_d1_eq", "(h_app, _)")
+            p.have(f"h_kred: {K_shape}").by_exists(
+                ["a_d1", "b_d1"], "h_app"
+            )
+            p.absurd().by_conj("not_kred", "h_kred")
+        with p.case(f"h2: {D2}"):
+            p.split("h2", "(_, h2_ex)")
+            p.choose("a_d2", from_="h2_ex")
+            p.choose("b_d2", from_="a_d2_eq")
+            p.choose("c_d2", from_="b_d2_eq")
+            p.split("c_d2_eq", "(h_app, _)")
+            p.have(f"h_sred: {S_shape}").by_exists(
+                ["a_d2", "b_d2", "c_d2"], "h_app"
+            )
+            p.absurd().by_conj("not_sred", "h_sred")
+        with p.case(f"h3: {D3}"):
+            p.split("h3", "(_, _, h3_ex)")
+            p.choose("a3", from_="h3_ex")
+            p.choose("b3", from_="a3_eq")
+            p.split("b3_eq", "(h_app, h_triple)")
+            p.have("h_inj: u = a3 /\\ v = b3").by(
+                APP_T_INJ, "u", "v", "a3", "b3", "h_app"
+            )
+            p.have("h_ua: u = a3").by_thm(_C1(p.fact("h_inj")))
+            p.have("h_vb: v = b3").by_thm(_C2(p.fact("h_inj")))
+            with p.cases_on("h_triple"):
+                with p.case(
+                    f"hsub1: ~(sk_step a3 = a3) /\\ "
+                    f"       {sk_t} = App_t (sk_step a3) b3"
+                ):
+                    p.split("hsub1", "(h_nn_a, _)")
+                    # ~(sk_step a3 = a3); rewrite a3 → u gives
+                    # ~(sk_step u = u), contradicting norm_u.
+                    p.have("h_nn_u: ~(sk_step u = u)").by_rewrite_of(
+                        "h_nn_a", [SYM(p.fact("h_ua"))]
+                    )
+                    p.absurd().by_conj("h_nn_u", "norm_u")
+                with p.case(
+                    f"hsub2: sk_step a3 = a3 /\\ ~(sk_step b3 = b3) /\\ "
+                    f"       {sk_t} = App_t a3 (sk_step b3)"
+                ):
+                    p.split("hsub2", "(_, _, h_sk)")
+                    # h_sk: sk_t = App_t a3 (sk_step b3); rewrite a3 → u, b3 → v.
+                    p.thus(f"{sk_t} = {val}").by_rewrite_of(
+                        "h_sk",
+                        [SYM(p.fact("h_ua")), SYM(p.fact("h_vb"))],
+                    )
+                with p.case(
+                    f"hsub3: sk_step a3 = a3 /\\ sk_step b3 = b3 /\\ "
+                    f"       {sk_t} = {t}"
+                ):
+                    p.split("hsub3", "(_, h_sk_b, _)")
+                    p.have("h_sk_v: sk_step v = v").by_rewrite_of(
+                        "h_sk_b", [SYM(p.fact("h_vb"))]
+                    )
+                    p.absurd().by_conj("not_norm_v", "h_sk_v")
+        with p.case(f"h4: {D4}"):
+            p.split("h4", "(_, _, h_napp, _)")
+            p.absurd().by_conj("h_napp", "is_app")
+
 
 def _atom_neq_App_negations(p, atom, atom_neq_lemma):
     """For an atom term (S_t or K_t), prove the three "atom is not
@@ -1270,6 +1549,186 @@ def HALTS_AT(p):
 
 
 # ---------------------------------------------------------------------------
+# sk_reduce -- block helper for head-redex sk_iter traces.
+#
+# A trace lemma of shape ``sk_iter k start = end`` (or its existential
+# closure ``?n. sk_iter n start = end``) is a head-by-head reduction
+# punctuated by definitional fold/unfold.  Hand-rolled, each head step
+# costs two named ``have``s (one ``SK_ITER_SUC`` unfold + one
+# ``by_rewrite_of`` to collapse the inner iter) plus per-step bookkeeping
+# for the SUC0-tower witness.  See ``I_T_REDUCES`` for the unfactored
+# shape and ``Y_FIXED_POINT``'s docstring for the friction inventory.
+#
+# Usage::
+#
+#     with sk_reduce(p, "App_t I_t x", "x") as r:
+#         r.rewrite(I_T_DEF)                       # align: unfold I_t at start
+#         r.step(SK_STEP_S, "K_t", "K_t", "x")     # head S-redex
+#         r.step(SK_STEP_K, "x", "App_t K_t x")    # head K-redex
+#
+# On exit the surrounding goal is discharged.  Two goal shapes are
+# auto-detected:
+#
+#   sk_iter <SUC0-tower> start = end       -- concrete (e.g. I_T_REDUCES)
+#   ?n. sk_iter n start = end              -- existential
+#
+# If the goal matches neither, the running equation is registered as a
+# plain fact instead.
+#
+# Each ``step``'s rule must fire on the whole current term:
+# ``sk_step LHS = RHS`` (or ``... ==> sk_step LHS = RHS`` with the
+# antecedents passed via ``mp=[...]``).  Head redexes (top S/K shape)
+# use ``SK_STEP_S`` / ``SK_STEP_K`` directly; deeper redexes use the
+# ``SK_STEP_LEFT`` / ``SK_STEP_RIGHT`` congruence lemmas, whose three
+# guard hypotheses (~K-shape, ~S-shape, non-normality of the relevant
+# child) are discharged by the caller and passed via ``mp=[...]``.
+# ---------------------------------------------------------------------------
+
+
+def sk_reduce(p, start, end, *, prefix="_sr"):
+    """Open a head-redex sk_iter trace.  See module-level comment above."""
+    return _SkReduce(p, start, end, prefix)
+
+
+class _SkReduce:
+    def __init__(self, p, start, end, prefix):
+        self.p = p
+        self.prefix = prefix
+        self.start = p._parse(start) if isinstance(start, str) else start
+        self.end = p._parse(end) if isinstance(end, str) else end
+        self.current = self.start
+        # SUC0-tower kernel term, grown on every step.
+        self.tower = p._parse("0")
+        # Cached constants.
+        self._sk_step = p._parse("sk_step")
+        self._sk_iter = p._parse("sk_iter")
+        # Seed: |- sk_iter 0 start = start.
+        self._running = SPEC(self.start, SK_ITER_ZERO)
+        self._closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is None and not self._closed:
+            self._close()
+        return False
+
+    # -- public ops --------------------------------------------------------
+
+    def step(self, rule, *args, mp=()):
+        """Apply one head-redex rule.  ``rule`` is a kernel theorem of
+        shape ``!v1...vk. H1 ==> ... ==> Hm ==> sk_step LHS = RHS``;
+        ``args`` are term-string or kernel-term specialisations for
+        v1...vk.  ``mp`` is an optional sequence of fact references (label
+        / theorem) MP'd onto the antecedents after SPECL -- use for
+        congruence rules like ``SK_STEP_LEFT`` whose statement is
+        guarded by ``~K-shape``, ``~S-shape``, ``~(sk_step a = a)``.
+        After SPECL + MP, the instantiated ``LHS`` must alpha-match the
+        current term -- call ``rewrite`` first to align if it doesn't.
+        """
+        arg_ts = [self.p._parse(a) if isinstance(a, str) else a for a in args]
+        step_th = SPECL(arg_ts, rule) if arg_ts else rule
+        for h in mp:
+            h_th = self.p.fact(h) if isinstance(h, str) else h
+            step_th = MP(step_th, h_th)
+        try:
+            lhs, rhs = dest_eq(step_th._concl)
+        except HolError:
+            raise HolError(
+                "sk_reduce.step: rule conclusion is not an equation after "
+                "SPECL+MP (remaining antecedents? pass them via mp=[...])"
+            )
+        try:
+            head = rator(lhs)
+        except HolError:
+            raise HolError("sk_reduce.step: rule LHS is not of shape `sk_step _`")
+        if not aconv(head, self._sk_step):
+            raise HolError(
+                f"sk_reduce.step: rule LHS head is {pp(head)}, not sk_step"
+            )
+        T = rand(lhs)
+        if not aconv(T, self.current):
+            raise HolError(
+                "sk_reduce.step: rule fires on "
+                f"sk_step ({pp(T)}); current is {pp(self.current)} -- "
+                "call .rewrite(...) to align before .step()"
+            )
+        # iter_unfold: sk_iter (SUC0 tower) start = sk_step (sk_iter tower start)
+        iter_unfold = SPECL([self.tower, self.start], SK_ITER_SUC)
+        # Replace the inner ``sk_iter tower start`` by ``current`` via the
+        # running fact: sk_step (sk_iter tower start) = sk_step current.
+        inner = AP_TERM(self._sk_step, self._running)
+        # Compose: sk_iter (SUC0 tower) start = sk_step current.
+        iter_aligned = TRANS(iter_unfold, inner)
+        # Apply step_th: sk_iter (SUC0 tower) start = rhs.
+        self._running = TRANS(iter_aligned, step_th)
+        self.current = rhs
+        self.tower = mk_suc0(self.tower)
+
+    def rewrite(self, *rules):
+        """Rewrite the current term via REWRITE_CONV with ``rules``
+        (kernel theorems or fact labels).  Useful for unfolding a defined
+        symbol on the start side (so the next ``step`` sees the redex
+        shape) or folding mid-trace.  Does not bump the iter count.
+        """
+        if not rules:
+            return
+        rule_ths = [self.p.fact(r) if isinstance(r, str) else r for r in rules]
+        eq = REWRITE_CONV(rule_ths, self.current)
+        lhs, rhs = dest_eq(eq._concl)
+        if aconv(lhs, rhs):
+            return  # REFL -- nothing to do.
+        self._running = TRANS(self._running, eq)
+        self.current = rhs
+
+    def qed(self):
+        """Explicit close.  Called automatically on block exit."""
+        self._close()
+
+    # -- internals ---------------------------------------------------------
+
+    def _close(self):
+        if self._closed:
+            return
+        self._closed = True
+        if not aconv(self.current, self.end):
+            raise HolError(
+                "sk_reduce: trace ended at "
+                f"{pp(self.current)}; expected end = {pp(self.end)}"
+            )
+        # Build the kernel theorem to register.
+        # Concrete: |- sk_iter tower start = end  (already self._running).
+        concrete_th = self._running
+        # Existential lift: |- ?n. sk_iter n start = end.
+        n_var = Var("n", nat0_ty)
+        body_at_n = mk_eq(
+            mk_app(self._sk_iter, n_var, self.start),
+            self.end,
+        )
+        existential_term = mk_exists(n_var, body_at_n)
+        ex_th = EXISTS(mk_abs(n_var, body_at_n), self.tower, concrete_th)
+
+        # Inspect surrounding goal to decide how to discharge.
+        fr = self.p._frames[-1]
+        goal = fr.goal
+        concrete_term = mk_eq(
+            mk_app(self._sk_iter, self.tower, self.start),
+            self.end,
+        )
+        if goal is not None and aconv(goal, concrete_term):
+            self.p.thus(pp(concrete_term)).by_thm(concrete_th)
+        elif goal is not None and aconv(goal, existential_term):
+            self.p.thus(pp(existential_term)).by_thm(ex_th)
+        else:
+            # Surrounding goal isn't a trace target -- register the
+            # existential as a fact for the caller to use.
+            self.p.have(
+                f"{self.prefix}_ex: {pp(existential_term)}"
+            ).by_thm(ex_th)
+
+
+# ---------------------------------------------------------------------------
 # Stage 3 -- the standard combinators.
 #
 #   I_t  := App_t (App_t S_t K_t) K_t           -- identity
@@ -1323,74 +1782,22 @@ Omega_t = mk_const("Omega_t", [])
 def I_T_REDUCES(p):
     """|- !x. is_sk_term x ==> sk_iter (SUC0 (SUC0 0)) (App_t I_t x) = x.
 
-    I = SKK; in two head steps:
-        sk_iter 0 (I x) = I x = App_t (App_t (App_t S_t K_t) K_t) x
-        sk_iter 1 (I x) = sk_step (I x) = App_t (App_t K_t x) (App_t K_t x)
-                                          (by SK_STEP_S at K_t, K_t, x)
-        sk_iter 2 (I x) = sk_step (App_t (App_t K_t x) (App_t K_t x)) = x
-                                          (by SK_STEP_K at x, App_t K_t x)
+    I = SKK; in two head steps via ``sk_reduce``:
+        sk_iter 0 (I x) = I x = App_t (App_t (App_t S_t K_t) K_t) x  [unfold I_t]
+        sk_iter 1 (I x) = App_t (App_t K_t x) (App_t K_t x)          [SK_STEP_S]
+        sk_iter 2 (I x) = x                                          [SK_STEP_K]
 
     The is_sk_term hypothesis isn't actually used by the head-redex
     rules -- they fire on any term of the right shape -- but it's
     carried in the goal for interface consistency with downstream.
     """
-    from tactics import AP_TERM, SPEC, SPECL, TRANS, SYM
-
     p.goal("!x. is_sk_term x ==> sk_iter (SUC0 (SUC0 0)) (App_t I_t x) = x")
     p.fix("x")
     p.assume("h_st: is_sk_term x")  # unused (see docstring)
-
-    # Step A: sk_iter 0 (App_t I_t x) = App_t I_t x.
-    p.have("h_iter0: sk_iter 0 (App_t I_t x) = App_t I_t x").by(
-        SK_ITER_ZERO, "App_t I_t x"
-    )
-
-    # Step B: sk_iter 1 = sk_step (sk_iter 0 ...) -- using SK_ITER_SUC at n=0.
-    p.have(
-        "h_iter1_raw: sk_iter (SUC0 0) (App_t I_t x) "
-        "= sk_step (sk_iter 0 (App_t I_t x))"
-    ).by(SK_ITER_SUC, "0", "App_t I_t x")
-    # Substitute Step A into the RHS to collapse the inner iter.
-    p.have(
-        "h_iter1: sk_iter (SUC0 0) (App_t I_t x) = sk_step (App_t I_t x)"
-    ).by_rewrite_of("h_iter1_raw", ["h_iter0"])
-
-    # Step C: sk_step (App_t I_t x) = App_t (App_t K_t x) (App_t K_t x).
-    # Unfold I_t via I_T_DEF to recognize the S-redex shape, then SK_STEP_S.
-    p.have(
-        "h_S: sk_step (App_t (App_t (App_t S_t K_t) K_t) x) "
-        "= App_t (App_t K_t x) (App_t K_t x)"
-    ).by(SK_STEP_S, "K_t", "K_t", "x")
-    # Fold (App_t S_t K_t) K_t back to I_t via SYM(I_T_DEF).
-    p.have(
-        "h_step_I: sk_step (App_t I_t x) "
-        "= App_t (App_t K_t x) (App_t K_t x)"
-    ).by_rewrite_of("h_S", [SYM(I_T_DEF)])
-
-    # Compose B + C: sk_iter 1 (App_t I_t x) = App_t (App_t K_t x) (App_t K_t x).
-    p.have(
-        "h_iter1_final: sk_iter (SUC0 0) (App_t I_t x) "
-        "= App_t (App_t K_t x) (App_t K_t x)"
-    ).by_thm(TRANS(p.fact("h_iter1"), p.fact("h_step_I")))
-
-    # Step D: sk_iter 2 = sk_step (sk_iter 1 ...) via SK_ITER_SUC at n=SUC0 0.
-    p.have(
-        "h_iter2_raw: sk_iter (SUC0 (SUC0 0)) (App_t I_t x) "
-        "= sk_step (sk_iter (SUC0 0) (App_t I_t x))"
-    ).by(SK_ITER_SUC, "SUC0 0", "App_t I_t x")
-    p.have(
-        "h_iter2: sk_iter (SUC0 (SUC0 0)) (App_t I_t x) "
-        "= sk_step (App_t (App_t K_t x) (App_t K_t x))"
-    ).by_rewrite_of("h_iter2_raw", ["h_iter1_final"])
-
-    # Step E: sk_step (App_t (App_t K_t x) (App_t K_t x)) = x by SK_STEP_K.
-    p.have(
-        "h_K: sk_step (App_t (App_t K_t x) (App_t K_t x)) = x"
-    ).by(SK_STEP_K, "x", "App_t K_t x")
-
-    p.thus("sk_iter (SUC0 (SUC0 0)) (App_t I_t x) = x").by_thm(
-        TRANS(p.fact("h_iter2"), p.fact("h_K"))
-    )
+    with sk_reduce(p, "App_t I_t x", "x") as r:
+        r.rewrite(I_T_DEF)
+        r.step(SK_STEP_S, "K_t", "K_t", "x")
+        r.step(SK_STEP_K, "x", "App_t K_t x")
 
 
 # ---------------------------------------------------------------------------
@@ -3192,12 +3599,17 @@ def CHURCH_TRUE_REDUCES(p):
                 ?n. sk_iter n (App_t (App_t K_t a) c) = a.
 
     K_t a c -->* a, i.e. the "true" Church bool selects its first arg.
+    One head K-step closes it; ``sk_reduce`` synthesises the witness
+    ``n = SUC0 0``.
     """
     p.goal(
         "!a c. is_sk_term a /\\ is_sk_term c ==> "
         "      ?n. sk_iter n (App_t (App_t K_t a) c) = a"
     )
-    p.sorry()
+    p.fix("a c")
+    p.assume("h_st: is_sk_term a /\\ is_sk_term c")  # unused
+    with sk_reduce(p, "App_t (App_t K_t a) c", "a") as r:
+        r.step(SK_STEP_K, "a", "c")
 
 
 @proof
