@@ -6013,10 +6013,17 @@ def CHURCH_FALSE_REDUCES(p):
 
 
 # ``halts_decider H`` says H is an SK term that decides halting via the
-# K_t / KI_t output convention.
-new_constant("halts_decider", parse_type("nat0 -> bool"))
+# K_t / KI_t output convention.  Defined directly via ``define`` so
+# HALTS_DECIDER_DEF_THM is a one-line unfold rather than an axiom.
+HALTS_DECIDER_DEF = define(
+    "halts_decider",
+    parse_type("nat0 -> bool"),
+    "\\H:nat0. is_sk_term H /\\ "
+    "         !t:nat0. is_sk_term t ==> "
+    "             (halts t ==> (?n:nat0. sk_iter n (App_t H t) = K_t)) /\\ "
+    "             (~halts t ==> (?n:nat0. sk_iter n (App_t H t) = KI_t))",
+)
 halts_decider = mk_const("halts_decider", [])
-add_const("halts_decider", halts_decider)
 
 
 @proof
@@ -6027,10 +6034,14 @@ def HALTS_DECIDER_DEF_THM(p):
                   (halts t  ==> ?n. sk_iter n (App_t H t) = K_t) /\\
                   (~halts t ==> ?n. sk_iter n (App_t H t) = KI_t).
 
-    Characterisation of ``halts_decider``.  This is the *definition*
-    expanded; once we drop the ``new_constant`` placeholder and write
-    a real ``define``, this becomes a one-liner.
+    Direct unfold of HALTS_DECIDER_DEF via AP_THM + BETA (same shape as
+    HALTS_AT for HALTS_DEF).
     """
+    from tactics import AP_THM, BETA_CONV, TRANS, GEN
+    H_var = Var("H", nat0_ty)
+    ap = AP_THM(HALTS_DECIDER_DEF, H_var)
+    bet = BETA_CONV(rand(ap._concl))
+    spec_th = TRANS(ap, bet)
     p.goal(
         "!H. halts_decider H = "
         "    (is_sk_term H /\\ "
@@ -6038,7 +6049,108 @@ def HALTS_DECIDER_DEF_THM(p):
         "         (halts t ==> (?n. sk_iter n (App_t H t) = K_t)) /\\ "
         "         (~halts t ==> (?n. sk_iter n (App_t H t) = KI_t)))"
     )
-    p.sorry()
+    p.thus(
+        "!H. halts_decider H = "
+        "    (is_sk_term H /\\ "
+        "     !t. is_sk_term t ==> "
+        "         (halts t ==> (?n. sk_iter n (App_t H t) = K_t)) /\\ "
+        "         (~halts t ==> (?n. sk_iter n (App_t H t) = KI_t)))"
+    ).by_thm(GEN(H_var, spec_th))
+
+
+@proof
+def HALTS_SK_STEP_BWD(p):
+    """|- !t. halts (sk_step t) ==> halts t.
+
+    Inverse of HALTS_SK_STEP_FWD: if ``sk_step t`` reaches normal form
+    at iter m, then ``t`` reaches normal form at iter (SUC0 m) via
+    SK_ITER_PUSH.
+    """
+    from tactics import AP_TERM as _AP_TERM
+    p.goal("!t. halts (sk_step t) ==> halts t")
+    p.fix("t")
+    p.assume("h: halts (sk_step t)")
+    p.have(
+        "h_at_st: halts (sk_step t) = (?m. is_normal (sk_iter m (sk_step t)))"
+    ).by(HALTS_AT, "sk_step t")
+    p.have(
+        "h_ex_st: ?m. is_normal (sk_iter m (sk_step t))"
+    ).by_eq_mp("h_at_st", "h")
+    p.choose("m", from_="h_ex_st")
+    # m_eq : is_normal (sk_iter m (sk_step t))
+    # SK_ITER_PUSH(m, t): sk_iter (SUC0 m) t = sk_iter m (sk_step t)
+    p.have(
+        "h_push: sk_iter (SUC0 m) t = sk_iter m (sk_step t)"
+    ).by(SK_ITER_PUSH, "m", "t")
+    # AP_TERM is_normal h_push: is_normal (sk_iter (SUC0 m) t)
+    #                          = is_normal (sk_iter m (sk_step t)).
+    # by_eq_mp is sym-tolerant: flips when the fact matches the RHS.
+    p.have(
+        "h_norm_succ: is_normal (sk_iter (SUC0 m) t)"
+    ).by_eq_mp(_AP_TERM(is_normal, p.fact("h_push")), "m_eq")
+    # Bundle as ?n. is_normal (sk_iter n t) and lift to halts t.
+    p.have(
+        "h_at_t: halts t = (?n. is_normal (sk_iter n t))"
+    ).by(HALTS_AT, "t")
+    p.have(
+        "h_ex_t: ?n. is_normal (sk_iter n t)"
+    ).by_witness("SUC0 m", "h_norm_succ")
+    p.thus("halts t").by_eq_mp("h_at_t", "h_ex_t")
+
+
+@proof
+def HALTS_SK_STEP_IFF(p):
+    """|- !t. halts t = halts (sk_step t).
+
+    Iff-intro on the two directions: HALTS_SK_STEP_FWD already shipped
+    above; HALTS_SK_STEP_BWD just above.
+    """
+    p.goal("!t. halts t = halts (sk_step t)")
+    p.fix("t")
+    p.have("h_fwd: halts t ==> halts (sk_step t)").by(HALTS_SK_STEP_FWD, "t")
+    p.have("h_bwd: halts (sk_step t) ==> halts t").by(HALTS_SK_STEP_BWD, "t")
+    p.thus("halts t = halts (sk_step t)").by_iff("h_fwd", "h_bwd")
+
+
+@proof
+def HALTS_SK_ITER(p):
+    """|- !n t. halts t = halts (sk_iter n t).
+
+    Induction on ``n`` with HALTS_SK_STEP_IFF as the step lemma:
+      base:  halts t = halts (sk_iter 0 t)        [SK_ITER_ZERO].
+      step:  halts t = halts (sk_iter n t)        [IH]
+              = halts (sk_step (sk_iter n t))     [HALTS_SK_STEP_IFF]
+              = halts (sk_iter (SUC0 n) t)        [SYM SK_ITER_SUC].
+    """
+    from tactics import AP_TERM as _AP_TERM, TRANS as _TRANS, SYM as _SYM
+    p.goal("!n t. halts t = halts (sk_iter n t)")
+    with p.induction("n"):
+        with p.base():
+            p.fix("t")
+            p.have("h_z: sk_iter 0 t = t").by(SK_ITER_ZERO, "t")
+            # halts t = halts (sk_iter 0 t) via AP_TERM(halts, SYM h_z).
+            p.thus("halts t = halts (sk_iter 0 t)").by_thm(
+                _AP_TERM(halts, _SYM(p.fact("h_z")))
+            )
+        with p.step("IH"):
+            p.fix("t")
+            p.have("h_ih: halts t = halts (sk_iter n t)").by("IH", "t")
+            p.have(
+                "h_step_iff: halts (sk_iter n t) "
+                "            = halts (sk_step (sk_iter n t))"
+            ).by(HALTS_SK_STEP_IFF, "sk_iter n t")
+            p.have(
+                "h_suc: sk_iter (SUC0 n) t = sk_step (sk_iter n t)"
+            ).by(SK_ITER_SUC, "n", "t")
+            # Chain: halts t = halts (sk_iter n t)
+            #              = halts (sk_step (sk_iter n t))
+            #              = halts (sk_iter (SUC0 n) t).
+            # DSL friction: no by_trans tactic on a forward chain when one
+            # link is itself a SYM of a fact; drop to kernel TRANS.
+            eq_last = _AP_TERM(halts, _SYM(p.fact("h_suc")))
+            p.thus("halts t = halts (sk_iter (SUC0 n) t)").by_thm(
+                _TRANS(_TRANS(p.fact("h_ih"), p.fact("h_step_iff")), eq_last)
+            )
 
 
 @proof
@@ -6049,10 +6161,80 @@ def HALTING_REDUCTION_PRESERVED(p):
     steps doesn't change whether a normal form is reachable.  Needed
     in both branches of the diagonal contradiction to push ``halts``
     through ``-->*``.
+
+    Proof: HALTS_SK_ITER at (n, t) gives ``halts t = halts (sk_iter n t)``;
+    AP_TERM(halts, h_eq) closes ``halts (sk_iter n t) = halts u``; TRANS.
+    The ``is_sk_term t`` hypothesis is unused (the trajectory lemmas don't
+    care about well-formedness) but is carried in the goal for interface
+    consistency with the downstream diagonal proof.
     """
+    from tactics import AP_TERM as _AP_TERM, TRANS as _TRANS
     p.goal(
         "!t u n. is_sk_term t /\\ sk_iter n t = u ==> "
         "        (halts t = halts u)"
+    )
+    p.fix("t u n")
+    p.assume("(_h_st, h_eq): is_sk_term t /\\ sk_iter n t = u")
+    p.have("h_iter: halts t = halts (sk_iter n t)").by(HALTS_SK_ITER, "n", "t")
+    # AP_TERM halts h_eq : halts (sk_iter n t) = halts u.
+    p.thus("halts t = halts u").by_thm(
+        _TRANS(p.fact("h_iter"), _AP_TERM(halts, p.fact("h_eq")))
+    )
+
+
+@proof
+def DIAGONAL_TERM_EXISTS(p):
+    """|- !H. is_sk_term H ==>
+              ?d. is_sk_term d /\\
+                  ((?n. sk_iter n (App_t H d) = K_t) ==>
+                   (?m. sk_iter m d = Omega_t)) /\\
+                  ((?n. sk_iter n (App_t H d) = KI_t) ==>
+                   (?m. sk_iter m d = K_t)).
+
+    *** STUB.  Encapsulates the bracket-abstraction + Y diagonal +
+    congruence work that the rest of Stage 6 takes for granted but
+    which is not yet built in this module.
+
+    Construction (sketch):
+      * Bracket-abstract ``[x] (App_t (App_t (App_t H x) Omega_t) K_t)``
+        as a concrete closed SK term ``f_H``.  Curry's [x]:
+          [x] x        = I_t
+          [x] M        = App_t K_t M   (x not in M)
+          [x] (M N)    = App_t (App_t S_t [x]M) [x]N
+        is a primitive recursion on the body's structure (~30 lines).
+      * d := App_t Y_t f_H.
+      * Show ``?n. sk_iter n d = App_t (App_t (App_t H d) Omega_t) K_t``
+        by chaining Y_FIXED_POINT with the bracket-abstraction beta
+        reduction.  Tromp's Y_FIXED_POINT lands at ``App_t f_H X_TROMP_f_H``
+        instead of the literal ``App_t f_H d`` -- bridging the two requires
+        ANOTHER bracket-abstraction reduction or a multi-step congruence
+        argument under App_t.
+      * Chain ``?n. sk_iter n (App_t H d) = K_t`` with CHURCH_TRUE_REDUCES
+        and the multi-step congruence ``X -->* X' ==> App_t X Y -->* App_t X' Y``
+        (also not currently in this module) to get ``?m. sk_iter m d = Omega_t``.
+      * Symmetric argument with CHURCH_FALSE_REDUCES for the KI_t branch.
+
+    DSL friction (why this stays a stub for now):
+      * Bracket abstraction needs a primitive-recursive constructor on
+        nat0-encoded SK terms; no helper for "is x free in this term"
+        as a decidable bool exists.
+      * Multi-step App-congruence ``?n. sk_iter n X = X' ==>
+        ?m. sk_iter m (App_t X Y) = App_t X' Y`` requires a "no-redex"
+        side-condition on App_t X Y to keep leftmost-outermost from
+        firing on the outer App before reducing the head -- see the
+        SK_STEP_LEFT not_kred / not_sred / not_fixed hypothesis
+        triple, which would have to be lifted multi-step.
+      * Tromp's Y' is not a literal fixed-point combinator; the
+        ``X_TROMP_f`` adjustment in Y_FIXED_POINT needs its own diagonal
+        bridge.
+    """
+    p.goal(
+        "!H. is_sk_term H ==> "
+        "    ?d. is_sk_term d /\\ "
+        "        ((?n. sk_iter n (App_t H d) = K_t) ==> "
+        "         (?m. sk_iter m d = Omega_t)) /\\ "
+        "        ((?n. sk_iter n (App_t H d) = KI_t) ==> "
+        "         (?m. sk_iter m d = K_t))"
     )
     p.sorry()
 
@@ -6088,9 +6270,138 @@ def HALTING_UNDECIDABLE(p):
         the case hypothesis.
 
       Either branch contradicts; hence no such H.
+
+    The "d --> Omega_t / K_t" steps are packaged into DIAGONAL_TERM_EXISTS
+    (still a stub); HALTING_REDUCTION_PRESERVED, CHURCH_*_REDUCES,
+    HALTS_DECIDER_DEF_THM, OMEGA_NON_HALTING, IS_NORMAL_K, HALTS_AT,
+    EXCLUDED_MIDDLE are all live.  Once DIAGONAL_TERM_EXISTS is
+    discharged the diagonal closes without further holes.
     """
+    from classical import EXCLUDED_MIDDLE
+    from tactics import CONJ as _CONJ
+
     p.goal("~ (?H. halts_decider H)")
-    p.sorry()
+    with p.suppose("h_ex: ?H. halts_decider H"):
+        p.choose("H", from_="h_ex")
+        # H_eq : halts_decider H.
+
+        # ---- Unfold the halts_decider definition. ---------------------
+        # HALTS_DECIDER_DEF_THM at H gives the iff between halts_decider H
+        # and the unfolded conjunction.
+        p.have(
+            "h_thm: halts_decider H = "
+            "       (is_sk_term H /\\ "
+            "        !t. is_sk_term t ==> "
+            "            (halts t ==> (?n. sk_iter n (App_t H t) = K_t)) /\\ "
+            "            (~halts t ==> (?n. sk_iter n (App_t H t) = KI_t)))"
+        ).by(HALTS_DECIDER_DEF_THM, "H")
+        p.have(
+            "h_unf: is_sk_term H /\\ "
+            "       !t. is_sk_term t ==> "
+            "           (halts t ==> (?n. sk_iter n (App_t H t) = K_t)) /\\ "
+            "           (~halts t ==> (?n. sk_iter n (App_t H t) = KI_t))"
+        ).by_eq_mp("h_thm", "H_eq")
+        p.split("h_unf", "(h_is_sk_H, h_decides)")
+
+        # ---- Build the diagonal term d. -------------------------------
+        # DIAGONAL_TERM_EXISTS packages the bracket-abstraction + Y + App-
+        # congruence work into a single (stubbed) existential.
+        p.have(
+            "h_diag: ?d. is_sk_term d /\\ "
+            "        ((?n. sk_iter n (App_t H d) = K_t) ==> "
+            "         (?m. sk_iter m d = Omega_t)) /\\ "
+            "        ((?n. sk_iter n (App_t H d) = KI_t) ==> "
+            "         (?m. sk_iter m d = K_t))"
+        ).by(DIAGONAL_TERM_EXISTS, "H", "h_is_sk_H")
+        p.choose("d", from_="h_diag")
+        # d_eq : is_sk_term d /\ (K_t ==> Omega_t) /\ (KI_t ==> K_t).
+        # DSL friction: 3-way conjunction split needs an explicit
+        # nesting pattern; the right-associated default works.
+        p.split("d_eq", "(h_is_sk_d, h_kt_impl, h_kit_impl)")
+
+        # ---- Apply the decider's promise at t := d. -------------------
+        p.have(
+            "h_dec_d: (halts d ==> (?n. sk_iter n (App_t H d) = K_t)) /\\ "
+            "         (~halts d ==> (?n. sk_iter n (App_t H d) = KI_t))"
+        ).by("h_decides", "d", "h_is_sk_d")
+        p.split("h_dec_d", "(h_halts_to_kt, h_nhalts_to_kit)")
+
+        # ---- Case-split on halts d (Excluded Middle). -----------------
+        with p.cases_on(EXCLUDED_MIDDLE, "halts d"):
+            # ===== Case 1: halts d. ====================================
+            with p.case("h_halts: halts d"):
+                # Decider hypothesis: App_t H d -->* K_t.
+                p.have(
+                    "h_to_kt: ?n. sk_iter n (App_t H d) = K_t"
+                ).by("h_halts_to_kt", "h_halts")
+                # DIAGONAL_TERM_EXISTS's K_t-branch: d -->* Omega_t.
+                p.have(
+                    "h_d_to_omega: ?m. sk_iter m d = Omega_t"
+                ).by("h_kt_impl", "h_to_kt")
+                p.choose("m1", from_="h_d_to_omega")
+                # m1_eq : sk_iter m1 d = Omega_t.
+                # HALTING_REDUCTION_PRESERVED at (d, Omega_t, m1):
+                #   is_sk_term d /\ sk_iter m1 d = Omega_t
+                #     ==> halts d = halts Omega_t.
+                p.have(
+                    "h_pres: halts d = halts Omega_t"
+                ).by(
+                    HALTING_REDUCTION_PRESERVED, "d", "Omega_t", "m1",
+                    _CONJ(p.fact("h_is_sk_d"), p.fact("m1_eq")),
+                )
+                # Flip h_halts to halts Omega_t.
+                p.have(
+                    "h_halts_omega: halts Omega_t"
+                ).by_eq_mp("h_pres", "h_halts")
+                # Contradict OMEGA_NON_HALTING.
+                p.absurd().by_conj(OMEGA_NON_HALTING, "h_halts_omega")
+
+            # ===== Case 2: ~halts d. ===================================
+            with p.case("h_nhalts: ~halts d"):
+                # Decider hypothesis: App_t H d -->* KI_t.
+                p.have(
+                    "h_to_kit: ?n. sk_iter n (App_t H d) = KI_t"
+                ).by("h_nhalts_to_kit", "h_nhalts")
+                # DIAGONAL_TERM_EXISTS's KI_t-branch: d -->* K_t.
+                p.have(
+                    "h_d_to_kt: ?m. sk_iter m d = K_t"
+                ).by("h_kit_impl", "h_to_kit")
+                p.choose("m2", from_="h_d_to_kt")
+                # m2_eq : sk_iter m2 d = K_t.
+                # HALTING_REDUCTION_PRESERVED at (d, K_t, m2):
+                #   halts d = halts K_t.
+                p.have(
+                    "h_pres: halts d = halts K_t"
+                ).by(
+                    HALTING_REDUCTION_PRESERVED, "d", "K_t", "m2",
+                    _CONJ(p.fact("h_is_sk_d"), p.fact("m2_eq")),
+                )
+                # halts K_t -- K_t is normal so witness 0 works.
+                # HALTS_AT K_t : halts K_t = ?n. is_normal (sk_iter n K_t).
+                # sk_iter 0 K_t = K_t (SK_ITER_ZERO); is_normal K_t (IS_NORMAL_K);
+                # so witness 0 + REFL.
+                p.have(
+                    "h_iter0_K: sk_iter 0 K_t = K_t"
+                ).by(SK_ITER_ZERO, "K_t")
+                # is_normal (sk_iter 0 K_t) by eq_mp on AP_TERM(is_normal, SYM h_iter0_K)
+                # applied to IS_NORMAL_K.
+                p.have(
+                    "h_norm_iter0: is_normal (sk_iter 0 K_t)"
+                ).by_eq_mp(
+                    AP_TERM(is_normal, p.fact("h_iter0_K")),
+                    IS_NORMAL_K,
+                )
+                p.have(
+                    "h_at_K: halts K_t = (?n. is_normal (sk_iter n K_t))"
+                ).by(HALTS_AT, "K_t")
+                p.have(
+                    "h_ex_K: ?n. is_normal (sk_iter n K_t)"
+                ).by_witness("0", "h_norm_iter0")
+                p.have("h_halts_K: halts K_t").by_eq_mp("h_at_K", "h_ex_K")
+                # Flip via SYM(h_pres): halts d.
+                p.have("h_halts_d: halts d").by_eq_mp("h_pres", "h_halts_K")
+                # Contradict h_nhalts.
+                p.absurd().by_conj("h_nhalts", "h_halts_d")
 
 
 # ---------------------------------------------------------------------------
@@ -6107,7 +6418,10 @@ def HALTS_NOT_SK_REPRESENTABLE(p):
 
     HALTING_UNDECIDABLE, restated as non-existence of an SK term
     computing the characteristic function of ``halts``.  Immediate
-    from HALTING_UNDECIDABLE + HALTS_DECIDER_DEF_THM.
+    from HALTING_UNDECIDABLE + HALTS_DECIDER_DEF_THM: suppose an H
+    satisfies the unfolded predicate; then by HALTS_DECIDER_DEF_THM
+    that H also satisfies ``halts_decider H``, witnessing the inner
+    existential that HALTING_UNDECIDABLE refutes.
     """
     p.goal(
         "~ (?H. is_sk_term H /\\ "
@@ -6115,7 +6429,27 @@ def HALTS_NOT_SK_REPRESENTABLE(p):
         "           (halts t ==> (?n. sk_iter n (App_t H t) = K_t)) /\\ "
         "           (~halts t ==> (?n. sk_iter n (App_t H t) = KI_t)))"
     )
-    p.sorry()
+    with p.suppose(
+        "h_ex: ?H. is_sk_term H /\\ "
+        "      !t. is_sk_term t ==> "
+        "          (halts t ==> (?n. sk_iter n (App_t H t) = K_t)) /\\ "
+        "          (~halts t ==> (?n. sk_iter n (App_t H t) = KI_t))"
+    ):
+        p.choose("H", from_="h_ex")
+        # H_eq : is_sk_term H /\ ...   (the unfolded body at H).
+        # HALTS_DECIDER_DEF_THM at H: halts_decider H = (unfolded body).
+        p.have(
+            "h_thm: halts_decider H = "
+            "       (is_sk_term H /\\ "
+            "        !t. is_sk_term t ==> "
+            "            (halts t ==> (?n. sk_iter n (App_t H t) = K_t)) /\\ "
+            "            (~halts t ==> (?n. sk_iter n (App_t H t) = KI_t)))"
+        ).by(HALTS_DECIDER_DEF_THM, "H")
+        # Fold H_eq back into halts_decider H via SYM-tolerant by_eq_mp.
+        p.have("h_hd: halts_decider H").by_eq_mp("h_thm", "H_eq")
+        p.have("h_ex_hd: ?H. halts_decider H").by_witness("H", "h_hd")
+        # HALTING_UNDECIDABLE : ~?H. halts_decider H.  Contradict.
+        p.absurd().by_conj(HALTING_UNDECIDABLE, "h_ex_hd")
 
 
 # ---------------------------------------------------------------------------
