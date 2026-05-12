@@ -7021,6 +7021,209 @@ def PAR_STEP_TO_STEPS(p):
     p.thus("sk_par_steps X Y").by(PAR_STEPS_STEP, "X", "Y", "Y", "h_conj")
 
 
+# ---------------------------------------------------------------------------
+# par_chain -- a context manager analogue of sk_reduce for sk_par_steps.
+#
+# Usage:
+#   with par_chain(p, start, label="h_par") as c:
+#       c.link("<intermediate_1>")
+#       c.link("<intermediate_2>")
+#       ...
+#       c.link("<final>")
+#   # registers   h_par : sk_par_steps start <final>
+#
+# Each ``c.link(next)`` synthesizes ``sk_par_step current next`` by
+# recursive structural matching:
+#   start ≡ end                                  -> PAR_REFL
+#   start = App_t (App_t K_t a) b, end = a'      -> PAR_K (with par-step a -> a')
+#   start = App_t (App_t (App_t S_t a) b) c,
+#       end = App_t (App_t a' c') (App_t b' c')  -> PAR_S
+#   start = App_t A B,
+#       end = App_t A' B'                        -> PAR_APP (recurse)
+# Links accumulate; ``__exit__`` composes them right-to-left via
+# ``PAR_STEPS_STEP`` (seeded with ``PAR_STEPS_REFL`` at the final term).
+#
+# Limitation: the synth only sees structural redexes.  A folded constant
+# like ``I_t`` is not an S_t-head even though ``I_t = (S_t K_t) K_t``
+# definitionally -- callers must either pre-unfold such constants in
+# the chain terms, or insert separate equational bridging steps.
+# ---------------------------------------------------------------------------
+
+
+_PC_S_t = mk_const("S_t", [])
+_PC_K_t = mk_const("K_t", [])
+_PC_App_t = mk_const("App_t", [])
+
+
+def _pc_dest_App_t(tm):
+    """If ``tm = App_t a b`` (i.e. ``Comb(Comb(App_t, a), b)``), return
+    ``(a, b)``; else None."""
+    from basics import is_comb, dest_comb, aconv
+    if not is_comb(tm):
+        return None
+    head, b = dest_comb(tm)
+    if not is_comb(head):
+        return None
+    h, a = dest_comb(head)
+    if not aconv(h, _PC_App_t):
+        return None
+    return (a, b)
+
+
+def _pc_try_K_redex(tm):
+    """If ``tm = App_t (App_t K_t a) b``, return ``(a, b)``; else None."""
+    from basics import aconv
+    outer = _pc_dest_App_t(tm)
+    if outer is None:
+        return None
+    inner, b = outer
+    inner_unp = _pc_dest_App_t(inner)
+    if inner_unp is None:
+        return None
+    K, a = inner_unp
+    if not aconv(K, _PC_K_t):
+        return None
+    return (a, b)
+
+
+def _pc_try_S_redex(tm):
+    """If ``tm = App_t (App_t (App_t S_t a) b) c``, return ``(a, b, c)``;
+    else None."""
+    from basics import aconv
+    outer = _pc_dest_App_t(tm)
+    if outer is None:
+        return None
+    inner2, c = outer
+    inner2_unp = _pc_dest_App_t(inner2)
+    if inner2_unp is None:
+        return None
+    inner1, b = inner2_unp
+    inner1_unp = _pc_dest_App_t(inner1)
+    if inner1_unp is None:
+        return None
+    S, a = inner1_unp
+    if not aconv(S, _PC_S_t):
+        return None
+    return (a, b, c)
+
+
+def _pc_try_S_result(tm):
+    """If ``tm = App_t (App_t aP cP1) (App_t bP cP2)``, return
+    ``(aP, cP1, bP, cP2)``; else None.  Caller checks cP1 aconv cP2."""
+    outer = _pc_dest_App_t(tm)
+    if outer is None:
+        return None
+    left, right = outer
+    left_unp = _pc_dest_App_t(left)
+    right_unp = _pc_dest_App_t(right)
+    if left_unp is None or right_unp is None:
+        return None
+    aP, cP1 = left_unp
+    bP, cP2 = right_unp
+    return (aP, cP1, bP, cP2)
+
+
+class _ParChainSynthFail(Exception):
+    """Raised when no par-step rule matches a (start, end) pair."""
+
+
+def _pc_synth_par_step(start, end):
+    """Return a kernel theorem ``|- sk_par_step start end``, or raise."""
+    from basics import aconv
+    if aconv(start, end):
+        return SPEC(start, PAR_REFL)
+
+    # K-redex firing.
+    K_unp = _pc_try_K_redex(start)
+    if K_unp is not None:
+        a, b = K_unp
+        try:
+            par_a = _pc_synth_par_step(a, end)
+            par_b = SPEC(b, PAR_REFL)
+            return MP(SPECL([a, end, b, b], PAR_K), CONJ(par_a, par_b))
+        except _ParChainSynthFail:
+            pass
+
+    # S-redex firing.
+    S_unp = _pc_try_S_redex(start)
+    if S_unp is not None:
+        a, b, c = S_unp
+        S_res = _pc_try_S_result(end)
+        if S_res is not None:
+            aP, cP1, bP, cP2 = S_res
+            if aconv(cP1, cP2):
+                try:
+                    par_a = _pc_synth_par_step(a, aP)
+                    par_b = _pc_synth_par_step(b, bP)
+                    par_c = _pc_synth_par_step(c, cP1)
+                    inst = SPECL([a, aP, b, bP, c, cP1], PAR_S)
+                    return MP(inst, CONJ(par_a, CONJ(par_b, par_c)))
+                except _ParChainSynthFail:
+                    pass
+
+    # PAR_APP descent.
+    start_unp = _pc_dest_App_t(start)
+    end_unp = _pc_dest_App_t(end)
+    if start_unp is not None and end_unp is not None:
+        sA, sB = start_unp
+        eA, eB = end_unp
+        try:
+            par_A = _pc_synth_par_step(sA, eA)
+            par_B = _pc_synth_par_step(sB, eB)
+            inst = SPECL([sA, eA, sB, eB], PAR_APP)
+            return MP(inst, CONJ(par_A, par_B))
+        except _ParChainSynthFail:
+            pass
+
+    raise _ParChainSynthFail(
+        f"par_chain: no par-step from {pp(start)} to {pp(end)}"
+    )
+
+
+class _ParChain:
+    def __init__(self, p, start, label):
+        self.p = p
+        self.label = label
+        self.start = p._parse(start) if isinstance(start, str) else start
+        self.current = self.start
+        self.links = []
+        self._closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is None and not self._closed:
+            self._close()
+        return False
+
+    def link(self, next_tm):
+        """Synthesize ``sk_par_step current next_tm`` and advance."""
+        next_kt = (
+            self.p._parse(next_tm) if isinstance(next_tm, str) else next_tm
+        )
+        par_th = _pc_synth_par_step(self.current, next_kt)
+        self.links.append((self.current, next_kt, par_th))
+        self.current = next_kt
+
+    def _close(self):
+        # Fold right-to-left: seed sk_par_steps last last (REFL),
+        # then prepend each par-step via PAR_STEPS_STEP.
+        last = self.current
+        acc = SPEC(last, PAR_STEPS_REFL)
+        for (ti, tj, par_th) in reversed(self.links):
+            inst = SPECL([ti, tj, last], PAR_STEPS_STEP)
+            acc = MP(inst, CONJ(par_th, acc))
+        self.p.have(f"{self.label}: {pp(acc._concl)}").by_thm(acc)
+        self._closed = True
+
+
+def par_chain(p, start, *, label):
+    """Context manager for assembling an ``sk_par_steps`` chain.  See
+    module-level comment for the synthesis algorithm and limitations."""
+    return _ParChain(p, start, label)
+
+
 def _par_step_app_case(p):
     """SK_PAR_STEP_TO_SK_STEP's App-but-not-K/S sub-case.  Three-way
     sub-split on which child fixes:
@@ -7845,42 +8048,119 @@ def DIAG_TERM(p):
               ?d. is_sk_term d /\\
                   sk_par_steps d (App_t (App_t H d) Omega_t).
 
-    *** STUB.  Curry's diagonal under parallel reduction.
+    Curry's diagonal under parallel reduction.  The literal
+    ``sk_iter n d = (H d) Omega`` form is unprovable (LMO contracts
+    one redex at a time and never duplicates, so the ``(x x)`` sites
+    expand without re-collapsing).  Parallel reduction sidesteps this:
+    a single par-step contracts every visible redex simultaneously,
+    which is exactly the single-β substitution Curry's diagonal needs.
 
-    The literal ``sk_iter n d = (H d) Omega`` form is unprovable: LMO
-    ``sk_step`` contracts one redex at a time and never duplicates,
-    so the ``(x x)`` sites in Curry's witness expand incrementally
-    and never re-collapse to ``d``.  Parallel reduction sidesteps
-    this -- a single par-step contracts every visible redex
-    simultaneously, which is exactly the single-β substitution
-    Curry's diagonal needs.
+    Witness (I_t expanded inline as ``(S K) K`` so the par-step synth
+    sees the S-redex structure; the existential doesn't care):
+        I_unf := (S K_t) K_t
+        SII  := S I_unf I_unf
+        e_H  := S (S (K H) SII) (K Omega_t)
+        d    := App_t e_H e_H
 
-    Witness:
-        SII := S I_t I_t
-        e_H := S (S (K H) SII) (K Omega_t)
-        d   := App_t e_H e_H
-
-    Discharge:
-      1. ``is_sk_term d`` by ``by_tree(unfold=[I_T_DEF, OMEGA_T_DEF])``
-         plus the leaf lemma for H.
-      2. ``sk_par_steps d (App_t (App_t H d) Omega_t)`` by a 5-link
-         par-step chain, each link a ``PAR_S`` / ``PAR_K`` /
-         ``PAR_APP`` congruence tree contracting all redexes visible
-         at that level:
-            d --> (A e_H) (B e_H)                       [outer S]
-              --> ((KH e_H) (SII e_H)) Omega_t          [inner S, K]
-              --> (H ((I_t e_H)(I_t e_H))) Omega_t      [KH-K, SII-S]
-              --> (H (((K e_H)(K e_H)) ((K e_H)(K e_H)))) Omega_t  [2x I-S]
-              --> (H (e_H e_H)) Omega_t                 [4x K-redex]
-              =   (H d) Omega_t.
-         Compose via ``PAR_STEPS_STEP``.
+    5-link par-step chain (each link a parallel contraction of every
+    redex visible at that level; built mechanically by ``par_chain``):
+        d --> (A e_H) (B e_H)                              [outer S]
+          --> ((KH e_H) (SII e_H)) Omega_t                 [inner S, K]
+          --> (H ((I_unf e_H)(I_unf e_H))) Omega_t         [KH-K, SII-S]
+          --> (H (((K e_H)(K e_H)) ((K e_H)(K e_H)))) Omega_t  [2x I_unf-S]
+          --> (H (e_H e_H)) Omega_t                        [4x K-redex]
+          =   (H d) Omega_t.
     """
+    # Witness term strings.  I_t inlined as (S_t K_t) K_t so par_chain's
+    # synth sees the S-redex structure when each I_unf-applied-to-arg
+    # fires; the existential is over any d so I_t-folding isn't needed.
+    _I = "App_t (App_t S_t K_t) K_t"
+    _SII = f"App_t (App_t S_t ({_I})) ({_I})"
+    _KH = "App_t K_t H"
+    _KO = "App_t K_t Omega_t"
+    _A = f"App_t (App_t S_t ({_KH})) ({_SII})"
+    _E_H = f"App_t (App_t S_t ({_A})) ({_KO})"
+    _D = f"App_t ({_E_H}) ({_E_H})"
+
+    # Chain intermediates.
+    _T1 = f"App_t (App_t ({_A}) ({_E_H})) (App_t ({_KO}) ({_E_H}))"
+    _T2 = (
+        f"App_t (App_t (App_t ({_KH}) ({_E_H})) "
+        f"             (App_t ({_SII}) ({_E_H}))) "
+        f"      Omega_t"
+    )
+    _I_E = f"App_t ({_I}) ({_E_H})"
+    _T3 = (
+        f"App_t (App_t H "
+        f"  (App_t ({_I_E}) ({_I_E}))) "
+        f"Omega_t"
+    )
+    _KE = f"App_t K_t ({_E_H})"
+    _KE_KE = f"App_t ({_KE}) ({_KE})"
+    _T4 = (
+        f"App_t (App_t H "
+        f"  (App_t ({_KE_KE}) ({_KE_KE}))) "
+        f"Omega_t"
+    )
+    _T5 = f"App_t (App_t H ({_D})) Omega_t"
+
     p.goal(
         "!H. is_sk_term H ==> "
         "    ?d. is_sk_term d /\\ "
         "        sk_par_steps d (App_t (App_t H d) Omega_t)"
     )
-    p.sorry()
+    p.fix("H")
+    p.assume("h_is_sk_H: is_sk_term H")
+
+    # is_sk_term cascade.  With I_t unfolded, we go through S_t / K_t
+    # atoms only (no need for IS_SK_TERM_I_T).
+    p.have("h_SK: is_sk_term (App_t S_t K_t)").by_match(
+        IS_SK_TERM_APP, IS_SK_TERM_S, IS_SK_TERM_K
+    )
+    p.have(f"h_I: is_sk_term ({_I})").by_match(
+        IS_SK_TERM_APP, "h_SK", IS_SK_TERM_K
+    )
+    p.have(f"h_S_I: is_sk_term (App_t S_t ({_I}))").by_match(
+        IS_SK_TERM_APP, IS_SK_TERM_S, "h_I"
+    )
+    p.have(f"h_SII: is_sk_term ({_SII})").by_match(
+        IS_SK_TERM_APP, "h_S_I", "h_I"
+    )
+    p.have(f"h_KH: is_sk_term ({_KH})").by_match(
+        IS_SK_TERM_APP, IS_SK_TERM_K, "h_is_sk_H"
+    )
+    p.have(f"h_KO: is_sk_term ({_KO})").by_match(
+        IS_SK_TERM_APP, IS_SK_TERM_K, IS_SK_TERM_OMEGA_T
+    )
+    p.have(f"h_S_KH: is_sk_term (App_t S_t ({_KH}))").by_match(
+        IS_SK_TERM_APP, IS_SK_TERM_S, "h_KH"
+    )
+    p.have(f"h_A: is_sk_term ({_A})").by_match(
+        IS_SK_TERM_APP, "h_S_KH", "h_SII"
+    )
+    p.have(f"h_S_A: is_sk_term (App_t S_t ({_A}))").by_match(
+        IS_SK_TERM_APP, IS_SK_TERM_S, "h_A"
+    )
+    p.have(f"h_e_H: is_sk_term ({_E_H})").by_match(
+        IS_SK_TERM_APP, "h_S_A", "h_KO"
+    )
+    p.have(f"h_is_sk_d: is_sk_term ({_D})").by_match(
+        IS_SK_TERM_APP, "h_e_H", "h_e_H"
+    )
+
+    # 5-link par-step chain via par_chain.  Each link's par-step proof
+    # is synthesized structurally by walking start/end in tandem.
+    with par_chain(p, _D, label="h_par") as c:
+        c.link(_T1)
+        c.link(_T2)
+        c.link(_T3)
+        c.link(_T4)
+        c.link(_T5)
+
+    p.thus(
+        "?d. is_sk_term d /\\ "
+        "    sk_par_steps d (App_t (App_t H d) Omega_t)"
+    ).by_exists([_D], "h_is_sk_d", "h_par")
 
 
 @proof
