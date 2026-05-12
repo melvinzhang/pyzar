@@ -449,6 +449,202 @@ K_T_NEQ_APP_T = _proof_atom_neq_app_t("K_T_NEQ_APP_T", "K_t", K_T_DEF, "SUC0 0",
 
 
 # ---------------------------------------------------------------------------
+# DSL helper: discharge ``~(?bv1...bvn. LHS = RHS)`` by head-tag clash.
+#
+# LHS must be concrete over {S_t, K_t, App_t}; RHS may mention the
+# existentially bound variables (which can pattern-match anything).
+# The helper walks LHS/RHS in parallel, finds the first APP_T_INJ-
+# descent path leading to a clashing pair, and emits the
+# choose+inj+absurd chain.  Three clash kinds:
+#
+#   atom-atom   (e.g. S_t vs K_t)              -- closed by S_T_NEQ_K_T
+#   atom-App_t  (e.g. S_t vs App_t _ _)        -- closed by S_T_NEQ_APP_T
+#                                                 or K_T_NEQ_APP_T
+#   App_t-atom  (sym of the above)             -- SYM + S_T_NEQ_APP_T
+#                                                 or K_T_NEQ_APP_T
+#
+# Without this helper each negation in IS_NORMAL_I_T / HALTS_K_OMEGA_FALSE
+# / DIAG_TERM cost ~20 lines of suppose+choose+APP_T_INJ+CONJUNCT
+# boilerplate; with it they become one-liners.
+# ---------------------------------------------------------------------------
+
+
+def _split_app_t(t):
+    """Split ``App_t a b`` (i.e. ``Comb(Comb(App_t, a), b)``) into
+    ``(a, b)``; return ``(None, None)`` if ``t`` isn't an App_t-Comb.
+    """
+    from basics import is_comb, is_const
+    if not is_comb(t):
+        return None, None
+    head, R = t.fun, t.arg
+    if not is_comb(head):
+        return None, None
+    op, L = head.fun, head.arg
+    if is_const(op) and op.name == "App_t":
+        return L, R
+    return None, None
+
+
+_ATOM_NAMES = {"S_t", "K_t"}
+
+
+def _find_shape_clash(lhs, rhs, bvar_set):
+    """Walk lhs/rhs in parallel.  Return a list of descents
+    (``"L"`` / ``"R"``) ending in a clash kind, or ``None`` if no
+    structural clash exists (e.g. rhs is a bvar at the conflict
+    site, allowing the existential to match).
+
+    Clash kinds at the leaf: ``"atom_atom"``, ``"atom_app"``,
+    ``"app_atom"``.
+    """
+    from basics import is_const, is_var
+    if is_var(rhs) and rhs.name in bvar_set:
+        return None  # rhs side is unconstrained here
+    lhs_atom = is_const(lhs) and lhs.name in _ATOM_NAMES
+    rhs_atom = is_const(rhs) and rhs.name in _ATOM_NAMES
+    if lhs_atom and rhs_atom:
+        if lhs.name == rhs.name:
+            return None
+        return [("clash", "atom_atom")]
+    if lhs_atom:
+        rL, rR = _split_app_t(rhs)
+        if rL is None:
+            return None
+        return [("clash", "atom_app")]
+    if rhs_atom:
+        lL, lR = _split_app_t(lhs)
+        if lL is None:
+            return None
+        return [("clash", "app_atom")]
+    lL, lR = _split_app_t(lhs)
+    rL, rR = _split_app_t(rhs)
+    if lL is None or rL is None:
+        return None
+    left = _find_shape_clash(lL, rL, bvar_set)
+    if left is not None:
+        return [("L",)] + left
+    right = _find_shape_clash(lR, rR, bvar_set)
+    if right is not None:
+        return [("R",)] + right
+    return None
+
+
+def _atom_neq_app_t_thm(atom):
+    """Return the ``atom ≠ App_t _ _`` lemma for ``atom``
+    (must be ``S_t`` or ``K_t``).
+    """
+    if atom.name == "S_t":
+        return S_T_NEQ_APP_T
+    if atom.name == "K_t":
+        return K_T_NEQ_APP_T
+    from fusion import HolError
+    raise HolError(f"_atom_neq_app_t_thm: no neq lemma for atom {atom.name}")
+
+
+def shape_neq(p, label, neg_term_str):
+    """Register ``label`` proving ``~(?v1...vn. LHS = RHS)`` via
+    head-tag clash detection.
+
+    ``LHS`` must be a concrete term over ``{S_t, K_t, App_t}``;
+    ``RHS`` may mention the existentially bound variables.  Walks
+    both kernel terms in parallel; finds the first L/R-descent path
+    through ``APP_T_INJ`` leading to a clashing pair (atom-atom,
+    atom-App_t, or App_t-atom); emits the corresponding
+    ``suppose``+``choose``+``APP_T_INJ``+absurd chain.
+
+    Raises if no structural clash exists (so e.g. tautological
+    negations fail loudly).
+    """
+    from tactics import CONJUNCT1 as _C1, CONJUNCT2 as _C2
+    from basics import is_const, is_comb, is_abs, dest_const
+    from axioms import dest_neg
+    from fusion import HolError
+
+    neg_tm = p._parse(neg_term_str)
+    body = dest_neg(neg_tm)
+    # Strip existentials, collecting bvar names.
+    bvar_names = []
+    cur = body
+    while is_comb(cur) and is_const(cur.fun) and cur.fun.name == "?" and is_abs(cur.arg):
+        bvar_names.append(cur.arg.bvar.name)
+        cur = cur.arg.body
+    lhs, rhs = dest_eq(cur)
+    bvar_set = set(bvar_names)
+
+    path = _find_shape_clash(lhs, rhs, bvar_set)
+    if path is None:
+        raise HolError(
+            f"shape_neq: no head-tag clash found in {neg_term_str}"
+        )
+
+    # Open: with p.have(label).proof(): with p.suppose("h: <body>"):
+    body_str = pp(body)
+    with p.have(f"{label}: {pp(neg_tm)}").proof():
+        with p.suppose(f"_sn_h: {body_str}"):
+            # Chain choose's for every bound variable.
+            cur_eq_label = "_sn_h"
+            for name in bvar_names:
+                p.choose(name, from_=cur_eq_label)
+                cur_eq_label = f"{name}_eq"
+            # Walk path emitting APP_T_INJ + CONJUNCT.
+            cur_lhs, cur_rhs = lhs, rhs
+            for i, step in enumerate(path[:-1]):
+                lL, lR = _split_app_t(cur_lhs)
+                rL, rR = _split_app_t(cur_rhs)
+                pair_label = f"_sn_p{i}"
+                p.have(
+                    f"{pair_label}: {pp(lL)} = {pp(rL)} /\\ "
+                    f"{pp(lR)} = {pp(rR)}"
+                ).by(
+                    APP_T_INJ, pp(lL), pp(lR), pp(rL), pp(rR), cur_eq_label
+                )
+                pick_label = f"_sn_e{i}"
+                if step[0] == "L":
+                    p.have(f"{pick_label}: {pp(lL)} = {pp(rL)}").by_thm(
+                        _C1(p.fact(pair_label))
+                    )
+                    cur_lhs, cur_rhs = lL, rL
+                else:
+                    p.have(f"{pick_label}: {pp(lR)} = {pp(rR)}").by_thm(
+                        _C2(p.fact(pair_label))
+                    )
+                    cur_lhs, cur_rhs = lR, rR
+                cur_eq_label = pick_label
+
+            # Leaf clash.
+            _, kind = path[-1]
+            if kind == "atom_atom":
+                # cur_lhs, cur_rhs are S_t / K_t (different).  Only one
+                # such pair exists; use S_T_NEQ_K_T (oriented S_t = K_t).
+                if cur_lhs.name == "S_t":
+                    # cur_lhs = cur_rhs is literally S_t = K_t.
+                    p.absurd().by_conj(S_T_NEQ_K_T, cur_eq_label)
+                else:
+                    # K_t = S_t; flip.
+                    p.have(f"_sn_sym: S_t = K_t").by_thm(SYM(p.fact(cur_eq_label)))
+                    p.absurd().by_conj(S_T_NEQ_K_T, "_sn_sym")
+            elif kind == "atom_app":
+                # cur_lhs (atom) = cur_rhs (App_t r1 r2).
+                rL, rR = _split_app_t(cur_rhs)
+                neq_lemma = _atom_neq_app_t_thm(cur_lhs)
+                p.have(
+                    f"_sn_neg: ~({pp(cur_lhs)} = App_t ({pp(rL)}) ({pp(rR)}))"
+                ).by(neq_lemma, pp(rL), pp(rR))
+                p.absurd().by_conj("_sn_neg", cur_eq_label)
+            else:  # "app_atom"
+                # cur_lhs (App_t l1 l2) = cur_rhs (atom).
+                lL, lR = _split_app_t(cur_lhs)
+                neq_lemma = _atom_neq_app_t_thm(cur_rhs)
+                p.have(
+                    f"_sn_neg: ~({pp(cur_rhs)} = App_t ({pp(lL)}) ({pp(lR)}))"
+                ).by(neq_lemma, pp(lL), pp(lR))
+                p.have(
+                    f"_sn_sym: {pp(cur_rhs)} = App_t ({pp(lL)}) ({pp(lR)})"
+                ).by_thm(SYM(p.fact(cur_eq_label)))
+                p.absurd().by_conj("_sn_neg", "_sn_sym")
+
+
+# ---------------------------------------------------------------------------
 # Stage 1 -- one-step reduction with leftmost-outermost congruence.
 #
 # Strategy: fire a K- or S- redex at the leftmost-outermost position.
@@ -2376,63 +2572,22 @@ def IS_NORMAL_I_T(p):
     ``sk_step I_t = I_t``.  Then ``by_unfold IS_NORMAL_DEF`` bridges
     to ``is_normal I_t``.
 
-    DSL friction: the four "not a K/S redex of shape X" side conditions
-    here are pure first-order injectivity arguments
-    (APP_T_INJ + {S_T_NEQ_APP_T, S_T_NEQ_K_T}), but each requires its
-    own ``with p.suppose / p.choose`` boilerplate; no by_tactic exists
-    yet for "head-tag clash refutes a shape-existence."  An
-    ``@register_shape_neq_finder`` analogous to ``@contra_finder``
-    that pattern-matches on outer head constants and emits the choose+
-    inj chain would cut this proof roughly in half.
+    The four "head-tag clash" non-redex hypotheses are discharged
+    mechanically by ``shape_neq`` (~50 LOC saved vs. inline
+    APP_T_INJ chains).
     """
-    from tactics import CONJUNCT1 as _C1
     p.goal("is_normal I_t")
 
-    # ---- inner-layer non-redex side conditions ---------------------------
+    # ---- inner: sk_step (App_t S_t K_t) = App_t S_t K_t -------------------
     inner = "App_t S_t K_t"
-    # ~(?a b. App_t S_t K_t = App_t (App_t K_t a) b):
-    #   APP_T_INJ peels the outer App.  Left child equates as
-    #   S_t = App_t K_t a; S_T_NEQ_APP_T closes.
-    with p.have(
-        f"not_kred_inner: ~(?a b. {inner} = App_t (App_t K_t a) b)"
-    ).proof():
-        with p.suppose(f"h: ?a b. {inner} = App_t (App_t K_t a) b"):
-            p.choose("a", from_="h")
-            p.choose("b", from_="a_eq")
-            p.have("h_o: S_t = App_t K_t a /\\ K_t = b").by(
-                APP_T_INJ, "S_t", "K_t", "App_t K_t a", "b", "b_eq"
-            )
-            p.have("h_s: S_t = App_t K_t a").by_thm(_C1(p.fact("h_o")))
-            p.have("h_neg: ~(S_t = App_t K_t a)").by(
-                S_T_NEQ_APP_T, "K_t", "a"
-            )
-            p.absurd().by_conj("h_neg", "h_s")
-    # ~(?a b c. App_t S_t K_t = App_t (App_t (App_t S_t a) b) c):
-    #   APP_T_INJ peels the outer App; S_t = App_t (App_t S_t a) b is
-    #   the left-child equality, S_T_NEQ_APP_T closes.
-    with p.have(
-        f"not_sred_inner: ~(?a b c. {inner} = App_t (App_t (App_t S_t a) b) c)"
-    ).proof():
-        with p.suppose(
-            f"h: ?a b c. {inner} = App_t (App_t (App_t S_t a) b) c"
-        ):
-            p.choose("a", from_="h")
-            p.choose("b", from_="a_eq")
-            p.choose("c", from_="b_eq")
-            p.have(
-                "h_o: S_t = App_t (App_t S_t a) b /\\ K_t = c"
-            ).by(
-                APP_T_INJ, "S_t", "K_t", "App_t (App_t S_t a) b", "c", "c_eq"
-            )
-            p.have("h_s: S_t = App_t (App_t S_t a) b").by_thm(
-                _C1(p.fact("h_o"))
-            )
-            p.have("h_neg: ~(S_t = App_t (App_t S_t a) b)").by(
-                S_T_NEQ_APP_T, "App_t S_t a", "b"
-            )
-            p.absurd().by_conj("h_neg", "h_s")
-
-    # Inner App is fixed by sk_step (both children leaf-normal).
+    shape_neq(
+        p, "not_kred_inner",
+        f"~(?a b. {inner} = App_t (App_t K_t a) b)",
+    )
+    shape_neq(
+        p, "not_sred_inner",
+        f"~(?a b c. {inner} = App_t (App_t (App_t S_t a) b) c)",
+    )
     p.have(
         f"inner_fixed: sk_step ({inner}) = {inner}"
     ).by(
@@ -2441,63 +2596,16 @@ def IS_NORMAL_I_T(p):
         SK_STEP_LEAF_S, SK_STEP_LEAF_K,
     )
 
-    # ---- outer-layer non-redex side conditions ---------------------------
+    # ---- outer: sk_step I_t = I_t -----------------------------------------
     outer = "App_t (App_t S_t K_t) K_t"
-    # ~(?a b. App_t (App_t S_t K_t) K_t = App_t (App_t K_t a) b):
-    #   Outer APP_T_INJ then inner APP_T_INJ reduces to S_t = K_t,
-    #   refuted by S_T_NEQ_K_T.
-    with p.have(
-        f"not_kred_outer: ~(?a b. {outer} = App_t (App_t K_t a) b)"
-    ).proof():
-        with p.suppose(f"h: ?a b. {outer} = App_t (App_t K_t a) b"):
-            p.choose("a", from_="h")
-            p.choose("b", from_="a_eq")
-            p.have(
-                "h_o: App_t S_t K_t = App_t K_t a /\\ K_t = b"
-            ).by(
-                APP_T_INJ, "App_t S_t K_t", "K_t",
-                "App_t K_t a", "b", "b_eq"
-            )
-            p.have("h_o1: App_t S_t K_t = App_t K_t a").by_thm(
-                _C1(p.fact("h_o"))
-            )
-            p.have("h_i: S_t = K_t /\\ K_t = a").by(
-                APP_T_INJ, "S_t", "K_t", "K_t", "a", "h_o1"
-            )
-            p.have("h_sk: S_t = K_t").by_thm(_C1(p.fact("h_i")))
-            p.absurd().by_conj(S_T_NEQ_K_T, "h_sk")
-    # ~(?a b c. App_t (App_t S_t K_t) K_t = App_t (App_t (App_t S_t a) b) c):
-    #   Outer APP_T_INJ then inner APP_T_INJ reduces to S_t = App_t S_t a,
-    #   refuted by S_T_NEQ_APP_T.
-    with p.have(
-        f"not_sred_outer: ~(?a b c. {outer} = App_t (App_t (App_t S_t a) b) c)"
-    ).proof():
-        with p.suppose(
-            f"h: ?a b c. {outer} = App_t (App_t (App_t S_t a) b) c"
-        ):
-            p.choose("a", from_="h")
-            p.choose("b", from_="a_eq")
-            p.choose("c", from_="b_eq")
-            p.have(
-                "h_o: App_t S_t K_t = App_t (App_t S_t a) b /\\ K_t = c"
-            ).by(
-                APP_T_INJ, "App_t S_t K_t", "K_t",
-                "App_t (App_t S_t a) b", "c", "c_eq"
-            )
-            p.have("h_o1: App_t S_t K_t = App_t (App_t S_t a) b").by_thm(
-                _C1(p.fact("h_o"))
-            )
-            p.have("h_i: S_t = App_t S_t a /\\ K_t = b").by(
-                APP_T_INJ, "S_t", "K_t", "App_t S_t a", "b", "h_o1"
-            )
-            p.have("h_s: S_t = App_t S_t a").by_thm(_C1(p.fact("h_i")))
-            p.have("h_neg: ~(S_t = App_t S_t a)").by(
-                S_T_NEQ_APP_T, "S_t", "a"
-            )
-            p.absurd().by_conj("h_neg", "h_s")
-
-    # Outer App is fixed by sk_step (both children fixed: inner by
-    # inner_fixed, K_t by SK_STEP_LEAF_K).
+    shape_neq(
+        p, "not_kred_outer",
+        f"~(?a b. {outer} = App_t (App_t K_t a) b)",
+    )
+    shape_neq(
+        p, "not_sred_outer",
+        f"~(?a b c. {outer} = App_t (App_t (App_t S_t a) b) c)",
+    )
     p.have(
         f"outer_fixed: sk_step ({outer}) = {outer}"
     ).by(
