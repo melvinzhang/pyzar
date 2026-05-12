@@ -7846,22 +7846,73 @@ def PAR_STEP_K_T_INV(p):
 
 
 @proof
+def TRIANGLE_EXISTS(p):
+    """|- ?bullet. !A B. sk_par_step A B ==> sk_par_step B (bullet A).
+
+    *** STUB.  Existence of Takahashi's complete-development function
+    ``bullet`` together with the triangle property.
+
+    Bullet contracts every redex visible at a node simultaneously:
+        bullet S_t                          = S_t
+        bullet K_t                          = K_t
+        bullet (App_t (App_t K_t X) Y)      = bullet X
+        bullet (App_t (App_t (App_t S_t X) Y) Z)
+            = App_t (App_t (bullet X) (bullet Z))
+                    (App_t (bullet Y) (bullet Z))
+        bullet (App_t X Y) [otherwise]      = App_t (bullet X) (bullet Y)
+
+    Triangle: structural induction on A using the par-step inversion
+    lemmas at each shape.  Atom inversions (PAR_STEP_{S,K}_T_INV)
+    already exist; the App-shape inversions are the missing dependency.
+
+    Packaging the bullet function and triangle as a single existential
+    sidesteps the ``define_wf_lt`` boilerplate for now -- discharge
+    requires either inlining bullet via ``define`` and proving the
+    five unfolds + triangle (~250 LOC) or supplying a SELECT witness
+    that satisfies the property.
+    """
+    p.goal(
+        "?bullet:nat0->nat0. "
+        "!A:nat0. !B:nat0. "
+        "sk_par_step A B ==> sk_par_step B (bullet A)"
+    )
+    p.sorry()
+
+
+@proof
 def PAR_STEP_DIAMOND(p):
     """|- !X Y Z. sk_par_step X Y /\\ sk_par_step X Z
                    ==> ?W. sk_par_step Y W /\\ sk_par_step Z W.
 
-    *** STUB.  Takahashi diamond for one-step parallel reduction.
-    Discharge: define ``bullet : nat0 -> nat0`` (complete-development
-    function), prove the triangle lemma ``sk_par_step X Y ==>
-    sk_par_step Y (bullet X)`` by structural induction on X, then take
-    W := bullet X and apply triangle to both branches.
+    Takahashi diamond: from the triangle property at (X, Y) and
+    (X, Z), both Y and Z par-step to the common reduct ``bullet X``.
+    Witness W := bullet X.
     """
     p.goal(
         "!X:nat0. !Y:nat0. !Z:nat0. "
         "sk_par_step X Y /\\ sk_par_step X Z ==> "
         "?W:nat0. sk_par_step Y W /\\ sk_par_step Z W"
     )
-    p.sorry()
+    p.fix("X Y Z")
+    p.assume(
+        "(h_XY, h_XZ): sk_par_step X Y /\\ sk_par_step X Z"
+    )
+    p.have(
+        "h_te: ?bullet:nat0->nat0. "
+        "      !A:nat0. !B:nat0. "
+        "      sk_par_step A B ==> sk_par_step B (bullet A)"
+    ).by_thm(TRIANGLE_EXISTS)
+    p.choose("bullet", from_="h_te")
+    # bullet_eq: !A B. sk_par_step A B ==> sk_par_step B (bullet A).
+    p.have(
+        "h_Y_bull: sk_par_step Y (bullet X)"
+    ).by("bullet_eq", "X", "Y", "h_XY")
+    p.have(
+        "h_Z_bull: sk_par_step Z (bullet X)"
+    ).by("bullet_eq", "X", "Z", "h_XZ")
+    p.thus(
+        "?W:nat0. sk_par_step Y W /\\ sk_par_step Z W"
+    ).by_exists(["bullet X"], "h_Y_bull", "h_Z_bull")
 
 
 @proof
