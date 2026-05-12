@@ -121,7 +121,7 @@ from basics import mk_const, mk_app, mk_abs, rand
 from parser import define, parse_type, add_const
 from nat0 import nat0_ty, ZERO, mk_suc0
 from nat0_order import define_wf_lt
-from proof import proof, define_with_at
+from proof import proof, define_with_at, register_intro_set
 from tactics import REFL, SPEC, SPECL, SYM, EQ_MP, DISJ1, DISJ2, CONJ, EXISTS, MP
 from hf_sets import Pair_ord
 from hf_syntax import (
@@ -340,6 +340,17 @@ def IS_SK_TERM_APP(p):
 # IS_SK_TERM_CASES coincides with IS_SK_TERM_REC up to surface phrasing;
 # we re-export under the historical name so downstream consumers find it.
 IS_SK_TERM_CASES = IS_SK_TERM_REC
+
+
+# Structural-intro registry: feed atoms (S_t, K_t) + the App-style
+# recursive rule into the DSL so ``p.thus(...).by_tree(unfold=[...])``
+# can discharge any concrete ``is_sk_term term`` goal without the
+# IS_SK_TERM_APP cascade.
+register_intro_set(
+    is_sk_term,
+    atoms=[(S_t, IS_SK_TERM_S), (K_t, IS_SK_TERM_K)],
+    app=(App_t, IS_SK_TERM_APP),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -3061,64 +3072,18 @@ Y_t = mk_const("Y_t", [])
 def IS_SK_TERM_Y(p):
     """|- is_sk_term Y_t.
 
-    Mechanical structural proof: Y_t is a closed SK tree, every node
-    is an atom (S_t/K_t, dispatched via IS_SK_TERM_S/K) or an App_t
-    whose children are themselves SK terms (dispatched via
-    IS_SK_TERM_APP).  I_t appears in Y_t and is itself a defined
-    constant (I_T_DEF: I_t = App_t (App_t S_t K_t) K_t), so we lift
-    ``is_sk_term I_t`` once via SYM(I_T_DEF).
+    Discharged by ``by_tree`` against the structural-intro set
+    registered above (atoms S_t/K_t, App constructor App_t).  The
+    ``unfold`` list opens both Y_t and the I_t occurrences inside it
+    so the walker sees a pure S_t/K_t/App_t tree.
 
-    DSL friction: each IS_SK_TERM_APP usage takes a conjunction
-    ``is_sk_term a /\\ is_sk_term b``.  There's no "by_conj_intro"
-    sugar on ``by``, and writing each conjunction as a separate
-    ``p.have`` + IS_SK_TERM_APP call would balloon to ~60 lines.
-    Instead we build the proof tree at the kernel level via a tiny
-    local helper ``app_st`` and discharge the whole thing with a
-    single ``p.thus(...).by_thm(...)``.  This is the cleanest pattern
-    found for "deeply structural" goals where every node is the same
-    inference rule.
-
-    DSL friction: there's no "fold via DEF" tactic; ``by_rewrite_of``
-    + SYM(DEF) would work but doesn't compose with kernel ``MP``
-    chains.  We use ``EQ_MP(AP_TERM(is_sk_term, SYM(DEF)), h)``
-    directly -- two lines per fold, cleaner than rewriting.
+    Originally written as a ~30-line cascade of IS_SK_TERM_APP
+    applications threaded through a local ``app_st(a,b,ha,hb)``
+    helper -- the proof DSL gained ``register_intro_set`` +
+    ``by_tree`` to collapse exactly this pattern.
     """
-    from tactics import AP_TERM as _AP_TERM
-
     p.goal("is_sk_term Y_t")
-
-    def app_st(a, b, ha, hb):
-        """|- is_sk_term a, |- is_sk_term b  =>  |- is_sk_term (App_t a b)."""
-        return MP(SPECL([a, b], IS_SK_TERM_APP), CONJ(ha, hb))
-
-    h_S = IS_SK_TERM_S
-    h_K = IS_SK_TERM_K
-
-    # is_sk_term I_t  (via I_T_DEF: I_t = App_t (App_t S_t K_t) K_t).
-    h_SK_t  = app_st(S_t, K_t, h_S, h_K)
-    h_I_raw = app_st(mk_app(App_t, S_t, K_t), K_t, h_SK_t, h_K)
-    h_I     = EQ_MP(_AP_TERM(is_sk_term, SYM(I_T_DEF)), h_I_raw)
-
-    # is_sk_term for the inner atoms of M.
-    h_KS    = app_st(K_t, S_t, h_K, h_S)                            # K S
-    h_KK    = app_st(K_t, K_t, h_K, h_K)                            # K K
-    h_SI    = app_st(S_t, I_t, h_S, h_I)                            # S I
-    h_SII   = app_st(mk_app(App_t, S_t, I_t), I_t, h_SI, h_I)       # S I I = SII
-
-    h_S_KS    = app_st(S_t, _KS_t, h_S, h_KS)                       # S (KS)
-    h_S_KK    = app_st(S_t, _KK_t, h_S, h_KK)                       # S (KK)
-    h_S_KK_I  = app_st(mk_app(App_t, S_t, _KK_t), I_t, h_S_KK, h_I) # S (KK) I
-
-    h_U = app_st(_S_KS_t, _S_KK_I, h_S_KS, h_S_KK_I)                # S(KS)(S(KK)I)
-    h_V = app_st(K_t, _SII_t, h_K, h_SII)                           # K (SII)
-
-    h_S_U = app_st(S_t, _U_t, h_S, h_U)                             # S U
-    h_M   = app_st(_S_U_t, _V_t, h_S_U, h_V)                        # M = S U V
-    h_MM  = app_st(_M_t, _M_t, h_M, h_M)                            # M M
-
-    # Fold App_t M M back to Y_t via SYM(Y_T_DEF).
-    h_Y = EQ_MP(_AP_TERM(is_sk_term, SYM(Y_T_DEF)), h_MM)
-    p.thus("is_sk_term Y_t").by_thm(h_Y)
+    p.thus("is_sk_term Y_t").by_tree(unfold=[Y_T_DEF, I_T_DEF])
 
 
 @proof
