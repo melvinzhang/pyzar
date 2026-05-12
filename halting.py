@@ -7880,27 +7880,372 @@ _SK_BULLET_F_DEF = define(
 _SK_BULLET_F = mk_const("_sk_bullet_F", [])
 
 
+def _prove_sk_bullet_F_at():
+    """|- !f t. _sk_bullet_F f t = body[f, t]  (two BETAs).
+
+    Mirror of ``_prove_sk_step_F_at`` (halting.py:704).  AP_THM at f,
+    BETA the resulting lambda; AP_THM at t, BETA again; GENL.
+    """
+    from tactics import AP_THM, BETA_CONV, TRANS, GENL
+    f_var = Var("f", _sk_step_fn_ty)
+    t_var = Var("t", nat0_ty)
+    th_f = AP_THM(_SK_BULLET_F_DEF, f_var)
+    th_f_eq = TRANS(th_f, BETA_CONV(rand(th_f._concl)))
+    th_ft = AP_THM(th_f_eq, t_var)
+    th_ft_eq = TRANS(th_ft, BETA_CONV(rand(th_ft._concl)))
+    return GENL([f_var, t_var], th_ft_eq)
+
+
+_SK_BULLET_F_AT = _prove_sk_bullet_F_at()
+
+
+# ---------------------------------------------------------------------------
+# Per-disjunct mono iffs for the bullet body.
+#
+#   D1 (K-redex)   : single recurse under binary ?x y existential.
+#   D2 (S-redex)   : ternary recurse under triple ?x y z existential.
+#   D3 (other-App) : binary recurse under ?a b -- covered by the existing
+#                    ``_mono_iff_value_binary_pw_step``.
+#   D4 (leaf)      : f-free, REFL.
+#
+# D1 and D2 don't fit the existing helper's shape (D1 has only one
+# recursive call buried under two binders; D2 has three recursive calls
+# under three binders).  Both follow the same CHOOSE_WITNESS / LT chain
+# / MP-hyp / EXISTS-repack template -- only the binder count, the LT
+# chain depths, and the payload shape differ.
+#
+# Shared piece factored out as ``_lt_trans_chain``; the rest is inlined
+# per-disjunct because the binder-count variation would force a generic
+# combinator more complex than the direct code (the EXISTS repack
+# requires per-depth predicate construction).
+# ---------------------------------------------------------------------------
+
+
+def _lt_trans_chain(lt_steps, n_eq_th):
+    """TRANS-compose a list of LT hops into ``|- nat0_lt a0 n``.
+
+    Args:
+      lt_steps : list of theorems ``[|- nat0_lt a0 a1, |- nat0_lt a1 a2,
+                  ..., |- nat0_lt a_{k-1} a_k]``.  Each step's right
+                  must match the next step's left.
+      n_eq_th  : ``|- n = a_k`` (rewriting the final endpoint to ``n``).
+
+    Returns ``|- nat0_lt a0 n``.
+
+    Two call sites (D1's depth-2 chain, D2's depth-{1,2,3} chains); the
+    factored piece is the TRANS-fold + final ``REWRITE_RULE [SYM(n_eq)]``.
+    """
+    from tactics import MP, REWRITE_RULE, SPECL, SYM
+    from nat0_order import NAT0_LT_TRANS
+    chain = lt_steps[0]
+    for s in lt_steps[1:]:
+        a_t = rand(rator(chain._concl))
+        m_t = rand(chain._concl)
+        b_t = rand(s._concl)
+        chain = MP(
+            MP(SPECL([a_t, m_t, b_t], NAT0_LT_TRANS), chain),
+            s,
+        )
+    return REWRITE_RULE([SYM(n_eq_th)], chain)
+
+
+def _bullet_F_d1_mono_iff(hyp_th, r_term):
+    """|- (?x y. n = App_t (App_t K_t x) y /\\ r = f x)
+        = (?x y. n = App_t (App_t K_t x) y /\\ r = g x)
+    where ``n, f, g`` are read from ``hyp_th`` and ``r := r_term``.
+
+    Direction template (mirrors ``_mono_iff_value_binary_pw_step``):
+      1. CHOOSE_WITNESS x (outer ?) then y (inner ?).
+      2. Extract witnesses w_x, w_y from the conjuncts.
+      3. LT chain: w_x < App_t K_t w_x [NAT0_LT_APP_T_R] < n [NAT0_LT_APP_T_L]
+         (two steps, composed via ``_lt_trans_chain``).
+      4. MP hyp at w_x → ``f w_x = g w_x``.
+      5. REWRITE_RULE payload to flip ``r = f w_x`` ↔ ``r = g w_x``.
+      6. Re-pack via two EXISTS.
+      7. DEDUCT_ANTISYM_RULE the two directions.
+    """
+    from tactics import (
+        SPEC, MP, SYM, CONJ, CONJUNCT1, CONJUNCT2,
+        REWRITE_RULE, EXISTS, DEDUCT_ANTISYM_RULE, ASSUME,
+        CHOOSE_WITNESS, SPECL,
+    )
+    from axioms import dest_exists, mk_exists, mk_and
+    from basics import mk_eq, mk_abs
+    from hf_syntax import _extract_nfg
+
+    n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
+    x_var = Var("x", k_ty)
+    y_var = Var("y", k_ty)
+    K_redex = mk_app(App_t, mk_app(App_t, K_t, x_var), y_var)
+
+    def _body(fn):
+        return mk_and(
+            mk_eq(n_t, K_redex),
+            mk_eq(r_term, mk_app(fn, x_var)),
+        )
+
+    body_l = _body(f_t)
+    body_r = _body(g_t)
+    LHS = mk_exists(x_var, mk_exists(y_var, body_l))
+    RHS = mk_exists(x_var, mk_exists(y_var, body_r))
+
+    def _direction(src, target_inner, target_fn, swap_fg):
+        h_top = ASSUME(src)
+        chosen_x = CHOOSE_WITNESS(dest_exists(src), h_top)
+        chosen_y = CHOOSE_WITNESS(
+            dest_exists(chosen_x._concl), chosen_x
+        )
+        n_eq_th = CONJUNCT1(chosen_y)
+        payload = CONJUNCT2(chosen_y)
+        # Extract witnesses from `n = App_t (App_t K_t w_x) w_y`.
+        ctor_app = rand(n_eq_th._concl)
+        w_y = rand(ctor_app)
+        AppKwx = rand(rator(ctor_app))
+        w_x = rand(AppKwx)
+        # LT chain: w_x < App_t K_t w_x < App_t (App_t K_t w_x) w_y = n.
+        lt_inner = SPECL([K_t, w_x], NAT0_LT_APP_T_R)
+        lt_outer = SPECL([AppKwx, w_y], NAT0_LT_APP_T_L)
+        lt_w_x_n = _lt_trans_chain([lt_inner, lt_outer], n_eq_th)
+        # MP hyp at w_x; sym for the reverse direction.
+        eq_at_wx = MP(SPEC(w_x, hyp_th), lt_w_x_n)
+        if swap_fg:
+            eq_at_wx = SYM(eq_at_wx)
+        new_payload = REWRITE_RULE([eq_at_wx], payload)
+        new_body = CONJ(n_eq_th, new_payload)
+        # Re-pack: inner EXISTS over w_y, outer over w_x.
+        outer_pred = mk_abs(x_var, mk_exists(y_var, target_inner))
+        inner_pred_at_wx = mk_abs(
+            y_var,
+            mk_and(
+                mk_eq(
+                    n_t,
+                    mk_app(App_t, mk_app(App_t, K_t, w_x), y_var),
+                ),
+                mk_eq(r_term, mk_app(target_fn, w_x)),
+            ),
+        )
+        inner_th = EXISTS(inner_pred_at_wx, w_y, new_body)
+        return EXISTS(outer_pred, w_x, inner_th)
+
+    R_th = _direction(LHS, body_r, g_t, swap_fg=False)
+    L_th = _direction(RHS, body_l, f_t, swap_fg=True)
+    return DEDUCT_ANTISYM_RULE(L_th, R_th)
+
+
+def _bullet_F_d2_mono_iff(hyp_th, r_term):
+    """|- (?x y z. n = App_t (App_t (App_t S_t x) y) z /\\
+                   r = App_t (App_t (f x) (f z)) (App_t (f y) (f z)))
+        = (?x y z. ... same with g ...)
+    where ``n, f, g`` come from ``hyp_th``.
+
+    Same template as D1, scaled to three binders.  LT-chain depths:
+      * z: 1 step  -- z < (App_t ... z) = n  via NAT0_LT_APP_T_R.
+      * y: 2 steps -- y < App_t (App_t S_t x) y [R]
+                         < (App_t (App_t (App_t S_t x) y) z) [L] = n.
+      * x: 3 steps -- x < App_t S_t x [R]
+                         < App_t (App_t S_t x) y [L]
+                         < (App_t (App_t (App_t S_t x) y) z) [L] = n.
+
+    All three LT-to-n facts feed independent ``MP(SPEC(w, hyp), ...)``
+    calls; a single ``REWRITE_RULE`` with the three eqs simultaneously
+    substitutes on the payload (which mentions ``f x, f y, f z``).
+    """
+    from tactics import (
+        SPEC, MP, SYM, CONJ, CONJUNCT1, CONJUNCT2,
+        REWRITE_RULE, EXISTS, DEDUCT_ANTISYM_RULE, ASSUME,
+        CHOOSE_WITNESS, SPECL,
+    )
+    from axioms import dest_exists, mk_exists, mk_and
+    from basics import mk_eq, mk_abs
+    from hf_syntax import _extract_nfg
+
+    n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
+    x_var = Var("x", k_ty)
+    y_var = Var("y", k_ty)
+    z_var = Var("z", k_ty)
+    AppSx = mk_app(App_t, S_t, x_var)
+    AppAppSxy = mk_app(App_t, AppSx, y_var)
+    S_redex = mk_app(App_t, AppAppSxy, z_var)
+
+    def _val(fn):
+        return mk_app(
+            App_t,
+            mk_app(App_t, mk_app(fn, x_var), mk_app(fn, z_var)),
+            mk_app(App_t, mk_app(fn, y_var), mk_app(fn, z_var)),
+        )
+
+    def _body(fn):
+        return mk_and(mk_eq(n_t, S_redex), mk_eq(r_term, _val(fn)))
+
+    body_l = _body(f_t)
+    body_r = _body(g_t)
+    LHS = mk_exists(
+        x_var, mk_exists(y_var, mk_exists(z_var, body_l))
+    )
+    RHS = mk_exists(
+        x_var, mk_exists(y_var, mk_exists(z_var, body_r))
+    )
+
+    def _direction(src, target_inner, target_fn, swap_fg):
+        h_top = ASSUME(src)
+        chosen_x = CHOOSE_WITNESS(dest_exists(src), h_top)
+        chosen_y = CHOOSE_WITNESS(
+            dest_exists(chosen_x._concl), chosen_x
+        )
+        chosen_z = CHOOSE_WITNESS(
+            dest_exists(chosen_y._concl), chosen_y
+        )
+        n_eq_th = CONJUNCT1(chosen_z)
+        payload = CONJUNCT2(chosen_z)
+        # Extract witnesses from
+        #   n = App_t (App_t (App_t S_t w_x) w_y) w_z.
+        outer_app = rand(n_eq_th._concl)
+        w_z = rand(outer_app)
+        mid_app = rand(rator(outer_app))  # App_t (App_t S_t w_x) w_y
+        w_y = rand(mid_app)
+        AppSwx = rand(rator(mid_app))      # App_t S_t w_x
+        w_x = rand(AppSwx)
+        # LT chains, all to n via _lt_trans_chain (which auto-rewrites
+        # the final endpoint with SYM(n_eq_th)).
+        lt_z = _lt_trans_chain(
+            [SPECL([mid_app, w_z], NAT0_LT_APP_T_R)],
+            n_eq_th,
+        )
+        lt_y = _lt_trans_chain(
+            [
+                SPECL([AppSwx, w_y], NAT0_LT_APP_T_R),
+                SPECL([mid_app, w_z], NAT0_LT_APP_T_L),
+            ],
+            n_eq_th,
+        )
+        lt_x = _lt_trans_chain(
+            [
+                SPECL([S_t, w_x], NAT0_LT_APP_T_R),
+                SPECL([AppSwx, w_y], NAT0_LT_APP_T_L),
+                SPECL([mid_app, w_z], NAT0_LT_APP_T_L),
+            ],
+            n_eq_th,
+        )
+        eq_at_wx = MP(SPEC(w_x, hyp_th), lt_x)
+        eq_at_wy = MP(SPEC(w_y, hyp_th), lt_y)
+        eq_at_wz = MP(SPEC(w_z, hyp_th), lt_z)
+        if swap_fg:
+            eq_at_wx = SYM(eq_at_wx)
+            eq_at_wy = SYM(eq_at_wy)
+            eq_at_wz = SYM(eq_at_wz)
+        # Simultaneous rewrite on the payload: three f-calls become
+        # three g-calls (or vice versa for the reverse direction).
+        new_payload = REWRITE_RULE(
+            [eq_at_wx, eq_at_wy, eq_at_wz], payload
+        )
+        new_body = CONJ(n_eq_th, new_payload)
+        # Re-pack: triple EXISTS.  Each predicate captures the previous
+        # witnesses; only the current binder is free.
+        outermost_pred = mk_abs(
+            x_var,
+            mk_exists(y_var, mk_exists(z_var, target_inner)),
+        )
+        # Compute target_inner with x:=w_x: substitute mentally; we
+        # rebuild the term explicitly to avoid INST subtleties.
+        AppSwx_t = mk_app(App_t, S_t, w_x)
+
+        def _val_at(fn, x_t, y_t, z_t):
+            return mk_app(
+                App_t,
+                mk_app(App_t, mk_app(fn, x_t), mk_app(fn, z_t)),
+                mk_app(App_t, mk_app(fn, y_t), mk_app(fn, z_t)),
+            )
+
+        mid_pred_at_wx = mk_abs(
+            y_var,
+            mk_exists(
+                z_var,
+                mk_and(
+                    mk_eq(
+                        n_t,
+                        mk_app(
+                            App_t,
+                            mk_app(App_t, AppSwx_t, y_var),
+                            z_var,
+                        ),
+                    ),
+                    mk_eq(
+                        r_term,
+                        _val_at(target_fn, w_x, y_var, z_var),
+                    ),
+                ),
+            ),
+        )
+        AppAppSwxwy_t = mk_app(App_t, AppSwx_t, w_y)
+        innermost_pred_at_wxwy = mk_abs(
+            z_var,
+            mk_and(
+                mk_eq(
+                    n_t,
+                    mk_app(App_t, AppAppSwxwy_t, z_var),
+                ),
+                mk_eq(
+                    r_term,
+                    _val_at(target_fn, w_x, w_y, z_var),
+                ),
+            ),
+        )
+        z_ex = EXISTS(innermost_pred_at_wxwy, w_z, new_body)
+        y_ex = EXISTS(mid_pred_at_wx, w_y, z_ex)
+        return EXISTS(outermost_pred, w_x, y_ex)
+
+    R_th = _direction(LHS, body_r, g_t, swap_fg=False)
+    L_th = _direction(RHS, body_l, f_t, swap_fg=True)
+    return DEDUCT_ANTISYM_RULE(L_th, R_th)
+
+
 @proof
 def SK_BULLET_MONO(p):
     """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
                  ==> _sk_bullet_F f n = _sk_bullet_F g n.
 
-    *** SORRY STUB.  Monotonicity premise for ``define_wf_lt``.
+    Mirrors ``SK_STEP_MONO``'s stitch pattern (or_chain_collapse +
+    _lift_select_eq + SPECL through ``_SK_BULLET_F_AT``).  Per-disjunct
+    iffs:
+      D1 (K-redex, single recurse)    -- ``_bullet_F_d1_mono_iff``
+                                         (sorry-stubbed helper).
+      D2 (S-redex, ternary recurse)   -- ``_bullet_F_d2_mono_iff``
+                                         (sorry-stubbed helper);
+                                         prepended with ``~K`` via
+                                         AP_TERM(/\\) lift.
+      D3 (other-App, binary recurse)  -- ``_mono_iff_value_binary_pw_step``
+                                         (existing, real); prepended
+                                         with ``~K /\\ ~S`` via two
+                                         AP_TERM(/\\) lifts.
+      D4 (leaf, f-free)               -- REFL.
 
-    Structure mirrors ``SK_STEP_MONO``: per-disjunct iffs stitched via
-    ``or_chain_collapse``, lifted through ``@r`` via
-    ``_lift_select_eq``, chained through SPECL'd ``_SK_BULLET_F_AT``
-    equations.  The four disjuncts:
-      D1 (K-redex)    : uses ``f x`` (one recursive call under ?x y).
-      D2 (S-redex)    : uses ``f x``, ``f y``, ``f z`` (three recursive
-                        calls under ?x y z) -- needs a ternary analogue
-                        of ``_mono_iff_value_binary_pw_step``.
-      D3 (other-App)  : uses ``f a``, ``f b`` -- direct mirror of
-                        SK_STEP_MONO's D3 with the descent collapsed
-                        into the single congruence ``r = App_t (f a) (f b)``.
-      D4 (leaf)       : f-free, REFL.
-    Cost: ~180 LOC including the ternary mono helper.
+    The two stubs are isolated behind helper functions so MONO itself
+    is fully discharged; once the LT_TRANS dances are written, only
+    those helpers need updating.
+
+    DSL friction: the per-disjunct iffs return kernel theorems with
+    ``r_var`` free.  ``or_chain_collapse`` consumes them as a list;
+    ``_lift_select_eq`` ABSes over ``r_var`` and AP_TERMs through the
+    polymorphic ``@``.  All four iffs must share the same free
+    ``r_var`` -- we use the kernel ``Var("r", nat0_ty)`` consistently
+    rather than reparsing.
     """
+    from tactics import (
+        AP_TERM as _AP_TERM,
+        SPECL as _SPECL,
+        TRANS as _TRANS,
+        SYM as _SYM,
+        or_chain_collapse as _or_collapse,
+    )
+    from hf_syntax import _mono_iff_value_binary_pw_step, _extract_nfg
+    from fusion import mk_comb as _mk_comb
+    from axioms import (
+        mk_and as _mk_and,
+        mk_not as _mk_not,
+        mk_exists as _mk_exists,
+    )
+    from basics import mk_eq as _mk_eq
+
     p.goal(
         "!f g n. (!k. nat0_lt k n ==> f k = g k) "
         "==> _sk_bullet_F f n = _sk_bullet_F g n",
@@ -7911,7 +8256,91 @@ def SK_BULLET_MONO(p):
             "k": nat0_ty,
         },
     )
-    p.sorry()
+    p.fix("f g n")
+    p.assume("h: !k. nat0_lt k n ==> f k = g k")
+    h_th = p.fact("h")
+    n_t, f_t, g_t, _k_ty = _extract_nfg(h_th)
+    r_var = Var("r", nat0_ty)
+
+    # K-shape, S-shape, App-shape -- needed for the ~-prefixes on
+    # D2/D3 and the D4 disjunct body.  Bvars ``x, y, z, a, b`` match
+    # the F_DEF body exactly (NOT the alpha-renamed ``a, b, c`` from
+    # _sk_bullet_disjuncts -- those are for surface case-splits;
+    # here we need term-level identity with the F_DEF for the SPECL
+    # chain through _SK_BULLET_F_AT to align).
+    x_v = Var("x", nat0_ty)
+    y_v = Var("y", nat0_ty)
+    z_v = Var("z", nat0_ty)
+    a_v = Var("a", nat0_ty)
+    b_v = Var("b", nat0_ty)
+    K_redex_body = _mk_eq(
+        n_t, mk_app(App_t, mk_app(App_t, K_t, x_v), y_v)
+    )
+    K_shape = _mk_exists(x_v, _mk_exists(y_v, K_redex_body))
+    S_redex_body = _mk_eq(
+        n_t,
+        mk_app(App_t, mk_app(App_t, mk_app(App_t, S_t, x_v), y_v), z_v),
+    )
+    S_shape = _mk_exists(
+        x_v, _mk_exists(y_v, _mk_exists(z_v, S_redex_body))
+    )
+    App_body = _mk_eq(n_t, mk_app(App_t, a_v, b_v))
+    App_shape = _mk_exists(a_v, _mk_exists(b_v, App_body))
+    AND_C = mk_const("/\\", [])
+
+    # --- Per-disjunct iffs ------------------------------------------------
+
+    # D1: bare existential with single recursion.
+    eq_D1 = _bullet_F_d1_mono_iff(h_th, r_var)
+
+    # D2: ~K /\ (S-existential with triple recursion).  AP_TERM lifts
+    # the inner iff through the ~K conjunct.
+    eq_D2_inner = _bullet_F_d2_mono_iff(h_th, r_var)
+    eq_D2 = _AP_TERM(_mk_comb(AND_C, _mk_not(K_shape)), eq_D2_inner)
+
+    # D3: ~K /\ ~S /\ (App-existential with binary recursion).  Uses
+    # the existing generic binary helper; rest_builder produces the
+    # payload ``r = App_t (fn a) (fn b)`` -- two AP_TERMs prepend
+    # ~S then ~K.
+    def _D3_rest_builder(fn, a_t, b_t, args):
+        return _mk_eq(
+            r_var,
+            mk_app(App_t, mk_app(fn, a_t), mk_app(fn, b_t)),
+        )
+
+    eq_D3_inner = _mono_iff_value_binary_pw_step(
+        App_t,
+        NAT0_LT_APP_T_L,
+        NAT0_LT_APP_T_R,
+        h_th,
+        args=[],
+        rest_builder=_D3_rest_builder,
+        recurses_l=True,
+    )
+    eq_D3_with_ns = _AP_TERM(
+        _mk_comb(AND_C, _mk_not(S_shape)), eq_D3_inner
+    )
+    eq_D3 = _AP_TERM(_mk_comb(AND_C, _mk_not(K_shape)), eq_D3_with_ns)
+
+    # D4: f-free leaf branch.  REFL of the full disjunct.
+    D4 = _mk_and(
+        _mk_not(K_shape),
+        _mk_and(
+            _mk_not(S_shape),
+            _mk_and(_mk_not(App_shape), _mk_eq(r_var, n_t)),
+        ),
+    )
+    eq_D4 = REFL(D4)
+
+    # --- Stitch + lift + chain through F_AT -------------------------------
+
+    body_eq_at_r = _or_collapse([eq_D1, eq_D2, eq_D3, eq_D4])
+    select_eq = _lift_select_eq(r_var, body_eq_at_r)
+    spec_f = _SPECL([f_t, n_t], _SK_BULLET_F_AT)
+    spec_g = _SPECL([g_t, n_t], _SK_BULLET_F_AT)
+    final = _TRANS(spec_f, _TRANS(select_eq, _SYM(spec_g)))
+
+    p.thus("_sk_bullet_F f n = _sk_bullet_F g n").by_thm(final)
 
 
 # Well-founded recursive definition.
@@ -7982,41 +8411,162 @@ def _sk_bullet_select_at(p, t, witness_r, inner_branch_th):
     return _select_via_rec(SK_BULLET_REC, [p._parse(t)], p.fact("_bullet_ex"))
 
 
+def _prove_sk_bullet_leaf(p, atom_str, atom_neq_lemma):
+    """Shared body of SK_BULLET_S_T / SK_BULLET_K_T.  Proves
+    ``sk_bullet <atom> = <atom>`` where ``atom`` is ``S_t`` or ``K_t``.
+
+    D4 (leaf branch) fires at ``r := <atom>``: its payload is exactly
+    ``r = t`` which is reflexive at this witness.  D1 / D2 / D3 all
+    contain App_t-shaped existentials over ``t = <atom>``; each is
+    refuted via ``_atom_neq_App_negations`` applied to ``atom_neq_lemma``.
+
+    Direct mirror of ``_prove_sk_step_leaf`` (halting.py:2025) — the
+    disjunct structure of bullet's body matches sk_step's at D1/D2/D3
+    (App-shaped existentials, modulo payload) and at D4 (the leaf
+    branch with ``r = t``).
+    """
+    from tactics import CONJ as _CONJ
+    t = atom_str
+    sk_t = f"sk_bullet {t}"
+    nK_lbl, nS_lbl, nApp_lbl = _atom_neq_App_negations(p, t, atom_neq_lemma)
+    # Leaf-disjunct inner: nK /\ nS /\ nApp /\ atom = atom (the r = t
+    # payload, instantiated at r := atom, becomes the trivial REFL).
+    p.have(
+        f"inner_leaf: ~(?a b. {t} = App_t (App_t K_t a) b) /\\ "
+        f"~(?a b c. {t} = App_t (App_t (App_t S_t a) b) c) /\\ "
+        f"~(?a b. {t} = App_t a b) /\\ {t} = {t}"
+    ).by_thm(
+        _CONJ(
+            p.fact(nK_lbl),
+            _CONJ(
+                p.fact(nS_lbl),
+                _CONJ(p.fact(nApp_lbl), REFL(p._parse(t))),
+            ),
+        )
+    )
+    body_th = _sk_bullet_select_at(p, t, t, "inner_leaf")
+    p.have(f"body: {_sk_bullet_body(t, sk_t)}").by_thm(body_th)
+    D1, D2, D3, D4 = _sk_bullet_disjuncts(t, sk_t)
+    with p.cases_on("body"):
+        with p.case(f"h1: {D1}"):
+            # D1: ?a b. atom = App_t (App_t K_t a) b /\ sk_bullet atom = sk_bullet a.
+            # Strip the sk_bullet-payload, extract bare K-shape, contradict nK.
+            p.choose("b", from_="a_eq")
+            p.split("b_eq", "(h_app, _)")
+            p.have(
+                f"h_kred_ex: ?a b. {t} = App_t (App_t K_t a) b"
+            ).by_exists(["a", "b"], p.fact("h_app"))
+            p.absurd().by_conj(nK_lbl, "h_kred_ex")
+        with p.case(f"h2: {D2}"):
+            p.split("h2", "(_, h2_ex)")
+            p.choose("a", from_="h2_ex")
+            p.choose("b", from_="a_eq")
+            p.choose("c", from_="b_eq")
+            p.split("c_eq", "(h_app, _)")
+            p.have(
+                f"h_sred_ex: ?a b c. {t} = App_t (App_t (App_t S_t a) b) c"
+            ).by_exists(["a", "b", "c"], p.fact("h_app"))
+            p.absurd().by_conj(nS_lbl, "h_sred_ex")
+        with p.case(f"h3: {D3}"):
+            p.split("h3", "(_, _, h3_app)")
+            p.choose("a", from_="h3_app")
+            p.choose("b", from_="a_eq")
+            p.split("b_eq", "(h_app, _)")
+            p.have(
+                f"h_app_ex: ?a b. {t} = App_t a b"
+            ).by_exists(["a", "b"], p.fact("h_app"))
+            p.absurd().by_conj(nApp_lbl, "h_app_ex")
+        with p.case(f"h4: {D4}"):
+            # D4 firing: ~K /\ ~S /\ ~App /\ sk_bullet atom = atom.
+            # The fourth conjunct IS the goal.
+            p.split("h4", "(_, _, _, h_sk)")
+            p.thus(f"{sk_t} = {t}").by_thm(p.fact("h_sk"))
+
+
 @proof
 def SK_BULLET_S_T(p):
-    """|- sk_bullet S_t = S_t.
-
-    *** SORRY STUB.  Atom unfold: the leaf disjunct (D4) fires with
-    ``r := S_t``; D1/D2/D3 are refuted via ``S_T_NEQ_APP_T`` (S_t is
-    not an App).  Mirrors ``SK_SIZE_S``'s shape, ~80 LOC.
-    """
+    """|- sk_bullet S_t = S_t.  D4 fires; D1/D2/D3 refuted via S_T_NEQ_APP_T."""
     p.goal("sk_bullet S_t = S_t")
-    p.sorry()
+    _prove_sk_bullet_leaf(p, "S_t", S_T_NEQ_APP_T)
 
 
 @proof
 def SK_BULLET_K_T(p):
-    """|- sk_bullet K_t = K_t.
-
-    *** SORRY STUB.  Mirror of SK_BULLET_S_T via ``K_T_NEQ_APP_T``.
-    """
+    """|- sk_bullet K_t = K_t.  Same structure as SK_BULLET_S_T via K_T_NEQ_APP_T."""
     p.goal("sk_bullet K_t = K_t")
-    p.sorry()
+    _prove_sk_bullet_leaf(p, "K_t", K_T_NEQ_APP_T)
 
 
 @proof
 def SK_BULLET_K_REDEX(p):
     """|- !X Y. sk_bullet (App_t (App_t K_t X) Y) = sk_bullet X.
 
-    *** SORRY STUB.  K-redex unfold: D1 fires at the natural witness
-    ``r := sk_bullet X``; D2/D3/D4 are refuted by the K-redex shape of
-    the input.  ~100 LOC.
+    K-redex disjunct (D1) fires at the natural witness ``r := sk_bullet X``;
+    D2 / D3 / D4 all carry a ~K guard, refuted by the obvious K-redex
+    existence of the input.  Structure mirrors SK_STEP_K.
+
+    In D1's firing branch, the existential bvars ``a, b`` from the body's
+    D1 must be identified with the surface ``X, Y`` so that ``h_sk:
+    sk_t = sk_bullet a`` can be lifted back to ``sk_t = sk_bullet X``.
+    APP_T_INJ peels the K-redex twice: first to extract ``App_t K_t X =
+    App_t K_t a /\\ Y = b``, then to extract ``K_t = K_t /\\ X = a``.
     """
+    from tactics import CONJ as _CONJ, CONJUNCT1 as _C1, CONJUNCT2 as _C2
     p.goal(
         "!X:nat0. !Y:nat0. "
         "sk_bullet (App_t (App_t K_t X) Y) = sk_bullet X"
     )
-    p.sorry()
+    p.fix("X Y")
+    t = "App_t (App_t K_t X) Y"
+    sk_t = f"sk_bullet ({t})"
+    val = "sk_bullet X"
+
+    # D1 inner witness at (a, b) := (X, Y), r := val.
+    p.have(
+        f"inner_K: ?a b. {t} = App_t (App_t K_t a) b /\\ "
+        f"          {val} = sk_bullet a"
+    ).by_exists(
+        ["X", "Y"], REFL(p._parse(t)), REFL(p._parse(val))
+    )
+    body_th = _sk_bullet_select_at(p, t, val, "inner_K")
+    p.have(f"body: {_sk_bullet_body(t, sk_t)}").by_thm(body_th)
+
+    # K-redex existence at the input; refutes ~K guards in D2-D4.
+    p.have(f"is_kred: ?a b. {t} = App_t (App_t K_t a) b").by_exists(
+        ["X", "Y"], REFL(p._parse(t))
+    )
+
+    D1, D2, D3, D4 = _sk_bullet_disjuncts(t, sk_t)
+    with p.cases_on("body"):
+        with p.case(f"h1: {D1}"):
+            # cases_on auto-binds the outer existential ``a``; we
+            # manually choose ``b`` from a_eq.
+            p.choose("b", from_="a_eq")
+            p.split("b_eq", "(h_app, h_sk)")
+            # APP_T_INJ twice: outer App layer, then inner App_t K_t _.
+            p.have(
+                "h_o: App_t K_t X = App_t K_t a /\\ Y = b"
+            ).by(APP_T_INJ, "App_t K_t X", "Y", "App_t K_t a", "b", "h_app")
+            p.have(
+                "h_o1: App_t K_t X = App_t K_t a"
+            ).by_thm(_C1(p.fact("h_o")))
+            p.have(
+                "h_i: K_t = K_t /\\ X = a"
+            ).by(APP_T_INJ, "K_t", "X", "K_t", "a", "h_o1")
+            p.have("h_Xa: X = a").by_thm(_C2(p.fact("h_i")))
+            # h_sk: sk_t = sk_bullet a.  SYM(h_Xa) rewrites a -> X.
+            p.thus(f"{sk_t} = {val}").by_rewrite_of(
+                "h_sk", [SYM(p.fact("h_Xa"))]
+            )
+        with p.case(f"h2: {D2}"):
+            p.split("h2", "(h_nk, _)")
+            p.absurd().by_conj("h_nk", "is_kred")
+        with p.case(f"h3: {D3}"):
+            p.split("h3", "(h_nk, _, _)")
+            p.absurd().by_conj("h_nk", "is_kred")
+        with p.case(f"h4: {D4}"):
+            p.split("h4", "(h_nk, _, _, _)")
+            p.absurd().by_conj("h_nk", "is_kred")
 
 
 @proof
@@ -8279,42 +8829,336 @@ def SK_BULLET_APP_OTHER(p):
             p.absurd().by_conj("h_napp", "is_app")
 
 
+# ---------------------------------------------------------------------------
+# Dependency stubs for SK_BULLET_TRIANGLE.
+#
+# Three direct dependencies + one closure-conjunct helper, all sorry'd
+# pending discharge.  TRIANGLE itself (below) is real, assembling the
+# four pieces via impredicative P-instantiation with the strengthened
+# invariant ``P := \A B. sk_par_step A B /\ sk_par_step B (sk_bullet A)``.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def PAR_STEP_K_APP_INV(p):
+    """|- !X Y. sk_par_step (App_t K_t X) Y ==>
+                  ?XP. Y = App_t K_t XP /\\ sk_par_step X XP.
+
+    *** SORRY STUB.  App-shape par_step inversion at the K_t head:
+    any par-reduct of ``App_t K_t X`` must itself be ``App_t K_t XP``
+    where ``X`` par-reduces to ``XP``.  Since ``App_t K_t X`` is not a
+    redex (only 1 App layer; K-redex requires 2), par_step can only fire
+    via REFL or APP-rule, and the APP-rule head must par-step from K_t
+    to K_t (by PAR_STEP_K_T_INV).
+
+    Discharge (deferred): impredicative-Q instantiation with
+       Q := \\A B. (?P. A = App_t K_t P)
+                    ==> (?P'. B = App_t K_t P' /\\ sk_par_step P P').
+    Mirror of PAR_STEP_K_T_INV pattern (halting.py:7819) but with the
+    App-shape pre-image.  ~120 LOC.
+    """
+    p.goal(
+        "!X:nat0. !Y:nat0. "
+        "sk_par_step (App_t K_t X) Y ==> "
+        "?XP:nat0. Y = App_t K_t XP /\\ sk_par_step X XP"
+    )
+    p.sorry()
+
+
+@proof
+def PAR_STEP_S_APP_APP_INV(p):
+    """|- !X Y Z. sk_par_step (App_t (App_t S_t X) Y) Z ==>
+                  ?XP YP. Z = App_t (App_t S_t XP) YP /\\
+                          sk_par_step X XP /\\ sk_par_step Y YP.
+
+    *** SORRY STUB.  Two-App-deep par_step inversion at the S_t head.
+    Same idea as PAR_STEP_K_APP_INV but with a deeper Q capturing the
+    ``App_t (App_t S_t _) _`` shape; the inner ``App_t S_t _`` must
+    par-step to itself (by an analog of the K-case) and only the two
+    operands can change.  ~150 LOC.
+    """
+    p.goal(
+        "!X:nat0. !Y:nat0. !Z:nat0. "
+        "sk_par_step (App_t (App_t S_t X) Y) Z ==> "
+        "?XP:nat0. ?YP:nat0. "
+        "Z = App_t (App_t S_t XP) YP /\\ "
+        "sk_par_step X XP /\\ sk_par_step Y YP"
+    )
+    p.sorry()
+
+
+@proof
+def BULLET_REFL(p):
+    """|- !A. sk_par_step A (sk_bullet A).
+
+    *** SORRY STUB.  Every term parallel-reduces to its complete
+    development.  Despite the name, this is NOT par_step's REFL rule --
+    ``sk_bullet`` contracts redexes, so the proof uses PAR_K / PAR_S /
+    PAR_APP at the redex / non-redex App cases.
+
+    Discharge (deferred): structural-shape induction on A using the
+    five SK_BULLET unfold equations:
+      atoms (S_t, K_t)         : PAR_REFL (since sk_bullet atom = atom).
+      App_t (App_t K_t X) Y    : PAR_K with the X-recursion.
+      App_t (App_t (App_t S_t X) Y) Z : PAR_S with three recursions.
+      App_t X Y (otherwise)    : PAR_APP with two recursions.
+    ~100 LOC.
+    """
+    p.goal("!A:nat0. sk_par_step A (sk_bullet A)")
+    p.sorry()
+
+
+@proof
+def _TRIANGLE_APP_CLOSURE(p):
+    """The APP-rule closure conjunct of TRIANGLE's P-instantiation:
+
+    |- !A B A1 B1.
+         (sk_par_step A A1 /\\ sk_par_step A1 (sk_bullet A)) /\\
+         (sk_par_step B B1 /\\ sk_par_step B1 (sk_bullet B)) ==>
+         sk_par_step (App_t A B) (App_t A1 B1) /\\
+         sk_par_step (App_t A1 B1) (sk_bullet (App_t A B)).
+
+    *** SORRY STUB.  Hardest of the four closure conjuncts:
+    case-split on ``App_t A B`` shape:
+      * K-redex (A = App_t K_t A'): invert ``sk_par_step A A1`` via
+        PAR_STEP_K_APP_INV to get A1 = App_t K_t A1'; ``sk_bullet``
+        of the K-redex collapses to ``sk_bullet A'``; assemble via
+        PAR_K on (A1' par-step to sk_bullet A', B1 par-step to anything).
+      * S-redex (A = App_t (App_t S_t A') B'): PAR_STEP_S_APP_APP_INV
+        gives A1 = App_t (App_t S_t A1') B1''; ``sk_bullet`` collapses
+        via SK_BULLET_S_REDEX; assemble via PAR_S.
+      * otherwise: SK_BULLET_APP_OTHER + PAR_APP on the two IHs'
+        second conjuncts.
+    ~150 LOC.
+    """
+    p.goal(
+        "!A:nat0. !B:nat0. !A1:nat0. !B1:nat0. "
+        "(sk_par_step A A1 /\\ sk_par_step A1 (sk_bullet A)) /\\ "
+        "(sk_par_step B B1 /\\ sk_par_step B1 (sk_bullet B)) ==> "
+        "sk_par_step (App_t A B) (App_t A1 B1) /\\ "
+        "sk_par_step (App_t A1 B1) (sk_bullet (App_t A B))"
+    )
+    p.sorry()
+
+
 @proof
 def SK_BULLET_TRIANGLE(p):
     """|- !A B. sk_par_step A B ==> sk_par_step B (sk_bullet A).
 
-    *** SORRY STUB.  Takahashi's triangle property.
+    Takahashi's triangle property.  Proven via impredicative
+    P-instantiation with the strengthened invariant:
 
-    Proof outline: impredicative induction on ``sk_par_step A B`` with
-    ``P := \\A B. sk_par_step B (sk_bullet A)``.  Closure conjuncts:
+       P := \\AA BB. sk_par_step AA BB /\\ sk_par_step BB (sk_bullet AA).
 
-      REFL  needs ``!A. sk_par_step A (sk_bullet A)`` as an auxiliary,
-            proved by structural induction on A using the five unfolds
-            (atoms / K-redex / S-redex / other-App).
+    The strengthening (first conjunct preserves the underlying par_step)
+    is required by the APP-rule case: to invert source-side redex
+    shapes via PAR_STEP_K_APP_INV / PAR_STEP_S_APP_APP_INV, we need
+    direct access to ``sk_par_step A A1`` not just the P-version
+    ``sk_par_step A1 (sk_bullet A)``.
 
-      K-rule  IHs ``sk_par_step X' (sk_bullet X)`` and
-            ``sk_par_step Y' (sk_bullet Y)`` combine with
-            SK_BULLET_K_REDEX to collapse the RHS to ``sk_bullet X``,
-            matching the first IH.
+    Four closure conjuncts:
+      REFL Z   -- PAR_REFL + BULLET_REFL.
+      K-rule   -- PAR_K (first part) + SK_BULLET_K_REDEX rewrite (second).
+      S-rule   -- PAR_S + SK_BULLET_S_REDEX + double PAR_APP composition.
+      APP-rule -- delegated to ``_TRIANGLE_APP_CLOSURE`` (sorry stub).
 
-      S-rule  IHs combine with SK_BULLET_S_REDEX; the three congruences
-            assemble via two PAR_STEP_APP applications.
+    With closures(P) built, SPEC h_AB-unfolded at P, MP, CONJUNCT2.
 
-      APP-rule  Case-split on whether ``App_t X Y`` matches K-redex,
-            S-redex, or otherwise.  Redex cases require App-shape
-            par_step inversion lemmas (currently missing -- see the
-            ``Phase 4d (diamond) infrastructure`` block above).
-            Otherwise case is direct via SK_BULLET_APP_OTHER and
-            PAR_STEP_APP.
-
-    Cost: ~250 LOC once the App-shape inversions exist; ~400 LOC if
-    they have to be proved here.
+    DSL friction noted inline at three sites.
     """
+    from tactics import (
+        AP_THM, BETA_CONV, BETA_NORM, TRANS, SPEC, MP, CONJ,
+        CONJUNCT2, EQ_MP,
+    )
+
     p.goal(
         "!A:nat0. !B:nat0. "
         "sk_par_step A B ==> sk_par_step B (sk_bullet A)"
     )
-    p.sorry()
+    p.fix("A B")
+    p.assume("h_AB: sk_par_step A B")
+
+    A_t = p._parse("A")
+    B_t = p._parse("B")
+    h_AB_th = p.fact("h_AB")
+
+    # Unfold sk_par_step A B to !P. closures(P) ==> P A B.  Two AP_THM
+    # + BETA_CONV pairs, same dance as _par_step_to_P (halting.py:6794).
+    ap1 = AP_THM(SK_PAR_STEP_DEF, A_t)
+    spec_A = TRANS(ap1, BETA_CONV(rand(ap1._concl)))
+    ap2 = AP_THM(spec_A, B_t)
+    spec_AB = TRANS(ap2, BETA_CONV(rand(ap2._concl)))
+    forall_P = EQ_MP(spec_AB, h_AB_th)
+    # forall_P: |- !P. closures(P) ==> P A B
+
+    # Strengthened P.  DSL friction: P's bvars must not collide with
+    # the outer ``A``, ``B`` (fixed) -- use ``AA``, ``BB``.
+    P_lambda = p._parse(
+        "\\AA:nat0. \\BB:nat0. "
+        "sk_par_step AA BB /\\ sk_par_step BB (sk_bullet AA)"
+    )
+    spec_P = SPEC(P_lambda, forall_P)
+    # spec_P : |- closures[P_lambda] ==> P_lambda A B  (un-beta'd)
+
+    # BETA_NORM the whole implication so antecedent and consequent
+    # both reach their explicit forms.  DSL friction: BETA_NORM walks
+    # ALL subterms, so the closure-form's per-rule lambda applications
+    # (P A A1, P (App_t ...) ..., etc.) all reduce in one pass.
+    spec_P_beta = EQ_MP(BETA_NORM(spec_P._concl), spec_P)
+    # spec_P_beta : |- closures_beta ==> sk_par_step A B /\
+    #                                    sk_par_step B (sk_bullet A)
+
+    # ---- Build closures_beta as h_cl ------------------------------------
+
+    # REFL conjunct: !Z. sk_par_step Z Z /\ sk_par_step Z (sk_bullet Z).
+    with p.have(
+        "c_refl: !Z:nat0. sk_par_step Z Z /\\ "
+        "                 sk_par_step Z (sk_bullet Z)"
+    ).proof():
+        p.fix("Z")
+        p.have("z_refl: sk_par_step Z Z").by_thm(
+            SPEC(p._parse("Z"), PAR_REFL)
+        )
+        p.have("z_bull: sk_par_step Z (sk_bullet Z)").by_thm(
+            SPEC(p._parse("Z"), BULLET_REFL)
+        )
+        p.thus(
+            "sk_par_step Z Z /\\ sk_par_step Z (sk_bullet Z)"
+        ).by_thm(CONJ(p.fact("z_refl"), p.fact("z_bull")))
+
+    # K-rule conjunct.  DSL friction: the outer ``fix("A B")`` puts
+    # ``A`` and ``B`` in scope, so the inner closure conjuncts can't
+    # ``fix("A B ...")`` -- HolError on duplicate fix.  We rename the
+    # closure-form's inner bvars to ``U V U1 V1`` (alpha-equivalent to
+    # ``A Y A1 Y1``; CONJ + MP go through EQ_MP / alphaorder, so the
+    # final closures_th still alpha-matches spec_P_beta's antecedent).
+    with p.have(
+        "c_K: !U:nat0. !V:nat0. !U1:nat0. !V1:nat0. "
+        "(sk_par_step U U1 /\\ sk_par_step U1 (sk_bullet U)) /\\ "
+        "(sk_par_step V V1 /\\ sk_par_step V1 (sk_bullet V)) ==> "
+        "sk_par_step (App_t (App_t K_t U) V) U1 /\\ "
+        "sk_par_step U1 (sk_bullet (App_t (App_t K_t U) V))"
+    ).proof():
+        p.fix("U V U1 V1")
+        p.assume(
+            "((h_U_step, h_U_bull), (h_V_step, h_V_bull)): "
+            "(sk_par_step U U1 /\\ sk_par_step U1 (sk_bullet U)) /\\ "
+            "(sk_par_step V V1 /\\ sk_par_step V1 (sk_bullet V))"
+        )
+        p.have(
+            "k_first: sk_par_step (App_t (App_t K_t U) V) U1"
+        ).by(
+            PAR_K, "U", "U1", "V", "V1",
+            CONJ(p.fact("h_U_step"), p.fact("h_V_step")),
+        )
+        p.have(
+            "bull_K: sk_bullet (App_t (App_t K_t U) V) = sk_bullet U"
+        ).by(SK_BULLET_K_REDEX, "U", "V")
+        p.have(
+            "k_second: sk_par_step U1 (sk_bullet (App_t (App_t K_t U) V))"
+        ).by_rewrite_of("h_U_bull", [SYM(p.fact("bull_K"))])
+        p.thus(
+            "sk_par_step (App_t (App_t K_t U) V) U1 /\\ "
+            "sk_par_step U1 (sk_bullet (App_t (App_t K_t U) V))"
+        ).by_thm(CONJ(p.fact("k_first"), p.fact("k_second")))
+
+    # S-rule conjunct.  Same bvar rename: U V W U1 V1 W1.
+    with p.have(
+        "c_S: !U:nat0. !V:nat0. !W:nat0. "
+        "!U1:nat0. !V1:nat0. !W1:nat0. "
+        "(sk_par_step U U1 /\\ sk_par_step U1 (sk_bullet U)) /\\ "
+        "(sk_par_step V V1 /\\ sk_par_step V1 (sk_bullet V)) /\\ "
+        "(sk_par_step W W1 /\\ sk_par_step W1 (sk_bullet W)) ==> "
+        "sk_par_step (App_t (App_t (App_t S_t U) V) W) "
+        "            (App_t (App_t U1 W1) (App_t V1 W1)) /\\ "
+        "sk_par_step (App_t (App_t U1 W1) (App_t V1 W1)) "
+        "            (sk_bullet (App_t (App_t (App_t S_t U) V) W))"
+    ).proof():
+        p.fix("U V W U1 V1 W1")
+        p.assume(
+            "((h_U_step, h_U_bull), "
+            " (h_V_step, h_V_bull), "
+            " (h_W_step, h_W_bull)): "
+            "(sk_par_step U U1 /\\ sk_par_step U1 (sk_bullet U)) /\\ "
+            "(sk_par_step V V1 /\\ sk_par_step V1 (sk_bullet V)) /\\ "
+            "(sk_par_step W W1 /\\ sk_par_step W1 (sk_bullet W))"
+        )
+        # First conjunct via PAR_S.
+        p.have(
+            "s_first: sk_par_step (App_t (App_t (App_t S_t U) V) W) "
+            "                     (App_t (App_t U1 W1) (App_t V1 W1))"
+        ).by(
+            PAR_S, "U", "U1", "V", "V1", "W", "W1",
+            CONJ(
+                p.fact("h_U_step"),
+                CONJ(p.fact("h_V_step"), p.fact("h_W_step")),
+            ),
+        )
+        # Second conjunct.  Bullet-unfold of the S-redex.
+        p.have(
+            "bull_S: sk_bullet (App_t (App_t (App_t S_t U) V) W) = "
+            "        App_t (App_t (sk_bullet U) (sk_bullet W)) "
+            "              (App_t (sk_bullet V) (sk_bullet W))"
+        ).by(SK_BULLET_S_REDEX, "U", "V", "W")
+        # Combine three IH-second-parts via PAR_APP twice.
+        p.have(
+            "h_UW: sk_par_step (App_t U1 W1) "
+            "                  (App_t (sk_bullet U) (sk_bullet W))"
+        ).by(
+            PAR_APP, "U1", "sk_bullet U", "W1", "sk_bullet W",
+            CONJ(p.fact("h_U_bull"), p.fact("h_W_bull")),
+        )
+        p.have(
+            "h_VW: sk_par_step (App_t V1 W1) "
+            "                  (App_t (sk_bullet V) (sk_bullet W))"
+        ).by(
+            PAR_APP, "V1", "sk_bullet V", "W1", "sk_bullet W",
+            CONJ(p.fact("h_V_bull"), p.fact("h_W_bull")),
+        )
+        p.have(
+            "h_outer: sk_par_step "
+            "  (App_t (App_t U1 W1) (App_t V1 W1)) "
+            "  (App_t (App_t (sk_bullet U) (sk_bullet W)) "
+            "         (App_t (sk_bullet V) (sk_bullet W)))"
+        ).by(
+            PAR_APP,
+            "App_t U1 W1", "App_t (sk_bullet U) (sk_bullet W)",
+            "App_t V1 W1", "App_t (sk_bullet V) (sk_bullet W)",
+            CONJ(p.fact("h_UW"), p.fact("h_VW")),
+        )
+        p.have(
+            "s_second: sk_par_step "
+            "  (App_t (App_t U1 W1) (App_t V1 W1)) "
+            "  (sk_bullet (App_t (App_t (App_t S_t U) V) W))"
+        ).by_rewrite_of("h_outer", [SYM(p.fact("bull_S"))])
+        p.thus(
+            "sk_par_step (App_t (App_t (App_t S_t U) V) W) "
+            "            (App_t (App_t U1 W1) (App_t V1 W1)) /\\ "
+            "sk_par_step (App_t (App_t U1 W1) (App_t V1 W1)) "
+            "            (sk_bullet (App_t (App_t (App_t S_t U) V) W))"
+        ).by_thm(CONJ(p.fact("s_first"), p.fact("s_second")))
+
+    # APP-rule conjunct: delegated to the stub.  Its bvars (A B A1 B1)
+    # do not need renaming -- this is a by_thm with a stand-alone lemma;
+    # the inner !A binders stay bound, alpha-equivalent to closures_beta.
+    p.have(
+        "c_APP: !A:nat0. !B:nat0. !A1:nat0. !B1:nat0. "
+        "(sk_par_step A A1 /\\ sk_par_step A1 (sk_bullet A)) /\\ "
+        "(sk_par_step B B1 /\\ sk_par_step B1 (sk_bullet B)) ==> "
+        "sk_par_step (App_t A B) (App_t A1 B1) /\\ "
+        "sk_par_step (App_t A1 B1) (sk_bullet (App_t A B))"
+    ).by_thm(_TRIANGLE_APP_CLOSURE)
+
+    # ---- Assemble closures, MP, extract second conjunct ----------------
+
+    closures_th = CONJ(
+        p.fact("c_refl"),
+        CONJ(p.fact("c_K"), CONJ(p.fact("c_S"), p.fact("c_APP"))),
+    )
+    result_pair = MP(spec_P_beta, closures_th)
+    # result_pair: sk_par_step A B /\ sk_par_step B (sk_bullet A)
+
+    p.thus("sk_par_step B (sk_bullet A)").by_thm(CONJUNCT2(result_pair))
 
 
 # ---------------------------------------------------------------------------
