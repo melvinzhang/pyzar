@@ -11253,28 +11253,111 @@ def HALTS_B_IFF_HALTS_PAR(p):
 def HALTS_PAR_INVARIANT(p):
     """|- !X Y. sk_par_steps X Y ==> halts_par X = halts_par Y.
 
-    *** STUB.  halts_par is invariant along par-step chains.
+    halts_par is invariant along par-step chains.  Iff-intro on the
+    two directions:
 
-    Forward (halts_par X ==> halts_par Y): unfold halts_par X to get
-    ?N. sk_par_steps X N /\\ is_normal N.  Combined with the hypothesis
-    sk_par_steps X Y, PAR_STEPS_CONFLUENT gives ?W. sk_par_steps N W
-    /\\ sk_par_steps Y W.  N normal + NORMAL_STABILITY_PAR_STEPS forces
-    W = N.  So sk_par_steps Y N; witness halts_par Y.
+    Forward (halts_par X ==> halts_par Y).  Unfold halts_par X to
+    ``?N. sk_par_steps X N /\\ is_normal N``.  Combined with the
+    hypothesis sk_par_steps X Y, PAR_STEPS_CONFLUENT gives a common
+    reduct ``?W. sk_par_steps N W /\\ sk_par_steps Y W``.  N normal +
+    NORMAL_STABILITY_PAR_STEPS forces W = N; transport sk_par_steps Y
+    W to sk_par_steps Y N; witness halts_par Y.
 
-    Backward (halts_par Y ==> halts_par X): unfold halts_par Y to get
-    ?N. sk_par_steps Y N /\\ is_normal N.  PAR_STEPS_TRANS on
-    sk_par_steps X Y and sk_par_steps Y N gives sk_par_steps X N.
-    Witness halts_par X.
+    Backward (halts_par Y ==> halts_par X).  Unfold halts_par Y;
+    PAR_STEPS_TRANS prepends sk_par_steps X Y; witness halts_par X.
 
-    Both directions composable from existing PAR_STEPS_CONFLUENT,
-    NORMAL_STABILITY_PAR_STEPS, PAR_STEPS_TRANS (all shipped).  Mirrors
-    HALTS_PAR_STEPS_INVARIANT's argument (iter-form, line 10742) but
-    stays inside the par calculus (no STANDARDIZATION_NORMAL).  ~50 lines.
+    Stays inside the par calculus (no STANDARDIZATION_NORMAL).
     """
     p.goal(
         "!X Y. sk_par_steps X Y ==> halts_par X = halts_par Y"
     )
-    p.sorry()
+    p.fix("X Y")
+    p.assume("h_XY: sk_par_steps X Y")
+
+    # ---- Forward direction ----------------------------------------------
+    with p.have(
+        "h_fwd: halts_par X ==> halts_par Y"
+    ).proof():
+        p.assume("h_hX: halts_par X")
+        p.have(
+            "h_at_X: halts_par X = "
+            "(?N. sk_par_steps X N /\\ is_normal N)"
+        ).by(HALTS_PAR_AT, "X")
+        p.have(
+            "h_ex_X: ?N. sk_par_steps X N /\\ is_normal N"
+        ).by_eq_mp("h_at_X", "h_hX")
+        p.choose("N", from_="h_ex_X")
+        p.split("N_eq", "(h_XN, h_norm_N)")
+
+        # Confluence: X -*> N and X -*> Y join at some W.
+        p.have(
+            "h_conj_XN_XY: sk_par_steps X N /\\ sk_par_steps X Y"
+        ).by_thm(CONJ(p.fact("h_XN"), p.fact("h_XY")))
+        p.have(
+            "h_join: ?W. sk_par_steps N W /\\ sk_par_steps Y W"
+        ).by(
+            PAR_STEPS_CONFLUENT, "X", "N", "Y", "h_conj_XN_XY"
+        )
+        p.choose("W", from_="h_join")
+        p.split("W_eq", "(h_NW, h_YW)")
+
+        # N normal + N -*> W forces W = N.
+        p.have(
+            "h_conj_NW: is_normal N /\\ sk_par_steps N W"
+        ).by_thm(CONJ(p.fact("h_norm_N"), p.fact("h_NW")))
+        p.have("h_W_N: W = N").by(
+            NORMAL_STABILITY_PAR_STEPS, "N", "W", "h_conj_NW"
+        )
+        # Transport h_YW : sk_par_steps Y W along W = N.
+        p.have("h_YN: sk_par_steps Y N").by_rewrite_of(
+            "h_YW", [p.fact("h_W_N")]
+        )
+
+        # Witness halts_par Y.
+        p.have(
+            "h_at_Y: halts_par Y = "
+            "(?N. sk_par_steps Y N /\\ is_normal N)"
+        ).by(HALTS_PAR_AT, "Y")
+        p.have(
+            "h_ex_Y: ?N. sk_par_steps Y N /\\ is_normal N"
+        ).by_exists(["N"], "h_YN", "h_norm_N")
+        p.thus("halts_par Y").by_eq_mp("h_at_Y", "h_ex_Y")
+
+    # ---- Backward direction ---------------------------------------------
+    with p.have(
+        "h_bwd: halts_par Y ==> halts_par X"
+    ).proof():
+        p.assume("h_hY: halts_par Y")
+        p.have(
+            "h_at_Y: halts_par Y = "
+            "(?N. sk_par_steps Y N /\\ is_normal N)"
+        ).by(HALTS_PAR_AT, "Y")
+        p.have(
+            "h_ex_Y: ?N. sk_par_steps Y N /\\ is_normal N"
+        ).by_eq_mp("h_at_Y", "h_hY")
+        p.choose("N", from_="h_ex_Y")
+        p.split("N_eq", "(h_YN, h_norm_N)")
+
+        # X -*> Y, Y -*> N => X -*> N via PAR_STEPS_TRANS.
+        p.have(
+            "h_conj_XY_YN: sk_par_steps X Y /\\ sk_par_steps Y N"
+        ).by_thm(CONJ(p.fact("h_XY"), p.fact("h_YN")))
+        p.have("h_XN: sk_par_steps X N").by(
+            PAR_STEPS_TRANS, "X", "Y", "N", "h_conj_XY_YN"
+        )
+
+        p.have(
+            "h_at_X: halts_par X = "
+            "(?N. sk_par_steps X N /\\ is_normal N)"
+        ).by(HALTS_PAR_AT, "X")
+        p.have(
+            "h_ex_X: ?N. sk_par_steps X N /\\ is_normal N"
+        ).by_exists(["N"], "h_XN", "h_norm_N")
+        p.thus("halts_par X").by_eq_mp("h_at_X", "h_ex_X")
+
+    p.thus("halts_par X = halts_par Y").by_iff(
+        "h_fwd", "h_bwd"
+    )
 
 
 # ``halts_decider H`` says H is an SK term that decides halting via the
