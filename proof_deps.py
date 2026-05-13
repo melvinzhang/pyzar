@@ -31,12 +31,12 @@ def _is_proof_decorator(dec: ast.AST) -> bool:
     return False
 
 
-def collect_nodes(tree) -> dict[str, ast.AST]:
-    nodes: dict[str, ast.AST] = {}
+def collect_nodes(tree) -> dict[str, tuple[ast.AST, bool]]:
+    nodes: dict[str, tuple[ast.AST, bool]] = {}
     for stmt in tree.body:
         if isinstance(stmt, ast.FunctionDef):
-            if any(_is_proof_decorator(d) for d in stmt.decorator_list):
-                nodes[stmt.name] = stmt
+            is_proof = any(_is_proof_decorator(d) for d in stmt.decorator_list)
+            nodes[stmt.name] = (stmt, is_proof)
     return nodes
 
 
@@ -52,7 +52,23 @@ def build_graph(path: Path):
     tree = ast.parse(path.read_text(), filename=str(path))
     nodes = collect_nodes(tree)
     universe = set(nodes)
-    return {name: references(stmt, universe, name) for name, stmt in nodes.items()}
+    proofs = {n for n, (_, is_p) in nodes.items() if is_p}
+    raw = {n: references(stmt, universe, n) for n, (stmt, _) in nodes.items()}
+
+    def reach(src):
+        seen, out, stack = {src}, set(), list(raw[src])
+        while stack:
+            n = stack.pop()
+            if n in seen:
+                continue
+            seen.add(n)
+            if n in proofs:
+                out.add(n)
+            else:
+                stack.extend(raw[n])
+        return out
+
+    return {p: reach(p) for p in proofs}
 
 
 def to_dot(graph, module_name: str) -> str:
