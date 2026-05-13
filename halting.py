@@ -119,14 +119,14 @@ producing self-reference. Tarski's undefinability of truth is the same
 diagonal a third time.
 """
 
-from fusion import Var, new_constant, HolError
-from basics import mk_const, mk_app, mk_abs, mk_eq, rand, rator, aconv, dest_eq
-from parser import define, parse_type, add_const, pp
+from fusion import Var
+from basics import mk_const, mk_app, mk_abs, mk_eq, rand, rator, aconv
+from parser import define, parse_type, pp
 from nat0 import nat0_ty, ZERO, mk_suc0
 from nat0_order import define_wf_lt, NAT0_LT_TRANS
 from proof import proof, define_with_at, register_intro_set
 from tactics import REFL, SPEC, SPECL, SYM, EQ_MP, DISJ1, DISJ2, CONJ, EXISTS, MP
-from tactics import AP_TERM, TRANS, REWRITE_CONV, BETA_NORM, unfold_def_at
+from tactics import AP_TERM, TRANS, BETA_NORM, unfold_def_at
 from axioms import mk_exists
 from hf_sets import Pair_ord
 from hf_syntax import (
@@ -312,7 +312,6 @@ def IS_SK_TERM_APP(p):
     b' := b with REFL.  Then chain through DISJ2 / DISJ2 and EQ_MP via
     REC.
     """
-    from tactics import CONJ
     p.goal("!a b. is_sk_term a /\\ is_sk_term b ==> is_sk_term (App_t a b)")
     p.fix("a b")
     p.assume("(ha, hb): is_sk_term a /\\ is_sk_term b")
@@ -657,7 +656,6 @@ def PAR_K(p):
 
     K-redex contraction at parallel-reduction granularity.
     """
-    from tactics import AP_THM, BETA_CONV, TRANS
     p.goal(
         "!X X1 Y Y1. sk_par_step X X1 /\\ sk_par_step Y Y1 ==> "
         "            sk_par_step (App_t (App_t K_t X) Y) X1"
@@ -689,7 +687,6 @@ def PAR_S(p):
             ==> sk_par_step (App_t (App_t (App_t S_t X) Y) Z)
                             (App_t (App_t X1 Z1) (App_t Y1 Z1)).
     """
-    from tactics import AP_THM, BETA_CONV, TRANS
     p.goal(
         "!X X1 Y Y1 Z Z1. "
         "sk_par_step X X1 /\\ sk_par_step Y Y1 /\\ sk_par_step Z Z1 ==> "
@@ -734,7 +731,6 @@ def PAR_APP(p):
 
     Congruence: par-step lifts to App componentwise.
     """
-    from tactics import AP_THM, BETA_CONV, TRANS
     p.goal(
         "!X X1 Y Y1. sk_par_step X X1 /\\ sk_par_step Y Y1 ==> "
         "            sk_par_step (App_t X Y) (App_t X1 Y1)"
@@ -889,7 +885,7 @@ _PC_App_t = mk_const("App_t", [])
 def _pc_dest_App_t(tm):
     """If ``tm = App_t a b`` (i.e. ``Comb(Comb(App_t, a), b)``), return
     ``(a, b)``; else None."""
-    from basics import is_comb, dest_comb, aconv
+    from basics import is_comb, dest_comb
     if not is_comb(tm):
         return None
     head, b = dest_comb(tm)
@@ -903,7 +899,6 @@ def _pc_dest_App_t(tm):
 
 def _pc_try_K_redex(tm):
     """If ``tm = App_t (App_t K_t a) b``, return ``(a, b)``; else None."""
-    from basics import aconv
     outer = _pc_dest_App_t(tm)
     if outer is None:
         return None
@@ -920,7 +915,6 @@ def _pc_try_K_redex(tm):
 def _pc_try_S_redex(tm):
     """If ``tm = App_t (App_t (App_t S_t a) b) c``, return ``(a, b, c)``;
     else None."""
-    from basics import aconv
     outer = _pc_dest_App_t(tm)
     if outer is None:
         return None
@@ -960,7 +954,6 @@ class _ParChainSynthFail(Exception):
 
 def _pc_synth_par_step(start, end):
     """Return a kernel theorem ``|- sk_par_step start end``, or raise."""
-    from basics import aconv
     if aconv(start, end):
         return SPEC(start, PAR_REFL)
 
@@ -1369,11 +1362,11 @@ def _bullet_F_d1_mono_iff(hyp_th, r_term):
     """
     from tactics import (
         SPEC, MP, SYM, CONJ, CONJUNCT1, CONJUNCT2,
-        REWRITE_RULE, EXISTS, DEDUCT_ANTISYM_RULE, ASSUME,
+        REWRITE_RULE, DEDUCT_ANTISYM_RULE, ASSUME,
         CHOOSE_WITNESS, SPECL,
     )
-    from axioms import dest_exists, mk_exists, mk_and
-    from basics import mk_eq, mk_abs
+    from axioms import dest_exists, mk_and
+    from basics import mk_abs
     from hf_syntax import _extract_nfg
 
     n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
@@ -1455,11 +1448,11 @@ def _bullet_F_d2_mono_iff(hyp_th, r_term):
     """
     from tactics import (
         SPEC, MP, SYM, CONJ, CONJUNCT1, CONJUNCT2,
-        REWRITE_RULE, EXISTS, DEDUCT_ANTISYM_RULE, ASSUME,
+        REWRITE_RULE, DEDUCT_ANTISYM_RULE, ASSUME,
         CHOOSE_WITNESS, SPECL,
     )
-    from axioms import dest_exists, mk_exists, mk_and
-    from basics import mk_eq, mk_abs
+    from axioms import dest_exists, mk_and
+    from basics import mk_abs
     from hf_syntax import _extract_nfg
 
     n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
@@ -1906,7 +1899,7 @@ def SK_BULLET_K_REDEX(p):
     APP_T_INJ peels the K-redex twice: first to extract ``App_t K_t X =
     App_t K_t a /\\ Y = b``, then to extract ``K_t = K_t /\\ X = a``.
     """
-    from tactics import CONJ as _CONJ, CONJUNCT1 as _C1, CONJUNCT2 as _C2
+    from tactics import CONJUNCT1 as _C1, CONJUNCT2 as _C2
     p.goal(
         "!X:nat0. !Y:nat0. "
         "sk_bullet (App_t (App_t K_t X) Y) = sk_bullet X"
@@ -3937,7 +3930,6 @@ def _triangle_other_case(p):
     from tactics import (
         CONJ as _CONJ,
         CONJUNCT1 as _C1,
-        CONJUNCT2 as _C2,
     )
 
     # Lift the A-shape negations to App_t A B negations.
