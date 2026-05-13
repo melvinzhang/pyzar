@@ -97,10 +97,16 @@ What this gives and doesn't give
 Derived from the bare HOL kernel + ``hf_sets.py``:
   * Undecidability of halting for SK combinators (the headline).
   * Church-Rosser for SK via parallel reduction (en route to the bridge).
-  * SK is Turing-complete in the weak sense (par-form Curry diagonal
-    gives general self-reference).
+  * General fixed-point self-reference (``DIAG_TERM``): for every SK
+    term H there is an SK term d with ``sk_par_steps d (App_t H d)``.
+    This is the diagonal/Y-combinator ingredient, and the only piece
+    of "computational universality" the undecidability proof needs.
 
 Not in scope here:
+  * Full Turing-completeness of SK -- representability of every
+    recursive function would also need Church booleans / numerals
+    and an encoding/decoding correctness proof.  Classical, but not
+    formalised here; the diagonal alone carries the contradiction.
   * Equivalence with Turing machines or lambda calculus (would need a
     third file). The theorem stands on its own without it.
   * Equivalence between Takahashi halting (``halts_b``) and LMO halting.
