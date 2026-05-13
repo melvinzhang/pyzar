@@ -7416,3 +7416,12 @@ def HALTS_NOT_SK_REPRESENTABLE(p):
         p.absurd().by_conj(HALTING_UNDECIDABLE, "h_ex_hd")
 
 
+if __name__ == "__main__":
+    from parser import pp_thm
+    print("HALTS_DECIDER_DEF        :", pp_thm(HALTS_DECIDER_DEF))
+    print("DIAG_TERM                :", pp_thm(DIAG_TERM))
+    print("DIAGONAL_TERM_EXISTS     :", pp_thm(DIAGONAL_TERM_EXISTS))
+    print("HALTING_UNDECIDABLE      :", pp_thm(HALTING_UNDECIDABLE))
+    print("HALTS_NOT_SK_REPRESENTABLE:", pp_thm(HALTS_NOT_SK_REPRESENTABLE))
+
+
