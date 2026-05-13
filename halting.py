@@ -75,21 +75,18 @@ Stage map
                       Pair_ord depth) + normal-form structural lemmas
                       (IS_NORMAL_NOT_K_REDEX_SHAPE, _NOT_S_REDEX_SHAPE,
                       _APP_DECOMP).
-  Stage 2 (sk_size):  Term-size measure (currently unused; retained
-                      for diagnostic / size-induction work outside the
-                      halting proof).
-  Stage 3 (par):      Parallel reduction relation ``sk_par_step`` +
+  Stage 2 (par):      Parallel reduction relation ``sk_par_step`` +
                       RTC ``sk_par_steps`` + ``par_chain`` DSL.
-  Stage 4 (bullet):   Takahashi's complete development ``sk_bullet``
+  Stage 3 (bullet):   Takahashi's complete development ``sk_bullet``
                       + triangle property + Tait/Martin-Loef diamond
                       + Church-Rosser confluence on par.
-  Stage 5 (halts):    ``bullet_iter`` + ``halts_b`` (user-facing) +
+  Stage 4 (halts):    ``bullet_iter`` + ``halts_b`` (user-facing) +
                       ``halts_par`` (internal) + the bridge
                       ``HALTS_B_IFF_HALTS_PAR``.
-  Stage 6 (diag):     Classical Curry diagonal ``DIAG_TERM`` in par
+  Stage 5 (diag):     Classical Curry diagonal ``DIAG_TERM`` in par
                       form; ``DIAGONAL_TERM_EXISTS`` lifts to halts_b
                       via the bridge.
-  Stage 7:            ``HALTING_UNDECIDABLE`` and the corollary
+  Stage 6:            ``HALTING_UNDECIDABLE`` and the corollary
                       ``HALTS_NOT_SK_REPRESENTABLE``.
 
 ------------------------------------------------------------------
@@ -119,7 +116,7 @@ from fusion import Var, new_constant, HolError
 from basics import mk_const, mk_app, mk_abs, mk_eq, rand, rator, aconv, dest_eq
 from parser import define, parse_type, add_const, pp
 from nat0 import nat0_ty, ZERO, mk_suc0
-from nat0_order import define_wf_lt
+from nat0_order import define_wf_lt, NAT0_LT_TRANS
 from proof import proof, define_with_at, register_intro_set
 from tactics import REFL, SPEC, SPECL, SYM, EQ_MP, DISJ1, DISJ2, CONJ, EXISTS, MP
 from tactics import AP_TERM, TRANS, REWRITE_CONV, BETA_NORM, unfold_def_at
@@ -436,8 +433,7 @@ K_T_NEQ_APP_T = _proof_atom_neq_app_t("K_T_NEQ_APP_T", "K_t", K_T_DEF, "SUC0 0",
 
 
 # ---------------------------------------------------------------------------
-# Common helpers used by sk_size and sk_bullet (both wf-recursive on
-# Pair_ord depth with SELECT-shaped functional bodies).
+# Common helpers for sk_bullet's wf-recursive SELECT-shaped body.
 # ---------------------------------------------------------------------------
 
 
@@ -450,8 +446,8 @@ def _lift_select_eq(r_var, pw_eq_th):
 
     Two-step lift: ``ABS`` over ``r`` to land on
     ``(\\r. P r) = (\\r. Q r)``, then ``AP_TERM`` the polymorphic ``@``
-    constant instantiated at ``r``'s type.  Used by SK_SIZE_MONO and
-    SK_BULLET_MONO to lift per-disjunct iffs through their SELECT bodies.
+    constant instantiated at ``r``'s type.  Used by SK_BULLET_MONO to
+    lift per-disjunct iffs through the SELECT body.
     """
     from tactics import AP_TERM as _AP_TERM
     from fusion import ABS as _ABS, aty as _aty
@@ -611,479 +607,6 @@ is_normal = mk_const("is_normal", [])
 #                           ?a b. n = App_t a b /\ is_normal a /\ is_normal b).
 IS_NORMAL_REC = _unfold_rec_via_F_def(_IS_NORMAL_REC_RAW, _IS_NORMAL_F_DEF)
 
-
-# ---------------------------------------------------------------------------
-# Stage 2 -- ``sk_size`` measure.
-#
-# Term-size on the nat0 encoding.  Only used by the normal-form
-# structural lemmas (IS_NORMAL_NOT_K_REDEX_SHAPE,
-# IS_NORMAL_NOT_S_REDEX_SHAPE, IS_NORMAL_APP_DECOMP), where it gives
-# the strict-descent argument that lets us rule out
-# ``M = App_t (App_t K_t M) N`` and similar self-containing equations.
-#
-# Definition (well-founded recursion on Pair_ord depth, same wf-shape
-# as ``sk_step``):
-#
-#   sk_size n  :=  if ?a b. n = App_t a b
-#                  then SUC0 (n0plus (sk_size a) (sk_size b))
-#                  else SUC0 0
-#
-# Unfolder:
-#   SK_SIZE_APP  :  |- !a b. sk_size (App_t a b)
-#                            = SUC0 (n0plus (sk_size a) (sk_size b))
-#
-# DSL friction inventory for sk_size (compared to ``sk_step``, which
-# uses the same SELECT-shaped body but with four disjuncts):
-#   * ``sk_size`` only needs two disjuncts (``App_t a b`` vs. leaf),
-#     so MONO is half the length and we reuse
-#     ``mono_iff_value_binary_pw_step`` directly for the App_t branch.
-#   * The leaf disjunct is f-free, so its MONO contribution is REFL.
-#   * Unfolding uses ``_select_via_rec`` plus the
-#     ``_atom_neq_App_negations`` helper.
-
-
-_F_sk_size_ty = parse_type("(nat0 -> nat0) -> nat0 -> nat0")
-
-
-_SK_SIZE_F_DEF = define(
-    "_sk_size_F",
-    _F_sk_size_ty,
-    "\\f:nat0->nat0. \\n:nat0. "
-    "@r:nat0. "
-    "(?a b. n = App_t a b /\\ r = SUC0 (n0plus (f a) (f b))) \\/ "
-    "(~(?a b. n = App_t a b) /\\ r = SUC0 0)",
-)
-_SK_SIZE_F = mk_const("_sk_size_F", [])
-
-
-def _prove_sk_size_F_at():
-    """|- !f t. _sk_size_F f t = body[f, t]  (two BETAs).
-
-    DSL friction: this is the same shape as ``_prove_sk_step_F_at``
-    (and ``_prove_F_at`` in bits.py); a generic 2-BETA peel helper
-    would dedupe these three sites but doesn't exist yet.
-    """
-    from tactics import AP_THM, BETA_CONV, TRANS, GENL
-    f_var = Var("f", _nat0_fn_ty)
-    t_var = Var("t", nat0_ty)
-    th_f = AP_THM(_SK_SIZE_F_DEF, f_var)
-    th_f_eq = TRANS(th_f, BETA_CONV(rand(th_f._concl)))
-    th_ft = AP_THM(th_f_eq, t_var)
-    th_ft_eq = TRANS(th_ft, BETA_CONV(rand(th_ft._concl)))
-    return GENL([f_var, t_var], th_ft_eq)
-
-
-_SK_SIZE_F_AT = _prove_sk_size_F_at()
-
-
-@proof
-def SK_SIZE_MONO(p):
-    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
-                ==> _sk_size_F f n = _sk_size_F g n.
-
-    Body is ``@r. D1 \\/ D2`` where:
-      D1 (?a b. n = App_t a b /\\ r = SUC0 (n0plus (f a) (f b)))
-        recurses through ``f a`` / ``f b``; the helper
-        ``mono_iff_value_binary_pw_step`` handles it directly.
-      D2 (~App-shape /\\ r = SUC0 0) is f-free; REFL.
-
-    Same stitching pattern as ``SK_STEP_MONO`` but with two disjuncts
-    instead of four.
-    """
-    from tactics import (
-        AP_TERM as _AP_TERM,
-        SPECL as _SPECL,
-        TRANS as _TRANS,
-        SYM as _SYM,
-        or_chain_collapse as _or_collapse,
-    )
-    from hf_syntax import _mono_iff_value_binary_pw_step, _extract_nfg
-    from axioms import mk_and as _mk_and, mk_not as _mk_not, mk_exists as _mk_exists
-    from basics import mk_eq as _mk_eq
-
-    p.goal(
-        "!f g n. (!k. nat0_lt k n ==> f k = g k) "
-        "==> _sk_size_F f n = _sk_size_F g n",
-        types={
-            "f": _nat0_fn_ty,
-            "g": _nat0_fn_ty,
-            "n": nat0_ty,
-            "k": nat0_ty,
-        },
-    )
-    p.fix("f g n")
-    p.assume("h: !k. nat0_lt k n ==> f k = g k")
-    h_th = p.fact("h")
-    n_t, f_t, g_t, _ = _extract_nfg(h_th)
-    r_var = Var("r", nat0_ty)
-    a_var = Var("a", nat0_ty)
-    b_var = Var("b", nat0_ty)
-
-    # App-shape (used in D2's negation).
-    App_body = _mk_eq(n_t, mk_app(App_t, a_var, b_var))
-    App_shape = _mk_exists(a_var, _mk_exists(b_var, App_body))
-
-    # D2 is f-free.
-    D2 = _mk_and(_mk_not(App_shape), _mk_eq(r_var, p._parse("SUC0 0")))
-    eq_D2 = REFL(D2)
-
-    # D1 = ?a b. n = App_t a b /\ r = SUC0 (n0plus (f a) (f b))
-    # ``rest_builder(fn, a, b, args)`` returns the conjunct after
-    # ``n = App_t a b /\ ...``; we want
-    # ``r = SUC0 (n0plus (fn a) (fn b))``.
-    SUC0_C = p._parse("SUC0")
-    N0PLUS_C = p._parse("n0plus")
-
-    def _D1_rest_builder(fn, a, b, args):
-        fa = mk_app(fn, a)
-        fb = mk_app(fn, b)
-        sum_ = mk_app(N0PLUS_C, fa, fb)
-        suc = mk_app(SUC0_C, sum_)
-        return _mk_eq(r_var, suc)
-
-    eq_D1 = _mono_iff_value_binary_pw_step(
-        App_t,
-        NAT0_LT_APP_T_L, NAT0_LT_APP_T_R,
-        h_th,
-        args=[],
-        rest_builder=_D1_rest_builder,
-        recurses_l=True,
-    )
-
-    body_eq_at_r = _or_collapse([eq_D1, eq_D2])
-    select_eq = _lift_select_eq(r_var, body_eq_at_r)
-    spec_f = _SPECL([f_t, n_t], _SK_SIZE_F_AT)
-    spec_g = _SPECL([g_t, n_t], _SK_SIZE_F_AT)
-    final = _TRANS(spec_f, _TRANS(select_eq, _SYM(spec_g)))
-
-    p.thus("_sk_size_F f n = _sk_size_F g n").by_thm(final)
-
-
-SK_SIZE_DEF, _SK_SIZE_REC_RAW = define_wf_lt(
-    "sk_size",
-    _nat0_fn_ty,
-    _SK_SIZE_F,
-    SK_SIZE_MONO,
-)
-sk_size = mk_const("sk_size", [])
-
-
-# SK_SIZE_REC : |- !n. sk_size n = body[sk_size, n]
-SK_SIZE_REC = _unfold_rec_via_F_def(_SK_SIZE_REC_RAW, _SK_SIZE_F_DEF)
-
-
-def _sk_size_disjuncts(t, r):
-    """Return the two disjunct strings of ``_sk_size_F``'s body at
-    input ``t`` with the SELECT-bound variable substituted by ``r``.
-    Existential names ``a, b`` are chosen to avoid shadowing common
-    outer-scope names like ``x, y``.
-    """
-    D1 = f"(?a b. {t} = App_t a b /\\ {r} = SUC0 (n0plus (sk_size a) (sk_size b)))"
-    D2 = f"(~(?a b. {t} = App_t a b) /\\ {r} = SUC0 0)"
-    return [D1, D2]
-
-
-def _sk_size_body(t, r):
-    return " \\/ ".join(_sk_size_disjuncts(t, r))
-
-
-def _sk_size_select_at(p, t, witness_r, inner_branch_th):
-    """Mirror of ``_sk_step_select_at`` for sk_size's two-disjunct body."""
-    body_at_r = _sk_size_body(t, witness_r)
-    body_at_r_var = _sk_size_body(t, "r")
-    p.have(f"_size_disj_rhs: {body_at_r}").by_disj(inner_branch_th)
-    p.have(f"_size_ex: ?r. {body_at_r_var}").by_witness(
-        witness_r, "_size_disj_rhs"
-    )
-    return _select_via_rec(SK_SIZE_REC, [p._parse(t)], p.fact("_size_ex"))
-
-
-@proof
-def SK_SIZE_APP(p):
-    """|- !a b. sk_size (App_t a b) = SUC0 (n0plus (sk_size a) (sk_size b)).
-
-    The App-shape disjunct (D1) fires at the natural witness; D2 is
-    refuted by the obvious App-existence of the input.
-    """
-    from tactics import CONJ as _CONJ
-    from tactics import CONJUNCT1 as _C1, CONJUNCT2 as _C2  # noqa: F841
-    # DSL friction: ``_sk_size_disjuncts`` uses bound names ``a, b``, so
-    # the surface goal vars must avoid those.  We use ``u, v`` for the
-    # App_t arguments throughout this proof.
-    p.goal(
-        "!u v. sk_size (App_t u v) = SUC0 (n0plus (sk_size u) (sk_size v))"
-    )
-    p.fix("u v")
-    t = "App_t u v"
-    sk_t = f"sk_size ({t})"
-    witness = "SUC0 (n0plus (sk_size u) (sk_size v))"
-
-    # D1 inner at (u, v): ?a b. App_t u v = App_t a b /\ witness = SUC0 (n0plus (sk_size a) (sk_size b)).
-    p.have(
-        f"inner_app: ?a b. {t} = App_t a b /\\ "
-        f"            {witness} = SUC0 (n0plus (sk_size a) (sk_size b))"
-    ).by_exists(["u", "v"], REFL(p._parse(t)), REFL(p._parse(witness)))
-    body_th = _sk_size_select_at(p, t, witness, "inner_app")
-    p.have(f"body: {_sk_size_body(t, sk_t)}").by_thm(body_th)
-
-    # App existence at the input; refutes ~App guard in D2.
-    p.have(f"is_app: ?a b. {t} = App_t a b").by_exists(
-        ["u", "v"], REFL(p._parse(t))
-    )
-
-    D1, D2 = _sk_size_disjuncts(t, sk_t)
-    with p.cases_on("body"):
-        with p.case(f"h1: {D1}"):
-            # ?a b. App_t u v = App_t a b /\ sk_size (App_t u v) = SUC0 (n0plus (sk_size a) (sk_size b)).
-            # ``cases_on`` auto-chooses the outermost existential (a, registered
-            # via ``a_eq``); we choose ``b`` manually.
-            p.choose("b", from_="a_eq")
-            p.split("b_eq", "(h_app, h_sz)")
-            # APP_T_INJ: App_t u v = App_t a b ==> u = a /\ v = b.
-            p.have("h_o: u = a /\\ v = b").by(
-                APP_T_INJ, "u", "v", "a", "b", "h_app"
-            )
-            p.have("h_ua: u = a").by_thm(_C1(p.fact("h_o")))
-            p.have("h_vb: v = b").by_thm(_C2(p.fact("h_o")))
-            # Rewrite h_sz to put back u, v.
-            p.thus(
-                f"{sk_t} = SUC0 (n0plus (sk_size u) (sk_size v))"
-            ).by_rewrite_of("h_sz", [SYM(p.fact("h_ua")), SYM(p.fact("h_vb"))])
-        with p.case(f"h2: {D2}"):
-            p.split("h2", "(h_napp, _)")
-            p.absurd().by_conj("h_napp", "is_app")
-# ---------------------------------------------------------------------------
-# Arithmetic helper: ``n0plus`` is strictly bounded by SUC0 over its
-# growth -- specifically ``nat0_lt a (SUC0 (n0plus a b))``.  Feeds
-# SK_SIZE_LT_APP_LEFT / _RIGHT, which feed the normal-form structural
-# lemmas (IS_NORMAL_NOT_K_REDEX_SHAPE etc.).
-#
-# Proof by induction on ``b``: base ``n0plus a 0 = a``, SUC0 a > a by
-# NAT0_LT_SUC0; step ``n0plus a (SUC0 b) = SUC0 (n0plus a b)``, lift IH
-# through one more SUC0 via NAT0_LT_TRANS.
-# ---------------------------------------------------------------------------
-
-
-from nat0_order import NAT0_LT_SUC0, NAT0_LT_TRANS  # noqa: E402
-from hf_sets import N0PLUS_BASE, N0PLUS_STEP  # noqa: E402
-
-
-@proof
-def NAT0_LT_SUC0_N0PLUS_L(p):
-    """|- !a b. nat0_lt a (SUC0 (n0plus a b)).
-
-    Pulled out as a named lemma so the growth proof reads cleanly.
-
-    DSL friction: ``by_rewrite_of`` with ``SYM`` of the n0plus equation
-    loops because REWRITE_CONV treats free vars as schematic.  We
-    do the substitution manually via two ``AP_TERM`` hops and
-    ``by_eq_mp``.
-    """
-    from tactics import AP_TERM as _APT
-    p.goal("!a b. nat0_lt a (SUC0 (n0plus a b))")
-    p.fix("a")
-    SUC0_C = p._parse("SUC0")
-    NAT0_LT_a = p._parse("nat0_lt a")
-    with p.induction("b"):
-        with p.base():
-            p.have("h_base: n0plus a 0 = a").by(N0PLUS_BASE, "a")
-            p.have("h_lt: nat0_lt a (SUC0 a)").by(NAT0_LT_SUC0, "a")
-            # eq_suc: SUC0 (n0plus a 0) = SUC0 a;
-            # eq_lt:  nat0_lt a (SUC0 (n0plus a 0)) = nat0_lt a (SUC0 a).
-            eq_suc = _APT(SUC0_C, p.fact("h_base"))
-            eq_lt = _APT(NAT0_LT_a, eq_suc)
-            p.thus("nat0_lt a (SUC0 (n0plus a 0))").by_eq_mp(eq_lt, "h_lt")
-        with p.step("IH"):
-            # ``induction("b")`` reuses ``b`` as the step variable.
-            p.have(
-                "h_step: n0plus a (SUC0 b) = SUC0 (n0plus a b)"
-            ).by(N0PLUS_STEP, "a", "b")
-            p.have(
-                "h_lt_one: nat0_lt (SUC0 (n0plus a b)) (SUC0 (SUC0 (n0plus a b)))"
-            ).by(NAT0_LT_SUC0, "SUC0 (n0plus a b)")
-            p.have(
-                "h_ih_lift: nat0_lt a (SUC0 (SUC0 (n0plus a b)))"
-            ).by(NAT0_LT_TRANS, "a", "SUC0 (n0plus a b)",
-                 "SUC0 (SUC0 (n0plus a b))", "IH", "h_lt_one")
-            eq_suc = _APT(SUC0_C, p.fact("h_step"))
-            eq_lt = _APT(NAT0_LT_a, eq_suc)
-            p.thus(
-                "nat0_lt a (SUC0 (n0plus a (SUC0 b)))"
-            ).by_eq_mp(eq_lt, "h_ih_lift")
-
-
-@proof
-def NAT0_LT_SUC0_N0PLUS_R(p):
-    """|- !a b. nat0_lt b (SUC0 (n0plus a b)).
-
-    The right-summand companion to NAT0_LT_SUC0_N0PLUS_L.  Direct
-    induction on ``b``:
-      base: nat0_lt 0 (SUC0 (n0plus a 0)) = nat0_lt 0 (SUC0 a);
-            standard zero-vs-successor (NAT0_LT_0_SUC0 in nat0_order).
-      step: nat0_lt (SUC0 n) (SUC0 (n0plus a (SUC0 n)))
-            = nat0_lt (SUC0 n) (SUC0 (SUC0 (n0plus a n))) [N0PLUS_STEP];
-            from IH ``nat0_lt n (SUC0 (n0plus a n))`` lift via
-            NAT0_LT_SUC0_MONO.
-    """
-    from nat0_order import NAT0_LT_0_SUC0, NAT0_LT_SUC0_MONO
-    from tactics import AP_TERM as _APT
-    p.goal("!a b. nat0_lt b (SUC0 (n0plus a b))")
-    p.fix("a")
-    SUC0_C = p._parse("SUC0")
-    with p.induction("b"):
-        with p.base():
-            p.have("h_base: n0plus a 0 = a").by(N0PLUS_BASE, "a")
-            p.have("h_lt: nat0_lt 0 (SUC0 a)").by(NAT0_LT_0_SUC0, "a")
-            # eq_suc: SUC0 (n0plus a 0) = SUC0 a; lift via nat0_lt 0.
-            NAT0_LT_0 = p._parse("nat0_lt 0")
-            eq_suc = _APT(SUC0_C, p.fact("h_base"))
-            eq_lt = _APT(NAT0_LT_0, eq_suc)
-            p.thus("nat0_lt 0 (SUC0 (n0plus a 0))").by_eq_mp(eq_lt, "h_lt")
-        with p.step("IH"):
-            p.have(
-                "h_step: n0plus a (SUC0 b) = SUC0 (n0plus a b)"
-            ).by(N0PLUS_STEP, "a", "b")
-            p.have(
-                "h_mono: nat0_lt (SUC0 b) (SUC0 (SUC0 (n0plus a b)))"
-            ).by(NAT0_LT_SUC0_MONO, "b", "SUC0 (n0plus a b)", "IH")
-            NAT0_LT_SUCb = p._parse("nat0_lt (SUC0 b)")
-            eq_suc = _APT(SUC0_C, p.fact("h_step"))
-            eq_lt = _APT(NAT0_LT_SUCb, eq_suc)
-            p.thus(
-                "nat0_lt (SUC0 b) (SUC0 (n0plus a (SUC0 b)))"
-            ).by_eq_mp(eq_lt, "h_mono")
-
-
-# ---------------------------------------------------------------------------
-# Size-monotone irreflexivity helpers.
-#
-# ``SK_SIZE_LT_APP_LEFT`` / ``_RIGHT`` show that an App strictly grows
-# ``sk_size`` over either child; ``SK_SIZE_LT_DEEP_LEFT`` composes the
-# two for depth-2 self-containment.  Used by
-# ``IS_NORMAL_NOT_K_REDEX_SHAPE`` / ``_NOT_S_REDEX_SHAPE`` to rule out
-# self-containing equations like ``M = App_t (App_t K_t M) N`` via
-# AP_TERM(sk_size) + NAT0_LT_NOT_REFL.
-# ---------------------------------------------------------------------------
-
-
-@proof
-def SK_SIZE_LT_APP_LEFT(p):
-    """|- !t u. nat0_lt (sk_size t) (sk_size (App_t t u)).
-
-    Wrapping a term as the left child of an App strictly grows sk_size.
-    Direct: SK_SIZE_APP unfolds the RHS to
-    ``SUC0 (n0plus (sk_size t) (sk_size u))``, then
-    NAT0_LT_SUC0_N0PLUS_L at (a := sk_size t, b := sk_size u).
-    """
-    p.goal("!t u. nat0_lt (sk_size t) (sk_size (App_t t u))")
-    p.fix("t u")
-
-    # Unfold sk_size on the App_t.
-    p.have(
-        "sz_app: sk_size (App_t t u) "
-        "        = SUC0 (n0plus (sk_size t) (sk_size u))"
-    ).by(SK_SIZE_APP, "t", "u")
-
-    # NAT0_LT_SUC0_N0PLUS_L gives the lt in unfolded form.
-    p.have(
-        "h_pre: nat0_lt (sk_size t) "
-        "       (SUC0 (n0plus (sk_size t) (sk_size u)))"
-    ).by(NAT0_LT_SUC0_N0PLUS_L, "sk_size t", "sk_size u")
-
-    # DSL friction: by_rewrite_of orients each rule LHS -> RHS, so to fold
-    # ``SUC0 (n0plus ...)`` back into ``sk_size (App_t t u)`` we have to
-    # feed ``SYM(sz_app)`` rather than ``sz_app``.  A ``by_rewrite_of``
-    # variant that auto-orients (mirroring _simp_require's sym tolerance)
-    # would remove this small ceremony at every size-fold call site.
-    p.thus(
-        "nat0_lt (sk_size t) (sk_size (App_t t u))"
-    ).by_rewrite_of("h_pre", [SYM(p.fact("sz_app"))])
-
-
-@proof
-def SK_SIZE_LT_APP_RIGHT(p):
-    """|- !t u. nat0_lt (sk_size t) (sk_size (App_t u t)).
-
-    Wrapping a term as the *right* child of an App strictly grows
-    sk_size.  Mirror of SK_SIZE_LT_APP_LEFT via NAT0_LT_SUC0_N0PLUS_R.
-    """
-    p.goal("!t u. nat0_lt (sk_size t) (sk_size (App_t u t))")
-    p.fix("t u")
-
-    p.have(
-        "sz_app: sk_size (App_t u t) "
-        "        = SUC0 (n0plus (sk_size u) (sk_size t))"
-    ).by(SK_SIZE_APP, "u", "t")
-
-    p.have(
-        "h_pre: nat0_lt (sk_size t) "
-        "       (SUC0 (n0plus (sk_size u) (sk_size t)))"
-    ).by(NAT0_LT_SUC0_N0PLUS_R, "sk_size u", "sk_size t")
-
-    # Same fold-back via SYM(sz_app) as in SK_SIZE_LT_APP_LEFT.
-    p.thus(
-        "nat0_lt (sk_size t) (sk_size (App_t u t))"
-    ).by_rewrite_of("h_pre", [SYM(p.fact("sz_app"))])
-
-
-@proof
-def SK_SIZE_LT_DEEP_LEFT(p):
-    """|- !t u v. nat0_lt (sk_size t) (sk_size (App_t (App_t u t) v)).
-
-    Depth-2 size growth: wrapping ``t`` as the right child of an inner
-    App and then as the left child of an outer App strictly grows
-    sk_size by two SUC0/n0plus hops.
-
-    Two-hop chain via NAT0_LT_TRANS:
-      sk_size t
-        < sk_size (App_t u t)                  [SK_SIZE_LT_APP_RIGHT]
-        < sk_size (App_t (App_t u t) v)        [SK_SIZE_LT_APP_LEFT]
-
-    Used by ``IS_NORMAL_NOT_K_REDEX_SHAPE`` to rule out
-    ``M = App_t (App_t K_t M) N`` via AP_TERM(sk_size) +
-    NAT0_LT_NOT_REFL on this chain.
-    """
-    p.goal(
-        "!t u v. nat0_lt (sk_size t) "
-        "                (sk_size (App_t (App_t u t) v))"
-    )
-    p.fix("t u v")
-
-    # Hop 1: sk_size t < sk_size (App_t u t).
-    # DSL friction: SK_SIZE_LT_APP_RIGHT is stated as ``!t u. ... App_t u t``,
-    # so the SPEC order is (t-arg-of-lemma := t, u-arg-of-lemma := u);
-    # the position of the *wrapped* variable in the conclusion is the
-    # first bound name regardless of which child it lives at.  A
-    # SK_SIZE_LT_APP variant that took (wrapper, wrapped) in surface
-    # order would read more naturally at call sites.
-    p.have(
-        "h_inner: nat0_lt (sk_size t) (sk_size (App_t u t))"
-    ).by(SK_SIZE_LT_APP_RIGHT, "t", "u")
-
-    # Hop 2: sk_size (App_t u t) < sk_size (App_t (App_t u t) v).
-    p.have(
-        "h_outer: nat0_lt (sk_size (App_t u t)) "
-        "                 (sk_size (App_t (App_t u t) v))"
-    ).by(SK_SIZE_LT_APP_LEFT, "App_t u t", "v")
-
-    # Compose via NAT0_LT_TRANS.  DSL friction: NAT0_LT_TRANS requires
-    # all three witness terms spelled out (a, b, c) before the two
-    # ordering facts -- a ``by_match`` overload that infers the middle
-    # term from the two facts' shapes would save the verbose middle
-    # ``sk_size (App_t u t)`` repetition here.
-    p.thus(
-        "nat0_lt (sk_size t) (sk_size (App_t (App_t u t) v))"
-    ).by(
-        NAT0_LT_TRANS,
-        "sk_size t",
-        "sk_size (App_t u t)",
-        "sk_size (App_t (App_t u t) v)",
-        "h_inner",
-        "h_outer",
-    )
-
-
-from nat0_order import NAT0_LT_NOT_REFL  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -1784,8 +1307,9 @@ def PAR_STEP_K_T_INV(p):
 # ---------------------------------------------------------------------------
 # Stage 4 -- Takahashi's complete-development function ``sk_bullet``.
 #
-# Defined by well-founded recursion on ``sk_size`` (same machinery as
-# ``sk_step``).  Contracts every redex visible at a node simultaneously:
+# Defined by well-founded recursion on Pair_ord depth (via
+# ``define_wf_lt``).  Contracts every redex visible at a node
+# simultaneously:
 #
 #     sk_bullet S_t                          = S_t
 #     sk_bullet K_t                          = K_t
@@ -1796,8 +1320,7 @@ def PAR_STEP_K_T_INV(p):
 #     sk_bullet (App_t X Y) [otherwise]      = App_t (sk_bullet X) (sk_bullet Y)
 #
 # The body is a SELECT over four guarded disjuncts (K-redex, S-redex,
-# other-App, leaf), mirroring ``_sk_step_F``'s structure.  Atom unfolds
-# (S_t / K_t) fall into the leaf branch.
+# other-App, leaf).  Atom unfolds (S_t / K_t) fall into the leaf branch.
 #
 # The triangle property
 #     SK_BULLET_TRIANGLE : !A B. sk_par_step A B ==> sk_par_step B (sk_bullet A)
