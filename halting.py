@@ -11224,29 +11224,175 @@ def HALTS_PAR_AT(p):
 
 
 @proof
+def _BULLET_TRAJ_PAR_STEPS(p):
+    """|- !n X. sk_par_steps X (bullet_iter n X).
+
+    The bullet trajectory rooted at X is a par-step RTC chain: each
+    iterate is one par-step ahead of the previous (BULLET_REFL).
+    Induction on ``n``:
+
+      base : bullet_iter 0 X = X (BULLET_ITER_ZERO); PAR_STEPS_REFL.
+      step : IH says sk_par_steps X (bullet_iter n X).  BULLET_REFL
+             specialised at ``bullet_iter n X`` gives the single
+             par-step to ``sk_bullet (bullet_iter n X)`` = bullet_iter
+             (SUC0 n) X (BULLET_ITER_SUC); PAR_STEPS_TRANS composes.
+    """
+    from tactics import CONJ as _CONJ
+
+    p.goal("!n:nat0. !X:nat0. sk_par_steps X (bullet_iter n X)")
+    with p.induction("n"):
+        with p.base():
+            p.fix("X")
+            p.have(
+                "h_base: bullet_iter 0 X = X"
+            ).by(BULLET_ITER_ZERO, "X")
+            p.have("h_XX: sk_par_steps X X").by(PAR_STEPS_REFL, "X")
+            # DSL friction: by_rewrite_of with SYM(h_base) would
+            # rewrite ``X -> bullet_iter 0 X`` non-terminatingly
+            # (RHS contains X).  Lift via AP_TERM at the
+            # ``sk_par_steps X _`` slot and let by_eq_mp's
+            # sym-tolerance pick the matching side.
+            p.thus(
+                "sk_par_steps X (bullet_iter 0 X)"
+            ).by_eq_mp(
+                AP_TERM(
+                    p._parse("sk_par_steps X"),
+                    p.fact("h_base"),
+                ),
+                "h_XX",
+            )
+        with p.step("IH"):
+            # IH : !X. sk_par_steps X (bullet_iter n X).
+            p.fix("X")
+            p.have(
+                "h_ih: sk_par_steps X (bullet_iter n X)"
+            ).by("IH", "X")
+            p.have(
+                "h_unfold: bullet_iter (SUC0 n) X = "
+                "          sk_bullet (bullet_iter n X)"
+            ).by(BULLET_ITER_SUC, "n", "X")
+            p.have(
+                "h_par1: sk_par_step (bullet_iter n X) "
+                "                    (sk_bullet (bullet_iter n X))"
+            ).by_thm(
+                SPEC(p._parse("bullet_iter n X"), BULLET_REFL)
+            )
+            p.have(
+                "h_par1s: sk_par_steps (bullet_iter n X) "
+                "                     (sk_bullet (bullet_iter n X))"
+            ).by(
+                PAR_STEP_TO_STEPS,
+                "bullet_iter n X",
+                "sk_bullet (bullet_iter n X)",
+                "h_par1",
+            )
+            p.have(
+                "h_conj: sk_par_steps X (bullet_iter n X) /\\ "
+                "        sk_par_steps (bullet_iter n X) "
+                "                     (sk_bullet (bullet_iter n X))"
+            ).by_thm(_CONJ(p.fact("h_ih"), p.fact("h_par1s")))
+            p.have(
+                "h_chain: "
+                "sk_par_steps X (sk_bullet (bullet_iter n X))"
+            ).by(
+                PAR_STEPS_TRANS,
+                "X", "bullet_iter n X",
+                "sk_bullet (bullet_iter n X)",
+                "h_conj",
+            )
+            p.thus(
+                "sk_par_steps X (bullet_iter (SUC0 n) X)"
+            ).by_rewrite_of(
+                "h_chain", [SYM(p.fact("h_unfold"))]
+            )
+
+
+@proof
+def _HALTS_PAR_TO_HALTS_B(p):
+    """|- !X. halts_par X ==> halts_b X.
+
+    *** SORRY STUB.  Backward direction of the bullet/par bridge.
+
+    Plan (iter_to_bullet.md "HALTS_B_IFF_HALTS_PAR (the bridge)"):
+    impredicative induction on ``sk_par_steps X N`` with the
+    strengthened predicate P A B := is_normal B ==> halts_b A.
+
+      REFL : is_normal A ==> halts_b A via witness 0 (BULLET_ITER_ZERO).
+      STEP : par_step A B /\\ (is_normal C ==> halts_b B) ==>
+             (is_normal C ==> halts_b A).  Open obligation: from
+             halts_b B (?m. is_normal (bullet_iter m B)) and
+             par_step A B, derive halts_b A.  Strategy via
+             SK_BULLET_TRIANGLE: par_step B (sk_bullet A), iterated
+             through BULLET_COMMUTES_PAR_STEP (par_step A B ==>
+             par_step (sk_bullet A) (sk_bullet B), two TRIANGLE
+             applications) to land at sk_par_steps (sk_bullet A) (bullet_iter
+             m B) and then close via normal-stability.  Requires two
+             auxiliary helpers (BULLET_COMMUTES_PAR_STEP and its
+             iter-lift); ~80-100 lines together.
+
+    Gated on SK_BULLET_TRIANGLE closing (also stubbed via
+    _TRIANGLE_APP_CLOSURE).
+    """
+    p.goal("!X. halts_par X ==> halts_b X")
+    p.sorry()
+
+
+@proof
 def HALTS_B_IFF_HALTS_PAR(p):
     """|- !X. halts_b X = halts_par X.
 
-    *** STUB.  The bullet/par halt-bridge (Option C's central lemma; see
-    iter_to_bullet.md "HALTS_B_IFF_HALTS_PAR (the bridge -- Option C's
-    new central lemma)").
+    The bullet/par halt-bridge (Option C's central lemma).  Iff-intro
+    on the two directions:
 
-    Forward (halts_b X ==> halts_par X): bullet trajectory is a chain
-    of par-steps (BULLET_REFL: par_step W (sk_bullet W)).  If
-    bullet_iter n X = N is normal, then sk_par_steps X N (n applications
-    of PAR_STEPS_STEP) witnesses halts_par X.  ~10 lines.
+    Forward (halts_b X ==> halts_par X).  Unfold halts_b X to
+    ``?n. is_normal (bullet_iter n X)``; choose n; witness halts_par X
+    at N := bullet_iter n X using _BULLET_TRAJ_PAR_STEPS for the
+    sk_par_steps witness.
 
-    Backward (halts_par X ==> halts_b X): given ?N. sk_par_steps X N
-    /\\ is_normal N, induct on the par-step count to N.  At each step
-    SK_BULLET_TRIANGLE pushes ``par_step Y (sk_bullet X)`` past the
-    remaining par-chain, so ``sk_par_steps (sk_bullet X) N`` and IH
-    on sk_bullet X yields ``?m. is_normal (bullet_iter m (sk_bullet X))
-    = is_normal (bullet_iter (SUC0 m) X)``.  ~50 lines.
-
-    Gated on SK_BULLET_TRIANGLE (also stubbed via _TRIANGLE_APP_CLOSURE).
+    Backward (halts_par X ==> halts_b X).  Delegated to the helper
+    ``_HALTS_PAR_TO_HALTS_B`` (currently a sorry stub; needs the
+    Takahashi confluence argument via SK_BULLET_TRIANGLE).
     """
     p.goal("!X. halts_b X = halts_par X")
-    p.sorry()
+    p.fix("X")
+
+    # ---- Forward direction ----------------------------------------------
+    with p.have(
+        "h_fwd: halts_b X ==> halts_par X"
+    ).proof():
+        p.assume("h_hb: halts_b X")
+        # Unfold halts_b X.
+        p.have(
+            "h_at_b: halts_b X = "
+            "(?n. is_normal (bullet_iter n X))"
+        ).by(HALTS_B_AT, "X")
+        p.have(
+            "h_ex_b: ?n. is_normal (bullet_iter n X)"
+        ).by_eq_mp("h_at_b", "h_hb")
+        p.choose("n", from_="h_ex_b")
+        # n_eq : is_normal (bullet_iter n X).
+
+        # The bullet trajectory is itself a par-chain.
+        p.have(
+            "h_traj: sk_par_steps X (bullet_iter n X)"
+        ).by(_BULLET_TRAJ_PAR_STEPS, "n", "X")
+
+        # Witness halts_par X at N := bullet_iter n X.
+        p.have(
+            "h_at_par: halts_par X = "
+            "(?N. sk_par_steps X N /\\ is_normal N)"
+        ).by(HALTS_PAR_AT, "X")
+        p.have(
+            "h_ex_par: ?N. sk_par_steps X N /\\ is_normal N"
+        ).by_exists(["bullet_iter n X"], "h_traj", "n_eq")
+        p.thus("halts_par X").by_eq_mp("h_at_par", "h_ex_par")
+
+    # ---- Backward direction ---------------------------------------------
+    p.have(
+        "h_bwd: halts_par X ==> halts_b X"
+    ).by(_HALTS_PAR_TO_HALTS_B, "X")
+
+    p.thus("halts_b X = halts_par X").by_iff("h_fwd", "h_bwd")
 
 
 @proof
