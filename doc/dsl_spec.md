@@ -200,6 +200,7 @@ conclusion is fixed by the args, no need to repeat it in the spec).
 * `.by_eq_mp(eq_th, ref)` — `EQ_MP(eq_th, fact)` modulo simp on the LHS; sym-tolerant — flips `eq_th` if the fact aligns with the RHS.
 * `.by_def(def_th, ref)` — unfold `def_th` at `ref`'s head args, then `EQ_MP` — sugar for `by_eq_mp(UNFOLD(def_th, ...), ref)`.
 * `.by_inst(lemma, *terms)` — `SPECL(terms, lemma)` — pre-instantiate a lemma at term args; pairs with `have("label:")` so the result's conclusion need not be spelled out.
+* `.by_spec(lemma, *terms)` — `SPECL` + `BETA_NORM` — like `by_inst` but absorbs the BETA_NORM step when one or more `terms` is a `\v. body`; pairs with `have("label:")`.
 * `.by_trans(*eqs)` — `TRANS_CHAIN(eqs)` — compose `a=b`, `b=c`, ... into `a=c`; greedily orients each link, so equations in either direction work.
 * `.by_cong(left, right)` — single-step congruence: term + fact → `AP_TERM`; fact + term → `AP_THM`; fact + fact → `MK_COMB`.
 * `.by_cong(op, eq1, eq2)` — binop shorthand: from `a=c` and `b=d` derive `op a b = op c d` (i.e. `MK_COMB(AP_TERM(op, eq1), eq2)`).

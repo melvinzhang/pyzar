@@ -48,6 +48,9 @@ test-theories:
 	$(PY) tg_set_theory.py
 	$(PY) num.py
 
+test-halting:
+	$(PY) halting.py
+
 test-landau:
 	@set -o pipefail; \
 	  raw=$$(mktemp); \

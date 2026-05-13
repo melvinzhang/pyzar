@@ -1066,25 +1066,16 @@ def _par_step_atom_inv(p, atom_str, atom_neq_app_t):
     p.fix("Y")
     p.assume(f"h: sk_par_step {atom_str} Y")
 
-    # Unfold ``sk_par_step <atom> Y`` to the impredicative universal.
-    # DSL friction: ``by_def`` produces a registered fact, but we need
-    # to immediately SPEC at a lambda; the DSL exposes only term-applied
-    # SPEC via ``by_inst`` (which goes through ``_finish``).  Drop to
-    # kernel calls.
+    # Unfold ``sk_par_step <atom> Y`` to the impredicative universal,
+    # then SPEC at Q via ``by_spec`` (SPECL + BETA_NORM in one shot).
     sps_unfold = unfold_def_at(
         SK_PAR_STEP_DEF, p._parse(atom_str), p._parse("Y")
     )
     h_univ = EQ_MP(sps_unfold, p.fact("h"))
-
-    # SPEC at Q, then BETA_NORM the raw redexes that SPEC-at-a-lambda
-    # creates throughout the closures body and in the final ``Q <atom>
-    # Y`` application.
     Q_tm = p._parse(
         f"\\A:nat0. \\B:nat0. (A = {atom_str}) ==> (B = {atom_str})"
     )
-    h_at_Q_raw = SPEC(Q_tm, h_univ)
-    h_at_Q = EQ_MP(BETA_NORM(h_at_Q_raw._concl), h_at_Q_raw)
-    p.have(f"h_at_Q: {pp(h_at_Q._concl)}").by_thm(h_at_Q)
+    p.have("h_at_Q:").by_spec(h_univ, Q_tm)
 
     # Prove the four closure conjuncts for Q.  DSL friction: BETA_NORM
     # surfaces ``Y`` as one of the K-rule bvars, which would collide
@@ -2279,24 +2270,21 @@ def _par_step_app_atom_inv(p, atom_str, atom_inv_thm, atom_neq_app_t):
     p.fix("X Y")
     p.assume(f"h: sk_par_step (App_t {atom_str} X) Y")
 
-    # Unfold sk_par_step at (App_t <atom> X, Y).
+    # Unfold sk_par_step at (App_t <atom> X, Y); SPEC at Q via
+    # ``by_spec`` (SPECL + BETA_NORM in one shot).
     sps_unfold = unfold_def_at(
         SK_PAR_STEP_DEF,
         p._parse(f"App_t {atom_str} X"),
         p._parse("Y"),
     )
     h_univ = EQ_MP(sps_unfold, p.fact("h"))
-
-    # SPEC at Q.  Two-arg lambda; BETA_NORM cleans the redexes.
     Q_tm = p._parse(
         f"\\A:nat0. \\B:nat0. "
         f"sk_par_step A B /\\ "
         f"(!W:nat0. A = App_t {atom_str} W ==> "
         f"  ?Wp:nat0. B = App_t {atom_str} Wp /\\ sk_par_step W Wp)"
     )
-    h_at_Q_raw = SPEC(Q_tm, h_univ)
-    h_at_Q = EQ_MP(BETA_NORM(h_at_Q_raw._concl), h_at_Q_raw)
-    p.have(f"h_at_Q: {pp(h_at_Q._concl)}").by_thm(h_at_Q)
+    p.have("h_at_Q:").by_spec(h_univ, Q_tm)
 
     # --- REFL closure --------------------------------------------------
     with p.have(
@@ -2654,15 +2642,14 @@ def PAR_STEP_S_APP_APP_INV(p):
     p.fix("X Y Z")
     p.assume("h: sk_par_step (App_t (App_t S_t X) Y) Z")
 
-    # Unfold sk_par_step at the input.
+    # Unfold sk_par_step at the input; SPEC at the binary-inversion Q
+    # via ``by_spec`` (SPECL + BETA_NORM in one shot).
     sps_unfold = unfold_def_at(
         SK_PAR_STEP_DEF,
         p._parse("App_t (App_t S_t X) Y"),
         p._parse("Z"),
     )
     h_univ = EQ_MP(sps_unfold, p.fact("h"))
-
-    # SPEC at the binary-inversion Q.
     Q_tm = p._parse(
         "\\A:nat0. \\B:nat0. "
         "sk_par_step A B /\\ "
@@ -2671,9 +2658,7 @@ def PAR_STEP_S_APP_APP_INV(p):
         " B = App_t (App_t S_t W1p) W2p /\\ "
         " sk_par_step W1 W1p /\\ sk_par_step W2 W2p)"
     )
-    h_at_Q_raw = SPEC(Q_tm, h_univ)
-    h_at_Q = EQ_MP(BETA_NORM(h_at_Q_raw._concl), h_at_Q_raw)
-    p.have(f"h_at_Q: {pp(h_at_Q._concl)}").by_thm(h_at_Q)
+    p.have("h_at_Q:").by_spec(h_univ, Q_tm)
 
     # Q body, parameterized over (A, B), as a reusable string.
     def _q_body(A_str, B_str):
@@ -4063,12 +4048,10 @@ def SK_BULLET_TRIANGLE(p):
 
     With closures(P) built, SPEC h_AB-unfolded at P, MP, CONJUNCT2.
 
-    DSL friction noted inline at three sites.
+    DSL friction noted inline at two sites (P-lambda bvar collision,
+    K-rule closure bvar collision).
     """
-    from tactics import (
-        AP_THM, BETA_CONV, BETA_NORM, TRANS, SPEC, MP, CONJ,
-        CONJUNCT2, EQ_MP,
-    )
+    from tactics import CONJUNCT2
 
     p.goal(
         "!A:nat0. !B:nat0. "
@@ -4081,29 +4064,18 @@ def SK_BULLET_TRIANGLE(p):
     B_t = p._parse("B")
     h_AB_th = p.fact("h_AB")
 
-    # Unfold sk_par_step A B to !P. closures(P) ==> P A B.  Two AP_THM
-    # + BETA_CONV pairs, same dance as _par_step_to_P (halting.py:6794).
-    ap1 = AP_THM(SK_PAR_STEP_DEF, A_t)
-    spec_A = TRANS(ap1, BETA_CONV(rand(ap1._concl)))
-    ap2 = AP_THM(spec_A, B_t)
-    spec_AB = TRANS(ap2, BETA_CONV(rand(ap2._concl)))
-    forall_P = EQ_MP(spec_AB, h_AB_th)
-    # forall_P: |- !P. closures(P) ==> P A B
-
-    # Strengthened P.  DSL friction: P's bvars must not collide with
-    # the outer ``A``, ``B`` (fixed) -- use ``AA``, ``BB``.
+    # Unfold sk_par_step A B to !P. closures(P) ==> P A B, then SPEC at
+    # the strengthened P via ``by_spec`` (SPECL + BETA_NORM in one shot:
+    # the closure form's per-rule lambda applications all reduce in one
+    # pass).  DSL friction: P's bvars must not collide with the outer
+    # ``A``, ``B`` (fixed) -- use ``AA``, ``BB``.
+    sps_unfold = unfold_def_at(SK_PAR_STEP_DEF, A_t, B_t)
+    forall_P = EQ_MP(sps_unfold, h_AB_th)
     P_lambda = p._parse(
         "\\AA:nat0. \\BB:nat0. "
         "sk_par_step AA BB /\\ sk_par_step BB (sk_bullet AA)"
     )
-    spec_P = SPEC(P_lambda, forall_P)
-    # spec_P : |- closures[P_lambda] ==> P_lambda A B  (un-beta'd)
-
-    # BETA_NORM the whole implication so antecedent and consequent
-    # both reach their explicit forms.  DSL friction: BETA_NORM walks
-    # ALL subterms, so the closure-form's per-rule lambda applications
-    # (P A A1, P (App_t ...) ..., etc.) all reduce in one pass.
-    spec_P_beta = EQ_MP(BETA_NORM(spec_P._concl), spec_P)
+    p.have("spec_P_beta:").by_spec(forall_P, P_lambda)
     # spec_P_beta : |- closures_beta ==> sk_par_step A B /\
     #                                    sk_par_step B (sk_bullet A)
 
@@ -4255,7 +4227,7 @@ def SK_BULLET_TRIANGLE(p):
         p.fact("c_refl"),
         CONJ(p.fact("c_K"), CONJ(p.fact("c_S"), p.fact("c_APP"))),
     )
-    result_pair = MP(spec_P_beta, closures_th)
+    result_pair = MP(p.fact("spec_P_beta"), closures_th)
     # result_pair: sk_par_step A B /\ sk_par_step B (sk_bullet A)
 
     p.thus("sk_par_step B (sk_bullet A)").by_thm(CONJUNCT2(result_pair))

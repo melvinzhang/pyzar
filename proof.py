@@ -2598,6 +2598,27 @@ class _Have:
             th = SPEC(resolved, th)
         return self._finish(th)
 
+    def by_spec(self, lemma, *args):
+        """``SPECL`` ``lemma`` at term args, then ``BETA_NORM`` the
+        conclusion.
+
+        Like ``by_inst`` but absorbs the BETA_NORM step that
+        SPEC-at-a-lambda mandates: when one or more args is a `\\v.
+        body`, the post-SPEC conclusion carries beta redexes that
+        block any subsequent shape check. Pairs with ``have("label:")``
+        so the caller need not spell out the post-beta conclusion.
+        """
+        p = self.p
+        th = p.simp_norm_fact(p.coerce(lemma))
+        for a in args:
+            resolved = p.coerce(a, accept_term=True)
+            if isinstance(resolved, thm):
+                raise HolError(
+                    f"by_spec: arg {a!r} resolved to a theorem; expected a term"
+                )
+            th = SPEC(resolved, th)
+        return self._finish(EQ_MP(BETA_NORM(th._concl), th))
+
     def by_trans(self, *eqs):
         """``TRANS_CHAIN`` over ``eqs``: compose ``a=b``, ``b=c``, ...
         into ``a=c``. Each ``eq`` is a fact label or theorem of equation
