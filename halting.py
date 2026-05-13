@@ -127,14 +127,13 @@ diagonal a third time.
 """
 
 from fusion import Var
-from basics import mk_const, mk_app, mk_abs, mk_eq, rand, rator, aconv
+from basics import mk_const, mk_app, rand, aconv
 from parser import define, parse_type, pp
 from nat0 import nat0_ty, ZERO, mk_suc0
-from nat0_order import define_wf_lt, NAT0_LT_TRANS
+from nat0_order import define_wf_lt
 from proof import proof, define_with_at, register_intro_set
-from tactics import REFL, SPEC, SPECL, SYM, EQ_MP, DISJ1, DISJ2, CONJ, EXISTS, MP
-from tactics import AP_TERM, TRANS, BETA_NORM, unfold_def_at
-from axioms import mk_exists
+from tactics import REFL, SPEC, SPECL, SYM, EQ_MP, DISJ1, DISJ2, CONJ, MP
+from tactics import TRANS, unfold_def_at
 from hf_sets import Pair_ord
 from hf_syntax import (
     _proof_lt_binary_left,
@@ -1441,7 +1440,7 @@ def HALTS_AT(p):
 
     Direct unfold of HALTS_DEF via AP_THM + BETA.
     """
-    from tactics import AP_THM, BETA_CONV, TRANS, GEN
+    from tactics import AP_THM, BETA_CONV, GEN
 
     ap = AP_THM(HALTS_DEF, _n0_t_var)
     bet = BETA_CONV(rand(ap._concl))
@@ -1574,7 +1573,7 @@ def HALTS_DECIDER_DEF_THM(p):
 
     Direct unfold of HALTS_DECIDER_DEF via AP_THM + BETA.
     """
-    from tactics import AP_THM, BETA_CONV, TRANS, GEN
+    from tactics import AP_THM, BETA_CONV, GEN
     H_var = Var("H", nat0_ty)
     ap = AP_THM(HALTS_DECIDER_DEF, H_var)
     bet = BETA_CONV(rand(ap._concl))

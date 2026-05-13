@@ -19,24 +19,17 @@ Exported headline theorems (not currently consumed elsewhere):
 """
 
 from fusion import Var
-from basics import mk_const, mk_app, mk_abs, mk_eq, rand, rator, aconv
+from basics import mk_const, mk_app, mk_abs, mk_eq, rand, rator
 from parser import define, parse_type, pp
-from nat0 import nat0_ty, ZERO, mk_suc0
+from nat0 import nat0_ty
 from nat0_order import define_wf_lt, NAT0_LT_TRANS
-from proof import proof, define_with_at, register_intro_set
-from tactics import REFL, SPEC, SPECL, SYM, EQ_MP, DISJ1, DISJ2, CONJ, EXISTS, MP
-from tactics import AP_TERM, TRANS, BETA_NORM, unfold_def_at
+from proof import proof
+from tactics import REFL, SPEC, SPECL, SYM, EQ_MP, CONJ, EXISTS, MP
+from tactics import AP_TERM, TRANS, unfold_def_at
 from axioms import mk_exists
-from hf_sets import Pair_ord
 from hf_syntax import (
-    _proof_lt_binary_left,
-    _proof_lt_binary_right,
     _unfold_rec_via_F_def,
-    mono_iff_binary_step,
 )
-from tactics import or_chain_collapse
-from hf_syntax import _proof_binary_inj, _TAG_NEQS  # noqa: E402
-from hf_sets import PAIR_ORD_INJ  # noqa: E402
 from tactics import CONJUNCT1  # noqa: E402
 
 # Stage 0/1/IS_NORMAL symbols carried over from halting.py.
@@ -44,16 +37,14 @@ from halting import (
     S_t, K_t, App_t,
     APP_T_INJ, S_T_NEQ_K_T, S_T_NEQ_APP_T, K_T_NEQ_APP_T,
     NAT0_LT_APP_T_L, NAT0_LT_APP_T_R,
-    sk_par_step, sk_par_steps,
-    SK_PAR_STEP_DEF, SK_PAR_STEPS_DEF,
+    sk_par_step, SK_PAR_STEP_DEF, SK_PAR_STEPS_DEF,
     PAR_REFL, PAR_K, PAR_S, PAR_APP,
     PAR_STEPS_REFL, PAR_STEPS_STEP,
     PAR_STEP_S_T_INV, PAR_STEP_K_T_INV,
-    is_normal, IS_NORMAL_DEF,
+    IS_NORMAL_DEF,
 )
 # Stage-1 private helpers that Stage 2 reuses.
 from halting import (
-    _PAR_STEP_CLOSURE,
     _nat0_fn_ty,
     _atom_neq_App_negations,
     _lift_select_eq,
@@ -160,7 +151,7 @@ def _lt_trans_chain(lt_steps, n_eq_th):
     Two call sites (D1's depth-2 chain, D2's depth-{1,2,3} chains); the
     factored piece is the TRANS-fold + final ``REWRITE_RULE [SYM(n_eq)]``.
     """
-    from tactics import MP, REWRITE_RULE, SPECL, SYM
+    from tactics import MP, REWRITE_RULE, SYM
     from nat0_order import NAT0_LT_TRANS
     chain = lt_steps[0]
     for s in lt_steps[1:]:
@@ -190,9 +181,9 @@ def _bullet_F_d1_mono_iff(hyp_th, r_term):
       7. DEDUCT_ANTISYM_RULE the two directions.
     """
     from tactics import (
-        SPEC, MP, SYM, CONJ, CONJUNCT1, CONJUNCT2,
+        SPEC, MP, SYM, CONJ, CONJUNCT2,
         REWRITE_RULE, DEDUCT_ANTISYM_RULE, ASSUME,
-        CHOOSE_WITNESS, SPECL,
+        CHOOSE_WITNESS,
     )
     from axioms import dest_exists, mk_and
     from hf_syntax import _extract_nfg
@@ -275,9 +266,9 @@ def _bullet_F_d2_mono_iff(hyp_th, r_term):
     substitutes on the payload (which mentions ``f x, f y, f z``).
     """
     from tactics import (
-        SPEC, MP, SYM, CONJ, CONJUNCT1, CONJUNCT2,
+        SPEC, MP, SYM, CONJ, CONJUNCT2,
         REWRITE_RULE, DEDUCT_ANTISYM_RULE, ASSUME,
-        CHOOSE_WITNESS, SPECL,
+        CHOOSE_WITNESS,
     )
     from axioms import dest_exists, mk_and
     from hf_syntax import _extract_nfg
@@ -1099,7 +1090,6 @@ def _par_step_app_atom_inv(p, atom_str, atom_inv_thm, atom_neq_app_t):
       registered fact.
     """
     from tactics import (
-        BETA_NORM,
         CONJ as _CONJ,
         CONJUNCT1 as _C1,
         CONJUNCT2 as _C2,
@@ -1463,7 +1453,6 @@ def PAR_STEP_S_APP_APP_INV(p):
     DSL needs sequential ``by(... "X", "Y", ...)``.
     """
     from tactics import (
-        BETA_NORM,
         CONJ as _CONJ,
         CONJUNCT1 as _C1,
         CONJUNCT2 as _C2,
@@ -2339,7 +2328,6 @@ def _triangle_K_case(p):
     """
     from tactics import (
         CONJ as _CONJ,
-        CONJUNCT1 as _C1,
         CONJUNCT2 as _C2,
     )
 
