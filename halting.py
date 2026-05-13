@@ -3376,6 +3376,132 @@ def BULLET_REFL(p):
                                 _bullet_refl_leaf_case(p)
 
 
+def _bull_no_redex_guard_atom_head(p, atom_str, X_str, suffix):
+    """For ``T := App_t {atom_str} ({X_str})`` with atom_str in
+    {"S_t", "K_t"}, prove the SK_BULLET_APP_OTHER guard conjunction
+    ``~(?a b. T = App_t (App_t K_t a) b)
+      /\\ ~(?a b c. T = App_t (App_t (App_t S_t a) b) c)``
+    and register it as ``h_nKnS_{suffix}``.  Each negation falls in
+    one APP_T_INJ peel: the outer-App left-arg ({atom_str}) collides
+    with App_t-headed RHS via S_T_NEQ_APP_T / K_T_NEQ_APP_T.
+    """
+    from tactics import CONJ as _CONJ, CONJUNCT1 as _C1
+    atom_neq = S_T_NEQ_APP_T if atom_str == "S_t" else K_T_NEQ_APP_T
+    T = f"App_t {atom_str} ({X_str})"
+    nK = f"_nK_{suffix}"
+    nS = f"_nS_{suffix}"
+    with p.have(
+        f"{nK}: ~(?a b. {T} = App_t (App_t K_t a) b)"
+    ).proof():
+        with p.suppose(f"ex: ?a b. {T} = App_t (App_t K_t a) b"):
+            p.choose("a", from_="ex")
+            p.choose("b", from_="a_eq")
+            p.have(
+                f"h_inj: {atom_str} = App_t K_t a /\\ ({X_str}) = b"
+            ).by(APP_T_INJ, atom_str, X_str, "App_t K_t a", "b", "b_eq")
+            p.have(f"h_a: {atom_str} = App_t K_t a").by_thm(
+                _C1(p.fact("h_inj"))
+            )
+            p.have(f"h_n: ~({atom_str} = App_t K_t a)").by(
+                atom_neq, "K_t", "a"
+            )
+            p.absurd().by_conj("h_n", "h_a")
+    with p.have(
+        f"{nS}: ~(?a b c. {T} = App_t (App_t (App_t S_t a) b) c)"
+    ).proof():
+        with p.suppose(
+            f"ex: ?a b c. {T} = App_t (App_t (App_t S_t a) b) c"
+        ):
+            p.choose("a", from_="ex")
+            p.choose("b", from_="a_eq")
+            p.choose("c", from_="b_eq")
+            p.have(
+                f"h_inj: {atom_str} = App_t (App_t S_t a) b /\\ "
+                f"({X_str}) = c"
+            ).by(
+                APP_T_INJ, atom_str, X_str,
+                "App_t (App_t S_t a) b", "c", "c_eq",
+            )
+            p.have(f"h_a: {atom_str} = App_t (App_t S_t a) b").by_thm(
+                _C1(p.fact("h_inj"))
+            )
+            p.have(f"h_n: ~({atom_str} = App_t (App_t S_t a) b)").by(
+                atom_neq, "App_t S_t a", "b"
+            )
+            p.absurd().by_conj("h_n", "h_a")
+    p.have(
+        f"h_nKnS_{suffix}: "
+        f"~(?a b. {T} = App_t (App_t K_t a) b) /\\ "
+        f"~(?a b c. {T} = App_t (App_t (App_t S_t a) b) c)"
+    ).by_thm(_CONJ(p.fact(nK), p.fact(nS)))
+    return f"h_nKnS_{suffix}"
+
+
+def _bull_no_redex_guard_app_S_head(p, X_str, Y_str, suffix):
+    """For ``T := App_t (App_t S_t {X_str}) ({Y_str})``, prove the
+    SK_BULLET_APP_OTHER guard conjunction.  Two-level APP_T_INJ peel:
+    the inner-App left-arg ``S_t`` clashes with K_t (S_T_NEQ_K_T) for
+    the K-redex case, and with App_t S_t (S_T_NEQ_APP_T) for the
+    S-redex case.
+    """
+    from tactics import CONJ as _CONJ, CONJUNCT1 as _C1
+    T = f"App_t (App_t S_t ({X_str})) ({Y_str})"
+    SX = f"App_t S_t ({X_str})"
+    nK = f"_nK_{suffix}"
+    nS = f"_nS_{suffix}"
+    with p.have(
+        f"{nK}: ~(?a b. {T} = App_t (App_t K_t a) b)"
+    ).proof():
+        with p.suppose(f"ex: ?a b. {T} = App_t (App_t K_t a) b"):
+            p.choose("a", from_="ex")
+            p.choose("b", from_="a_eq")
+            p.have(
+                f"h_o: {SX} = App_t K_t a /\\ ({Y_str}) = b"
+            ).by(APP_T_INJ, SX, Y_str, "App_t K_t a", "b", "b_eq")
+            p.have(f"h_o_L: {SX} = App_t K_t a").by_thm(
+                _C1(p.fact("h_o"))
+            )
+            p.have(
+                f"h_i: S_t = K_t /\\ ({X_str}) = a"
+            ).by(APP_T_INJ, "S_t", X_str, "K_t", "a", "h_o_L")
+            p.have("h_SK: S_t = K_t").by_thm(_C1(p.fact("h_i")))
+            p.absurd().by_conj(S_T_NEQ_K_T, "h_SK")
+    with p.have(
+        f"{nS}: ~(?a b c. {T} = App_t (App_t (App_t S_t a) b) c)"
+    ).proof():
+        with p.suppose(
+            f"ex: ?a b c. {T} = App_t (App_t (App_t S_t a) b) c"
+        ):
+            p.choose("a", from_="ex")
+            p.choose("b", from_="a_eq")
+            p.choose("c", from_="b_eq")
+            p.have(
+                f"h_o: {SX} = App_t (App_t S_t a) b /\\ ({Y_str}) = c"
+            ).by(
+                APP_T_INJ, SX, Y_str,
+                "App_t (App_t S_t a) b", "c", "c_eq",
+            )
+            p.have(
+                f"h_o_L: {SX} = App_t (App_t S_t a) b"
+            ).by_thm(_C1(p.fact("h_o")))
+            p.have(
+                f"h_i: S_t = App_t S_t a /\\ ({X_str}) = b"
+            ).by(APP_T_INJ, "S_t", X_str, "App_t S_t a", "b", "h_o_L")
+            p.have("h_a: S_t = App_t S_t a").by_thm(
+                _C1(p.fact("h_i"))
+            )
+            p.have("h_n: ~(S_t = App_t S_t a)").by(
+                S_T_NEQ_APP_T, "S_t", "a"
+            )
+            p.absurd().by_conj("h_n", "h_a")
+    p.have(
+        f"h_nKnS_{suffix}: "
+        f"~(?a b. {T} = App_t (App_t K_t a) b) /\\ "
+        f"~(?a b c. {T} = App_t (App_t (App_t S_t a) b) c)"
+    ).by_thm(_CONJ(p.fact(nK), p.fact(nS)))
+    return f"h_nKnS_{suffix}"
+
+
 def _triangle_K_case(p):
     """K-redex sub-case of _TRIANGLE_APP_CLOSURE.
 
@@ -3417,58 +3543,7 @@ def _triangle_K_case(p):
     p.split("A1_in_eq", "(h_A1_eq, h_par_Ai_A1_in)")
 
     # ---- Step 2a: ~K and ~S guards for App_t K_t Ai. ------------------
-    with p.have(
-        "h_nK_KAi: "
-        "~(?a b. App_t K_t Ai = App_t (App_t K_t a) b)"
-    ).proof():
-        with p.suppose(
-            "ex: ?a b. App_t K_t Ai = App_t (App_t K_t a) b"
-        ):
-            p.choose("a", from_="ex")
-            p.choose("b", from_="a_eq")
-            p.have(
-                "h_inj: K_t = App_t K_t a /\\ Ai = b"
-            ).by(
-                APP_T_INJ, "K_t", "Ai",
-                "App_t K_t a", "b", "b_eq",
-            )
-            p.have(
-                "h_K_app: K_t = App_t K_t a"
-            ).by_thm(_C1(p.fact("h_inj")))
-            p.have(
-                "h_K_neq: ~(K_t = App_t K_t a)"
-            ).by(K_T_NEQ_APP_T, "K_t", "a")
-            p.absurd().by_conj("h_K_neq", "h_K_app")
-    with p.have(
-        "h_nS_KAi: ~(?a b c. App_t K_t Ai = "
-        "          App_t (App_t (App_t S_t a) b) c)"
-    ).proof():
-        with p.suppose(
-            "ex: ?a b c. App_t K_t Ai = "
-            "    App_t (App_t (App_t S_t a) b) c"
-        ):
-            p.choose("a", from_="ex")
-            p.choose("b", from_="a_eq")
-            p.choose("c", from_="b_eq")
-            p.have(
-                "h_inj: K_t = App_t (App_t S_t a) b /\\ Ai = c"
-            ).by(
-                APP_T_INJ, "K_t", "Ai",
-                "App_t (App_t S_t a) b", "c", "c_eq",
-            )
-            p.have(
-                "h_K_app: K_t = App_t (App_t S_t a) b"
-            ).by_thm(_C1(p.fact("h_inj")))
-            p.have(
-                "h_K_neq: ~(K_t = App_t (App_t S_t a) b)"
-            ).by(K_T_NEQ_APP_T, "App_t S_t a", "b")
-            p.absurd().by_conj("h_K_neq", "h_K_app")
-    p.have(
-        "h_nKnS_KAi: "
-        "~(?a b. App_t K_t Ai = App_t (App_t K_t a) b) /\\ "
-        "~(?a b c. App_t K_t Ai = "
-        "  App_t (App_t (App_t S_t a) b) c)"
-    ).by_thm(_CONJ(p.fact("h_nK_KAi"), p.fact("h_nS_KAi")))
+    _bull_no_redex_guard_atom_head(p, "K_t", "Ai", "KAi")
 
     # ---- Step 2b: sk_bullet (App_t K_t Ai) = App_t K_t (sk_bullet Ai).
     p.have(
@@ -3615,60 +3690,8 @@ def _triangle_S_case(p):
     )
 
     # ---- Step 2: compute sk_bullet (App_t (App_t S_t Ai) Bi). ---------
-    # We need negation guards at two nesting levels.
-    # First: App_t S_t Ai is not a K/S redex (1 App layer, S_t head).
-    with p.have(
-        "h_nK_SAi: ~(?a b. App_t S_t Ai = "
-        "          App_t (App_t K_t a) b)"
-    ).proof():
-        with p.suppose(
-            "ex: ?a b. App_t S_t Ai = App_t (App_t K_t a) b"
-        ):
-            p.choose("a", from_="ex")
-            p.choose("b", from_="a_eq")
-            p.have(
-                "h_inj: S_t = App_t K_t a /\\ Ai = b"
-            ).by(
-                APP_T_INJ, "S_t", "Ai",
-                "App_t K_t a", "b", "b_eq",
-            )
-            p.have(
-                "h_S_app: S_t = App_t K_t a"
-            ).by_thm(_C1(p.fact("h_inj")))
-            p.have(
-                "h_S_neq: ~(S_t = App_t K_t a)"
-            ).by(S_T_NEQ_APP_T, "K_t", "a")
-            p.absurd().by_conj("h_S_neq", "h_S_app")
-    with p.have(
-        "h_nS_SAi: ~(?a b c. App_t S_t Ai = "
-        "          App_t (App_t (App_t S_t a) b) c)"
-    ).proof():
-        with p.suppose(
-            "ex: ?a b c. App_t S_t Ai = "
-            "    App_t (App_t (App_t S_t a) b) c"
-        ):
-            p.choose("a", from_="ex")
-            p.choose("b", from_="a_eq")
-            p.choose("c", from_="b_eq")
-            p.have(
-                "h_inj: S_t = App_t (App_t S_t a) b /\\ Ai = c"
-            ).by(
-                APP_T_INJ, "S_t", "Ai",
-                "App_t (App_t S_t a) b", "c", "c_eq",
-            )
-            p.have(
-                "h_S_app: S_t = App_t (App_t S_t a) b"
-            ).by_thm(_C1(p.fact("h_inj")))
-            p.have(
-                "h_S_neq: ~(S_t = App_t (App_t S_t a) b)"
-            ).by(S_T_NEQ_APP_T, "App_t S_t a", "b")
-            p.absurd().by_conj("h_S_neq", "h_S_app")
-    p.have(
-        "h_nKnS_SAi: "
-        "~(?a b. App_t S_t Ai = App_t (App_t K_t a) b) /\\ "
-        "~(?a b c. App_t S_t Ai = "
-        "  App_t (App_t (App_t S_t a) b) c)"
-    ).by_thm(_CONJ(p.fact("h_nK_SAi"), p.fact("h_nS_SAi")))
+    # Inner layer: App_t S_t Ai is not a K/S redex (1 App layer, S_t head).
+    _bull_no_redex_guard_atom_head(p, "S_t", "Ai", "SAi")
     p.have(
         "h_bull_SAi_raw: sk_bullet (App_t S_t Ai) = "
         "                App_t (sk_bullet S_t) (sk_bullet Ai)"
@@ -3678,78 +3701,9 @@ def _triangle_S_case(p):
         "            App_t S_t (sk_bullet Ai)"
     ).by_rewrite_of("h_bull_SAi_raw", [SK_BULLET_S_T])
 
-    # Next layer: App_t (App_t S_t Ai) Bi is not a K/S redex either.
-    # K-redex check: needs App_t (App_t K_t _) _ at the top; here we
-    # have App_t (App_t S_t Ai) Bi, so inner App's head is S_t.
-    with p.have(
-        "h_nK_SAB: ~(?a b. App_t (App_t S_t Ai) Bi = "
-        "          App_t (App_t K_t a) b)"
-    ).proof():
-        with p.suppose(
-            "ex: ?a b. App_t (App_t S_t Ai) Bi = "
-            "    App_t (App_t K_t a) b"
-        ):
-            p.choose("a", from_="ex")
-            p.choose("b", from_="a_eq")
-            p.have(
-                "h_inj1: App_t S_t Ai = App_t K_t a /\\ Bi = b"
-            ).by(
-                APP_T_INJ, "App_t S_t Ai", "Bi",
-                "App_t K_t a", "b", "b_eq",
-            )
-            p.have(
-                "h_inj1_L: App_t S_t Ai = App_t K_t a"
-            ).by_thm(_C1(p.fact("h_inj1")))
-            p.have(
-                "h_inj2: S_t = K_t /\\ Ai = a"
-            ).by(
-                APP_T_INJ, "S_t", "Ai", "K_t", "a", "h_inj1_L"
-            )
-            p.have("h_SK: S_t = K_t").by_thm(_C1(p.fact("h_inj2")))
-            p.absurd().by_conj(S_T_NEQ_K_T, "h_SK")
-    # S-redex check: needs App_t (App_t (App_t S_t _) _) _ at the top.
-    # Here we have App_t (App_t S_t Ai) Bi which has only 2 App layers.
-    with p.have(
-        "h_nS_SAB: ~(?a b c. App_t (App_t S_t Ai) Bi = "
-        "          App_t (App_t (App_t S_t a) b) c)"
-    ).proof():
-        with p.suppose(
-            "ex: ?a b c. App_t (App_t S_t Ai) Bi = "
-            "    App_t (App_t (App_t S_t a) b) c"
-        ):
-            p.choose("a", from_="ex")
-            p.choose("b", from_="a_eq")
-            p.choose("c", from_="b_eq")
-            p.have(
-                "h_inj1: App_t S_t Ai = "
-                "        App_t (App_t S_t a) b /\\ Bi = c"
-            ).by(
-                APP_T_INJ, "App_t S_t Ai", "Bi",
-                "App_t (App_t S_t a) b", "c", "c_eq",
-            )
-            p.have(
-                "h_inj1_L: App_t S_t Ai = App_t (App_t S_t a) b"
-            ).by_thm(_C1(p.fact("h_inj1")))
-            p.have(
-                "h_inj2: S_t = App_t S_t a /\\ Ai = b"
-            ).by(
-                APP_T_INJ, "S_t", "Ai",
-                "App_t S_t a", "b", "h_inj1_L",
-            )
-            p.have(
-                "h_S_app: S_t = App_t S_t a"
-            ).by_thm(_C1(p.fact("h_inj2")))
-            p.have(
-                "h_S_neq: ~(S_t = App_t S_t a)"
-            ).by(S_T_NEQ_APP_T, "S_t", "a")
-            p.absurd().by_conj("h_S_neq", "h_S_app")
-    p.have(
-        "h_nKnS_SAB: "
-        "~(?a b. App_t (App_t S_t Ai) Bi = "
-        "  App_t (App_t K_t a) b) /\\ "
-        "~(?a b c. App_t (App_t S_t Ai) Bi = "
-        "  App_t (App_t (App_t S_t a) b) c)"
-    ).by_thm(_CONJ(p.fact("h_nK_SAB"), p.fact("h_nS_SAB")))
+    # Outer layer: App_t (App_t S_t Ai) Bi has 2 App layers, neither
+    # K- nor S-redex shape.
+    _bull_no_redex_guard_app_S_head(p, "Ai", "Bi", "SAB")
     p.have(
         "h_bull_SAB_raw: "
         "sk_bullet (App_t (App_t S_t Ai) Bi) = "
