@@ -71,12 +71,13 @@ Stage map
 
   Stage 0 (sk):       SK terms as tagged HF tuples
                       (S_t, K_t, App_t, is_sk_term).
-  Stage 1 (sk_step):  One-step LMO reduction sk_step + IS_NORMAL_DEF +
-                      SK_STEP_K / _S intros and SK_STEP_LEFT / _RIGHT
-                      congruences.
-  Stage 2 (sk_size):  Term-size measure used by the normal-form
-                      structural lemmas (IS_NORMAL_NOT_K_REDEX_SHAPE,
-                      _NOT_S_REDEX_SHAPE, _APP_DECOMP).
+  Stage 1 (is_normal): Syntactic no-redex predicate (WF-rec on
+                      Pair_ord depth) + normal-form structural lemmas
+                      (IS_NORMAL_NOT_K_REDEX_SHAPE, _NOT_S_REDEX_SHAPE,
+                      _APP_DECOMP).
+  Stage 2 (sk_size):  Term-size measure (currently unused; retained
+                      for diagnostic / size-induction work outside the
+                      halting proof).
   Stage 3 (par):      Parallel reduction relation ``sk_par_step`` +
                       RTC ``sk_par_steps`` + ``par_chain`` DSL.
   Stage 4 (bullet):   Takahashi's complete development ``sk_bullet``
@@ -435,95 +436,12 @@ K_T_NEQ_APP_T = _proof_atom_neq_app_t("K_T_NEQ_APP_T", "K_t", K_T_DEF, "SUC0 0",
 
 
 # ---------------------------------------------------------------------------
-# DSL helper: discharge ``~(?bv1...bvn. LHS = RHS)`` by head-tag clash.
-#
-# LHS must be concrete over {S_t, K_t, App_t}; RHS may mention the
-# existentially bound variables (which can pattern-match anything).
-# The helper walks LHS/RHS in parallel, finds the first APP_T_INJ-
-# descent path leading to a clashing pair, and emits the
-# choose+inj+absurd chain.  Three clash kinds:
-#
-#   atom-atom   (e.g. S_t vs K_t)              -- closed by S_T_NEQ_K_T
-#   atom-App_t  (e.g. S_t vs App_t _ _)        -- closed by S_T_NEQ_APP_T
-#                                                 or K_T_NEQ_APP_T
-#   App_t-atom  (sym of the above)             -- SYM + S_T_NEQ_APP_T
-#                                                 or K_T_NEQ_APP_T
-#
-# Without this helper each non-equality on a concrete SK shape would
-# cost ~20 lines of suppose+choose+APP_T_INJ+CONJUNCT boilerplate;
-# with it those become one-liners (used heavily by DIAG_TERM and the
-# par/bullet inversion lemmas).
+# Common helpers used by sk_size and sk_bullet (both wf-recursive on
+# Pair_ord depth with SELECT-shaped functional bodies).
 # ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# Stage 1 -- one-step reduction with leftmost-outermost congruence.
-#
-# Strategy: fire a K- or S- redex at the leftmost-outermost position.
-# When the top is not a redex but is an App_t, descend into the LEFT
-# child; if the left is a fixed point, descend into the RIGHT.  Leaves
-# (S_t, K_t) and "fully normal" terms are unchanged.
-#
-# This is a wf-recursive function on the nat0 encoding (subterms are
-# strictly smaller nat0s by NAT0_LT_APP_T_L/R), defined via
-# ``define_wf_lt`` over a SELECT-shaped functional body.
-#
-#   _sk_step_F f t  :=  @r.
-#     (?x y. t = App_t (App_t K_t x) y /\ r = x)                       -- K-redex
-#     \/ (~K /\ ?x y z. t = App_t (App_t (App_t S_t x) y) z /\
-#                       r = App_t (App_t x z) (App_t y z))             -- S-redex
-#     \/ (~K /\ ~S /\ ?a b. t = App_t a b /\
-#          ((~(f a = a) /\ r = App_t (f a) b)                          -- descend L
-#           \/ (f a = a /\ ~(f b = b) /\ r = App_t a (f b))             -- descend R
-#           \/ (f a = a /\ f b = b /\ r = t)))                          -- App fixed
-#     \/ (~K /\ ~S /\ ~(?a b. t = App_t a b) /\ r = t)                  -- leaf fixed
-#
-# The guards make the disjunction functional (mutually exclusive by
-# construction), so the SELECT picks the unique satisfying ``r``.
-#
-# DSL friction: ``define_wf_lt`` doesn't accept a SELECT-shaped body
-# directly -- the monotonicity proof has to dive under ``@r.`` and
-# show pointwise body-equality, then lift via AP_TERM Eps.  No
-# pre-built helper here (the existing ``mono_iff_*`` family targets
-# top-level disjunctions of constructor-existentials, not nested
-# SELECT predicates), so SK_STEP_MONO is hand-rolled.
-_sk_step_fn_ty = parse_type("nat0 -> nat0")
-_F_sk_step_ty = parse_type("(nat0 -> nat0) -> nat0 -> nat0")
 
 
-_SK_STEP_F_DEF = define(
-    "_sk_step_F",
-    _F_sk_step_ty,
-    "\\f:nat0->nat0. \\t:nat0. "
-    "@r:nat0. "
-    "(?x y. t = App_t (App_t K_t x) y /\\ r = x) \\/ "
-    "(~(?x y. t = App_t (App_t K_t x) y) /\\ "
-    " ?x y z. t = App_t (App_t (App_t S_t x) y) z /\\ "
-    "         r = App_t (App_t x z) (App_t y z)) \\/ "
-    "(~(?x y. t = App_t (App_t K_t x) y) /\\ "
-    " ~(?x y z. t = App_t (App_t (App_t S_t x) y) z) /\\ "
-    " (?a b. t = App_t a b /\\ "
-    "        ((~(f a = a) /\\ r = App_t (f a) b) \\/ "
-    "         (f a = a /\\ ~(f b = b) /\\ r = App_t a (f b)) \\/ "
-    "         (f a = a /\\ f b = b /\\ r = t)))) \\/ "
-    "(~(?x y. t = App_t (App_t K_t x) y) /\\ "
-    " ~(?x y z. t = App_t (App_t (App_t S_t x) y) z) /\\ "
-    " ~(?a b. t = App_t a b) /\\ r = t)",
-)
-_SK_STEP_F = mk_const("_sk_step_F", [])
-
-
-def _prove_sk_step_F_at():
-    """|- !f t. _sk_step_F f t = body[f, t]  (two BETAs)."""
-    from tactics import AP_THM, BETA_CONV, TRANS, GENL
-    f_var = Var("f", _sk_step_fn_ty)
-    t_var = Var("t", nat0_ty)
-    th_f = AP_THM(_SK_STEP_F_DEF, f_var)
-    th_f_eq = TRANS(th_f, BETA_CONV(rand(th_f._concl)))
-    th_ft = AP_THM(th_f_eq, t_var)
-    th_ft_eq = TRANS(th_ft, BETA_CONV(rand(th_ft._concl)))
-    return GENL([f_var, t_var], th_ft_eq)
-
-
-_SK_STEP_F_AT = _prove_sk_step_F_at()
+_nat0_fn_ty = parse_type("nat0 -> nat0")
 
 
 def _lift_select_eq(r_var, pw_eq_th):
@@ -532,8 +450,8 @@ def _lift_select_eq(r_var, pw_eq_th):
 
     Two-step lift: ``ABS`` over ``r`` to land on
     ``(\\r. P r) = (\\r. Q r)``, then ``AP_TERM`` the polymorphic ``@``
-    constant instantiated at ``r``'s type.  Generic enough to promote
-    to ``tactics.py`` if more SELECT-recursive definitions arrive.
+    constant instantiated at ``r``'s type.  Used by SK_SIZE_MONO and
+    SK_BULLET_MONO to lift per-disjunct iffs through their SELECT bodies.
     """
     from tactics import AP_TERM as _AP_TERM
     from fusion import ABS as _ABS, aty as _aty
@@ -541,203 +459,6 @@ def _lift_select_eq(r_var, pw_eq_th):
     eps_const = mk_const("@", [(r_var.ty, _aty)])
     return _AP_TERM(eps_const, abs_eq)
 
-
-@proof
-def SK_STEP_MONO(p):
-    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
-                 ==> _sk_step_F f n = _sk_step_F g n.
-
-    Body is ``@r. D1 \\/ D2 \\/ D3 \\/ D4``:
-      D1 (K-redex), D2 (~K /\\ S-redex), D4 (~K /\\ ~S /\\ ~App /\\ r=t)
-        are f-free; REFL each.
-      D3 (~K /\\ ~S /\\ ?a b. n = App_t a b /\\ inner) uses ``f a`` and
-        ``f b``; for ``a, b < n`` (NAT0_LT_APP_T_L/R) the IH gives
-        ``f a = g a`` / ``f b = g b``.  Handled by
-        ``_mono_iff_value_binary_pw_step``.
-
-    Stitch per-disjunct iffs via ``or_chain_collapse``; lift through
-    the SELECT via ``_lift_select_eq``; chain through the two
-    SPECL'd ``_SK_STEP_F_AT`` equations.
-    """
-    from tactics import (
-        AP_TERM as _AP_TERM,
-        SPECL as _SPECL,
-        TRANS as _TRANS,
-        SYM as _SYM,
-        or_chain_collapse as _or_collapse,
-    )
-    from hf_syntax import _mono_iff_value_binary_pw_step, _extract_nfg
-    from fusion import mk_comb as _mk_comb
-    from axioms import (
-        mk_and as _mk_and, mk_or as _mk_or, mk_not as _mk_not,
-        mk_exists as _mk_exists,
-    )
-    from basics import mk_eq as _mk_eq
-
-    p.goal(
-        "!f g n. (!k. nat0_lt k n ==> f k = g k) "
-        "==> _sk_step_F f n = _sk_step_F g n",
-        types={
-            "f": _sk_step_fn_ty,
-            "g": _sk_step_fn_ty,
-            "n": nat0_ty,
-            "k": nat0_ty,
-        },
-    )
-    p.fix("f g n")
-    p.assume("h: !k. nat0_lt k n ==> f k = g k")
-    h_th = p.fact("h")
-    n_t, f_t, g_t, k_ty = _extract_nfg(h_th)
-    r_var = Var("r", nat0_ty)
-
-    # ---- Build the 4 disjuncts at fresh r, sharing structure -------------
-    # K-shape, S-shape, App-shape (used in negations and as targets).
-    x_v = Var("x", nat0_ty)
-    y_v = Var("y", nat0_ty)
-    z_v = Var("z", nat0_ty)
-    a_v = Var("a", nat0_ty)
-    b_v = Var("b", nat0_ty)
-    K_redex_body = _mk_eq(
-        n_t, mk_app(App_t, mk_app(App_t, K_t, x_v), y_v)
-    )
-    K_shape = _mk_exists(x_v, _mk_exists(y_v, K_redex_body))
-    S_redex_body = _mk_eq(
-        n_t,
-        mk_app(App_t, mk_app(App_t, mk_app(App_t, S_t, x_v), y_v), z_v),
-    )
-    S_shape = _mk_exists(x_v, _mk_exists(y_v, _mk_exists(z_v, S_redex_body)))
-    App_body = _mk_eq(n_t, mk_app(App_t, a_v, b_v))
-    App_shape = _mk_exists(a_v, _mk_exists(b_v, App_body))
-
-    # D1: ?x y. n = App_t (App_t K_t x) y /\ r = x
-    D1 = _mk_exists(
-        x_v,
-        _mk_exists(
-            y_v,
-            _mk_and(K_redex_body, _mk_eq(r_var, x_v)),
-        ),
-    )
-    # D2: ~K /\ ?x y z. n = App_t (App_t (App_t S_t x) y) z /\ r = App_t (App_t x z) (App_t y z)
-    S_reduct_val = mk_app(
-        App_t,
-        mk_app(App_t, x_v, z_v),
-        mk_app(App_t, y_v, z_v),
-    )
-    D2 = _mk_and(
-        _mk_not(K_shape),
-        _mk_exists(
-            x_v,
-            _mk_exists(
-                y_v,
-                _mk_exists(
-                    z_v,
-                    _mk_and(S_redex_body, _mk_eq(r_var, S_reduct_val)),
-                ),
-            ),
-        ),
-    )
-    # D3 (built from the rest_builder via the helper).
-    # D4: ~K /\ ~S /\ ~App /\ r = n
-    D4 = _mk_and(
-        _mk_not(K_shape),
-        _mk_and(
-            _mk_not(S_shape),
-            _mk_and(_mk_not(App_shape), _mk_eq(r_var, n_t)),
-        ),
-    )
-
-    # ---- Per-disjunct iffs -----------------------------------------------
-    eq_D1 = REFL(D1)
-    eq_D2 = REFL(D2)
-    eq_D4 = REFL(D4)
-
-    # _mono_iff_value_binary_pw_step's ``args`` are extra arguments
-    # applied AFTER the recursive call ``f w`` -- for our case
-    # ``f : nat0 -> nat0`` the recursive call is already complete at
-    # ``f a`` / ``f b``, so ``args=[]``.  ``r_var`` is captured by
-    # closure rather than threaded as an arg.
-    def _D3_rest_builder(fn, a, b, args):
-        fn_a = mk_app(fn, a)
-        fn_b = mk_app(fn, b)
-        da = _mk_and(
-            _mk_not(_mk_eq(fn_a, a)),
-            _mk_eq(r_var, mk_app(App_t, fn_a, b)),
-        )
-        db = _mk_and(
-            _mk_eq(fn_a, a),
-            _mk_and(
-                _mk_not(_mk_eq(fn_b, b)),
-                _mk_eq(r_var, mk_app(App_t, a, fn_b)),
-            ),
-        )
-        dc = _mk_and(
-            _mk_eq(fn_a, a),
-            _mk_and(_mk_eq(fn_b, b), _mk_eq(r_var, n_t)),
-        )
-        return _mk_or(da, _mk_or(db, dc))
-
-    eq_D3_inner = _mono_iff_value_binary_pw_step(
-        App_t,
-        NAT0_LT_APP_T_L, NAT0_LT_APP_T_R,
-        h_th,
-        args=[],
-        rest_builder=_D3_rest_builder,
-        recurses_l=True,
-    )
-    # |- (?a b. n = App_t a b /\ rest_f) = (?a b. n = App_t a b /\ rest_g)
-
-    # Prefix ~S, then ~K via partial-application AP_TERM on /\.
-    AND_C = mk_const("/\\", [])
-    eq_D3_with_ns = _AP_TERM(_mk_comb(AND_C, _mk_not(S_shape)), eq_D3_inner)
-    eq_D3 = _AP_TERM(_mk_comb(AND_C, _mk_not(K_shape)), eq_D3_with_ns)
-
-    # ---- Stitch via or_chain_collapse ------------------------------------
-    body_eq_at_r = _or_collapse([eq_D1, eq_D2, eq_D3, eq_D4])
-    # |- body[f, n, r] = body[g, n, r]   (r free)
-
-    # ---- Lift through SELECT and chain through _SK_STEP_F_AT -------------
-    select_eq = _lift_select_eq(r_var, body_eq_at_r)
-    spec_f = _SPECL([f_t, n_t], _SK_STEP_F_AT)
-    spec_g = _SPECL([g_t, n_t], _SK_STEP_F_AT)
-    final = _TRANS(spec_f, _TRANS(select_eq, _SYM(spec_g)))
-
-    p.thus("_sk_step_F f n = _sk_step_F g n").by_thm(final)
-
-
-# Well-founded recursive definition.
-#   SK_STEP_DEF      : |- sk_step = (@h. !n. h n = _sk_step_F h n)
-#   _SK_STEP_REC_RAW : |- !n. sk_step n = _sk_step_F sk_step n
-SK_STEP_DEF, _SK_STEP_REC_RAW = define_wf_lt(
-    "sk_step",
-    _sk_step_fn_ty,
-    _SK_STEP_F,
-    SK_STEP_MONO,
-)
-sk_step = mk_const("sk_step", [])
-
-
-# SK_STEP_REC : |- !n. sk_step n = body[sk_step, n]
-# (the un-helpered RHS, ready for case-splits).
-SK_STEP_REC = _unfold_rec_via_F_def(_SK_STEP_REC_RAW, _SK_STEP_F_DEF)
-
-
-# ``is_normal`` is *defined* as the fixed-point condition of sk_step.
-# Under leftmost-outermost congruence reduction this is equivalent to
-# "no redex anywhere in t".  Making it the definition collapses
-# ``is_normal``-related unfolds to a single equational rewrite.
-IS_NORMAL_DEF = define(
-    "is_normal",
-    parse_type("nat0 -> bool"),
-    "\\t:nat0. sk_step t = t",
-)
-is_normal = mk_const("is_normal", [])
-
-
-# ---------------------------------------------------------------------------
-# DSL helpers for the SK_STEP_REC case-split pattern.  Without these,
-# each of SK_STEP_K / SK_STEP_S has to spell the 4-disjunct body
-# verbatim at three sites (existence witness, post-select body fact,
-# each case spec), which is ~150 lines per proof.
 
 def _select_via_rec(rec_th, args, ex_th):
     """Like ``by_select_def``, but works with a REC-shape equation
@@ -758,524 +479,15 @@ def _select_via_rec(rec_th, args, ex_th):
     return REWRITE_RULE([_SYM(spec)], chosen)
 
 
-def _sk_step_disjuncts(t, r):
-    """Return the four disjunct strings of the ``_sk_step_F`` body
-    applied at input ``t``, with the SELECT-bound variable substituted
-    by ``r`` (literal ``"r"`` for the existence witness; ``"sk_step
-    (<t>)"`` for the post-select body and case specs).
-
-    Existential bound names are ``a, b, c`` (renamed from the
-    definition's ``x, y, z`` so they don't shadow caller-free vars
-    like ``x, y, z`` from the outer goal).
-    """
-    K_shape = f"?a b. {t} = App_t (App_t K_t a) b"
-    S_shape = f"?a b c. {t} = App_t (App_t (App_t S_t a) b) c"
-    App_shape = f"?a b. {t} = App_t a b"
-    D1 = f"(?a b. {t} = App_t (App_t K_t a) b /\\ {r} = a)"
-    D2 = (
-        f"(~({K_shape}) /\\ "
-        f" ?a b c. {t} = App_t (App_t (App_t S_t a) b) c /\\ "
-        f"         {r} = App_t (App_t a c) (App_t b c))"
-    )
-    D3_inner = (
-        f"((~(sk_step a = a) /\\ {r} = App_t (sk_step a) b) \\/ "
-        f" (sk_step a = a /\\ ~(sk_step b = b) /\\ "
-        f"  {r} = App_t a (sk_step b)) \\/ "
-        f" (sk_step a = a /\\ sk_step b = b /\\ {r} = {t}))"
-    )
-    D3 = (
-        f"(~({K_shape}) /\\ ~({S_shape}) /\\ "
-        f" (?a b. {t} = App_t a b /\\ {D3_inner}))"
-    )
-    D4 = (
-        f"(~({K_shape}) /\\ ~({S_shape}) /\\ ~({App_shape}) /\\ "
-        f" {r} = {t})"
-    )
-    return [D1, D2, D3, D4]
-
-
-def _sk_step_body(t, r):
-    return " \\/ ".join(_sk_step_disjuncts(t, r))
-
-
-def _sk_step_select_at(p, t, witness_r, inner_branch_th):
-    """Build the body-at-sk_step fact for input ``t``.
-
-    Combines:
-      1. ``ex: ?r. body[t, r]``      (existence witness via inner_branch_th + by_disj)
-      2. ``_select_via_rec``         (fold SELECT to ``sk_step t``)
-
-    Args:
-      t                : input term, as a string.
-      witness_r        : the ``r``-value to witness with, as a string.
-      inner_branch_th  : a fact label or theorem proving the firing
-                         disjunct's body at ``r := witness_r``.
-
-    The caller registers ``inner_branch_th`` as a fact in scope
-    (e.g. ``p.have("inner_K: ?a b. t = App_t (App_t K_t a) b /\\ r0 = a")``
-    with ``r0 = witness_r``).  This helper DISJ-chains it into the
-    full 4-disjunct shape, EXISTS-introduces ``r``, and feeds to
-    ``_select_via_rec``.
-
-    Returns the kernel theorem ``|- body[t, sk_step t]``.
-    """
-    body_at_r = _sk_step_body(t, witness_r)
-    body_at_r_var = _sk_step_body(t, "r")
-    p.have(f"_step_disj_rhs: {body_at_r}").by_disj(inner_branch_th)
-    p.have(f"_step_ex: ?r. {body_at_r_var}").by_witness(witness_r, "_step_disj_rhs")
-    return _select_via_rec(SK_STEP_REC, [p._parse(t)], p.fact("_step_ex"))
-
-
-@proof
-def SK_STEP_K(p):
-    """|- !x y. sk_step (App_t (App_t K_t x) y) = x.
-
-    K-redex disjunct of the 4-disjunct body fires at ``r := x``;
-    APP_T_INJ chain identifies the K-redex's bound ``a`` with our
-    ``x``.  The S-, App-, and leaf-branches all carry ``~K`` and are
-    refuted via the obvious K-redex existence of the input.
-    """
-    from tactics import CONJ as _CONJ, CONJUNCT1 as _C1, CONJUNCT2 as _C2
-    p.goal("!x y. sk_step (App_t (App_t K_t x) y) = x")
-    p.fix("x y")
-    t = "App_t (App_t K_t x) y"
-    sk_t = f"sk_step ({t})"
-    # K-disjunct witness at r := x: ?a b. t = App_t (App_t K_t a) b /\ x = a.
-    p.have(
-        f"inner_K: ?a b. {t} = App_t (App_t K_t a) b /\\ x = a"
-    ).by_exists(
-        ["x", "y"], REFL(p._parse(t)), REFL(p._parse("x"))
-    )
-    body_th = _sk_step_select_at(p, t, "x", "inner_K")
-    p.have(f"body: {_sk_step_body(t, sk_t)}").by_thm(body_th)
-    # K-redex existence at the input; refutes ~K guards in cases 2-4.
-    p.have(f"is_kred: ?a b. {t} = App_t (App_t K_t a) b").by_exists(
-        ["x", "y"], REFL(p._parse(t))
-    )
-    D1, D2, D3, D4 = _sk_step_disjuncts(t, sk_t)
-    with p.cases_on("body"):
-        with p.case(f"h1: {D1}"):
-            p.choose("b", from_="a_eq")
-            p.split("b_eq", "(h_app, h_sk)")
-            p.have(
-                "h_o: App_t K_t x = App_t K_t a /\\ y = b"
-            ).by(APP_T_INJ, "App_t K_t x", "y", "App_t K_t a", "b", "h_app")
-            p.have("h_o1: App_t K_t x = App_t K_t a").by_thm(_C1(p.fact("h_o")))
-            p.have("h_i: K_t = K_t /\\ x = a").by(
-                APP_T_INJ, "K_t", "x", "K_t", "a", "h_o1"
-            )
-            p.have("h_xa: x = a").by_thm(_C2(p.fact("h_i")))
-            p.thus(f"{sk_t} = x").by_rewrite_of("h_sk", [SYM(p.fact("h_xa"))])
-        with p.case(f"h2: {D2}"):
-            p.split("h2", "(h_nk, _)")
-            p.absurd().by_conj("h_nk", "is_kred")
-        with p.case(f"h3: {D3}"):
-            p.split("h3", "(h_nk, _, _)")
-            p.absurd().by_conj("h_nk", "is_kred")
-        with p.case(f"h4: {D4}"):
-            p.split("h4", "(h_nk, _, _, _)")
-            p.absurd().by_conj("h_nk", "is_kred")
-
-
-@proof
-def SK_STEP_S(p):
-    """|- !x y z. sk_step (App_t (App_t (App_t S_t x) y) z)
-                  = App_t (App_t x z) (App_t y z).
-
-    S-redex disjunct (index 1, guarded by ``~K``) fires at the natural
-    witness; refute K-branch via ``not_kred`` (APP_T_INJ chain shows
-    an S-input can't unify with a K-redex shape); refute App-rec and
-    leaf branches via the obvious S-redex existence of the input.
-    """
-    from tactics import CONJ as _CONJ, CONJUNCT1 as _C1, CONJUNCT2 as _C2
-    p.goal(
-        "!x y z. sk_step (App_t (App_t (App_t S_t x) y) z) "
-        "         = App_t (App_t x z) (App_t y z)"
-    )
-    p.fix("x y z")
-    t = "App_t (App_t (App_t S_t x) y) z"
-    sk_t = f"sk_step ({t})"
-    val = "App_t (App_t x z) (App_t y z)"
-
-    # not_kred: ~(?a b. t = App_t (App_t K_t a) b).  S-input has head
-    # S_t, not K_t; tag clash via K_T_NEQ_APP_T after two APP_T_INJ peels.
-    with p.have(
-        f"not_kred: ~(?a b. {t} = App_t (App_t K_t a) b)"
-    ).proof():
-        with p.suppose(f"ex_kred: ?a b. {t} = App_t (App_t K_t a) b"):
-            p.choose("a", from_="ex_kred")
-            p.choose("b", from_="a_eq")
-            p.have(
-                "h_o: App_t (App_t S_t x) y = App_t K_t a /\\ z = b"
-            ).by(APP_T_INJ, "App_t (App_t S_t x) y", "z",
-                 "App_t K_t a", "b", "b_eq")
-            p.have("h_o1: App_t (App_t S_t x) y = App_t K_t a").by_thm(
-                _C1(p.fact("h_o"))
-            )
-            p.have("h_m: App_t S_t x = K_t /\\ y = a").by(
-                APP_T_INJ, "App_t S_t x", "y", "K_t", "a", "h_o1"
-            )
-            p.have("ASx_eq_K: App_t S_t x = K_t").by_thm(_C1(p.fact("h_m")))
-            p.have("K_neq: ~(K_t = App_t S_t x)").by(K_T_NEQ_APP_T, "S_t", "x")
-            p.have("K_eq: K_t = App_t S_t x").by_thm(SYM(p.fact("ASx_eq_K")))
-            p.absurd().by_conj("K_neq", "K_eq")
-
-    # S-disjunct inner witness at r := val.
-    p.have(
-        f"inner_S_inner: ?a b c. {t} = App_t (App_t (App_t S_t a) b) c /\\ "
-        f"                       {val} = App_t (App_t a c) (App_t b c)"
-    ).by_exists(
-        ["x", "y", "z"], REFL(p._parse(t)), REFL(p._parse(val))
-    )
-    p.have(
-        f"inner_S: ~(?a b. {t} = App_t (App_t K_t a) b) /\\ "
-        f" (?a b c. {t} = App_t (App_t (App_t S_t a) b) c /\\ "
-        f"          {val} = App_t (App_t a c) (App_t b c))"
-    ).by_thm(_CONJ(p.fact("not_kred"), p.fact("inner_S_inner")))
-    body_th = _sk_step_select_at(p, t, val, "inner_S")
-    p.have(f"body: {_sk_step_body(t, sk_t)}").by_thm(body_th)
-
-    # is_sred: refutes ~S guards in branches 3, 4.
-    p.have(
-        f"is_sred: ?a b c. {t} = App_t (App_t (App_t S_t a) b) c"
-    ).by_exists(["x", "y", "z"], REFL(p._parse(t)))
-
-    D1, D2, D3, D4 = _sk_step_disjuncts(t, sk_t)
-    with p.cases_on("body"):
-        with p.case(f"h1: {D1}"):
-            # K-branch on S-input: extract a, b and contradict not_kred.
-            p.choose("b", from_="a_eq")
-            p.split("b_eq", "(h_app, _)")
-            p.have(
-                f"h_kred_ex: ?a b. {t} = App_t (App_t K_t a) b"
-            ).by_exists(["a", "b"], p.fact("h_app"))
-            p.absurd().by_conj("not_kred", "h_kred_ex")
-        with p.case(f"h2: {D2}"):
-            p.split("h2", "(_, h2_ex)")
-            p.choose("a", from_="h2_ex")
-            p.choose("b", from_="a_eq")
-            p.choose("c", from_="b_eq")
-            p.split("c_eq", "(h_app, h_sk)")
-            # h_app: t = App_t (App_t (App_t S_t a) b) c.  Three APP_T_INJ peels
-            # identify x = a, y = b, z = c.
-            p.have(
-                "h_o: App_t (App_t S_t x) y = App_t (App_t S_t a) b /\\ z = c"
-            ).by(APP_T_INJ, "App_t (App_t S_t x) y", "z",
-                 "App_t (App_t S_t a) b", "c", "h_app")
-            p.have("h_o1: App_t (App_t S_t x) y = App_t (App_t S_t a) b").by_thm(
-                _C1(p.fact("h_o"))
-            )
-            p.have("h_zc: z = c").by_thm(_C2(p.fact("h_o")))
-            p.have(
-                "h_m: App_t S_t x = App_t S_t a /\\ y = b"
-            ).by(APP_T_INJ, "App_t S_t x", "y", "App_t S_t a", "b", "h_o1")
-            p.have("h_m1: App_t S_t x = App_t S_t a").by_thm(_C1(p.fact("h_m")))
-            p.have("h_yb: y = b").by_thm(_C2(p.fact("h_m")))
-            p.have(
-                "h_i: S_t = S_t /\\ x = a"
-            ).by(APP_T_INJ, "S_t", "x", "S_t", "a", "h_m1")
-            p.have("h_xa: x = a").by_thm(_C2(p.fact("h_i")))
-            p.thus(f"{sk_t} = {val}").by_rewrite_of(
-                "h_sk",
-                [SYM(p.fact("h_xa")), SYM(p.fact("h_yb")), SYM(p.fact("h_zc"))],
-            )
-        with p.case(f"h3: {D3}"):
-            p.split("h3", "(_, h_ns, _)")
-            p.absurd().by_conj("h_ns", "is_sred")
-        with p.case(f"h4: {D4}"):
-            p.split("h4", "(_, h_ns, _, _)")
-            p.absurd().by_conj("h_ns", "is_sred")
-
-
-@proof
-def SK_STEP_LEFT(p):
-    """|- !u v.
-            ~(?a b. App_t u v = App_t (App_t K_t a) b)
-            ==> ~(?a b c. App_t u v = App_t (App_t (App_t S_t a) b) c)
-            ==> ~(sk_step u = u)
-            ==> sk_step (App_t u v) = App_t (sk_step u) v.
-
-    Descend-left congruence: when the outer App is neither a K- nor an
-    S-redex and the left child is non-normal, sk_step descends into the
-    left.  D3 (App-recurse) of the 4-disjunct body fires at the
-    descend-left sub-disjunct with witness (a, b) := (u, v); the
-    sub-disjunct's ``~(sk_step a = a)`` premise is exactly our third
-    hypothesis.  D1/D2 contradict the first two hypotheses, D4 the
-    obvious fact that ``App_t u v`` is an App.
-    """
-    from tactics import CONJ as _CONJ, CONJUNCT1 as _C1, CONJUNCT2 as _C2
-    p.goal(
-        "!u v. ~(?a b. App_t u v = App_t (App_t K_t a) b) ==> "
-        "      ~(?a b c. App_t u v = App_t (App_t (App_t S_t a) b) c) ==> "
-        "      ~(sk_step u = u) ==> "
-        "      sk_step (App_t u v) = App_t (sk_step u) v"
-    )
-    p.fix("u v")
-    p.assume("not_kred: ~(?a b. App_t u v = App_t (App_t K_t a) b)")
-    p.assume("not_sred: ~(?a b c. App_t u v = App_t (App_t (App_t S_t a) b) c)")
-    p.assume("not_norm_u: ~(sk_step u = u)")
-
-    t = "App_t u v"
-    sk_t = f"sk_step ({t})"
-    val = "App_t (sk_step u) v"
-    K_shape = f"?a b. {t} = App_t (App_t K_t a) b"
-    S_shape = f"?a b c. {t} = App_t (App_t (App_t S_t a) b) c"
-
-    # Build the descend-left D3-inner witness, at (a, b) := (u, v), r := val.
-    # Sub-disjunct 1: ~(sk_step u = u) /\ val = App_t (sk_step u) v.
-    p.have(
-        f"sub1: ~(sk_step u = u) /\\ {val} = App_t (sk_step u) v"
-    ).by_thm(_CONJ(p.fact("not_norm_u"), REFL(p._parse(val))))
-    triple_at_uv = (
-        f"(~(sk_step u = u) /\\ {val} = App_t (sk_step u) v) \\/ "
-        f"(sk_step u = u /\\ ~(sk_step v = v) /\\ "
-        f" {val} = App_t u (sk_step v)) \\/ "
-        f"(sk_step u = u /\\ sk_step v = v /\\ {val} = {t})"
-    )
-    p.have(f"triple_uv: {triple_at_uv}").by_disj("sub1")
-    inner_ex = (
-        f"?a b. {t} = App_t a b /\\ "
-        f"((~(sk_step a = a) /\\ {val} = App_t (sk_step a) b) \\/ "
-        f" (sk_step a = a /\\ ~(sk_step b = b) /\\ "
-        f"  {val} = App_t a (sk_step b)) \\/ "
-        f" (sk_step a = a /\\ sk_step b = b /\\ {val} = {t}))"
-    )
-    p.have(f"inner_ex: {inner_ex}").by_exists(["u", "v"], "triple_uv")
-    p.have(
-        f"inner_d3: ~({K_shape}) /\\ ~({S_shape}) /\\ ({inner_ex})"
-    ).by_thm(
-        _CONJ(p.fact("not_kred"), _CONJ(p.fact("not_sred"), p.fact("inner_ex")))
-    )
-
-    body_th = _sk_step_select_at(p, t, val, "inner_d3")
-    p.have(f"body: {_sk_step_body(t, sk_t)}").by_thm(body_th)
-
-    # App-shape witness for D4 contradiction.
-    p.have(f"is_app: ?a b. {t} = App_t a b").by_exists(
-        ["u", "v"], REFL(p._parse(t))
-    )
-
-    D1, D2, D3, D4 = _sk_step_disjuncts(t, sk_t)
-    with p.cases_on("body"):
-        with p.case(f"h1: {D1}"):
-            # D1 carries the K-redex existence directly.
-            p.choose("a_d1", from_="h1")
-            p.choose("b_d1", from_="a_d1_eq")
-            p.split("b_d1_eq", "(h_app, _)")
-            p.have(f"h_kred: {K_shape}").by_exists(
-                ["a_d1", "b_d1"], "h_app"
-            )
-            p.absurd().by_conj("not_kred", "h_kred")
-        with p.case(f"h2: {D2}"):
-            p.split("h2", "(_, h2_ex)")
-            p.choose("a_d2", from_="h2_ex")
-            p.choose("b_d2", from_="a_d2_eq")
-            p.choose("c_d2", from_="b_d2_eq")
-            p.split("c_d2_eq", "(h_app, _)")
-            p.have(f"h_sred: {S_shape}").by_exists(
-                ["a_d2", "b_d2", "c_d2"], "h_app"
-            )
-            p.absurd().by_conj("not_sred", "h_sred")
-        with p.case(f"h3: {D3}"):
-            p.split("h3", "(_, _, h3_ex)")
-            p.choose("a3", from_="h3_ex")
-            p.choose("b3", from_="a3_eq")
-            p.split("b3_eq", "(h_app, h_triple)")
-            # u = a3, v = b3 via APP_T_INJ.
-            p.have("h_inj: u = a3 /\\ v = b3").by(
-                APP_T_INJ, "u", "v", "a3", "b3", "h_app"
-            )
-            p.have("h_ua: u = a3").by_thm(_C1(p.fact("h_inj")))
-            p.have("h_vb: v = b3").by_thm(_C2(p.fact("h_inj")))
-            with p.cases_on("h_triple"):
-                with p.case(
-                    f"hsub1: ~(sk_step a3 = a3) /\\ "
-                    f"       {sk_t} = App_t (sk_step a3) b3"
-                ):
-                    p.split("hsub1", "(_, h_sk)")
-                    p.thus(f"{sk_t} = {val}").by_rewrite_of(
-                        "h_sk",
-                        [SYM(p.fact("h_ua")), SYM(p.fact("h_vb"))],
-                    )
-                with p.case(
-                    f"hsub2: sk_step a3 = a3 /\\ ~(sk_step b3 = b3) /\\ "
-                    f"       {sk_t} = App_t a3 (sk_step b3)"
-                ):
-                    p.split("hsub2", "(h_sk_a, _, _)")
-                    # sk_step a3 = a3; rewrite a3 → u gives sk_step u = u,
-                    # contradicting not_norm_u.
-                    p.have("h_sk_u: sk_step u = u").by_rewrite_of(
-                        "h_sk_a", [SYM(p.fact("h_ua"))]
-                    )
-                    p.absurd().by_conj("not_norm_u", "h_sk_u")
-                with p.case(
-                    f"hsub3: sk_step a3 = a3 /\\ sk_step b3 = b3 /\\ "
-                    f"       {sk_t} = {t}"
-                ):
-                    p.split("hsub3", "(h_sk_a, _, _)")
-                    p.have("h_sk_u: sk_step u = u").by_rewrite_of(
-                        "h_sk_a", [SYM(p.fact("h_ua"))]
-                    )
-                    p.absurd().by_conj("not_norm_u", "h_sk_u")
-        with p.case(f"h4: {D4}"):
-            p.split("h4", "(_, _, h_napp, _)")
-            p.absurd().by_conj("h_napp", "is_app")
-
-
-@proof
-def SK_STEP_RIGHT(p):
-    """|- !u v.
-            ~(?a b. App_t u v = App_t (App_t K_t a) b)
-            ==> ~(?a b c. App_t u v = App_t (App_t (App_t S_t a) b) c)
-            ==> sk_step u = u
-            ==> ~(sk_step v = v)
-            ==> sk_step (App_t u v) = App_t u (sk_step v).
-
-    Descend-right congruence: when the outer App is neither a K- nor an
-    S-redex, the left child is already normal, and the right child is
-    non-normal, sk_step descends into the right.  D3 of the 4-disjunct
-    body fires at the descend-right sub-disjunct with witness
-    (a, b) := (u, v).  Same dispatch shape as ``SK_STEP_LEFT``; sub2
-    fires, sub1 contradicts ``sk_step u = u`` (after ``a = u``), sub3
-    contradicts ``~(sk_step v = v)`` (after ``b = v``).
-    """
-    from tactics import CONJ as _CONJ, CONJUNCT1 as _C1, CONJUNCT2 as _C2
-    p.goal(
-        "!u v. ~(?a b. App_t u v = App_t (App_t K_t a) b) ==> "
-        "      ~(?a b c. App_t u v = App_t (App_t (App_t S_t a) b) c) ==> "
-        "      sk_step u = u ==> "
-        "      ~(sk_step v = v) ==> "
-        "      sk_step (App_t u v) = App_t u (sk_step v)"
-    )
-    p.fix("u v")
-    p.assume("not_kred: ~(?a b. App_t u v = App_t (App_t K_t a) b)")
-    p.assume("not_sred: ~(?a b c. App_t u v = App_t (App_t (App_t S_t a) b) c)")
-    p.assume("norm_u: sk_step u = u")
-    p.assume("not_norm_v: ~(sk_step v = v)")
-
-    t = "App_t u v"
-    sk_t = f"sk_step ({t})"
-    val = "App_t u (sk_step v)"
-    K_shape = f"?a b. {t} = App_t (App_t K_t a) b"
-    S_shape = f"?a b c. {t} = App_t (App_t (App_t S_t a) b) c"
-
-    # Build the descend-right D3-inner witness at (a, b) := (u, v), r := val.
-    # Sub-disjunct 2: sk_step u = u /\ ~(sk_step v = v) /\ val = App_t u (sk_step v).
-    p.have(
-        f"sub2: sk_step u = u /\\ ~(sk_step v = v) /\\ "
-        f"      {val} = App_t u (sk_step v)"
-    ).by_thm(
-        _CONJ(
-            p.fact("norm_u"),
-            _CONJ(p.fact("not_norm_v"), REFL(p._parse(val))),
-        )
-    )
-    triple_at_uv = (
-        f"(~(sk_step u = u) /\\ {val} = App_t (sk_step u) v) \\/ "
-        f"(sk_step u = u /\\ ~(sk_step v = v) /\\ "
-        f" {val} = App_t u (sk_step v)) \\/ "
-        f"(sk_step u = u /\\ sk_step v = v /\\ {val} = {t})"
-    )
-    p.have(f"triple_uv: {triple_at_uv}").by_disj("sub2")
-
-    inner_ex = (
-        f"?a b. {t} = App_t a b /\\ "
-        f"((~(sk_step a = a) /\\ {val} = App_t (sk_step a) b) \\/ "
-        f" (sk_step a = a /\\ ~(sk_step b = b) /\\ "
-        f"  {val} = App_t a (sk_step b)) \\/ "
-        f" (sk_step a = a /\\ sk_step b = b /\\ {val} = {t}))"
-    )
-    p.have(f"inner_ex: {inner_ex}").by_exists(["u", "v"], "triple_uv")
-    p.have(
-        f"inner_d3: ~({K_shape}) /\\ ~({S_shape}) /\\ ({inner_ex})"
-    ).by_thm(
-        _CONJ(p.fact("not_kred"), _CONJ(p.fact("not_sred"), p.fact("inner_ex")))
-    )
-
-    body_th = _sk_step_select_at(p, t, val, "inner_d3")
-    p.have(f"body: {_sk_step_body(t, sk_t)}").by_thm(body_th)
-
-    p.have(f"is_app: ?a b. {t} = App_t a b").by_exists(
-        ["u", "v"], REFL(p._parse(t))
-    )
-
-    D1, D2, D3, D4 = _sk_step_disjuncts(t, sk_t)
-    with p.cases_on("body"):
-        with p.case(f"h1: {D1}"):
-            p.choose("a_d1", from_="h1")
-            p.choose("b_d1", from_="a_d1_eq")
-            p.split("b_d1_eq", "(h_app, _)")
-            p.have(f"h_kred: {K_shape}").by_exists(
-                ["a_d1", "b_d1"], "h_app"
-            )
-            p.absurd().by_conj("not_kred", "h_kred")
-        with p.case(f"h2: {D2}"):
-            p.split("h2", "(_, h2_ex)")
-            p.choose("a_d2", from_="h2_ex")
-            p.choose("b_d2", from_="a_d2_eq")
-            p.choose("c_d2", from_="b_d2_eq")
-            p.split("c_d2_eq", "(h_app, _)")
-            p.have(f"h_sred: {S_shape}").by_exists(
-                ["a_d2", "b_d2", "c_d2"], "h_app"
-            )
-            p.absurd().by_conj("not_sred", "h_sred")
-        with p.case(f"h3: {D3}"):
-            p.split("h3", "(_, _, h3_ex)")
-            p.choose("a3", from_="h3_ex")
-            p.choose("b3", from_="a3_eq")
-            p.split("b3_eq", "(h_app, h_triple)")
-            p.have("h_inj: u = a3 /\\ v = b3").by(
-                APP_T_INJ, "u", "v", "a3", "b3", "h_app"
-            )
-            p.have("h_ua: u = a3").by_thm(_C1(p.fact("h_inj")))
-            p.have("h_vb: v = b3").by_thm(_C2(p.fact("h_inj")))
-            with p.cases_on("h_triple"):
-                with p.case(
-                    f"hsub1: ~(sk_step a3 = a3) /\\ "
-                    f"       {sk_t} = App_t (sk_step a3) b3"
-                ):
-                    p.split("hsub1", "(h_nn_a, _)")
-                    # ~(sk_step a3 = a3); rewrite a3 → u gives
-                    # ~(sk_step u = u), contradicting norm_u.
-                    p.have("h_nn_u: ~(sk_step u = u)").by_rewrite_of(
-                        "h_nn_a", [SYM(p.fact("h_ua"))]
-                    )
-                    p.absurd().by_conj("h_nn_u", "norm_u")
-                with p.case(
-                    f"hsub2: sk_step a3 = a3 /\\ ~(sk_step b3 = b3) /\\ "
-                    f"       {sk_t} = App_t a3 (sk_step b3)"
-                ):
-                    p.split("hsub2", "(_, _, h_sk)")
-                    # h_sk: sk_t = App_t a3 (sk_step b3); rewrite a3 → u, b3 → v.
-                    p.thus(f"{sk_t} = {val}").by_rewrite_of(
-                        "h_sk",
-                        [SYM(p.fact("h_ua")), SYM(p.fact("h_vb"))],
-                    )
-                with p.case(
-                    f"hsub3: sk_step a3 = a3 /\\ sk_step b3 = b3 /\\ "
-                    f"       {sk_t} = {t}"
-                ):
-                    p.split("hsub3", "(_, h_sk_b, _)")
-                    p.have("h_sk_v: sk_step v = v").by_rewrite_of(
-                        "h_sk_b", [SYM(p.fact("h_vb"))]
-                    )
-                    p.absurd().by_conj("not_norm_v", "h_sk_v")
-        with p.case(f"h4: {D4}"):
-            p.split("h4", "(_, _, h_napp, _)")
-            p.absurd().by_conj("h_napp", "is_app")
 def _atom_neq_App_negations(p, atom, atom_neq_lemma):
     """For an atom term (S_t or K_t), prove the three "atom is not
     App_t-shaped" existentials:
       ``~(?x y. atom = App_t (App_t K_t x) y)``,
       ``~(?x y z. atom = App_t (App_t (App_t S_t x) y) z)``,
       ``~(?a b. atom = App_t a b)``.
-    Returns the three theorems.  Uses S_T_NEQ_APP_T / K_T_NEQ_APP_T.
+    Returns the three fact-name strings.  Uses S_T_NEQ_APP_T / K_T_NEQ_APP_T.
     """
-    from tactics import CONJ as _CONJ
-    atom_str = atom  # display name only
-    nK_th = None
-    nS_th = None
-    nApp_th = None
+    atom_str = atom
     with p.have(f"nApp_{atom_str}: ~(?a b. {atom_str} = App_t a b)").proof():
         with p.suppose(f"hex: ?a b. {atom_str} = App_t a b"):
             p.choose("a", from_="hex")
@@ -1306,17 +518,100 @@ def _atom_neq_App_negations(p, atom, atom_neq_lemma):
             ).by(atom_neq_lemma, "App_t (App_t S_t x) y", "z")
             p.absurd().by_conj("hneq", "z_eq")
     return f"nK_{atom_str}", f"nS_{atom_str}", f"nApp_{atom_str}"
-@proof
-def IS_NORMAL_IMP_FIXED(p):
-    """|- !t. is_normal t ==> sk_step t = t.
 
-    Trivial under is_normal := sk_step t = t: is_normal t IS
-    sk_step t = t after one unfold.
+
+# ---------------------------------------------------------------------------
+# Stage 1 -- ``is_normal``: syntactic no-redex predicate.
+#
+# A term ``n`` is "normal" iff it contains no K-redex or S-redex
+# anywhere.  WF-recursion on Pair_ord depth, same shape as
+# ``is_sk_term``:
+#
+#   _is_normal_F f n  :=  n = S_t
+#                       \/ n = K_t
+#                       \/ ( ~(?M N. n = App_t (App_t K_t M) N)
+#                          /\ ~(?M N P. n = App_t (App_t (App_t S_t M) N) P)
+#                          /\ ?a b. n = App_t a b /\ f a /\ f b )
+#
+# The two not-redex guards are non-recursive in f; only the inner
+# App-existential drives recursion, at NAT0_LT_APP_T_L/R-smaller args.
+#
+# Under leftmost-outermost reduction this is classically equivalent to
+# ``sk_bullet t = t``; the equivalence is not needed for the halting
+# proof, so we don't formalise it.
+# ---------------------------------------------------------------------------
+
+
+_IS_NORMAL_F_DEF = define(
+    "_is_normal_F",
+    _F_pred_ty,
+    "\\f:nat0->bool. \\n:nat0. "
+    "n = S_t \\/ n = K_t \\/ "
+    "(~(?u v. n = App_t (App_t K_t u) v) /\\ "
+    " ~(?u v w. n = App_t (App_t (App_t S_t u) v) w) /\\ "
+    " (?a b. n = App_t a b /\\ f a /\\ f b))",
+)
+_IS_NORMAL_F = mk_const("_is_normal_F", [])
+
+
+@proof
+def IS_NORMAL_MONO(p):
+    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
+    ==> _is_normal_F f n = _is_normal_F g n.
+
+    D1 (n = S_t), D2 (n = K_t) are f-free (REFL).  D3's outer
+    ~K-redex / ~S-redex guards are f-free; the inner
+    ``?a b. n = App_t a b /\\ f a /\\ f b`` recurses at strictly-
+    smaller arguments (NAT0_LT_APP_T_L/R), handled by
+    ``mono_iff_binary_step``.  Conjoin the f-free guards on top via
+    AP_TERM, then chain disjuncts via ``or_chain_collapse``.
     """
-    p.goal("!t. is_normal t ==> sk_step t = t")
-    p.fix("t")
-    p.assume("h_norm: is_normal t")
-    p.thus("sk_step t = t").by_unfold("h_norm", IS_NORMAL_DEF)
+    from tactics import AP_TERM as _AP_TERM
+    p.goal(
+        "!f g n. (!k. nat0_lt k n ==> f k = g k) "
+        "==> _is_normal_F f n = _is_normal_F g n",
+        types={"f": _pred_ty, "g": _pred_ty, "n": nat0_ty, "k": nat0_ty},
+    )
+    p.fix("f g n")
+    p.assume("h: !k. nat0_lt k n ==> f k = g k")
+
+    h_th = p.fact("h")
+    eq_S = REFL(p._parse("n = S_t"))
+    eq_K = REFL(p._parse("n = K_t"))
+    eq_app_inner = mono_iff_binary_step(
+        App_t, NAT0_LT_APP_T_L, NAT0_LT_APP_T_R, h_th
+    )
+    nK_guard = p._parse("~(?u v. n = App_t (App_t K_t u) v)")
+    nS_guard = p._parse("~(?u v w. n = App_t (App_t (App_t S_t u) v) w)")
+    and_const = mk_const("/\\", [])
+    # Right-associative /\: nest as nK /\ (nS /\ inner) to match the
+    # body's right-associative chain.
+    eq_with_nS = _AP_TERM(mk_app(and_const, nS_guard), eq_app_inner)
+    eq_app = _AP_TERM(mk_app(and_const, nK_guard), eq_with_nS)
+    body_eq = or_chain_collapse([eq_S, eq_K, eq_app])
+
+    p.thus("_is_normal_F f n = _is_normal_F g n").by_unfold(
+        body_eq, _IS_NORMAL_F_DEF
+    )
+
+
+IS_NORMAL_DEF, _IS_NORMAL_REC_RAW = define_wf_lt(
+    "is_normal",
+    _pred_ty,
+    _IS_NORMAL_F,
+    IS_NORMAL_MONO,
+)
+is_normal = mk_const("is_normal", [])
+
+
+# IS_NORMAL_REC : |- !n. is_normal n =
+#                          n = S_t \/ n = K_t \/
+#                          (~(?M N. n = App_t (App_t K_t M) N) /\
+#                           ~(?M N P. n = App_t (App_t (App_t S_t M) N) P) /\
+#                           ?a b. n = App_t a b /\ is_normal a /\ is_normal b).
+IS_NORMAL_REC = _unfold_rec_via_F_def(_IS_NORMAL_REC_RAW, _IS_NORMAL_F_DEF)
+
+
 # ---------------------------------------------------------------------------
 # Stage 2 -- ``sk_size`` measure.
 #
@@ -1369,7 +664,7 @@ def _prove_sk_size_F_at():
     would dedupe these three sites but doesn't exist yet.
     """
     from tactics import AP_THM, BETA_CONV, TRANS, GENL
-    f_var = Var("f", _sk_step_fn_ty)
+    f_var = Var("f", _nat0_fn_ty)
     t_var = Var("t", nat0_ty)
     th_f = AP_THM(_SK_SIZE_F_DEF, f_var)
     th_f_eq = TRANS(th_f, BETA_CONV(rand(th_f._concl)))
@@ -1410,8 +705,8 @@ def SK_SIZE_MONO(p):
         "!f g n. (!k. nat0_lt k n ==> f k = g k) "
         "==> _sk_size_F f n = _sk_size_F g n",
         types={
-            "f": _sk_step_fn_ty,
-            "g": _sk_step_fn_ty,
+            "f": _nat0_fn_ty,
+            "g": _nat0_fn_ty,
             "n": nat0_ty,
             "k": nat0_ty,
         },
@@ -1466,7 +761,7 @@ def SK_SIZE_MONO(p):
 
 SK_SIZE_DEF, _SK_SIZE_REC_RAW = define_wf_lt(
     "sk_size",
-    _sk_step_fn_ty,
+    _nat0_fn_ty,
     _SK_SIZE_F,
     SK_SIZE_MONO,
 )
@@ -2538,7 +1833,7 @@ def _prove_sk_bullet_F_at():
     BETA the resulting lambda; AP_THM at t, BETA again; GENL.
     """
     from tactics import AP_THM, BETA_CONV, TRANS, GENL
-    f_var = Var("f", _sk_step_fn_ty)
+    f_var = Var("f", _nat0_fn_ty)
     t_var = Var("t", nat0_ty)
     th_f = AP_THM(_SK_BULLET_F_DEF, f_var)
     th_f_eq = TRANS(th_f, BETA_CONV(rand(th_f._concl)))
@@ -2893,8 +2188,8 @@ def SK_BULLET_MONO(p):
         "!f g n. (!k. nat0_lt k n ==> f k = g k) "
         "==> _sk_bullet_F f n = _sk_bullet_F g n",
         types={
-            "f": _sk_step_fn_ty,
-            "g": _sk_step_fn_ty,
+            "f": _nat0_fn_ty,
+            "g": _nat0_fn_ty,
             "n": nat0_ty,
             "k": nat0_ty,
         },
@@ -2991,7 +2286,7 @@ def SK_BULLET_MONO(p):
 #   _SK_BULLET_REC_RAW : |- !n. sk_bullet n = _sk_bullet_F sk_bullet n
 SK_BULLET_DEF, _SK_BULLET_REC_RAW = define_wf_lt(
     "sk_bullet",
-    _sk_step_fn_ty,
+    _nat0_fn_ty,
     _SK_BULLET_F,
     SK_BULLET_MONO,
 )
@@ -5963,121 +5258,104 @@ def PAR_STEPS_TRANS(p):
     ).by_thm(MP(inst_beta, p.fact("lifted_cl")))
 
     p.thus("sk_par_steps X Z").by("h_PXY", "Z", "h_YZ")
+def _is_normal_rec_body(t):
+    """Body of IS_NORMAL_REC at term ``t``, as a parser-ready string."""
+    nK = f"~(?u v. {t} = App_t (App_t K_t u) v)"
+    nS = f"~(?u v w. {t} = App_t (App_t (App_t S_t u) v) w)"
+    Dapp_inner = f"?a b. {t} = App_t a b /\\ is_normal a /\\ is_normal b"
+    D1 = f"{t} = S_t"
+    D2 = f"{t} = K_t"
+    D3 = f"({nK}) /\\ ({nS}) /\\ ({Dapp_inner})"
+    return D1, D2, D3
+
+
 @proof
 def IS_NORMAL_NOT_K_REDEX_SHAPE(p):
     """|- !M N. ~is_normal (App_t (App_t K_t M) N).
 
-    Size argument.  Suppose ``is_normal (App_t (App_t K_t M) N)``.
-    Then ``sk_step (K-redex) = K-redex`` (IS_NORMAL_IMP_FIXED) while
-    ``sk_step (K-redex) = M`` (SK_STEP_K); hence
-    ``M = App_t (App_t K_t M) N``.  Apply SK_SIZE_LT_DEEP_LEFT
-    (sk_size M < sk_size (App_t (App_t K_t M) N)) and substitute via
-    the equation -- yields ``sk_size M < sk_size M``, contradicting
-    ``NAT0_LT_NOT_REFL``.
+    Unfold via IS_NORMAL_REC.  D1 (t = S_t) / D2 (t = K_t) refuted by
+    S_T_NEQ_APP_T / K_T_NEQ_APP_T.  D3 carries the ~K-redex guard,
+    immediately contradicted by witnessing (M, N).
     """
-    from nat0_order import NAT0_LT_NOT_REFL
     p.goal("!M:nat0. !N:nat0. ~is_normal (App_t (App_t K_t M) N)")
     p.fix("M N")
-    with p.suppose("h_norm: is_normal (App_t (App_t K_t M) N)"):
-        p.have(
-            "h_fixed: sk_step (App_t (App_t K_t M) N) "
-            "         = App_t (App_t K_t M) N"
-        ).by(
-            IS_NORMAL_IMP_FIXED, "App_t (App_t K_t M) N", "h_norm"
+    t = "App_t (App_t K_t M) N"
+    with p.suppose(f"h_norm: is_normal ({t})"):
+        spec = SPEC(p._parse(t), IS_NORMAL_REC)
+        D1, D2, D3 = _is_normal_rec_body(t)
+        p.have(f"h_body: ({D1}) \\/ ({D2}) \\/ ({D3})").by_thm(
+            EQ_MP(spec, p.fact("h_norm"))
         )
-        p.have(
-            "h_step: sk_step (App_t (App_t K_t M) N) = M"
-        ).by(SK_STEP_K, "M", "N")
-        p.have(
-            "h_M_eq: M = App_t (App_t K_t M) N"
-        ).by_thm(TRANS(SYM(p.fact("h_step")), p.fact("h_fixed")))
-        p.have(
-            "h_lt: nat0_lt (sk_size M) "
-            "      (sk_size (App_t (App_t K_t M) N))"
-        ).by(SK_SIZE_LT_DEEP_LEFT, "M", "K_t", "N")
-        p.have(
-            "h_self_lt: nat0_lt (sk_size M) (sk_size M)"
-        ).by_rewrite_of("h_lt", [SYM(p.fact("h_M_eq"))])
-        p.have(
-            "h_nrefl: ~nat0_lt (sk_size M) (sk_size M)"
-        ).by(NAT0_LT_NOT_REFL, "sk_size M")
-        p.absurd().by_conj("h_nrefl", "h_self_lt")
+        with p.cases_on("h_body"):
+            with p.case(f"h1: {D1}"):
+                p.have(f"h_sym: S_t = {t}").by_thm(SYM(p.fact("h1")))
+                p.have(f"h_neq: ~(S_t = {t})").by(
+                    S_T_NEQ_APP_T, "App_t K_t M", "N"
+                )
+                p.absurd().by_conj("h_neq", "h_sym")
+            with p.case(f"h2: {D2}"):
+                p.have(f"h_sym: K_t = {t}").by_thm(SYM(p.fact("h2")))
+                p.have(f"h_neq: ~(K_t = {t})").by(
+                    K_T_NEQ_APP_T, "App_t K_t M", "N"
+                )
+                p.absurd().by_conj("h_neq", "h_sym")
+            with p.case(f"h3: {D3}"):
+                p.split("h3", "(h_nK, _, _)")
+                p.have(
+                    f"h_K: ?u v. {t} = App_t (App_t K_t u) v"
+                ).by_exists(["M", "N"], REFL(p._parse(t)))
+                p.absurd().by_conj("h_nK", "h_K")
 
 
 @proof
 def IS_NORMAL_NOT_S_REDEX_SHAPE(p):
     """|- !M N P. ~is_normal (App_t (App_t (App_t S_t M) N) P).
 
-    Size argument via APP_T_INJ.  From ``is_normal (S-redex)`` derive
-    ``App_t (App_t M P) (App_t N P) = App_t (App_t (App_t S_t M) N) P``
-    (IS_NORMAL_IMP_FIXED + SK_STEP_S).  Outer APP_T_INJ exposes the
-    right-conjunct ``App_t N P = P`` -- P would be a strict superterm
-    of itself.  SK_SIZE_LT_APP_RIGHT + NAT0_LT_NOT_REFL on P contradicts.
+    Same shape as IS_NORMAL_NOT_K_REDEX_SHAPE; D3's ~S-redex guard
+    contradicted by witnessing (M, N, P).
     """
-    from nat0_order import NAT0_LT_NOT_REFL
     p.goal(
         "!M:nat0. !N:nat0. !P:nat0. "
         "~is_normal (App_t (App_t (App_t S_t M) N) P)"
     )
     p.fix("M N P")
-    with p.suppose(
-        "h_norm: is_normal (App_t (App_t (App_t S_t M) N) P)"
-    ):
-        p.have(
-            "h_fixed: "
-            "sk_step (App_t (App_t (App_t S_t M) N) P) "
-            "= App_t (App_t (App_t S_t M) N) P"
-        ).by(
-            IS_NORMAL_IMP_FIXED,
-            "App_t (App_t (App_t S_t M) N) P",
-            "h_norm",
+    t = "App_t (App_t (App_t S_t M) N) P"
+    with p.suppose(f"h_norm: is_normal ({t})"):
+        spec = SPEC(p._parse(t), IS_NORMAL_REC)
+        D1, D2, D3 = _is_normal_rec_body(t)
+        p.have(f"h_body: ({D1}) \\/ ({D2}) \\/ ({D3})").by_thm(
+            EQ_MP(spec, p.fact("h_norm"))
         )
-        p.have(
-            "h_step: "
-            "sk_step (App_t (App_t (App_t S_t M) N) P) "
-            "= App_t (App_t M P) (App_t N P)"
-        ).by(SK_STEP_S, "M", "N", "P")
-        p.have(
-            "h_eq: App_t (App_t M P) (App_t N P) "
-            "      = App_t (App_t (App_t S_t M) N) P"
-        ).by_thm(
-            TRANS(SYM(p.fact("h_step")), p.fact("h_fixed"))
-        )
-        # Outer APP_T_INJ -- pick the right conjunct App_t N P = P.
-        p.have(
-            "h_inj: App_t M P = App_t (App_t S_t M) N "
-            "       /\\ App_t N P = P"
-        ).by(
-            APP_T_INJ,
-            "App_t M P", "App_t N P",
-            "App_t (App_t S_t M) N", "P",
-            "h_eq",
-        )
-        p.split("h_inj", "(_, h_NP)")
-        p.have("h_P_eq: P = App_t N P").by_thm(SYM(p.fact("h_NP")))
-        p.have(
-            "h_lt: nat0_lt (sk_size P) (sk_size (App_t N P))"
-        ).by(SK_SIZE_LT_APP_RIGHT, "P", "N")
-        p.have(
-            "h_self_lt: nat0_lt (sk_size P) (sk_size P)"
-        ).by_rewrite_of("h_lt", [SYM(p.fact("h_P_eq"))])
-        p.have(
-            "h_nrefl: ~nat0_lt (sk_size P) (sk_size P)"
-        ).by(NAT0_LT_NOT_REFL, "sk_size P")
-        p.absurd().by_conj("h_nrefl", "h_self_lt")
+        with p.cases_on("h_body"):
+            with p.case(f"h1: {D1}"):
+                p.have(f"h_sym: S_t = {t}").by_thm(SYM(p.fact("h1")))
+                p.have(f"h_neq: ~(S_t = {t})").by(
+                    S_T_NEQ_APP_T, "App_t (App_t S_t M) N", "P"
+                )
+                p.absurd().by_conj("h_neq", "h_sym")
+            with p.case(f"h2: {D2}"):
+                p.have(f"h_sym: K_t = {t}").by_thm(SYM(p.fact("h2")))
+                p.have(f"h_neq: ~(K_t = {t})").by(
+                    K_T_NEQ_APP_T, "App_t (App_t S_t M) N", "P"
+                )
+                p.absurd().by_conj("h_neq", "h_sym")
+            with p.case(f"h3: {D3}"):
+                p.split("h3", "(_, h_nS, _)")
+                p.have(
+                    f"h_S: ?u v w. {t} = "
+                    f"      App_t (App_t (App_t S_t u) v) w"
+                ).by_exists(["M", "N", "P"], REFL(p._parse(t)))
+                p.absurd().by_conj("h_nS", "h_S")
 
 
 @proof
 def IS_NORMAL_APP_DECOMP(p):
     """|- !A B. is_normal (App_t A B) ==> is_normal A /\\ is_normal B.
 
-    From ``is_normal (App_t A B)`` derive that the outer App is neither
-    a K- nor S-redex (via IS_NORMAL_NOT_{K,S}_REDEX_SHAPE, by
-    contradicting an assumed redex shape).  Then SK_STEP_LEFT with the
-    two not-redex preconditions forces ``sk_step A = A`` by
-    contradiction; SK_STEP_RIGHT chains in the established
-    ``sk_step A = A`` to force ``sk_step B = B``.  Fold both back to
-    ``is_normal`` via IS_NORMAL_DEF.
+    Unfold IS_NORMAL_REC at App_t A B.  Atom disjuncts refuted by
+    S_T_NEQ_APP_T / K_T_NEQ_APP_T.  D3 yields witnesses a, b with
+    App_t A B = App_t a b and is_normal a /\\ is_normal b; APP_T_INJ
+    identifies a = A, b = B.
     """
     p.goal(
         "!A:nat0. !B:nat0. "
@@ -6085,94 +5363,39 @@ def IS_NORMAL_APP_DECOMP(p):
     )
     p.fix("A B")
     p.assume("h_norm_AB: is_normal (App_t A B)")
-    p.have(
-        "h_fixed: sk_step (App_t A B) = App_t A B"
-    ).by(IS_NORMAL_IMP_FIXED, "App_t A B", "h_norm_AB")
-
-    # not-K-redex precondition.
-    with p.have(
-        "not_kred: ~(?a b. App_t A B = App_t (App_t K_t a) b)"
-    ).proof():
-        with p.suppose(
-            "h_kred: ?a b. App_t A B = App_t (App_t K_t a) b"
-        ):
-            p.choose("a", from_="h_kred")
+    t = "App_t A B"
+    spec = SPEC(p._parse(t), IS_NORMAL_REC)
+    D1, D2, D3 = _is_normal_rec_body(t)
+    p.have(f"h_body: ({D1}) \\/ ({D2}) \\/ ({D3})").by_thm(
+        EQ_MP(spec, p.fact("h_norm_AB"))
+    )
+    with p.cases_on("h_body"):
+        with p.case(f"h1: {D1}"):
+            p.have(f"h_sym: S_t = {t}").by_thm(SYM(p.fact("h1")))
+            p.have(f"h_neq: ~(S_t = {t})").by(S_T_NEQ_APP_T, "A", "B")
+            p.absurd().by_conj("h_neq", "h_sym")
+        with p.case(f"h2: {D2}"):
+            p.have(f"h_sym: K_t = {t}").by_thm(SYM(p.fact("h2")))
+            p.have(f"h_neq: ~(K_t = {t})").by(K_T_NEQ_APP_T, "A", "B")
+            p.absurd().by_conj("h_neq", "h_sym")
+        with p.case(f"h3: {D3}"):
+            p.split("h3", "(_, _, h_inner)")
+            p.choose("a", from_="h_inner")
             p.choose("b", from_="a_eq")
-            p.have(
-                "h_norm_kred: is_normal (App_t (App_t K_t a) b)"
-            ).by_rewrite_of("h_norm_AB", ["b_eq"])
-            p.have(
-                "h_not_norm: ~is_normal (App_t (App_t K_t a) b)"
-            ).by(IS_NORMAL_NOT_K_REDEX_SHAPE, "a", "b")
-            p.absurd().by_conj("h_not_norm", "h_norm_kred")
-
-    # not-S-redex precondition.
-    with p.have(
-        "not_sred: ~(?a b c. "
-        "App_t A B = App_t (App_t (App_t S_t a) b) c)"
-    ).proof():
-        with p.suppose(
-            "h_sred: ?a b c. "
-            "App_t A B = App_t (App_t (App_t S_t a) b) c"
-        ):
-            p.choose("a", from_="h_sred")
-            p.choose("b", from_="a_eq")
-            p.choose("c", from_="b_eq")
-            p.have(
-                "h_norm_sred: "
-                "is_normal (App_t (App_t (App_t S_t a) b) c)"
-            ).by_rewrite_of("h_norm_AB", ["c_eq"])
-            p.have(
-                "h_not_norm: "
-                "~is_normal (App_t (App_t (App_t S_t a) b) c)"
-            ).by(IS_NORMAL_NOT_S_REDEX_SHAPE, "a", "b", "c")
-            p.absurd().by_conj("h_not_norm", "h_norm_sred")
-
-    # sk_step A = A by contradiction via SK_STEP_LEFT.
-    with p.have("h_step_A: sk_step A = A").by_contradiction("h_neg_A"):
-        p.have(
-            "h_left: sk_step (App_t A B) = App_t (sk_step A) B"
-        ).by(
-            SK_STEP_LEFT, "A", "B",
-            "not_kred", "not_sred", "h_neg_A",
-        )
-        p.have(
-            "h_App_eq: App_t (sk_step A) B = App_t A B"
-        ).by_thm(TRANS(SYM(p.fact("h_left")), p.fact("h_fixed")))
-        p.have(
-            "h_inj: sk_step A = A /\\ B = B"
-        ).by(APP_T_INJ, "sk_step A", "B", "A", "B", "h_App_eq")
-        p.split("h_inj", "(h_eq_A, _)")
-        p.absurd().by_conj("h_neg_A", "h_eq_A")
-
-    p.have("h_norm_A: is_normal A").by_unfold(
-        "h_step_A", IS_NORMAL_DEF
-    )
-
-    # sk_step B = B by contradiction via SK_STEP_RIGHT.
-    with p.have("h_step_B: sk_step B = B").by_contradiction("h_neg_B"):
-        p.have(
-            "h_right: sk_step (App_t A B) = App_t A (sk_step B)"
-        ).by(
-            SK_STEP_RIGHT, "A", "B",
-            "not_kred", "not_sred", "h_step_A", "h_neg_B",
-        )
-        p.have(
-            "h_App_eq: App_t A (sk_step B) = App_t A B"
-        ).by_thm(TRANS(SYM(p.fact("h_right")), p.fact("h_fixed")))
-        p.have(
-            "h_inj: A = A /\\ sk_step B = B"
-        ).by(APP_T_INJ, "A", "sk_step B", "A", "B", "h_App_eq")
-        p.split("h_inj", "(_, h_eq_B)")
-        p.absurd().by_conj("h_neg_B", "h_eq_B")
-
-    p.have("h_norm_B: is_normal B").by_unfold(
-        "h_step_B", IS_NORMAL_DEF
-    )
-
-    p.thus("is_normal A /\\ is_normal B").by_thm(
-        CONJ(p.fact("h_norm_A"), p.fact("h_norm_B"))
-    )
+            p.split("b_eq", "(h_app, h_norm_a, h_norm_b)")
+            p.have("h_inj: A = a /\\ B = b").by(
+                APP_T_INJ, "A", "B", "a", "b", "h_app"
+            )
+            p.split("h_inj", "(h_Aa, h_Bb)")
+            p.have("h_norm_A: is_normal A").by_rewrite_of(
+                "h_norm_a", [SYM(p.fact("h_Aa"))]
+            )
+            p.have("h_norm_B: is_normal B").by_rewrite_of(
+                "h_norm_b", [SYM(p.fact("h_Bb"))]
+            )
+            p.thus("is_normal A /\\ is_normal B").by_thm(
+                CONJ(p.fact("h_norm_A"), p.fact("h_norm_B"))
+            )
 
 
 @proof
