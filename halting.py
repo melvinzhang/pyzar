@@ -8832,11 +8832,371 @@ def SK_BULLET_APP_OTHER(p):
 # ---------------------------------------------------------------------------
 # Dependency stubs for SK_BULLET_TRIANGLE.
 #
-# Three direct dependencies + one closure-conjunct helper, all sorry'd
-# pending discharge.  TRIANGLE itself (below) is real, assembling the
-# four pieces via impredicative P-instantiation with the strengthened
-# invariant ``P := \A B. sk_par_step A B /\ sk_par_step B (sk_bullet A)``.
+# PAR_STEP_K_APP_INV and PAR_STEP_S_APP_APP_INV are discharged below
+# via the shared ``_par_step_app_atom_inv`` template.  BULLET_REFL,
+# _TRIANGLE_APP_CLOSURE remain stubs.  TRIANGLE itself (below) is real,
+# assembling the four pieces via impredicative P-instantiation with the
+# strengthened invariant
+#   ``P := \A B. sk_par_step A B /\ sk_par_step B (sk_bullet A)``.
 # ---------------------------------------------------------------------------
+
+
+def _par_step_app_atom_inv(p, atom_str, atom_inv_thm, atom_neq_app_t):
+    """Discharge
+        ``!X Y. sk_par_step (App_t <atom> X) Y ==>
+                  ?XP. Y = App_t <atom> XP /\\ sk_par_step X XP``
+    where ``<atom>`` is ``S_t`` or ``K_t``.
+
+    Strategy: instantiate the impredicative encoding's ``P`` with
+        Q := \\A B. sk_par_step A B /\\
+                     (!W. A = App_t <atom> W ==>
+                          ?Wp. B = App_t <atom> Wp /\\ sk_par_step W Wp)
+    The first conjunct propagates par_step inside the closure
+    rules (each rule's hypothesis carries it through); the second
+    conjunct is the actual inversion shape.
+
+    Closure analysis after BETA_NORM:
+      REFL : both conjuncts via PAR_REFL.
+      K    : par_step propagated by PAR_K from the IHs; inversion is
+             vacuous -- ``App_t (App_t K_t _) _ = App_t <atom> _`` clashes
+             at ``App_t K_t _ = <atom>`` (App vs leaf, ``atom_neq_app_t``).
+      S    : par_step propagated by PAR_S; inversion clashes at
+             ``App_t (App_t S_t _) _ = <atom>`` (same shape).
+      APP  : the firing case.  ``App_t M N = App_t <atom> W`` gives
+             ``M = <atom>``, ``N = W`` via APP_T_INJ; then the IH's
+             par_step conjunct ``par_step M M1`` becomes ``par_step
+             <atom> M1``, which ``atom_inv_thm`` collapses to ``M1 =
+             <atom>``.  Witness ``Wp := N1``; ``App_t M1 N1 = App_t
+             <atom> N1`` via AP_TERM + AP_THM.
+
+    DSL friction (general):
+    * SPEC at a 2-arg lambda Q creates beta redexes throughout the
+      closures body and in the final ``Q (App_t <atom> X) Y``
+      application; ``BETA_NORM`` is the only way to clean them in one
+      shot.  ``by_def_at`` doesn't cover lambda-shaped P arguments.
+    * The closure bvars in ``_PAR_STEP_CLOSURE`` (A Y A1 Y1 ...) clash
+      with the outer ``Y``; we name the closure bvars freshly (M N P
+      M1 N1 P1) and rely on alpha-conversion at the final CONJ.
+    * ``by_conj`` is NOT sym-tolerant (unlike ``_simp_require``); each
+      shape-clash branch SYMs the APP_T_INJ result before ``absurd``.
+
+    DSL friction (firing-case specific):
+    * Rewriting ``par_step M M1`` to ``par_step <atom> M1`` via
+      ``M = <atom>`` works through ``by_rewrite_of`` -- the equation
+      fires under both Comb layers.
+    * Lifting ``M1 = <atom>`` to ``App_t M1 N1 = App_t <atom> N1``
+      uses raw AP_TERM + AP_THM (one congruence step per kernel arg).
+      ``by_cong(App_t, eq, refl)`` would also work; the explicit form
+      is cheaper because we already have ``M1 = <atom>`` as a
+      registered fact.
+    """
+    from tactics import (
+        BETA_NORM,
+        CONJ as _CONJ,
+        CONJUNCT1 as _C1,
+        CONJUNCT2 as _C2,
+        AP_TERM as _AP_TERM,
+        AP_THM as _AP_THM,
+    )
+
+    p.goal(
+        f"!X:nat0. !Y:nat0. "
+        f"sk_par_step (App_t {atom_str} X) Y ==> "
+        f"?XP:nat0. Y = App_t {atom_str} XP /\\ sk_par_step X XP"
+    )
+    p.fix("X Y")
+    p.assume(f"h: sk_par_step (App_t {atom_str} X) Y")
+
+    # Unfold sk_par_step at (App_t <atom> X, Y).
+    sps_unfold = unfold_def_at(
+        SK_PAR_STEP_DEF,
+        p._parse(f"App_t {atom_str} X"),
+        p._parse("Y"),
+    )
+    h_univ = EQ_MP(sps_unfold, p.fact("h"))
+
+    # SPEC at Q.  Two-arg lambda; BETA_NORM cleans the redexes.
+    Q_tm = p._parse(
+        f"\\A:nat0. \\B:nat0. "
+        f"sk_par_step A B /\\ "
+        f"(!W:nat0. A = App_t {atom_str} W ==> "
+        f"  ?Wp:nat0. B = App_t {atom_str} Wp /\\ sk_par_step W Wp)"
+    )
+    h_at_Q_raw = SPEC(Q_tm, h_univ)
+    h_at_Q = EQ_MP(BETA_NORM(h_at_Q_raw._concl), h_at_Q_raw)
+    p.have(f"h_at_Q: {pp(h_at_Q._concl)}").by_thm(h_at_Q)
+
+    # --- REFL closure --------------------------------------------------
+    with p.have(
+        f"c_refl: !Z:nat0. sk_par_step Z Z /\\ "
+        f"(!W:nat0. Z = App_t {atom_str} W ==> "
+        f" ?Wp:nat0. Z = App_t {atom_str} Wp /\\ sk_par_step W Wp)"
+    ).proof():
+        p.fix("Z")
+        p.have("h_par: sk_par_step Z Z").by(PAR_REFL, "Z")
+        with p.have(
+            f"h_inv: !W:nat0. Z = App_t {atom_str} W ==> "
+            f"?Wp:nat0. Z = App_t {atom_str} Wp /\\ sk_par_step W Wp"
+        ).proof():
+            p.fix("W")
+            p.assume(f"h_eq: Z = App_t {atom_str} W")
+            p.have("h_par_WW: sk_par_step W W").by(PAR_REFL, "W")
+            p.thus(
+                f"?Wp:nat0. Z = App_t {atom_str} Wp /\\ sk_par_step W Wp"
+            ).by_exists(["W"], "h_eq", "h_par_WW")
+        p.thus(
+            f"sk_par_step Z Z /\\ "
+            f"(!W:nat0. Z = App_t {atom_str} W ==> "
+            f" ?Wp:nat0. Z = App_t {atom_str} Wp /\\ sk_par_step W Wp)"
+        ).by_thm(_CONJ(p.fact("h_par"), p.fact("h_inv")))
+
+    # --- K-rule closure (vacuous inversion) ----------------------------
+    with p.have(
+        f"c_K: !M:nat0. !N:nat0. !M1:nat0. !N1:nat0. "
+        f"(sk_par_step M M1 /\\ "
+        f"  (!W:nat0. M = App_t {atom_str} W ==> "
+        f"   ?Wp:nat0. M1 = App_t {atom_str} Wp /\\ sk_par_step W Wp)) "
+        f"/\\ "
+        f"(sk_par_step N N1 /\\ "
+        f"  (!W:nat0. N = App_t {atom_str} W ==> "
+        f"   ?Wp:nat0. N1 = App_t {atom_str} Wp /\\ sk_par_step W Wp)) "
+        f"==> "
+        f"sk_par_step (App_t (App_t K_t M) N) M1 /\\ "
+        f"(!W:nat0. App_t (App_t K_t M) N = App_t {atom_str} W ==> "
+        f" ?Wp:nat0. M1 = App_t {atom_str} Wp /\\ sk_par_step W Wp)"
+    ).proof():
+        p.fix("M N M1 N1")
+        p.assume(
+            f"((h_par_M, h_inv_M), (h_par_N, h_inv_N)): "
+            f"(sk_par_step M M1 /\\ "
+            f"  (!W:nat0. M = App_t {atom_str} W ==> "
+            f"   ?Wp:nat0. M1 = App_t {atom_str} Wp /\\ sk_par_step W Wp)) "
+            f"/\\ "
+            f"(sk_par_step N N1 /\\ "
+            f"  (!W:nat0. N = App_t {atom_str} W ==> "
+            f"   ?Wp:nat0. N1 = App_t {atom_str} Wp /\\ sk_par_step W Wp))"
+        )
+        p.have(
+            "h_conj_MN: sk_par_step M M1 /\\ sk_par_step N N1"
+        ).by_thm(_CONJ(p.fact("h_par_M"), p.fact("h_par_N")))
+        p.have(
+            "h_par_KMN_M1: sk_par_step (App_t (App_t K_t M) N) M1"
+        ).by(PAR_K, "M", "M1", "N", "N1", "h_conj_MN")
+        with p.have(
+            f"h_inv_K: !W:nat0. "
+            f"App_t (App_t K_t M) N = App_t {atom_str} W ==> "
+            f"?Wp:nat0. M1 = App_t {atom_str} Wp /\\ sk_par_step W Wp"
+        ).proof():
+            p.fix("W")
+            p.assume(
+                f"h_eq: App_t (App_t K_t M) N = App_t {atom_str} W"
+            )
+            p.have(
+                f"h_inj: App_t K_t M = {atom_str} /\\ N = W"
+            ).by(APP_T_INJ, "App_t K_t M", "N", atom_str, "W", "h_eq")
+            p.have(
+                f"h_inj_L: App_t K_t M = {atom_str}"
+            ).by_thm(_C1(p.fact("h_inj")))
+            p.have(
+                f"h_inj_L_sym: {atom_str} = App_t K_t M"
+            ).by_thm(SYM(p.fact("h_inj_L")))
+            p.have(
+                f"h_neq: ~({atom_str} = App_t K_t M)"
+            ).by(atom_neq_app_t, "K_t", "M")
+            p.absurd().by_conj("h_neq", "h_inj_L_sym")
+        p.thus(
+            f"sk_par_step (App_t (App_t K_t M) N) M1 /\\ "
+            f"(!W:nat0. App_t (App_t K_t M) N = App_t {atom_str} W ==> "
+            f" ?Wp:nat0. M1 = App_t {atom_str} Wp /\\ sk_par_step W Wp)"
+        ).by_thm(_CONJ(p.fact("h_par_KMN_M1"), p.fact("h_inv_K")))
+
+    # --- S-rule closure (vacuous inversion) ----------------------------
+    with p.have(
+        f"c_S: !M:nat0. !N:nat0. !P:nat0. !M1:nat0. !N1:nat0. !P1:nat0. "
+        f"(sk_par_step M M1 /\\ "
+        f"  (!W:nat0. M = App_t {atom_str} W ==> "
+        f"   ?Wp:nat0. M1 = App_t {atom_str} Wp /\\ sk_par_step W Wp)) "
+        f"/\\ "
+        f"(sk_par_step N N1 /\\ "
+        f"  (!W:nat0. N = App_t {atom_str} W ==> "
+        f"   ?Wp:nat0. N1 = App_t {atom_str} Wp /\\ sk_par_step W Wp)) "
+        f"/\\ "
+        f"(sk_par_step P P1 /\\ "
+        f"  (!W:nat0. P = App_t {atom_str} W ==> "
+        f"   ?Wp:nat0. P1 = App_t {atom_str} Wp /\\ sk_par_step W Wp)) "
+        f"==> "
+        f"sk_par_step (App_t (App_t (App_t S_t M) N) P) "
+        f"            (App_t (App_t M1 P1) (App_t N1 P1)) /\\ "
+        f"(!W:nat0. "
+        f"App_t (App_t (App_t S_t M) N) P = App_t {atom_str} W ==> "
+        f" ?Wp:nat0. App_t (App_t M1 P1) (App_t N1 P1) = "
+        f"            App_t {atom_str} Wp /\\ sk_par_step W Wp)"
+    ).proof():
+        p.fix("M N P M1 N1 P1")
+        p.assume(
+            f"((h_par_M, h_inv_M), (h_par_N, h_inv_N), (h_par_P, h_inv_P)): "
+            f"(sk_par_step M M1 /\\ "
+            f"  (!W:nat0. M = App_t {atom_str} W ==> "
+            f"   ?Wp:nat0. M1 = App_t {atom_str} Wp /\\ sk_par_step W Wp)) "
+            f"/\\ "
+            f"(sk_par_step N N1 /\\ "
+            f"  (!W:nat0. N = App_t {atom_str} W ==> "
+            f"   ?Wp:nat0. N1 = App_t {atom_str} Wp /\\ sk_par_step W Wp)) "
+            f"/\\ "
+            f"(sk_par_step P P1 /\\ "
+            f"  (!W:nat0. P = App_t {atom_str} W ==> "
+            f"   ?Wp:nat0. P1 = App_t {atom_str} Wp /\\ sk_par_step W Wp))"
+        )
+        p.have(
+            "h_conj_3: sk_par_step M M1 /\\ sk_par_step N N1 /\\ "
+            "          sk_par_step P P1"
+        ).by_thm(_CONJ(
+            p.fact("h_par_M"),
+            _CONJ(p.fact("h_par_N"), p.fact("h_par_P")),
+        ))
+        p.have(
+            "h_par_Sred: sk_par_step (App_t (App_t (App_t S_t M) N) P) "
+            "            (App_t (App_t M1 P1) (App_t N1 P1))"
+        ).by(PAR_S, "M", "M1", "N", "N1", "P", "P1", "h_conj_3")
+        with p.have(
+            f"h_inv_S: !W:nat0. "
+            f"App_t (App_t (App_t S_t M) N) P = App_t {atom_str} W ==> "
+            f"?Wp:nat0. App_t (App_t M1 P1) (App_t N1 P1) = "
+            f"           App_t {atom_str} Wp /\\ sk_par_step W Wp"
+        ).proof():
+            p.fix("W")
+            p.assume(
+                f"h_eq: App_t (App_t (App_t S_t M) N) P = "
+                f"      App_t {atom_str} W"
+            )
+            p.have(
+                f"h_inj: App_t (App_t S_t M) N = {atom_str} /\\ P = W"
+            ).by(
+                APP_T_INJ,
+                "App_t (App_t S_t M) N", "P", atom_str, "W", "h_eq",
+            )
+            p.have(
+                f"h_inj_L: App_t (App_t S_t M) N = {atom_str}"
+            ).by_thm(_C1(p.fact("h_inj")))
+            p.have(
+                f"h_inj_L_sym: {atom_str} = App_t (App_t S_t M) N"
+            ).by_thm(SYM(p.fact("h_inj_L")))
+            p.have(
+                f"h_neq: ~({atom_str} = App_t (App_t S_t M) N)"
+            ).by(atom_neq_app_t, "App_t S_t M", "N")
+            p.absurd().by_conj("h_neq", "h_inj_L_sym")
+        p.thus(
+            f"sk_par_step (App_t (App_t (App_t S_t M) N) P) "
+            f"            (App_t (App_t M1 P1) (App_t N1 P1)) /\\ "
+            f"(!W:nat0. "
+            f"App_t (App_t (App_t S_t M) N) P = App_t {atom_str} W ==> "
+            f" ?Wp:nat0. App_t (App_t M1 P1) (App_t N1 P1) = "
+            f"            App_t {atom_str} Wp /\\ sk_par_step W Wp)"
+        ).by_thm(_CONJ(p.fact("h_par_Sred"), p.fact("h_inv_S")))
+
+    # --- APP-rule closure (firing case) --------------------------------
+    with p.have(
+        f"c_APP: !M:nat0. !N:nat0. !M1:nat0. !N1:nat0. "
+        f"(sk_par_step M M1 /\\ "
+        f"  (!W:nat0. M = App_t {atom_str} W ==> "
+        f"   ?Wp:nat0. M1 = App_t {atom_str} Wp /\\ sk_par_step W Wp)) "
+        f"/\\ "
+        f"(sk_par_step N N1 /\\ "
+        f"  (!W:nat0. N = App_t {atom_str} W ==> "
+        f"   ?Wp:nat0. N1 = App_t {atom_str} Wp /\\ sk_par_step W Wp)) "
+        f"==> "
+        f"sk_par_step (App_t M N) (App_t M1 N1) /\\ "
+        f"(!W:nat0. App_t M N = App_t {atom_str} W ==> "
+        f" ?Wp:nat0. App_t M1 N1 = App_t {atom_str} Wp /\\ "
+        f"            sk_par_step W Wp)"
+    ).proof():
+        p.fix("M N M1 N1")
+        p.assume(
+            f"((h_par_M, h_inv_M), (h_par_N, h_inv_N)): "
+            f"(sk_par_step M M1 /\\ "
+            f"  (!W:nat0. M = App_t {atom_str} W ==> "
+            f"   ?Wp:nat0. M1 = App_t {atom_str} Wp /\\ sk_par_step W Wp)) "
+            f"/\\ "
+            f"(sk_par_step N N1 /\\ "
+            f"  (!W:nat0. N = App_t {atom_str} W ==> "
+            f"   ?Wp:nat0. N1 = App_t {atom_str} Wp /\\ sk_par_step W Wp))"
+        )
+        p.have(
+            "h_conj_MN: sk_par_step M M1 /\\ sk_par_step N N1"
+        ).by_thm(_CONJ(p.fact("h_par_M"), p.fact("h_par_N")))
+        p.have(
+            "h_par_APP: sk_par_step (App_t M N) (App_t M1 N1)"
+        ).by(PAR_APP, "M", "M1", "N", "N1", "h_conj_MN")
+        with p.have(
+            f"h_inv_APP: !W:nat0. App_t M N = App_t {atom_str} W ==> "
+            f"?Wp:nat0. App_t M1 N1 = App_t {atom_str} Wp /\\ "
+            f"           sk_par_step W Wp"
+        ).proof():
+            p.fix("W")
+            p.assume(f"h_eq: App_t M N = App_t {atom_str} W")
+            p.have(
+                f"h_inj: M = {atom_str} /\\ N = W"
+            ).by(APP_T_INJ, "M", "N", atom_str, "W", "h_eq")
+            p.have(f"h_M_eq: M = {atom_str}").by_thm(_C1(p.fact("h_inj")))
+            p.have("h_N_eq: N = W").by_thm(_C2(p.fact("h_inj")))
+            # par_step M M1 + M = <atom>  ==>  par_step <atom> M1.
+            p.have(
+                f"h_par_atom_M1: sk_par_step {atom_str} M1"
+            ).by_rewrite_of("h_par_M", [p.fact("h_M_eq")])
+            # atom inversion collapses M1 to <atom>.
+            p.have(
+                f"h_M1_eq: M1 = {atom_str}"
+            ).by(atom_inv_thm, "M1", "h_par_atom_M1")
+            # par_step N N1 + N = W  ==>  par_step W N1.
+            p.have(
+                "h_par_W_N1: sk_par_step W N1"
+            ).by_rewrite_of("h_par_N", [p.fact("h_N_eq")])
+            # App_t M1 N1 = App_t <atom> N1 via AP_TERM + AP_THM.
+            ap1 = _AP_TERM(App_t, p.fact("h_M1_eq"))
+            ap2 = _AP_THM(ap1, p._parse("N1"))
+            p.have(
+                f"h_app_eq: App_t M1 N1 = App_t {atom_str} N1"
+            ).by_thm(ap2)
+            p.thus(
+                f"?Wp:nat0. App_t M1 N1 = App_t {atom_str} Wp /\\ "
+                f"           sk_par_step W Wp"
+            ).by_exists(["N1"], "h_app_eq", "h_par_W_N1")
+        p.thus(
+            f"sk_par_step (App_t M N) (App_t M1 N1) /\\ "
+            f"(!W:nat0. App_t M N = App_t {atom_str} W ==> "
+            f" ?Wp:nat0. App_t M1 N1 = App_t {atom_str} Wp /\\ "
+            f"            sk_par_step W Wp)"
+        ).by_thm(_CONJ(p.fact("h_par_APP"), p.fact("h_inv_APP")))
+
+    # --- Compose closures, MP, project, conclude -----------------------
+    cl_th = CONJ(
+        p.fact("c_refl"),
+        CONJ(p.fact("c_K"), CONJ(p.fact("c_S"), p.fact("c_APP"))),
+    )
+    p.have(f"h_cl: {pp(cl_th._concl)}").by_thm(cl_th)
+    p.have(
+        f"h_Q: sk_par_step (App_t {atom_str} X) Y /\\ "
+        f"(!W:nat0. App_t {atom_str} X = App_t {atom_str} W ==> "
+        f" ?Wp:nat0. Y = App_t {atom_str} Wp /\\ sk_par_step W Wp)"
+    ).by("h_at_Q", "h_cl")
+
+    # Extract the inversion conjunct, SPEC at X, MP at the trivial REFL.
+    p.split("h_Q", "(_, h_inv_Q)")
+    p.have(
+        f"h_inv_X: App_t {atom_str} X = App_t {atom_str} X ==> "
+        f"?Wp:nat0. Y = App_t {atom_str} Wp /\\ sk_par_step X Wp"
+    ).by("h_inv_Q", "X")
+    p.have(
+        f"h_refl: App_t {atom_str} X = App_t {atom_str} X"
+    ).by_thm(REFL(p._parse(f"App_t {atom_str} X")))
+    p.have(
+        f"h_ex: ?Wp:nat0. Y = App_t {atom_str} Wp /\\ sk_par_step X Wp"
+    ).by("h_inv_X", "h_refl")
+    p.choose("XP", from_="h_ex")
+    p.split("XP_eq", "(h_Y_eq, h_par_X_XP)")
+    p.thus(
+        f"?XP:nat0. Y = App_t {atom_str} XP /\\ sk_par_step X XP"
+    ).by_exists(["XP"], "h_Y_eq", "h_par_X_XP")
 
 
 @proof
@@ -8844,25 +9204,35 @@ def PAR_STEP_K_APP_INV(p):
     """|- !X Y. sk_par_step (App_t K_t X) Y ==>
                   ?XP. Y = App_t K_t XP /\\ sk_par_step X XP.
 
-    *** SORRY STUB.  App-shape par_step inversion at the K_t head:
-    any par-reduct of ``App_t K_t X`` must itself be ``App_t K_t XP``
-    where ``X`` par-reduces to ``XP``.  Since ``App_t K_t X`` is not a
-    redex (only 1 App layer; K-redex requires 2), par_step can only fire
-    via REFL or APP-rule, and the APP-rule head must par-step from K_t
-    to K_t (by PAR_STEP_K_T_INV).
+    App-shape par_step inversion at the K_t head: any par-reduct of
+    ``App_t K_t X`` must itself be ``App_t K_t XP`` where ``X`` par-
+    reduces to ``XP``.  Since ``App_t K_t X`` is not a redex (only 1
+    App layer; K-redex requires 2, S-redex 3), par_step can only fire
+    via REFL or APP-rule; the APP-rule head ``K_t`` then collapses
+    back to ``K_t`` via PAR_STEP_K_T_INV.
 
-    Discharge (deferred): impredicative-Q instantiation with
-       Q := \\A B. (?P. A = App_t K_t P)
-                    ==> (?P'. B = App_t K_t P' /\\ sk_par_step P P').
-    Mirror of PAR_STEP_K_T_INV pattern (halting.py:7819) but with the
-    App-shape pre-image.  ~120 LOC.
+    Delegated to ``_par_step_app_atom_inv`` with atom = K_t.
     """
-    p.goal(
-        "!X:nat0. !Y:nat0. "
-        "sk_par_step (App_t K_t X) Y ==> "
-        "?XP:nat0. Y = App_t K_t XP /\\ sk_par_step X XP"
+    _par_step_app_atom_inv(
+        p, "K_t", PAR_STEP_K_T_INV, K_T_NEQ_APP_T
     )
-    p.sorry()
+
+
+@proof
+def PAR_STEP_S_T_APP_INV(p):
+    """|- !X Y. sk_par_step (App_t S_t X) Y ==>
+                  ?XP. Y = App_t S_t XP /\\ sk_par_step X XP.
+
+    Sister of PAR_STEP_K_APP_INV at the S_t head -- the inner inversion
+    needed by PAR_STEP_S_APP_APP_INV's APP-rule firing case (where the
+    par-step head ``App_t S_t X`` must be inverted before the S-shape
+    survival argument can fire).
+
+    Delegated to ``_par_step_app_atom_inv`` with atom = S_t.
+    """
+    _par_step_app_atom_inv(
+        p, "S_t", PAR_STEP_S_T_INV, S_T_NEQ_APP_T
+    )
 
 
 @proof
@@ -8871,12 +9241,37 @@ def PAR_STEP_S_APP_APP_INV(p):
                   ?XP YP. Z = App_t (App_t S_t XP) YP /\\
                           sk_par_step X XP /\\ sk_par_step Y YP.
 
-    *** SORRY STUB.  Two-App-deep par_step inversion at the S_t head.
-    Same idea as PAR_STEP_K_APP_INV but with a deeper Q capturing the
-    ``App_t (App_t S_t _) _`` shape; the inner ``App_t S_t _`` must
-    par-step to itself (by an analog of the K-case) and only the two
-    operands can change.  ~150 LOC.
+    Two-App-deep par_step inversion at the S_t head.  ``App_t (App_t
+    S_t X) Y`` has 2 App layers; S-redex needs 3 and K-redex needs 2
+    with K_t (not S_t) at depth-1, so neither fires.  Only REFL and
+    APP-rule.  The APP-rule case recursively inverts the head
+    ``App_t S_t X`` via PAR_STEP_S_T_APP_INV.
+
+    Strategy: instantiate the impredicative ``P`` with
+        Q := \\A B. sk_par_step A B /\\
+                     (!W1 W2. A = App_t (App_t S_t W1) W2 ==>
+                          ?W1p W2p. B = App_t (App_t S_t W1p) W2p
+                                       /\\ sk_par_step W1 W1p
+                                       /\\ sk_par_step W2 W2p)
+
+    Closures: REFL trivial; K/S vacuous via 1-2 layer APP_T_INJ
+    descent ending in S_t vs K_t / S_t vs App_t clash; APP fires using
+    PAR_STEP_S_T_APP_INV on the depth-1 head par-step.
+
+    DSL friction: the inversion existentials are now binary (W1p,
+    W2p) so ``by_exists`` takes two witnesses; ``h_inv_Q`` after
+    extraction is also two-arg (``!W1 W2. ...``), so SPECL via the
+    DSL needs sequential ``by(... "X", "Y", ...)``.
     """
+    from tactics import (
+        BETA_NORM,
+        CONJ as _CONJ,
+        CONJUNCT1 as _C1,
+        CONJUNCT2 as _C2,
+        AP_TERM as _AP_TERM,
+        AP_THM as _AP_THM,
+    )
+
     p.goal(
         "!X:nat0. !Y:nat0. !Z:nat0. "
         "sk_par_step (App_t (App_t S_t X) Y) Z ==> "
@@ -8884,7 +9279,287 @@ def PAR_STEP_S_APP_APP_INV(p):
         "Z = App_t (App_t S_t XP) YP /\\ "
         "sk_par_step X XP /\\ sk_par_step Y YP"
     )
-    p.sorry()
+    p.fix("X Y Z")
+    p.assume("h: sk_par_step (App_t (App_t S_t X) Y) Z")
+
+    # Unfold sk_par_step at the input.
+    sps_unfold = unfold_def_at(
+        SK_PAR_STEP_DEF,
+        p._parse("App_t (App_t S_t X) Y"),
+        p._parse("Z"),
+    )
+    h_univ = EQ_MP(sps_unfold, p.fact("h"))
+
+    # SPEC at the binary-inversion Q.
+    Q_tm = p._parse(
+        "\\A:nat0. \\B:nat0. "
+        "sk_par_step A B /\\ "
+        "(!W1:nat0. !W2:nat0. A = App_t (App_t S_t W1) W2 ==> "
+        " ?W1p:nat0. ?W2p:nat0. "
+        " B = App_t (App_t S_t W1p) W2p /\\ "
+        " sk_par_step W1 W1p /\\ sk_par_step W2 W2p)"
+    )
+    h_at_Q_raw = SPEC(Q_tm, h_univ)
+    h_at_Q = EQ_MP(BETA_NORM(h_at_Q_raw._concl), h_at_Q_raw)
+    p.have(f"h_at_Q: {pp(h_at_Q._concl)}").by_thm(h_at_Q)
+
+    # Q body, parameterized over (A, B), as a reusable string.
+    def _q_body(A_str, B_str):
+        return (
+            f"sk_par_step {A_str} {B_str} /\\ "
+            f"(!W1:nat0. !W2:nat0. {A_str} = App_t (App_t S_t W1) W2 ==> "
+            f" ?W1p:nat0. ?W2p:nat0. "
+            f" {B_str} = App_t (App_t S_t W1p) W2p /\\ "
+            f" sk_par_step W1 W1p /\\ sk_par_step W2 W2p)"
+        )
+
+    # --- REFL closure --------------------------------------------------
+    with p.have(f"c_refl: !Zc:nat0. {_q_body('Zc', 'Zc')}").proof():
+        p.fix("Zc")
+        p.have("h_par: sk_par_step Zc Zc").by(PAR_REFL, "Zc")
+        with p.have(
+            "h_inv: !W1:nat0. !W2:nat0. Zc = App_t (App_t S_t W1) W2 "
+            "==> ?W1p:nat0. ?W2p:nat0. "
+            "    Zc = App_t (App_t S_t W1p) W2p /\\ "
+            "    sk_par_step W1 W1p /\\ sk_par_step W2 W2p"
+        ).proof():
+            p.fix("W1 W2")
+            p.assume("h_eq: Zc = App_t (App_t S_t W1) W2")
+            p.have("h_par_W1: sk_par_step W1 W1").by(PAR_REFL, "W1")
+            p.have("h_par_W2: sk_par_step W2 W2").by(PAR_REFL, "W2")
+            p.thus(
+                "?W1p:nat0. ?W2p:nat0. "
+                "Zc = App_t (App_t S_t W1p) W2p /\\ "
+                "sk_par_step W1 W1p /\\ sk_par_step W2 W2p"
+            ).by_exists(
+                ["W1", "W2"], "h_eq", "h_par_W1", "h_par_W2"
+            )
+        p.thus(f"{_q_body('Zc', 'Zc')}").by_thm(
+            _CONJ(p.fact("h_par"), p.fact("h_inv"))
+        )
+
+    # --- K-rule closure (vacuous inversion) ----------------------------
+    with p.have(
+        f"c_K: !M:nat0. !N:nat0. !M1:nat0. !N1:nat0. "
+        f"({_q_body('M', 'M1')}) /\\ ({_q_body('N', 'N1')}) ==> "
+        f"{_q_body('(App_t (App_t K_t M) N)', 'M1')}"
+    ).proof():
+        p.fix("M N M1 N1")
+        p.assume(
+            f"((h_par_M, h_inv_M), (h_par_N, h_inv_N)): "
+            f"({_q_body('M', 'M1')}) /\\ ({_q_body('N', 'N1')})"
+        )
+        p.have(
+            "h_conj_MN: sk_par_step M M1 /\\ sk_par_step N N1"
+        ).by_thm(_CONJ(p.fact("h_par_M"), p.fact("h_par_N")))
+        p.have(
+            "h_par_KMN: sk_par_step (App_t (App_t K_t M) N) M1"
+        ).by(PAR_K, "M", "M1", "N", "N1", "h_conj_MN")
+        with p.have(
+            "h_inv_K: !W1:nat0. !W2:nat0. "
+            "App_t (App_t K_t M) N = App_t (App_t S_t W1) W2 ==> "
+            "?W1p:nat0. ?W2p:nat0. "
+            "M1 = App_t (App_t S_t W1p) W2p /\\ "
+            "sk_par_step W1 W1p /\\ sk_par_step W2 W2p"
+        ).proof():
+            p.fix("W1 W2")
+            p.assume(
+                "h_eq: App_t (App_t K_t M) N = App_t (App_t S_t W1) W2"
+            )
+            # Outer APP_T_INJ: App_t K_t M = App_t S_t W1 /\ N = W2.
+            p.have(
+                "h_inj1: App_t K_t M = App_t S_t W1 /\\ N = W2"
+            ).by(
+                APP_T_INJ,
+                "App_t K_t M", "N", "App_t S_t W1", "W2", "h_eq",
+            )
+            p.have(
+                "h_inj1_L: App_t K_t M = App_t S_t W1"
+            ).by_thm(_C1(p.fact("h_inj1")))
+            # Inner APP_T_INJ: K_t = S_t.
+            p.have(
+                "h_inj2: K_t = S_t /\\ M = W1"
+            ).by(APP_T_INJ, "K_t", "M", "S_t", "W1", "h_inj1_L")
+            p.have("h_K_eq_S: K_t = S_t").by_thm(_C1(p.fact("h_inj2")))
+            p.have("h_S_eq_K: S_t = K_t").by_thm(SYM(p.fact("h_K_eq_S")))
+            p.absurd().by_conj(S_T_NEQ_K_T, "h_S_eq_K")
+        p.thus(
+            f"{_q_body('(App_t (App_t K_t M) N)', 'M1')}"
+        ).by_thm(_CONJ(p.fact("h_par_KMN"), p.fact("h_inv_K")))
+
+    # --- S-rule closure (vacuous inversion) ----------------------------
+    with p.have(
+        f"c_S: !M:nat0. !N:nat0. !P:nat0. !M1:nat0. !N1:nat0. !P1:nat0. "
+        f"({_q_body('M', 'M1')}) /\\ ({_q_body('N', 'N1')}) /\\ "
+        f"({_q_body('P', 'P1')}) ==> "
+        f"{_q_body('(App_t (App_t (App_t S_t M) N) P)', '(App_t (App_t M1 P1) (App_t N1 P1))')}"
+    ).proof():
+        p.fix("M N P M1 N1 P1")
+        p.assume(
+            f"((h_par_M, h_inv_M), (h_par_N, h_inv_N), (h_par_P, h_inv_P)): "
+            f"({_q_body('M', 'M1')}) /\\ ({_q_body('N', 'N1')}) /\\ "
+            f"({_q_body('P', 'P1')})"
+        )
+        p.have(
+            "h_conj_3: sk_par_step M M1 /\\ sk_par_step N N1 /\\ "
+            "          sk_par_step P P1"
+        ).by_thm(_CONJ(
+            p.fact("h_par_M"),
+            _CONJ(p.fact("h_par_N"), p.fact("h_par_P")),
+        ))
+        p.have(
+            "h_par_Sred: sk_par_step "
+            "  (App_t (App_t (App_t S_t M) N) P) "
+            "  (App_t (App_t M1 P1) (App_t N1 P1))"
+        ).by(PAR_S, "M", "M1", "N", "N1", "P", "P1", "h_conj_3")
+        with p.have(
+            "h_inv_S: !W1:nat0. !W2:nat0. "
+            "App_t (App_t (App_t S_t M) N) P = "
+            "  App_t (App_t S_t W1) W2 ==> "
+            "?W1p:nat0. ?W2p:nat0. "
+            "App_t (App_t M1 P1) (App_t N1 P1) = "
+            "  App_t (App_t S_t W1p) W2p /\\ "
+            "sk_par_step W1 W1p /\\ sk_par_step W2 W2p"
+        ).proof():
+            p.fix("W1 W2")
+            p.assume(
+                "h_eq: App_t (App_t (App_t S_t M) N) P = "
+                "      App_t (App_t S_t W1) W2"
+            )
+            # Outer APP_T_INJ: App_t (App_t S_t M) N = App_t S_t W1.
+            p.have(
+                "h_inj1: App_t (App_t S_t M) N = App_t S_t W1 /\\ P = W2"
+            ).by(
+                APP_T_INJ,
+                "App_t (App_t S_t M) N", "P",
+                "App_t S_t W1", "W2", "h_eq",
+            )
+            p.have(
+                "h_inj1_L: App_t (App_t S_t M) N = App_t S_t W1"
+            ).by_thm(_C1(p.fact("h_inj1")))
+            # Inner APP_T_INJ: App_t S_t M = S_t.  App vs leaf.
+            p.have(
+                "h_inj2: App_t S_t M = S_t /\\ N = W1"
+            ).by(
+                APP_T_INJ, "App_t S_t M", "N", "S_t", "W1", "h_inj1_L"
+            )
+            p.have(
+                "h_inj2_L: App_t S_t M = S_t"
+            ).by_thm(_C1(p.fact("h_inj2")))
+            p.have(
+                "h_inj2_L_sym: S_t = App_t S_t M"
+            ).by_thm(SYM(p.fact("h_inj2_L")))
+            p.have("h_neq: ~(S_t = App_t S_t M)").by(
+                S_T_NEQ_APP_T, "S_t", "M"
+            )
+            p.absurd().by_conj("h_neq", "h_inj2_L_sym")
+        p.thus(
+            f"{_q_body('(App_t (App_t (App_t S_t M) N) P)', '(App_t (App_t M1 P1) (App_t N1 P1))')}"
+        ).by_thm(_CONJ(p.fact("h_par_Sred"), p.fact("h_inv_S")))
+
+    # --- APP-rule closure (firing case) --------------------------------
+    with p.have(
+        f"c_APP: !M:nat0. !N:nat0. !M1:nat0. !N1:nat0. "
+        f"({_q_body('M', 'M1')}) /\\ ({_q_body('N', 'N1')}) ==> "
+        f"{_q_body('(App_t M N)', '(App_t M1 N1)')}"
+    ).proof():
+        p.fix("M N M1 N1")
+        p.assume(
+            f"((h_par_M, h_inv_M), (h_par_N, h_inv_N)): "
+            f"({_q_body('M', 'M1')}) /\\ ({_q_body('N', 'N1')})"
+        )
+        p.have(
+            "h_conj_MN: sk_par_step M M1 /\\ sk_par_step N N1"
+        ).by_thm(_CONJ(p.fact("h_par_M"), p.fact("h_par_N")))
+        p.have(
+            "h_par_APP: sk_par_step (App_t M N) (App_t M1 N1)"
+        ).by(PAR_APP, "M", "M1", "N", "N1", "h_conj_MN")
+        with p.have(
+            "h_inv_APP: !W1:nat0. !W2:nat0. "
+            "App_t M N = App_t (App_t S_t W1) W2 ==> "
+            "?W1p:nat0. ?W2p:nat0. "
+            "App_t M1 N1 = App_t (App_t S_t W1p) W2p /\\ "
+            "sk_par_step W1 W1p /\\ sk_par_step W2 W2p"
+        ).proof():
+            p.fix("W1 W2")
+            p.assume("h_eq: App_t M N = App_t (App_t S_t W1) W2")
+            p.have(
+                "h_inj: M = App_t S_t W1 /\\ N = W2"
+            ).by(APP_T_INJ, "M", "N", "App_t S_t W1", "W2", "h_eq")
+            p.have(
+                "h_M_eq: M = App_t S_t W1"
+            ).by_thm(_C1(p.fact("h_inj")))
+            p.have("h_N_eq: N = W2").by_thm(_C2(p.fact("h_inj")))
+            # par_step M M1 + M = App_t S_t W1 ==> par_step (App_t S_t W1) M1.
+            p.have(
+                "h_par_SW1_M1: sk_par_step (App_t S_t W1) M1"
+            ).by_rewrite_of("h_par_M", [p.fact("h_M_eq")])
+            # Recursive App-atom inversion at the S_t head.
+            p.have(
+                "h_M1_shape: ?XP:nat0. "
+                "M1 = App_t S_t XP /\\ sk_par_step W1 XP"
+            ).by(
+                PAR_STEP_S_T_APP_INV, "W1", "M1", "h_par_SW1_M1"
+            )
+            p.choose("M1_inner", from_="h_M1_shape")
+            p.split("M1_inner_eq", "(h_M1_eq, h_par_W1_inner)")
+            # par_step N N1 + N = W2  ==>  par_step W2 N1.
+            p.have(
+                "h_par_W2_N1: sk_par_step W2 N1"
+            ).by_rewrite_of("h_par_N", [p.fact("h_N_eq")])
+            # App_t M1 N1 = App_t (App_t S_t M1_inner) N1 via congruence.
+            ap1 = _AP_TERM(App_t, p.fact("h_M1_eq"))
+            ap2 = _AP_THM(ap1, p._parse("N1"))
+            p.have(
+                "h_app_eq: App_t M1 N1 = App_t (App_t S_t M1_inner) N1"
+            ).by_thm(ap2)
+            p.thus(
+                "?W1p:nat0. ?W2p:nat0. "
+                "App_t M1 N1 = App_t (App_t S_t W1p) W2p /\\ "
+                "sk_par_step W1 W1p /\\ sk_par_step W2 W2p"
+            ).by_exists(
+                ["M1_inner", "N1"],
+                "h_app_eq", "h_par_W1_inner", "h_par_W2_N1",
+            )
+        p.thus(
+            f"{_q_body('(App_t M N)', '(App_t M1 N1)')}"
+        ).by_thm(_CONJ(p.fact("h_par_APP"), p.fact("h_inv_APP")))
+
+    # --- Compose closures, MP, project, conclude -----------------------
+    cl_th = CONJ(
+        p.fact("c_refl"),
+        CONJ(p.fact("c_K"), CONJ(p.fact("c_S"), p.fact("c_APP"))),
+    )
+    p.have(f"h_cl: {pp(cl_th._concl)}").by_thm(cl_th)
+    p.have(
+        f"h_Q: {_q_body('(App_t (App_t S_t X) Y)', 'Z')}"
+    ).by("h_at_Q", "h_cl")
+
+    p.split("h_Q", "(_, h_inv_Q)")
+    p.have(
+        "h_inv_XY: App_t (App_t S_t X) Y = App_t (App_t S_t X) Y ==> "
+        "?W1p:nat0. ?W2p:nat0. "
+        "Z = App_t (App_t S_t W1p) W2p /\\ "
+        "sk_par_step X W1p /\\ sk_par_step Y W2p"
+    ).by("h_inv_Q", "X", "Y")
+    p.have(
+        "h_refl: App_t (App_t S_t X) Y = App_t (App_t S_t X) Y"
+    ).by_thm(REFL(p._parse("App_t (App_t S_t X) Y")))
+    p.have(
+        "h_ex: ?W1p:nat0. ?W2p:nat0. "
+        "Z = App_t (App_t S_t W1p) W2p /\\ "
+        "sk_par_step X W1p /\\ sk_par_step Y W2p"
+    ).by("h_inv_XY", "h_refl")
+    p.choose("XP", from_="h_ex")
+    p.choose("YP", from_="XP_eq")
+    p.split("YP_eq", "(h_Z_eq, h_par_X_XP, h_par_Y_YP)")
+    p.thus(
+        "?XP:nat0. ?YP:nat0. "
+        "Z = App_t (App_t S_t XP) YP /\\ "
+        "sk_par_step X XP /\\ sk_par_step Y YP"
+    ).by_exists(
+        ["XP", "YP"], "h_Z_eq", "h_par_X_XP", "h_par_Y_YP"
+    )
 
 
 @proof
