@@ -11308,33 +11308,292 @@ def _BULLET_TRAJ_PAR_STEPS(p):
 
 
 @proof
+def _BULLET_COMMUTES_PAR_STEP(p):
+    """|- !X Y. sk_par_step X Y ==> sk_par_step (sk_bullet X) (sk_bullet Y).
+
+    Two applications of SK_BULLET_TRIANGLE:
+      * TRIANGLE on par_step X Y           : par_step Y (sk_bullet X).
+      * TRIANGLE on par_step Y (sk_bullet X): par_step (sk_bullet X) (sk_bullet Y).
+    """
+    p.goal(
+        "!X:nat0. !Y:nat0. sk_par_step X Y ==> "
+        "sk_par_step (sk_bullet X) (sk_bullet Y)"
+    )
+    p.fix("X Y")
+    p.assume("h_XY: sk_par_step X Y")
+    p.have(
+        "h_T1: sk_par_step Y (sk_bullet X)"
+    ).by(SK_BULLET_TRIANGLE, "X", "Y", "h_XY")
+    p.thus(
+        "sk_par_step (sk_bullet X) (sk_bullet Y)"
+    ).by(SK_BULLET_TRIANGLE, "Y", "sk_bullet X", "h_T1")
+
+
+@proof
+def _BULLET_ITER_COMMUTES_PAR_STEP(p):
+    """|- !n X Y. sk_par_step X Y ==>
+                   sk_par_step (bullet_iter n X) (bullet_iter n Y).
+
+    nat0 induction on n lifts ``_BULLET_COMMUTES_PAR_STEP`` to bullet
+    iterates.  Base: bullet_iter 0 _ = _ (BULLET_ITER_ZERO) + h_XY +
+    congruence (by_cong + by_eq_mp).  Step: IH at (X, Y) gives the
+    par-step between iterates; apply the per-step commute helper at
+    that par-step; fold sk_bullet (bullet_iter n _) to bullet_iter
+    (SUC0 n) _ via BULLET_ITER_SUC.
+    """
+    p.goal(
+        "!n:nat0. !X:nat0. !Y:nat0. sk_par_step X Y ==> "
+        "sk_par_step (bullet_iter n X) (bullet_iter n Y)"
+    )
+    with p.induction("n"):
+        with p.base():
+            p.fix("X Y")
+            p.assume("h_XY: sk_par_step X Y")
+            p.have(
+                "h_z0X: bullet_iter 0 X = X"
+            ).by(BULLET_ITER_ZERO, "X")
+            p.have(
+                "h_z0Y: bullet_iter 0 Y = Y"
+            ).by(BULLET_ITER_ZERO, "Y")
+            # DSL friction: by_rewrite_of with SYM(h_z0X) would
+            # rewrite ``X -> bullet_iter 0 X`` non-terminatingly.
+            # Use by_cong's binop shorthand to build the equation
+            # ``sk_par_step (bullet_iter 0 X) (bullet_iter 0 Y) =
+            # sk_par_step X Y`` then by_eq_mp's sym-tolerance closes.
+            p.have(
+                "h_cong: "
+                "sk_par_step (bullet_iter 0 X) (bullet_iter 0 Y) = "
+                "sk_par_step X Y"
+            ).by_cong(sk_par_step, "h_z0X", "h_z0Y")
+            p.thus(
+                "sk_par_step (bullet_iter 0 X) (bullet_iter 0 Y)"
+            ).by_eq_mp("h_cong", "h_XY")
+        with p.step("IH"):
+            # IH : !X Y. sk_par_step X Y ==>
+            #             sk_par_step (bullet_iter n X) (bullet_iter n Y).
+            p.fix("X Y")
+            p.assume("h_XY: sk_par_step X Y")
+            p.have(
+                "h_ih: "
+                "sk_par_step (bullet_iter n X) (bullet_iter n Y)"
+            ).by("IH", "X", "Y", "h_XY")
+            p.have(
+                "h_step: sk_par_step "
+                "(sk_bullet (bullet_iter n X)) "
+                "(sk_bullet (bullet_iter n Y))"
+            ).by(
+                _BULLET_COMMUTES_PAR_STEP,
+                "bullet_iter n X", "bullet_iter n Y", "h_ih",
+            )
+            p.have(
+                "h_unfX: bullet_iter (SUC0 n) X = "
+                "        sk_bullet (bullet_iter n X)"
+            ).by(BULLET_ITER_SUC, "n", "X")
+            p.have(
+                "h_unfY: bullet_iter (SUC0 n) Y = "
+                "        sk_bullet (bullet_iter n Y)"
+            ).by(BULLET_ITER_SUC, "n", "Y")
+            p.have(
+                "h_cong: "
+                "sk_par_step "
+                "  (bullet_iter (SUC0 n) X) "
+                "  (bullet_iter (SUC0 n) Y) = "
+                "sk_par_step "
+                "  (sk_bullet (bullet_iter n X)) "
+                "  (sk_bullet (bullet_iter n Y))"
+            ).by_cong(sk_par_step, "h_unfX", "h_unfY")
+            p.thus(
+                "sk_par_step "
+                "(bullet_iter (SUC0 n) X) "
+                "(bullet_iter (SUC0 n) Y)"
+            ).by_eq_mp("h_cong", "h_step")
+
+
+@proof
 def _HALTS_PAR_TO_HALTS_B(p):
     """|- !X. halts_par X ==> halts_b X.
 
-    *** SORRY STUB.  Backward direction of the bullet/par bridge.
+    Backward direction of the bullet/par bridge.  Impredicative
+    induction on ``sk_par_steps X N`` with the strengthened invariant:
 
-    Plan (iter_to_bullet.md "HALTS_B_IFF_HALTS_PAR (the bridge)"):
-    impredicative induction on ``sk_par_steps X N`` with the
-    strengthened predicate P A B := is_normal B ==> halts_b A.
+        P := \\A B. is_normal B ==> ?m. is_normal (bullet_iter m A).
 
-      REFL : is_normal A ==> halts_b A via witness 0 (BULLET_ITER_ZERO).
-      STEP : par_step A B /\\ (is_normal C ==> halts_b B) ==>
-             (is_normal C ==> halts_b A).  Open obligation: from
-             halts_b B (?m. is_normal (bullet_iter m B)) and
-             par_step A B, derive halts_b A.  Strategy via
-             SK_BULLET_TRIANGLE: par_step B (sk_bullet A), iterated
-             through BULLET_COMMUTES_PAR_STEP (par_step A B ==>
-             par_step (sk_bullet A) (sk_bullet B), two TRIANGLE
-             applications) to land at sk_par_steps (sk_bullet A) (bullet_iter
-             m B) and then close via normal-stability.  Requires two
-             auxiliary helpers (BULLET_COMMUTES_PAR_STEP and its
-             iter-lift); ~80-100 lines together.
+    REFL  Z : is_normal Z ==> ?m. is_normal (bullet_iter m Z).
+            Take m := 0 (BULLET_ITER_ZERO).
+    STEP a -> b /\\ P b c ==> P a c : assume is_normal c; IH at b
+            yields ?m_B. is_normal (bullet_iter m_B b).  Lift
+            par_step a b to par_step (bullet_iter m_B a) (bullet_iter
+            m_B b) via _BULLET_ITER_COMMUTES_PAR_STEP; SK_BULLET_TRIANGLE
+            on that par-step gives par_step (bullet_iter m_B b)
+            (sk_bullet (bullet_iter m_B a)) = par_step (bullet_iter
+            m_B b) (bullet_iter (SUC0 m_B) a).  is_normal at the LHS
+            of this par-step + NORMAL_STABILITY_PAR_STEP forces
+            bullet_iter (SUC0 m_B) a = bullet_iter m_B b, transporting
+            normality across.  Witness m := SUC0 m_B.
 
-    Gated on SK_BULLET_TRIANGLE closing (also stubbed via
-    _TRIANGLE_APP_CLOSURE).
+    With P instantiated, the closures conjunction + impredicative MP
+    yields P X N; applied at is_normal N, the conclusion is
+    ?m. is_normal (bullet_iter m X), which is halts_b X via HALTS_B_AT.
     """
+    from tactics import BETA_RULE
+
     p.goal("!X. halts_par X ==> halts_b X")
-    p.sorry()
+    p.fix("X")
+    p.assume("h_hp: halts_par X")
+
+    # Unfold halts_par X to extract the par-chain to a normal form.
+    p.have(
+        "h_at_par: halts_par X = "
+        "(?N. sk_par_steps X N /\\ is_normal N)"
+    ).by(HALTS_PAR_AT, "X")
+    p.have(
+        "h_ex_par: ?N. sk_par_steps X N /\\ is_normal N"
+    ).by_eq_mp("h_at_par", "h_hp")
+    p.choose("N", from_="h_ex_par")
+    p.split("N_eq", "(h_XN, h_norm_N)")
+
+    # ---- Impredicative induction setup (mirrors NORMAL_STABILITY_PAR_STEPS).
+    spec_XN = unfold_def_at(
+        SK_PAR_STEPS_DEF, p._parse("X"), p._parse("N")
+    )
+    h_forall = EQ_MP(spec_XN, p.fact("h_XN"))
+    # h_forall : !P. closures(P) ==> P X N.
+
+    P_lifted = p._parse(
+        "\\A:nat0. \\B:nat0. "
+        "is_normal B ==> ?m:nat0. is_normal (bullet_iter m A)"
+    )
+    inst = SPEC(P_lifted, h_forall)
+    inst_beta = BETA_RULE(inst)
+    # inst_beta : closures(P_lifted) ==> (is_normal N ==>
+    #                                      ?m. is_normal (bullet_iter m X)).
+
+    # ---- REFL closure ---------------------------------------------------
+    with p.have(
+        "lifted_refl: "
+        "!Z:nat0. is_normal Z ==> ?m:nat0. is_normal (bullet_iter m Z)"
+    ).proof():
+        p.fix("Z")
+        p.assume("h_norm_Z: is_normal Z")
+        p.have(
+            "h_z0Z: bullet_iter 0 Z = Z"
+        ).by(BULLET_ITER_ZERO, "Z")
+        # is_normal Z transported back to is_normal (bullet_iter 0 Z)
+        # via AP_TERM (sym-tolerant by_eq_mp picks the matching side).
+        p.have(
+            "h_norm_0: is_normal (bullet_iter 0 Z)"
+        ).by_eq_mp(
+            AP_TERM(is_normal, p.fact("h_z0Z")),
+            "h_norm_Z",
+        )
+        p.thus(
+            "?m:nat0. is_normal (bullet_iter m Z)"
+        ).by_witness("0", "h_norm_0")
+
+    # ---- STEP closure ---------------------------------------------------
+    with p.have(
+        "lifted_step: "
+        "!a:nat0. !b:nat0. !c:nat0. "
+        "sk_par_step a b /\\ "
+        "(is_normal c ==> ?m:nat0. is_normal (bullet_iter m b)) ==> "
+        "(is_normal c ==> ?m:nat0. is_normal (bullet_iter m a))"
+    ).proof():
+        p.fix("a b c")
+        p.assume(
+            "(h_ab, h_IH): sk_par_step a b /\\ "
+            "(is_normal c ==> ?m:nat0. is_normal (bullet_iter m b))"
+        )
+        p.assume("h_norm_c: is_normal c")
+
+        # IH gives a bullet-normal index for b.
+        p.have(
+            "h_ex_b: ?m:nat0. is_normal (bullet_iter m b)"
+        ).by("h_IH", "h_norm_c")
+        p.choose("m_B", from_="h_ex_b")
+        # m_B_eq : is_normal (bullet_iter m_B b).
+
+        # Commute par_step a b through bullet_iter m_B on both sides.
+        p.have(
+            "h_par_iter: "
+            "sk_par_step (bullet_iter m_B a) (bullet_iter m_B b)"
+        ).by(
+            _BULLET_ITER_COMMUTES_PAR_STEP,
+            "m_B", "a", "b", "h_ab",
+        )
+        # TRIANGLE: from par_step (bullet_iter m_B a) (bullet_iter m_B b),
+        # get par_step (bullet_iter m_B b) (sk_bullet (bullet_iter m_B a)).
+        p.have(
+            "h_T: sk_par_step "
+            "  (bullet_iter m_B b) "
+            "  (sk_bullet (bullet_iter m_B a))"
+        ).by(
+            SK_BULLET_TRIANGLE,
+            "bullet_iter m_B a",
+            "bullet_iter m_B b",
+            "h_par_iter",
+        )
+        # Fold sk_bullet (bullet_iter m_B a) to bullet_iter (SUC0 m_B) a.
+        p.have(
+            "h_unf: bullet_iter (SUC0 m_B) a = "
+            "       sk_bullet (bullet_iter m_B a)"
+        ).by(BULLET_ITER_SUC, "m_B", "a")
+        p.have(
+            "h_T2: sk_par_step "
+            "  (bullet_iter m_B b) "
+            "  (bullet_iter (SUC0 m_B) a)"
+        ).by_rewrite_of("h_T", [SYM(p.fact("h_unf"))])
+        # NORMAL_STABILITY_PAR_STEP: is_normal LHS + par-step LHS -> RHS
+        # forces RHS = LHS.
+        p.have(
+            "h_conj_stab: "
+            "is_normal (bullet_iter m_B b) /\\ "
+            "sk_par_step (bullet_iter m_B b) (bullet_iter (SUC0 m_B) a)"
+        ).by_thm(CONJ(p.fact("m_B_eq"), p.fact("h_T2")))
+        p.have(
+            "h_eq: bullet_iter (SUC0 m_B) a = bullet_iter m_B b"
+        ).by(
+            NORMAL_STABILITY_PAR_STEP,
+            "bullet_iter m_B b",
+            "bullet_iter (SUC0 m_B) a",
+            "h_conj_stab",
+        )
+        # Transport normality across h_eq (sym-tolerant by_eq_mp).
+        p.have(
+            "h_norm_SUC: is_normal (bullet_iter (SUC0 m_B) a)"
+        ).by_eq_mp(
+            AP_TERM(is_normal, p.fact("h_eq")),
+            "m_B_eq",
+        )
+        p.thus(
+            "?m:nat0. is_normal (bullet_iter m a)"
+        ).by_witness("SUC0 m_B", "h_norm_SUC")
+
+    # ---- Bundle closures and discharge P X N ----------------------------
+    p.have(
+        "lifted_cl: "
+        "(!Z:nat0. is_normal Z ==> "
+        "          ?m:nat0. is_normal (bullet_iter m Z)) /\\ "
+        "(!a:nat0. !b:nat0. !c:nat0. "
+        "    sk_par_step a b /\\ "
+        "    (is_normal c ==> "
+        "        ?m:nat0. is_normal (bullet_iter m b)) ==> "
+        "    (is_normal c ==> "
+        "        ?m:nat0. is_normal (bullet_iter m a)))"
+    ).by_thm(CONJ(p.fact("lifted_refl"), p.fact("lifted_step")))
+
+    p.have(
+        "h_PXN: is_normal N ==> ?m:nat0. is_normal (bullet_iter m X)"
+    ).by_thm(MP(inst_beta, p.fact("lifted_cl")))
+
+    p.have(
+        "h_ex_bull: ?m:nat0. is_normal (bullet_iter m X)"
+    ).by("h_PXN", "h_norm_N")
+
+    # Witness halts_b X via HALTS_B_AT.
+    p.have(
+        "h_at_b: halts_b X = (?n. is_normal (bullet_iter n X))"
+    ).by(HALTS_B_AT, "X")
+    p.thus("halts_b X").by_eq_mp("h_at_b", "h_ex_bull")
 
 
 @proof
