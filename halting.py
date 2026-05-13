@@ -9520,25 +9520,447 @@ def PAR_STEP_S_APP_APP_INV(p):
     )
 
 
+def _bullet_refl_app_case(p):
+    """BULLET_REFL's App-but-not-K/S sub-case.
+
+    Closes ``sk_par_step A (sk_bullet A)`` from:
+      * ``a_eq``: ``?b. A = App_t a b`` (auto-bound by outer ``cases_on``)
+      * ``h_nK``, ``h_nS``: A is neither K- nor S-redex
+      * ``IH``:  the strong-induction hypothesis on ``A``
+
+    PAR_APP combines IH at (a, b); SK_BULLET_APP_OTHER unfolds
+    ``sk_bullet (App_t a b)`` to ``App_t (sk_bullet a) (sk_bullet b)``.
+    Mirrors _par_step_app_case (halting.py:7185).
+    """
+    from tactics import CONJ as _CONJ, BETA_RULE
+
+    # 'a' auto-introduced by cases_on; manually choose b.
+    p.choose("b", from_="a_eq")
+    # b_eq : A = App_t a b.
+    # Lift the non-redex hypotheses from A to App_t a b via AP_TERM at
+    # the negation-shape predicate, then BETA_RULE, then EQ_MP.
+    P_K = p._parse(
+        "\\x:nat0. ~(?u:nat0. ?v:nat0. x = App_t (App_t K_t u) v)"
+    )
+    h_nK_ab_thm = EQ_MP(
+        BETA_RULE(AP_TERM(P_K, p.fact("b_eq"))),
+        p.fact("h_nK"),
+    )
+    p.have(
+        "h_nK_ab: ~(?u v. App_t a b = App_t (App_t K_t u) v)"
+    ).by_thm(h_nK_ab_thm)
+    P_S = p._parse(
+        "\\x:nat0. ~(?u:nat0. ?v:nat0. ?w:nat0. "
+        "          x = App_t (App_t (App_t S_t u) v) w)"
+    )
+    h_nS_ab_thm = EQ_MP(
+        BETA_RULE(AP_TERM(P_S, p.fact("b_eq"))),
+        p.fact("h_nS"),
+    )
+    p.have(
+        "h_nS_ab: ~(?u v w. App_t a b = "
+        "         App_t (App_t (App_t S_t u) v) w)"
+    ).by_thm(h_nS_ab_thm)
+    # IH at a, b -- both strictly smaller via NAT0_LT_APP_T_L/R.
+    p.have(
+        "h_lt_a_AB: nat0_lt a (App_t a b)"
+    ).by(NAT0_LT_APP_T_L, "a", "b")
+    p.have(
+        "h_lt_b_AB: nat0_lt b (App_t a b)"
+    ).by(NAT0_LT_APP_T_R, "a", "b")
+    p.have("h_lt_a: nat0_lt a A").by_rewrite_of(
+        "h_lt_a_AB", [SYM(p.fact("b_eq"))]
+    )
+    p.have("h_lt_b: nat0_lt b A").by_rewrite_of(
+        "h_lt_b_AB", [SYM(p.fact("b_eq"))]
+    )
+    p.have("h_ih_a: sk_par_step a (sk_bullet a)").by(
+        "IH", "a", "h_lt_a"
+    )
+    p.have("h_ih_b: sk_par_step b (sk_bullet b)").by(
+        "IH", "b", "h_lt_b"
+    )
+    # PAR_APP combines the two IHs.
+    p.have(
+        "h_par_AB: sk_par_step (App_t a b) "
+        "                     (App_t (sk_bullet a) (sk_bullet b))"
+    ).by(
+        PAR_APP, "a", "sk_bullet a", "b", "sk_bullet b",
+        _CONJ(p.fact("h_ih_a"), p.fact("h_ih_b")),
+    )
+    # SK_BULLET_APP_OTHER under the lifted non-redex guards.
+    p.have(
+        "h_nKnS_ab: "
+        "~(?u v. App_t a b = App_t (App_t K_t u) v) /\\ "
+        "~(?u v w. App_t a b = "
+        "          App_t (App_t (App_t S_t u) v) w)"
+    ).by_thm(_CONJ(p.fact("h_nK_ab"), p.fact("h_nS_ab")))
+    p.have(
+        "h_bullet_AB: sk_bullet (App_t a b) = "
+        "             App_t (sk_bullet a) (sk_bullet b)"
+    ).by(SK_BULLET_APP_OTHER, "a", "b", "h_nKnS_ab")
+    p.have(
+        "h_bullet_A: sk_bullet A = "
+        "            App_t (sk_bullet a) (sk_bullet b)"
+    ).by_rewrite_of("h_bullet_AB", [SYM(p.fact("b_eq"))])
+    # Fold App_t a b back to A on the LHS slot, then sk_bullet a b's
+    # RHS-form back to sk_bullet A.
+    p.have(
+        "h_par_A_bull: sk_par_step A "
+        "             (App_t (sk_bullet a) (sk_bullet b))"
+    ).by_rewrite_of("h_par_AB", [SYM(p.fact("b_eq"))])
+    p.thus("sk_par_step A (sk_bullet A)").by_rewrite_of(
+        "h_par_A_bull", [SYM(p.fact("h_bullet_A"))]
+    )
+
+
+def _bullet_refl_leaf_case(p):
+    """BULLET_REFL's non-App leaf sub-case.
+
+    Builds the D4 inner branch from h_nK / h_nS / h_nApp, lifts it via
+    ``_sk_bullet_select_at`` to ``body[A, sk_bullet A]``, case-splits;
+    D1/D2/D3 are App-shaped existentials refuted by the three non-shape
+    hypotheses, D4 yields ``sk_bullet A = A`` which PAR_REFL closes.
+    Mirrors _par_step_leaf_case (halting.py:7323).
+    """
+    from tactics import CONJ as _CONJ
+
+    p.have(
+        "inner_leaf: "
+        "~(?a b. A = App_t (App_t K_t a) b) /\\ "
+        "~(?a b c. A = App_t (App_t (App_t S_t a) b) c) /\\ "
+        "~(?a b. A = App_t a b) /\\ A = A"
+    ).by_thm(
+        _CONJ(
+            p.fact("h_nK"),
+            _CONJ(
+                p.fact("h_nS"),
+                _CONJ(p.fact("h_nApp"), REFL(p._parse("A"))),
+            ),
+        )
+    )
+    body_th = _sk_bullet_select_at(p, "A", "A", "inner_leaf")
+    p.have(
+        f"body: {_sk_bullet_body('A', 'sk_bullet A')}"
+    ).by_thm(body_th)
+    D1, D2, D3, D4 = _sk_bullet_disjuncts("A", "sk_bullet A")
+    with p.cases_on("body"):
+        with p.case(f"h1: {D1}"):
+            # Auto-bound 'a' from the outer ?a; manually choose b.
+            p.choose("b", from_="a_eq")
+            p.split("b_eq", "(h_app, _)")
+            p.have(
+                "h_kred_ex: ?a b. A = App_t (App_t K_t a) b"
+            ).by_exists(["a", "b"], "h_app")
+            p.absurd().by_conj("h_nK", "h_kred_ex")
+        with p.case(f"h2: {D2}"):
+            p.split("h2", "(_, h2_ex)")
+            p.choose("a", from_="h2_ex")
+            p.choose("b", from_="a_eq")
+            p.choose("c", from_="b_eq")
+            p.split("c_eq", "(h_app, _)")
+            p.have(
+                "h_sred_ex: ?a b c. A = "
+                "           App_t (App_t (App_t S_t a) b) c"
+            ).by_exists(["a", "b", "c"], "h_app")
+            p.absurd().by_conj("h_nS", "h_sred_ex")
+        with p.case(f"h3: {D3}"):
+            p.split("h3", "(_, _, h3_app)")
+            p.choose("a", from_="h3_app")
+            p.choose("b", from_="a_eq")
+            p.split("b_eq", "(h_app, _)")
+            p.have(
+                "h_app_ex: ?a b. A = App_t a b"
+            ).by_exists(["a", "b"], "h_app")
+            p.absurd().by_conj("h_nApp", "h_app_ex")
+        with p.case(f"h4: {D4}"):
+            p.split("h4", "(_, _, _, h_bull)")
+            # h_bull : sk_bullet A = A.  SYM as a rewrite rule
+            # (A -> sk_bullet A) would loop; lift via AP_TERM at the
+            # RHS slot of ``sk_par_step A _`` instead.  DSL friction:
+            # by_rewrite_of refuses non-terminating rules silently and
+            # ``sk_par_step A A`` doesn't simp-match the goal, so the
+            # explicit AP_TERM lift is the cleanest route here.
+            p.have("h_refl: sk_par_step A A").by(PAR_REFL, "A")
+            p.thus("sk_par_step A (sk_bullet A)").by_thm(
+                EQ_MP(
+                    AP_TERM(
+                        p._parse("sk_par_step A"),
+                        SYM(p.fact("h_bull")),
+                    ),
+                    p.fact("h_refl"),
+                )
+            )
+
+
 @proof
 def BULLET_REFL(p):
     """|- !A. sk_par_step A (sk_bullet A).
 
-    *** SORRY STUB.  Every term parallel-reduces to its complete
-    development.  Despite the name, this is NOT par_step's REFL rule --
-    ``sk_bullet`` contracts redexes, so the proof uses PAR_K / PAR_S /
-    PAR_APP at the redex / non-redex App cases.
+    Every term parallel-reduces (in one parallel step) to its complete
+    development.  Despite the name this is NOT par_step's REFL rule:
+    ``sk_bullet`` contracts every redex it sees, so the proof actually
+    fires PAR_K / PAR_S / PAR_APP at the redex / non-redex App cases.
 
-    Discharge (deferred): structural-shape induction on A using the
-    five SK_BULLET unfold equations:
-      atoms (S_t, K_t)         : PAR_REFL (since sk_bullet atom = atom).
-      App_t (App_t K_t X) Y    : PAR_K with the X-recursion.
-      App_t (App_t (App_t S_t X) Y) Z : PAR_S with three recursions.
-      App_t X Y (otherwise)    : PAR_APP with two recursions.
-    ~100 LOC.
+    Strong induction on ``A`` over ``nat0_lt`` with a 4-way LEM split
+    on A's shape -- exact mirror of SK_PAR_STEP_TO_SK_STEP
+    (halting.py:7395), substituting bullet's collapsing semantics:
+
+      * K-redex (A = App K a b)         : sk_bullet A = sk_bullet a;
+                                          PAR_K with IH at a, b.
+      * S-redex (A = App (App S a) b c) : SK_BULLET_S_REDEX;
+                                          PAR_S with IH at a, b, c.
+      * generic App (~K, ~S)            : SK_BULLET_APP_OTHER;
+                                          PAR_APP with IH at a, b.
+      * leaf (~K, ~S, ~App)             : sk_bullet A = A via D4;
+                                          PAR_REFL.
+
+    Subterm-smaller-than-A facts go via NAT0_LT_APP_T_L/R (single hop
+    in the App-other case) or NAT0_LT_TRANS chains (1 hop for the
+    K-redex inner ``a``; 2-3 hops for the S-redex's a, b through
+    nested App-spines).
     """
+    from classical import EXCLUDED_MIDDLE
+    from tactics import CONJ as _CONJ
+
     p.goal("!A:nat0. sk_par_step A (sk_bullet A)")
-    p.sorry()
+    with p.strong_induction("A", "IH"):
+        # IH : !k. nat0_lt k A ==> sk_par_step k (sk_bullet k).
+        # ---- LEM split: is A a K-redex? ---------------------------------
+        with p.cases_on(
+            EXCLUDED_MIDDLE,
+            "?a b. A = App_t (App_t K_t a) b",
+        ):
+            with p.case("h_K: ?a b. A = App_t (App_t K_t a) b"):
+                # cases_on auto-introduces 'a' (outer ? bvar); we
+                # manually peel the inner ?b.  DSL friction: leaf is
+                # ``?a b. ...`` but auto-introduce only peels the
+                # outermost ?, so the second p.choose remains explicit.
+                p.choose("b", from_="a_eq")
+                # b_eq : A = App_t (App_t K_t a) b.
+
+                # nat0_lt a A: two-hop a < App K a < App (App K a) b.
+                p.have(
+                    "h_lt_a_Ka: nat0_lt a (App_t K_t a)"
+                ).by(NAT0_LT_APP_T_R, "K_t", "a")
+                p.have(
+                    "h_lt_Ka_KAB: nat0_lt (App_t K_t a) "
+                    "                     (App_t (App_t K_t a) b)"
+                ).by(NAT0_LT_APP_T_L, "App_t K_t a", "b")
+                p.have(
+                    "h_lt_a_KAB: "
+                    "nat0_lt a (App_t (App_t K_t a) b)"
+                ).by(
+                    NAT0_LT_TRANS,
+                    "a", "App_t K_t a", "App_t (App_t K_t a) b",
+                    "h_lt_a_Ka", "h_lt_Ka_KAB",
+                )
+                p.have("h_lt_a: nat0_lt a A").by_rewrite_of(
+                    "h_lt_a_KAB", [SYM(p.fact("b_eq"))]
+                )
+                # nat0_lt b A: direct from App_t-right.
+                p.have(
+                    "h_lt_b_KAB: "
+                    "nat0_lt b (App_t (App_t K_t a) b)"
+                ).by(NAT0_LT_APP_T_R, "App_t K_t a", "b")
+                p.have("h_lt_b: nat0_lt b A").by_rewrite_of(
+                    "h_lt_b_KAB", [SYM(p.fact("b_eq"))]
+                )
+
+                p.have(
+                    "h_ih_a: sk_par_step a (sk_bullet a)"
+                ).by("IH", "a", "h_lt_a")
+                p.have(
+                    "h_ih_b: sk_par_step b (sk_bullet b)"
+                ).by("IH", "b", "h_lt_b")
+                # PAR_K with X1 := sk_bullet a, Y1 := sk_bullet b.
+                p.have(
+                    "h_par_KAB: "
+                    "sk_par_step (App_t (App_t K_t a) b) (sk_bullet a)"
+                ).by(
+                    PAR_K, "a", "sk_bullet a", "b", "sk_bullet b",
+                    _CONJ(p.fact("h_ih_a"), p.fact("h_ih_b")),
+                )
+                # Bullet collapses the K-redex.
+                p.have(
+                    "h_bullet_KAB: sk_bullet (App_t (App_t K_t a) b) "
+                    "              = sk_bullet a"
+                ).by(SK_BULLET_K_REDEX, "a", "b")
+                p.have(
+                    "h_bullet_A: sk_bullet A = sk_bullet a"
+                ).by_rewrite_of(
+                    "h_bullet_KAB", [SYM(p.fact("b_eq"))]
+                )
+                # Fold the K-redex back to A in the par-step, then
+                # ``sk_bullet a`` back to ``sk_bullet A`` on the RHS.
+                p.have(
+                    "h_par_A_bull_a: sk_par_step A (sk_bullet a)"
+                ).by_rewrite_of("h_par_KAB", [SYM(p.fact("b_eq"))])
+                p.thus("sk_par_step A (sk_bullet A)").by_rewrite_of(
+                    "h_par_A_bull_a", [SYM(p.fact("h_bullet_A"))]
+                )
+            with p.case("h_nK: ~(?a b. A = App_t (App_t K_t a) b)"):
+                # ---- LEM split: is A an S-redex? --------------------
+                with p.cases_on(
+                    EXCLUDED_MIDDLE,
+                    "?a b c. A = App_t (App_t (App_t S_t a) b) c",
+                ):
+                    with p.case(
+                        "h_S: ?a b c. A = "
+                        "     App_t (App_t (App_t S_t a) b) c"
+                    ):
+                        # 'a' auto-introduced; manually choose b, c.
+                        p.choose("b", from_="a_eq")
+                        p.choose("c", from_="b_eq")
+                        # c_eq : A = App_t (App_t (App_t S_t a) b) c.
+
+                        # nat0_lt c A: one hop.
+                        p.have(
+                            "h_lt_c_SABC: nat0_lt c "
+                            "(App_t (App_t (App_t S_t a) b) c)"
+                        ).by(
+                            NAT0_LT_APP_T_R,
+                            "App_t (App_t S_t a) b", "c",
+                        )
+                        p.have("h_lt_c: nat0_lt c A").by_rewrite_of(
+                            "h_lt_c_SABC", [SYM(p.fact("c_eq"))]
+                        )
+                        # nat0_lt b A: two hops via App (App S a) b.
+                        p.have(
+                            "h_lt_b_SAb: "
+                            "nat0_lt b (App_t (App_t S_t a) b)"
+                        ).by(NAT0_LT_APP_T_R, "App_t S_t a", "b")
+                        p.have(
+                            "h_lt_SAb_SABC: "
+                            "nat0_lt (App_t (App_t S_t a) b) "
+                            "(App_t (App_t (App_t S_t a) b) c)"
+                        ).by(
+                            NAT0_LT_APP_T_L,
+                            "App_t (App_t S_t a) b", "c",
+                        )
+                        p.have(
+                            "h_lt_b_SABC: "
+                            "nat0_lt b "
+                            "(App_t (App_t (App_t S_t a) b) c)"
+                        ).by(
+                            NAT0_LT_TRANS,
+                            "b", "App_t (App_t S_t a) b",
+                            "App_t (App_t (App_t S_t a) b) c",
+                            "h_lt_b_SAb", "h_lt_SAb_SABC",
+                        )
+                        p.have("h_lt_b: nat0_lt b A").by_rewrite_of(
+                            "h_lt_b_SABC", [SYM(p.fact("c_eq"))]
+                        )
+                        # nat0_lt a A: three hops via App S a, App (App S a) b.
+                        p.have(
+                            "h_lt_a_Sa: nat0_lt a (App_t S_t a)"
+                        ).by(NAT0_LT_APP_T_R, "S_t", "a")
+                        p.have(
+                            "h_lt_Sa_SAb: "
+                            "nat0_lt (App_t S_t a) "
+                            "(App_t (App_t S_t a) b)"
+                        ).by(NAT0_LT_APP_T_L, "App_t S_t a", "b")
+                        p.have(
+                            "h_lt_a_SAb: "
+                            "nat0_lt a (App_t (App_t S_t a) b)"
+                        ).by(
+                            NAT0_LT_TRANS,
+                            "a", "App_t S_t a",
+                            "App_t (App_t S_t a) b",
+                            "h_lt_a_Sa", "h_lt_Sa_SAb",
+                        )
+                        p.have(
+                            "h_lt_a_SABC: "
+                            "nat0_lt a "
+                            "(App_t (App_t (App_t S_t a) b) c)"
+                        ).by(
+                            NAT0_LT_TRANS,
+                            "a", "App_t (App_t S_t a) b",
+                            "App_t (App_t (App_t S_t a) b) c",
+                            "h_lt_a_SAb", "h_lt_SAb_SABC",
+                        )
+                        p.have("h_lt_a: nat0_lt a A").by_rewrite_of(
+                            "h_lt_a_SABC", [SYM(p.fact("c_eq"))]
+                        )
+
+                        p.have(
+                            "h_ih_a: sk_par_step a (sk_bullet a)"
+                        ).by("IH", "a", "h_lt_a")
+                        p.have(
+                            "h_ih_b: sk_par_step b (sk_bullet b)"
+                        ).by("IH", "b", "h_lt_b")
+                        p.have(
+                            "h_ih_c: sk_par_step c (sk_bullet c)"
+                        ).by("IH", "c", "h_lt_c")
+                        # PAR_S aligned with SK_BULLET_S_REDEX's RHS:
+                        # X1 := sk_bullet a, Y1 := sk_bullet b,
+                        # Z1 := sk_bullet c.
+                        p.have(
+                            "h_par_SABC: "
+                            "sk_par_step "
+                            "(App_t (App_t (App_t S_t a) b) c) "
+                            "(App_t "
+                            "  (App_t (sk_bullet a) (sk_bullet c)) "
+                            "  (App_t (sk_bullet b) (sk_bullet c)))"
+                        ).by(
+                            PAR_S,
+                            "a", "sk_bullet a", "b", "sk_bullet b",
+                            "c", "sk_bullet c",
+                            _CONJ(
+                                p.fact("h_ih_a"),
+                                _CONJ(
+                                    p.fact("h_ih_b"),
+                                    p.fact("h_ih_c"),
+                                ),
+                            ),
+                        )
+                        p.have(
+                            "h_bullet_SABC: "
+                            "sk_bullet "
+                            "(App_t (App_t (App_t S_t a) b) c) = "
+                            "App_t "
+                            "  (App_t (sk_bullet a) (sk_bullet c)) "
+                            "  (App_t (sk_bullet b) (sk_bullet c))"
+                        ).by(SK_BULLET_S_REDEX, "a", "b", "c")
+                        p.have(
+                            "h_bullet_A: sk_bullet A = "
+                            "App_t "
+                            "  (App_t (sk_bullet a) (sk_bullet c)) "
+                            "  (App_t (sk_bullet b) (sk_bullet c))"
+                        ).by_rewrite_of(
+                            "h_bullet_SABC", [SYM(p.fact("c_eq"))]
+                        )
+                        p.have(
+                            "h_par_A_bull: "
+                            "sk_par_step A "
+                            "(App_t "
+                            "  (App_t (sk_bullet a) (sk_bullet c)) "
+                            "  (App_t (sk_bullet b) (sk_bullet c)))"
+                        ).by_rewrite_of(
+                            "h_par_SABC", [SYM(p.fact("c_eq"))]
+                        )
+                        p.thus(
+                            "sk_par_step A (sk_bullet A)"
+                        ).by_rewrite_of(
+                            "h_par_A_bull",
+                            [SYM(p.fact("h_bullet_A"))],
+                        )
+                    with p.case(
+                        "h_nS: ~(?a b c. A = "
+                        "       App_t (App_t (App_t S_t a) b) c)"
+                    ):
+                        # ---- LEM split: is A an App at all? --------
+                        with p.cases_on(
+                            EXCLUDED_MIDDLE, "?a b. A = App_t a b"
+                        ):
+                            with p.case(
+                                "h_App: ?a b. A = App_t a b"
+                            ):
+                                _bullet_refl_app_case(p)
+                            with p.case(
+                                "h_nApp: ~(?a b. A = App_t a b)"
+                            ):
+                                _bullet_refl_leaf_case(p)
 
 
 @proof
