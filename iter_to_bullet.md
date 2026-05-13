@@ -455,91 +455,7 @@ The bullet-only plan is **strictly smaller** for the iter-elimination
 goal.  The par-relation plan would be preferable if Church-Rosser
 were independently needed; it's not.
 
-## Risks
-
-Updated after the EXP 5 spike, the `HALTS_SK_STEP_APP_LEFT` audit,
-and the `DIAGONAL_TERM_EXISTS` / `HALTING_UNDECIDABLE` consumer
-audit:
-
-- **(1) is resolved via output-convention change** — candidate (2)
-  satisfies `DIAG_TERM` but not `DIAGONAL_TERM_EXISTS`'s
-  two-directional K/KI contract.  Resolution: swap `halts_decider` to
-  the halting-status convention; see Risk 1 and the "Output
-  convention change" section.
-- (2) is dissolved into the cleaner `HALTS_B_APP_DECOMP` framing.
-- (3) is dissolved — `HALTS_SK_STEP_APP_LEFT` has no purpose under
-  bullet; consumers re-wire to `HALTS_B_APP_DECOMP`.
-- (4) and (5) remain as friction items, not blockers.
-
-**Net status**: the bullet-only plan is **viable** under the
-chosen output-convention change.  Total halting pipeline ~250 lines.
-Grep confirmed `halts_decider`'s K/KI shape is local to halting.py
-(leaf module, no external imports); the convention swap is safe and
-adopted.
-
-### 1. `DIAG_TERM` rewrite (Layer 5) — **RE-ELEVATED to blocking by consumer audit**
-
-Two strands of evidence:
-
-(a) The spike found a working bullet diagonal: candidate (2),
-classical Curry `e = S (K H) SII`, `d = e e`, gives
-`bullet_iter 4 d = App H d` in 4 explicit steps.  That part is fine.
-
-(b) The consumer audit (DIAGONAL_TERM_EXISTS, halting.py:11672) shows
-candidate (2)'s `d` **does not** satisfy DIAG_TERM's required contract.
-The contract is two-directional:
-
-  * K_t branch: `(H d → K_t) ==> ~halts d`.
-  * KI_t branch: `(H d → KI_t) ==> halts d`.
-
-Under candidate (2), since `bullet_iter 4 d = App H d` is the *only*
-recursion, the bullet trajectory continues `d → App H d → (whatever
-H d is)`.  Both K_t and KI_t are normal (halting).  So:
-
-  * KI_t branch: provable — `bullet_iter (4+n) d = KI_t` (normal), so
-    `halts d`. ✓
-  * K_t branch: NOT provable — `bullet_iter (4+n) d = K_t` (normal),
-    so `halts d`, *not* `~halts d`.  The contract demands `~halts d`
-    in this branch. ✗
-
-The iter-form derived `~halts d` in the K_t branch via the K/KI Omega
-flip: `d → (H d) Omega → K_t Omega`, which doesn't halt because Omega
-is inside a one-arg K.  Under bullet, Omega cannot be embedded in the
-diagonal recursion — that's the original Risk #1 cause, and it's not
-fixed by candidate (2): it just relocates from the recursion
-(`(H d) Omega` as d's evaluation) to the consumer-level discriminator,
-which then has nowhere to attach.
-
-HALTING_UNDECIDABLE (halting.py:11867-11885) case-splits on `halts d`
-via excluded middle and needs *both* directions to contradict.  The
-`halts d` case has no contradiction route under candidate (2).
-
-**Status**: Layer 5 cannot be discharged as currently planned.  No
-known bullet-only diagonal satisfies DIAG_TERM's two-directional
-contract.
-
-**Chosen resolution**: option (2), the halting-status output
-convention.  Verified by audit that nothing outside `halting.py`
-depends on `halts_decider`'s K_t/KI_t shape (it's a leaf module).
-See the "Output convention change" section below for the precise
-definition swap, pipeline, and Bucket C impact.
-
-Discarded alternatives:
-
-1. **New diagonal under bullet** that produces `App (H d) Y` for some
-   non-halting `Y` reachable in d's bullet trajectory.  Multiple
-   candidates ruled out by EXP 5 (Omega-protected, I-doubled);
-   Tromp-style Y-combinator applied to `\\x. (H x) Omega = S H (K Omega)`
-   has the same K-Omega-eaten problem inside g.  Open question
-   whether *any* SK term can encode the K/KI Omega flip under
-   bullet's eager-everywhere semantics — not pursued.
-
-3. **Hybrid plan**: keep bullet for OMEGA_NON_HALTING and most of the
-   pipeline, but keep `sk_par_step` (and triangle / App-inversions)
-   for `DIAG_TERM`'s diagonal proof.  Brings back ~600 lines of par-
-   relation infrastructure for no semantic gain over (2).  Rejected.
-
-## Output convention change (Risk 1 recovery option 2 — chosen path)
+## Output convention change (chosen resolution for Risk 1)
 
 Audit (2026-05-13):
 
@@ -637,80 +553,86 @@ The `CHURCH_*_REDUCES` and `HALTS_*_OMEGA_*` lemmas were previously
 mandatory Bucket C restatements; under 2a they become Bucket D
 deletions.  Net saving: ~80 more lines deleted.
 
-### 2. `_STABLE` catalog size — **resolved into App-decomposition**
+## Risks
 
-Initial concern: every distinct App-shape the diagonal walks through
-needs its own `_STABLE` lemma; 6-10 shapes would balloon the family.
+All design-level unknowns have been resolved — see "Resolved during
+design" below.  The remaining risks are HOL-discharge cost estimates;
+the design is stable.  Ranked by volume of residual risk.
 
-EXP 5 candidate (2) shows the actual shape exposure is much smaller
-— the 4-step trajectory uses per-iter explicit rewrites, not a
-universally-quantified family.  Further auditing (see Risk 3 below)
-showed that the only `_STABLE` lemma the consumers actually need is
-a generic distributivity + a halts-decomposition lemma:
+### 1. DIAG_TERM HOL discharge (~150 lines, spike-validated but HOL-untested)
 
-- `BULLET_APP_DISTRIB_ATOMHEAD` (~30 lines) — `App` with atom-headed
-  left stays App-other under all bullet iterates.
-- `HALTS_B_APP_DECOMP` (~40 lines) — `halts_b (App X Y) = halts_b X
-  /\ halts_b Y` for App-other-forever shapes.
+The spike (EXP 5 candidate (2)) confirmed the 4-step trajectory
+`d → (K H e)(SII e) → H ((I e)(I e)) → H ((K e)(K e)(...)) → H d`
+works at the term-rewriting level.  The HOL discharge still has
+friction the spike doesn't measure:
 
-Closing `HALTS_K_OMEGA_FALSE` via these is a ~15-line consequence
-(`halts_b K_t /\ halts_b Omega_t = T /\ F = F`), with no
-specialized `APP_K_OMEGA_BULLET_STABLE` lemma needed — the generic
-distributivity covers it.
+- Four `bullet_iter k d = ...` equations, each over a concrete term
+  of size up to 89 nodes.
+- The iter-3 → iter-4 step contracts **four simultaneous K-redexes**
+  under one bullet step.  HOL discharge requires `SK_BULLET_APP_OTHER`
+  at the top, then recursive `SK_BULLET_K_REDEX` at each child
+  position, each sub-derivation discharging no-K / no-S guards via
+  `shape_neq`.  Plausibly 30-50 lines per outer step.
+- Large concrete terms stress the simp / rewrite system; alpha-
+  equivalence and beta-reduction overhead is hard to predict without
+  trying.
 
-Total ~70 lines.  Below the original ~100 budget; below the
-intermediate ~50-80 estimate from the first spike-driven revision.
+Plausible range: 100-300 lines.  The doc's 150 estimate is a
+midpoint guess.
 
-Shape-stability gotcha (still real but unencountered on this path):
-`App_t X (App_t Y Z)` where X bullets to `App_t K_t _` would *create*
-a new K-redex at the next bullet step, breaking distributivity.
-Candidate (2)'s trajectory does not hit this case because the head
-remains atom-shaped throughout, so `BULLET_APP_DISTRIB_ATOMHEAD`'s
-guard is satisfied.
+**De-risking move**: spike one of the four `bullet_iter` equations
+in HOL (the iter-1 step is simplest — a single SK_BULLET_S_REDEX
+application) and measure the line cost.  Extrapolate.
 
-### 3. ~~`HALTS_SK_STEP_APP_LEFT` semantic mismatch~~ — **dissolved**
+### 2. OMEGA_NON_HALTING_BULLET orbit equations (~75 lines, untested)
 
-Initial concern: the iter-form `HALTS_SK_STEP_APP_LEFT` consumer
-needs "reduce X internally, leave Y fixed", which has no bullet
-analog.
+`sk_bullet Omega_t = T1`, `sk_bullet T1 = T2`, `sk_bullet T2 = Omega_t`
+were stubbed earlier in halting.py but never discharged.  The middle
+equation is the trickiest: T1 contains `App I_t SII_t` sub-terms,
+and bullet recognizes the S-redex inside only after `I_T_DEF` is
+folded into the existential proof inside `_sk_bullet_F`'s D2
+disjunct.  No calibration on actual line cost.
 
-Resolution: the lemma has *no purpose* under bullet halting.  Bullet
-fundamentally reduces both children of an App in lockstep; there is
-no "internal reduction with sibling fixed."  But the bullet world
-gives a structurally different lemma — `HALTS_B_APP_DECOMP` — that
-covers every iter-form consumer that was using
-`HALTS_SK_STEP_APP_LEFT`.
+### 3. is_sk_term cascade for the new diagonal (~40-60 lines)
 
-- iter-form consumer: "X reduces to X' inside App ==> halts (App X
-  Y) = halts (App X' Y)".  Used to evaluate one child to expose
-  structure.
-- bullet replacement: `halts_b (App X Y) = halts_b X /\ halts_b Y`
-  (under App-other-forever).  Same effect achieved by direct
-  decomposition rather than internal reduction.
+Mirrors the existing iter-form `DIAG_TERM` cascade
+(halting.py:11424-11458) but for the smaller candidate (2) witness
+(`e = S (K H) SII`, no `K Omega` term).  Structurally simpler, so
+should be shorter.  Bounded but worth budgeting.
 
-Migration impact: `HALTS_SK_STEP_APP_LEFT` and
-`SK_ITER_APP_LEFT_HALTS` move from Bucket C (restate) to Bucket A
-(delete outright).  All consumers re-wired to `HALTS_B_APP_DECOMP`.
+### 4. OMEGA_NON_HALTING_BULLET orbit-membership induction (~30-50 lines)
 
-### 4. `is_normal` definition coupling
+`!n. bullet_iter n Omega_t IN {Omega, T1, T2}` by nat0 induction.
+The 3-way right-associated disjunct in the IH branch has DSL friction
+(disjunction destructure + `BULLET_ITER_SUC` unfold + simp-matching);
+could push past the 30-line budget but bounded.
 
-`IS_NORMAL_DEF` is `sk_step X = X`.  The bullet world's natural
-normality test is `sk_bullet X = X`.  These *should* be equivalent
-(both equivalent to "has no redex"), but if the existing codebase
-reasons about `is_normal` via `sk_step` somewhere the bullet plan
-touches, you may need to prove
-`IS_NORMAL_BULLET_FIXED : is_normal X = (sk_bullet X = X)`.
-Not hard but not free; not currently in the plan's budget.
+### 5. Possibly redundant: HALTS_B_APP_DECOMP under 2a
 
-### 5. nat0 induction friction on the 3-way orbit invariant
+Re-reading the pipeline under the chosen convention: the four lemmas
+HALTS_B_APP_DECOMP was meant to support (`HALTS_K_OMEGA_FALSE`,
+`HALTS_KI_OMEGA_TRUE`, `CHURCH_*_REDUCES`) are now Bucket D deletions.
+`DIAG_TERM`, `DIAGONAL_TERM_EXISTS`, and `HALTING_UNDECIDABLE` all
+use `BULLET_ITER_INVARIANT` (halts-iter offset) — *not* App-
+decomposition.  So `HALTS_B_APP_DECOMP` + `BULLET_APP_DISTRIB_ATOMHEAD`
+(Layer 3 in the pipeline) may dissolve entirely, saving another ~70
+lines.
 
-The orbit-membership induction (`bullet_iter n Omega_t IN
-{Omega, T1, T2}`) has an IH with a 3-way right-associated disjunct;
-the step case-splits on three IH branches and applies the matching
-orbit equation.  Clean on paper, but DSL-level friction with
-disjunction destructure + `BULLET_ITER_SUC` unfold + simp-matching
-the result could push it past the budgeted 30 lines.  Bounded
-risk; will surface immediately in Layer 2.
+Confirm during Layer 4 audit before committing the work.
+
+### Resolved during design
+
+| # | Risk | Status | Resolution |
+|---|------|--------|------------|
+| R1 | DIAG_TERM consumer-contract mismatch | resolved | Output convention swap (this doc) |
+| R2 | `_STABLE` catalog size | dissolved | Per-iter explicit rewrites + `HALTS_B_APP_DECOMP`; under 2a may dissolve fully — see remaining Risk 5 |
+| R3 | `HALTS_SK_STEP_APP_LEFT` semantic mismatch | dissolved | Lemma has no purpose under bullet; consumers re-wire to App-decomposition (which itself may now be unneeded — see Risk 5) |
+| R4 | `is_normal` definition coupling | friction | Bullet pipeline uses `is_normal` only via existing `IS_NORMAL_DEF` (sk_step-based); `OMEGA_NON_HALTING_BULLET`'s three non-normality lemmas use direct `sk_step ≠ self` calculations.  No conversion lemma needed. |
+
+**Risk concentration**: (1) is ~60% of remaining risk by volume; (2)
+is ~25%; (3)-(5) are bookkeeping or possible savings.  All remaining
+risks are HOL-discharge unknowns rather than design unknowns — the
+design is stable.
 
 ## What this doesn't fix
 
