@@ -11000,6 +11000,87 @@ def BULLET_ITER_INVARIANT(p):
     p.sorry()
 
 
+# halts_par t := ?N. sk_par_steps t N /\ is_normal N.
+# Retained under Option C as the par-side of the bullet/par bridge.
+HALTS_PAR_DEF = define(
+    "halts_par",
+    parse_type("nat0 -> bool"),
+    "\\t:nat0. ?N:nat0. sk_par_steps t N /\\ is_normal N",
+)
+halts_par = mk_const("halts_par", [])
+
+
+@proof
+def HALTS_PAR_AT(p):
+    """|- !t. halts_par t = (?N. sk_par_steps t N /\\ is_normal N).
+
+    Direct unfold of HALTS_PAR_DEF via AP_THM + BETA -- mirrors HALTS_AT.
+    """
+    from tactics import AP_THM, BETA_CONV, TRANS, GEN
+
+    ap = AP_THM(HALTS_PAR_DEF, _n0_t_var)
+    bet = BETA_CONV(rand(ap._concl))
+    spec_th = TRANS(ap, bet)
+    p.goal("!t. halts_par t = (?N. sk_par_steps t N /\\ is_normal N)")
+    p.thus(
+        "!t. halts_par t = (?N. sk_par_steps t N /\\ is_normal N)"
+    ).by_thm(GEN(_n0_t_var, spec_th))
+
+
+@proof
+def HALTS_B_IFF_HALTS_PAR(p):
+    """|- !X. halts_b X = halts_par X.
+
+    *** STUB.  The bullet/par halt-bridge (Option C's central lemma; see
+    iter_to_bullet.md "HALTS_B_IFF_HALTS_PAR (the bridge -- Option C's
+    new central lemma)").
+
+    Forward (halts_b X ==> halts_par X): bullet trajectory is a chain
+    of par-steps (BULLET_REFL: par_step W (sk_bullet W)).  If
+    bullet_iter n X = N is normal, then sk_par_steps X N (n applications
+    of PAR_STEPS_STEP) witnesses halts_par X.  ~10 lines.
+
+    Backward (halts_par X ==> halts_b X): given ?N. sk_par_steps X N
+    /\\ is_normal N, induct on the par-step count to N.  At each step
+    SK_BULLET_TRIANGLE pushes ``par_step Y (sk_bullet X)`` past the
+    remaining par-chain, so ``sk_par_steps (sk_bullet X) N`` and IH
+    on sk_bullet X yields ``?m. is_normal (bullet_iter m (sk_bullet X))
+    = is_normal (bullet_iter (SUC0 m) X)``.  ~50 lines.
+
+    Gated on SK_BULLET_TRIANGLE (also stubbed via _TRIANGLE_APP_CLOSURE).
+    """
+    p.goal("!X. halts_b X = halts_par X")
+    p.sorry()
+
+
+@proof
+def HALTS_PAR_INVARIANT(p):
+    """|- !X Y. sk_par_steps X Y ==> halts_par X = halts_par Y.
+
+    *** STUB.  halts_par is invariant along par-step chains.
+
+    Forward (halts_par X ==> halts_par Y): unfold halts_par X to get
+    ?N. sk_par_steps X N /\\ is_normal N.  Combined with the hypothesis
+    sk_par_steps X Y, PAR_STEPS_CONFLUENT gives ?W. sk_par_steps N W
+    /\\ sk_par_steps Y W.  N normal + NORMAL_STABILITY_PAR_STEPS forces
+    W = N.  So sk_par_steps Y N; witness halts_par Y.
+
+    Backward (halts_par Y ==> halts_par X): unfold halts_par Y to get
+    ?N. sk_par_steps Y N /\\ is_normal N.  PAR_STEPS_TRANS on
+    sk_par_steps X Y and sk_par_steps Y N gives sk_par_steps X N.
+    Witness halts_par X.
+
+    Both directions composable from existing PAR_STEPS_CONFLUENT,
+    NORMAL_STABILITY_PAR_STEPS, PAR_STEPS_TRANS (all shipped).  Mirrors
+    HALTS_PAR_STEPS_INVARIANT's argument (iter-form, line 10742) but
+    stays inside the par calculus (no STANDARDIZATION_NORMAL).  ~50 lines.
+    """
+    p.goal(
+        "!X Y. sk_par_steps X Y ==> halts_par X = halts_par Y"
+    )
+    p.sorry()
+
+
 # ---------------------------------------------------------------------------
 # bullet_eval / bullet_chain -- kernel-level evaluators for sk_bullet.
 #
@@ -11815,54 +11896,59 @@ def HALTS_KI_OMEGA_TRUE(p):
 @proof
 def DIAGONAL_TERM_EXISTS(p):
     """|- !H. is_sk_term H ==>
-              ?d. is_sk_term d /\\
-                  ((?n. sk_iter n (App_t H d) = K_t)  ==> ~halts d) /\\
-                  ((?n. sk_iter n (App_t H d) = KI_t) ==>  halts d).
+              ?d. is_sk_term d /\\ halts_b d = halts_b (App_t H d).
 
-    Halts-form diagonal.  ``d -->* (H d) Omega`` (TWO App layers; DIAG_TERM
-    no longer wraps with the outer K_t since the inner ``halts (K_t Omega)
-    = F`` vs. ``halts (KI_t Omega) = T`` already breaks symmetry).
+    Halts-form diagonal in the new (bullet) convention.  Combines:
 
-    Combines:
-      * DIAG_TERM:                  self-applying d with d -->* (H d) Omega.
-      * HALTING_REDUCTION_PRESERVED: halts d = halts ((H d) Omega).
-      * SK_ITER_APP_LEFT_HALTS:     lift ``H d -->* K_t / KI_t`` to
-                                     ``halts ((H d) Omega) = halts (K_t/KI_t Omega)``.
-      * HALTS_K_OMEGA_FALSE:        ~halts (K_t Omega).
-      * HALTS_KI_OMEGA_TRUE:         halts (KI_t Omega).
+      * DIAG_TERM           : the par-form Curry diagonal
+                              ``sk_par_steps d (App_t H d)``.
+      * HALTS_PAR_INVARIANT : par-step chains preserve halts_par.
+      * HALTS_B_IFF_HALTS_PAR : the bullet/par halt-bridge.
 
-    No further holes here -- closes against the four stubs above plus
-    the already-discharged HALTING_REDUCTION_PRESERVED.
+    Pipeline: DIAG_TERM gives ``d`` and ``sk_par_steps d (App_t H d)``.
+    Apply HALTS_PAR_INVARIANT to get ``halts_par d = halts_par (App_t
+    H d)``.  Sandwich with HALTS_B_IFF_HALTS_PAR (on both sides) to
+    convert each ``halts_par`` to ``halts_b``.  Witness d.
     """
-    # *** STUB.  DIAG_TERM's signature changed to bullet form -- it now
-    # produces ``halts_b d = halts_b (App_t H d)`` rather than the
-    # par-form witness this proof relied on.  Two viable next steps:
-    #
-    #   (a) Restate this theorem in bullet form mirroring DIAG_TERM:
-    #       |- !H. is_sk_term H ==>
-    #             ?d. is_sk_term d /\ halts_b d = halts_b (App_t H d).
-    #       Derivation is trivial: just delegate to DIAG_TERM (~5 lines).
-    #       HALTING_UNDECIDABLE below would then need to be restated
-    #       under the bullet convention (per iter_to_bullet.md "Output
-    #       convention change" section, ~20 lines using halts_decider's
-    #       new spec ``halts_b t = ~halts_b (App_t H t)``).
-    #
-    #   (b) Keep this theorem's K_t / KI_t output convention and rebuild
-    #       the bridge layer: needs ``halts_b == halts`` (the deleted
-    #       STANDARDIZATION_NORMAL equivalence), plus the par-form
-    #       ``H d -->* K_t / KI_t`` lift to ``halts (K_t Omega)`` /
-    #       ``halts (KI_t Omega)`` -- substantially more infrastructure.
-    #
-    # The bullet-only migration plan prefers (a).  See iter_to_bullet.md
-    # Layer 4 / Layer 5 for the full rewire.  Stubbed here to keep the
-    # file compilable while the migration is in flight.
     p.goal(
         "!H. is_sk_term H ==> "
-        "    ?d. is_sk_term d /\\ "
-        "        ((?n. sk_iter n (App_t H d) = K_t) ==> ~halts d) /\\ "
-        "        ((?n. sk_iter n (App_t H d) = KI_t) ==> halts d)"
+        "    ?d. is_sk_term d /\\ halts_b d = halts_b (App_t H d)"
     )
-    p.sorry()
+    p.fix("H")
+    p.assume("h_is_sk_H: is_sk_term H")
+
+    # Pull in the par-form diagonal witness.
+    p.have(
+        "h_diag: ?d. is_sk_term d /\\ sk_par_steps d (App_t H d)"
+    ).by(DIAG_TERM, "H", "h_is_sk_H")
+    p.choose("d", from_="h_diag")
+    p.split("d_eq", "(h_is_sk_d, h_par)")
+
+    # halts_par d = halts_par (App H d) via par-step invariance.
+    p.have(
+        "h_par_eq: halts_par d = halts_par (App_t H d)"
+    ).by(HALTS_PAR_INVARIANT, "d", "App_t H d", "h_par")
+
+    # Sandwich with the bullet/par halt-bridge.
+    # halts_b d = halts_par d.
+    p.have("h_b_d: halts_b d = halts_par d").by_thm(
+        SPEC(p._parse("d"), HALTS_B_IFF_HALTS_PAR)
+    )
+    # halts_b (App H d) = halts_par (App H d).
+    p.have(
+        "h_b_Hd: halts_b (App_t H d) = halts_par (App_t H d)"
+    ).by_thm(SPEC(p._parse("App_t H d"), HALTS_B_IFF_HALTS_PAR))
+    # Chain: halts_b d = halts_par d = halts_par (App H d) = halts_b (App H d).
+    p.have("h_step1: halts_b d = halts_par (App_t H d)").by_trans(
+        "h_b_d", "h_par_eq"
+    )
+    p.have(
+        "h_halts_eq: halts_b d = halts_b (App_t H d)"
+    ).by_trans("h_step1", SYM(p.fact("h_b_Hd")))
+
+    p.thus(
+        "?d. is_sk_term d /\\ halts_b d = halts_b (App_t H d)"
+    ).by_exists(["d"], "h_is_sk_d", "h_halts_eq")
 
 
 @proof
@@ -11903,67 +11989,25 @@ def HALTING_UNDECIDABLE(p):
     EXCLUDED_MIDDLE are all live.  Once DIAGONAL_TERM_EXISTS is
     discharged the diagonal closes without further holes.
     """
-    from classical import EXCLUDED_MIDDLE
-
+    # *** STUB.  The halts_decider definition still has its old K_t/KI_t
+    # output convention; DIAGONAL_TERM_EXISTS now emits the bullet-form
+    # ``halts_b d = halts_b (App_t H d)`` equality instead.  The two
+    # signatures don't compose -- the body below previously consumed
+    # ``(?n. sk_iter n (App_t H d) = K_t) ==> ~halts d`` etc., which
+    # DIAGONAL_TERM_EXISTS no longer produces.
+    #
+    # Resolution per iter_to_bullet.md "Output convention change":
+    # swap halts_decider's definition to
+    #   halts_decider H := is_sk_term H /\
+    #                      !t. is_sk_term t ==>
+    #                          halts_b t = ~halts_b (App_t H t)
+    # then close HALTING_UNDECIDABLE in ~20 lines by specialising the
+    # decider's spec at t := d and combining with
+    # ``halts_b d = halts_b (App_t H d)`` from DIAGONAL_TERM_EXISTS to
+    # contradict ``halts_b (App_t H d) = ~halts_b (App_t H d)``.
+    # Stubbed here pending the convention swap.
     p.goal("~ (?H. halts_decider H)")
-    with p.suppose("h_ex: ?H. halts_decider H"):
-        p.choose("H", from_="h_ex")
-        # H_eq : halts_decider H.
-
-        # ---- Unfold the halts_decider definition. ---------------------
-        p.have(
-            "h_thm: halts_decider H = "
-            "       (is_sk_term H /\\ "
-            "        !t. is_sk_term t ==> "
-            "            (halts t ==> (?n. sk_iter n (App_t H t) = K_t)) /\\ "
-            "            (~halts t ==> (?n. sk_iter n (App_t H t) = KI_t)))"
-        ).by(HALTS_DECIDER_DEF_THM, "H")
-        p.have(
-            "h_unf: is_sk_term H /\\ "
-            "       !t. is_sk_term t ==> "
-            "           (halts t ==> (?n. sk_iter n (App_t H t) = K_t)) /\\ "
-            "           (~halts t ==> (?n. sk_iter n (App_t H t) = KI_t))"
-        ).by_eq_mp("h_thm", "H_eq")
-        p.split("h_unf", "(h_is_sk_H, h_decides)")
-
-        # ---- Diagonal term d (halts-form). ----------------------------
-        # DIAGONAL_TERM_EXISTS produces ``~halts d`` (K_t branch) and
-        # ``halts d`` (KI_t branch) directly; no further reduction
-        # plumbing required at this site.
-        p.have(
-            "h_diag: ?d. is_sk_term d /\\ "
-            "        ((?n. sk_iter n (App_t H d) = K_t) ==> ~halts d) /\\ "
-            "        ((?n. sk_iter n (App_t H d) = KI_t) ==> halts d)"
-        ).by(DIAGONAL_TERM_EXISTS, "H", "h_is_sk_H")
-        p.choose("d", from_="h_diag")
-        p.split("d_eq", "(h_is_sk_d, h_kt_to_nhalts, h_kit_to_halts)")
-
-        # ---- Decider's promise specialised at t := d. -----------------
-        p.have(
-            "h_dec_d: (halts d ==> (?n. sk_iter n (App_t H d) = K_t)) /\\ "
-            "         (~halts d ==> (?n. sk_iter n (App_t H d) = KI_t))"
-        ).by("h_decides", "d", "h_is_sk_d")
-        p.split("h_dec_d", "(h_halts_to_kt, h_nhalts_to_kit)")
-
-        # ---- Case-split on halts d (Excluded Middle). -----------------
-        with p.cases_on(EXCLUDED_MIDDLE, "halts d"):
-            # ===== Case 1: halts d. ====================================
-            with p.case("h_halts: halts d"):
-                # H d -->* K_t (from decider) ==> ~halts d (diagonal).
-                p.have(
-                    "h_to_kt: ?n. sk_iter n (App_t H d) = K_t"
-                ).by("h_halts_to_kt", "h_halts")
-                p.have("h_nhalts: ~halts d").by("h_kt_to_nhalts", "h_to_kt")
-                p.absurd().by_conj("h_nhalts", "h_halts")
-
-            # ===== Case 2: ~halts d. ===================================
-            with p.case("h_nhalts: ~halts d"):
-                # H d -->* KI_t (from decider) ==> halts d (diagonal).
-                p.have(
-                    "h_to_kit: ?n. sk_iter n (App_t H d) = KI_t"
-                ).by("h_nhalts_to_kit", "h_nhalts")
-                p.have("h_halts: halts d").by("h_kit_to_halts", "h_to_kit")
-                p.absurd().by_conj("h_nhalts", "h_halts")
+    p.sorry()
 
 
 # ---------------------------------------------------------------------------
