@@ -242,9 +242,52 @@ def type_of(tm: term) -> hol_type:
 
 def mk_comb(f: term, a: term) -> term:
     f_ty = type_of(f)
-    if isinstance(f_ty, Tyapp) and f_ty.tyop == "fun" and f_ty.args[0] == type_of(a):
+    a_ty = type_of(a)
+    if isinstance(f_ty, Tyapp) and f_ty.tyop == "fun" and f_ty.args[0] == a_ty:
         return Comb(f, a)
-    raise HolError("mk_comb: types do not agree")
+    if isinstance(f_ty, Tyapp) and f_ty.tyop == "fun":
+        reason = (
+            f"function expects {_pp_ty(f_ty.args[0])} but got {_pp_ty(a_ty)}"
+        )
+    else:
+        reason = f"head is not a function: type {_pp_ty(f_ty)}"
+    raise HolError(
+        f"mk_comb: types do not agree -- {reason}\n"
+        f"  head : {_pp_tm(f)} :: {_pp_ty(f_ty)}\n"
+        f"  arg  : {_pp_tm(a)} :: {_pp_ty(a_ty)}"
+    )
+
+
+def _pp_ty(ty, _max=120):
+    s = _pp_ty_raw(ty)
+    return s if len(s) <= _max else s[: _max - 3] + "..."
+
+
+def _pp_ty_raw(ty):
+    if isinstance(ty, Tyvar):
+        return ty.name
+    if isinstance(ty, Tyapp):
+        if ty.tyop == "fun" and len(ty.args) == 2:
+            return f"({_pp_ty_raw(ty.args[0])} -> {_pp_ty_raw(ty.args[1])})"
+        if not ty.args:
+            return ty.tyop
+        return f"{ty.tyop}({', '.join(_pp_ty_raw(a) for a in ty.args)})"
+    return repr(ty)
+
+
+def _pp_tm(tm, _max=160):
+    s = _pp_tm_raw(tm)
+    return s if len(s) <= _max else s[: _max - 3] + "..."
+
+
+def _pp_tm_raw(tm):
+    if isinstance(tm, (Var, Const)):
+        return tm.name
+    if isinstance(tm, Abs):
+        return f"(\\{tm.bvar.name}. {_pp_tm_raw(tm.body)})"
+    if isinstance(tm, Comb):
+        return f"({_pp_tm_raw(tm.fun)} {_pp_tm_raw(tm.arg)})"
+    return repr(tm)
 
 
 # ---------------------------------------------------------------------------
