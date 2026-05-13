@@ -71,22 +71,23 @@ Stage map
 
   Stage 0 (sk):       SK terms as tagged HF tuples
                       (S_t, K_t, App_t, is_sk_term).
-  Stage 1 (is_normal): Syntactic no-redex predicate (WF-rec on
-                      Pair_ord depth) + normal-form structural lemmas
-                      (IS_NORMAL_NOT_K_REDEX_SHAPE, _NOT_S_REDEX_SHAPE,
-                      _APP_DECOMP).
-  Stage 2 (par):      Parallel reduction relation ``sk_par_step`` +
-                      RTC ``sk_par_steps`` + ``par_chain`` DSL.
-  Stage 3 (bullet):   Takahashi's complete development ``sk_bullet``
+  Stage 1 (par):      Parallel reduction ``sk_par_step`` + RTC
+                      ``sk_par_steps`` + ``par_chain`` DSL.  Defines
+                      ``is_normal`` as the par-step fixed-point
+                      (``\\t. !Y. sk_par_step t Y ==> Y = t``) and
+                      proves the structural lemmas
+                      IS_NORMAL_NOT_{K,S}_REDEX_SHAPE,
+                      IS_NORMAL_APP_DECOMP.
+  Stage 2 (bullet):   Takahashi's complete development ``sk_bullet``
                       + triangle property + Tait/Martin-Loef diamond
                       + Church-Rosser confluence on par.
-  Stage 4 (halts):    ``bullet_iter`` + ``halts_b`` (user-facing) +
+  Stage 3 (halts):    ``bullet_iter`` + ``halts_b`` (user-facing) +
                       ``halts_par`` (internal) + the bridge
                       ``HALTS_B_IFF_HALTS_PAR``.
-  Stage 5 (diag):     Classical Curry diagonal ``DIAG_TERM`` in par
+  Stage 4 (diag):     Classical Curry diagonal ``DIAG_TERM`` in par
                       form; ``DIAGONAL_TERM_EXISTS`` lifts to halts_b
                       via the bridge.
-  Stage 6:            ``HALTING_UNDECIDABLE`` and the corollary
+  Stage 5:            ``HALTING_UNDECIDABLE`` and the corollary
                       ``HALTS_NOT_SK_REPRESENTABLE``.
 
 ------------------------------------------------------------------
@@ -340,7 +341,7 @@ register_intro_set(
 
 
 # ---------------------------------------------------------------------------
-# Stage 1 -- constructor injectivity and disjointness.
+# Constructor injectivity and disjointness (still Stage 0).
 #
 # Three lemmas we need for the head-redex reductions and the normal-form
 # proofs:
@@ -517,100 +518,7 @@ def _atom_neq_App_negations(p, atom, atom_neq_lemma):
 
 
 # ---------------------------------------------------------------------------
-# Stage 1 -- ``is_normal``: syntactic no-redex predicate.
-#
-# A term ``n`` is "normal" iff it contains no K-redex or S-redex
-# anywhere.  WF-recursion on Pair_ord depth, same shape as
-# ``is_sk_term``:
-#
-#   _is_normal_F f n  :=  n = S_t
-#                       \/ n = K_t
-#                       \/ ( ~(?M N. n = App_t (App_t K_t M) N)
-#                          /\ ~(?M N P. n = App_t (App_t (App_t S_t M) N) P)
-#                          /\ ?a b. n = App_t a b /\ f a /\ f b )
-#
-# The two not-redex guards are non-recursive in f; only the inner
-# App-existential drives recursion, at NAT0_LT_APP_T_L/R-smaller args.
-#
-# Under leftmost-outermost reduction this is classically equivalent to
-# ``sk_bullet t = t``; the equivalence is not needed for the halting
-# proof, so we don't formalise it.
-# ---------------------------------------------------------------------------
-
-
-_IS_NORMAL_F_DEF = define(
-    "_is_normal_F",
-    _F_pred_ty,
-    "\\f:nat0->bool. \\n:nat0. "
-    "n = S_t \\/ n = K_t \\/ "
-    "(~(?u v. n = App_t (App_t K_t u) v) /\\ "
-    " ~(?u v w. n = App_t (App_t (App_t S_t u) v) w) /\\ "
-    " (?a b. n = App_t a b /\\ f a /\\ f b))",
-)
-_IS_NORMAL_F = mk_const("_is_normal_F", [])
-
-
-@proof
-def IS_NORMAL_MONO(p):
-    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
-    ==> _is_normal_F f n = _is_normal_F g n.
-
-    D1 (n = S_t), D2 (n = K_t) are f-free (REFL).  D3's outer
-    ~K-redex / ~S-redex guards are f-free; the inner
-    ``?a b. n = App_t a b /\\ f a /\\ f b`` recurses at strictly-
-    smaller arguments (NAT0_LT_APP_T_L/R), handled by
-    ``mono_iff_binary_step``.  Conjoin the f-free guards on top via
-    AP_TERM, then chain disjuncts via ``or_chain_collapse``.
-    """
-    from tactics import AP_TERM as _AP_TERM
-    p.goal(
-        "!f g n. (!k. nat0_lt k n ==> f k = g k) "
-        "==> _is_normal_F f n = _is_normal_F g n",
-        types={"f": _pred_ty, "g": _pred_ty, "n": nat0_ty, "k": nat0_ty},
-    )
-    p.fix("f g n")
-    p.assume("h: !k. nat0_lt k n ==> f k = g k")
-
-    h_th = p.fact("h")
-    eq_S = REFL(p._parse("n = S_t"))
-    eq_K = REFL(p._parse("n = K_t"))
-    eq_app_inner = mono_iff_binary_step(
-        App_t, NAT0_LT_APP_T_L, NAT0_LT_APP_T_R, h_th
-    )
-    nK_guard = p._parse("~(?u v. n = App_t (App_t K_t u) v)")
-    nS_guard = p._parse("~(?u v w. n = App_t (App_t (App_t S_t u) v) w)")
-    and_const = mk_const("/\\", [])
-    # Right-associative /\: nest as nK /\ (nS /\ inner) to match the
-    # body's right-associative chain.
-    eq_with_nS = _AP_TERM(mk_app(and_const, nS_guard), eq_app_inner)
-    eq_app = _AP_TERM(mk_app(and_const, nK_guard), eq_with_nS)
-    body_eq = or_chain_collapse([eq_S, eq_K, eq_app])
-
-    p.thus("_is_normal_F f n = _is_normal_F g n").by_unfold(
-        body_eq, _IS_NORMAL_F_DEF
-    )
-
-
-IS_NORMAL_DEF, _IS_NORMAL_REC_RAW = define_wf_lt(
-    "is_normal",
-    _pred_ty,
-    _IS_NORMAL_F,
-    IS_NORMAL_MONO,
-)
-is_normal = mk_const("is_normal", [])
-
-
-# IS_NORMAL_REC : |- !n. is_normal n =
-#                          n = S_t \/ n = K_t \/
-#                          (~(?M N. n = App_t (App_t K_t M) N) /\
-#                           ~(?M N P. n = App_t (App_t (App_t S_t M) N) P) /\
-#                           ?a b. n = App_t a b /\ is_normal a /\ is_normal b).
-IS_NORMAL_REC = _unfold_rec_via_F_def(_IS_NORMAL_REC_RAW, _IS_NORMAL_F_DEF)
-
-
-
-# ---------------------------------------------------------------------------
-# Stage 3 -- parallel reduction.
+# Stage 1 -- parallel reduction.
 #
 # ``sk_par_step X X1`` -- one-step parallel reduction.  Inductively
 # defined by:
@@ -1305,7 +1213,27 @@ def PAR_STEP_K_T_INV(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 4 -- Takahashi's complete-development function ``sk_bullet``.
+# ``is_normal`` -- par-step fixed-point predicate.
+#
+# A term is normal iff no proper par-step leaves it -- the standard
+# definition of a normal form for a reduction relation.  Treated as
+# opaque downstream; the three structural lemmas
+# IS_NORMAL_NOT_{K,S}_REDEX_SHAPE and IS_NORMAL_APP_DECOMP are the
+# only places that crack the definition open, and
+# NORMAL_STABILITY_PAR_STEP is then a one-line specialisation.
+# ---------------------------------------------------------------------------
+
+
+IS_NORMAL_DEF = define(
+    "is_normal",
+    parse_type("nat0 -> bool"),
+    "\\t:nat0. !Y:nat0. sk_par_step t Y ==> Y = t",
+)
+is_normal = mk_const("is_normal", [])
+
+
+# ---------------------------------------------------------------------------
+# Stage 2 -- Takahashi's complete-development function ``sk_bullet``.
 #
 # Defined by well-founded recursion on Pair_ord depth (via
 # ``define_wf_lt``).  Contracts every redex visible at a node
@@ -4781,104 +4709,113 @@ def PAR_STEPS_TRANS(p):
     ).by_thm(MP(inst_beta, p.fact("lifted_cl")))
 
     p.thus("sk_par_steps X Z").by("h_PXY", "Z", "h_YZ")
-def _is_normal_rec_body(t):
-    """Body of IS_NORMAL_REC at term ``t``, as a parser-ready string."""
-    nK = f"~(?u v. {t} = App_t (App_t K_t u) v)"
-    nS = f"~(?u v w. {t} = App_t (App_t (App_t S_t u) v) w)"
-    Dapp_inner = f"?a b. {t} = App_t a b /\\ is_normal a /\\ is_normal b"
-    D1 = f"{t} = S_t"
-    D2 = f"{t} = K_t"
-    D3 = f"({nK}) /\\ ({nS}) /\\ ({Dapp_inner})"
-    return D1, D2, D3
 
 
 @proof
 def IS_NORMAL_NOT_K_REDEX_SHAPE(p):
     """|- !M N. ~is_normal (App_t (App_t K_t M) N).
 
-    Unfold via IS_NORMAL_REC.  D1 (t = S_t) / D2 (t = K_t) refuted by
-    S_T_NEQ_APP_T / K_T_NEQ_APP_T.  D3 carries the ~K-redex guard,
-    immediately contradicted by witnessing (M, N).
+    PAR_K with PAR_REFL witnesses gives sk_par_step (K M N) M; the
+    is_normal hypothesis would force M = K M N.  Strict-subterm
+    contradiction via NAT0_LT_APP_T_R + NAT0_LT_APP_T_L + NAT0_LT_TRANS
+    + NAT0_LT_NOT_REFL.
     """
+    from nat0_order import NAT0_LT_NOT_REFL
     p.goal("!M:nat0. !N:nat0. ~is_normal (App_t (App_t K_t M) N)")
     p.fix("M N")
     t = "App_t (App_t K_t M) N"
     with p.suppose(f"h_norm: is_normal ({t})"):
-        spec = SPEC(p._parse(t), IS_NORMAL_REC)
-        D1, D2, D3 = _is_normal_rec_body(t)
-        p.have(f"h_body: ({D1}) \\/ ({D2}) \\/ ({D3})").by_thm(
-            EQ_MP(spec, p.fact("h_norm"))
+        p.have("h_rM: sk_par_step M M").by(PAR_REFL, "M")
+        p.have("h_rN: sk_par_step N N").by(PAR_REFL, "N")
+        p.have(
+            "h_conj: sk_par_step M M /\\ sk_par_step N N"
+        ).by_thm(CONJ(p.fact("h_rM"), p.fact("h_rN")))
+        p.have(
+            f"h_par: sk_par_step ({t}) M"
+        ).by(PAR_K, "M", "M", "N", "N", "h_conj")
+        p.have(
+            f"h_un: !Y:nat0. sk_par_step ({t}) Y ==> Y = ({t})"
+        ).by_unfold("h_norm", IS_NORMAL_DEF)
+        p.have(f"h_M_eq: M = ({t})").by("h_un", "M", "h_par")
+        p.have("h_lt1: nat0_lt M (App_t K_t M)").by(
+            NAT0_LT_APP_T_R, "K_t", "M"
         )
-        with p.cases_on("h_body"):
-            with p.case(f"h1: {D1}"):
-                p.have(f"h_sym: S_t = {t}").by_thm(SYM(p.fact("h1")))
-                p.have(f"h_neq: ~(S_t = {t})").by(
-                    S_T_NEQ_APP_T, "App_t K_t M", "N"
-                )
-                p.absurd().by_conj("h_neq", "h_sym")
-            with p.case(f"h2: {D2}"):
-                p.have(f"h_sym: K_t = {t}").by_thm(SYM(p.fact("h2")))
-                p.have(f"h_neq: ~(K_t = {t})").by(
-                    K_T_NEQ_APP_T, "App_t K_t M", "N"
-                )
-                p.absurd().by_conj("h_neq", "h_sym")
-            with p.case(f"h3: {D3}"):
-                p.split("h3", "(h_nK, _, _)")
-                p.have(
-                    f"h_K: ?u v. {t} = App_t (App_t K_t u) v"
-                ).by_exists(["M", "N"], REFL(p._parse(t)))
-                p.absurd().by_conj("h_nK", "h_K")
+        p.have(f"h_lt2: nat0_lt (App_t K_t M) ({t})").by(
+            NAT0_LT_APP_T_L, "App_t K_t M", "N"
+        )
+        p.have(f"h_lt: nat0_lt M ({t})").by(
+            NAT0_LT_TRANS, "M", "App_t K_t M", t, "h_lt1", "h_lt2"
+        )
+        p.have("h_self_lt: nat0_lt M M").by_rewrite_of(
+            "h_lt", [SYM(p.fact("h_M_eq"))]
+        )
+        p.have("h_nrefl: ~nat0_lt M M").by(NAT0_LT_NOT_REFL, "M")
+        p.absurd().by_conj("h_nrefl", "h_self_lt")
 
 
 @proof
 def IS_NORMAL_NOT_S_REDEX_SHAPE(p):
     """|- !M N P. ~is_normal (App_t (App_t (App_t S_t M) N) P).
 
-    Same shape as IS_NORMAL_NOT_K_REDEX_SHAPE; D3's ~S-redex guard
-    contradicted by witnessing (M, N, P).
+    PAR_S with PAR_REFL witnesses gives sk_par_step (S M N P)
+    (App_t (App_t M P) (App_t N P)).  is_normal would then force the
+    contracted form to equal the S-redex; outer APP_T_INJ extracts
+    ``App_t N P = P``, giving a strict-subterm contradiction on P via
+    NAT0_LT_APP_T_R + NAT0_LT_NOT_REFL.
     """
+    from nat0_order import NAT0_LT_NOT_REFL
     p.goal(
         "!M:nat0. !N:nat0. !P:nat0. "
         "~is_normal (App_t (App_t (App_t S_t M) N) P)"
     )
     p.fix("M N P")
     t = "App_t (App_t (App_t S_t M) N) P"
+    val = "App_t (App_t M P) (App_t N P)"
     with p.suppose(f"h_norm: is_normal ({t})"):
-        spec = SPEC(p._parse(t), IS_NORMAL_REC)
-        D1, D2, D3 = _is_normal_rec_body(t)
-        p.have(f"h_body: ({D1}) \\/ ({D2}) \\/ ({D3})").by_thm(
-            EQ_MP(spec, p.fact("h_norm"))
+        p.have("h_rM: sk_par_step M M").by(PAR_REFL, "M")
+        p.have("h_rN: sk_par_step N N").by(PAR_REFL, "N")
+        p.have("h_rP: sk_par_step P P").by(PAR_REFL, "P")
+        p.have(
+            "h_conj: sk_par_step M M /\\ sk_par_step N N /\\ sk_par_step P P"
+        ).by_thm(
+            CONJ(p.fact("h_rM"), CONJ(p.fact("h_rN"), p.fact("h_rP")))
         )
-        with p.cases_on("h_body"):
-            with p.case(f"h1: {D1}"):
-                p.have(f"h_sym: S_t = {t}").by_thm(SYM(p.fact("h1")))
-                p.have(f"h_neq: ~(S_t = {t})").by(
-                    S_T_NEQ_APP_T, "App_t (App_t S_t M) N", "P"
-                )
-                p.absurd().by_conj("h_neq", "h_sym")
-            with p.case(f"h2: {D2}"):
-                p.have(f"h_sym: K_t = {t}").by_thm(SYM(p.fact("h2")))
-                p.have(f"h_neq: ~(K_t = {t})").by(
-                    K_T_NEQ_APP_T, "App_t (App_t S_t M) N", "P"
-                )
-                p.absurd().by_conj("h_neq", "h_sym")
-            with p.case(f"h3: {D3}"):
-                p.split("h3", "(_, h_nS, _)")
-                p.have(
-                    f"h_S: ?u v w. {t} = "
-                    f"      App_t (App_t (App_t S_t u) v) w"
-                ).by_exists(["M", "N", "P"], REFL(p._parse(t)))
-                p.absurd().by_conj("h_nS", "h_S")
+        p.have(
+            f"h_par: sk_par_step ({t}) ({val})"
+        ).by(PAR_S, "M", "M", "N", "N", "P", "P", "h_conj")
+        p.have(
+            f"h_un: !Y:nat0. sk_par_step ({t}) Y ==> Y = ({t})"
+        ).by_unfold("h_norm", IS_NORMAL_DEF)
+        p.have(f"h_val_eq: ({val}) = ({t})").by("h_un", val, "h_par")
+        p.have(
+            "h_inj: App_t M P = App_t (App_t S_t M) N "
+            "       /\\ App_t N P = P"
+        ).by(
+            APP_T_INJ,
+            "App_t M P", "App_t N P",
+            "App_t (App_t S_t M) N", "P",
+            "h_val_eq",
+        )
+        p.split("h_inj", "(_, h_NP)")
+        p.have("h_P_eq: P = App_t N P").by_thm(SYM(p.fact("h_NP")))
+        p.have("h_lt: nat0_lt P (App_t N P)").by(
+            NAT0_LT_APP_T_R, "N", "P"
+        )
+        p.have("h_self_lt: nat0_lt P P").by_rewrite_of(
+            "h_lt", [SYM(p.fact("h_P_eq"))]
+        )
+        p.have("h_nrefl: ~nat0_lt P P").by(NAT0_LT_NOT_REFL, "P")
+        p.absurd().by_conj("h_nrefl", "h_self_lt")
 
 
 @proof
 def IS_NORMAL_APP_DECOMP(p):
     """|- !A B. is_normal (App_t A B) ==> is_normal A /\\ is_normal B.
 
-    Unfold IS_NORMAL_REC at App_t A B.  Atom disjuncts refuted by
-    S_T_NEQ_APP_T / K_T_NEQ_APP_T.  D3 yields witnesses a, b with
-    App_t A B = App_t a b and is_normal a /\\ is_normal b; APP_T_INJ
-    identifies a = A, b = B.
+    For ``is_normal A``: given sk_par_step A Y, PAR_APP with PAR_REFL B
+    gives sk_par_step (App_t A B) (App_t Y B); the hypothesis forces
+    App_t Y B = App_t A B, and APP_T_INJ extracts Y = A.  Symmetric
+    construction for B.  Fold both bodies back via IS_NORMAL_DEF.
     """
     p.goal(
         "!A:nat0. !B:nat0. "
@@ -4886,181 +4823,85 @@ def IS_NORMAL_APP_DECOMP(p):
     )
     p.fix("A B")
     p.assume("h_norm_AB: is_normal (App_t A B)")
-    t = "App_t A B"
-    spec = SPEC(p._parse(t), IS_NORMAL_REC)
-    D1, D2, D3 = _is_normal_rec_body(t)
-    p.have(f"h_body: ({D1}) \\/ ({D2}) \\/ ({D3})").by_thm(
-        EQ_MP(spec, p.fact("h_norm_AB"))
+    p.have(
+        "h_un_AB: !Y:nat0. sk_par_step (App_t A B) Y ==> Y = App_t A B"
+    ).by_unfold("h_norm_AB", IS_NORMAL_DEF)
+
+    # Body for ``is_normal A``.
+    with p.have(
+        "h_body_A: !Y:nat0. sk_par_step A Y ==> Y = A"
+    ).proof():
+        p.fix("Y")
+        p.assume("h_AY: sk_par_step A Y")
+        p.have("h_rB: sk_par_step B B").by(PAR_REFL, "B")
+        p.have(
+            "h_conj: sk_par_step A Y /\\ sk_par_step B B"
+        ).by_thm(CONJ(p.fact("h_AY"), p.fact("h_rB")))
+        p.have(
+            "h_par: sk_par_step (App_t A B) (App_t Y B)"
+        ).by(PAR_APP, "A", "Y", "B", "B", "h_conj")
+        p.have("h_eq: App_t Y B = App_t A B").by(
+            "h_un_AB", "App_t Y B", "h_par"
+        )
+        p.have("h_inj: Y = A /\\ B = B").by(
+            APP_T_INJ, "Y", "B", "A", "B", "h_eq"
+        )
+        p.split("h_inj", "(h_YA, _)")
+        p.thus("Y = A").by_thm(p.fact("h_YA"))
+
+    spec_A = unfold_def_at(IS_NORMAL_DEF, p._parse("A"))
+    p.have("h_norm_A: is_normal A").by_thm(
+        EQ_MP(SYM(spec_A), p.fact("h_body_A"))
     )
-    with p.cases_on("h_body"):
-        with p.case(f"h1: {D1}"):
-            p.have(f"h_sym: S_t = {t}").by_thm(SYM(p.fact("h1")))
-            p.have(f"h_neq: ~(S_t = {t})").by(S_T_NEQ_APP_T, "A", "B")
-            p.absurd().by_conj("h_neq", "h_sym")
-        with p.case(f"h2: {D2}"):
-            p.have(f"h_sym: K_t = {t}").by_thm(SYM(p.fact("h2")))
-            p.have(f"h_neq: ~(K_t = {t})").by(K_T_NEQ_APP_T, "A", "B")
-            p.absurd().by_conj("h_neq", "h_sym")
-        with p.case(f"h3: {D3}"):
-            p.split("h3", "(_, _, h_inner)")
-            p.choose("a", from_="h_inner")
-            p.choose("b", from_="a_eq")
-            p.split("b_eq", "(h_app, h_norm_a, h_norm_b)")
-            p.have("h_inj: A = a /\\ B = b").by(
-                APP_T_INJ, "A", "B", "a", "b", "h_app"
-            )
-            p.split("h_inj", "(h_Aa, h_Bb)")
-            p.have("h_norm_A: is_normal A").by_rewrite_of(
-                "h_norm_a", [SYM(p.fact("h_Aa"))]
-            )
-            p.have("h_norm_B: is_normal B").by_rewrite_of(
-                "h_norm_b", [SYM(p.fact("h_Bb"))]
-            )
-            p.thus("is_normal A /\\ is_normal B").by_thm(
-                CONJ(p.fact("h_norm_A"), p.fact("h_norm_B"))
-            )
+
+    # Body for ``is_normal B``.
+    with p.have(
+        "h_body_B: !Y:nat0. sk_par_step B Y ==> Y = B"
+    ).proof():
+        p.fix("Y")
+        p.assume("h_BY: sk_par_step B Y")
+        p.have("h_rA: sk_par_step A A").by(PAR_REFL, "A")
+        p.have(
+            "h_conj: sk_par_step A A /\\ sk_par_step B Y"
+        ).by_thm(CONJ(p.fact("h_rA"), p.fact("h_BY")))
+        p.have(
+            "h_par: sk_par_step (App_t A B) (App_t A Y)"
+        ).by(PAR_APP, "A", "A", "B", "Y", "h_conj")
+        p.have("h_eq: App_t A Y = App_t A B").by(
+            "h_un_AB", "App_t A Y", "h_par"
+        )
+        p.have("h_inj: A = A /\\ Y = B").by(
+            APP_T_INJ, "A", "Y", "A", "B", "h_eq"
+        )
+        p.split("h_inj", "(_, h_YB)")
+        p.thus("Y = B").by_thm(p.fact("h_YB"))
+
+    spec_B = unfold_def_at(IS_NORMAL_DEF, p._parse("B"))
+    p.have("h_norm_B: is_normal B").by_thm(
+        EQ_MP(SYM(spec_B), p.fact("h_body_B"))
+    )
+
+    p.thus("is_normal A /\\ is_normal B").by_thm(
+        CONJ(p.fact("h_norm_A"), p.fact("h_norm_B"))
+    )
 
 
 @proof
 def NORMAL_STABILITY_PAR_STEP(p):
     """|- !X Y. is_normal X /\\ sk_par_step X Y ==> Y = X.
 
-    Impredicative induction on the par-step at
-        P A B := is_normal A ==> B = A.
-    REFL : tautology.
-    K, S : vacuously true via IS_NORMAL_NOT_{K,S}_REDEX_SHAPE -- the
-           hypothesis ``is_normal (K-/S-redex)`` is contradictory, so
-           the implication's RHS holds via CONTR.
-    APP  : decompose ``is_normal (App_t A B)`` into ``is_normal A`` and
-           ``is_normal B`` via IS_NORMAL_APP_DECOMP, apply both IHs,
-           lift to ``App_t A1 B1 = App_t A B`` via MK_COMB congruence.
+    Direct from IS_NORMAL_DEF: unfold ``is_normal X`` to
+    ``!Z. sk_par_step X Z ==> Z = X`` and specialise at Z := Y.
     """
-    from tactics import BETA_RULE, MK_COMB
     p.goal(
         "!X:nat0. !Y:nat0. is_normal X /\\ sk_par_step X Y ==> Y = X"
     )
     p.fix("X Y")
-    p.assume(
-        "(h_normX, h_XY): is_normal X /\\ sk_par_step X Y"
-    )
-
-    spec_XY = unfold_def_at(
-        SK_PAR_STEP_DEF, p._parse("X"), p._parse("Y")
-    )
-    h_forall = EQ_MP(spec_XY, p.fact("h_XY"))
-
-    P_lifted = p._parse(
-        "\\A:nat0. \\B:nat0. is_normal A ==> B = A"
-    )
-    inst = SPEC(P_lifted, h_forall)
-    inst_beta = BETA_RULE(inst)
-
-    # REFL closure.
-    with p.have(
-        "lifted_refl: !Zb:nat0. is_normal Zb ==> Zb = Zb"
-    ).proof():
-        p.fix("Zb")
-        p.assume("h: is_normal Zb")
-        p.thus("Zb = Zb").by_thm(REFL(p._parse("Zb")))
-
-    # K closure -- vacuous via IS_NORMAL_NOT_K_REDEX_SHAPE.
-    with p.have(
-        "lifted_K: !a:nat0. !y:nat0. !a1:nat0. !y1:nat0. "
-        "(is_normal a ==> a1 = a) /\\ (is_normal y ==> y1 = y) ==> "
-        "(is_normal (App_t (App_t K_t a) y) ==> "
-        " a1 = App_t (App_t K_t a) y)"
-    ).proof():
-        p.fix("a y a1 y1")
-        p.assume(
-            "(_h_a, _h_y): "
-            "(is_normal a ==> a1 = a) /\\ (is_normal y ==> y1 = y)"
-        )
-        p.assume("h_norm_K: is_normal (App_t (App_t K_t a) y)")
-        p.have(
-            "h_neg: ~is_normal (App_t (App_t K_t a) y)"
-        ).by(IS_NORMAL_NOT_K_REDEX_SHAPE, "a", "y")
-        p.absurd().by_conj("h_neg", "h_norm_K")
-
-    # S closure -- vacuous via IS_NORMAL_NOT_S_REDEX_SHAPE.
-    with p.have(
-        "lifted_S: !a:nat0. !b:nat0. !c:nat0. "
-        "!a1:nat0. !b1:nat0. !c1:nat0. "
-        "(is_normal a ==> a1 = a) /\\ (is_normal b ==> b1 = b) /\\ "
-        "(is_normal c ==> c1 = c) ==> "
-        "(is_normal (App_t (App_t (App_t S_t a) b) c) ==> "
-        " App_t (App_t a1 c1) (App_t b1 c1) = "
-        " App_t (App_t (App_t S_t a) b) c)"
-    ).proof():
-        p.fix("a b c a1 b1 c1")
-        p.assume(
-            "(_h_a, _h_b, _h_c): "
-            "(is_normal a ==> a1 = a) /\\ (is_normal b ==> b1 = b) /\\ "
-            "(is_normal c ==> c1 = c)"
-        )
-        p.assume(
-            "h_norm_S: is_normal (App_t (App_t (App_t S_t a) b) c)"
-        )
-        p.have(
-            "h_neg: ~is_normal (App_t (App_t (App_t S_t a) b) c)"
-        ).by(IS_NORMAL_NOT_S_REDEX_SHAPE, "a", "b", "c")
-        p.absurd().by_conj("h_neg", "h_norm_S")
-
-    # APP closure -- decompose is_normal, apply IHs, lift via congruence.
-    with p.have(
-        "lifted_APP: !a:nat0. !b:nat0. !a1:nat0. !b1:nat0. "
-        "(is_normal a ==> a1 = a) /\\ (is_normal b ==> b1 = b) ==> "
-        "(is_normal (App_t a b) ==> App_t a1 b1 = App_t a b)"
-    ).proof():
-        p.fix("a b a1 b1")
-        p.assume(
-            "(h_ih_a, h_ih_b): "
-            "(is_normal a ==> a1 = a) /\\ (is_normal b ==> b1 = b)"
-        )
-        p.assume("h_norm_ab: is_normal (App_t a b)")
-        p.have(
-            "h_dec: is_normal a /\\ is_normal b"
-        ).by(IS_NORMAL_APP_DECOMP, "a", "b", "h_norm_ab")
-        p.split("h_dec", "(h_norm_a, h_norm_b)")
-        p.have("h_a1: a1 = a").by("h_ih_a", "h_norm_a")
-        p.have("h_b1: b1 = b").by("h_ih_b", "h_norm_b")
-        # MK_COMB lifts (a1 = a, b1 = b) to (App_t a1 b1 = App_t a b).
-        eq_left = AP_TERM(p._parse("App_t"), p.fact("h_a1"))
-        p.thus("App_t a1 b1 = App_t a b").by_thm(
-            MK_COMB(eq_left, p.fact("h_b1"))
-        )
-
+    p.assume("(h_normX, h_XY): is_normal X /\\ sk_par_step X Y")
     p.have(
-        "lifted_cl: "
-        "(!Zb:nat0. is_normal Zb ==> Zb = Zb) /\\ "
-        "(!a:nat0. !y:nat0. !a1:nat0. !y1:nat0. "
-        "    (is_normal a ==> a1 = a) /\\ (is_normal y ==> y1 = y) ==> "
-        "    (is_normal (App_t (App_t K_t a) y) ==> "
-        "     a1 = App_t (App_t K_t a) y)) /\\ "
-        "(!a:nat0. !b:nat0. !c:nat0. "
-        " !a1:nat0. !b1:nat0. !c1:nat0. "
-        "    (is_normal a ==> a1 = a) /\\ (is_normal b ==> b1 = b) /\\ "
-        "    (is_normal c ==> c1 = c) ==> "
-        "    (is_normal (App_t (App_t (App_t S_t a) b) c) ==> "
-        "     App_t (App_t a1 c1) (App_t b1 c1) = "
-        "     App_t (App_t (App_t S_t a) b) c)) /\\ "
-        "(!a:nat0. !b:nat0. !a1:nat0. !b1:nat0. "
-        "    (is_normal a ==> a1 = a) /\\ (is_normal b ==> b1 = b) ==> "
-        "    (is_normal (App_t a b) ==> App_t a1 b1 = App_t a b))"
-    ).by_thm(
-        CONJ(
-            p.fact("lifted_refl"),
-            CONJ(
-                p.fact("lifted_K"),
-                CONJ(p.fact("lifted_S"), p.fact("lifted_APP")),
-            ),
-        )
-    )
-
-    p.have(
-        "h_PXY: is_normal X ==> Y = X"
-    ).by_thm(MP(inst_beta, p.fact("lifted_cl")))
-
-    p.thus("Y = X").by("h_PXY", "h_normX")
+        "h_un: !Z:nat0. sk_par_step X Z ==> Z = X"
+    ).by_unfold("h_normX", IS_NORMAL_DEF)
+    p.thus("Y = X").by("h_un", "Y", "h_XY")
 
 
 @proof
@@ -5143,7 +4984,7 @@ def NORMAL_STABILITY_PAR_STEPS(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 5 -- halting predicate.
+# Stage 3 -- halting predicate.
 #
 #   bullet_iter 0        = \t. t
 #   bullet_iter (SUC0 n) = \t. sk_bullet (bullet_iter n t)
@@ -5817,7 +5658,7 @@ def HALTS_PAR_INVARIANT(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 6 -- the diagonal.
+# Stage 4 -- the diagonal.
 #
 # ``halts_decider H`` says H is an SK term that decides halting via the
 # flipped halting-status output convention:
@@ -6119,7 +5960,7 @@ def HALTING_UNDECIDABLE(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 7 -- corollaries.
+# Stage 5 -- corollaries.
 # ---------------------------------------------------------------------------
 
 
