@@ -11189,6 +11189,19 @@ def _be_prove_not_sred(X, Y):
     return _be_prove_neg_app_pattern(X, Y, 3, pattern)
 
 
+def _be_mk_app_eq(eq_L, eq_R):
+    """Given ``eq_L : |- L1 = L2`` and ``eq_R : |- R1 = R2``, build
+    ``|- App_t L1 R1 = App_t L2 R2`` via MK_COMB.
+
+    Direct construction (no REWRITE_CONV) so identity-shaped sub-equations
+    -- which arise from the opaque-Var fallback in ``_be_synth_bullet`` --
+    don't trip REWRITE_CONV's loop detector on rules of shape ``t = t``.
+    """
+    from fusion import MK_COMB as _MK_COMB
+    # MK_COMB(L1=L2, R1=R2) : App_t L1 R1 = App_t L2 R2 (after AP_TERM lift on App_t).
+    return _MK_COMB(AP_TERM(App_t, eq_L), eq_R)
+
+
 def _be_synth_bullet(start):
     """Return ``(end_term, |- sk_bullet start = end_term)`` for concrete
     ``start`` over {S_t, K_t, App_t}.
@@ -11233,7 +11246,14 @@ def _be_synth_bullet(start):
         _, X_eq = _be_synth_bullet(X)
         _, Y_eq = _be_synth_bullet(Y)
         _, Z_eq = _be_synth_bullet(Z)
-        rhs_eq = REWRITE_CONV([X_eq, Y_eq, Z_eq], rand(head_eq._concl))
+        # Build the RHS rewrite via direct MK_COMB compositions rather
+        # than REWRITE_CONV, since identity-shaped X_eq / Y_eq / Z_eq
+        # (from the opaque fallback) would loop REWRITE_CONV's
+        # _bottom_up at sk_bullet H sub-positions.
+        rhs_eq = _be_mk_app_eq(
+            _be_mk_app_eq(X_eq, Z_eq),
+            _be_mk_app_eq(Y_eq, Z_eq),
+        )
         composed = TRANS(head_eq, rhs_eq)
         return (rand(composed._concl), composed)
 
@@ -11259,14 +11279,26 @@ def _be_synth_bullet(start):
         # head_eq RHS = App (sk_bullet X) (sk_bullet Y).
         _, X_eq = _be_synth_bullet(X)
         _, Y_eq = _be_synth_bullet(Y)
-        rhs_eq = REWRITE_CONV([X_eq, Y_eq], rand(head_eq._concl))
+        rhs_eq = _be_mk_app_eq(X_eq, Y_eq)
         composed = TRANS(head_eq, rhs_eq)
         return (rand(composed._concl), composed)
 
-    raise HolError(
-        f"_be_synth_bullet: cannot evaluate sk_bullet on {pp(start)} "
-        "(free variable or unsupported shape)"
-    )
+    # Opaque fallback: free Var or folded constant.  Return REFL(sk_bullet
+    # start) so that ``sk_bullet start`` carries through as a symbolic
+    # chunk.  This lets bullet trajectories of H-containing terms (e.g.
+    # DIAG_TERM's diagonal) compute to a closed form modulo opaque
+    # ``sk_bullet H`` residuals -- the App-other and K/S guards above
+    # discharge cleanly so long as the *head* of each App is concrete
+    # over {S_t, K_t, App_t}, even if leaf positions are opaque.
+    #
+    # DSL friction: when ``start`` is a free Var, the App-other K-shape
+    # guard ``~(?a b. App X start = App (App K_t a) b)`` for any wrapping
+    # App goes through because the head clash is on the *first* arg side
+    # (X vs App K_t a, both concrete on the X side), not on the leaf
+    # ``start`` side -- ``_be_eq_to_F``'s CONJUNCT1 path picks the head
+    # branch before ever inspecting ``start``.
+    fallback = mk_app(sk_bullet, start)
+    return (fallback, REFL(fallback))
 
 
 def bullet_eval(p, start, *, label):
@@ -11479,88 +11511,65 @@ def SK_ITER_APP_LEFT_HALTS(p):
     ).by_rewrite_of("h_at_n", ["n_eq"])
 
 
+_DIAG_I = "App_t (App_t S_t K_t) K_t"
+_DIAG_SII = f"App_t (App_t S_t ({_DIAG_I})) ({_DIAG_I})"
+_DIAG_KH = "App_t K_t H"
+_DIAG_E = f"App_t (App_t S_t ({_DIAG_KH})) ({_DIAG_SII})"
+_DIAG_D = f"App_t ({_DIAG_E}) ({_DIAG_E})"
+
+
 @proof
 def DIAG_TERM(p):
     """|- !H. is_sk_term H ==>
-              ?d. is_sk_term d /\\ halts_b d = halts_b (App_t H d).
+              ?d. is_sk_term d /\\ sk_par_steps d (App_t H d).
 
-    Curry's diagonal under bullet (Takahashi complete-development)
-    reduction.  Migrated from the par-form output (sk_par_steps d
-    (App_t (App_t H d) Omega_t)) per iter_to_bullet.md -- the bullet
-    trajectory of the simpler Curry witness lands directly on
-    ``App_t H d`` in four steps, so we discharge the diagonal as a
-    halts_b equality and skip the K_t / KI_t case-split entirely.
+    Classical Curry diagonal under parallel reduction.  Witness with I_t
+    unfolded inline as ``(S_t K_t) K_t`` so ``par_chain``'s structural
+    synth sees the S-redex shape at each ``I_unf e`` site (the
+    existential over d doesn't care that I_unf = I_t definitionally)::
 
-    Spike-validated witness (outside/sk_par.py EXP 5 candidate 2):
-        I_unf := App_t (App_t S_t K_t) K_t      (I_t inlined for D2)
+        I_unf := App_t (App_t S_t K_t) K_t
         SII   := App_t (App_t S_t I_unf) I_unf
-        e     := App_t (App_t S_t (App_t K_t H)) SII     (* S (K H) SII *)
+        KH    := App_t K_t H
+        e     := App_t (App_t S_t KH) SII        (* S (K H) SII *)
         d     := App_t e e
 
-    4-step bullet trajectory (each step a single ``sk_bullet`` parallel
-    contraction; ``size`` notes from outside/sk_par.py EXP 5):
-        iter 0:  d                                         size 39
-        iter 1:  (K H e)(SII e)                            size 57
-                  [outer S-redex; SK_BULLET_S_REDEX at X=K H, Y=SII, Z=e]
-        iter 2:  H ((I_unf e)(I_unf e))                    size 53
-                  [outer K-redex on the left + inner S-redex on right]
-        iter 3:  H (((K e)(K e)) ((K e)(K e)))             size 89
-                  [I_unf e -> S K K e -> K e (K e) on both sides]
-        iter 4:  H (e e) = H d                             size 41
-                  [four K-redexes fire in parallel under one bullet step]
+    4-link par-step chain (each link a single parallel-reduction step;
+    par_chain synth emits PAR_S / PAR_K / PAR_APP from the start/end
+    shapes, REFL on H carries through every link)::
 
-    Why this witness (and not the par-form ``S (S (K H) SII) (K Omega)``):
-    under LMO ``sk_iter``, contracting both ``(K e)(K e)`` pairs into
-    ``e e`` simultaneously is impossible -- LMO is one-at-a-time.  Under
-    ``sk_bullet``, the iter-3 -> iter-4 step contracts all four K-redexes
-    in parallel, yielding the residual ``e e = d`` exactly.  The
-    par-form proof's outer ``S _ (K Omega)`` wrapper is unnecessary here
-    because no Omega protection is needed -- the simpler diagonal lands
-    on ``H d`` cleanly.
+        d --> (KH e)(SII e)                          [outer S]
+          --> H ((I_unf e)(I_unf e))                 [PAR_K on left, PAR_S on right]
+          --> H (((K e)(K e))((K e)(K e)))           [2 x I_unf-as-SKK fires PAR_S]
+          --> H (e e) = App_t H d                    [4 x parallel K]
 
-    *** PROOF STUB.  The four-step ``bullet_iter <SUC0-tower 4> d =
-    App_t H d`` equation is HOL-untested but spike-validated at the
-    term-rewriting level (see outside/sk_par.py EXP 5).  Estimated
-    cost ~150-300 lines (Risk 1 in iter_to_bullet.md): each step
-    discharges via SK_BULLET_S_REDEX / SK_BULLET_K_REDEX / SK_BULLET_APP_OTHER
-    on a concrete 40-90 node term, with ~30-50 lines per step for the
-    no-K / no-S guards SK_BULLET_APP_OTHER demands (resolved by
-    ``shape_neq`` on head-clash patterns).
-
-    DSL friction (anticipated, deferred to the real proof):
-      * SK_BULLET_APP_OTHER's negation hypotheses ``~(?a b. T = App_t
-        (App_t K_t a) b)`` etc. are existentials over the *current*
-        intermediate term, which grows from size 39 to size 89.  Each
-        guard discharges via APP_T_INJ + S_T_NEQ_K_T / K_T_NEQ_APP_T
-        head clashes; ``shape_neq`` handles this in one line per guard
-        but the auto-instantiation of A,B,C in the negation lives at
-        the parser/by_match boundary.
-      * The iter-3 -> iter-4 step contracts four simultaneous K-redexes;
-        HOL discharge needs SK_BULLET_APP_OTHER at the top, then four
-        nested SK_BULLET_K_REDEX firings.  Each sub-derivation may need
-        explicit ``SYM(BULLET_ITER_SUC)`` rewrites to land on the
-        ``bullet_iter (SUC0 ...) d`` shape rather than ``sk_bullet (...)``.
-      * The final lift bullet_iter equation -> halts_b equality routes
-        through BULLET_ITER_INVARIANT (itself a stub here); the rewrite
-        ``halts_b d = halts_b (bullet_iter 4 d) = halts_b (App_t H d)``
-        is a two-step ``by_rewrite_of`` chain.
+    History (see iter_to_bullet.md "Post-spike audit"):
+    commit 01ac895 attempted to migrate this proof to a bullet form
+    `bullet_iter 4 d = App H d`, on the spike-validated trajectory for
+    atomic H.  Composite-H stress testing (EXP 5/6 in outside/sk_par.py)
+    falsified the equation under `is_sk_term H` -- for H = App K K,
+    the trajectory collapses at iter 3; for H = I = SKK, it cycles
+    period-4 without ever reaching App H d.  Under Option C the
+    diagonal is back in par form (the calculus that has PAR_REFL on H,
+    which is precisely the "keep H unreduced" operation bullet's
+    eager-everywhere semantics forbids), and the par-to-bullet bridge
+    is provided downstream by `HALTS_B_IFF_HALTS_PAR` (not yet
+    shipped).
     """
-    # Witness term strings for candidate (2) (no K Omega wrapper).
-    _I = "App_t (App_t S_t K_t) K_t"
-    _SII = f"App_t (App_t S_t ({_I})) ({_I})"
-    _KH = "App_t K_t H"
-    _E = f"App_t (App_t S_t ({_KH})) ({_SII})"
-    _D = f"App_t ({_E}) ({_E})"
+    _I = _DIAG_I
+    _SII = _DIAG_SII
+    _KH = _DIAG_KH
+    _E = _DIAG_E
+    _D = _DIAG_D
 
     p.goal(
         "!H. is_sk_term H ==> "
-        "    ?d. is_sk_term d /\\ halts_b d = halts_b (App_t H d)"
+        "    ?d. is_sk_term d /\\ sk_par_steps d (App_t H d)"
     )
     p.fix("H")
     p.assume("h_is_sk_H: is_sk_term H")
 
-    # is_sk_term cascade.  Smaller than the par-form witness (no
-    # K Omega term), so we skip the IS_SK_TERM_OMEGA_T leaf.
+    # ---- (1) is_sk_term cascade for d. -----------------------------------
     p.have("h_SK: is_sk_term (App_t S_t K_t)").by_match(
         IS_SK_TERM_APP, IS_SK_TERM_S, IS_SK_TERM_K
     )
@@ -11586,58 +11595,25 @@ def DIAG_TERM(p):
         IS_SK_TERM_APP, "h_e", "h_e"
     )
 
-    # *** STUB.  Real proof skeleton (deferred):
-    #
-    #   with p.have(
-    #       f"h_bullet_eq: bullet_iter (SUC0 (SUC0 (SUC0 (SUC0 0)))) "
-    #       f"             ({_D}) = App_t H ({_D})"
-    #   ).proof():
-    #       # Step 1: bullet_iter 1 d = (K H e)(SII e)   [outer S-redex,
-    #       # SK_BULLET_S_REDEX at X=KH, Y=SII, Z=e -- but Z=e means we
-    #       # need sk_bullet e first; route via BULLET_ITER_SUC + S-redex
-    #       # firing at the head].
-    #       # Step 2: bullet_iter 2 d = H ((I_unf e)(I_unf e))   [K-redex
-    #       # on left, S-redex on right under SK_BULLET_APP_OTHER at top].
-    #       # Step 3: bullet_iter 3 d = H (((K e)(K e))((K e)(K e)))
-    #       #   [I_unf-as-SKK fires on both sides; two nested S-redexes
-    #       #    under three layers of SK_BULLET_APP_OTHER].
-    #       # Step 4: bullet_iter 4 d = H (e e) = H d
-    #       #   [four parallel K-redexes; SK_BULLET_APP_OTHER at top, then
-    #       #    SK_BULLET_K_REDEX four times under one bullet step].
-    #       ...
-    #   p.have(f"h_lhs_eq: halts_b ({_D}) = halts_b (bullet_iter "
-    #          f"        (SUC0 (SUC0 (SUC0 (SUC0 0)))) ({_D}))"
-    #          ).by(BULLET_ITER_INVARIANT,
-    #               "SUC0 (SUC0 (SUC0 (SUC0 0)))", _D)
-    #   p.have(f"h_rhs_eq: halts_b (bullet_iter "
-    #          f"        (SUC0 (SUC0 (SUC0 (SUC0 0)))) ({_D})) "
-    #          f"        = halts_b (App_t H ({_D}))"
-    #          ).by_cong("halts_b", "h_bullet_eq")
-    #   p.have(f"h_halts_eq: halts_b ({_D}) = halts_b (App_t H ({_D}))"
-    #          ).by_trans("h_lhs_eq", "h_rhs_eq")
-    #   p.thus("?d. is_sk_term d /\\ halts_b d = halts_b (App_t H d)"
-    #          ).by_exists([_D], "h_is_sk_d", "h_halts_eq")
-    #
-    # DSL friction notes for the future implementor:
-    #   * The bullet_iter SUC0-tower (``SUC0 (SUC0 (SUC0 (SUC0 0)))``)
-    #     is verbose at every rewrite site.  A ``bullet_reduce`` block
-    #     mirroring ``sk_reduce`` (head-redex sk_iter traces, line 2305)
-    #     would absorb this, but sk_reduce's structure depends on LMO
-    #     single-step semantics that don't translate to bullet's
-    #     parallel-contraction shape.
-    #   * SK_BULLET_APP_OTHER's negation hypotheses ``~(?a b. T = App_t
-    #     (App_t K_t a) b)`` etc. live over the *current* intermediate
-    #     term, which grows from size 39 to 89 across the four steps.
-    #     Each guard discharges via APP_T_INJ + S_T_NEQ_K_T /
-    #     K_T_NEQ_APP_T head clashes; ``shape_neq`` handles this in one
-    #     line per guard.
-    #   * The iter-3 -> iter-4 step contracts four simultaneous K-redexes
-    #     under one bullet step; HOL discharge needs SK_BULLET_APP_OTHER
-    #     at the top, then four SK_BULLET_K_REDEX firings recursively.
-    #   * The final lift to halts_b equality routes through
-    #     BULLET_ITER_INVARIANT (itself a stub).  AP_TERM on halts_b lifts
-    #     the equation; TRANS chains the two halves.
-    p.sorry()
+    # ---- (2) 4-link par-step chain. --------------------------------------
+    _T1 = f"App_t (App_t ({_KH}) ({_E})) (App_t ({_SII}) ({_E}))"
+    _I_E = f"App_t ({_I}) ({_E})"
+    _T2 = f"App_t H (App_t ({_I_E}) ({_I_E}))"
+    _KE = f"App_t K_t ({_E})"
+    _KE_KE = f"App_t ({_KE}) ({_KE})"
+    _T3 = f"App_t H (App_t ({_KE_KE}) ({_KE_KE}))"
+    _T4 = f"App_t H ({_D})"
+
+    with par_chain(p, _D, label="h_par") as c:
+        c.link(_T1)
+        c.link(_T2)
+        c.link(_T3)
+        c.link(_T4)
+
+    # ---- (3) Witness d. --------------------------------------------------
+    p.thus(
+        "?d. is_sk_term d /\\ sk_par_steps d (App_t H d)"
+    ).by_exists([_D], "h_is_sk_d", "h_par")
 
 
 @proof
