@@ -10244,99 +10244,328 @@ def HALTS_PAR_AT(p):
     ).by_thm(GEN(_n0_t_var, spec_th))
 
 
+# ---------------------------------------------------------------------------
+# Bullet orbit of Omega: T1_t and T2_t.
+#
+# Empirical map (outside/sk_par.py): sk_bullet iterates from Omega in a
+# strict period-3 cycle:
+#
+#   Omega  -bullet->  T1   -bullet->  T2   -bullet->  Omega
+#
+# where (with SII_t := App_t (App_t S_t I_t) I_t, i.e. ``_D_self_t``):
+#   T1_t := App_t (App_t I_t SII_t) (App_t I_t SII_t)
+#   T2_t := App_t M M, M := App_t (App_t K_t SII_t) (App_t K_t SII_t)
+#
+# I_t stays folded.  The bullet recursion still fires the inner
+# S-redex at the ``App_t I_t SII_t`` position because _sk_bullet_F's
+# D2 existential ``?a b c. t = App_t (App_t (App_t S_t a) b) c`` is
+# provable via I_T_DEF (I_t = App_t (App_t S_t K_t) K_t).
+# ---------------------------------------------------------------------------
+
+
+# T1_t := App_t (App_t I_t SII_t) (App_t I_t SII_t).
+_I_SII = mk_app(App_t, I_t, _D_self_t)
+T1_T_DEF = define(
+    "T1_t",
+    nat0_ty,
+    mk_app(App_t, _I_SII, _I_SII),
+)
+T1_t = mk_const("T1_t", [])
+
+
+# T2_t := App_t M M where M := App_t (App_t K_t SII_t) (App_t K_t SII_t).
+_K_SII = mk_app(App_t, K_t, _D_self_t)
+_T2_M = mk_app(App_t, _K_SII, _K_SII)
+T2_T_DEF = define(
+    "T2_t",
+    nat0_ty,
+    mk_app(App_t, _T2_M, _T2_M),
+)
+T2_t = mk_const("T2_t", [])
+
+
+@proof
+def SK_BULLET_OMEGA_T(p):
+    """|- sk_bullet Omega_t = T1_t.
+
+    *** STUB.  Unfold OMEGA_T_DEF (Omega_t = App_t (App_t (App_t S_t
+    I_t) I_t) SII_t -- syntactically S-redex with X=I_t, Y=I_t,
+    Z=SII_t), fire SK_BULLET_S_REDEX, evaluate sk_bullet I_t = I_t and
+    sk_bullet SII_t = SII_t (both via SK_BULLET_APP_OTHER recursion to
+    S_t / K_t leaves), fold T1_T_DEF.
+    """
+    p.goal("sk_bullet Omega_t = T1_t")
+    p.sorry()
+
+
+@proof
+def SK_BULLET_T1_T(p):
+    """|- sk_bullet T1_t = T2_t.
+
+    *** STUB.  T1_t = App_t L L with L = App_t I_t SII_t.  Top App
+    has no K/S redex at the surface (L's first arg is I_t, not K_t
+    nor App_t S_t _); SK_BULLET_APP_OTHER fires, recurse into L.
+
+    At L: unfold I_T_DEF to expose L = App_t (App_t (App_t S_t K_t)
+    K_t) SII_t, the syntactic S-redex; SK_BULLET_S_REDEX at X=K_t,
+    Y=K_t, Z=SII_t yields App_t (App_t K_t SII_t) (App_t K_t SII_t).
+
+    Compose: sk_bullet T1_t = App_t M M = T2_t (fold T2_T_DEF).
+
+    DSL friction: the no-K / no-S guards needed by SK_BULLET_APP_OTHER
+    at the top of T1_t are existential negations over the *folded*
+    I_t shape; ``shape_neq`` discharges each in one line (head clash
+    I_t vs K_t / I_t vs App_t S_t _ resolves via APP_T_INJ + leaf
+    disequality after unfolding I_T_DEF).
+    """
+    p.goal("sk_bullet T1_t = T2_t")
+    p.sorry()
+
+
+@proof
+def SK_BULLET_T2_T(p):
+    """|- sk_bullet T2_t = Omega_t.
+
+    *** STUB.  T2_t = App_t M M with M = App_t (App_t K_t SII_t)
+    (App_t K_t SII_t).  Top App: no K/S redex (the top's first arg is
+    M -- an App, not K_t and not of shape App_t S_t _).
+    SK_BULLET_APP_OTHER fires, recurse into M.
+
+    At M: SK_BULLET_K_REDEX direct (M = App_t (App_t K_t a) b at
+    a=SII_t, b=App_t K_t SII_t).  Gives sk_bullet M = sk_bullet SII_t
+    = SII_t.
+
+    Compose: sk_bullet T2_t = App_t SII_t SII_t = Omega_t (fold
+    OMEGA_T_DEF).
+    """
+    p.goal("sk_bullet T2_t = Omega_t")
+    p.sorry()
+
+
+@proof
+def T1_T_NOT_NORMAL(p):
+    """|- ~ is_normal T1_t.
+
+    *** STUB.  Via the "normal terms are bullet-fixed" contrapositive:
+    if is_normal T1_t, then BULLET_REFL gives sk_par_step T1_t
+    (sk_bullet T1_t), and NORMAL_STABILITY_PAR_STEP forces sk_bullet
+    T1_t = T1_t.  But SK_BULLET_T1_T yields sk_bullet T1_t = T2_t, so
+    T2_t = T1_t -- ruled out by a structural disequality (shape_neq
+    on the unfolded App-tree: T1's deep-left leaf is I_t (via I_T_DEF
+    an SKK App), T2's is App_t K_t SII_t -- the heads K_t vs the
+    head of I_t = App_t S_t K_t collide at APP_T_INJ + S_T_NEQ_K_T).
+    """
+    p.goal("~ is_normal T1_t")
+    p.sorry()
+
+
+@proof
+def T2_T_NOT_NORMAL(p):
+    """|- ~ is_normal T2_t.  Mirrors T1_T_NOT_NORMAL via SK_BULLET_T2_T
+    (sk_bullet T2_t = Omega_t != T2_t).
+    """
+    p.goal("~ is_normal T2_t")
+    p.sorry()
+
+
+@proof
+def OMEGA_ORBIT_REACH(p):
+    """|- !N. sk_par_steps Omega_t N ==>
+              ?Z. sk_par_steps N Z /\\ (Z = Omega_t \\/ Z = T1_t \\/ Z = T2_t).
+
+    *** STUB.  The chain-induction core of OMEGA_NON_HALTING_PAR.
+    Impredicative induction on ``sk_par_steps Omega_t N`` at
+        P A B := orbit_reachable A ==> orbit_reachable B
+    where ``orbit_reachable W := ?Z. sk_par_steps W Z /\\ Z IN
+    {Omega_t, T1_t, T2_t}``.
+
+    REFL closure: P X X is the identity implication -- trivial.
+
+    STEP closure: par_step a b /\\ (orbit_reachable b ==>
+    orbit_reachable c) ==> (orbit_reachable a ==> orbit_reachable c).
+    Suppose orbit_reachable a, i.e. ?Z_a. par_steps a Z_a /\\ Z_a in
+    orbit.  Apply PAR_STEPS_STRIP at (par_step a b, par_steps a Z_a):
+    yields W with par_steps b W /\\ par_step Z_a W.  Apply
+    SK_BULLET_TRIANGLE at (Z_a, W): par_step W (sk_bullet Z_a).
+    Case-split Z_a on its three orbit values:
+      * Z_a = Omega_t : sk_bullet Z_a = T1_t   (SK_BULLET_OMEGA_T)
+      * Z_a = T1_t    : sk_bullet Z_a = T2_t   (SK_BULLET_T1_T)
+      * Z_a = T2_t    : sk_bullet Z_a = Omega_t (SK_BULLET_T2_T)
+    In all three sub-cases ``sk_bullet Z_a`` is in the orbit.
+    Compose par_steps b W with par_step W (sk_bullet Z_a) via
+    PAR_STEP_TO_STEPS + PAR_STEPS_TRANS: par_steps b (sk_bullet Z_a).
+    Witness for orbit_reachable b is sk_bullet Z_a; IH closes
+    orbit_reachable c.
+
+    Seed: orbit_reachable Omega_t holds with Z = Omega_t (par_steps
+    Omega_t Omega_t by PAR_STEPS_REFL, disjunct 1).  Apply the
+    impredicative-encoded chain at (Omega_t, N) under the lifted P
+    to obtain orbit_reachable N.
+
+    Cost: ~80-100 lines.  The bulk is the STEP closure's per-disjunct
+    triangle-application + arithmetic on which orbit element bullet
+    lands on.
+
+    DSL friction: the 3-way disjunction ``Z = Omega_t \\/ Z = T1_t \\/
+    Z = T2_t`` is right-associated; ``cases_on`` matches each leaf by
+    aconv, so branches need not appear in disjunct order.  But the
+    per-case ``sk_bullet Z_a`` rewrite still needs ``by_rewrite_of``
+    with the leaf equation in scope; the AC-sym-tolerance of
+    ``_simp_require`` covers both orientations.
+    """
+    p.goal(
+        "!N:nat0. sk_par_steps Omega_t N ==> "
+        "?Z:nat0. sk_par_steps N Z /\\ "
+        "  (Z = Omega_t \\/ Z = T1_t \\/ Z = T2_t)"
+    )
+    p.sorry()
+
+
 @proof
 def OMEGA_NON_HALTING_PAR(p):
     """|- ~ halts_par Omega_t.
 
     *** STUB.  Par-form analogue of OMEGA_NON_HALTING: no par-descendant
     of Omega_t is normal.  Unlike the existing iter-form proof, this
-    does NOT depend on STANDARDIZATION_NORMAL -- it closes by a structural
-    invariant on Omega's par-orbit.
+    does NOT depend on STANDARDIZATION_NORMAL -- it routes through
+    ``sk_bullet`` (Takahashi's deterministic complete development) and
+    ``SK_BULLET_TRIANGLE`` to collapse the non-deterministic par-orbit
+    into a 3-element cycle.
 
-    Empirical input (``outside/sk_par.py``).  Under Takahashi complete
-    development (= "maximal" par-step), Omega's orbit is a strict
-    period-3 cycle of sk_size {27, 39, 63}:
+    Empirical input (``outside/sk_par.py``, EXP 1).  Iterating
+    ``sk_bullet`` from Omega_t produces a strict period-3 cycle of
+    sk_size {27, 39, 63}:
 
-        Omega = (S I I (S I I))                              size 27
-              -bullet->  (I (S I I) (I (S I I)))             size 39   (T1)
-              -bullet->  ((K SII)(K SII) ((K SII)(K SII)))   size 63   (T2)
-              -bullet->  Omega.
+        T0 := Omega_t = SII SII                              size 27
+            -bullet->  T1 := I (SII) (I (SII))               size 39
+            -bullet->  T2 := (K SII)(K SII)
+                            ((K SII)(K SII))                 size 63
+            -bullet->  T0.
 
-    Each orbit member has a visible top-level S- or K- redex (Omega: top
-    S-redex with x=I, y=I, z=SII; T1: S-redex inside each App_t I_t SII
-    leaf; T2: K-redex inside each App_t (App_t K_t SII) (App_t K_t SII)
-    leaf).  The non-deterministic par-step extends the orbit with
-    "mixed" descendants (one half fired, the other not) -- a depth-2
-    BFS sees 5 distinct shapes, all non-normal -- but the structural
-    pattern (each subterm is one of the three orbit shapes or built
-    from them by App-congruence over inert leaves) is preserved.
+    Each Ti has a visible head redex, so ``~is_normal Ti``:
+      T0 : top S-redex with x=I_t, y=I_t, z=SII.
+      T1 : top App_t whose left is App_t I_t SII; expanding I_t = SKK
+           exposes a top S-redex.
+      T2 : top K-redex App_t (App_t K_t (K SII)) (K SII (K SII))
+           (after left-associating; both halves match shape (iii)).
 
-    Proof sketch:
+    Proof strategy (bullet/triangle rather than ad-hoc invariant):
 
-      Define an inductive invariant ``omega_inv W`` carving out exactly
-      Omega's par-descendant set.  Two equivalent framings:
+      Background lemma (already in the file):
+        SK_BULLET_TRIANGLE  : sk_par_step A B ==> sk_par_step B (sk_bullet A)
 
-        (a) Closed-form: ``omega_inv W`` iff every position in W either
-            (i)   is the SII pattern App_t (App_t S_t I_t) I_t,
-            (ii)  is the I-S-redex pattern App_t I_t M for some
-                  M satisfying omega_inv, or
-            (iii) is the K-redex pattern App_t (App_t K_t M) M' for
-                  some M, M' satisfying omega_inv,
-            and the outer-most App_t is one of these three shapes.
+      Step 1.  Triangle along a chain.  By impredicative induction on
+      ``sk_par_steps Omega_t N`` at
+          P A B := !k. sk_par_steps B (bullet_iter k A)
+      (where ``bullet_iter`` is k-fold ``sk_bullet``), combine triangle
+      with PAR_STEPS_TRANS to obtain
+          sk_par_steps Omega_t N ==> ?k. sk_par_steps N (bullet_iter k Omega_t).
 
-        (b) Reachability: ``omega_inv W := sk_par_steps Omega_t W``,
-            i.e., literally the par-orbit.  Cleaner but its three
-            structural claims below have to be re-proved by induction
-            on the par_steps chain.
+      Step 2.  Compute the cycle.  Three explicit unfolds via
+      SK_BULLET_K_REDEX / SK_BULLET_S_REDEX / SK_BULLET_APP_OTHER:
+          sk_bullet T0 = T1
+          sk_bullet T1 = T2
+          sk_bullet T2 = T0
+      So ``!k. bullet_iter k Omega_t IN {T0, T1, T2}`` by k mod 3
+      (one-line nat0 case-split).
 
-      Either framing supports three structural claims:
+      Step 3.  Each Ti is non-normal.  Direct from IS_NORMAL_DEF and
+      one ``sk_step Ti != Ti`` calculation per Ti, reusing the existing
+      head-redex unfolds (SK_STEP_K, SK_STEP_S) -- ~5 lines each.
 
-        (i)   omega_inv Omega_t.
-              Direct from Omega_t = SII SII = App_t (App_t (App_t S_t
-              I_t) I_t) (App_t (App_t S_t I_t) I_t) (the S-redex shape
-              at the outer level, with z = SII inert).
+      Step 4.  Closing the theorem.  Assume ``halts_par Omega_t``;
+      unfold to ``?N. sk_par_steps Omega_t N /\\ is_normal N``; choose
+      N.  Step 1 gives ``sk_par_steps N (bullet_iter k Omega_t)`` for
+      some k.  NORMAL_STABILITY_PAR_STEPS applied to N forces
+      ``N = bullet_iter k Omega_t``.  Step 2 gives this is some Ti.
+      Step 3 contradicts ``is_normal N``.
 
-        (ii)  omega_inv W /\\ sk_par_step W W' ==> omega_inv W'.
-              Case-split on par-step's closure rules.  REFL: trivial.
-              K-rule: matches W's K-redex shape (iii); the contraction
-              produces an SII-headed or I-headed term per case
-              analysis; in both cases omega_inv W'.  S-rule: matches
-              W's SII shape (i) or its expanded I-shape; contraction
-              produces the I-shape or K-shape respectively.  App-rule:
-              recurse -- the sub-terms are themselves omega_inv (or
-              inert SII leaves whose only par-descendant is themselves).
+    Prerequisite: the sole sorry on the dependency chain is
+    ``_TRIANGLE_APP_CLOSURE`` (the APP-case of SK_BULLET_TRIANGLE,
+    halting.py:8912) -- the substitution-style lemma that makes the
+    Takahashi argument work.  Everything else used here is shipped
+    (sk_bullet recursion equations, PAR_STEPS_TRANS,
+    NORMAL_STABILITY_PAR_STEPS, sk_step unfolds for K/S redexes).
 
-        (iii) omega_inv W ==> ~is_normal W.
-              By cases on omega_inv's outer shape:
-                shape (i)  : exposes a top S-redex; close by
-                             IS_NORMAL_NOT_S_REDEX_SHAPE.
-                shape (ii) : App_t I_t M unfolds (via I_T_DEF) to a
-                             top S-redex (with x=K_t, y=K_t, z=M);
-                             same closer after rewriting.
-                shape (iii): exposes a top K-redex; close by
-                             IS_NORMAL_NOT_K_REDEX_SHAPE.
+    Cost estimate: ~100-150 lines for this proof itself once
+    ``_TRIANGLE_APP_CLOSURE`` is discharged.  Breakdown: ~30 lines for
+    the three bullet computations, ~20 lines for the three
+    non-normality facts, ~40 lines for the triangle-along-chain
+    induction, ~20 lines plumbing.  The bulk of the original
+    150-300 estimate lives in ``_TRIANGLE_APP_CLOSURE``, not here.
 
-      Closing the theorem.  Suppose ``halts_par Omega_t``; unfold to
-      ``?N. sk_par_steps Omega_t N /\\ is_normal N``; choose N.
-      Impredicative induction on the par-steps chain at
-        P A B := omega_inv A ==> omega_inv B
-      composes claims (i) and (ii) to yield omega_inv N.  Claim (iii)
-      gives ~is_normal N, contradicting the chosen witness.
-
-    Cost estimate: ~150-300 lines.  The bulk is claim (ii)'s par-step
-    case-split; reusing the SK_STEP_LEFT / IS_NORMAL_APP_DECOMP family
-    keeps the booking small.  No new background theorems needed; the
-    proof is entirely structural over par_step's closure rules and the
-    existing IS_NORMAL_NOT_{K,S}_REDEX_SHAPE lemmas.
-
-    Why this is strictly cheaper than STANDARDIZATION_NORMAL: the
-    invariant ``omega_inv`` is finite-state (three shape constructors),
-    so the case-split in (ii) is bounded.  Standardization needs to
-    relate two infinite-state reduction families (par-steps and
-    sk_iter).
+    Why bullet/triangle beats an ad-hoc invariant: the orbit is
+    deterministic under ``sk_bullet``, so the "what shapes does Omega
+    reach" question is settled by three rewrite steps rather than a
+    closure-rule case-split.  Non-determinism is absorbed once, in
+    SK_BULLET_TRIANGLE.
     """
     p.goal("~ halts_par Omega_t")
-    p.sorry()
+
+    with p.suppose("h_halts: halts_par Omega_t"):
+        # Unfold ``halts_par Omega_t`` to its existential body.
+        #
+        # DSL friction: HALTS_PAR_AT is a forall-equation
+        # (``!t. halts_par t = ?N. ...``); there's no single primitive
+        # that combines SPEC + EQ_MP on the fly for an AT-style lemma,
+        # so we SPEC by hand and pass the resulting equation to
+        # ``by_eq_mp``.
+        spec_halts = SPEC(p._parse("Omega_t"), HALTS_PAR_AT)
+        p.have(
+            "h_ex: ?N. sk_par_steps Omega_t N /\\ is_normal N"
+        ).by_eq_mp(spec_halts, "h_halts")
+
+        p.choose("N", from_="h_ex")
+        p.split("N_eq", "(h_par_omega_N, h_norm_N)")
+
+        # Chain-induction (packaged in OMEGA_ORBIT_REACH):
+        #   par_steps Omega_t N  ==>  ?Z. par_steps N Z /\\ Z in orbit.
+        p.have(
+            "h_reach: ?Z:nat0. sk_par_steps N Z /\\ "
+            "  (Z = Omega_t \\/ Z = T1_t \\/ Z = T2_t)"
+        ).by(OMEGA_ORBIT_REACH, "N", "h_par_omega_N")
+
+        p.choose("Z", from_="h_reach")
+        p.split("Z_eq", "(h_par_N_Z, h_orbit)")
+
+        # ``is_normal N`` + ``par_steps N Z`` forces Z = N via
+        # NORMAL_STABILITY_PAR_STEPS.
+        p.have(
+            "h_conj_stab: is_normal N /\\ sk_par_steps N Z"
+        ).by_thm(CONJ(p.fact("h_norm_N"), p.fact("h_par_N_Z")))
+        p.have("h_ZN: Z = N").by(
+            NORMAL_STABILITY_PAR_STEPS, "N", "Z", "h_conj_stab"
+        )
+
+        # Rewrite ``h_orbit`` through ``Z = N`` to land in N.
+        #
+        # DSL friction: ``by_rewrite_of`` over a 3-way right-associated
+        # disjunction with a single point-equation as a rule walks the
+        # whole tree; this works because every leaf has the form
+        # ``Z = T<i>`` and h_ZN: Z = N rewrites the LHS uniformly.
+        p.have(
+            "h_orbit_N: N = Omega_t \\/ N = T1_t \\/ N = T2_t"
+        ).by_rewrite_of("h_orbit", [p.fact("h_ZN")])
+
+        # 3-way case-split.  In each case, rewrite ``is_normal N`` to
+        # ``is_normal <T_i>``, then contradict with the matching
+        # non-normality fact.
+        with p.cases_on("h_orbit_N"):
+            with p.case("h_o: N = Omega_t"):
+                p.have("h_norm_O: is_normal Omega_t").by_rewrite_of(
+                    "h_norm_N", [p.fact("h_o")]
+                )
+                p.absurd().by_conj(OMEGA_T_NOT_NORMAL, "h_norm_O")
+            with p.case("h_1: N = T1_t"):
+                p.have("h_norm_T1: is_normal T1_t").by_rewrite_of(
+                    "h_norm_N", [p.fact("h_1")]
+                )
+                p.absurd().by_conj(T1_T_NOT_NORMAL, "h_norm_T1")
+            with p.case("h_2: N = T2_t"):
+                p.have("h_norm_T2: is_normal T2_t").by_rewrite_of(
+                    "h_norm_N", [p.fact("h_2")]
+                )
+                p.absurd().by_conj(T2_T_NOT_NORMAL, "h_norm_T2")
 
 
 @proof
