@@ -7,10 +7,14 @@ Final theorem (``HALTING_UNDECIDABLE``):
 where ``halts_decider H`` says ``H`` is an SK term and, for every SK
 term ``t``,
 
-    halts_b t = ~halts_b (App_t H t)
+    halts_par t = ~halts_par (App_t H t)
 
 i.e. the *halt-status of the decider's output on t* encodes the
-answer (flipped, so the diagonal contradiction lands cleanly).
+answer (flipped, so the diagonal contradiction lands cleanly).  This
+flipped form is at least as strong as the conventional
+boolean-output decider: a standard decider can be SK-massaged into
+one satisfying this spec, so non-existence here implies non-existence
+of the conventional decider.
 
 The whole development lives over ``hf_sets.py`` plus ``nat0.py``.
 Axiomatic cost: zero. The construction reuses ``Pair_ord`` for tagged
@@ -48,18 +52,20 @@ Three ingredients:
       rules ``K x y -> x`` and ``S x y z -> x z (y z)`` are local
       pattern matches.
 
-  (2) *Halting.*  ``halts_b t := ?n. is_normal (bullet_iter n t)``,
-      Takahashi-style halting via the deterministic complete-development
-      ``sk_bullet`` iterated on nat0.  Sigma_1 over nat0 (r.e.) but,
-      the theorem says, not decidable by an SK term.
+  (2) *Halting.*  ``halts_par t := ?N. sk_par_steps t N /\\ is_normal N``,
+      halting via parallel reduction reaching a normal form.  Sigma_1
+      over nat0 (r.e.) but, the theorem says, not decidable by an SK
+      term.
 
   (3) *Diagonal.*  Curry's classical diagonal ``e = S (K H) SII``,
       ``d = e e``.  Under parallel reduction one gets
       ``d ->>_par App_t H d`` (PAR_REFL lets H stay un-reduced inside
       the residue, which is what makes the diagonal work for arbitrary
-      ``is_sk_term H``).  Bridge to bullet via ``HALTS_B_IFF_HALTS_PAR``
-      gives ``halts_b d = halts_b (App_t H d)``.  Combined with the
-      flipped decider spec, ``halts_b d = ~halts_b d`` -- contradiction.
+      ``is_sk_term H``).  ``HALTS_PAR_INVARIANT`` (powered by Church-
+      Rosser via ``sk_bullet``'s triangle property) promotes the
+      par-step chain to ``halts_par d = halts_par (App_t H d)``.
+      Combined with the flipped decider spec,
+      ``halts_par d = ~halts_par d`` -- contradiction.
 
       No fixed-point combinator, no Omega.  See ``iter_to_bullet.md``
       for the design history (initial bullet-only DIAG_TERM was
@@ -80,12 +86,12 @@ Stage map
   Stage 2 (bullet):   Takahashi's complete development ``sk_bullet``
                       + triangle property + Tait/Martin-Loef diamond
                       + Church-Rosser confluence on par.
-  Stage 3 (halts):    ``bullet_iter`` + ``halts_b`` (user-facing) +
-                      ``halts_par`` (internal) + the bridge
-                      ``HALTS_B_IFF_HALTS_PAR``.
+  Stage 3 (halts):    ``halts_par`` + ``HALTS_PAR_INVARIANT``
+                      (par-step chains preserve halting, by
+                      confluence + normal-form stability).
   Stage 4 (diag):     Classical Curry diagonal ``DIAG_TERM`` in par
-                      form; ``DIAGONAL_TERM_EXISTS`` lifts to halts_b
-                      via the bridge.
+                      form; ``DIAGONAL_TERM_EXISTS`` promotes the
+                      chain to a ``halts_par`` equality.
   Stage 5:            ``HALTING_UNDECIDABLE`` and the corollary
                       ``HALTS_NOT_SK_REPRESENTABLE``.
 
@@ -95,7 +101,8 @@ What this gives and doesn't give
 
 Derived from the bare HOL kernel + ``hf_sets.py``:
   * Undecidability of halting for SK combinators (the headline).
-  * Church-Rosser for SK via parallel reduction (en route to the bridge).
+  * Church-Rosser for SK via parallel reduction (powers
+    ``HALTS_PAR_INVARIANT``).
   * General fixed-point self-reference (``DIAG_TERM``): for every SK
     term H there is an SK term d with ``sk_par_steps d (App_t H d)``.
     This is the diagonal/Y-combinator ingredient, and the only piece
@@ -108,9 +115,10 @@ Not in scope here:
     formalised here; the diagonal alone carries the contradiction.
   * Equivalence with Turing machines or lambda calculus (would need a
     third file). The theorem stands on its own without it.
-  * Equivalence between Takahashi halting (``halts_b``) and LMO halting.
-    Classically the same by standardization; this codebase doesn't
-    need the equivalence for the undecidability proof.
+  * A bullet-iter-based formulation of halting (``halts_b``) and its
+    equivalence with ``halts_par``.  Removed -- ``halts_par`` is the
+    natural form for the par-form diagonal and avoids the iterator
+    bridge entirely.
 
 Pairs especially well with ``godel_first.py``: the diagonal in this
 file is mechanically the same as the Goedel diagonal -- self-application
@@ -828,23 +836,6 @@ def PAR_STEPS_STEP(p):
         )
         p.thus("P X Z").by("step_cl", "X", "Y", "Z", "pConj")
     p.thus("sk_par_steps X Z").by_unfold("unf", SK_PAR_STEPS_DEF)
-
-
-@proof
-def PAR_STEP_TO_STEPS(p):
-    """|- !X Y. sk_par_step X Y ==> sk_par_steps X Y.
-
-    Single-step inclusion: every par-step is a 1-step RTC chain.
-    Direct consequence of PAR_STEPS_STEP + PAR_STEPS_REFL.
-    """
-    p.goal("!X Y. sk_par_step X Y ==> sk_par_steps X Y")
-    p.fix("X Y")
-    p.assume("h_XY: sk_par_step X Y")
-    p.have("h_YY: sk_par_steps Y Y").by(PAR_STEPS_REFL, "Y")
-    p.have("h_conj: sk_par_step X Y /\\ sk_par_steps Y Y").by_thm(
-        CONJ(p.fact("h_XY"), p.fact("h_YY"))
-    )
-    p.thus("sk_par_steps X Y").by(PAR_STEPS_STEP, "X", "Y", "Y", "h_conj")
 
 
 # ---------------------------------------------------------------------------
@@ -4805,111 +4796,19 @@ def NORMAL_STABILITY_PAR_STEPS(p):
 # ---------------------------------------------------------------------------
 # Stage 3 -- halting predicate.
 #
-#   bullet_iter 0        = \t. t
-#   bullet_iter (SUC0 n) = \t. sk_bullet (bullet_iter n t)
-#   halts_b t            := ?n. is_normal (bullet_iter n t)
+#   halts_par t := ?N. sk_par_steps t N /\\ is_normal N
 #
-# Takahashi-strategy halting: a term halts iff its deterministic
-# parallel-development trajectory reaches normal form.  Classically
-# equivalent to LMO halting (by standardization), but the bullet form
-# sidesteps the standardization bridge entirely on the undecidability
-# critical path.  See iter_to_bullet.md for the design history.
-#
-# This block ships the recursion equations for bullet_iter, the halts_b
-# unfold (HALTS_B_AT), and the par-form halts_par which is bridged to
-# halts_b via HALTS_B_IFF_HALTS_PAR.
+# A term halts iff some normal form is reachable from it via parallel
+# reduction.  Confluence (PAR_STEPS_CONFLUENT) plus normal-form
+# stability give ``HALTS_PAR_INVARIANT``: par_steps preserves halts_par,
+# which is what lets the par-form Curry diagonal land as a halt-equality
+# on the headline theorem.
 # ---------------------------------------------------------------------------
 
-from nat0 import define_unary_0  # noqa: E402
-
 _n0_t_var = Var("t", nat0_ty)
-_n0_k_var = Var("k", nat0_ty)
-_n0_a_var = Var("a", parse_type("nat0 -> nat0"))
-
-# c : nat0 -> nat0  ==  \t. t.
-_c_bullet_iter = mk_abs(_n0_t_var, _n0_t_var)
-
-# h : nat0 -> (nat0 -> nat0) -> (nat0 -> nat0)
-#   == \k. \a. \t. sk_bullet (a t).
-_h_bullet_iter = mk_abs(
-    _n0_k_var,
-    mk_abs(
-        _n0_a_var,
-        mk_abs(_n0_t_var, mk_app(sk_bullet, mk_app(_n0_a_var, _n0_t_var))),
-    ),
-)
-
-BULLET_ITER_BASE, BULLET_ITER_STEP = define_unary_0(
-    "bullet_iter",
-    parse_type("nat0 -> nat0 -> nat0"),
-    _c_bullet_iter,
-    _h_bullet_iter,
-    result_ty=parse_type("nat0 -> nat0"),
-)
-bullet_iter = mk_const("bullet_iter", [])
-# BULLET_ITER_BASE : |- bullet_iter 0 = (\t. t)
-# BULLET_ITER_STEP : |- !n. bullet_iter (SUC0 n) = (\t. sk_bullet (bullet_iter n t))
 
 
-@proof
-def BULLET_ITER_ZERO(p):
-    """|- !t. bullet_iter 0 t = t."""
-    from tactics import AP_THM, BETA_CONV, TRANS, GEN
-
-    ap = AP_THM(BULLET_ITER_BASE, _n0_t_var)
-    bet = BETA_CONV(rand(ap._concl))
-    spec_th = TRANS(ap, bet)
-    p.goal("!t. bullet_iter 0 t = t")
-    p.thus("!t. bullet_iter 0 t = t").by_thm(GEN(_n0_t_var, spec_th))
-
-
-@proof
-def BULLET_ITER_SUC(p):
-    """|- !n t. bullet_iter (SUC0 n) t = sk_bullet (bullet_iter n t).
-
-    SPEC BULLET_ITER_STEP at n, AP_THM at t, BETA.
-    """
-    from tactics import AP_THM, BETA_CONV, TRANS, SPEC, GENL
-
-    n_var = Var("n", nat0_ty)
-    step_at_n = SPEC(n_var, BULLET_ITER_STEP)
-    ap = AP_THM(step_at_n, _n0_t_var)
-    bet = BETA_CONV(rand(ap._concl))
-    spec_th = TRANS(ap, bet)
-    p.goal("!n t. bullet_iter (SUC0 n) t = sk_bullet (bullet_iter n t)")
-    p.thus(
-        "!n t. bullet_iter (SUC0 n) t = sk_bullet (bullet_iter n t)"
-    ).by_thm(GENL([n_var, _n0_t_var], spec_th))
-
-
-# halts_b t := ?n. is_normal (bullet_iter n t).
-HALTS_B_DEF = define(
-    "halts_b",
-    parse_type("nat0 -> bool"),
-    "\\t:nat0. ?n:nat0. is_normal (bullet_iter n t)",
-)
-halts_b = mk_const("halts_b", [])
-
-
-@proof
-def HALTS_B_AT(p):
-    """|- !t. halts_b t = (?n. is_normal (bullet_iter n t)).
-
-    Direct unfold of HALTS_B_DEF via AP_THM + BETA.
-    """
-    from tactics import AP_THM, BETA_CONV, TRANS, GEN
-
-    ap = AP_THM(HALTS_B_DEF, _n0_t_var)
-    bet = BETA_CONV(rand(ap._concl))
-    spec_th = TRANS(ap, bet)
-    p.goal("!t. halts_b t = (?n. is_normal (bullet_iter n t))")
-    p.thus(
-        "!t. halts_b t = (?n. is_normal (bullet_iter n t))"
-    ).by_thm(GEN(_n0_t_var, spec_th))
-
-
-# halts_par t := ?N. sk_par_steps t N /\ is_normal N.
-# Par-side of the bullet/par bridge HALTS_B_IFF_HALTS_PAR.
+# halts_par t := ?N. sk_par_steps t N /\\ is_normal N.
 HALTS_PAR_DEF = define(
     "halts_par",
     parse_type("nat0 -> bool"),
@@ -4933,436 +4832,6 @@ def HALTS_PAR_AT(p):
     p.thus(
         "!t. halts_par t = (?N. sk_par_steps t N /\\ is_normal N)"
     ).by_thm(GEN(_n0_t_var, spec_th))
-
-
-@proof
-def _BULLET_TRAJ_PAR_STEPS(p):
-    """|- !n X. sk_par_steps X (bullet_iter n X).
-
-    The bullet trajectory rooted at X is a par-step RTC chain: each
-    iterate is one par-step ahead of the previous (BULLET_REFL).
-    Induction on ``n``:
-
-      base : bullet_iter 0 X = X (BULLET_ITER_ZERO); PAR_STEPS_REFL.
-      step : IH says sk_par_steps X (bullet_iter n X).  BULLET_REFL
-             specialised at ``bullet_iter n X`` gives the single
-             par-step to ``sk_bullet (bullet_iter n X)`` = bullet_iter
-             (SUC0 n) X (BULLET_ITER_SUC); PAR_STEPS_TRANS composes.
-    """
-    from tactics import CONJ as _CONJ
-
-    p.goal("!n:nat0. !X:nat0. sk_par_steps X (bullet_iter n X)")
-    with p.induction("n"):
-        with p.base():
-            p.fix("X")
-            p.have(
-                "h_base: bullet_iter 0 X = X"
-            ).by(BULLET_ITER_ZERO, "X")
-            p.have("h_XX: sk_par_steps X X").by(PAR_STEPS_REFL, "X")
-            # DSL friction: by_rewrite_of with SYM(h_base) would
-            # rewrite ``X -> bullet_iter 0 X`` non-terminatingly
-            # (RHS contains X).  Lift via AP_TERM at the
-            # ``sk_par_steps X _`` slot and let by_eq_mp's
-            # sym-tolerance pick the matching side.
-            p.thus(
-                "sk_par_steps X (bullet_iter 0 X)"
-            ).by_eq_mp(
-                AP_TERM(
-                    p._parse("sk_par_steps X"),
-                    p.fact("h_base"),
-                ),
-                "h_XX",
-            )
-        with p.step("IH"):
-            # IH : !X. sk_par_steps X (bullet_iter n X).
-            p.fix("X")
-            p.have(
-                "h_ih: sk_par_steps X (bullet_iter n X)"
-            ).by("IH", "X")
-            p.have(
-                "h_unfold: bullet_iter (SUC0 n) X = "
-                "          sk_bullet (bullet_iter n X)"
-            ).by(BULLET_ITER_SUC, "n", "X")
-            p.have(
-                "h_par1: sk_par_step (bullet_iter n X) "
-                "                    (sk_bullet (bullet_iter n X))"
-            ).by_thm(
-                SPEC(p._parse("bullet_iter n X"), BULLET_REFL)
-            )
-            p.have(
-                "h_par1s: sk_par_steps (bullet_iter n X) "
-                "                     (sk_bullet (bullet_iter n X))"
-            ).by(
-                PAR_STEP_TO_STEPS,
-                "bullet_iter n X",
-                "sk_bullet (bullet_iter n X)",
-                "h_par1",
-            )
-            p.have(
-                "h_conj: sk_par_steps X (bullet_iter n X) /\\ "
-                "        sk_par_steps (bullet_iter n X) "
-                "                     (sk_bullet (bullet_iter n X))"
-            ).by_thm(_CONJ(p.fact("h_ih"), p.fact("h_par1s")))
-            p.have(
-                "h_chain: "
-                "sk_par_steps X (sk_bullet (bullet_iter n X))"
-            ).by(
-                PAR_STEPS_TRANS,
-                "X", "bullet_iter n X",
-                "sk_bullet (bullet_iter n X)",
-                "h_conj",
-            )
-            p.thus(
-                "sk_par_steps X (bullet_iter (SUC0 n) X)"
-            ).by_rewrite_of(
-                "h_chain", [SYM(p.fact("h_unfold"))]
-            )
-
-
-@proof
-def _BULLET_COMMUTES_PAR_STEP(p):
-    """|- !X Y. sk_par_step X Y ==> sk_par_step (sk_bullet X) (sk_bullet Y).
-
-    Two applications of SK_BULLET_TRIANGLE:
-      * TRIANGLE on par_step X Y           : par_step Y (sk_bullet X).
-      * TRIANGLE on par_step Y (sk_bullet X): par_step (sk_bullet X) (sk_bullet Y).
-    """
-    p.goal(
-        "!X:nat0. !Y:nat0. sk_par_step X Y ==> "
-        "sk_par_step (sk_bullet X) (sk_bullet Y)"
-    )
-    p.fix("X Y")
-    p.assume("h_XY: sk_par_step X Y")
-    p.have(
-        "h_T1: sk_par_step Y (sk_bullet X)"
-    ).by(SK_BULLET_TRIANGLE, "X", "Y", "h_XY")
-    p.thus(
-        "sk_par_step (sk_bullet X) (sk_bullet Y)"
-    ).by(SK_BULLET_TRIANGLE, "Y", "sk_bullet X", "h_T1")
-
-
-@proof
-def _BULLET_ITER_COMMUTES_PAR_STEP(p):
-    """|- !n X Y. sk_par_step X Y ==>
-                   sk_par_step (bullet_iter n X) (bullet_iter n Y).
-
-    nat0 induction on n lifts ``_BULLET_COMMUTES_PAR_STEP`` to bullet
-    iterates.  Base: bullet_iter 0 _ = _ (BULLET_ITER_ZERO) + h_XY +
-    congruence (by_cong + by_eq_mp).  Step: IH at (X, Y) gives the
-    par-step between iterates; apply the per-step commute helper at
-    that par-step; fold sk_bullet (bullet_iter n _) to bullet_iter
-    (SUC0 n) _ via BULLET_ITER_SUC.
-    """
-    p.goal(
-        "!n:nat0. !X:nat0. !Y:nat0. sk_par_step X Y ==> "
-        "sk_par_step (bullet_iter n X) (bullet_iter n Y)"
-    )
-    with p.induction("n"):
-        with p.base():
-            p.fix("X Y")
-            p.assume("h_XY: sk_par_step X Y")
-            p.have(
-                "h_z0X: bullet_iter 0 X = X"
-            ).by(BULLET_ITER_ZERO, "X")
-            p.have(
-                "h_z0Y: bullet_iter 0 Y = Y"
-            ).by(BULLET_ITER_ZERO, "Y")
-            # DSL friction: by_rewrite_of with SYM(h_z0X) would
-            # rewrite ``X -> bullet_iter 0 X`` non-terminatingly.
-            # Use by_cong's binop shorthand to build the equation
-            # ``sk_par_step (bullet_iter 0 X) (bullet_iter 0 Y) =
-            # sk_par_step X Y`` then by_eq_mp's sym-tolerance closes.
-            p.have(
-                "h_cong: "
-                "sk_par_step (bullet_iter 0 X) (bullet_iter 0 Y) = "
-                "sk_par_step X Y"
-            ).by_cong(sk_par_step, "h_z0X", "h_z0Y")
-            p.thus(
-                "sk_par_step (bullet_iter 0 X) (bullet_iter 0 Y)"
-            ).by_eq_mp("h_cong", "h_XY")
-        with p.step("IH"):
-            # IH : !X Y. sk_par_step X Y ==>
-            #             sk_par_step (bullet_iter n X) (bullet_iter n Y).
-            p.fix("X Y")
-            p.assume("h_XY: sk_par_step X Y")
-            p.have(
-                "h_ih: "
-                "sk_par_step (bullet_iter n X) (bullet_iter n Y)"
-            ).by("IH", "X", "Y", "h_XY")
-            p.have(
-                "h_step: sk_par_step "
-                "(sk_bullet (bullet_iter n X)) "
-                "(sk_bullet (bullet_iter n Y))"
-            ).by(
-                _BULLET_COMMUTES_PAR_STEP,
-                "bullet_iter n X", "bullet_iter n Y", "h_ih",
-            )
-            p.have(
-                "h_unfX: bullet_iter (SUC0 n) X = "
-                "        sk_bullet (bullet_iter n X)"
-            ).by(BULLET_ITER_SUC, "n", "X")
-            p.have(
-                "h_unfY: bullet_iter (SUC0 n) Y = "
-                "        sk_bullet (bullet_iter n Y)"
-            ).by(BULLET_ITER_SUC, "n", "Y")
-            p.have(
-                "h_cong: "
-                "sk_par_step "
-                "  (bullet_iter (SUC0 n) X) "
-                "  (bullet_iter (SUC0 n) Y) = "
-                "sk_par_step "
-                "  (sk_bullet (bullet_iter n X)) "
-                "  (sk_bullet (bullet_iter n Y))"
-            ).by_cong(sk_par_step, "h_unfX", "h_unfY")
-            p.thus(
-                "sk_par_step "
-                "(bullet_iter (SUC0 n) X) "
-                "(bullet_iter (SUC0 n) Y)"
-            ).by_eq_mp("h_cong", "h_step")
-
-
-@proof
-def _HALTS_PAR_TO_HALTS_B(p):
-    """|- !X. halts_par X ==> halts_b X.
-
-    Backward direction of the bullet/par bridge.  Impredicative
-    induction on ``sk_par_steps X N`` with the strengthened invariant:
-
-        P := \\A B. is_normal B ==> ?m. is_normal (bullet_iter m A).
-
-    REFL  Z : is_normal Z ==> ?m. is_normal (bullet_iter m Z).
-            Take m := 0 (BULLET_ITER_ZERO).
-    STEP a -> b /\\ P b c ==> P a c : assume is_normal c; IH at b
-            yields ?m_B. is_normal (bullet_iter m_B b).  Lift
-            par_step a b to par_step (bullet_iter m_B a) (bullet_iter
-            m_B b) via _BULLET_ITER_COMMUTES_PAR_STEP; SK_BULLET_TRIANGLE
-            on that par-step gives par_step (bullet_iter m_B b)
-            (sk_bullet (bullet_iter m_B a)) = par_step (bullet_iter
-            m_B b) (bullet_iter (SUC0 m_B) a).  is_normal at the LHS
-            of this par-step + NORMAL_STABILITY_PAR_STEP forces
-            bullet_iter (SUC0 m_B) a = bullet_iter m_B b, transporting
-            normality across.  Witness m := SUC0 m_B.
-
-    With P instantiated, the closures conjunction + impredicative MP
-    yields P X N; applied at is_normal N, the conclusion is
-    ?m. is_normal (bullet_iter m X), which is halts_b X via HALTS_B_AT.
-    """
-    from tactics import BETA_RULE
-
-    p.goal("!X. halts_par X ==> halts_b X")
-    p.fix("X")
-    p.assume("h_hp: halts_par X")
-
-    # Unfold halts_par X to extract the par-chain to a normal form.
-    p.have(
-        "h_at_par: halts_par X = "
-        "(?N. sk_par_steps X N /\\ is_normal N)"
-    ).by(HALTS_PAR_AT, "X")
-    p.have(
-        "h_ex_par: ?N. sk_par_steps X N /\\ is_normal N"
-    ).by_eq_mp("h_at_par", "h_hp")
-    p.choose("N", from_="h_ex_par")
-    p.split("N_eq", "(h_XN, h_norm_N)")
-
-    # ---- Impredicative induction setup (mirrors NORMAL_STABILITY_PAR_STEPS).
-    spec_XN = unfold_def_at(
-        SK_PAR_STEPS_DEF, p._parse("X"), p._parse("N")
-    )
-    h_forall = EQ_MP(spec_XN, p.fact("h_XN"))
-    # h_forall : !P. closures(P) ==> P X N.
-
-    P_lifted = p._parse(
-        "\\A:nat0. \\B:nat0. "
-        "is_normal B ==> ?m:nat0. is_normal (bullet_iter m A)"
-    )
-    inst = SPEC(P_lifted, h_forall)
-    inst_beta = BETA_RULE(inst)
-    # inst_beta : closures(P_lifted) ==> (is_normal N ==>
-    #                                      ?m. is_normal (bullet_iter m X)).
-
-    # ---- REFL closure ---------------------------------------------------
-    with p.have(
-        "lifted_refl: "
-        "!Z:nat0. is_normal Z ==> ?m:nat0. is_normal (bullet_iter m Z)"
-    ).proof():
-        p.fix("Z")
-        p.assume("h_norm_Z: is_normal Z")
-        p.have(
-            "h_z0Z: bullet_iter 0 Z = Z"
-        ).by(BULLET_ITER_ZERO, "Z")
-        # is_normal Z transported back to is_normal (bullet_iter 0 Z)
-        # via AP_TERM (sym-tolerant by_eq_mp picks the matching side).
-        p.have(
-            "h_norm_0: is_normal (bullet_iter 0 Z)"
-        ).by_eq_mp(
-            AP_TERM(is_normal, p.fact("h_z0Z")),
-            "h_norm_Z",
-        )
-        p.thus(
-            "?m:nat0. is_normal (bullet_iter m Z)"
-        ).by_witness("0", "h_norm_0")
-
-    # ---- STEP closure ---------------------------------------------------
-    with p.have(
-        "lifted_step: "
-        "!a:nat0. !b:nat0. !c:nat0. "
-        "sk_par_step a b /\\ "
-        "(is_normal c ==> ?m:nat0. is_normal (bullet_iter m b)) ==> "
-        "(is_normal c ==> ?m:nat0. is_normal (bullet_iter m a))"
-    ).proof():
-        p.fix("a b c")
-        p.assume(
-            "(h_ab, h_IH): sk_par_step a b /\\ "
-            "(is_normal c ==> ?m:nat0. is_normal (bullet_iter m b))"
-        )
-        p.assume("h_norm_c: is_normal c")
-
-        # IH gives a bullet-normal index for b.
-        p.have(
-            "h_ex_b: ?m:nat0. is_normal (bullet_iter m b)"
-        ).by("h_IH", "h_norm_c")
-        p.choose("m_B", from_="h_ex_b")
-        # m_B_eq : is_normal (bullet_iter m_B b).
-
-        # Commute par_step a b through bullet_iter m_B on both sides.
-        p.have(
-            "h_par_iter: "
-            "sk_par_step (bullet_iter m_B a) (bullet_iter m_B b)"
-        ).by(
-            _BULLET_ITER_COMMUTES_PAR_STEP,
-            "m_B", "a", "b", "h_ab",
-        )
-        # TRIANGLE: from par_step (bullet_iter m_B a) (bullet_iter m_B b),
-        # get par_step (bullet_iter m_B b) (sk_bullet (bullet_iter m_B a)).
-        p.have(
-            "h_T: sk_par_step "
-            "  (bullet_iter m_B b) "
-            "  (sk_bullet (bullet_iter m_B a))"
-        ).by(
-            SK_BULLET_TRIANGLE,
-            "bullet_iter m_B a",
-            "bullet_iter m_B b",
-            "h_par_iter",
-        )
-        # Fold sk_bullet (bullet_iter m_B a) to bullet_iter (SUC0 m_B) a.
-        p.have(
-            "h_unf: bullet_iter (SUC0 m_B) a = "
-            "       sk_bullet (bullet_iter m_B a)"
-        ).by(BULLET_ITER_SUC, "m_B", "a")
-        p.have(
-            "h_T2: sk_par_step "
-            "  (bullet_iter m_B b) "
-            "  (bullet_iter (SUC0 m_B) a)"
-        ).by_rewrite_of("h_T", [SYM(p.fact("h_unf"))])
-        # NORMAL_STABILITY_PAR_STEP: is_normal LHS + par-step LHS -> RHS
-        # forces RHS = LHS.
-        p.have(
-            "h_conj_stab: "
-            "is_normal (bullet_iter m_B b) /\\ "
-            "sk_par_step (bullet_iter m_B b) (bullet_iter (SUC0 m_B) a)"
-        ).by_thm(CONJ(p.fact("m_B_eq"), p.fact("h_T2")))
-        p.have(
-            "h_eq: bullet_iter (SUC0 m_B) a = bullet_iter m_B b"
-        ).by(
-            NORMAL_STABILITY_PAR_STEP,
-            "bullet_iter m_B b",
-            "bullet_iter (SUC0 m_B) a",
-            "h_conj_stab",
-        )
-        # Transport normality across h_eq (sym-tolerant by_eq_mp).
-        p.have(
-            "h_norm_SUC: is_normal (bullet_iter (SUC0 m_B) a)"
-        ).by_eq_mp(
-            AP_TERM(is_normal, p.fact("h_eq")),
-            "m_B_eq",
-        )
-        p.thus(
-            "?m:nat0. is_normal (bullet_iter m a)"
-        ).by_witness("SUC0 m_B", "h_norm_SUC")
-
-    # ---- Bundle closures and discharge P X N ----------------------------
-    p.have(
-        "lifted_cl: "
-        "(!Z:nat0. is_normal Z ==> "
-        "          ?m:nat0. is_normal (bullet_iter m Z)) /\\ "
-        "(!a:nat0. !b:nat0. !c:nat0. "
-        "    sk_par_step a b /\\ "
-        "    (is_normal c ==> "
-        "        ?m:nat0. is_normal (bullet_iter m b)) ==> "
-        "    (is_normal c ==> "
-        "        ?m:nat0. is_normal (bullet_iter m a)))"
-    ).by_thm(CONJ(p.fact("lifted_refl"), p.fact("lifted_step")))
-
-    p.have(
-        "h_PXN: is_normal N ==> ?m:nat0. is_normal (bullet_iter m X)"
-    ).by_thm(MP(inst_beta, p.fact("lifted_cl")))
-
-    p.have(
-        "h_ex_bull: ?m:nat0. is_normal (bullet_iter m X)"
-    ).by("h_PXN", "h_norm_N")
-
-    # Witness halts_b X via HALTS_B_AT.
-    p.have(
-        "h_at_b: halts_b X = (?n. is_normal (bullet_iter n X))"
-    ).by(HALTS_B_AT, "X")
-    p.thus("halts_b X").by_eq_mp("h_at_b", "h_ex_bull")
-
-
-@proof
-def HALTS_B_IFF_HALTS_PAR(p):
-    """|- !X. halts_b X = halts_par X.
-
-    The bullet/par halt-bridge.  Iff-intro on the two directions:
-
-    Forward (halts_b X ==> halts_par X).  Unfold halts_b X to
-    ``?n. is_normal (bullet_iter n X)``; choose n; witness halts_par X
-    at N := bullet_iter n X using _BULLET_TRAJ_PAR_STEPS for the
-    sk_par_steps witness.
-
-    Backward (halts_par X ==> halts_b X).  Delegated to the helper
-    ``_HALTS_PAR_TO_HALTS_B``, which uses the Takahashi confluence
-    argument via SK_BULLET_TRIANGLE.
-    """
-    p.goal("!X. halts_b X = halts_par X")
-    p.fix("X")
-
-    # ---- Forward direction ----------------------------------------------
-    with p.have(
-        "h_fwd: halts_b X ==> halts_par X"
-    ).proof():
-        p.assume("h_hb: halts_b X")
-        # Unfold halts_b X.
-        p.have(
-            "h_at_b: halts_b X = "
-            "(?n. is_normal (bullet_iter n X))"
-        ).by(HALTS_B_AT, "X")
-        p.have(
-            "h_ex_b: ?n. is_normal (bullet_iter n X)"
-        ).by_eq_mp("h_at_b", "h_hb")
-        p.choose("n", from_="h_ex_b")
-        # n_eq : is_normal (bullet_iter n X).
-
-        # The bullet trajectory is itself a par-chain.
-        p.have(
-            "h_traj: sk_par_steps X (bullet_iter n X)"
-        ).by(_BULLET_TRAJ_PAR_STEPS, "n", "X")
-
-        # Witness halts_par X at N := bullet_iter n X.
-        p.have(
-            "h_at_par: halts_par X = "
-            "(?N. sk_par_steps X N /\\ is_normal N)"
-        ).by(HALTS_PAR_AT, "X")
-        p.have(
-            "h_ex_par: ?N. sk_par_steps X N /\\ is_normal N"
-        ).by_exists(["bullet_iter n X"], "h_traj", "n_eq")
-        p.thus("halts_par X").by_eq_mp("h_at_par", "h_ex_par")
-
-    # ---- Backward direction ---------------------------------------------
-    p.have(
-        "h_bwd: halts_par X ==> halts_b X"
-    ).by(_HALTS_PAR_TO_HALTS_B, "X")
-
-    p.thus("halts_b X = halts_par X").by_iff("h_fwd", "h_bwd")
 
 
 @proof
@@ -5481,16 +4950,18 @@ def HALTS_PAR_INVARIANT(p):
 #
 # ``halts_decider H`` says H is an SK term that decides halting via the
 # flipped halting-status output convention:
-# ``halts_b t  iff  ~halts_b (App_t H t)``.  The flipped convention
-# turns the diagonal equation ``halts_b d = halts_b (App_t H d)`` into
-# a ``P = ~P`` contradiction directly, no Church-bool case-split needed.
+# ``halts_par t  iff  ~halts_par (App_t H t)``.  The flipped convention
+# turns the diagonal equation ``halts_par d = halts_par (App_t H d)``
+# into a ``P = ~P`` contradiction directly, no Church-bool case-split
+# needed.  See module docstring for why the flipped form is at least as
+# strong as a standard boolean-output decider.
 # ---------------------------------------------------------------------------
 HALTS_DECIDER_DEF = define(
     "halts_decider",
     parse_type("nat0 -> bool"),
     "\\H:nat0. is_sk_term H /\\ "
     "         !t:nat0. is_sk_term t ==> "
-    "             (halts_b t = ~(halts_b (App_t H t)))",
+    "             (halts_par t = ~(halts_par (App_t H t)))",
 )
 halts_decider = mk_const("halts_decider", [])
 
@@ -5500,7 +4971,7 @@ def HALTS_DECIDER_DEF_THM(p):
     """|- !H. halts_decider H =
               (is_sk_term H /\\
                !t. is_sk_term t ==>
-                   (halts_b t = ~(halts_b (App_t H t)))).
+                   (halts_par t = ~(halts_par (App_t H t)))).
 
     Direct unfold of HALTS_DECIDER_DEF via AP_THM + BETA.
     """
@@ -5513,35 +4984,16 @@ def HALTS_DECIDER_DEF_THM(p):
         "!H. halts_decider H = "
         "    (is_sk_term H /\\ "
         "     !t. is_sk_term t ==> "
-        "         (halts_b t = ~(halts_b (App_t H t))))"
+        "         (halts_par t = ~(halts_par (App_t H t))))"
     )
     p.thus(
         "!H. halts_decider H = "
         "    (is_sk_term H /\\ "
         "     !t. is_sk_term t ==> "
-        "         (halts_b t = ~(halts_b (App_t H t))))"
+        "         (halts_par t = ~(halts_par (App_t H t))))"
     ).by_thm(GEN(H_var, spec_th))
 
 
-# ---------------------------------------------------------------------------
-# bullet_eval / bullet_chain -- kernel-level evaluators for sk_bullet.
-#
-# Given a concrete term `start` over {S_t, K_t, App_t}, build a kernel
-# theorem ``|- sk_bullet start = end`` where ``end`` is the fully-evaluated
-# parallel-development result of one bullet step.  Composes via TRANS
-# chains through SK_BULLET_S_T / SK_BULLET_K_T / SK_BULLET_K_REDEX /
-# SK_BULLET_S_REDEX / SK_BULLET_APP_OTHER.
-#
-# ``bullet_chain`` threads BULLET_ITER_SUC over a sequence of bullet_eval
-# results to register ``label: bullet_iter <SUC0-tower n> start = end``
-# as a fact in the surrounding proof.
-#
-# Limitation: inputs must be fully concrete over {S_t, K_t, App_t}.  Free
-# variables and folded constants like Omega_t / I_t are not handled
-# (SK_BULLET_APP_OTHER's K-shape and S-shape guards can't be discharged
-# when the head is opaque -- the structural-clash walk in ``_be_eq_to_F``
-# would fail).  Unfold such constants at the call site.
-# ---------------------------------------------------------------------------
 _DIAG_I = "App_t (App_t S_t K_t) K_t"
 _DIAG_SII = f"App_t (App_t S_t ({_DIAG_I})) ({_DIAG_I})"
 _DIAG_KH = "App_t K_t H"
@@ -5578,10 +5030,9 @@ def DIAG_TERM(p):
     inside the residue, which is what makes the diagonal work for
     arbitrary ``is_sk_term H``.  Bullet's eager-everywhere semantics
     would reduce composite ``H`` mid-trajectory and break the equation
-    (empirically falsified in ``outside/sk_par.py`` EXP 5/6).  The
-    par-to-bullet bridge ``HALTS_B_IFF_HALTS_PAR`` downstream lifts
-    the par chain to a ``halts_b`` equality; see
-    ``DIAGONAL_TERM_EXISTS``.
+    (empirically falsified in ``outside/sk_par.py`` EXP 5/6).
+    ``DIAGONAL_TERM_EXISTS`` downstream promotes the par chain to a
+    ``halts_par`` equality via ``HALTS_PAR_INVARIANT``.
     """
     _I = _DIAG_I
     _SII = _DIAG_SII
@@ -5644,58 +5095,31 @@ def DIAG_TERM(p):
 @proof
 def DIAGONAL_TERM_EXISTS(p):
     """|- !H. is_sk_term H ==>
-              ?d. is_sk_term d /\\ halts_b d = halts_b (App_t H d).
+              ?d. is_sk_term d /\\ halts_par d = halts_par (App_t H d).
 
-    Halts-form diagonal in the bullet halting convention.  Combines:
-
-      * DIAG_TERM           : the par-form Curry diagonal
-                              ``sk_par_steps d (App_t H d)``.
-      * HALTS_PAR_INVARIANT : par-step chains preserve halts_par.
-      * HALTS_B_IFF_HALTS_PAR : the bullet/par halt-bridge.
-
-    Pipeline: DIAG_TERM gives ``d`` and ``sk_par_steps d (App_t H d)``.
-    Apply HALTS_PAR_INVARIANT to get ``halts_par d = halts_par (App_t
-    H d)``.  Sandwich with HALTS_B_IFF_HALTS_PAR (on both sides) to
-    convert each ``halts_par`` to ``halts_b``.  Witness d.
+    Halts-form diagonal: DIAG_TERM gives ``d`` and
+    ``sk_par_steps d (App_t H d)``; HALTS_PAR_INVARIANT promotes the
+    par-step chain to a halts_par equality.  Witness d.
     """
     p.goal(
         "!H. is_sk_term H ==> "
-        "    ?d. is_sk_term d /\\ halts_b d = halts_b (App_t H d)"
+        "    ?d. is_sk_term d /\\ halts_par d = halts_par (App_t H d)"
     )
     p.fix("H")
     p.assume("h_is_sk_H: is_sk_term H")
 
-    # Pull in the par-form diagonal witness.
     p.have(
         "h_diag: ?d. is_sk_term d /\\ sk_par_steps d (App_t H d)"
     ).by(DIAG_TERM, "H", "h_is_sk_H")
     p.choose("d", from_="h_diag")
     p.split("d_eq", "(h_is_sk_d, h_par)")
 
-    # halts_par d = halts_par (App H d) via par-step invariance.
     p.have(
-        "h_par_eq: halts_par d = halts_par (App_t H d)"
+        "h_halts_eq: halts_par d = halts_par (App_t H d)"
     ).by(HALTS_PAR_INVARIANT, "d", "App_t H d", "h_par")
 
-    # Sandwich with the bullet/par halt-bridge.
-    # halts_b d = halts_par d.
-    p.have("h_b_d: halts_b d = halts_par d").by_thm(
-        SPEC(p._parse("d"), HALTS_B_IFF_HALTS_PAR)
-    )
-    # halts_b (App H d) = halts_par (App H d).
-    p.have(
-        "h_b_Hd: halts_b (App_t H d) = halts_par (App_t H d)"
-    ).by_thm(SPEC(p._parse("App_t H d"), HALTS_B_IFF_HALTS_PAR))
-    # Chain: halts_b d = halts_par d = halts_par (App H d) = halts_b (App H d).
-    p.have("h_step1: halts_b d = halts_par (App_t H d)").by_trans(
-        "h_b_d", "h_par_eq"
-    )
-    p.have(
-        "h_halts_eq: halts_b d = halts_b (App_t H d)"
-    ).by_trans("h_step1", SYM(p.fact("h_b_Hd")))
-
     p.thus(
-        "?d. is_sk_term d /\\ halts_b d = halts_b (App_t H d)"
+        "?d. is_sk_term d /\\ halts_par d = halts_par (App_t H d)"
     ).by_exists(["d"], "h_is_sk_d", "h_halts_eq")
 
 
@@ -5705,75 +5129,68 @@ def HALTING_UNDECIDABLE(p):
 
     THE THEOREM.  No SK combinator decides halting.
 
-    Proof (5-step contradiction):
+    Proof (4-step contradiction):
 
-      Assume H with halts_decider H.  Unfold the (flipped, bullet-form)
-      spec via HALTS_DECIDER_DEF_THM:
+      Assume H with halts_decider H.  Unfold via HALTS_DECIDER_DEF_THM:
         is_sk_term H  /\\  !t. is_sk_term t ==>
-                              halts_b t = ~halts_b (App_t H t).
+                              halts_par t = ~halts_par (App_t H t).
 
-      Build the classical Curry diagonal via DIAGONAL_TERM_EXISTS at H:
-        ?d. is_sk_term d /\\ halts_b d = halts_b (App_t H d).
+      Curry diagonal via DIAGONAL_TERM_EXISTS at H:
+        ?d. is_sk_term d /\\ halts_par d = halts_par (App_t H d).
 
       Specialise the decider spec at t := d:
-        halts_b d = ~halts_b (App_t H d).
+        halts_par d = ~halts_par (App_t H d).
 
-      Combining: halts_b (App_t H d) = ~halts_b (App_t H d).
-      Discharge via EXCLUDED_MIDDLE on halts_b (App_t H d).
+      Combining: halts_par (App_t H d) = ~halts_par (App_t H d).
+      Discharge via EXCLUDED_MIDDLE on halts_par (App_t H d).
     """
     from classical import EXCLUDED_MIDDLE
 
     p.goal("~ (?H. halts_decider H)")
     with p.suppose("h_ex: ?H. halts_decider H"):
         p.choose("H", from_="h_ex")
-        # H_eq : halts_decider H.
 
-        # ---- Unfold the (flipped, bullet-form) halts_decider spec. ----
         p.have(
             "h_thm: halts_decider H = "
             "       (is_sk_term H /\\ "
             "        !t. is_sk_term t ==> "
-            "            (halts_b t = ~(halts_b (App_t H t))))"
+            "            (halts_par t = ~(halts_par (App_t H t))))"
         ).by(HALTS_DECIDER_DEF_THM, "H")
         p.have(
             "h_unf: is_sk_term H /\\ "
             "       !t. is_sk_term t ==> "
-            "           (halts_b t = ~(halts_b (App_t H t)))"
+            "           (halts_par t = ~(halts_par (App_t H t)))"
         ).by_eq_mp("h_thm", "H_eq")
         p.split("h_unf", "(h_is_sk_H, h_decides)")
 
-        # ---- Diagonal term d (halts_b form). --------------------------
         p.have(
             "h_diag: ?d. is_sk_term d /\\ "
-            "        halts_b d = halts_b (App_t H d)"
+            "        halts_par d = halts_par (App_t H d)"
         ).by(DIAGONAL_TERM_EXISTS, "H", "h_is_sk_H")
         p.choose("d", from_="h_diag")
         p.split("d_eq", "(h_is_sk_d, h_dd_eq)")
 
-        # ---- Decider's promise specialised at t := d. -----------------
         p.have(
-            "h_dec_d: halts_b d = ~halts_b (App_t H d)"
+            "h_dec_d: halts_par d = ~halts_par (App_t H d)"
         ).by("h_decides", "d", "h_is_sk_d")
 
-        # ---- Compose to a P = ~P contradiction at App_t H d. ----------
-        # h_dd_eq  : halts_b d           = halts_b (App_t H d)
-        # h_dec_d  : halts_b d           = ~halts_b (App_t H d)
+        # h_dd_eq  : halts_par d           = halts_par (App_t H d)
+        # h_dec_d  : halts_par d           = ~halts_par (App_t H d)
         # SYM h_dd_eq + h_dec_d :
-        #   halts_b (App_t H d) = ~halts_b (App_t H d)
+        #   halts_par (App_t H d) = ~halts_par (App_t H d)
         p.have(
-            "h_pne: halts_b (App_t H d) = ~halts_b (App_t H d)"
+            "h_pne: halts_par (App_t H d) = ~halts_par (App_t H d)"
         ).by_trans(SYM(p.fact("h_dd_eq")), "h_dec_d")
 
-        # ---- Discharge via EXCLUDED_MIDDLE on halts_b (App_t H d). ----
-        with p.cases_on(EXCLUDED_MIDDLE, "halts_b (App_t H d)"):
-            with p.case("h_yes: halts_b (App_t H d)"):
+        with p.cases_on(EXCLUDED_MIDDLE, "halts_par (App_t H d)"):
+            with p.case("h_yes: halts_par (App_t H d)"):
                 p.have(
-                    "h_no: ~halts_b (App_t H d)"
+                    "h_no: ~halts_par (App_t H d)"
                 ).by_eq_mp("h_pne", "h_yes")
                 p.absurd().by_conj("h_yes", "h_no")
-            with p.case("h_no: ~halts_b (App_t H d)"):
+            with p.case("h_no: ~halts_par (App_t H d)"):
                 p.have(
-                    "h_yes: halts_b (App_t H d)"
+                    "h_yes: halts_par (App_t H d)"
                 ).by_eq_mp(SYM(p.fact("h_pne")), "h_no")
                 p.absurd().by_conj("h_yes", "h_no")
 
@@ -5787,38 +5204,33 @@ def HALTING_UNDECIDABLE(p):
 def HALTS_NOT_SK_REPRESENTABLE(p):
     """|- ~ ?H. is_sk_term H /\\
                 !t. is_sk_term t ==>
-                    (halts_b t = ~(halts_b (App_t H t))).
+                    (halts_par t = ~(halts_par (App_t H t))).
 
     HALTING_UNDECIDABLE, restated as non-existence of an SK term
-    deciding bullet halting under the flipped output convention.
-    Immediate from HALTING_UNDECIDABLE + HALTS_DECIDER_DEF_THM: any
-    H satisfying the unfolded predicate also satisfies
-    ``halts_decider H``, witnessing the existential refuted by
-    HALTING_UNDECIDABLE.
+    satisfying the flipped halt-status spec.  Immediate from
+    HALTING_UNDECIDABLE + HALTS_DECIDER_DEF_THM: any H satisfying the
+    unfolded predicate also satisfies ``halts_decider H``, witnessing
+    the existential refuted by HALTING_UNDECIDABLE.
     """
     p.goal(
         "~ (?H. is_sk_term H /\\ "
         "       !t. is_sk_term t ==> "
-        "           (halts_b t = ~(halts_b (App_t H t))))"
+        "           (halts_par t = ~(halts_par (App_t H t))))"
     )
     with p.suppose(
         "h_ex: ?H. is_sk_term H /\\ "
         "      !t. is_sk_term t ==> "
-        "          (halts_b t = ~(halts_b (App_t H t)))"
+        "          (halts_par t = ~(halts_par (App_t H t)))"
     ):
         p.choose("H", from_="h_ex")
-        # H_eq : is_sk_term H /\ ...   (the unfolded body at H).
-        # HALTS_DECIDER_DEF_THM at H: halts_decider H = (unfolded body).
         p.have(
             "h_thm: halts_decider H = "
             "       (is_sk_term H /\\ "
             "        !t. is_sk_term t ==> "
-            "            (halts_b t = ~(halts_b (App_t H t))))"
+            "            (halts_par t = ~(halts_par (App_t H t))))"
         ).by(HALTS_DECIDER_DEF_THM, "H")
-        # Fold H_eq back into halts_decider H via SYM-tolerant by_eq_mp.
         p.have("h_hd: halts_decider H").by_eq_mp("h_thm", "H_eq")
         p.have("h_ex_hd: ?H. halts_decider H").by_witness("H", "h_hd")
-        # HALTING_UNDECIDABLE : ~?H. halts_decider H.  Contradict.
         p.absurd().by_conj(HALTING_UNDECIDABLE, "h_ex_hd")
 
 
