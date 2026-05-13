@@ -11000,6 +11000,377 @@ def BULLET_ITER_INVARIANT(p):
     p.sorry()
 
 
+# ---------------------------------------------------------------------------
+# bullet_eval / bullet_chain -- kernel-level evaluators for sk_bullet.
+#
+# Given a concrete term `start` over {S_t, K_t, App_t}, build a kernel
+# theorem ``|- sk_bullet start = end`` where ``end`` is the fully-evaluated
+# parallel-development result of one bullet step.  Composes via TRANS
+# chains through SK_BULLET_S_T / SK_BULLET_K_T / SK_BULLET_K_REDEX /
+# SK_BULLET_S_REDEX / SK_BULLET_APP_OTHER.
+#
+# ``bullet_chain`` threads BULLET_ITER_SUC over a sequence of bullet_eval
+# results to register ``label: bullet_iter <SUC0-tower n> start = end``
+# as a fact in the surrounding proof.
+#
+# Limitation: inputs must be fully concrete over {S_t, K_t, App_t}.  Free
+# variables and folded constants like Omega_t / I_t are not handled
+# (SK_BULLET_APP_OTHER's K-shape and S-shape guards can't be discharged
+# when the head is opaque -- the structural-clash walk in ``_be_eq_to_F``
+# would fail).  Unfold such constants at the call site.
+# ---------------------------------------------------------------------------
+
+
+def _be_eq_to_F(eq_th):
+    """Given ``eq_th: asl |- L = R`` over {S_t, K_t, App_t} where L and R
+    are structurally distinct, return ``asl |- F``.
+
+    Walks L/R in parallel:
+      * Atom-atom clash (one S_t, one K_t): S_T_NEQ_K_T (oriented).
+      * Atom-App clash: S_T_NEQ_APP_T or K_T_NEQ_APP_T (oriented).
+      * App-App: APP_T_INJ + recurse on the first conjunct; falls back
+        to the second conjunct if the first doesn't clash.
+
+    Used to discharge SK_BULLET_APP_OTHER's negation guards.
+    """
+    from basics import is_const, dest_const
+    from tactics import (
+        CONJUNCT1 as _C1,
+        CONJUNCT2 as _C2,
+        NOT_ELIM as _NOT_ELIM,
+        NE_SYM as _NE_SYM,
+    )
+
+    L, R = dest_eq(eq_th._concl)
+
+    # Atom-atom clash.
+    if is_const(L) and is_const(R):
+        if L.name == R.name:
+            raise HolError(
+                f"_be_eq_to_F: atoms identical ({L.name}); not a disequality"
+            )
+        if L.name == "S_t" and R.name == "K_t":
+            return MP(_NOT_ELIM(S_T_NEQ_K_T), eq_th)
+        if L.name == "K_t" and R.name == "S_t":
+            return MP(_NOT_ELIM(_NE_SYM(S_T_NEQ_K_T)), eq_th)
+        raise HolError(
+            f"_be_eq_to_F: unsupported atom pair {L.name}, {R.name}"
+        )
+
+    # Atom-App clash.  Use atom_neq_app_t lemmas directly.
+    if is_const(L):
+        rL, rR = _split_app_t(R)
+        if rL is None:
+            raise HolError(f"_be_eq_to_F: RHS not App_t-shaped: {pp(R)}")
+        if L.name == "S_t":
+            return MP(_NOT_ELIM(SPECL([rL, rR], S_T_NEQ_APP_T)), eq_th)
+        if L.name == "K_t":
+            return MP(_NOT_ELIM(SPECL([rL, rR], K_T_NEQ_APP_T)), eq_th)
+        raise HolError(f"_be_eq_to_F: unsupported atom {L.name}")
+
+    # App-Atom clash: flip and recurse.
+    if is_const(R):
+        return _be_eq_to_F(SYM(eq_th))
+
+    # App-App: APP_T_INJ + try first conjunct, fall back to second.
+    lL, lR = _split_app_t(L)
+    rL, rR = _split_app_t(R)
+    if lL is None or rL is None:
+        raise HolError(
+            f"_be_eq_to_F: unrecognized term shape: {pp(L)} = {pp(R)}"
+        )
+    pair = MP(SPECL([lL, lR, rL, rR], APP_T_INJ), eq_th)
+    # Try left descent first (most clashes live in the head).
+    try:
+        return _be_eq_to_F(_C1(pair))
+    except HolError:
+        return _be_eq_to_F(_C2(pair))
+
+
+def _be_prove_neg_app_pattern(X, Y, bvar_count, pattern_builder):
+    """Build ``|- ~(?v1 ... vN. App_t X Y = RHS_template)`` where N is
+    ``bvar_count`` and ``pattern_builder(*vs) -> term`` constructs the
+    RHS template using the fresh bvars.
+
+    Precondition: ``App_t X Y`` is structurally distinct from
+    ``RHS_template[w/v...]`` for the witnesses chosen by ``CHOOSE_WITNESS``
+    -- in practice this means ``X`` cannot match the shape of the
+    RHS_template's first arg (which is the part of the template that's
+    concrete and doesn't depend on bvars).
+
+    Algorithm: ASSUME the nested existential, peel via N applications of
+    CHOOSE_WITNESS to get ``App_t X Y = RHS_template[w/v]`` (asl is the
+    ASSUMEd existential), then APP_T_INJ + ``_be_eq_to_F`` to derive F,
+    then DISCH + NOT_INTRO.
+    """
+    from tactics import CHOOSE_WITNESS as _CHOOSE_WITNESS
+    from basics import is_comb, is_const
+    from fusion import ASSUME
+
+    # Build fresh bvars.
+    bvar_names = ["a", "b", "c", "d"][:bvar_count]
+    bvars = [Var(name, nat0_ty) for name in bvar_names]
+
+    LHS = mk_app(mk_app(App_t, X), Y)
+    RHS = pattern_builder(*bvars)
+    eq_body = mk_eq(LHS, RHS)
+
+    # Build nested existential: ?v1. ?v2. ... ?vN. eq_body.
+    nested_ex = eq_body
+    for v in reversed(bvars):
+        nested_ex = mk_exists(v, nested_ex)
+
+    # Peel via CHOOSE_WITNESS.  cur_th carries the existential as a hyp.
+    cur_th = ASSUME(nested_ex)
+    for v in bvars:
+        # cur_th._concl should be ?v. body_v.
+        ex_concl = cur_th._concl
+        if not (
+            is_comb(ex_concl)
+            and is_const(ex_concl.fun)
+            and ex_concl.fun.name == "?"
+        ):
+            raise HolError(
+                f"_be_prove_neg_app_pattern: expected ?, got {pp(ex_concl)}"
+            )
+        pred = ex_concl.arg  # Abs(v_actual, body)
+        cur_th = _CHOOSE_WITNESS(pred, cur_th)
+    # cur_th : {nested_ex} |- App_t X Y = RHS[w1...wN].
+
+    # APP_T_INJ to descend to the head clash.  At this point the equation
+    # has the form ``App_t X Y = App_t L' R'`` where L', R' may contain
+    # SELECT-bound witnesses; _be_eq_to_F handles them since it only
+    # descends through structural matches on concrete sub-terms (the X
+    # side).
+    _, RHS_concrete = dest_eq(cur_th._concl)
+    rL, rR = _split_app_t(RHS_concrete)
+    if rL is None:
+        raise HolError("_be_prove_neg_app_pattern: RHS not App_t-shaped")
+    pair = MP(SPECL([X, Y, rL, rR], APP_T_INJ), cur_th)
+    # pair : {nested_ex} |- X = rL /\ Y = rR.  Use the first conjunct.
+    X_eq = CONJUNCT1(pair)
+    F_th = _be_eq_to_F(X_eq)  # {nested_ex} |- F
+
+    from tactics import DISCH as _DISCH, NOT_INTRO as _NOT_INTRO
+    return _NOT_INTRO(_DISCH(nested_ex, F_th))
+
+
+def _be_prove_not_kred(X, Y):
+    """|- ~(?a b. App_t X Y = App_t (App_t K_t a) b).
+
+    Precondition: X is concrete and NOT of shape ``App_t K_t _``.
+    """
+    def pattern(a, b):
+        return mk_app(
+            mk_app(App_t, mk_app(mk_app(App_t, K_t), a)),
+            b,
+        )
+
+    return _be_prove_neg_app_pattern(X, Y, 2, pattern)
+
+
+def _be_prove_not_sred(X, Y):
+    """|- ~(?a b c. App_t X Y = App_t (App_t (App_t S_t a) b) c).
+
+    Precondition: X is concrete and NOT of shape ``App_t (App_t S_t _) _``.
+    """
+    def pattern(a, b, c):
+        return mk_app(
+            mk_app(
+                App_t,
+                mk_app(
+                    mk_app(App_t, mk_app(mk_app(App_t, S_t), a)),
+                    b,
+                ),
+            ),
+            c,
+        )
+
+    return _be_prove_neg_app_pattern(X, Y, 3, pattern)
+
+
+def _be_synth_bullet(start):
+    """Return ``(end_term, |- sk_bullet start = end_term)`` for concrete
+    ``start`` over {S_t, K_t, App_t}.
+
+    Recursion:
+      * K-redex ``App (App K X) Y``: SK_BULLET_K_REDEX gives
+        ``sk_bullet (App (App K X) Y) = sk_bullet X``; recurse on X and
+        TRANS.  Note this collapses through K-redexes eagerly.
+      * S-redex ``App (App (App S X) Y) Z``: SK_BULLET_S_REDEX gives
+        the explicit ``App (App (sb X) (sb Z)) (App (sb Y) (sb Z))`` RHS;
+        recurse on X, Y, Z; REWRITE_CONV rewrites the four sk_bullet
+        chunks on the RHS using the recursive results; TRANS.
+      * Atom S_t / K_t: SK_BULLET_S_T / SK_BULLET_K_T.
+      * App-other: discharge K-shape and S-shape guards via
+        ``_be_prove_not_kred`` / ``_be_prove_not_sred``; MP with
+        SK_BULLET_APP_OTHER; recurse on both children; REWRITE_CONV
+        on the RHS chunks; TRANS.
+
+    Raises ``HolError`` if ``start`` doesn't match any pattern (e.g. a
+    free Var or a folded constant like ``Omega_t``).
+    """
+    from basics import is_const
+
+    # K-redex first (most-specific).
+    Kred = _pc_try_K_redex(start)
+    if Kred is not None:
+        X, Y = Kred
+        head_eq = SPECL([X, Y], SK_BULLET_K_REDEX)
+        # head_eq : sk_bullet (App (App K X) Y) = sk_bullet X.
+        _, X_eq = _be_synth_bullet(X)
+        # X_eq : sk_bullet X = X_norm.
+        composed = TRANS(head_eq, X_eq)
+        return (rand(composed._concl), composed)
+
+    # S-redex.
+    Sred = _pc_try_S_redex(start)
+    if Sred is not None:
+        X, Y, Z = Sred
+        head_eq = SPECL([X, Y, Z], SK_BULLET_S_REDEX)
+        # head_eq RHS = App (App (sk_bullet X) (sk_bullet Z))
+        #               (App (sk_bullet Y) (sk_bullet Z)).
+        _, X_eq = _be_synth_bullet(X)
+        _, Y_eq = _be_synth_bullet(Y)
+        _, Z_eq = _be_synth_bullet(Z)
+        rhs_eq = REWRITE_CONV([X_eq, Y_eq, Z_eq], rand(head_eq._concl))
+        composed = TRANS(head_eq, rhs_eq)
+        return (rand(composed._concl), composed)
+
+    # Atom leaves.
+    if is_const(start):
+        if start.name == "S_t":
+            return (S_t, SK_BULLET_S_T)
+        if start.name == "K_t":
+            return (K_t, SK_BULLET_K_T)
+        raise HolError(
+            f"_be_synth_bullet: unsupported atom {start.name}; "
+            "unfold folded constants (Omega_t, I_t, ...) at the call site"
+        )
+
+    # App-other.
+    App = _pc_dest_App_t(start)
+    if App is not None:
+        X, Y = App
+        not_K = _be_prove_not_kred(X, Y)
+        not_S = _be_prove_not_sred(X, Y)
+        head_inst = SPECL([X, Y], SK_BULLET_APP_OTHER)
+        head_eq = MP(head_inst, CONJ(not_K, not_S))
+        # head_eq RHS = App (sk_bullet X) (sk_bullet Y).
+        _, X_eq = _be_synth_bullet(X)
+        _, Y_eq = _be_synth_bullet(Y)
+        rhs_eq = REWRITE_CONV([X_eq, Y_eq], rand(head_eq._concl))
+        composed = TRANS(head_eq, rhs_eq)
+        return (rand(composed._concl), composed)
+
+    raise HolError(
+        f"_be_synth_bullet: cannot evaluate sk_bullet on {pp(start)} "
+        "(free variable or unsupported shape)"
+    )
+
+
+def bullet_eval(p, start, *, label):
+    """Register a fact ``label: sk_bullet start = end`` for a concrete
+    ``start``.  Returns the kernel ``end`` term.
+
+    Example::
+
+        end = bullet_eval(p, "App_t (App_t K_t S_t) K_t", label="h_step")
+        # registers h_step: sk_bullet (App_t (App_t K_t S_t) K_t) = S_t
+        # returns S_t (kernel term).
+
+    Use ``bullet_chain`` instead when you need a multi-step
+    ``bullet_iter`` chain rather than a single sk_bullet equation.
+    """
+    start_kt = p._parse(start) if isinstance(start, str) else start
+    end_kt, th = _be_synth_bullet(start_kt)
+    p.have(f"{label}: {pp(th._concl)}").by_thm(th)
+    return end_kt
+
+
+class _BulletChain:
+    """Context manager assembling a ``bullet_iter <SUC0-tower n> start = end``
+    equation by chaining n single-bullet steps.
+
+    See ``bullet_chain`` for usage; ``_close`` builds the chain by induction
+    on the step count using BULLET_ITER_ZERO + BULLET_ITER_SUC and the
+    per-step ``sk_bullet T_i = T_{i+1}`` equations from ``_be_synth_bullet``.
+    """
+
+    def __init__(self, p, start, label):
+        self.p = p
+        self.label = label
+        self.start = (
+            p._parse(start) if isinstance(start, str) else start
+        )
+        self.current = self.start
+        self.steps = []  # list of (start_i, end_i, |- sk_bullet start_i = end_i)
+        self._closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is None and not self._closed:
+            self._close()
+        return False
+
+    def step(self):
+        """Apply one ``sk_bullet`` step.  Returns the resulting kernel term."""
+        end_kt, eq_th = _be_synth_bullet(self.current)
+        self.steps.append((self.current, end_kt, eq_th))
+        self.current = end_kt
+        return end_kt
+
+    def _close(self):
+        # Build by induction over self.steps:
+        #   cur_eq_i : bullet_iter <SUC0^i 0> start = end_i  (with end_0 = start).
+        # Inductive step from i to i+1:
+        #   BULLET_ITER_SUC at (SUC0^i 0, start):
+        #     bullet_iter (SUC0 (SUC0^i 0)) start = sk_bullet (bullet_iter (SUC0^i 0) start)
+        #   AP_TERM(sk_bullet, cur_eq_i):
+        #     sk_bullet (bullet_iter (SUC0^i 0) start) = sk_bullet end_i
+        #   eq_th_{i+1} from steps[i]:
+        #     sk_bullet end_i = end_{i+1}
+        # TRANS them all.
+        start_t = self.start
+        cur_tower = ZERO
+        # Seed: bullet_iter 0 start = start.
+        cur_eq = SPEC(start_t, BULLET_ITER_ZERO)
+        for (_s_i, _e_i, eq_i) in self.steps:
+            iter_suc = SPECL([cur_tower, start_t], BULLET_ITER_SUC)
+            # iter_suc : bullet_iter (SUC0 cur_tower) start
+            #            = sk_bullet (bullet_iter cur_tower start)
+            sb_eq = AP_TERM(sk_bullet, cur_eq)
+            # sb_eq : sk_bullet (bullet_iter cur_tower start) = sk_bullet s_i
+            #         (where s_i = the previous step's start, == cur_eq's RHS)
+            cur_eq = TRANS(TRANS(iter_suc, sb_eq), eq_i)
+            cur_tower = mk_suc0(cur_tower)
+        self.p.have(f"{self.label}: {pp(cur_eq._concl)}").by_thm(cur_eq)
+        self._closed = True
+
+
+def bullet_chain(p, start, *, label):
+    """Open a ``bullet_iter`` chain starting at ``start``.
+
+    Each ``c.step()`` advances one ``sk_bullet`` step (auto-evaluating via
+    ``_be_synth_bullet``).  On context exit, registers a fact
+    ``label: bullet_iter <SUC0-tower n> start = end`` where ``n`` is the
+    number of ``step()`` calls and ``end`` is the final term.
+
+    Example::
+
+        with bullet_chain(p, "App_t (App_t K_t S_t) K_t", label="h_4") as c:
+            c.step()  # sk_bullet 1
+            c.step()  # sk_bullet 2
+            c.step()
+            c.step()
+        # registers h_4: bullet_iter (SUC0 (SUC0 (SUC0 (SUC0 0))))
+        #                   (App_t (App_t K_t S_t) K_t) = <end>
+    """
+    return _BulletChain(p, start, label)
+
+
 @proof
 def HALTS_SK_STEP_APP_LEFT(p):
     """|- !X Y. halts (App_t X Y) = halts (App_t (sk_step X) Y).
