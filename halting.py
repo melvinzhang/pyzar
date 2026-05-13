@@ -7,7 +7,7 @@ Final theorem (``HALTING_UNDECIDABLE``):
 where ``halts_decider H`` says ``H`` is an SK term and, for every SK
 term ``t``,
 
-    halts_par t = ~halts_par (App_t H t)
+    halts t = ~halts (App_t H t)
 
 i.e. the *halt-status of the decider's output on t* encodes the
 answer (flipped, so the diagonal contradiction lands cleanly).  This
@@ -52,7 +52,7 @@ Three ingredients:
       rules ``K x y -> x`` and ``S x y z -> x z (y z)`` are local
       pattern matches.
 
-  (2) *Halting.*  ``halts_par t := ?N. sk_par_steps t N /\\ is_normal N``,
+  (2) *Halting.*  ``halts t := ?N. sk_par_steps t N /\\ is_normal N``,
       halting via parallel reduction reaching a normal form.  Sigma_1
       over nat0 (r.e.) but, the theorem says, not decidable by an SK
       term.
@@ -61,11 +61,11 @@ Three ingredients:
       ``d = e e``.  Under parallel reduction one gets
       ``d ->>_par App_t H d`` (PAR_REFL lets H stay un-reduced inside
       the residue, which is what makes the diagonal work for arbitrary
-      ``is_sk_term H``).  ``HALTS_PAR_INVARIANT`` (powered by Church-
+      ``is_sk_term H``).  ``HALTS_INVARIANT`` (powered by Church-
       Rosser via ``sk_bullet``'s triangle property) promotes the
-      par-step chain to ``halts_par d = halts_par (App_t H d)``.
+      par-step chain to ``halts d = halts (App_t H d)``.
       Combined with the flipped decider spec,
-      ``halts_par d = ~halts_par d`` -- contradiction.
+      ``halts d = ~halts d`` -- contradiction.
 
       No fixed-point combinator, no Omega.  See ``iter_to_bullet.md``
       for the design history (initial bullet-only DIAG_TERM was
@@ -86,12 +86,12 @@ Stage map
   Stage 2 (bullet):   Takahashi's complete development ``sk_bullet``
                       + triangle property + Tait/Martin-Loef diamond
                       + Church-Rosser confluence on par.
-  Stage 3 (halts):    ``halts_par`` + ``HALTS_PAR_INVARIANT``
+  Stage 3 (halts):    ``halts`` + ``HALTS_INVARIANT``
                       (par-step chains preserve halting, by
                       confluence + normal-form stability).
   Stage 4 (diag):     Classical Curry diagonal ``DIAG_TERM`` in par
                       form; ``DIAGONAL_TERM_EXISTS`` promotes the
-                      chain to a ``halts_par`` equality.
+                      chain to a ``halts`` equality.
   Stage 5:            ``HALTING_UNDECIDABLE`` and the corollary
                       ``HALTS_NOT_SK_REPRESENTABLE``.
 
@@ -102,7 +102,7 @@ What this gives and doesn't give
 Derived from the bare HOL kernel + ``hf_sets.py``:
   * Undecidability of halting for SK combinators (the headline).
   * Church-Rosser for SK via parallel reduction (powers
-    ``HALTS_PAR_INVARIANT``).
+    ``HALTS_INVARIANT``).
   * General fixed-point self-reference (``DIAG_TERM``): for every SK
     term H there is an SK term d with ``sk_par_steps d (App_t H d)``.
     This is the diagonal/Y-combinator ingredient, and the only piece
@@ -116,7 +116,7 @@ Not in scope here:
   * Equivalence with Turing machines or lambda calculus (would need a
     third file). The theorem stands on its own without it.
   * A bullet-iter-based formulation of halting (``halts_b``) and its
-    equivalence with ``halts_par``.  Removed -- ``halts_par`` is the
+    equivalence with ``halts``.  Removed -- ``halts`` is the
     natural form for the par-form diagonal and avoids the iterator
     bridge entirely.
 
@@ -1354,7 +1354,6 @@ def _bullet_F_d1_mono_iff(hyp_th, r_term):
         CHOOSE_WITNESS, SPECL,
     )
     from axioms import dest_exists, mk_and
-    from basics import mk_abs
     from hf_syntax import _extract_nfg
 
     n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
@@ -1440,7 +1439,6 @@ def _bullet_F_d2_mono_iff(hyp_th, r_term):
         CHOOSE_WITNESS, SPECL,
     )
     from axioms import dest_exists, mk_and
-    from basics import mk_abs
     from hf_syntax import _extract_nfg
 
     n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
@@ -4609,7 +4607,7 @@ def PAR_STEPS_CONFLUENT(p):
 
 
 # ---------------------------------------------------------------------------
-# Generic par-step infrastructure used by HALTS_PAR_INVARIANT and the
+# Generic par-step infrastructure used by HALTS_INVARIANT and the
 # par/bullet bridge: PAR_STEPS_TRANS (composition) and
 # NORMAL_STABILITY_PAR_STEPS (par-step from a normal goes nowhere).
 # ---------------------------------------------------------------------------
@@ -4796,11 +4794,11 @@ def NORMAL_STABILITY_PAR_STEPS(p):
 # ---------------------------------------------------------------------------
 # Stage 3 -- halting predicate.
 #
-#   halts_par t := ?N. sk_par_steps t N /\\ is_normal N
+#   halts t := ?N. sk_par_steps t N /\\ is_normal N
 #
 # A term halts iff some normal form is reachable from it via parallel
 # reduction.  Confluence (PAR_STEPS_CONFLUENT) plus normal-form
-# stability give ``HALTS_PAR_INVARIANT``: par_steps preserves halts_par,
+# stability give ``HALTS_INVARIANT``: par_steps preserves halts,
 # which is what lets the par-form Curry diagonal land as a halt-equality
 # on the headline theorem.
 # ---------------------------------------------------------------------------
@@ -4808,66 +4806,66 @@ def NORMAL_STABILITY_PAR_STEPS(p):
 _n0_t_var = Var("t", nat0_ty)
 
 
-# halts_par t := ?N. sk_par_steps t N /\\ is_normal N.
-HALTS_PAR_DEF = define(
-    "halts_par",
+# halts t := ?N. sk_par_steps t N /\\ is_normal N.
+HALTS_DEF = define(
+    "halts",
     parse_type("nat0 -> bool"),
     "\\t:nat0. ?N:nat0. sk_par_steps t N /\\ is_normal N",
 )
-halts_par = mk_const("halts_par", [])
+halts = mk_const("halts", [])
 
 
 @proof
-def HALTS_PAR_AT(p):
-    """|- !t. halts_par t = (?N. sk_par_steps t N /\\ is_normal N).
+def HALTS_AT(p):
+    """|- !t. halts t = (?N. sk_par_steps t N /\\ is_normal N).
 
-    Direct unfold of HALTS_PAR_DEF via AP_THM + BETA.
+    Direct unfold of HALTS_DEF via AP_THM + BETA.
     """
     from tactics import AP_THM, BETA_CONV, TRANS, GEN
 
-    ap = AP_THM(HALTS_PAR_DEF, _n0_t_var)
+    ap = AP_THM(HALTS_DEF, _n0_t_var)
     bet = BETA_CONV(rand(ap._concl))
     spec_th = TRANS(ap, bet)
-    p.goal("!t. halts_par t = (?N. sk_par_steps t N /\\ is_normal N)")
+    p.goal("!t. halts t = (?N. sk_par_steps t N /\\ is_normal N)")
     p.thus(
-        "!t. halts_par t = (?N. sk_par_steps t N /\\ is_normal N)"
+        "!t. halts t = (?N. sk_par_steps t N /\\ is_normal N)"
     ).by_thm(GEN(_n0_t_var, spec_th))
 
 
 @proof
-def HALTS_PAR_INVARIANT(p):
-    """|- !X Y. sk_par_steps X Y ==> halts_par X = halts_par Y.
+def HALTS_INVARIANT(p):
+    """|- !X Y. sk_par_steps X Y ==> halts X = halts Y.
 
-    halts_par is invariant along par-step chains.  Iff-intro on the
+    halts is invariant along par-step chains.  Iff-intro on the
     two directions:
 
-    Forward (halts_par X ==> halts_par Y).  Unfold halts_par X to
+    Forward (halts X ==> halts Y).  Unfold halts X to
     ``?N. sk_par_steps X N /\\ is_normal N``.  Combined with the
     hypothesis sk_par_steps X Y, PAR_STEPS_CONFLUENT gives a common
     reduct ``?W. sk_par_steps N W /\\ sk_par_steps Y W``.  N normal +
     NORMAL_STABILITY_PAR_STEPS forces W = N; transport sk_par_steps Y
-    W to sk_par_steps Y N; witness halts_par Y.
+    W to sk_par_steps Y N; witness halts Y.
 
-    Backward (halts_par Y ==> halts_par X).  Unfold halts_par Y;
-    PAR_STEPS_TRANS prepends sk_par_steps X Y; witness halts_par X.
+    Backward (halts Y ==> halts X).  Unfold halts Y;
+    PAR_STEPS_TRANS prepends sk_par_steps X Y; witness halts X.
 
     Stays inside the par calculus.
     """
     p.goal(
-        "!X Y. sk_par_steps X Y ==> halts_par X = halts_par Y"
+        "!X Y. sk_par_steps X Y ==> halts X = halts Y"
     )
     p.fix("X Y")
     p.assume("h_XY: sk_par_steps X Y")
 
     # ---- Forward direction ----------------------------------------------
     with p.have(
-        "h_fwd: halts_par X ==> halts_par Y"
+        "h_fwd: halts X ==> halts Y"
     ).proof():
-        p.assume("h_hX: halts_par X")
+        p.assume("h_hX: halts X")
         p.have(
-            "h_at_X: halts_par X = "
+            "h_at_X: halts X = "
             "(?N. sk_par_steps X N /\\ is_normal N)"
-        ).by(HALTS_PAR_AT, "X")
+        ).by(HALTS_AT, "X")
         p.have(
             "h_ex_X: ?N. sk_par_steps X N /\\ is_normal N"
         ).by_eq_mp("h_at_X", "h_hX")
@@ -4898,25 +4896,25 @@ def HALTS_PAR_INVARIANT(p):
             "h_YW", [p.fact("h_W_N")]
         )
 
-        # Witness halts_par Y.
+        # Witness halts Y.
         p.have(
-            "h_at_Y: halts_par Y = "
+            "h_at_Y: halts Y = "
             "(?N. sk_par_steps Y N /\\ is_normal N)"
-        ).by(HALTS_PAR_AT, "Y")
+        ).by(HALTS_AT, "Y")
         p.have(
             "h_ex_Y: ?N. sk_par_steps Y N /\\ is_normal N"
         ).by_exists(["N"], "h_YN", "h_norm_N")
-        p.thus("halts_par Y").by_eq_mp("h_at_Y", "h_ex_Y")
+        p.thus("halts Y").by_eq_mp("h_at_Y", "h_ex_Y")
 
     # ---- Backward direction ---------------------------------------------
     with p.have(
-        "h_bwd: halts_par Y ==> halts_par X"
+        "h_bwd: halts Y ==> halts X"
     ).proof():
-        p.assume("h_hY: halts_par Y")
+        p.assume("h_hY: halts Y")
         p.have(
-            "h_at_Y: halts_par Y = "
+            "h_at_Y: halts Y = "
             "(?N. sk_par_steps Y N /\\ is_normal N)"
-        ).by(HALTS_PAR_AT, "Y")
+        ).by(HALTS_AT, "Y")
         p.have(
             "h_ex_Y: ?N. sk_par_steps Y N /\\ is_normal N"
         ).by_eq_mp("h_at_Y", "h_hY")
@@ -4932,15 +4930,15 @@ def HALTS_PAR_INVARIANT(p):
         )
 
         p.have(
-            "h_at_X: halts_par X = "
+            "h_at_X: halts X = "
             "(?N. sk_par_steps X N /\\ is_normal N)"
-        ).by(HALTS_PAR_AT, "X")
+        ).by(HALTS_AT, "X")
         p.have(
             "h_ex_X: ?N. sk_par_steps X N /\\ is_normal N"
         ).by_exists(["N"], "h_XN", "h_norm_N")
-        p.thus("halts_par X").by_eq_mp("h_at_X", "h_ex_X")
+        p.thus("halts X").by_eq_mp("h_at_X", "h_ex_X")
 
-    p.thus("halts_par X = halts_par Y").by_iff(
+    p.thus("halts X = halts Y").by_iff(
         "h_fwd", "h_bwd"
     )
 
@@ -4950,8 +4948,8 @@ def HALTS_PAR_INVARIANT(p):
 #
 # ``halts_decider H`` says H is an SK term that decides halting via the
 # flipped halting-status output convention:
-# ``halts_par t  iff  ~halts_par (App_t H t)``.  The flipped convention
-# turns the diagonal equation ``halts_par d = halts_par (App_t H d)``
+# ``halts t  iff  ~halts (App_t H t)``.  The flipped convention
+# turns the diagonal equation ``halts d = halts (App_t H d)``
 # into a ``P = ~P`` contradiction directly, no Church-bool case-split
 # needed.  See module docstring for why the flipped form is at least as
 # strong as a standard boolean-output decider.
@@ -4961,7 +4959,7 @@ HALTS_DECIDER_DEF = define(
     parse_type("nat0 -> bool"),
     "\\H:nat0. is_sk_term H /\\ "
     "         !t:nat0. is_sk_term t ==> "
-    "             (halts_par t = ~(halts_par (App_t H t)))",
+    "             (halts t = ~(halts (App_t H t)))",
 )
 halts_decider = mk_const("halts_decider", [])
 
@@ -4971,7 +4969,7 @@ def HALTS_DECIDER_DEF_THM(p):
     """|- !H. halts_decider H =
               (is_sk_term H /\\
                !t. is_sk_term t ==>
-                   (halts_par t = ~(halts_par (App_t H t)))).
+                   (halts t = ~(halts (App_t H t)))).
 
     Direct unfold of HALTS_DECIDER_DEF via AP_THM + BETA.
     """
@@ -4984,13 +4982,13 @@ def HALTS_DECIDER_DEF_THM(p):
         "!H. halts_decider H = "
         "    (is_sk_term H /\\ "
         "     !t. is_sk_term t ==> "
-        "         (halts_par t = ~(halts_par (App_t H t))))"
+        "         (halts t = ~(halts (App_t H t))))"
     )
     p.thus(
         "!H. halts_decider H = "
         "    (is_sk_term H /\\ "
         "     !t. is_sk_term t ==> "
-        "         (halts_par t = ~(halts_par (App_t H t))))"
+        "         (halts t = ~(halts (App_t H t))))"
     ).by_thm(GEN(H_var, spec_th))
 
 
@@ -5032,7 +5030,7 @@ def DIAG_TERM(p):
     would reduce composite ``H`` mid-trajectory and break the equation
     (empirically falsified in ``outside/sk_par.py`` EXP 5/6).
     ``DIAGONAL_TERM_EXISTS`` downstream promotes the par chain to a
-    ``halts_par`` equality via ``HALTS_PAR_INVARIANT``.
+    ``halts`` equality via ``HALTS_INVARIANT``.
     """
     _I = _DIAG_I
     _SII = _DIAG_SII
@@ -5095,15 +5093,15 @@ def DIAG_TERM(p):
 @proof
 def DIAGONAL_TERM_EXISTS(p):
     """|- !H. is_sk_term H ==>
-              ?d. is_sk_term d /\\ halts_par d = halts_par (App_t H d).
+              ?d. is_sk_term d /\\ halts d = halts (App_t H d).
 
     Halts-form diagonal: DIAG_TERM gives ``d`` and
-    ``sk_par_steps d (App_t H d)``; HALTS_PAR_INVARIANT promotes the
-    par-step chain to a halts_par equality.  Witness d.
+    ``sk_par_steps d (App_t H d)``; HALTS_INVARIANT promotes the
+    par-step chain to a halts equality.  Witness d.
     """
     p.goal(
         "!H. is_sk_term H ==> "
-        "    ?d. is_sk_term d /\\ halts_par d = halts_par (App_t H d)"
+        "    ?d. is_sk_term d /\\ halts d = halts (App_t H d)"
     )
     p.fix("H")
     p.assume("h_is_sk_H: is_sk_term H")
@@ -5115,11 +5113,11 @@ def DIAGONAL_TERM_EXISTS(p):
     p.split("d_eq", "(h_is_sk_d, h_par)")
 
     p.have(
-        "h_halts_eq: halts_par d = halts_par (App_t H d)"
-    ).by(HALTS_PAR_INVARIANT, "d", "App_t H d", "h_par")
+        "h_halts_eq: halts d = halts (App_t H d)"
+    ).by(HALTS_INVARIANT, "d", "App_t H d", "h_par")
 
     p.thus(
-        "?d. is_sk_term d /\\ halts_par d = halts_par (App_t H d)"
+        "?d. is_sk_term d /\\ halts d = halts (App_t H d)"
     ).by_exists(["d"], "h_is_sk_d", "h_halts_eq")
 
 
@@ -5133,16 +5131,16 @@ def HALTING_UNDECIDABLE(p):
 
       Assume H with halts_decider H.  Unfold via HALTS_DECIDER_DEF_THM:
         is_sk_term H  /\\  !t. is_sk_term t ==>
-                              halts_par t = ~halts_par (App_t H t).
+                              halts t = ~halts (App_t H t).
 
       Curry diagonal via DIAGONAL_TERM_EXISTS at H:
-        ?d. is_sk_term d /\\ halts_par d = halts_par (App_t H d).
+        ?d. is_sk_term d /\\ halts d = halts (App_t H d).
 
       Specialise the decider spec at t := d:
-        halts_par d = ~halts_par (App_t H d).
+        halts d = ~halts (App_t H d).
 
-      Combining: halts_par (App_t H d) = ~halts_par (App_t H d).
-      Discharge via EXCLUDED_MIDDLE on halts_par (App_t H d).
+      Combining: halts (App_t H d) = ~halts (App_t H d).
+      Discharge via EXCLUDED_MIDDLE on halts (App_t H d).
     """
     from classical import EXCLUDED_MIDDLE
 
@@ -5154,43 +5152,43 @@ def HALTING_UNDECIDABLE(p):
             "h_thm: halts_decider H = "
             "       (is_sk_term H /\\ "
             "        !t. is_sk_term t ==> "
-            "            (halts_par t = ~(halts_par (App_t H t))))"
+            "            (halts t = ~(halts (App_t H t))))"
         ).by(HALTS_DECIDER_DEF_THM, "H")
         p.have(
             "h_unf: is_sk_term H /\\ "
             "       !t. is_sk_term t ==> "
-            "           (halts_par t = ~(halts_par (App_t H t)))"
+            "           (halts t = ~(halts (App_t H t)))"
         ).by_eq_mp("h_thm", "H_eq")
         p.split("h_unf", "(h_is_sk_H, h_decides)")
 
         p.have(
             "h_diag: ?d. is_sk_term d /\\ "
-            "        halts_par d = halts_par (App_t H d)"
+            "        halts d = halts (App_t H d)"
         ).by(DIAGONAL_TERM_EXISTS, "H", "h_is_sk_H")
         p.choose("d", from_="h_diag")
         p.split("d_eq", "(h_is_sk_d, h_dd_eq)")
 
         p.have(
-            "h_dec_d: halts_par d = ~halts_par (App_t H d)"
+            "h_dec_d: halts d = ~halts (App_t H d)"
         ).by("h_decides", "d", "h_is_sk_d")
 
-        # h_dd_eq  : halts_par d           = halts_par (App_t H d)
-        # h_dec_d  : halts_par d           = ~halts_par (App_t H d)
+        # h_dd_eq  : halts d           = halts (App_t H d)
+        # h_dec_d  : halts d           = ~halts (App_t H d)
         # SYM h_dd_eq + h_dec_d :
-        #   halts_par (App_t H d) = ~halts_par (App_t H d)
+        #   halts (App_t H d) = ~halts (App_t H d)
         p.have(
-            "h_pne: halts_par (App_t H d) = ~halts_par (App_t H d)"
+            "h_pne: halts (App_t H d) = ~halts (App_t H d)"
         ).by_trans(SYM(p.fact("h_dd_eq")), "h_dec_d")
 
-        with p.cases_on(EXCLUDED_MIDDLE, "halts_par (App_t H d)"):
-            with p.case("h_yes: halts_par (App_t H d)"):
+        with p.cases_on(EXCLUDED_MIDDLE, "halts (App_t H d)"):
+            with p.case("h_yes: halts (App_t H d)"):
                 p.have(
-                    "h_no: ~halts_par (App_t H d)"
+                    "h_no: ~halts (App_t H d)"
                 ).by_eq_mp("h_pne", "h_yes")
                 p.absurd().by_conj("h_yes", "h_no")
-            with p.case("h_no: ~halts_par (App_t H d)"):
+            with p.case("h_no: ~halts (App_t H d)"):
                 p.have(
-                    "h_yes: halts_par (App_t H d)"
+                    "h_yes: halts (App_t H d)"
                 ).by_eq_mp(SYM(p.fact("h_pne")), "h_no")
                 p.absurd().by_conj("h_yes", "h_no")
 
@@ -5204,7 +5202,7 @@ def HALTING_UNDECIDABLE(p):
 def HALTS_NOT_SK_REPRESENTABLE(p):
     """|- ~ ?H. is_sk_term H /\\
                 !t. is_sk_term t ==>
-                    (halts_par t = ~(halts_par (App_t H t))).
+                    (halts t = ~(halts (App_t H t))).
 
     HALTING_UNDECIDABLE, restated as non-existence of an SK term
     satisfying the flipped halt-status spec.  Immediate from
@@ -5215,19 +5213,19 @@ def HALTS_NOT_SK_REPRESENTABLE(p):
     p.goal(
         "~ (?H. is_sk_term H /\\ "
         "       !t. is_sk_term t ==> "
-        "           (halts_par t = ~(halts_par (App_t H t))))"
+        "           (halts t = ~(halts (App_t H t))))"
     )
     with p.suppose(
         "h_ex: ?H. is_sk_term H /\\ "
         "      !t. is_sk_term t ==> "
-        "          (halts_par t = ~(halts_par (App_t H t)))"
+        "          (halts t = ~(halts (App_t H t)))"
     ):
         p.choose("H", from_="h_ex")
         p.have(
             "h_thm: halts_decider H = "
             "       (is_sk_term H /\\ "
             "        !t. is_sk_term t ==> "
-            "            (halts_par t = ~(halts_par (App_t H t))))"
+            "            (halts t = ~(halts (App_t H t))))"
         ).by(HALTS_DECIDER_DEF_THM, "H")
         p.have("h_hd: halts_decider H").by_eq_mp("h_thm", "H_eq")
         p.have("h_ex_hd: ?H. halts_decider H").by_witness("H", "h_hd")
