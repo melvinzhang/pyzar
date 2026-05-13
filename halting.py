@@ -10096,12 +10096,10 @@ def PAR_STEPS_CONFLUENT(p):
 
 
 # ---------------------------------------------------------------------------
-# Helpers feeding HALTS_PAR_STEPS_INVARIANT.
-#
-# Two real lemmas (PAR_STEPS_TRANS, SK_ITER_TO_PAR_STEPS) + two stubs
-# (NORMAL_STABILITY_PAR_STEPS, STANDARDIZATION_NORMAL) carry the
-# halts-preservation proof.  Splits the prior "bulk of SK meta-theory"
-# sorry into one provable wrapper plus two sharply-scoped stubs.
+# Generic par-step infrastructure used by HALTS_PAR_INVARIANT and the
+# par/bullet bridge: PAR_STEPS_TRANS (composition), SK_ITER_TO_PAR_STEPS
+# (iter-form embedding into par-chains), NORMAL_STABILITY_PAR_STEPS
+# (par-step from a normal goes nowhere).
 # ---------------------------------------------------------------------------
 
 
@@ -10674,163 +10672,6 @@ def NORMAL_STABILITY_PAR_STEPS(p):
     p.thus("Y = X").by("h_PXY", "h_normX")
 
 
-@proof
-def STANDARDIZATION_NORMAL(p):
-    """|- !X N. sk_par_steps X N /\\ is_normal N ==> ?n. sk_iter n X = N.
-
-    *** STUB.  Curry-Feys standardization specialized to normal-form
-    targets.
-
-    Discharge: induct on the par_steps chain.  At each parallel step
-    ``sk_par_step ti t(i+1)``, apply an inner-redex reordering argument
-    to show any par-step ending at a normal eventually reaches that
-    normal via leftmost-outermost ``sk_iter`` steps.  The normality of
-    the target is essential -- it pins the standardized trace's
-    endpoint so no inner residual redex remains to be reordered.
-    """
-    p.goal(
-        "!X:nat0. !N:nat0. "
-        "sk_par_steps X N /\\ is_normal N ==> "
-        "?n:nat0. sk_iter n X = N"
-    )
-    p.sorry()
-
-
-@proof
-def HALTS_PAR_STEPS_INVARIANT(p):
-    """|- !X Y. sk_par_steps X Y ==> halts X = halts Y.
-
-    Closes structurally from five dependencies:
-      * PAR_STEPS_CONFLUENT       -- Church-Rosser for sk_par_steps.
-      * PAR_STEPS_TRANS           -- chain composition.
-      * SK_ITER_TO_PAR_STEPS      -- sk_iter trajectories embed in
-                                      sk_par_steps.
-      * NORMAL_STABILITY_PAR_STEPS -- par_steps from a normal term goes
-                                       nowhere.
-      * STANDARDIZATION_NORMAL    -- par_steps into a normal form
-                                      yields an sk_iter equation.
-
-    Forward (halts X ==> halts Y):
-      halts X gives ``N = sk_iter n X`` normal.  SK_ITER_TO_PAR_STEPS:
-      ``sk_par_steps X N``.  CONFLUENT on (X →* N, X →* Y) gives some
-      W with ``sk_par_steps N W`` and ``sk_par_steps Y W``.  N normal +
-      NORMAL_STABILITY_PAR_STEPS forces ``W = N``.  So ``sk_par_steps
-      Y N``; STANDARDIZATION_NORMAL produces an ``m`` with ``sk_iter
-      m Y = N``, witnessing halts Y.
-
-    Backward: halts Y gives ``N = sk_iter m Y`` normal.  TRANS:
-      ``sk_par_steps X N``.  STANDARDIZATION_NORMAL produces ``n`` with
-      ``sk_iter n X = N``, witnessing halts X.
-    """
-    p.goal(
-        "!X:nat0. !Y:nat0. sk_par_steps X Y ==> halts X = halts Y"
-    )
-    p.fix("X Y")
-    p.assume("h_XY: sk_par_steps X Y")
-
-    # Forward.
-    with p.have("h_fwd: halts X ==> halts Y").proof():
-        p.assume("h_hX: halts X")
-        p.have(
-            "h_hX_ex: ?n. is_normal (sk_iter n X)"
-        ).by_eq_mp(SPEC(p._parse("X"), HALTS_AT), "h_hX")
-        p.choose("n", from_="h_hX_ex")
-        p.have(
-            "h_XN: sk_par_steps X (sk_iter n X)"
-        ).by(SK_ITER_TO_PAR_STEPS, "n", "X")
-        p.have(
-            "h_conj_conf: sk_par_steps X (sk_iter n X) /\\ "
-            "             sk_par_steps X Y"
-        ).by_thm(CONJ(p.fact("h_XN"), p.fact("h_XY")))
-        p.have(
-            "h_diam: ?W. sk_par_steps (sk_iter n X) W /\\ "
-            "            sk_par_steps Y W"
-        ).by(
-            PAR_STEPS_CONFLUENT,
-            "X", "sk_iter n X", "Y",
-            "h_conj_conf",
-        )
-        p.choose("W", from_="h_diam")
-        p.split("W_eq", "(h_NW, h_YW)")
-        p.have(
-            "h_conj_stab: is_normal (sk_iter n X) /\\ "
-            "             sk_par_steps (sk_iter n X) W"
-        ).by_thm(CONJ(p.fact("n_eq"), p.fact("h_NW")))
-        p.have("h_W_eq: W = sk_iter n X").by(
-            NORMAL_STABILITY_PAR_STEPS,
-            "sk_iter n X", "W", "h_conj_stab",
-        )
-        p.have(
-            "h_YN: sk_par_steps Y (sk_iter n X)"
-        ).by_rewrite_of("h_YW", ["h_W_eq"])
-        p.have(
-            "h_conj_std: sk_par_steps Y (sk_iter n X) /\\ "
-            "            is_normal (sk_iter n X)"
-        ).by_thm(CONJ(p.fact("h_YN"), p.fact("n_eq")))
-        p.have(
-            "h_Y_iter: ?m. sk_iter m Y = sk_iter n X"
-        ).by(
-            STANDARDIZATION_NORMAL,
-            "Y", "sk_iter n X",
-            "h_conj_std",
-        )
-        p.choose("m", from_="h_Y_iter")
-        p.have(
-            "h_normY: is_normal (sk_iter m Y)"
-        ).by_rewrite_of("n_eq", [SYM(p.fact("m_eq"))])
-        p.have(
-            "h_hY_ex: ?k. is_normal (sk_iter k Y)"
-        ).by_witness("m", "h_normY")
-        p.thus("halts Y").by_eq_mp(
-            SYM(SPEC(p._parse("Y"), HALTS_AT)), "h_hY_ex"
-        )
-
-    # Backward.
-    with p.have("h_bwd: halts Y ==> halts X").proof():
-        p.assume("h_hY: halts Y")
-        p.have(
-            "h_hY_ex: ?n. is_normal (sk_iter n Y)"
-        ).by_eq_mp(SPEC(p._parse("Y"), HALTS_AT), "h_hY")
-        p.choose("m", from_="h_hY_ex")
-        p.have(
-            "h_YN: sk_par_steps Y (sk_iter m Y)"
-        ).by(SK_ITER_TO_PAR_STEPS, "m", "Y")
-        p.have(
-            "h_conj_t: sk_par_steps X Y /\\ "
-            "          sk_par_steps Y (sk_iter m Y)"
-        ).by_thm(CONJ(p.fact("h_XY"), p.fact("h_YN")))
-        p.have(
-            "h_XN: sk_par_steps X (sk_iter m Y)"
-        ).by(
-            PAR_STEPS_TRANS,
-            "X", "Y", "sk_iter m Y",
-            "h_conj_t",
-        )
-        p.have(
-            "h_conj_std: sk_par_steps X (sk_iter m Y) /\\ "
-            "            is_normal (sk_iter m Y)"
-        ).by_thm(CONJ(p.fact("h_XN"), p.fact("m_eq")))
-        p.have(
-            "h_X_iter: ?n. sk_iter n X = sk_iter m Y"
-        ).by(
-            STANDARDIZATION_NORMAL,
-            "X", "sk_iter m Y",
-            "h_conj_std",
-        )
-        p.choose("n", from_="h_X_iter")
-        p.have(
-            "h_normX: is_normal (sk_iter n X)"
-        ).by_rewrite_of("m_eq", [SYM(p.fact("n_eq"))])
-        p.have(
-            "h_hX_ex: ?k. is_normal (sk_iter k X)"
-        ).by_witness("n", "h_normX")
-        p.thus("halts X").by_eq_mp(
-            SYM(SPEC(p._parse("X"), HALTS_AT)), "h_hX_ex"
-        )
-
-    p.thus("halts X = halts Y").by_iff("h_fwd", "h_bwd")
-
-
 # ---------------------------------------------------------------------------
 # Bullet-form halts (the path used downstream).
 #
@@ -10845,12 +10686,9 @@ def HALTS_PAR_STEPS_INVARIANT(p):
 # the undecidability critical path.
 #
 # See iter_to_bullet.md for the full migration plan.  This block ships:
-# the recursion equations for bullet_iter, the halts_b unfold (HALTS_B_AT),
-# and BULLET_ITER_INVARIANT (stub) for use by the new DIAG_TERM.
-# The par-form halts_par / OMEGA_NON_HALTING_PAR scaffolding that lived
-# here previously has been removed -- everything sk_par_step-flavoured
-# downstream of HALTS_PAR_STEPS_INVARIANT either reroutes through
-# halts_b or is itself stubbed.
+# the recursion equations for bullet_iter and the halts_b unfold
+# (HALTS_B_AT).  Under Option C, the par-form halts_par is also retained
+# downstream and bridged to halts_b via HALTS_B_IFF_HALTS_PAR.
 # ---------------------------------------------------------------------------
 
 
@@ -10934,28 +10772,6 @@ def HALTS_B_AT(p):
     p.thus(
         "!t. halts_b t = (?n. is_normal (bullet_iter n t))"
     ).by_thm(GEN(_n0_t_var, spec_th))
-
-
-@proof
-def BULLET_ITER_INVARIANT(p):
-    """|- !n X. halts_b X = halts_b (bullet_iter n X).
-
-    *** STUB.  Halts-iter offset: shifting an existential ``?m. is_normal
-    (bullet_iter m X)`` by k yields ``?m. is_normal (bullet_iter (m+k)
-    (bullet_iter k X^{-k})) ...`` -- in either direction, the bullet
-    trajectory of ``bullet_iter n X`` is the n-suffix of ``X``'s
-    trajectory, and one reaches normal iff the other does.  ~15 lines
-    once BULLET_ITER_ADD is available (induction on n + index shift).
-
-    DSL friction: the forward direction needs ``?m. is_normal (bullet_iter
-    m X) ==> ?m'. is_normal (bullet_iter m' (bullet_iter n X))`` -- pick
-    ``m' := max(m - n, 0)`` plus a normal-stability ``is_normal Y
-    /\\ sk_bullet Y = Y`` fact for past-normal iterates.  Backward is
-    symmetric with ``m' := m + n``.  Both halves close by witness +
-    rewrite once the offset bookkeeping is in.
-    """
-    p.goal("!n X. halts_b X = halts_b (bullet_iter n X)")
-    p.sorry()
 
 
 # halts_par t := ?N. sk_par_steps t N /\ is_normal N.
@@ -11485,114 +11301,6 @@ def bullet_chain(p, start, *, label):
         #                   (App_t (App_t K_t S_t) K_t) = <end>
     """
     return _BulletChain(p, start, label)
-
-
-@proof
-def HALTS_SK_STEP_APP_LEFT(p):
-    """|- !X Y. halts (App_t X Y) = halts (App_t (sk_step X) Y).
-
-    Atomic halts-preservation under a single inner sk_step inside the
-    left position of an App.
-
-    Proof (3 lines, no sorry): factor through ``sk_par_steps``:
-      * SK_STEP_TO_PAR_STEPS: X -->>p (sk_step X).
-      * PAR_STEPS_APP_LEFT:   (App_t X Y) -->>p (App_t (sk_step X) Y).
-      * HALTS_PAR_STEPS_INVARIANT: halts equal.
-    All three are sorry'd above; the Church-Rosser + Standardization
-    development for SK is the remaining unbuilt infrastructure.
-
-    Why this factoring is honest: the multi-step reduction lift
-        ``?n. sk_iter n X = X1 ==> ?m. sk_iter m (App_t X Y) = App_t X1 Y``
-    is provably FALSE in its unconditional form (leftmost-outermost
-    sk_step can fire the outer App as a K- or S-redex BEFORE the inner
-    X completes its reduction).  Counterexample: ``X = App_t K_t Omega_t``
-    (single-arg K applied to Omega), ``Y`` arbitrary -- ``App_t X Y``
-    is a top-level K-redex, sk_step fires it to Omega_t and Y is
-    permanently discarded.  By contrast, *halts*-preservation is
-    classically true and follows from Church-Rosser + Standardization;
-    the three stubs above are each provable, and together suffice.
-    """
-    p.goal("!X Y. halts (App_t X Y) = halts (App_t (sk_step X) Y)")
-    p.fix("X Y")
-    p.have(
-        "h_par_step: sk_par_steps X (sk_step X)"
-    ).by(SK_STEP_TO_PAR_STEPS, "X")
-    p.have(
-        "h_par_app: sk_par_steps (App_t X Y) (App_t (sk_step X) Y)"
-    ).by(
-        PAR_STEPS_APP_LEFT, "X", "sk_step X", "Y", "h_par_step",
-    )
-    p.thus(
-        "halts (App_t X Y) = halts (App_t (sk_step X) Y)"
-    ).by(
-        HALTS_PAR_STEPS_INVARIANT,
-        "App_t X Y", "App_t (sk_step X) Y",
-        "h_par_app",
-    )
-
-
-@proof
-def SK_ITER_APP_LEFT_HALTS(p):
-    """|- !X X1 Y. (?n. sk_iter n X = X1) ==>
-                   halts (App_t X Y) = halts (App_t X1 Y).
-
-    Multi-step halts-preservation: if X reaches X1 under sk_iter,
-    then ``halts (App_t X Y) = halts (App_t X1 Y)`` for any Y.
-
-    Real proof (no sorry): induct an indexed form
-        ``halts (App_t X Y) = halts (App_t (sk_iter n X) Y)``
-    on n using HALTS_SK_STEP_APP_LEFT at the successor step, then
-    substitute ``sk_iter n X = X1`` to finish.
-    """
-    @proof
-    def _AT_N(pi):
-        """|- !n X Y. halts (App_t X Y) = halts (App_t (sk_iter n X) Y)."""
-        pi.goal(
-            "!n X Y. halts (App_t X Y) = halts (App_t (sk_iter n X) Y)"
-        )
-        with pi.induction("n"):
-            with pi.base():
-                pi.fix("X Y")
-                # sk_iter 0 X = X, both sides equal.  Rewrite RHS to LHS.
-                pi.thus(
-                    "halts (App_t X Y) = halts (App_t (sk_iter 0 X) Y)"
-                ).by_rewrite([SK_ITER_ZERO])
-            with pi.step("IH"):
-                pi.fix("X Y")
-                pi.have(
-                    "h_ih: halts (App_t X Y) = halts (App_t (sk_iter n X) Y)"
-                ).by("IH", "X", "Y")
-                pi.have(
-                    "h_step: halts (App_t (sk_iter n X) Y) "
-                    "        = halts (App_t (sk_step (sk_iter n X)) Y)"
-                ).by(HALTS_SK_STEP_APP_LEFT, "sk_iter n X", "Y")
-                pi.have(
-                    "h_suc: sk_iter (SUC0 n) X = sk_step (sk_iter n X)"
-                ).by(SK_ITER_SUC, "n", "X")
-                # Chain: halts (App X Y) -[h_ih]-> halts (App (sk_iter n X) Y)
-                #        -[h_step]-> halts (App (sk_step (sk_iter n X)) Y)
-                #        -[SYM h_suc, rewriting the head]-> halts (App (sk_iter (SUC0 n) X) Y).
-                pi.thus(
-                    "halts (App_t X Y) "
-                    "= halts (App_t (sk_iter (SUC0 n) X) Y)"
-                ).by_rewrite([
-                    "h_ih", "h_step", SYM(pi.fact("h_suc")),
-                ])
-
-    p.goal(
-        "!X X1 Y. (?n. sk_iter n X = X1) ==> "
-        "         halts (App_t X Y) = halts (App_t X1 Y)"
-    )
-    p.fix("X X1 Y")
-    p.assume("h_ex: ?n. sk_iter n X = X1")
-    p.choose("n", from_="h_ex")
-    # n_eq : sk_iter n X = X1.
-    p.have(
-        "h_at_n: halts (App_t X Y) = halts (App_t (sk_iter n X) Y)"
-    ).by(_AT_N, "n", "X", "Y")
-    p.thus(
-        "halts (App_t X Y) = halts (App_t X1 Y)"
-    ).by_rewrite_of("h_at_n", ["n_eq"])
 
 
 _DIAG_I = "App_t (App_t S_t K_t) K_t"
