@@ -74,10 +74,9 @@ Stage map
   Stage 1 (par):      Parallel reduction ``sk_par_step`` + RTC
                       ``sk_par_steps`` + ``par_chain`` DSL.  Defines
                       ``is_normal`` as the par-step fixed-point
-                      (``\\t. !Y. sk_par_step t Y ==> Y = t``) and
-                      proves the structural lemmas
-                      IS_NORMAL_NOT_{K,S}_REDEX_SHAPE,
-                      IS_NORMAL_APP_DECOMP.
+                      (``\\t. !Y. sk_par_step t Y ==> Y = t``); the
+                      stability lemma ``NORMAL_STABILITY_PAR_STEP`` is
+                      then a one-line specialisation of the definition.
   Stage 2 (bullet):   Takahashi's complete development ``sk_bullet``
                       + triangle property + Tait/Martin-Loef diamond
                       + Church-Rosser confluence on par.
@@ -1216,10 +1215,8 @@ def PAR_STEP_K_T_INV(p):
 #
 # A term is normal iff no proper par-step leaves it -- the standard
 # definition of a normal form for a reduction relation.  Treated as
-# opaque downstream; the three structural lemmas
-# IS_NORMAL_NOT_{K,S}_REDEX_SHAPE and IS_NORMAL_APP_DECOMP are the
-# only places that crack the definition open, and
-# NORMAL_STABILITY_PAR_STEP is then a one-line specialisation.
+# opaque downstream; ``NORMAL_STABILITY_PAR_STEP`` is the only direct
+# consumer and is a one-line specialisation of the definition.
 # ---------------------------------------------------------------------------
 
 
@@ -4707,182 +4704,6 @@ def PAR_STEPS_TRANS(p):
     ).by_thm(MP(inst_beta, p.fact("lifted_cl")))
 
     p.thus("sk_par_steps X Z").by("h_PXY", "Z", "h_YZ")
-
-
-@proof
-def IS_NORMAL_NOT_K_REDEX_SHAPE(p):
-    """|- !M N. ~is_normal (App_t (App_t K_t M) N).
-
-    PAR_K with PAR_REFL witnesses gives sk_par_step (K M N) M; the
-    is_normal hypothesis would force M = K M N.  Strict-subterm
-    contradiction via NAT0_LT_APP_T_R + NAT0_LT_APP_T_L + NAT0_LT_TRANS
-    + NAT0_LT_NOT_REFL.
-    """
-    from nat0_order import NAT0_LT_NOT_REFL
-    p.goal("!M:nat0. !N:nat0. ~is_normal (App_t (App_t K_t M) N)")
-    p.fix("M N")
-    t = "App_t (App_t K_t M) N"
-    with p.suppose(f"h_norm: is_normal ({t})"):
-        p.have("h_rM: sk_par_step M M").by(PAR_REFL, "M")
-        p.have("h_rN: sk_par_step N N").by(PAR_REFL, "N")
-        p.have(
-            "h_conj: sk_par_step M M /\\ sk_par_step N N"
-        ).by_thm(CONJ(p.fact("h_rM"), p.fact("h_rN")))
-        p.have(
-            f"h_par: sk_par_step ({t}) M"
-        ).by(PAR_K, "M", "M", "N", "N", "h_conj")
-        p.have(
-            f"h_un: !Y:nat0. sk_par_step ({t}) Y ==> Y = ({t})"
-        ).by_unfold("h_norm", IS_NORMAL_DEF)
-        p.have(f"h_M_eq: M = ({t})").by("h_un", "M", "h_par")
-        p.have("h_lt1: nat0_lt M (App_t K_t M)").by(
-            NAT0_LT_APP_T_R, "K_t", "M"
-        )
-        p.have(f"h_lt2: nat0_lt (App_t K_t M) ({t})").by(
-            NAT0_LT_APP_T_L, "App_t K_t M", "N"
-        )
-        p.have(f"h_lt: nat0_lt M ({t})").by(
-            NAT0_LT_TRANS, "M", "App_t K_t M", t, "h_lt1", "h_lt2"
-        )
-        p.have("h_self_lt: nat0_lt M M").by_rewrite_of(
-            "h_lt", [SYM(p.fact("h_M_eq"))]
-        )
-        p.have("h_nrefl: ~nat0_lt M M").by(NAT0_LT_NOT_REFL, "M")
-        p.absurd().by_conj("h_nrefl", "h_self_lt")
-
-
-@proof
-def IS_NORMAL_NOT_S_REDEX_SHAPE(p):
-    """|- !M N P. ~is_normal (App_t (App_t (App_t S_t M) N) P).
-
-    PAR_S with PAR_REFL witnesses gives sk_par_step (S M N P)
-    (App_t (App_t M P) (App_t N P)).  is_normal would then force the
-    contracted form to equal the S-redex; outer APP_T_INJ extracts
-    ``App_t N P = P``, giving a strict-subterm contradiction on P via
-    NAT0_LT_APP_T_R + NAT0_LT_NOT_REFL.
-    """
-    from nat0_order import NAT0_LT_NOT_REFL
-    p.goal(
-        "!M:nat0. !N:nat0. !P:nat0. "
-        "~is_normal (App_t (App_t (App_t S_t M) N) P)"
-    )
-    p.fix("M N P")
-    t = "App_t (App_t (App_t S_t M) N) P"
-    val = "App_t (App_t M P) (App_t N P)"
-    with p.suppose(f"h_norm: is_normal ({t})"):
-        p.have("h_rM: sk_par_step M M").by(PAR_REFL, "M")
-        p.have("h_rN: sk_par_step N N").by(PAR_REFL, "N")
-        p.have("h_rP: sk_par_step P P").by(PAR_REFL, "P")
-        p.have(
-            "h_conj: sk_par_step M M /\\ sk_par_step N N /\\ sk_par_step P P"
-        ).by_thm(
-            CONJ(p.fact("h_rM"), CONJ(p.fact("h_rN"), p.fact("h_rP")))
-        )
-        p.have(
-            f"h_par: sk_par_step ({t}) ({val})"
-        ).by(PAR_S, "M", "M", "N", "N", "P", "P", "h_conj")
-        p.have(
-            f"h_un: !Y:nat0. sk_par_step ({t}) Y ==> Y = ({t})"
-        ).by_unfold("h_norm", IS_NORMAL_DEF)
-        p.have(f"h_val_eq: ({val}) = ({t})").by("h_un", val, "h_par")
-        p.have(
-            "h_inj: App_t M P = App_t (App_t S_t M) N "
-            "       /\\ App_t N P = P"
-        ).by(
-            APP_T_INJ,
-            "App_t M P", "App_t N P",
-            "App_t (App_t S_t M) N", "P",
-            "h_val_eq",
-        )
-        p.split("h_inj", "(_, h_NP)")
-        p.have("h_P_eq: P = App_t N P").by_thm(SYM(p.fact("h_NP")))
-        p.have("h_lt: nat0_lt P (App_t N P)").by(
-            NAT0_LT_APP_T_R, "N", "P"
-        )
-        p.have("h_self_lt: nat0_lt P P").by_rewrite_of(
-            "h_lt", [SYM(p.fact("h_P_eq"))]
-        )
-        p.have("h_nrefl: ~nat0_lt P P").by(NAT0_LT_NOT_REFL, "P")
-        p.absurd().by_conj("h_nrefl", "h_self_lt")
-
-
-@proof
-def IS_NORMAL_APP_DECOMP(p):
-    """|- !A B. is_normal (App_t A B) ==> is_normal A /\\ is_normal B.
-
-    For ``is_normal A``: given sk_par_step A Y, PAR_APP with PAR_REFL B
-    gives sk_par_step (App_t A B) (App_t Y B); the hypothesis forces
-    App_t Y B = App_t A B, and APP_T_INJ extracts Y = A.  Symmetric
-    construction for B.  Fold both bodies back via IS_NORMAL_DEF.
-    """
-    p.goal(
-        "!A:nat0. !B:nat0. "
-        "is_normal (App_t A B) ==> is_normal A /\\ is_normal B"
-    )
-    p.fix("A B")
-    p.assume("h_norm_AB: is_normal (App_t A B)")
-    p.have(
-        "h_un_AB: !Y:nat0. sk_par_step (App_t A B) Y ==> Y = App_t A B"
-    ).by_unfold("h_norm_AB", IS_NORMAL_DEF)
-
-    # Body for ``is_normal A``.
-    with p.have(
-        "h_body_A: !Y:nat0. sk_par_step A Y ==> Y = A"
-    ).proof():
-        p.fix("Y")
-        p.assume("h_AY: sk_par_step A Y")
-        p.have("h_rB: sk_par_step B B").by(PAR_REFL, "B")
-        p.have(
-            "h_conj: sk_par_step A Y /\\ sk_par_step B B"
-        ).by_thm(CONJ(p.fact("h_AY"), p.fact("h_rB")))
-        p.have(
-            "h_par: sk_par_step (App_t A B) (App_t Y B)"
-        ).by(PAR_APP, "A", "Y", "B", "B", "h_conj")
-        p.have("h_eq: App_t Y B = App_t A B").by(
-            "h_un_AB", "App_t Y B", "h_par"
-        )
-        p.have("h_inj: Y = A /\\ B = B").by(
-            APP_T_INJ, "Y", "B", "A", "B", "h_eq"
-        )
-        p.split("h_inj", "(h_YA, _)")
-        p.thus("Y = A").by_thm(p.fact("h_YA"))
-
-    spec_A = unfold_def_at(IS_NORMAL_DEF, p._parse("A"))
-    p.have("h_norm_A: is_normal A").by_thm(
-        EQ_MP(SYM(spec_A), p.fact("h_body_A"))
-    )
-
-    # Body for ``is_normal B``.
-    with p.have(
-        "h_body_B: !Y:nat0. sk_par_step B Y ==> Y = B"
-    ).proof():
-        p.fix("Y")
-        p.assume("h_BY: sk_par_step B Y")
-        p.have("h_rA: sk_par_step A A").by(PAR_REFL, "A")
-        p.have(
-            "h_conj: sk_par_step A A /\\ sk_par_step B Y"
-        ).by_thm(CONJ(p.fact("h_rA"), p.fact("h_BY")))
-        p.have(
-            "h_par: sk_par_step (App_t A B) (App_t A Y)"
-        ).by(PAR_APP, "A", "A", "B", "Y", "h_conj")
-        p.have("h_eq: App_t A Y = App_t A B").by(
-            "h_un_AB", "App_t A Y", "h_par"
-        )
-        p.have("h_inj: A = A /\\ Y = B").by(
-            APP_T_INJ, "A", "Y", "A", "B", "h_eq"
-        )
-        p.split("h_inj", "(_, h_YB)")
-        p.thus("Y = B").by_thm(p.fact("h_YB"))
-
-    spec_B = unfold_def_at(IS_NORMAL_DEF, p._parse("B"))
-    p.have("h_norm_B: is_normal B").by_thm(
-        EQ_MP(SYM(spec_B), p.fact("h_body_B"))
-    )
-
-    p.thus("is_normal A /\\ is_normal B").by_thm(
-        CONJ(p.fact("h_norm_A"), p.fact("h_norm_B"))
-    )
-
 
 @proof
 def NORMAL_STABILITY_PAR_STEP(p):
