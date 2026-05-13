@@ -4685,32 +4685,240 @@ def NORMAL_STABILITY_PAR_STEPS(p):
 
 
 # ---------------------------------------------------------------------------
+# Stage 2.5 -- par-convertibility.
+#
+# ``par_conv X Y`` is the reflexive/symmetric/transitive closure of
+# ``sk_par_step`` (impredicatively encoded, same style as
+# ``sk_par_steps``).  Stage 3 defines ``halts`` over ``par_conv`` so that
+# invariance under reduction (``HALTS_INVARIANT``) is trivial -- no
+# confluence required.  The Stage 2 bullet/triangle/diamond machinery is
+# left in place for now but no longer feeds the halting predicate.
+# ---------------------------------------------------------------------------
+
+# Closure-conditions body for par_conv; reused in each intro.  The
+# string mentions ``P`` free -- it is only parseable in a scope where
+# ``P`` is bound (either as a fixed Var in an inner sub-frame or as the
+# universal binder around it).
+_PAR_CONV_CLOSURE = (
+    "((!Z:nat0. P Z Z) /\\ "
+    " (!A:nat0. !B:nat0. P A B ==> P B A) /\\ "
+    " (!A:nat0. !B:nat0. !C:nat0. P A B /\\ P B C ==> P A C) /\\ "
+    " (!A:nat0. !B:nat0. sk_par_step A B ==> P A B))"
+)
+
+
+PAR_CONV_DEF = define(
+    "par_conv",
+    parse_type("nat0 -> nat0 -> bool"),
+    "\\X:nat0. \\Y:nat0. "
+    f"!P:nat0->nat0->bool. {_PAR_CONV_CLOSURE} ==> P X Y",
+)
+par_conv = mk_const("par_conv", [])
+
+
+# Intro pattern (same as sk_par_steps): build the unfolded form
+# ``!P. closure(P) ==> P <lhs> <rhs>`` inside a sub-proof by fixing P,
+# assuming the closure conjunction, and applying the relevant closure
+# rule; then fold back via ``by_unfold("unf", PAR_CONV_DEF)``.
+#
+# DSL friction noted:
+#  - ``_PAR_CONV_CLOSURE`` has to be referenced verbatim in three
+#    positions per proof (the outer have's spec, the inner assume, and
+#    each ``by_unfold`` of a par_conv hypothesis).  No DSL primitive
+#    abstracts ``the closure conjunction of this impredicative
+#    encoding''.
+#  - ``by_unfold`` of a ``par_conv X Y`` hypothesis yields the full
+#    impredicative form; the user then has to SPEC at ``P`` and MP with
+#    ``h_cl`` by hand to extract ``P X Y``.  ``sk_par_steps`` works
+#    around this with a kernel helper (``_par_steps_to_P``); we use
+#    pure DSL here at the cost of two explicit ``have`` lines per
+#    hypothesis.
+
+
+@proof
+def PAR_CONV_REFL(p):
+    """|- !X. par_conv X X.  Reflexivity of par-convertibility."""
+    p.goal("!X. par_conv X X")
+    p.fix("X")
+    with p.have(
+        "unf: !P:nat0->nat0->bool. "
+        f"     {_PAR_CONV_CLOSURE} ==> P X X"
+    ).proof():
+        p.fix("P")
+        p.assume(f"h_cl: {_PAR_CONV_CLOSURE}")
+        p.split("h_cl", "(refl_cl, _, _, _)")
+        p.thus("P X X").by("refl_cl", "X")
+    p.thus("par_conv X X").by_unfold("unf", PAR_CONV_DEF)
+
+
+@proof
+def PAR_CONV_STEP(p):
+    """|- !X Y. sk_par_step X Y ==> par_conv X Y.
+
+    Embedding: every one-step parallel reduction is a par-convertibility.
+    """
+    p.goal("!X Y. sk_par_step X Y ==> par_conv X Y")
+    p.fix("X Y")
+    p.assume("h_step: sk_par_step X Y")
+    with p.have(
+        "unf: !P:nat0->nat0->bool. "
+        f"     {_PAR_CONV_CLOSURE} ==> P X Y"
+    ).proof():
+        p.fix("P")
+        p.assume(f"h_cl: {_PAR_CONV_CLOSURE}")
+        p.split("h_cl", "(_, _, _, step_cl)")
+        p.thus("P X Y").by("step_cl", "X", "Y", "h_step")
+    p.thus("par_conv X Y").by_unfold("unf", PAR_CONV_DEF)
+
+
+@proof
+def PAR_CONV_SYM(p):
+    """|- !X Y. par_conv X Y ==> par_conv Y X.
+
+    Symmetry of par-convertibility.
+    """
+    p.goal("!X Y. par_conv X Y ==> par_conv Y X")
+    p.fix("X Y")
+    p.assume("h_XY: par_conv X Y")
+    with p.have(
+        "unf: !P:nat0->nat0->bool. "
+        f"     {_PAR_CONV_CLOSURE} ==> P Y X"
+    ).proof():
+        p.fix("P")
+        p.assume(f"h_cl: {_PAR_CONV_CLOSURE}")
+        p.split("h_cl", "(_, sym_cl, _, _)")
+        # Unfold h_XY to its impredicative form, SPEC at the inner P,
+        # MP with h_cl -- yields ``P X Y``.  The inner ``!P:...`` binder
+        # shadows the outer fixed ``P``; ``.by("unf_XY", "P", "h_cl")``
+        # SPECs at the outer ``P`` and MPs with h_cl.
+        p.have(
+            "unf_XY: !P:nat0->nat0->bool. "
+            f"        {_PAR_CONV_CLOSURE} ==> P X Y"
+        ).by_unfold("h_XY", PAR_CONV_DEF)
+        p.have("pXY: P X Y").by("unf_XY", "P", "h_cl")
+        p.thus("P Y X").by("sym_cl", "X", "Y", "pXY")
+    p.thus("par_conv Y X").by_unfold("unf", PAR_CONV_DEF)
+
+
+@proof
+def PAR_CONV_TRANS(p):
+    """|- !X Y Z. par_conv X Y /\\ par_conv Y Z ==> par_conv X Z.
+
+    Transitivity of par-convertibility.
+    """
+    p.goal(
+        "!X Y Z. par_conv X Y /\\ par_conv Y Z ==> par_conv X Z"
+    )
+    p.fix("X Y Z")
+    p.assume(
+        "(h_XY, h_YZ): par_conv X Y /\\ par_conv Y Z"
+    )
+    with p.have(
+        "unf: !P:nat0->nat0->bool. "
+        f"     {_PAR_CONV_CLOSURE} ==> P X Z"
+    ).proof():
+        p.fix("P")
+        p.assume(f"h_cl: {_PAR_CONV_CLOSURE}")
+        p.split("h_cl", "(_, _, trans_cl, _)")
+        # Same unfold-SPEC-MP dance for each side of the conjunction.
+        p.have(
+            "unf_XY: !P:nat0->nat0->bool. "
+            f"        {_PAR_CONV_CLOSURE} ==> P X Y"
+        ).by_unfold("h_XY", PAR_CONV_DEF)
+        p.have("pXY: P X Y").by("unf_XY", "P", "h_cl")
+        p.have(
+            "unf_YZ: !P:nat0->nat0->bool. "
+            f"        {_PAR_CONV_CLOSURE} ==> P Y Z"
+        ).by_unfold("h_YZ", PAR_CONV_DEF)
+        p.have("pYZ: P Y Z").by("unf_YZ", "P", "h_cl")
+        p.have("pConj: P X Y /\\ P Y Z").by_thm(
+            CONJ(p.fact("pXY"), p.fact("pYZ"))
+        )
+        p.thus("P X Z").by("trans_cl", "X", "Y", "Z", "pConj")
+    p.thus("par_conv X Z").by_unfold("unf", PAR_CONV_DEF)
+
+
+@proof
+def PAR_CONV_OF_PAR_STEPS(p):
+    """|- !X Y. sk_par_steps X Y ==> par_conv X Y.
+
+    Embed an RTC of ``sk_par_step`` into ``par_conv`` by instantiating
+    ``sk_par_steps``'s impredicative encoding at ``P := par_conv``.  The
+    two closure obligations are PAR_CONV_REFL and (sk_par_step + par_conv
+    ==> par_conv) -- the latter from PAR_CONV_STEP composed with
+    PAR_CONV_TRANS.
+    """
+    p.goal("!X Y. sk_par_steps X Y ==> par_conv X Y")
+    p.fix("X Y")
+    p.assume("h_XY: sk_par_steps X Y")
+
+    # refl closure obligation: !Z. par_conv Z Z.
+    p.have("refl_cl: !Z:nat0. par_conv Z Z").by_thm(PAR_CONV_REFL)
+
+    # step closure obligation: !A B C. sk_par_step A B /\ par_conv B C
+    #                         ==> par_conv A C.
+    with p.have(
+        "step_cl: !A:nat0. !B:nat0. !C:nat0. "
+        "         sk_par_step A B /\\ par_conv B C ==> par_conv A C"
+    ).proof():
+        p.fix("A B C")
+        p.assume(
+            "(h_AB, h_BC): sk_par_step A B /\\ par_conv B C"
+        )
+        p.have("h_pc_AB: par_conv A B").by(
+            PAR_CONV_STEP, "A", "B", "h_AB"
+        )
+        p.have(
+            "h_conj: par_conv A B /\\ par_conv B C"
+        ).by_thm(CONJ(p.fact("h_pc_AB"), p.fact("h_BC")))
+        p.thus("par_conv A C").by(
+            PAR_CONV_TRANS, "A", "B", "C", "h_conj"
+        )
+
+    # Bundle into the closure conjunction over P := par_conv.
+    p.have(
+        "h_cl: (!Z:nat0. par_conv Z Z) /\\ "
+        "      (!A:nat0. !B:nat0. !C:nat0. "
+        "       sk_par_step A B /\\ par_conv B C ==> par_conv A C)"
+    ).by_thm(CONJ(p.fact("refl_cl"), p.fact("step_cl")))
+
+    # Unfold h_XY to its impredicative form; SPEC at par_conv; MP with
+    # h_cl.  ``_PAR_STEPS_CLOSURE`` is the closure body of sk_par_steps
+    # mentioning ``P`` free -- matches the impredicative shape after
+    # unfolding.
+    p.have(
+        "unf_XY: !P:nat0->nat0->bool. "
+        f"        {_PAR_STEPS_CLOSURE} ==> P X Y"
+    ).by_unfold("h_XY", SK_PAR_STEPS_DEF)
+    p.thus("par_conv X Y").by("unf_XY", "par_conv", "h_cl")
+
+
+# ---------------------------------------------------------------------------
 # Stage 3 -- halting predicate.
 #
-#   halts t := ?N. sk_par_steps t N /\\ is_normal N
+#   halts t := ?N. par_conv t N /\\ is_normal N
 #
-# A term halts iff some normal form is reachable from it via parallel
-# reduction.  Confluence (PAR_STEPS_CONFLUENT) plus normal-form
-# stability give ``HALTS_INVARIANT``: par_steps preserves halts,
-# which is what lets the par-form Curry diagonal land as a halt-equality
-# on the headline theorem.
+# A term halts iff some normal form lies in its par-convertibility class.
+# Invariance under reduction (``HALTS_INVARIANT``) follows from
+# ``PAR_CONV_*`` directly -- no Church-Rosser / Tait-Martin-Loef diamond
+# needed.
 # ---------------------------------------------------------------------------
 
 _n0_t_var = Var("t", nat0_ty)
 
 
-# halts t := ?N. sk_par_steps t N /\\ is_normal N.
+# halts t := ?N. par_conv t N /\\ is_normal N.
 HALTS_DEF = define(
     "halts",
     parse_type("nat0 -> bool"),
-    "\\t:nat0. ?N:nat0. sk_par_steps t N /\\ is_normal N",
+    "\\t:nat0. ?N:nat0. par_conv t N /\\ is_normal N",
 )
 halts = mk_const("halts", [])
 
 
 @proof
 def HALTS_AT(p):
-    """|- !t. halts t = (?N. sk_par_steps t N /\\ is_normal N).
+    """|- !t. halts t = (?N. par_conv t N /\\ is_normal N).
 
     Direct unfold of HALTS_DEF via AP_THM + BETA.
     """
@@ -4719,9 +4927,9 @@ def HALTS_AT(p):
     ap = AP_THM(HALTS_DEF, _n0_t_var)
     bet = BETA_CONV(rand(ap._concl))
     spec_th = TRANS(ap, bet)
-    p.goal("!t. halts t = (?N. sk_par_steps t N /\\ is_normal N)")
+    p.goal("!t. halts t = (?N. par_conv t N /\\ is_normal N)")
     p.thus(
-        "!t. halts t = (?N. sk_par_steps t N /\\ is_normal N)"
+        "!t. halts t = (?N. par_conv t N /\\ is_normal N)"
     ).by_thm(GEN(_n0_t_var, spec_th))
 
 
@@ -4729,26 +4937,24 @@ def HALTS_AT(p):
 def HALTS_INVARIANT(p):
     """|- !X Y. sk_par_steps X Y ==> halts X = halts Y.
 
-    halts is invariant along par-step chains.  Iff-intro on the
-    two directions:
-
-    Forward (halts X ==> halts Y).  Unfold halts X to
-    ``?N. sk_par_steps X N /\\ is_normal N``.  Combined with the
-    hypothesis sk_par_steps X Y, PAR_STEPS_CONFLUENT gives a common
-    reduct ``?W. sk_par_steps N W /\\ sk_par_steps Y W``.  N normal +
-    NORMAL_STABILITY_PAR_STEPS forces W = N; transport sk_par_steps Y
-    W to sk_par_steps Y N; witness halts Y.
-
-    Backward (halts Y ==> halts X).  Unfold halts Y;
-    PAR_STEPS_TRANS prepends sk_par_steps X Y; witness halts X.
-
-    Stays inside the par calculus.
+    Both directions go through PAR_CONV_TRANS via PAR_CONV_OF_PAR_STEPS.
+    Forward also needs PAR_CONV_SYM to flip the convertibility.  No
+    confluence used.
     """
     p.goal(
         "!X Y. sk_par_steps X Y ==> halts X = halts Y"
     )
     p.fix("X Y")
     p.assume("h_XY: sk_par_steps X Y")
+
+    # Lift the par-step chain to par-convertibility once; share for both
+    # directions.
+    p.have("h_pc_XY: par_conv X Y").by(
+        PAR_CONV_OF_PAR_STEPS, "X", "Y", "h_XY"
+    )
+    p.have("h_pc_YX: par_conv Y X").by(
+        PAR_CONV_SYM, "X", "Y", "h_pc_XY"
+    )
 
     # ---- Forward direction ----------------------------------------------
     with p.have(
@@ -4757,45 +4963,28 @@ def HALTS_INVARIANT(p):
         p.assume("h_hX: halts X")
         p.have(
             "h_at_X: halts X = "
-            "(?N. sk_par_steps X N /\\ is_normal N)"
+            "(?N. par_conv X N /\\ is_normal N)"
         ).by(HALTS_AT, "X")
         p.have(
-            "h_ex_X: ?N. sk_par_steps X N /\\ is_normal N"
+            "h_ex_X: ?N. par_conv X N /\\ is_normal N"
         ).by_eq_mp("h_at_X", "h_hX")
         p.choose("N", from_="h_ex_X")
         p.split("N_eq", "(h_XN, h_norm_N)")
 
-        # Confluence: X -*> N and X -*> Y join at some W.
+        # par_conv Y X /\ par_conv X N => par_conv Y N.
         p.have(
-            "h_conj_XN_XY: sk_par_steps X N /\\ sk_par_steps X Y"
-        ).by_thm(CONJ(p.fact("h_XN"), p.fact("h_XY")))
-        p.have(
-            "h_join: ?W. sk_par_steps N W /\\ sk_par_steps Y W"
-        ).by(
-            PAR_STEPS_CONFLUENT, "X", "N", "Y", "h_conj_XN_XY"
-        )
-        p.choose("W", from_="h_join")
-        p.split("W_eq", "(h_NW, h_YW)")
-
-        # N normal + N -*> W forces W = N.
-        p.have(
-            "h_conj_NW: is_normal N /\\ sk_par_steps N W"
-        ).by_thm(CONJ(p.fact("h_norm_N"), p.fact("h_NW")))
-        p.have("h_W_N: W = N").by(
-            NORMAL_STABILITY_PAR_STEPS, "N", "W", "h_conj_NW"
-        )
-        # Transport h_YW : sk_par_steps Y W along W = N.
-        p.have("h_YN: sk_par_steps Y N").by_rewrite_of(
-            "h_YW", [p.fact("h_W_N")]
+            "h_conj_YX_XN: par_conv Y X /\\ par_conv X N"
+        ).by_thm(CONJ(p.fact("h_pc_YX"), p.fact("h_XN")))
+        p.have("h_YN: par_conv Y N").by(
+            PAR_CONV_TRANS, "Y", "X", "N", "h_conj_YX_XN"
         )
 
-        # Witness halts Y.
         p.have(
             "h_at_Y: halts Y = "
-            "(?N. sk_par_steps Y N /\\ is_normal N)"
+            "(?N. par_conv Y N /\\ is_normal N)"
         ).by(HALTS_AT, "Y")
         p.have(
-            "h_ex_Y: ?N. sk_par_steps Y N /\\ is_normal N"
+            "h_ex_Y: ?N. par_conv Y N /\\ is_normal N"
         ).by_exists(["N"], "h_YN", "h_norm_N")
         p.thus("halts Y").by_eq_mp("h_at_Y", "h_ex_Y")
 
@@ -4806,28 +4995,28 @@ def HALTS_INVARIANT(p):
         p.assume("h_hY: halts Y")
         p.have(
             "h_at_Y: halts Y = "
-            "(?N. sk_par_steps Y N /\\ is_normal N)"
+            "(?N. par_conv Y N /\\ is_normal N)"
         ).by(HALTS_AT, "Y")
         p.have(
-            "h_ex_Y: ?N. sk_par_steps Y N /\\ is_normal N"
+            "h_ex_Y: ?N. par_conv Y N /\\ is_normal N"
         ).by_eq_mp("h_at_Y", "h_hY")
         p.choose("N", from_="h_ex_Y")
         p.split("N_eq", "(h_YN, h_norm_N)")
 
-        # X -*> Y, Y -*> N => X -*> N via PAR_STEPS_TRANS.
+        # par_conv X Y /\ par_conv Y N => par_conv X N.
         p.have(
-            "h_conj_XY_YN: sk_par_steps X Y /\\ sk_par_steps Y N"
-        ).by_thm(CONJ(p.fact("h_XY"), p.fact("h_YN")))
-        p.have("h_XN: sk_par_steps X N").by(
-            PAR_STEPS_TRANS, "X", "Y", "N", "h_conj_XY_YN"
+            "h_conj_XY_YN: par_conv X Y /\\ par_conv Y N"
+        ).by_thm(CONJ(p.fact("h_pc_XY"), p.fact("h_YN")))
+        p.have("h_XN: par_conv X N").by(
+            PAR_CONV_TRANS, "X", "Y", "N", "h_conj_XY_YN"
         )
 
         p.have(
             "h_at_X: halts X = "
-            "(?N. sk_par_steps X N /\\ is_normal N)"
+            "(?N. par_conv X N /\\ is_normal N)"
         ).by(HALTS_AT, "X")
         p.have(
-            "h_ex_X: ?N. sk_par_steps X N /\\ is_normal N"
+            "h_ex_X: ?N. par_conv X N /\\ is_normal N"
         ).by_exists(["N"], "h_XN", "h_norm_N")
         p.thus("halts X").by_eq_mp("h_at_X", "h_ex_X")
 
