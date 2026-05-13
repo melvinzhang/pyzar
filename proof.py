@@ -1986,32 +1986,54 @@ class Proof:
         fr.result = sorry_th
 
     def _auto_choose_for_case_leaf(self, leaf, user_term):
-        """If ``leaf`` is ``?v. body``, derive a witness inside the
-        just-entered case sub-frame so the user gets ``v`` in scope and
-        ``v_eq: body[v]`` as a fact -- exactly as if they had written
-        ``p.choose("v: body", from_=label)`` themselves.
+        """If ``leaf`` is ``?v. body``, peel one or more outer
+        existentials inside the just-entered case sub-frame so the user
+        gets the witnesses in scope and ``{last_name}_eq: body[...]`` as
+        a fact -- exactly as if they had written ``p.choose("n1 ... nk",
+        from_=label)`` themselves.
 
-        The display name follows the *user*'s spec bvar (so they can
-        rename to avoid clashes with outer scopes); when the spec isn't
-        an existential, falls back to the leaf's own bvar name. The
-        witness theorem is SELECT_AX-derived from ``ASSUME(leaf)``, so
-        its hyp set is ``{leaf}`` -- which the case's outer ``DISCH(leaf)``
-        already retires.
+        Peel-count is driven by the user spec: every leading ``?`` in
+        ``user_term`` contributes one peel under the user's chosen name.
+        When the spec is not existential, falls back to one peel using
+        the leaf's own bvar name (the original single-peel behaviour).
+        The witness theorems are SELECT_AX-derived from ``ASSUME(leaf)``,
+        so the hyp set is ``{leaf}`` -- which the case's outer
+        ``DISCH(leaf)`` already retires.
 
         No-op when ``leaf`` is not existential.
         """
         leaf_pred = dest_exists(leaf)
         if leaf_pred is None:
             return
-        leaf_v = leaf_pred.bvar
-        w_term = mk_select(leaf_v, leaf_pred.body)
-        user_pred = dest_exists(user_term)
-        wit_name = user_pred.bvar.name if user_pred is not None else leaf_v.name
-        eq_label = f"{wit_name}_eq"
-        witness_th = CHOOSE_WITNESS(leaf_pred, ASSUME(leaf))
-        self._require_fresh_name(wit_name, "case")
-        self._cur.choose_env[wit_name] = w_term
-        self._register_fact(eq_label, witness_th)
+
+        # Names: the user spec's outer ?-bvars, in order. If the spec
+        # is not existential, fall back to one peel using the leaf's
+        # own bvar name (preserves prior single-peel behaviour).
+        names = []
+        u = user_term
+        while True:
+            u_pred = dest_exists(u)
+            if u_pred is None:
+                break
+            names.append(u_pred.bvar.name)
+            u = u_pred.body
+        if not names:
+            names.append(leaf_pred.bvar.name)
+
+        cur_th = ASSUME(leaf)
+        for nm in names:
+            pred = dest_exists(cur_th._concl)
+            if pred is None:
+                raise HolError(
+                    f"case: spec declares {len(names)} witness names but "
+                    f"leaf has fewer existential binders: {pp(leaf)}"
+                )
+            w_term = mk_select(pred.bvar, pred.body)
+            cur_th = CHOOSE_WITNESS(pred, cur_th)
+            self._require_fresh_name(nm, "case")
+            self._cur.choose_env[nm] = w_term
+
+        self._register_fact(f"{names[-1]}_eq", cur_th)
 
     @contextlib.contextmanager
     def case(self, branch_spec):

@@ -1896,7 +1896,6 @@ def FREE_IN_P_AT_EMPTY(p):
                     "c2: ?a b. Empty_pt = Tup_pt a b /\\ "
                     "        (free_in_p a v \\/ free_in_p b v)"
                 ):
-                    p.choose("b", "a_eq")
                     p.split("b_eq", "(c_eq, _)")
                     p.have("c_neq: ~(Tup_pt a b = Empty_pt)").by(
                         TUP_PT_NEQ_EMPTY_PT, "a", "b"
@@ -1910,7 +1909,6 @@ def FREE_IN_P_AT_EMPTY(p):
                     "c3: ?a b. Empty_pt = Eq_pf a b /\\ "
                     "        (free_in_p a v \\/ free_in_p b v)"
                 ):
-                    p.choose("b", "a_eq")
                     p.split("b_eq", "(c_eq, _)")
                     p.have("c_neq: ~(Eq_pf a b = Empty_pt)").by(
                         EQ_PF_NEQ_EMPTY_PT, "a", "b"
@@ -1924,7 +1922,6 @@ def FREE_IN_P_AT_EMPTY(p):
                     "c4: ?a b. Empty_pt = In_pa a b /\\ "
                     "        (free_in_p a v \\/ free_in_p b v)"
                 ):
-                    p.choose("b", "a_eq")
                     p.split("b_eq", "(c_eq, _)")
                     p.have("c_neq: ~(In_pa a b = Empty_pt)").by(
                         IN_PA_NEQ_EMPTY_PT, "a", "b"
@@ -1950,7 +1947,6 @@ def FREE_IN_P_AT_EMPTY(p):
                     "c6: ?a b. Empty_pt = Imp_pf a b /\\ "
                     "        (free_in_p a v \\/ free_in_p b v)"
                 ):
-                    p.choose("b", "a_eq")
                     p.split("b_eq", "(c_eq, _)")
                     p.have("c_neq: ~(Imp_pf a b = Empty_pt)").by(
                         IMP_PF_NEQ_EMPTY_PT, "a", "b"

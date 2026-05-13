@@ -2805,7 +2805,6 @@ def SUBSTITUTE_PRESERVES_IS_TERM(p):
                 "c_ins: ?a b. s = Insert_t a b /\\ is_term a /\\ is_term b"
             ):
                 # auto-chooses a; a_eq: ?b. s = Insert_t a b /\ is_term a /\ is_term b.
-                p.choose("b", "a_eq")
                 p.split("b_eq", "(s_eq, h_a, h_b)")
                 p.have("lt_a: nat0_lt a s").by_rewrite_of(
                     SPECL([p._parse("a"), p._parse("b")], NAT0_LT_INSERT_T_L),
@@ -2880,7 +2879,6 @@ def SUBSTITUTE_PRESERVES_IS_FORM(p):
             with p.case(
                 "c_eq: ?a b. phi = Eq_f a b /\\ is_term a /\\ is_term b"
             ):
-                p.choose("b", "a_eq")
                 p.split("b_eq", "(phi_eq, h_a, h_b)")
                 p.have("hsub_a: is_term (substitute a t v)").by(
                     SUBSTITUTE_PRESERVES_IS_TERM, "a", "t", "v",
@@ -2931,7 +2929,6 @@ def SUBSTITUTE_PRESERVES_IS_FORM(p):
             with p.case(
                 "c_imp: ?a b. phi = Imp_f a b /\\ is_form a /\\ is_form b"
             ):
-                p.choose("b", "a_eq")
                 p.split("b_eq", "(phi_eq, h_a, h_b)")
                 p.have("lt_a: nat0_lt a phi").by_rewrite_of(
                     SPECL([p._parse("a"), p._parse("b")], NAT0_LT_IMP_F_L),
@@ -2967,7 +2964,6 @@ def SUBSTITUTE_PRESERVES_IS_FORM(p):
 
             # --- Forall_f a b (HIT v=a leaves phi alone; MISS recurses) ---
             with p.case("c_fa: ?a b. phi = Forall_f a b /\\ is_form b"):
-                p.choose("b", "a_eq")
                 p.split("b_eq", "(phi_eq, h_b)")
                 with p.cases_on(EXCLUDED_MIDDLE, "v = a"):
                     with p.case("hit: v = a"):
@@ -3031,7 +3027,6 @@ def SUBSTITUTE_PRESERVES_IS_FORM(p):
             with p.case(
                 "c_in: ?a b. phi = In_a a b /\\ is_term a /\\ is_term b"
             ):
-                p.choose("b", "a_eq")
                 p.split("b_eq", "(phi_eq, h_a, h_b)")
                 p.have("hsub_a: is_term (substitute a t v)").by(
                     SUBSTITUTE_PRESERVES_IS_TERM, "a", "t", "v",
@@ -3149,7 +3144,6 @@ def IDENTITY_SUBSTITUTE_TERM(p):
             with p.case(
                 "c_ins: ?a b. s = Insert_t a b /\\ is_term a /\\ is_term b"
             ):
-                p.choose("b", "a_eq")
                 p.split("b_eq", "(s_eq, h_a, h_b)")
                 p.have("lt_a: nat0_lt a s").by_rewrite_of(
                     SPECL([p._parse("a"), p._parse("b")], NAT0_LT_INSERT_T_L),
@@ -3208,7 +3202,6 @@ def IDENTITY_SUBSTITUTE(p):
             with p.case(
                 "c_eq: ?a b. phi = Eq_f a b /\\ is_term a /\\ is_term b"
             ):
-                p.choose("b", "a_eq")
                 p.split("b_eq", "(phi_eq, h_a, h_b)")
                 p.have("ih_a: substitute a (Var_t v) v = a").by(
                     IDENTITY_SUBSTITUTE_TERM, "a", "v", "h_a",
@@ -3250,7 +3243,6 @@ def IDENTITY_SUBSTITUTE(p):
             with p.case(
                 "c_imp: ?a b. phi = Imp_f a b /\\ is_form a /\\ is_form b"
             ):
-                p.choose("b", "a_eq")
                 p.split("b_eq", "(phi_eq, h_a, h_b)")
                 p.have("lt_a: nat0_lt a phi").by_rewrite_of(
                     SPECL([p._parse("a"), p._parse("b")], NAT0_LT_IMP_F_L),
@@ -3279,7 +3271,6 @@ def IDENTITY_SUBSTITUTE(p):
 
             # --- Forall_f a b (HIT v=a is trivial; MISS recurses on b) ---
             with p.case("c_fa: ?a b. phi = Forall_f a b /\\ is_form b"):
-                p.choose("b", "a_eq")
                 p.split("b_eq", "(phi_eq, h_b)")
                 with p.cases_on(EXCLUDED_MIDDLE, "v = a"):
                     with p.case("hit: v = a"):
@@ -3328,7 +3319,6 @@ def IDENTITY_SUBSTITUTE(p):
             with p.case(
                 "c_in: ?a b. phi = In_a a b /\\ is_term a /\\ is_term b"
             ):
-                p.choose("b", "a_eq")
                 p.split("b_eq", "(phi_eq, h_a, h_b)")
                 p.have("ih_a: substitute a (Var_t v) v = a").by(
                     IDENTITY_SUBSTITUTE_TERM, "a", "v", "h_a",

@@ -1506,8 +1506,7 @@ def VALID_STEP_PRESERVES(p):
             p.have(f"v2d: {vd2_str}").by_disj("ax_c")
             p.thus("valid_step q2 hd").by_eq_mp(SYM(valid_at_2), "v2d")
         with p.case("mp_c: ?f1 f2. mem_l q1 f1 /\\ mem_l q1 f2 /\\ is_mp f1 f2 hd"):
-            p.choose("f2", "f1_eq", eq_label="conj_mp")
-            p.split("conj_mp", "(mem_q1_f1, mem_q1_f2, mp_th)")
+            p.split("f2_eq", "(mem_q1_f1, mem_q1_f2, mp_th)")
             p.have("mem_q2_f1: mem_l q2 f1").by("preserve", "f1", "mem_q1_f1")
             p.have("mem_q2_f2: mem_l q2 f2").by("preserve", "f2", "mem_q1_f2")
             p.have(
@@ -2663,9 +2662,6 @@ def TRACE_STEP_MONO(p):
                 "c7: ?a1 a2 b1 b2. a = Eq_f a1 a2 /\\ b = Eq_f b1 b2 "
                 "/\\ In (Pair_ord a1 b1) T1 /\\ In (Pair_ord a2 b2) T1"
             ):
-                p.choose("a2", "a1_eq")
-                p.choose("b1", "a2_eq")
-                p.choose("b2", "b1_eq")
                 p.split("b2_eq", "(c7a, c7b, c7_in1, c7_in2)")
                 p.have("c7_in1_T2: In (Pair_ord a1 b1) T2").by(
                     "hsub", "Pair_ord a1 b1", "c7_in1"
@@ -2686,7 +2682,6 @@ def TRACE_STEP_MONO(p):
                 "c8: ?s1 s2. a = Not_f s1 /\\ b = Not_f s2 "
                 "/\\ In (Pair_ord s1 s2) T1"
             ):
-                p.choose("s2", "s1_eq")
                 p.split("s2_eq", "(c8a, c8b, c8_in1)")
                 p.have("c8_in2: In (Pair_ord s1 s2) T2").by(
                     "hsub", "Pair_ord s1 s2", "c8_in1"
@@ -2701,9 +2696,6 @@ def TRACE_STEP_MONO(p):
                 "c9: ?a1 a2 b1 b2. a = Imp_f a1 a2 /\\ b = Imp_f b1 b2 "
                 "/\\ In (Pair_ord a1 b1) T1 /\\ In (Pair_ord a2 b2) T1"
             ):
-                p.choose("a2", "a1_eq")
-                p.choose("b1", "a2_eq")
-                p.choose("b2", "b1_eq")
                 p.split("b2_eq", "(c9a, c9b, c9_in1, c9_in2)")
                 p.have("c9_in1_T2: In (Pair_ord a1 b1) T2").by(
                     "hsub", "Pair_ord a1 b1", "c9_in1"
@@ -2729,8 +2721,6 @@ def TRACE_STEP_MONO(p):
                 "c11: ?w f1 f2. a = Forall_f w f1 /\\ ~(w = v) "
                 "/\\ b = Forall_f w f2 /\\ In (Pair_ord f1 f2) T1"
             ):
-                p.choose("f1", "w_eq")
-                p.choose("f2", "f1_eq")
                 p.split("f2_eq", "(c11a, c11b, c11c, c11_in1)")
                 p.have("c11_in2: In (Pair_ord f1 f2) T2").by(
                     "hsub", "Pair_ord f1 f2", "c11_in1"
@@ -2747,9 +2737,6 @@ def TRACE_STEP_MONO(p):
                 "c12: ?a1 a2 b1 b2. a = Insert_t a1 a2 /\\ b = Insert_t b1 b2 "
                 "/\\ In (Pair_ord a1 b1) T1 /\\ In (Pair_ord a2 b2) T1"
             ):
-                p.choose("a2", "a1_eq")
-                p.choose("b1", "a2_eq")
-                p.choose("b2", "b1_eq")
                 p.split("b2_eq", "(c12a, c12b, c12_in1, c12_in2)")
                 p.have("c12_in1_T2: In (Pair_ord a1 b1) T2").by(
                     "hsub", "Pair_ord a1 b1", "c12_in1"
@@ -2771,9 +2758,6 @@ def TRACE_STEP_MONO(p):
                 "c13: ?a1 a2 b1 b2. a = In_a a1 a2 /\\ b = In_a b1 b2 "
                 "/\\ In (Pair_ord a1 b1) T1 /\\ In (Pair_ord a2 b2) T1"
             ):
-                p.choose("a2", "a1_eq")
-                p.choose("b1", "a2_eq")
-                p.choose("b2", "b1_eq")
                 p.split("b2_eq", "(c13a, c13b, c13_in1, c13_in2)")
                 p.have("c13_in1_T2: In (Pair_ord a1 b1) T2").by(
                     "hsub", "Pair_ord a1 b1", "c13_in1"
@@ -3096,13 +3080,12 @@ def _do_binary_case(
     sub_t_label="is_term", child_or="is_term"
 ):
     """Close a binary constructor case (Insert_t/Eq_f/Imp_f/In_a). The
-    case has auto-introduced ``a`` and registered
-    ``a_eq: ?b. phi = ctor a b /\\ <child_or> a /\\ <child_or> b``.
+    case has auto-introduced ``a`` and ``b`` and registered
+    ``b_eq: phi = ctor a b /\\ <child_or> a /\\ <child_or> b``.
 
     ``child_or`` is the predicate guarding the children: ``is_term`` for
     Insert_t/Eq_f/In_a, ``is_form`` for Imp_f.
     """
-    p.choose("b", "a_eq")
     p.split("b_eq", "(phi_eq, h_a_pred, h_b_pred)")
     # Sub-formula nat0_lt facts.
     p.have(f"lt_a: nat0_lt a phi").by_rewrite_of(
@@ -3248,8 +3231,7 @@ def _do_unary_form_case(p, ctor, subst_at_lemma, lt_lemma, step_body):
 
 def _do_forall_case(p, step_body):
     """Close the Forall_f case with hit/miss split. Auto-introduced
-    ``a`` plus ``a_eq: ?b. phi = Forall_f a b /\\ is_form b``."""
-    p.choose("b", "a_eq")
+    ``a`` and ``b`` plus ``b_eq: phi = Forall_f a b /\\ is_form b``."""
     p.split("b_eq", "(phi_eq, h_b_form)")
     with p.cases_on(EXCLUDED_MIDDLE, "a = v"):
         with p.case("hit: a = v"):

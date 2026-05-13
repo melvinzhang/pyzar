@@ -1945,7 +1945,6 @@ def SUBSTITUTE_P_PRESERVES_IS_PTERM(p):
             with p.case(
                 "c_tup: ?a b. s = Tup_pt a b /\\ is_pterm a /\\ is_pterm b"
             ):
-                p.choose("b", "a_eq")
                 p.split("b_eq", "(s_eq, h_a, h_b)")
                 p.have("lt_a: nat0_lt a s").by_rewrite_of(
                     SPECL([p._parse("a"), p._parse("b")], NAT0_LT_TUP_PT_L),
@@ -2052,7 +2051,6 @@ def SUBSTITUTE_P_PRESERVES_IS_PFORM(p):
             with p.case(
                 "c_eq: ?a b. phi = Eq_pf a b /\\ is_pterm a /\\ is_pterm b"
             ):
-                p.choose("b", "a_eq")
                 p.split("b_eq", "(phi_eq, h_a, h_b)")
                 p.have("hsub_a: is_pterm (substitute_p a t v)").by(
                     SUBSTITUTE_P_PRESERVES_IS_PTERM, "a", "t", "v",
@@ -2082,7 +2080,6 @@ def SUBSTITUTE_P_PRESERVES_IS_PFORM(p):
             with p.case(
                 "c_in: ?a b. phi = In_pa a b /\\ is_pterm a /\\ is_pterm b"
             ):
-                p.choose("b", "a_eq")
                 p.split("b_eq", "(phi_eq, h_a, h_b)")
                 p.have("hsub_a: is_pterm (substitute_p a t v)").by(
                     SUBSTITUTE_P_PRESERVES_IS_PTERM, "a", "t", "v",
@@ -2133,7 +2130,6 @@ def SUBSTITUTE_P_PRESERVES_IS_PFORM(p):
             with p.case(
                 "c_imp: ?a b. phi = Imp_pf a b /\\ is_pform a /\\ is_pform b"
             ):
-                p.choose("b", "a_eq")
                 p.split("b_eq", "(phi_eq, h_a, h_b)")
                 p.have("lt_a: nat0_lt a phi").by_rewrite_of(
                     SPECL([p._parse("a"), p._parse("b")], NAT0_LT_IMP_PF_L),

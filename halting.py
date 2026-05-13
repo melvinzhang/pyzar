@@ -1806,8 +1806,8 @@ def _prove_sk_bullet_leaf(p, atom_str, atom_neq_lemma):
     with p.cases_on("body"):
         with p.case(f"h1: {D1}"):
             # D1: ?a b. atom = App_t (App_t K_t a) b /\ sk_bullet atom = sk_bullet a.
-            # Strip the sk_bullet-payload, extract bare K-shape, contradict nK.
-            p.choose("b", from_="a_eq")
+            # cases_on auto-introduces 'a' and 'b'; strip the
+            # sk_bullet-payload, extract bare K-shape, contradict nK.
             p.split("b_eq", "(h_app, _)")
             p.have(
                 f"h_kred_ex: ?a b. {t} = App_t (App_t K_t a) b"
@@ -1895,9 +1895,7 @@ def SK_BULLET_K_REDEX(p):
     D1, D2, D3, D4 = _sk_bullet_disjuncts(t, sk_t)
     with p.cases_on("body"):
         with p.case(f"h1: {D1}"):
-            # cases_on auto-binds the outer existential ``a``; we
-            # manually choose ``b`` from a_eq.
-            p.choose("b", from_="a_eq")
+            # cases_on auto-binds both existentials ``a`` and ``b``.
             p.split("b_eq", "(h_app, h_sk)")
             # APP_T_INJ twice: outer App layer, then inner App_t K_t _.
             p.have(
@@ -2010,9 +2008,8 @@ def SK_BULLET_S_REDEX(p):
     with p.cases_on("body"):
         with p.case(f"h1: {D1}"):
             # K-branch fires on an S-input: extract the (a, b) witnesses
-            # via cases_on's auto-choose + manual choose-b, then re-pack
-            # as ?a b. t = App_t (App_t K_t a) b to contradict not_kred.
-            p.choose("b", from_="a_eq")
+            # via cases_on's auto-choose, then re-pack as
+            # ?a b. t = App_t (App_t K_t a) b to contradict not_kred.
             p.split("b_eq", "(h_app, _)")
             p.have(
                 f"h_kred_ex: ?a b. {t} = App_t (App_t K_t a) b"
@@ -2902,7 +2899,8 @@ def _bullet_refl_app_case(p):
     """BULLET_REFL's App-but-not-K/S sub-case.
 
     Closes ``sk_par_step A (sk_bullet A)`` from:
-      * ``a_eq``: ``?b. A = App_t a b`` (auto-bound by outer ``cases_on``)
+      * ``b_eq``: ``A = App_t a b`` (``a`` and ``b`` auto-bound by
+        outer ``cases_on``)
       * ``h_nK``, ``h_nS``: A is neither K- nor S-redex
       * ``IH``:  the strong-induction hypothesis on ``A``
 
@@ -2912,8 +2910,6 @@ def _bullet_refl_app_case(p):
     """
     from tactics import CONJ as _CONJ, BETA_RULE
 
-    # 'a' auto-introduced by cases_on; manually choose b.
-    p.choose("b", from_="a_eq")
     # b_eq : A = App_t a b.
     # Lift the non-redex hypotheses from A to App_t a b via AP_TERM at
     # the negation-shape predicate, then BETA_RULE, then EQ_MP.
@@ -3024,8 +3020,7 @@ def _bullet_refl_leaf_case(p):
     D1, D2, D3, D4 = _sk_bullet_disjuncts("A", "sk_bullet A")
     with p.cases_on("body"):
         with p.case(f"h1: {D1}"):
-            # Auto-bound 'a' from the outer ?a; manually choose b.
-            p.choose("b", from_="a_eq")
+            # cases_on auto-introduces both 'a' and 'b'.
             p.split("b_eq", "(h_app, _)")
             p.have(
                 "h_kred_ex: ?a b. A = App_t (App_t K_t a) b"
@@ -3109,12 +3104,8 @@ def BULLET_REFL(p):
             "?a b. A = App_t (App_t K_t a) b",
         ):
             with p.case("h_K: ?a b. A = App_t (App_t K_t a) b"):
-                # cases_on auto-introduces 'a' (outer ? bvar); we
-                # manually peel the inner ?b.  DSL friction: leaf is
-                # ``?a b. ...`` but auto-introduce only peels the
-                # outermost ?, so the second p.choose remains explicit.
-                p.choose("b", from_="a_eq")
-                # b_eq : A = App_t (App_t K_t a) b.
+                # cases_on auto-introduces both 'a' and 'b' (spec has
+                # two outer ? bvars).  b_eq : A = App_t (App_t K_t a) b.
 
                 # nat0_lt a A: two-hop a < App K a < App (App K a) b.
                 p.have(
@@ -3186,9 +3177,7 @@ def BULLET_REFL(p):
                         "h_S: ?a b c. A = "
                         "     App_t (App_t (App_t S_t a) b) c"
                     ):
-                        # 'a' auto-introduced; manually choose b, c.
-                        p.choose("b", from_="a_eq")
-                        p.choose("c", from_="b_eq")
+                        # cases_on auto-introduces 'a', 'b', 'c'.
                         # c_eq : A = App_t (App_t (App_t S_t a) b) c.
 
                         # nat0_lt c A: one hop.
@@ -3988,8 +3977,7 @@ def _TRIANGLE_APP_CLOSURE(p):
                         "h_AisSS: ?Ai:nat0. ?Bi:nat0. "
                         "A = App_t (App_t S_t Ai) Bi"
                     ):
-                        # Ai auto-bound; manual choose Bi in S-case.
-                        p.choose("Bi", from_="Ai_eq")
+                        # Ai and Bi auto-bound; Bi_eq in scope.
                         _triangle_S_case(p)
                     with p.case(
                         "h_nAisSS: "

@@ -313,10 +313,15 @@ with p.case("label: disjunct"):
     p.thus(target)...
 ```
 
-If a leaf is `?v. body`, the case auto-introduces a `choose`-style
-witness: `v` enters scope and `v_eq: body[v]` is registered (no need
-for an explicit `p.choose` inside the case). The display name follows
-the user's spec bvar; falls back to the leaf's bvar.
+If a leaf is `?v1 ... vn. body`, the case auto-introduces
+`choose`-style witnesses: `v1 ... vn` enter scope and
+`{vn}_eq: body[v1, ..., vn]` is registered. Peel-count is driven by
+the *user spec*'s leading `?`-binders, so `with p.case("h: ?a b. body")`
+peels both `a` and `b` even when the leaf has more binders the user
+doesn't want to name; `with p.case("h: ?a. body")` against a `?a b.
+...` leaf leaves the inner `?b` in `a_eq`. Display names follow the
+user spec; fallback to the leaf's bvar when the spec isn't
+existential. No explicit `p.choose` is needed inside the case.
 
 A `cases_on` block requires `>= 2` cases. Branches need not appear in
 disjunct order; they're matched by `aconv` to the right-associated
