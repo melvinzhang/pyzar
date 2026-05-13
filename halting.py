@@ -6468,50 +6468,8 @@ def CHURCH_FALSE_REDUCES(p):
 # ---------------------------------------------------------------------------
 
 
-# ``halts_decider H`` says H is an SK term that decides halting via the
-# K_t / KI_t output convention.  Defined directly via ``define`` so
-# HALTS_DECIDER_DEF_THM is a one-line unfold rather than an axiom.
-HALTS_DECIDER_DEF = define(
-    "halts_decider",
-    parse_type("nat0 -> bool"),
-    "\\H:nat0. is_sk_term H /\\ "
-    "         !t:nat0. is_sk_term t ==> "
-    "             (halts t ==> (?n:nat0. sk_iter n (App_t H t) = K_t)) /\\ "
-    "             (~halts t ==> (?n:nat0. sk_iter n (App_t H t) = KI_t))",
-)
-halts_decider = mk_const("halts_decider", [])
-
-
-@proof
-def HALTS_DECIDER_DEF_THM(p):
-    """|- !H. halts_decider H <=>
-              is_sk_term H /\\
-              !t. is_sk_term t ==>
-                  (halts t  ==> ?n. sk_iter n (App_t H t) = K_t) /\\
-                  (~halts t ==> ?n. sk_iter n (App_t H t) = KI_t).
-
-    Direct unfold of HALTS_DECIDER_DEF via AP_THM + BETA (same shape as
-    HALTS_AT for HALTS_DEF).
-    """
-    from tactics import AP_THM, BETA_CONV, TRANS, GEN
-    H_var = Var("H", nat0_ty)
-    ap = AP_THM(HALTS_DECIDER_DEF, H_var)
-    bet = BETA_CONV(rand(ap._concl))
-    spec_th = TRANS(ap, bet)
-    p.goal(
-        "!H. halts_decider H = "
-        "    (is_sk_term H /\\ "
-        "     !t. is_sk_term t ==> "
-        "         (halts t ==> (?n. sk_iter n (App_t H t) = K_t)) /\\ "
-        "         (~halts t ==> (?n. sk_iter n (App_t H t) = KI_t)))"
-    )
-    p.thus(
-        "!H. halts_decider H = "
-        "    (is_sk_term H /\\ "
-        "     !t. is_sk_term t ==> "
-        "         (halts t ==> (?n. sk_iter n (App_t H t) = K_t)) /\\ "
-        "         (~halts t ==> (?n. sk_iter n (App_t H t) = KI_t)))"
-    ).by_thm(GEN(H_var, spec_th))
+# ``halts_decider`` definition and its unfold are placed downstream, after
+# ``halts_b`` is in scope (search for ``HALTS_DECIDER_DEF =``).
 
 
 @proof
@@ -11081,6 +11039,51 @@ def HALTS_PAR_INVARIANT(p):
     p.sorry()
 
 
+# ``halts_decider H`` says H is an SK term that decides halting via the
+# flipped halting-status output convention (post bullet-migration):
+# ``halts_b t  iff  ~halts_b (App_t H t)``.  Per iter_to_bullet.md
+# "Output convention change" -- the flipped convention turns the
+# diagonal equation ``halts_b d = halts_b (App H d)`` into a P = ~P
+# contradiction directly, no K_t / KI_t case-split needed.
+HALTS_DECIDER_DEF = define(
+    "halts_decider",
+    parse_type("nat0 -> bool"),
+    "\\H:nat0. is_sk_term H /\\ "
+    "         !t:nat0. is_sk_term t ==> "
+    "             (halts_b t = ~(halts_b (App_t H t)))",
+)
+halts_decider = mk_const("halts_decider", [])
+
+
+@proof
+def HALTS_DECIDER_DEF_THM(p):
+    """|- !H. halts_decider H =
+              (is_sk_term H /\\
+               !t. is_sk_term t ==>
+                   (halts_b t = ~(halts_b (App_t H t)))).
+
+    Direct unfold of HALTS_DECIDER_DEF via AP_THM + BETA (same shape as
+    HALTS_AT for HALTS_DEF).
+    """
+    from tactics import AP_THM, BETA_CONV, TRANS, GEN
+    H_var = Var("H", nat0_ty)
+    ap = AP_THM(HALTS_DECIDER_DEF, H_var)
+    bet = BETA_CONV(rand(ap._concl))
+    spec_th = TRANS(ap, bet)
+    p.goal(
+        "!H. halts_decider H = "
+        "    (is_sk_term H /\\ "
+        "     !t. is_sk_term t ==> "
+        "         (halts_b t = ~(halts_b (App_t H t))))"
+    )
+    p.thus(
+        "!H. halts_decider H = "
+        "    (is_sk_term H /\\ "
+        "     !t. is_sk_term t ==> "
+        "         (halts_b t = ~(halts_b (App_t H t))))"
+    ).by_thm(GEN(H_var, spec_th))
+
+
 # ---------------------------------------------------------------------------
 # bullet_eval / bullet_chain -- kernel-level evaluators for sk_bullet.
 #
@@ -11989,25 +11992,61 @@ def HALTING_UNDECIDABLE(p):
     EXCLUDED_MIDDLE are all live.  Once DIAGONAL_TERM_EXISTS is
     discharged the diagonal closes without further holes.
     """
-    # *** STUB.  The halts_decider definition still has its old K_t/KI_t
-    # output convention; DIAGONAL_TERM_EXISTS now emits the bullet-form
-    # ``halts_b d = halts_b (App_t H d)`` equality instead.  The two
-    # signatures don't compose -- the body below previously consumed
-    # ``(?n. sk_iter n (App_t H d) = K_t) ==> ~halts d`` etc., which
-    # DIAGONAL_TERM_EXISTS no longer produces.
-    #
-    # Resolution per iter_to_bullet.md "Output convention change":
-    # swap halts_decider's definition to
-    #   halts_decider H := is_sk_term H /\
-    #                      !t. is_sk_term t ==>
-    #                          halts_b t = ~halts_b (App_t H t)
-    # then close HALTING_UNDECIDABLE in ~20 lines by specialising the
-    # decider's spec at t := d and combining with
-    # ``halts_b d = halts_b (App_t H d)`` from DIAGONAL_TERM_EXISTS to
-    # contradict ``halts_b (App_t H d) = ~halts_b (App_t H d)``.
-    # Stubbed here pending the convention swap.
+    from classical import EXCLUDED_MIDDLE
+
     p.goal("~ (?H. halts_decider H)")
-    p.sorry()
+    with p.suppose("h_ex: ?H. halts_decider H"):
+        p.choose("H", from_="h_ex")
+        # H_eq : halts_decider H.
+
+        # ---- Unfold the (flipped, bullet-form) halts_decider spec. ----
+        p.have(
+            "h_thm: halts_decider H = "
+            "       (is_sk_term H /\\ "
+            "        !t. is_sk_term t ==> "
+            "            (halts_b t = ~(halts_b (App_t H t))))"
+        ).by(HALTS_DECIDER_DEF_THM, "H")
+        p.have(
+            "h_unf: is_sk_term H /\\ "
+            "       !t. is_sk_term t ==> "
+            "           (halts_b t = ~(halts_b (App_t H t)))"
+        ).by_eq_mp("h_thm", "H_eq")
+        p.split("h_unf", "(h_is_sk_H, h_decides)")
+
+        # ---- Diagonal term d (halts_b form). --------------------------
+        p.have(
+            "h_diag: ?d. is_sk_term d /\\ "
+            "        halts_b d = halts_b (App_t H d)"
+        ).by(DIAGONAL_TERM_EXISTS, "H", "h_is_sk_H")
+        p.choose("d", from_="h_diag")
+        p.split("d_eq", "(h_is_sk_d, h_dd_eq)")
+
+        # ---- Decider's promise specialised at t := d. -----------------
+        p.have(
+            "h_dec_d: halts_b d = ~halts_b (App_t H d)"
+        ).by("h_decides", "d", "h_is_sk_d")
+
+        # ---- Compose to a P = ~P contradiction at App_t H d. ----------
+        # h_dd_eq  : halts_b d           = halts_b (App_t H d)
+        # h_dec_d  : halts_b d           = ~halts_b (App_t H d)
+        # SYM h_dd_eq + h_dec_d :
+        #   halts_b (App_t H d) = ~halts_b (App_t H d)
+        p.have(
+            "h_pne: halts_b (App_t H d) = ~halts_b (App_t H d)"
+        ).by_trans(SYM(p.fact("h_dd_eq")), "h_dec_d")
+
+        # ---- Discharge via EXCLUDED_MIDDLE on halts_b (App_t H d). ----
+        with p.cases_on(EXCLUDED_MIDDLE, "halts_b (App_t H d)"):
+            with p.case("h_yes: halts_b (App_t H d)"):
+                p.have(
+                    "h_no: ~halts_b (App_t H d)"
+                ).by_eq_mp("h_pne", "h_yes")
+                p.absurd().by_conj("h_yes", "h_no")
+            with p.case("h_no: ~halts_b (App_t H d)"):
+                p.have(
+                    "h_yes: halts_b (App_t H d)"
+                ).by_eq_mp(SYM(p.fact("h_pne")), "h_no")
+                p.absurd().by_conj("h_yes", "h_no")
 
 
 # ---------------------------------------------------------------------------
@@ -12019,27 +12058,24 @@ def HALTING_UNDECIDABLE(p):
 def HALTS_NOT_SK_REPRESENTABLE(p):
     """|- ~ ?H. is_sk_term H /\\
                 !t. is_sk_term t ==>
-                    (halts t  ==> ?n. sk_iter n (App_t H t) = K_t) /\\
-                    (~halts t ==> ?n. sk_iter n (App_t H t) = KI_t).
+                    (halts_b t = ~(halts_b (App_t H t))).
 
     HALTING_UNDECIDABLE, restated as non-existence of an SK term
-    computing the characteristic function of ``halts``.  Immediate
-    from HALTING_UNDECIDABLE + HALTS_DECIDER_DEF_THM: suppose an H
-    satisfies the unfolded predicate; then by HALTS_DECIDER_DEF_THM
-    that H also satisfies ``halts_decider H``, witnessing the inner
-    existential that HALTING_UNDECIDABLE refutes.
+    deciding bullet halting under the flipped output convention.
+    Immediate from HALTING_UNDECIDABLE + HALTS_DECIDER_DEF_THM: any
+    H satisfying the unfolded predicate also satisfies
+    ``halts_decider H``, witnessing the existential refuted by
+    HALTING_UNDECIDABLE.
     """
     p.goal(
         "~ (?H. is_sk_term H /\\ "
         "       !t. is_sk_term t ==> "
-        "           (halts t ==> (?n. sk_iter n (App_t H t) = K_t)) /\\ "
-        "           (~halts t ==> (?n. sk_iter n (App_t H t) = KI_t)))"
+        "           (halts_b t = ~(halts_b (App_t H t))))"
     )
     with p.suppose(
         "h_ex: ?H. is_sk_term H /\\ "
         "      !t. is_sk_term t ==> "
-        "          (halts t ==> (?n. sk_iter n (App_t H t) = K_t)) /\\ "
-        "          (~halts t ==> (?n. sk_iter n (App_t H t) = KI_t))"
+        "          (halts_b t = ~(halts_b (App_t H t)))"
     ):
         p.choose("H", from_="h_ex")
         # H_eq : is_sk_term H /\ ...   (the unfolded body at H).
@@ -12048,8 +12084,7 @@ def HALTS_NOT_SK_REPRESENTABLE(p):
             "h_thm: halts_decider H = "
             "       (is_sk_term H /\\ "
             "        !t. is_sk_term t ==> "
-            "            (halts t ==> (?n. sk_iter n (App_t H t) = K_t)) /\\ "
-            "            (~halts t ==> (?n. sk_iter n (App_t H t) = KI_t)))"
+            "            (halts_b t = ~(halts_b (App_t H t))))"
         ).by(HALTS_DECIDER_DEF_THM, "H")
         # Fold H_eq back into halts_decider H via SYM-tolerant by_eq_mp.
         p.have("h_hd: halts_decider H").by_eq_mp("h_thm", "H_eq")
