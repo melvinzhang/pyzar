@@ -37,9 +37,8 @@ from halting import (
     S_t, K_t, App_t,
     APP_T_INJ, S_T_NEQ_K_T, S_T_NEQ_APP_T, K_T_NEQ_APP_T,
     NAT0_LT_APP_T_L, NAT0_LT_APP_T_R,
-    sk_par_step, SK_PAR_STEP_DEF, SK_PAR_STEPS_DEF,
+    sk_par_step, SK_PAR_STEP_DEF,
     PAR_REFL, PAR_K, PAR_S, PAR_APP,
-    PAR_STEPS_REFL, PAR_STEPS_STEP,
     PAR_STEP_S_T_INV, PAR_STEP_K_T_INV,
     IS_NORMAL_DEF,
 )
@@ -50,6 +49,93 @@ from halting import (
     _lift_select_eq,
     _select_via_rec,
 )
+
+SK_PAR_STEPS_DEF = define(
+    "sk_par_steps",
+    parse_type("nat0 -> nat0 -> bool"),
+    "\\X:nat0. \\Y:nat0. "
+    "!P:nat0->nat0->bool. "
+    "((!Z:nat0. P Z Z) /\\ "
+    " (!A:nat0. !B:nat0. !C:nat0. "
+    "    sk_par_step A B /\\ P B C ==> P A C)) "
+    "==> P X Y",
+)
+sk_par_steps = mk_const("sk_par_steps", [])
+
+# ---------------------------------------------------------------------------
+# Intro lemmas for sk_par_steps (RTC).
+# ---------------------------------------------------------------------------
+
+# The closure-conditions body for sk_par_steps; reused in each intro.
+_PAR_STEPS_CLOSURE = (
+    "((!Z:nat0. P Z Z) /\\ "
+    " (!A:nat0. !B:nat0. !C:nat0. "
+    "    sk_par_step A B /\\ P B C ==> P A C))"
+)
+
+
+@proof
+def PAR_STEPS_REFL(p):
+    """|- !X. sk_par_steps X X."""
+    p.goal("!X. sk_par_steps X X")
+    p.fix("X")
+    with p.have(
+        "unf: !P:nat0->nat0->bool. "
+        f"     {_PAR_STEPS_CLOSURE} ==> P X X"
+    ).proof():
+        p.fix("P")
+        p.assume(f"h_cl: {_PAR_STEPS_CLOSURE}")
+        p.split("h_cl", "(refl_cl, _)")
+        p.thus("P X X").by("refl_cl", "X")
+    p.thus("sk_par_steps X X").by_unfold("unf", SK_PAR_STEPS_DEF)
+
+
+def _par_steps_to_P(p, ref, *, P_str="P", new_label):
+    """Analogue of ``_par_step_to_P`` for ``sk_par_steps``."""
+    from tactics import AP_THM as _AP_THM, BETA_CONV as _BETA, TRANS as _TRANS
+    from basics import dest_comb
+    th = p.fact(ref) if isinstance(ref, str) else ref
+    sps_A, B = dest_comb(th._concl)
+    _, A = dest_comb(sps_A)
+    ap1 = _AP_THM(SK_PAR_STEPS_DEF, A)
+    bet1 = _BETA(rand(ap1._concl))
+    spec_A = _TRANS(ap1, bet1)
+    ap2 = _AP_THM(spec_A, B)
+    bet2 = _BETA(rand(ap2._concl))
+    spec_AB = _TRANS(ap2, bet2)
+    forall_th = EQ_MP(spec_AB, th)
+    P_tm = p._parse(P_str)
+    inst_at_P = SPEC(P_tm, forall_th)
+    result = MP(inst_at_P, p.fact("h_cl"))
+    p.have(f"{new_label}: {pp(result._concl)}").by_thm(result)
+
+
+@proof
+def PAR_STEPS_STEP(p):
+    """|- !X Y Z. sk_par_step X Y /\\ sk_par_steps Y Z ==> sk_par_steps X Z.
+
+    Prepend a single parallel step to an existing RTC chain.
+    """
+    p.goal(
+        "!X Y Z. sk_par_step X Y /\\ sk_par_steps Y Z ==> sk_par_steps X Z"
+    )
+    p.fix("X Y Z")
+    p.assume(
+        "(h_XY, h_YZ): sk_par_step X Y /\\ sk_par_steps Y Z"
+    )
+    with p.have(
+        "unf: !P:nat0->nat0->bool. "
+        f"     {_PAR_STEPS_CLOSURE} ==> P X Z"
+    ).proof():
+        p.fix("P")
+        p.assume(f"h_cl: {_PAR_STEPS_CLOSURE}")
+        p.split("h_cl", "(_, step_cl)")
+        _par_steps_to_P(p, "h_YZ", new_label="pYZ")
+        p.have("pConj: sk_par_step X Y /\\ P Y Z").by_thm(
+            CONJ(p.fact("h_XY"), p.fact("pYZ"))
+        )
+        p.thus("P X Z").by("step_cl", "X", "Y", "Z", "pConj")
+    p.thus("sk_par_steps X Z").by_unfold("unf", SK_PAR_STEPS_DEF)
 
 
 # Stage 2 -- Takahashi's complete-development function ``sk_bullet``.
