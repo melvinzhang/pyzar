@@ -1,12 +1,16 @@
 """Undecidability of the halting problem, via SK combinators over HF.
 
-SKETCH ONLY -- this file lays out the construction; the proofs are
-stubbed with ``p.sorry()``. The goal is to state and prove, as a HOL
-theorem, that no SK combinator decides whether an SK term has a normal
-form:
+Final theorem (``HALTING_UNDECIDABLE``):
 
-    |- ~ ?H. is_sk_term H /\\
-             !t. is_sk_term t ==> ((App H t) reduces_to K_t  <=>  halts t).
+    |- ~ ?H. halts_decider H
+
+where ``halts_decider H`` says ``H`` is an SK term and, for every SK
+term ``t``,
+
+    halts_b t = ~halts_b (App_t H t)
+
+i.e. the *halt-status of the decider's output on t* encodes the
+answer (flipped, so the diagonal contradiction lands cleanly).
 
 The whole development lives over ``hf_sets.py`` plus ``nat0.py``.
 Axiomatic cost: zero. The construction reuses ``Pair_ord`` for tagged
@@ -25,10 +29,11 @@ Three computation models give the same theorem; SK is the cheapest:
               bit-encoded canonical-form preconditions of ``substitute``
               (cf. ``project_pyzar_simp_select_constraint``).
   SK        : three tags, no binders, two local rewrite rules.
-              ~300 LOC. No substitution lemmas. ``Omega = SII(SII)``
-              is the non-halting witness, definable in five symbols.
+              No substitution lemmas. The non-halting witness ``Omega``
+              is definable in five symbols (and unused in the final
+              theorem -- see "Diagonal" below).
 
-The diagonal is the same shape in all three. SK wins by avoiding the
+The diagonal is the same shape in all three.  SK wins by avoiding the
 nastiest infrastructure piece (substitution under binders) while
 keeping the diagonal mechanically identical.
 
@@ -39,59 +44,52 @@ The idea (Turing 1936; SK presentation: Barendregt Ch. 7)
 Three ingredients:
 
   (1) *Encoding.* SK terms are finite ternary trees: leaves S/K, internal
-      nodes App. Each is a tagged HF tuple, hence a nat0. Reduction
+      nodes App.  Each is a tagged HF tuple, hence a nat0.  Reduction
       rules ``K x y -> x`` and ``S x y z -> x z (y z)`` are local
       pattern matches.
 
-  (2) *Halting.*  ``halts t := ?n u. reduces_in n t u /\\ is_normal u``.
-      Existential over ``num`` plus a primitive recursive body, so
-      ``halts`` is r.e. -- but not, the theorem says, decidable by an
-      SK term.
+  (2) *Halting.*  ``halts_b t := ?n. is_normal (bullet_iter n t)``,
+      Takahashi-style halting via the deterministic complete-development
+      ``sk_bullet`` iterated on nat0.  Sigma_1 over nat0 (r.e.) but,
+      the theorem says, not decidable by an SK term.
 
-  (3) *Diagonal.* Curry's fixed-point combinator ``Y`` gives, for any
-      ``f``, a term ``Y f`` such that ``Y f -->* f (Y f)``. Apply with
-      ``f := \\x. if H(x) then Omega else K_t``. The fixed point ``d``
-      satisfies ``d -->* if H(d) then Omega else K_t``. If ``H`` decides
-      halting, ``halts d <=> halts (if H(d) then Omega else K_t) <=>
-      halts d`` -- contradiction either way.
+  (3) *Diagonal.*  Curry's classical diagonal ``e = S (K H) SII``,
+      ``d = e e``.  Under parallel reduction one gets
+      ``d ->>_par App_t H d`` (PAR_REFL lets H stay un-reduced inside
+      the residue, which is what makes the diagonal work for arbitrary
+      ``is_sk_term H``).  Bridge to bullet via ``HALTS_B_IFF_HALTS_PAR``
+      gives ``halts_b d = halts_b (App_t H d)``.  Combined with the
+      flipped decider spec, ``halts_b d = ~halts_b d`` -- contradiction.
 
-Lambda-abstraction is *defined* on SK (Curry's algorithm ``[x] e``);
-no binder primitive needed.
-
-------------------------------------------------------------------
-The HOL encoding hurdle
-------------------------------------------------------------------
-
-There isn't one for the data: ``Pair_ord`` from ``hf_sets.py`` gives
-ordered pairs on nat0, so tagged tuples ``<n, t1, ..., tk>`` are
-nested Pair_ord's. The work is:
-
-  * Defining ``sk_step`` as a primitive recursive HF function (it
-    inspects the head of an application chain and matches K/S).
-  * Defining ``sk_reduces : num -> nat0 -> nat0 -> bool`` by primitive
-    recursion on the step count, and ``halts`` as the existential
-    closure.
-  * Constructing ``Y`` and proving its fixed-point property as an SK
-    reduction.
-  * The diagonal argument itself -- once the reduction lemmas are in
-    place, ~30 lines.
+      No fixed-point combinator, no Omega.  See ``iter_to_bullet.md``
+      for the design history (initial bullet-only DIAG_TERM was
+      empirically falsified for composite H; current proof uses par).
 
 ------------------------------------------------------------------
 Stage map
 ------------------------------------------------------------------
 
-  Stage 0:  SK terms as tagged HF tuples (S_t, K_t, App_t, is_sk_term).
-  Stage 1:  One-step reduction sk_step + determinism.
-  Stage 2:  Multi-step sk_reduces, normal-form predicate, halts.
-  Stage 3:  Useful combinators: I, KI, Omega; OMEGA_NON_HALTING.
-  Stage 4:  Curry's fixed-point combinator Y and the fixed-point
-            theorem Y_FIXED_POINT.
-  Stage 5:  Lambda-abstraction emulation [x]e (the bracket abstraction
-            algorithm) -- used only to define D readably; could be
-            inlined.
-  Stage 6:  HALTING_UNDECIDABLE: no SK term decides halting.
-  Stage 7:  Corollary: ``halts`` is not primitive recursive
-            (essentially, the standard Rice-flavoured consequence).
+  Stage 0 (sk):       SK terms as tagged HF tuples
+                      (S_t, K_t, App_t, is_sk_term).
+  Stage 1 (sk_step):  One-step LMO reduction sk_step + IS_NORMAL_DEF +
+                      SK_STEP_K / _S intros and SK_STEP_LEFT / _RIGHT
+                      congruences.
+  Stage 2 (sk_size):  Term-size measure used by the normal-form
+                      structural lemmas (IS_NORMAL_NOT_K_REDEX_SHAPE,
+                      _NOT_S_REDEX_SHAPE, _APP_DECOMP).
+  Stage 3 (par):      Parallel reduction relation ``sk_par_step`` +
+                      RTC ``sk_par_steps`` + ``par_chain`` DSL.
+  Stage 4 (bullet):   Takahashi's complete development ``sk_bullet``
+                      + triangle property + Tait/Martin-Loef diamond
+                      + Church-Rosser confluence on par.
+  Stage 5 (halts):    ``bullet_iter`` + ``halts_b`` (user-facing) +
+                      ``halts_par`` (internal) + the bridge
+                      ``HALTS_B_IFF_HALTS_PAR``.
+  Stage 6 (diag):     Classical Curry diagonal ``DIAG_TERM`` in par
+                      form; ``DIAGONAL_TERM_EXISTS`` lifts to halts_b
+                      via the bridge.
+  Stage 7:            ``HALTING_UNDECIDABLE`` and the corollary
+                      ``HALTS_NOT_SK_REPRESENTABLE``.
 
 ------------------------------------------------------------------
 What this gives and doesn't give
@@ -99,16 +97,16 @@ What this gives and doesn't give
 
 Derived from the bare HOL kernel + ``hf_sets.py``:
   * Undecidability of halting for SK combinators (the headline).
-  * Non-haltingness of Omega -- a concrete non-terminating program.
-  * SK is Turing-complete in the weak sense: Y gives general recursion.
+  * Church-Rosser for SK via parallel reduction (en route to the bridge).
+  * SK is Turing-complete in the weak sense (par-form Curry diagonal
+    gives general self-reference).
 
 Not in scope here:
   * Equivalence with Turing machines or lambda calculus (would need a
     third file). The theorem stands on its own without it.
-  * Church-Rosser confluence. Cleanly provable here via the standard
-    parallel-reduction argument (Tait/Martin-Loef minus the binder
-    cases, so ~80 lines), but the halting theorem does not depend on
-    it.
+  * Equivalence between Takahashi halting (``halts_b``) and LMO halting.
+    Classically the same by standardization; this codebase doesn't
+    need the equivalence for the undecidability proof.
 
 Pairs especially well with ``godel_first.py``: the diagonal in this
 file is mechanically the same as the Goedel diagonal -- self-application
@@ -451,9 +449,10 @@ K_T_NEQ_APP_T = _proof_atom_neq_app_t("K_T_NEQ_APP_T", "K_t", K_T_DEF, "SUC0 0",
 #   App_t-atom  (sym of the above)             -- SYM + S_T_NEQ_APP_T
 #                                                 or K_T_NEQ_APP_T
 #
-# Without this helper each negation in IS_NORMAL_I_T / HALTS_K_OMEGA_FALSE
-# / DIAG_TERM cost ~20 lines of suppose+choose+APP_T_INJ+CONJUNCT
-# boilerplate; with it they become one-liners.
+# Without this helper each non-equality on a concrete SK shape would
+# cost ~20 lines of suppose+choose+APP_T_INJ+CONJUNCT boilerplate;
+# with it those become one-liners (used heavily by DIAG_TERM and the
+# par/bullet inversion lemmas).
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Stage 1 -- one-step reduction with leftmost-outermost congruence.
@@ -725,7 +724,7 @@ SK_STEP_REC = _unfold_rec_via_F_def(_SK_STEP_REC_RAW, _SK_STEP_F_DEF)
 # ``is_normal`` is *defined* as the fixed-point condition of sk_step.
 # Under leftmost-outermost congruence reduction this is equivalent to
 # "no redex anywhere in t".  Making it the definition collapses
-# IS_NORMAL_IMP_FIXED and IS_NORMAL_CASES to direct unfolds.
+# ``is_normal``-related unfolds to a single equational rewrite.
 IS_NORMAL_DEF = define(
     "is_normal",
     parse_type("nat0 -> bool"),
@@ -736,10 +735,9 @@ is_normal = mk_const("is_normal", [])
 
 # ---------------------------------------------------------------------------
 # DSL helpers for the SK_STEP_REC case-split pattern.  Without these,
-# each of SK_STEP_K / SK_STEP_S / SK_STEP_LEAF_S / SK_STEP_LEAF_K
-# has to spell the 4-disjunct body verbatim at three sites (existence
-# witness, post-select body fact, each case spec), which is ~150 lines
-# per proof.
+# each of SK_STEP_K / SK_STEP_S has to spell the 4-disjunct body
+# verbatim at three sites (existence witness, post-select body fact,
+# each case spec), which is ~150 lines per proof.
 
 def _select_via_rec(rec_th, args, ex_th):
     """Like ``by_select_def``, but works with a REC-shape equation
@@ -1320,119 +1318,24 @@ def IS_NORMAL_IMP_FIXED(p):
     p.assume("h_norm: is_normal t")
     p.thus("sk_step t = t").by_unfold("h_norm", IS_NORMAL_DEF)
 # ---------------------------------------------------------------------------
-# Stage 2 -- multi-step reduction and halting.
+# Stage 2 -- ``sk_size`` measure.
 #
-#   sk_iter 0 t       = t
-#   sk_iter (SUC n) t = sk_step (sk_iter n t)
+# Term-size on the nat0 encoding.  Only used by the normal-form
+# structural lemmas (IS_NORMAL_NOT_K_REDEX_SHAPE,
+# IS_NORMAL_NOT_S_REDEX_SHAPE, IS_NORMAL_APP_DECOMP), where it gives
+# the strict-descent argument that lets us rule out
+# ``M = App_t (App_t K_t M) N`` and similar self-containing equations.
 #
-#   reduces_in n t u  :=  sk_iter n t = u
-#   halts t           :=  ?n. is_normal (sk_iter n t)
-#
-# ``halts`` is therefore a Sigma_1 predicate over nat0: r.e., not
-# (we will show) recursive in the SK sense.
-# ---------------------------------------------------------------------------
-
-
-# ``sk_iter`` is defined by primitive recursion on the iteration count
-# (the first argument). Using ``define_unary_0`` with result type
-# ``nat0 -> nat0`` makes ``sk_iter n`` a function:
-#
-#   sk_iter 0          = \t. t
-#   sk_iter (SUC0 n)   = \t. sk_step (sk_iter n t)
-#
-# The point-free form yields the SK_ITER_BASE / SK_ITER_STEP equations
-# directly; SK_ITER_ZERO / SK_ITER_SUC just AP_THM at t and BETA.
-from nat0 import define_unary_0  # noqa: E402
-
-_n0_t_var = Var("t", nat0_ty)
-_n0_k_var = Var("k", nat0_ty)
-_n0_a_var = Var("a", parse_type("nat0 -> nat0"))
-
-# c : nat0 -> nat0  ==  \t. t.
-# h : nat0 -> (nat0 -> nat0) -> (nat0 -> nat0)
-#   == \k. \a. \t. sk_step (a t).
-# SK_ITER_BASE : |- sk_iter 0 = (\t. t)
-# SK_ITER_STEP : |- !n. sk_iter (SUC0 n) = (\t. sk_step (sk_iter n t))
-
-
-# halts t := ?n. is_normal (sk_iter n t).
-# ---------------------------------------------------------------------------
-# sk_reduce -- block helper for head-redex sk_iter traces.
-#
-# A trace lemma of shape ``sk_iter k start = end`` (or its existential
-# closure ``?n. sk_iter n start = end``) is a head-by-head reduction
-# punctuated by definitional fold/unfold.  Hand-rolled, each head step
-# costs two named ``have``s (one ``SK_ITER_SUC`` unfold + one
-# ``by_rewrite_of`` to collapse the inner iter) plus per-step bookkeeping
-# for the SUC0-tower witness.  See ``I_T_REDUCES`` for the unfactored
-# shape and ``Y_FIXED_POINT``'s docstring for the friction inventory.
-#
-# Usage::
-#
-#     with sk_reduce(p, "App_t I_t x", "x") as r:
-#         r.rewrite(I_T_DEF)                       # align: unfold I_t at start
-#         r.step(SK_STEP_S, "K_t", "K_t", "x")     # head S-redex
-#         r.step(SK_STEP_K, "x", "App_t K_t x")    # head K-redex
-#
-# On exit the surrounding goal is discharged.  Two goal shapes are
-# auto-detected:
-#
-#   sk_iter <SUC0-tower> start = end       -- concrete (e.g. I_T_REDUCES)
-#   ?n. sk_iter n start = end              -- existential
-#
-# If the goal matches neither, the running equation is registered as a
-# plain fact instead.
-#
-# Each ``step``'s rule must fire on the whole current term:
-# ``sk_step LHS = RHS`` (or ``... ==> sk_step LHS = RHS`` with the
-# antecedents passed via ``mp=[...]``).  Head redexes (top S/K shape)
-# use ``SK_STEP_S`` / ``SK_STEP_K`` directly; deeper redexes use the
-# ``SK_STEP_LEFT`` / ``SK_STEP_RIGHT`` congruence lemmas, whose three
-# guard hypotheses (~K-shape, ~S-shape, non-normality of the relevant
-# child) are discharged by the caller and passed via ``mp=[...]``.
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# Stage 3 -- the standard combinators.
-#
-#   I_t  := App_t (App_t S_t K_t) K_t           -- identity
-#   KI_t := App_t K_t I_t                       -- "false" Church bool
-#   D_t  := App_t S_t (App_t I_t I_t)           -- self-duplicator (Curry)
-#   Omega_t := App_t D_t D_t                    -- canonical loop
-#
-# Reductions:
-#   I_t x   -->  x                              (S K K x --> K x (K x) --> x;
-#                                                see I_T_REDUCES, 2 steps)
-#   sk_step Omega_t  =  App_t (I_t SII) (I_t SII)
-#                                               (one S-redex step, NOT a
-#                                                self-loop; see OMEGA_T_STEP1)
-#
-# Hence Omega_t never reaches a normal form, but proving
-# ``~ halts Omega_t`` requires a size-measure on nat0 terms and a
-# 3-step strict-growth lemma -- see OMEGA_NON_HALTING's docstring for
-# the DSL friction inventory.
-# ---------------------------------------------------------------------------
-# D_t := S I I  -- the self-applicator
-# ---------------------------------------------------------------------------
-# Stage 3b -- ``sk_size`` measure and arithmetic helpers for the
-# eventual OMEGA_NON_HALTING proof.
-#
-# Definition (well-founded recursion on Pair_ord depth, same as
-# ``sk_step``):
+# Definition (well-founded recursion on Pair_ord depth, same wf-shape
+# as ``sk_step``):
 #
 #   sk_size n  :=  if ?a b. n = App_t a b
 #                  then SUC0 (n0plus (sk_size a) (sk_size b))
 #                  else SUC0 0
 #
-# Unfolders:
-#   SK_SIZE_S    :  |- sk_size S_t = SUC0 0
-#   SK_SIZE_K    :  |- sk_size K_t = SUC0 0
+# Unfolder:
 #   SK_SIZE_APP  :  |- !a b. sk_size (App_t a b)
 #                            = SUC0 (n0plus (sk_size a) (sk_size b))
-#
-# Strict-growth helper (used by OMEGA_NON_HALTING):
-#   SK_SIZE_GROWTH_OMEGA_SHAPE
-#                :  |- !t. nat0_lt (sk_size t)
-#                          (sk_size (App_t (App_t I_t t) (App_t I_t t)))
 #
 # DSL friction inventory for sk_size (compared to ``sk_step``, which
 # uses the same SELECT-shaped body but with four disjuncts):
@@ -1440,9 +1343,8 @@ _n0_a_var = Var("a", parse_type("nat0 -> nat0"))
 #     so MONO is half the length and we reuse
 #     ``mono_iff_value_binary_pw_step`` directly for the App_t branch.
 #   * The leaf disjunct is f-free, so its MONO contribution is REFL.
-#   * Unfolding equations re-use ``_select_via_rec`` and the
-#     ``_atom_neq_App_negations`` helper introduced for SK_STEP_LEAF_S/K.
-# ---------------------------------------------------------------------------
+#   * Unfolding uses ``_select_via_rec`` plus the
+#     ``_atom_neq_App_negations`` helper.
 
 
 _F_sk_size_ty = parse_type("(nat0 -> nat0) -> nat0 -> nat0")
@@ -1657,11 +1559,9 @@ def SK_SIZE_APP(p):
             p.absurd().by_conj("h_napp", "is_app")
 # ---------------------------------------------------------------------------
 # Arithmetic helper: ``n0plus`` is strictly bounded by SUC0 over its
-# growth -- specifically ``nat0_lt a (SUC0 (n0plus a b))``.  This is the
-# core inequality used by SK_SIZE_GROWTH_OMEGA_SHAPE: ``sk_size t``
-# appears as one summand in ``sk_size (App_t (I_t t) (I_t t))`` and the
-# overall result is SUC0 of a sum that includes a strictly-positive
-# constant.
+# growth -- specifically ``nat0_lt a (SUC0 (n0plus a b))``.  Feeds
+# SK_SIZE_LT_APP_LEFT / _RIGHT, which feed the normal-form structural
+# lemmas (IS_NORMAL_NOT_K_REDEX_SHAPE etc.).
 #
 # Proof by induction on ``b``: base ``n0plus a 0 = a``, SUC0 a > a by
 # NAT0_LT_SUC0; step ``n0plus a (SUC0 b) = SUC0 (n0plus a b)``, lift IH
@@ -1717,26 +1617,6 @@ def NAT0_LT_SUC0_N0PLUS_L(p):
             ).by_eq_mp(eq_lt, "h_ih_lift")
 
 
-# ---------------------------------------------------------------------------
-# Strict-growth lemma for the Omega-shape:
-#   |- !t. nat0_lt (sk_size t) (sk_size (App_t (App_t I_t t) (App_t I_t t)))
-#
-# Direct computation:
-#   sk_size (App_t (App_t I_t t) (App_t I_t t))
-#     = SUC0 (n0plus (sk_size (App_t I_t t)) (sk_size (App_t I_t t)))
-#                                                       [SK_SIZE_APP]
-#   sk_size (App_t I_t t) = SUC0 (n0plus (sk_size I_t) (sk_size t))
-#                                                       [SK_SIZE_APP]
-# Therefore the result is SUC0 (n0plus (SUC0 X) (SUC0 X)) where
-# X = n0plus (sk_size I_t) (sk_size t); each summand strictly exceeds
-# ``sk_size t`` by NAT0_LT_SUC0_N0PLUS_L plus one SUC0 wrap.
-#
-# DSL friction: the chain of "SUC0 lifts" wants a ``nat0_lt_suc0_chain``
-# helper; without it we do three NAT0_LT_TRANS hops by hand.  Worth
-# packaging if a fourth use-site appears.
-# ---------------------------------------------------------------------------
-
-
 @proof
 def NAT0_LT_SUC0_N0PLUS_R(p):
     """|- !a b. nat0_lt b (SUC0 (n0plus a b)).
@@ -1780,22 +1660,14 @@ def NAT0_LT_SUC0_N0PLUS_R(p):
 
 
 # ---------------------------------------------------------------------------
-# n0plus left-side recursion equations.  ``N0PLUS_BASE``/``N0PLUS_STEP``
-# in hf_sets handle the *right* argument (n0plus x 0 = x, n0plus x (SUC0 y)
-# = SUC0 (n0plus x y)).  For the SK_ITER_ADD induction on the outer count
-# we need the *left*-side mirror.  Each is a small induction on the right
-# argument, using the existing right-side equations and AP_TERM(SUC0).
-# ---------------------------------------------------------------------------
-# OMEGA_DEPTH_SEQ moved to just before OMEGA_T_REACHES_LARGE_SIZE (it
-# references I_pow / Omega_t which are defined later in this file).
-# ---------------------------------------------------------------------------
 # Size-monotone irreflexivity helpers.
 #
-# Used to discharge ``not_self`` hypotheses of the form
-# ``~(t = App_t ... t ...)`` by showing the App-wrapped term has strictly
-# greater sk_size than ``t``.  The hypotheses appear in Y_FIXED_POINT's
-# trace where ``t`` is universally quantified (an arbitrary SK term),
-# so the usual APP_T_INJ + atom-tag-clash discharge doesn't apply.
+# ``SK_SIZE_LT_APP_LEFT`` / ``_RIGHT`` show that an App strictly grows
+# ``sk_size`` over either child; ``SK_SIZE_LT_DEEP_LEFT`` composes the
+# two for depth-2 self-containment.  Used by
+# ``IS_NORMAL_NOT_K_REDEX_SHAPE`` / ``_NOT_S_REDEX_SHAPE`` to rule out
+# self-containing equations like ``M = App_t (App_t K_t M) N`` via
+# AP_TERM(sk_size) + NAT0_LT_NOT_REFL.
 # ---------------------------------------------------------------------------
 
 
@@ -1872,9 +1744,9 @@ def SK_SIZE_LT_DEEP_LEFT(p):
         < sk_size (App_t u t)                  [SK_SIZE_LT_APP_RIGHT]
         < sk_size (App_t (App_t u t) v)        [SK_SIZE_LT_APP_LEFT]
 
-    Discharges Step 7 of Y_FIXED_POINT: the SK_STEP_K_UNDER_LEFT guard
-    ``~(f = App_t (App_t K_t f) (App_t (App_t K_t ARG) f))`` follows by
-    AP_TERM(sk_size) + NAT0_LT_NOT_REFL on this chain.
+    Used by ``IS_NORMAL_NOT_K_REDEX_SHAPE`` to rule out
+    ``M = App_t (App_t K_t M) N`` via AP_TERM(sk_size) +
+    NAT0_LT_NOT_REFL on this chain.
     """
     p.goal(
         "!t u v. nat0_lt (sk_size t) "
@@ -1916,238 +1788,11 @@ def SK_SIZE_LT_DEEP_LEFT(p):
     )
 
 
-# ---------------------------------------------------------------------------
-# Self-inequality wrappers (irreflexivity corollaries).
-#
-# Each ~(t = App-expr containing t) follows from the matching
-# SK_SIZE_LT_* lemma via AP_TERM(sk_size) + NAT0_LT_NOT_REFL.  These are
-# the call-site form actually used to discharge SK_STEP_*_UNDER_LEFT
-# not_self hypotheses when ``t`` is universally quantified (no atom-tag
-# clash available).
-# ---------------------------------------------------------------------------
-
-
 from nat0_order import NAT0_LT_NOT_REFL  # noqa: E402
-# ---------------------------------------------------------------------------
-# Python helper: discharge the SK_STEP_S_UNDER_LEFT not_self hypothesis.
-#
-# Every call to SK_STEP_S_UNDER_LEFT at SPEC (x, y, z, w) leaves the
-# user owing
-#   ~(App_t (App_t x z) (App_t y z) = App_t (App_t (App_t S_t x) y) z).
-# The discharge is structurally identical at every site (and depends
-# only on z, never on x or y):
-#   * APP_T_INJ peels the equation to two conjuncts.
-#   * The right conjunct ``App_t y z = z`` is rejected by
-#     SK_NEQ_APP_RIGHT_WRAP at (t := z, u := y) -- the wrapped term
-#     can't equal its own subterm regardless of what y is.
-# Used 3x in Y_FIXED_POINT (Steps 1, 3, 5) and any other lifted-S call.
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# halts shift lemmas.  Two general-purpose facts about the
-# ``sk_iter``/``halts`` interaction:
-#
-#   SK_ITER_PUSH   :  |- !n t. sk_iter (SUC0 n) t = sk_iter n (sk_step t)
-#                   -- commute one sk_step from the outside to the
-#                      inside of an iter (or vice versa via SYM).
-#   HALTS_SK_STEP  :  |- !t. halts t = halts (sk_step t)
-#                   -- halting is preserved going both directions across
-#                      a single sk_step.
-#
-# Used by the eventual OMEGA_NON_HALTING reasoning to shift the
-# fixed-point witness between iterates.
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# is_normal propagation under sk_iter, in both directions:
-#
-#   IS_NORMAL_SK_ITER_FIXED :  |- !n t. is_normal t ==> sk_iter n t = t
-#                              -- a normal-form fixed point of sk_step is
-#                                 also a fixed point of every sk_iter.
-#   IS_NORMAL_SK_STEP       :  |- !t. is_normal t ==> is_normal (sk_step t)
-#                              -- normality is preserved by sk_step
-#                                 (trivially: sk_step t = t).
-#   HALTS_SK_STEP_FWD       :  |- !t. halts t ==> halts (sk_step t)
-#                              -- shift halts witness forward by one step.
-#
-# These are weak enough not to close OMEGA_NON_HALTING on their own
-# (the backward direction halts (sk_step t) ==> halts t would also
-# be needed, and the heart of the proof is still the 3-step cycle
-# computation -- see OMEGA_NON_HALTING's docstring), but they form
-# the structural skeleton around the missing trajectory lemma.
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# Trajectory step lemmas for the Omega-shape.
-#
-#   SK_STEP_I_APP            :  |- !X. sk_step (App_t I_t X)
-#                                    = App_t (App_t K_t X) (App_t K_t X)
-#       I_t = App_t (App_t S_t K_t) K_t, so ``App_t I_t X`` is an
-#       S-redex (in disguise) with x=K_t, y=K_t, z=X.
-#
-#   TRAJ_STEP_OMEGA_SHAPE    :  |- !X. sk_step (App_t (App_t I_t X) (App_t I_t X))
-#                                    = App_t (App_t (App_t K_t X) (App_t K_t X))
-#                                            (App_t I_t X)
-#       Top is App_t a b with a = b = App_t I_t X, neither K- nor
-#       S-redex at top (I_t doesn't unify with K_t or App_t S_t _),
-#       so D3 fires.  ``sk_step a`` reduces via SK_STEP_I_APP, so
-#       descend-L wins.
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# Size-induction route to OMEGA_NON_HALTING.
-#
-# Three feeder lemmas (each stubbed below with a docstring sketch of its
-# own proof); OMEGA_NON_HALTING composes them.
-#
-#   SK_ITER_ADD                  : iterate-of-iterate decomposition along
-#                                  n0plus.  Pure induction on the outer
-#                                  count.
-#   SK_ITER_PAST_NORMAL          : once normal, stays normal under any
-#                                  additional iter prefix.  Built from
-#                                  SK_ITER_ADD + IS_NORMAL_SK_ITER_FIXED.
-#   OMEGA_SHAPE_TRAJ_RETURNS     : from any Omega-shape, some k>0 sk_steps
-#                                  later we land back at Omega-shape with
-#                                  strictly larger sk_size.  Inducts on
-#                                  the App_t I_t-nesting depth of X.
-#   OMEGA_T_REACHES_LARGE_SIZE   : !N L. arbitrarily large Omega-shape
-#                                  iterate at index n0plus k L (so >= L).
-#                                  Induction on N using OMEGA_T_STEP1 as
-#                                  base and OMEGA_SHAPE_TRAJ_RETURNS as
-#                                  step.
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# I-depth recursive constructor and the peel induction.
-#
-# The Omega trajectory has Omega-shape returns at iters 1, 4, 9, ... where
-# the kth return is at Omega-shape (I^k SII).  To prove "returns to some
-# Omega-shape with strictly larger size" inductively, we need to talk
-# about ``I^k SII`` as a function of k.  Define ``I_pow`` by primitive
-# recursion on the depth:
-#
-#   I_pow 0       X = X
-#   I_pow (SUC0 k) X = App_t I_t (I_pow k X)
-#
-# Then the peel induction lemma OMEGA_PEEL captures the variable-length
-# trace from ``App_t (I_pow k SII) (App_t I_t W)`` to Omega-shape (I W),
-# inducting on k.
-# ---------------------------------------------------------------------------
-# c : nat0 -> nat0 = \X. X
-# h : nat0 -> (nat0 -> nat0) -> (nat0 -> nat0)
-#   = \k. \a. \X. App_t I_t (a X)
-# I_POW_BASE : |- I_pow 0 = (\X. X)
-# I_POW_STEP : |- !k. I_pow (SUC0 k) = (\X. App_t I_t (I_pow k X))
-# ---------------------------------------------------------------------------
-# Stage 4 -- Curry's fixed-point combinator.
-#
-#   Y_t := App_t L_t L_t      where    L_t := App_t S_t (App_t S_t K_t)
-#                                              applied to itself appropriately;
-#                                              see e.g. Barendregt Def. 6.1.3.
-#
-# Concretely the standard SK-encoding is
-#   Y := S S K (S (K (S S (S (S S K)))) K)
-# or any other Y-witness; the specific shape doesn't matter, only the
-# fixed-point equation.
-#
-# The fixed-point theorem:
-#   |- !f. is_sk_term f ==>
-#          ?n. sk_iter n (App_t Y_t f) = App_t f (App_t Y_t f).
-#
-# i.e. ``Y f`` reduces in finitely many steps to ``f (Y f)``.  This is
-# all we need from Y for the diagonal.
-# ---------------------------------------------------------------------------
-
-
-# Concrete Y_t witness: Tromp's 25-symbol Y combinator in pure SK.
-#
-#   Y_t := SSK (S (K (SS (S (SSK)))) K)
-#
-# Tromp's Y' is the shortest known fixed-point combinator in pure SK.
-# We use it because it provably satisfies the reduction property
-#   sk_iter 7 (App_t Y_t f) = App_t f X_TROMP_f
-# under the kernel's leftmost-outermost sk_step (verified by
-# outside/sk_trace.py).  Curry's and Turing's standard Y combinators do
-# *not* satisfy any such literal-equality fixed-point under one-way
-# sk_step -- the inner Y-applied-to-f always reduces, so the trajectory
-# never freezes at App_t f (App_t Y_t f).
-#
-# Built only from S_t and K_t -- no I_t -- so the kernel's lack of
-# I-recognition doesn't block the reduction trace.
-#
-# Layout (left-associative):
-#   SS         = App_t S_t S_t
-#   SSK        = App_t (App_t S_t S_t) K_t                          -- SS K
-#   S(SSK)     = App_t S_t (App_t (App_t S_t S_t) K_t)              -- S (SSK)
-#   SS(S(SSK)) = App_t (App_t S_t S_t)
-#                       (App_t S_t (App_t (App_t S_t S_t) K_t))
-#   K(SS...)   = App_t K_t (SS(S(SSK)))                             -- inner K-applied
-#   S(K(...))  = App_t S_t (K(SS(S(SSK))))                          -- arg's spine
-#   arg        = App_t (S(K(SS(S(SSK))))) K_t
-#   Y_t        = App_t SSK arg
-# Tromp's Y' reduction trace concrete witnesses.  These are the term
-# pieces we'll reference from the Y_FIXED_POINT statement and proof.
-# X_TROMP_f -- the term such that sk_iter 7 (App_t Y_t f) = App_t f X_TROMP_f.
-# Computed by the Python verifier (outside/sk_trace.py, experiment 16).
-# ---------------------------------------------------------------------------
-# Stage 5 -- bracket abstraction (Curry's [x] e).
-#
-# We need a constant ``flip_t`` that, applied to a Church-bool b and two
-# values a/c, returns ``a`` if b = K_t (true) and ``c`` if b = KI_t
-# (false).  Standard encoding:
-#
-#   flip_t b a c  :=  b a c       (if Church booleans are K_t and KI_t,
-#                                  then K_t a c -->* a and KI_t a c -->* c)
-#
-# Hence flip_t is just I_t.  We expose it as a named constant only to
-# make the diagonal construction readable.
-#
-# This stage is bookkeeping; could be inlined.
-# ---------------------------------------------------------------------------
-        # current = c.
 
 
 # ---------------------------------------------------------------------------
-# Stage 6 -- the diagonal.
-#
-# Assume for contradiction that some SK term H decides halting in the
-# sense that, for every closed term t,
-#
-#       App_t H t  -->*  K_t       if halts t
-#       App_t H t  -->*  KI_t      if ~halts t.
-#
-# (Bool-output, leftmost-outermost.)  Define
-#
-#       f := \\x. (H x) Omega_t K_t              -- bracket-abstracted
-#       d := Y_t f                               -- fixed point of f
-#
-# Then ``d -->* f d -->* (H d) Omega_t K_t``.  Case split:
-#   * If halts d: H d -->* K_t, so d -->* K_t a c -->* Omega_t,
-#     and halts d implies halts Omega_t -- contradicting
-#     OMEGA_NON_HALTING.
-#   * If ~halts d: H d -->* KI_t, so d -->* KI_t a c -->* K_t, which
-#     is normal -- so halts d, contradicting the assumption.
-#
-# Either way contradiction; hence no such H exists.
-# ---------------------------------------------------------------------------
-
-
-# ``halts_decider`` definition and its unfold are placed downstream, after
-# ``halts_b`` is in scope (search for ``HALTS_DECIDER_DEF =``).
-# ---------------------------------------------------------------------------
-# Church-Rosser / Standardization scaffolding for SK.
-#
-# ``sk_par_steps`` is the reflexive-transitive closure of one-step
-# parallel reduction (non-deterministic: contracts any subset of the
-# redexes present at a given moment).  We use it as a black-box
-# infrastructure: three primitive properties (single-step embedding,
-# left-App congruence, halts invariance) factor every halts-preservation
-# argument Stage 6 needs.
-#
-# Full discharge of the three stubs below is the standard SK meta-theory
-# (parallel reduction + diamond property + Church-Rosser + standardization
-# theorem).  Estimate ~500 lines if developed from scratch in this
-# module; ~200 lines if transferred via SK <-> lambda encoding.
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Phase 4a -- parallel reduction.
+# Stage 3 -- parallel reduction.
 #
 # ``sk_par_step X X1`` -- one-step parallel reduction.  Inductively
 # defined by:
@@ -2171,7 +1816,7 @@ from nat0_order import NAT0_LT_NOT_REFL  # noqa: E402
 # The cost: every proof of ``sk_par_step X X1`` must instantiate the
 # universal ``P`` with the desired relation.  Two places need this:
 # (1) the four intro lemmas below (instantiating P = sk_par_step
-# itself), and (2) the diamond proof in Phase 4d (instantiating P with
+# itself), and (2) the triangle / diamond proofs (instantiating P with
 # the bullet-paired relation).  Both are mechanical.
 # ---------------------------------------------------------------------------
 
@@ -2677,14 +2322,14 @@ def par_chain(p, start, *, label):
     module-level comment for the synthesis algorithm and limitations."""
     return _ParChain(p, start, label)
 # ---------------------------------------------------------------------------
-# Phase 4d (diamond) infrastructure -- inversion lemmas for ``sk_par_step``.
+# Inversion lemmas for ``sk_par_step``.
 #
-# The impredicative encoding of ``sk_par_step`` admits inversion only via
-# careful P-instantiation: pick a Q such that ``closures(Q)`` is provable,
+# The impredicative encoding admits inversion only via careful
+# P-instantiation: pick a Q such that ``closures(Q)`` is provable,
 # SPEC the unfolded universal at Q, and BETA_NORM the resulting redexes.
-# The two atom inversions below establish the technique; they are also
-# downstream prerequisites for the App-shape inversion lemmas needed by
-# the triangle / diamond proof in Phase 4d.
+# The two atom inversions below establish the technique; they are
+# prerequisites for the App-shape inversion lemmas needed by the
+# triangle / diamond proofs.
 # ---------------------------------------------------------------------------
 
 
@@ -2825,7 +2470,7 @@ def PAR_STEP_S_T_INV(p):
     """|- !Y. sk_par_step S_t Y ==> Y = S_t.
 
     Atom inversion: a parallel step from ``S_t`` can only target
-    ``S_t``.  Used by Phase 4d's triangle / diamond and by the App-
+    ``S_t``.  Used by the triangle / diamond proofs and by the App-
     shape inversion lemmas (when the closure-rule branch produces an
     intermediate par-step from an atom head).
     """
@@ -2842,7 +2487,7 @@ def PAR_STEP_K_T_INV(p):
 
 
 # ---------------------------------------------------------------------------
-# Phase 4d -- Takahashi's complete-development function ``sk_bullet``.
+# Stage 4 -- Takahashi's complete-development function ``sk_bullet``.
 #
 # Defined by well-founded recursion on ``sk_size`` (same machinery as
 # ``sk_step``).  Contracts every redex visible at a node simultaneously:
@@ -2863,18 +2508,7 @@ def PAR_STEP_K_T_INV(p):
 #     SK_BULLET_TRIANGLE : !A B. sk_par_step A B ==> sk_par_step B (sk_bullet A)
 # is the headline lemma; ``TRIANGLE_EXISTS`` packages it as the
 # existential consumed by ``PAR_STEP_DIAMOND`` / ``PAR_STEPS_STRIP`` /
-# ``PAR_STEPS_CONFLUENT``.
-#
-# The seven named theorems below ship as ``sorry`` stubs:
-#   * SK_BULLET_MONO       -- monotonicity premise for define_wf_lt
-#   * SK_BULLET_S_T        -- atom unfold (leaf branch)
-#   * SK_BULLET_K_T        -- atom unfold (leaf branch)
-#   * SK_BULLET_K_REDEX    -- K-redex unfold (D1 branch)
-#   * SK_BULLET_S_REDEX    -- S-redex unfold (D2 branch)
-#   * SK_BULLET_APP_OTHER  -- non-redex App congruence (D3 branch)
-#   * SK_BULLET_TRIANGLE   -- the triangle property (par_step induction)
-# Once these are discharged, ``TRIANGLE_EXISTS`` (and hence
-# ``PAR_STEP_DIAMOND`` etc.) follow without further sorries.
+# ``PAR_STEPS_CONFLUENT`` (Tait/Martin-Loef diamond + Church-Rosser).
 # ---------------------------------------------------------------------------
 
 
@@ -3221,24 +2855,16 @@ def SK_BULLET_MONO(p):
     """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
                  ==> _sk_bullet_F f n = _sk_bullet_F g n.
 
-    Mirrors ``SK_STEP_MONO``'s stitch pattern (or_chain_collapse +
-    _lift_select_eq + SPECL through ``_SK_BULLET_F_AT``).  Per-disjunct
-    iffs:
-      D1 (K-redex, single recurse)    -- ``_bullet_F_d1_mono_iff``
-                                         (sorry-stubbed helper).
-      D2 (S-redex, ternary recurse)   -- ``_bullet_F_d2_mono_iff``
-                                         (sorry-stubbed helper);
+    Stitch pattern (or_chain_collapse + _lift_select_eq + SPECL through
+    ``_SK_BULLET_F_AT``).  Per-disjunct iffs:
+      D1 (K-redex, single recurse)    -- ``_bullet_F_d1_mono_iff``.
+      D2 (S-redex, ternary recurse)   -- ``_bullet_F_d2_mono_iff``;
                                          prepended with ``~K`` via
                                          AP_TERM(/\\) lift.
-      D3 (other-App, binary recurse)  -- ``_mono_iff_value_binary_pw_step``
-                                         (existing, real); prepended
-                                         with ``~K /\\ ~S`` via two
-                                         AP_TERM(/\\) lifts.
+      D3 (other-App, binary recurse)  -- ``_mono_iff_value_binary_pw_step``;
+                                         prepended with ``~K /\\ ~S`` via
+                                         two AP_TERM(/\\) lifts.
       D4 (leaf, f-free)               -- REFL.
-
-    The two stubs are isolated behind helper functions so MONO itself
-    is fully discharged; once the LT_TRANS dances are written, only
-    those helpers need updating.
 
     DSL friction: the per-disjunct iffs return kernel theorems with
     ``r_var`` free.  ``or_chain_collapse`` consumes them as a list;
@@ -3746,9 +3372,8 @@ def SK_BULLET_APP_OTHER(p):
     are pinned via APP_T_INJ a single by_rewrite_of suffices.
 
     DSL friction: the negation antecedents use lowercase ``a b c`` as
-    existential bvars (matching SK_STEP_LEFT's convention) rather than
-    the original stub's uppercase ``A B C`` -- alpha-equivalent, but the
-    lowercase form aligns with ``_sk_bullet_disjuncts``' bvar choice so
+    existential bvars (matching SK_STEP_LEFT's convention) -- this aligns
+    with ``_sk_bullet_disjuncts``' bvar choice so
     ``by_conj("not_kred", "h_kred")`` matches without surprise.
     """
     from tactics import CONJ as _CONJ, CONJUNCT1 as _C1, CONJUNCT2 as _C2
@@ -3847,13 +3472,12 @@ def SK_BULLET_APP_OTHER(p):
 
 
 # ---------------------------------------------------------------------------
-# Dependency stubs for SK_BULLET_TRIANGLE.
+# Dependencies for SK_BULLET_TRIANGLE.
 #
 # PAR_STEP_K_APP_INV and PAR_STEP_S_APP_APP_INV are discharged below
-# via the shared ``_par_step_app_atom_inv`` template.  BULLET_REFL,
-# _TRIANGLE_APP_CLOSURE remain stubs.  TRIANGLE itself (below) is real,
-# assembling the four pieces via impredicative P-instantiation with the
-# strengthened invariant
+# via the shared ``_par_step_app_atom_inv`` template.  TRIANGLE itself
+# (further below) assembles the four pieces via impredicative
+# P-instantiation with the strengthened invariant
 #   ``P := \A B. sk_par_step A B /\ sk_par_step B (sk_bullet A)``.
 # ---------------------------------------------------------------------------
 
@@ -4762,8 +4386,7 @@ def BULLET_REFL(p):
     fires PAR_K / PAR_S / PAR_APP at the redex / non-redex App cases.
 
     Strong induction on ``A`` over ``nat0_lt`` with a 4-way LEM split
-    on A's shape -- exact mirror of SK_PAR_STEP_TO_SK_STEP
-    (halting.py:7395), substituting bullet's collapsing semantics:
+    on A's shape:
 
       * K-redex (A = App K a b)         : sk_bullet A = sk_bullet a;
                                           PAR_K with IH at a, b.
@@ -5752,7 +5375,7 @@ def SK_BULLET_TRIANGLE(p):
       REFL Z   -- PAR_REFL + BULLET_REFL.
       K-rule   -- PAR_K (first part) + SK_BULLET_K_REDEX rewrite (second).
       S-rule   -- PAR_S + SK_BULLET_S_REDEX + double PAR_APP composition.
-      APP-rule -- delegated to ``_TRIANGLE_APP_CLOSURE`` (sorry stub).
+      APP-rule -- delegated to ``_TRIANGLE_APP_CLOSURE``.
 
     With closures(P) built, SPEC h_AB-unfolded at P, MP, CONJUNCT2.
 
@@ -5930,9 +5553,10 @@ def SK_BULLET_TRIANGLE(p):
             "            (sk_bullet (App_t (App_t (App_t S_t U) V) W))"
         ).by_thm(CONJ(p.fact("s_first"), p.fact("s_second")))
 
-    # APP-rule conjunct: delegated to the stub.  Its bvars (A B A1 B1)
-    # do not need renaming -- this is a by_thm with a stand-alone lemma;
-    # the inner !A binders stay bound, alpha-equivalent to closures_beta.
+    # APP-rule conjunct: delegated to _TRIANGLE_APP_CLOSURE.  Its bvars
+    # (A B A1 B1) do not need renaming -- this is a by_thm with a
+    # stand-alone lemma; the inner !A binders stay bound, alpha-equivalent
+    # to closures_beta.
     p.have(
         "c_APP: !A:nat0. !B:nat0. !A1:nat0. !B1:nat0. "
         "(sk_par_step A A1 /\\ sk_par_step A1 (sk_bullet A)) /\\ "
@@ -5954,10 +5578,8 @@ def SK_BULLET_TRIANGLE(p):
 
 
 # ---------------------------------------------------------------------------
-# Phase 4d -- diamond / confluence theorems for ``sk_par_step``.
-#
-# These three now follow without sorry from SK_BULLET_TRIANGLE (which
-# itself remains a stub):
+# Diamond / confluence theorems for ``sk_par_step``, built on
+# SK_BULLET_TRIANGLE:
 #   * TRIANGLE_EXISTS   -- existential wrapper over sk_bullet + triangle.
 #   * PAR_STEP_DIAMOND  -- W := sk_bullet X.
 #   * PAR_STEPS_STRIP   -- RTC induction on top of DIAMOND.
@@ -6256,9 +5878,8 @@ def PAR_STEPS_CONFLUENT(p):
 
 # ---------------------------------------------------------------------------
 # Generic par-step infrastructure used by HALTS_PAR_INVARIANT and the
-# par/bullet bridge: PAR_STEPS_TRANS (composition), SK_ITER_TO_PAR_STEPS
-# (iter-form embedding into par-chains), NORMAL_STABILITY_PAR_STEPS
-# (par-step from a normal goes nowhere).
+# par/bullet bridge: PAR_STEPS_TRANS (composition) and
+# NORMAL_STABILITY_PAR_STEPS (par-step from a normal goes nowhere).
 # ---------------------------------------------------------------------------
 
 
@@ -6776,7 +6397,7 @@ def NORMAL_STABILITY_PAR_STEPS(p):
 
 
 # ---------------------------------------------------------------------------
-# Bullet-form halts (the path used downstream).
+# Stage 5 -- halting predicate.
 #
 #   bullet_iter 0        = \t. t
 #   bullet_iter (SUC0 n) = \t. sk_bullet (bullet_iter n t)
@@ -6784,18 +6405,22 @@ def NORMAL_STABILITY_PAR_STEPS(p):
 #
 # Takahashi-strategy halting: a term halts iff its deterministic
 # parallel-development trajectory reaches normal form.  Classically
-# equivalent to ``halts`` (the LMO sk_iter version) via standardization,
-# but the bullet form sidesteps the standardization bridge entirely on
-# the undecidability critical path.
+# equivalent to LMO halting (by standardization), but the bullet form
+# sidesteps the standardization bridge entirely on the undecidability
+# critical path.  See iter_to_bullet.md for the design history.
 #
-# See iter_to_bullet.md for the full migration plan.  This block ships:
-# the recursion equations for bullet_iter and the halts_b unfold
-# (HALTS_B_AT).  Under Option C, the par-form halts_par is also retained
-# downstream and bridged to halts_b via HALTS_B_IFF_HALTS_PAR.
+# This block ships the recursion equations for bullet_iter, the halts_b
+# unfold (HALTS_B_AT), and the par-form halts_par which is bridged to
+# halts_b via HALTS_B_IFF_HALTS_PAR.
 # ---------------------------------------------------------------------------
 
+from nat0 import define_unary_0  # noqa: E402
 
-# c : nat0 -> nat0  ==  \t. t.   (identical to sk_iter's base shape)
+_n0_t_var = Var("t", nat0_ty)
+_n0_k_var = Var("k", nat0_ty)
+_n0_a_var = Var("a", parse_type("nat0 -> nat0"))
+
+# c : nat0 -> nat0  ==  \t. t.
 _c_bullet_iter = mk_abs(_n0_t_var, _n0_t_var)
 
 # h : nat0 -> (nat0 -> nat0) -> (nat0 -> nat0)
@@ -6822,7 +6447,7 @@ bullet_iter = mk_const("bullet_iter", [])
 
 @proof
 def BULLET_ITER_ZERO(p):
-    """|- !t. bullet_iter 0 t = t.  Mirrors SK_ITER_ZERO."""
+    """|- !t. bullet_iter 0 t = t."""
     from tactics import AP_THM, BETA_CONV, TRANS, GEN
 
     ap = AP_THM(BULLET_ITER_BASE, _n0_t_var)
@@ -6836,7 +6461,7 @@ def BULLET_ITER_ZERO(p):
 def BULLET_ITER_SUC(p):
     """|- !n t. bullet_iter (SUC0 n) t = sk_bullet (bullet_iter n t).
 
-    Mirrors SK_ITER_SUC: SPEC BULLET_ITER_STEP at n, AP_THM at t, BETA.
+    SPEC BULLET_ITER_STEP at n, AP_THM at t, BETA.
     """
     from tactics import AP_THM, BETA_CONV, TRANS, SPEC, GENL
 
@@ -6864,7 +6489,7 @@ halts_b = mk_const("halts_b", [])
 def HALTS_B_AT(p):
     """|- !t. halts_b t = (?n. is_normal (bullet_iter n t)).
 
-    Direct unfold of HALTS_B_DEF via AP_THM + BETA -- mirrors HALTS_AT.
+    Direct unfold of HALTS_B_DEF via AP_THM + BETA.
     """
     from tactics import AP_THM, BETA_CONV, TRANS, GEN
 
@@ -6878,7 +6503,7 @@ def HALTS_B_AT(p):
 
 
 # halts_par t := ?N. sk_par_steps t N /\ is_normal N.
-# Retained under Option C as the par-side of the bullet/par bridge.
+# Par-side of the bullet/par bridge HALTS_B_IFF_HALTS_PAR.
 HALTS_PAR_DEF = define(
     "halts_par",
     parse_type("nat0 -> bool"),
@@ -6891,7 +6516,7 @@ halts_par = mk_const("halts_par", [])
 def HALTS_PAR_AT(p):
     """|- !t. halts_par t = (?N. sk_par_steps t N /\\ is_normal N).
 
-    Direct unfold of HALTS_PAR_DEF via AP_THM + BETA -- mirrors HALTS_AT.
+    Direct unfold of HALTS_PAR_DEF via AP_THM + BETA.
     """
     from tactics import AP_THM, BETA_CONV, TRANS, GEN
 
@@ -7281,8 +6906,7 @@ def _HALTS_PAR_TO_HALTS_B(p):
 def HALTS_B_IFF_HALTS_PAR(p):
     """|- !X. halts_b X = halts_par X.
 
-    The bullet/par halt-bridge (Option C's central lemma).  Iff-intro
-    on the two directions:
+    The bullet/par halt-bridge.  Iff-intro on the two directions:
 
     Forward (halts_b X ==> halts_par X).  Unfold halts_b X to
     ``?n. is_normal (bullet_iter n X)``; choose n; witness halts_par X
@@ -7290,8 +6914,8 @@ def HALTS_B_IFF_HALTS_PAR(p):
     sk_par_steps witness.
 
     Backward (halts_par X ==> halts_b X).  Delegated to the helper
-    ``_HALTS_PAR_TO_HALTS_B`` (currently a sorry stub; needs the
-    Takahashi confluence argument via SK_BULLET_TRIANGLE).
+    ``_HALTS_PAR_TO_HALTS_B``, which uses the Takahashi confluence
+    argument via SK_BULLET_TRIANGLE.
     """
     p.goal("!X. halts_b X = halts_par X")
     p.fix("X")
@@ -7352,7 +6976,7 @@ def HALTS_PAR_INVARIANT(p):
     Backward (halts_par Y ==> halts_par X).  Unfold halts_par Y;
     PAR_STEPS_TRANS prepends sk_par_steps X Y; witness halts_par X.
 
-    Stays inside the par calculus (no STANDARDIZATION_NORMAL).
+    Stays inside the par calculus.
     """
     p.goal(
         "!X Y. sk_par_steps X Y ==> halts_par X = halts_par Y"
@@ -7446,12 +7070,15 @@ def HALTS_PAR_INVARIANT(p):
     )
 
 
+# ---------------------------------------------------------------------------
+# Stage 6 -- the diagonal.
+#
 # ``halts_decider H`` says H is an SK term that decides halting via the
-# flipped halting-status output convention (post bullet-migration):
-# ``halts_b t  iff  ~halts_b (App_t H t)``.  Per iter_to_bullet.md
-# "Output convention change" -- the flipped convention turns the
-# diagonal equation ``halts_b d = halts_b (App H d)`` into a P = ~P
-# contradiction directly, no K_t / KI_t case-split needed.
+# flipped halting-status output convention:
+# ``halts_b t  iff  ~halts_b (App_t H t)``.  The flipped convention
+# turns the diagonal equation ``halts_b d = halts_b (App_t H d)`` into
+# a ``P = ~P`` contradiction directly, no Church-bool case-split needed.
+# ---------------------------------------------------------------------------
 HALTS_DECIDER_DEF = define(
     "halts_decider",
     parse_type("nat0 -> bool"),
@@ -7469,8 +7096,7 @@ def HALTS_DECIDER_DEF_THM(p):
                !t. is_sk_term t ==>
                    (halts_b t = ~(halts_b (App_t H t)))).
 
-    Direct unfold of HALTS_DECIDER_DEF via AP_THM + BETA (same shape as
-    HALTS_AT for HALTS_DEF).
+    Direct unfold of HALTS_DECIDER_DEF via AP_THM + BETA.
     """
     from tactics import AP_THM, BETA_CONV, TRANS, GEN
     H_var = Var("H", nat0_ty)
@@ -7542,18 +7168,14 @@ def DIAG_TERM(p):
           --> H (((K e)(K e))((K e)(K e)))           [2 x I_unf-as-SKK fires PAR_S]
           --> H (e e) = App_t H d                    [4 x parallel K]
 
-    History (see iter_to_bullet.md "Post-spike audit"):
-    commit 01ac895 attempted to migrate this proof to a bullet form
-    `bullet_iter 4 d = App H d`, on the spike-validated trajectory for
-    atomic H.  Composite-H stress testing (EXP 5/6 in outside/sk_par.py)
-    falsified the equation under `is_sk_term H` -- for H = App K K,
-    the trajectory collapses at iter 3; for H = I = SKK, it cycles
-    period-4 without ever reaching App H d.  Under Option C the
-    diagonal is back in par form (the calculus that has PAR_REFL on H,
-    which is precisely the "keep H unreduced" operation bullet's
-    eager-everywhere semantics forbids), and the par-to-bullet bridge
-    is provided downstream by `HALTS_B_IFF_HALTS_PAR` (not yet
-    shipped).
+    Why par and not bullet: ``PAR_REFL`` lets ``H`` stay un-reduced
+    inside the residue, which is what makes the diagonal work for
+    arbitrary ``is_sk_term H``.  Bullet's eager-everywhere semantics
+    would reduce composite ``H`` mid-trajectory and break the equation
+    (empirically falsified in ``outside/sk_par.py`` EXP 5/6).  The
+    par-to-bullet bridge ``HALTS_B_IFF_HALTS_PAR`` downstream lifts
+    the par chain to a ``halts_b`` equality; see
+    ``DIAGONAL_TERM_EXISTS``.
     """
     _I = _DIAG_I
     _SII = _DIAG_SII
@@ -7618,7 +7240,7 @@ def DIAGONAL_TERM_EXISTS(p):
     """|- !H. is_sk_term H ==>
               ?d. is_sk_term d /\\ halts_b d = halts_b (App_t H d).
 
-    Halts-form diagonal in the new (bullet) convention.  Combines:
+    Halts-form diagonal in the bullet halting convention.  Combines:
 
       * DIAG_TERM           : the par-form Curry diagonal
                               ``sk_par_steps d (App_t H d)``.
@@ -7677,37 +7299,21 @@ def HALTING_UNDECIDABLE(p):
 
     THE THEOREM.  No SK combinator decides halting.
 
-    Proof (the diagonal sketched above):
+    Proof (5-step contradiction):
 
-      Assume H with halts_decider H.  Build
-        f := an SK term satisfying  App_t f x -->* App_t (App_t (App_t H x)
-                                                            Omega_t) K_t
-             for all x   (via bracket abstraction on x).
-        d := App_t Y_t f.
+      Assume H with halts_decider H.  Unfold the (flipped, bullet-form)
+      spec via HALTS_DECIDER_DEF_THM:
+        is_sk_term H  /\\  !t. is_sk_term t ==>
+                              halts_b t = ~halts_b (App_t H t).
 
-      By Y_FIXED_POINT:  d -->* App_t f d
-                            -->* App_t (App_t (App_t H d) Omega_t) K_t.
+      Build the classical Curry diagonal via DIAGONAL_TERM_EXISTS at H:
+        ?d. is_sk_term d /\\ halts_b d = halts_b (App_t H d).
 
-      Case 1.  halts d.
-        Then App_t H d -->* K_t (decider hypothesis), so
-          d -->* App_t (App_t K_t Omega_t) K_t -->* Omega_t
-        (by CHURCH_TRUE_REDUCES).  By HALTING_REDUCTION_PRESERVED,
-        halts Omega_t -- contradicting OMEGA_NON_HALTING.
+      Specialise the decider spec at t := d:
+        halts_b d = ~halts_b (App_t H d).
 
-      Case 2.  ~halts d.
-        Then App_t H d -->* KI_t, so
-          d -->* App_t (App_t KI_t Omega_t) K_t -->* K_t
-        (by CHURCH_FALSE_REDUCES).  K_t is normal (IS_NORMAL_K), so
-        halts d via HALTING_REDUCTION_PRESERVED -- contradicting
-        the case hypothesis.
-
-      Either branch contradicts; hence no such H.
-
-    The "d --> Omega_t / K_t" steps are packaged into DIAGONAL_TERM_EXISTS
-    (still a stub); HALTING_REDUCTION_PRESERVED, CHURCH_*_REDUCES,
-    HALTS_DECIDER_DEF_THM, OMEGA_NON_HALTING, IS_NORMAL_K, HALTS_AT,
-    EXCLUDED_MIDDLE are all live.  Once DIAGONAL_TERM_EXISTS is
-    discharged the diagonal closes without further holes.
+      Combining: halts_b (App_t H d) = ~halts_b (App_t H d).
+      Discharge via EXCLUDED_MIDDLE on halts_b (App_t H d).
     """
     from classical import EXCLUDED_MIDDLE
 
@@ -7810,22 +7416,3 @@ def HALTS_NOT_SK_REPRESENTABLE(p):
         p.absurd().by_conj(HALTING_UNDECIDABLE, "h_ex_hd")
 
 
-# ---------------------------------------------------------------------------
-# Estimated line budget (once stubs are discharged):
-#
-#   Stage 0 (SK terms + is_sk_term)          : ~50  lines
-#   Stage 1 (sk_step + is_normal)            : ~80  lines (spine analysis)
-#   Stage 2 (sk_iter + halts)                : ~30  lines
-#   Stage 3 (I, KI, Omega + OMEGA_NON_HALT)  : ~40  lines
-#   Stage 4 (Y + fixed-point thm)            : ~30  lines
-#   Stage 5 (Church-bool selectors)          : ~20  lines
-#   Stage 6 (diagonal + HALTING_UNDECIDABLE) : ~50  lines
-#   Stage 7 (corollaries)                    : ~10  lines
-#   -----------------------------------------------------
-#   Total                                    : ~310 lines
-#
-# Comparison: Norrish's HOL4 ``lambdaTheory`` halting development is
-# ~2k lines because it carries the lambda-calculus substitution
-# infrastructure.  Replacing lambda with SK removes that piece outright;
-# the diagonal portion is the same size.
-# ---------------------------------------------------------------------------
