@@ -838,15 +838,19 @@ def PAR_STEPS_STEP(p):
 
 
 # ---------------------------------------------------------------------------
-# par_chain -- a context manager analogue of sk_reduce for sk_par_steps.
+# par_conv_chain -- a context manager for assembling a par_conv chain by
+# linking individual sk_par_step transitions.  Composition lives in the
+# par_conv calculus (PAR_CONV_TRANS), so the chain's output is a
+# par-convertibility rather than an RTC of par-steps -- skipping
+# sk_par_steps entirely.
 #
 # Usage:
-#   with par_chain(p, start, label="h_par") as c:
+#   with par_conv_chain(p, start, label="h_par") as c:
 #       c.link("<intermediate_1>")
 #       c.link("<intermediate_2>")
 #       ...
 #       c.link("<final>")
-#   # registers   h_par : sk_par_steps start <final>
+#   # registers   h_par : par_conv start <final>
 #
 # Each ``c.link(next)`` synthesizes ``sk_par_step current next`` by
 # recursive structural matching:
@@ -856,13 +860,14 @@ def PAR_STEPS_STEP(p):
 #       end = App_t (App_t a' c') (App_t b' c')  -> PAR_S
 #   start = App_t A B,
 #       end = App_t A' B'                        -> PAR_APP (recurse)
-# Links accumulate; ``__exit__`` composes them right-to-left via
-# ``PAR_STEPS_STEP`` (seeded with ``PAR_STEPS_REFL`` at the final term).
+# then lifts the single par-step to par_conv via PAR_CONV_STEP.  Links
+# accumulate; ``__exit__`` folds them left-to-right via PAR_CONV_TRANS
+# (seeded with PAR_CONV_REFL when the chain is empty).
 #
-# Limitation: the synth only sees structural redexes.  A folded constant
-# like ``I_t`` is not an S_t-head even though ``I_t = (S_t K_t) K_t``
-# definitionally -- callers must either pre-unfold such constants in
-# the chain terms, or insert separate equational bridging steps.
+# Limitation: the shape synth only sees structural redexes.  A folded
+# constant like ``I_t`` is not an S_t-head even though ``I_t = (S_t K_t)
+# K_t`` definitionally -- callers must either pre-unfold such constants
+# in the chain terms, or insert separate equational bridging steps.
 # ---------------------------------------------------------------------------
 
 
@@ -993,12 +998,13 @@ def _pc_synth_par_step(start, end):
     )
 
 
-class _ParChain:
+class _ParConvChain:
     def __init__(self, p, start, label):
         self.p = p
         self.label = label
         self.start = p._parse(start) if isinstance(start, str) else start
         self.current = self.start
+        # Each entry: (left_endpoint, right_endpoint, par_conv_th).
         self.links = []
         self._closed = False
 
@@ -1011,30 +1017,40 @@ class _ParChain:
         return False
 
     def link(self, next_tm):
-        """Synthesize ``sk_par_step current next_tm`` and advance."""
+        """Synthesize ``sk_par_step current next_tm``, lift via
+        PAR_CONV_STEP to ``par_conv current next_tm``, and advance."""
         next_kt = (
             self.p._parse(next_tm) if isinstance(next_tm, str) else next_tm
         )
         par_th = _pc_synth_par_step(self.current, next_kt)
-        self.links.append((self.current, next_kt, par_th))
+        conv_th = MP(
+            SPECL([self.current, next_kt], PAR_CONV_STEP), par_th
+        )
+        self.links.append((self.current, next_kt, conv_th))
         self.current = next_kt
 
     def _close(self):
-        # Fold right-to-left: seed sk_par_steps last last (REFL),
-        # then prepend each par-step via PAR_STEPS_STEP.
-        last = self.current
-        acc = SPEC(last, PAR_STEPS_REFL)
-        for (ti, tj, par_th) in reversed(self.links):
-            inst = SPECL([ti, tj, last], PAR_STEPS_STEP)
-            acc = MP(inst, CONJ(par_th, acc))
+        # Empty chain collapses to PAR_CONV_REFL at the start term.
+        if not self.links:
+            acc = SPEC(self.start, PAR_CONV_REFL)
+        else:
+            # Fold left: acc tracks ``par_conv start <cur_right>``.
+            _, cur_right, acc = self.links[0]
+            for (_ti, tj, conv_th) in self.links[1:]:
+                inst = SPECL(
+                    [self.start, cur_right, tj], PAR_CONV_TRANS
+                )
+                acc = MP(inst, CONJ(acc, conv_th))
+                cur_right = tj
         self.p.have(f"{self.label}: {pp(acc._concl)}").by_thm(acc)
         self._closed = True
 
 
-def par_chain(p, start, *, label):
-    """Context manager for assembling an ``sk_par_steps`` chain.  See
-    module-level comment for the synthesis algorithm and limitations."""
-    return _ParChain(p, start, label)
+def par_conv_chain(p, start, *, label):
+    """Context manager for assembling a ``par_conv`` chain from
+    individual ``sk_par_step`` transitions.  See module-level comment
+    for the synthesis algorithm and limitations."""
+    return _ParConvChain(p, start, label)
 # ---------------------------------------------------------------------------
 # Inversion lemmas for ``sk_par_step``.
 #
@@ -1356,61 +1372,6 @@ def PAR_CONV_TRANS(p):
     p.thus("par_conv X Z").by_unfold("unf", PAR_CONV_DEF)
 
 
-@proof
-def PAR_CONV_OF_PAR_STEPS(p):
-    """|- !X Y. sk_par_steps X Y ==> par_conv X Y.
-
-    Embed an RTC of ``sk_par_step`` into ``par_conv`` by instantiating
-    ``sk_par_steps``'s impredicative encoding at ``P := par_conv``.  The
-    two closure obligations are PAR_CONV_REFL and (sk_par_step + par_conv
-    ==> par_conv) -- the latter from PAR_CONV_STEP composed with
-    PAR_CONV_TRANS.
-    """
-    p.goal("!X Y. sk_par_steps X Y ==> par_conv X Y")
-    p.fix("X Y")
-    p.assume("h_XY: sk_par_steps X Y")
-
-    # refl closure obligation: !Z. par_conv Z Z.
-    p.have("refl_cl: !Z:nat0. par_conv Z Z").by_thm(PAR_CONV_REFL)
-
-    # step closure obligation: !A B C. sk_par_step A B /\ par_conv B C
-    #                         ==> par_conv A C.
-    with p.have(
-        "step_cl: !A:nat0. !B:nat0. !C:nat0. "
-        "         sk_par_step A B /\\ par_conv B C ==> par_conv A C"
-    ).proof():
-        p.fix("A B C")
-        p.assume(
-            "(h_AB, h_BC): sk_par_step A B /\\ par_conv B C"
-        )
-        p.have("h_pc_AB: par_conv A B").by(
-            PAR_CONV_STEP, "A", "B", "h_AB"
-        )
-        p.have(
-            "h_conj: par_conv A B /\\ par_conv B C"
-        ).by_thm(CONJ(p.fact("h_pc_AB"), p.fact("h_BC")))
-        p.thus("par_conv A C").by(
-            PAR_CONV_TRANS, "A", "B", "C", "h_conj"
-        )
-
-    # Bundle into the closure conjunction over P := par_conv.
-    p.have(
-        "h_cl: (!Z:nat0. par_conv Z Z) /\\ "
-        "      (!A:nat0. !B:nat0. !C:nat0. "
-        "       sk_par_step A B /\\ par_conv B C ==> par_conv A C)"
-    ).by_thm(CONJ(p.fact("refl_cl"), p.fact("step_cl")))
-
-    # Unfold h_XY to its impredicative form; SPEC at par_conv; MP with
-    # h_cl.  ``_PAR_STEPS_CLOSURE`` is the closure body of sk_par_steps
-    # mentioning ``P`` free -- matches the impredicative shape after
-    # unfolding.
-    p.have(
-        "unf_XY: !P:nat0->nat0->bool. "
-        f"        {_PAR_STEPS_CLOSURE} ==> P X Y"
-    ).by_unfold("h_XY", SK_PAR_STEPS_DEF)
-    p.thus("par_conv X Y").by("unf_XY", "par_conv", "h_cl")
-
-
 # ---------------------------------------------------------------------------
 # Stage 3 -- halting predicate.
 #
@@ -1453,23 +1414,18 @@ def HALTS_AT(p):
 
 @proof
 def HALTS_INVARIANT(p):
-    """|- !X Y. sk_par_steps X Y ==> halts X = halts Y.
+    """|- !X Y. par_conv X Y ==> halts X = halts Y.
 
-    Both directions go through PAR_CONV_TRANS via PAR_CONV_OF_PAR_STEPS.
-    Forward also needs PAR_CONV_SYM to flip the convertibility.  No
-    confluence used.
+    Both directions go through PAR_CONV_TRANS; forward also uses
+    PAR_CONV_SYM to flip the convertibility.  No confluence used.
     """
     p.goal(
-        "!X Y. sk_par_steps X Y ==> halts X = halts Y"
+        "!X Y. par_conv X Y ==> halts X = halts Y"
     )
     p.fix("X Y")
-    p.assume("h_XY: sk_par_steps X Y")
+    p.assume("h_pc_XY: par_conv X Y")
 
-    # Lift the par-step chain to par-convertibility once; share for both
-    # directions.
-    p.have("h_pc_XY: par_conv X Y").by(
-        PAR_CONV_OF_PAR_STEPS, "X", "Y", "h_XY"
-    )
+    # Symmetric flip, shared by both directions.
     p.have("h_pc_YX: par_conv Y X").by(
         PAR_CONV_SYM, "X", "Y", "h_pc_XY"
     )
@@ -1602,12 +1558,13 @@ _DIAG_D = f"App_t ({_DIAG_E}) ({_DIAG_E})"
 @proof
 def DIAG_TERM(p):
     """|- !H. is_sk_term H ==>
-              ?d. is_sk_term d /\\ sk_par_steps d (App_t H d).
+              ?d. is_sk_term d /\\ par_conv d (App_t H d).
 
-    Classical Curry diagonal under parallel reduction.  Witness with I_t
-    unfolded inline as ``(S_t K_t) K_t`` so ``par_chain``'s structural
-    synth sees the S-redex shape at each ``I_unf e`` site (the
-    existential over d doesn't care that I_unf = I_t definitionally)::
+    Classical Curry diagonal in the par-convertibility calculus.  Witness
+    with I_t unfolded inline as ``(S_t K_t) K_t`` so ``par_conv_chain``'s
+    structural synth sees the S-redex shape at each ``I_unf e`` site
+    (the existential over d doesn't care that I_unf = I_t
+    definitionally)::
 
         I_unf := App_t (App_t S_t K_t) K_t
         SII   := App_t (App_t S_t I_unf) I_unf
@@ -1615,22 +1572,23 @@ def DIAG_TERM(p):
         e     := App_t (App_t S_t KH) SII        (* S (K H) SII *)
         d     := App_t e e
 
-    4-link par-step chain (each link a single parallel-reduction step;
-    par_chain synth emits PAR_S / PAR_K / PAR_APP from the start/end
-    shapes, REFL on H carries through every link)::
+    4-link chain (each link a single parallel-reduction step lifted to
+    par_conv via PAR_CONV_STEP and composed via PAR_CONV_TRANS;
+    par_conv_chain synth emits PAR_S / PAR_K / PAR_APP from the
+    start/end shapes, REFL on H carries through every link)::
 
-        d --> (KH e)(SII e)                          [outer S]
-          --> H ((I_unf e)(I_unf e))                 [PAR_K on left, PAR_S on right]
-          --> H (((K e)(K e))((K e)(K e)))           [2 x I_unf-as-SKK fires PAR_S]
-          --> H (e e) = App_t H d                    [4 x parallel K]
+        d ~ (KH e)(SII e)                          [outer S]
+          ~ H ((I_unf e)(I_unf e))                 [PAR_K on left, PAR_S on right]
+          ~ H (((K e)(K e))((K e)(K e)))           [2 x I_unf-as-SKK fires PAR_S]
+          ~ H (e e) = App_t H d                    [4 x parallel K]
 
     Why par and not bullet: ``PAR_REFL`` lets ``H`` stay un-reduced
     inside the residue, which is what makes the diagonal work for
     arbitrary ``is_sk_term H``.  Bullet's eager-everywhere semantics
     would reduce composite ``H`` mid-trajectory and break the equation
     (empirically falsified in ``outside/sk_par.py`` EXP 5/6).
-    ``DIAGONAL_TERM_EXISTS`` downstream promotes the par chain to a
-    ``halts`` equality via ``HALTS_INVARIANT``.
+    ``DIAGONAL_TERM_EXISTS`` downstream promotes the par_conv chain to
+    a ``halts`` equality via ``HALTS_INVARIANT``.
     """
     _I = _DIAG_I
     _SII = _DIAG_SII
@@ -1640,7 +1598,7 @@ def DIAG_TERM(p):
 
     p.goal(
         "!H. is_sk_term H ==> "
-        "    ?d. is_sk_term d /\\ sk_par_steps d (App_t H d)"
+        "    ?d. is_sk_term d /\\ par_conv d (App_t H d)"
     )
     p.fix("H")
     p.assume("h_is_sk_H: is_sk_term H")
@@ -1671,7 +1629,7 @@ def DIAG_TERM(p):
         IS_SK_TERM_APP, "h_e", "h_e"
     )
 
-    # ---- (2) 4-link par-step chain. --------------------------------------
+    # ---- (2) 4-link par_conv chain. --------------------------------------
     _T1 = f"App_t (App_t ({_KH}) ({_E})) (App_t ({_SII}) ({_E}))"
     _I_E = f"App_t ({_I}) ({_E})"
     _T2 = f"App_t H (App_t ({_I_E}) ({_I_E}))"
@@ -1680,7 +1638,7 @@ def DIAG_TERM(p):
     _T3 = f"App_t H (App_t ({_KE_KE}) ({_KE_KE}))"
     _T4 = f"App_t H ({_D})"
 
-    with par_chain(p, _D, label="h_par") as c:
+    with par_conv_chain(p, _D, label="h_par") as c:
         c.link(_T1)
         c.link(_T2)
         c.link(_T3)
@@ -1688,7 +1646,7 @@ def DIAG_TERM(p):
 
     # ---- (3) Witness d. --------------------------------------------------
     p.thus(
-        "?d. is_sk_term d /\\ sk_par_steps d (App_t H d)"
+        "?d. is_sk_term d /\\ par_conv d (App_t H d)"
     ).by_exists([_D], "h_is_sk_d", "h_par")
 @proof
 def DIAGONAL_TERM_EXISTS(p):
@@ -1696,8 +1654,8 @@ def DIAGONAL_TERM_EXISTS(p):
               ?d. is_sk_term d /\\ halts d = halts (App_t H d).
 
     Halts-form diagonal: DIAG_TERM gives ``d`` and
-    ``sk_par_steps d (App_t H d)``; HALTS_INVARIANT promotes the
-    par-step chain to a halts equality.  Witness d.
+    ``par_conv d (App_t H d)``; HALTS_INVARIANT promotes the
+    par-convertibility to a halts equality.  Witness d.
     """
     p.goal(
         "!H. is_sk_term H ==> "
@@ -1707,7 +1665,7 @@ def DIAGONAL_TERM_EXISTS(p):
     p.assume("h_is_sk_H: is_sk_term H")
 
     p.have(
-        "h_diag: ?d. is_sk_term d /\\ sk_par_steps d (App_t H d)"
+        "h_diag: ?d. is_sk_term d /\\ par_conv d (App_t H d)"
     ).by(DIAG_TERM, "H", "h_is_sk_H")
     p.choose("d", from_="h_diag")
     p.split("d_eq", "(h_is_sk_d, h_par)")
