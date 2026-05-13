@@ -1103,12 +1103,9 @@ def _par_step_atom_inv(p, atom_str, atom_neq_app_t):
         )
         p.assume(f"h_eq: App_t (App_t K_t M) N = {atom_str}")
         p.have(
-            f"h_eq_sym: {atom_str} = App_t (App_t K_t M) N"
-        ).by_thm(SYM(p.fact("h_eq")))
-        p.have(
             f"h_neg: ~({atom_str} = App_t (App_t K_t M) N)"
         ).by(atom_neq_app_t, "App_t K_t M", "N")
-        p.absurd().by_conj("h_neg", "h_eq_sym")
+        p.absurd().by_conj("h_neg", "h_eq")
 
     with p.have(
         f"c_S: !M:nat0. !N:nat0. !P:nat0. "
@@ -1128,12 +1125,9 @@ def _par_step_atom_inv(p, atom_str, atom_neq_app_t):
         )
         p.assume(f"h_eq: App_t (App_t (App_t S_t M) N) P = {atom_str}")
         p.have(
-            f"h_eq_sym: {atom_str} = App_t (App_t (App_t S_t M) N) P"
-        ).by_thm(SYM(p.fact("h_eq")))
-        p.have(
             f"h_neg: ~({atom_str} = App_t (App_t (App_t S_t M) N) P)"
         ).by(atom_neq_app_t, "App_t (App_t S_t M) N", "P")
-        p.absurd().by_conj("h_neg", "h_eq_sym")
+        p.absurd().by_conj("h_neg", "h_eq")
 
     with p.have(
         f"c_APP: !M:nat0. !N:nat0. !M1:nat0. !N1:nat0. "
@@ -1148,13 +1142,10 @@ def _par_step_atom_inv(p, atom_str, atom_neq_app_t):
             f"(N = {atom_str} ==> N1 = {atom_str})"
         )
         p.assume(f"h_eq: App_t M N = {atom_str}")
-        p.have(f"h_eq_sym: {atom_str} = App_t M N").by_thm(
-            SYM(p.fact("h_eq"))
-        )
         p.have(f"h_neg: ~({atom_str} = App_t M N)").by(
             atom_neq_app_t, "M", "N"
         )
-        p.absurd().by_conj("h_neg", "h_eq_sym")
+        p.absurd().by_conj("h_neg", "h_eq")
 
     cl_th = CONJ(
         p.fact("c_refl"),
@@ -2240,8 +2231,6 @@ def _par_step_app_atom_inv(p, atom_str, atom_inv_thm, atom_neq_app_t):
     * The closure bvars in ``_PAR_STEP_CLOSURE`` (A Y A1 Y1 ...) clash
       with the outer ``Y``; we name the closure bvars freshly (M N P
       M1 N1 P1) and rely on alpha-conversion at the final CONJ.
-    * ``by_conj`` is NOT sym-tolerant (unlike ``_simp_require``); each
-      shape-clash branch SYMs the APP_T_INJ result before ``absurd``.
 
     DSL friction (firing-case specific):
     * Rewriting ``par_step M M1`` to ``par_step <atom> M1`` via
@@ -2358,12 +2347,9 @@ def _par_step_app_atom_inv(p, atom_str, atom_inv_thm, atom_neq_app_t):
                 f"h_inj_L: App_t K_t M = {atom_str}"
             ).by_thm(_C1(p.fact("h_inj")))
             p.have(
-                f"h_inj_L_sym: {atom_str} = App_t K_t M"
-            ).by_thm(SYM(p.fact("h_inj_L")))
-            p.have(
                 f"h_neq: ~({atom_str} = App_t K_t M)"
             ).by(atom_neq_app_t, "K_t", "M")
-            p.absurd().by_conj("h_neq", "h_inj_L_sym")
+            p.absurd().by_conj("h_neq", "h_inj_L")
         p.thus(
             f"sk_par_step (App_t (App_t K_t M) N) M1 /\\ "
             f"(!W:nat0. App_t (App_t K_t M) N = App_t {atom_str} W ==> "
@@ -2439,12 +2425,9 @@ def _par_step_app_atom_inv(p, atom_str, atom_inv_thm, atom_neq_app_t):
                 f"h_inj_L: App_t (App_t S_t M) N = {atom_str}"
             ).by_thm(_C1(p.fact("h_inj")))
             p.have(
-                f"h_inj_L_sym: {atom_str} = App_t (App_t S_t M) N"
-            ).by_thm(SYM(p.fact("h_inj_L")))
-            p.have(
                 f"h_neq: ~({atom_str} = App_t (App_t S_t M) N)"
             ).by(atom_neq_app_t, "App_t S_t M", "N")
-            p.absurd().by_conj("h_neq", "h_inj_L_sym")
+            p.absurd().by_conj("h_neq", "h_inj_L")
         p.thus(
             f"sk_par_step (App_t (App_t (App_t S_t M) N) P) "
             f"            (App_t (App_t M1 P1) (App_t N1 P1)) /\\ "
@@ -2738,8 +2721,7 @@ def PAR_STEP_S_APP_APP_INV(p):
                 "h_inj2: K_t = S_t /\\ M = W1"
             ).by(APP_T_INJ, "K_t", "M", "S_t", "W1", "h_inj1_L")
             p.have("h_K_eq_S: K_t = S_t").by_thm(_C1(p.fact("h_inj2")))
-            p.have("h_S_eq_K: S_t = K_t").by_thm(SYM(p.fact("h_K_eq_S")))
-            p.absurd().by_conj(S_T_NEQ_K_T, "h_S_eq_K")
+            p.absurd().by_conj(S_T_NEQ_K_T, "h_K_eq_S")
         p.thus(
             f"{_q_body('(App_t (App_t K_t M) N)', 'M1')}"
         ).by_thm(_CONJ(p.fact("h_par_KMN"), p.fact("h_inv_K")))
@@ -2803,13 +2785,10 @@ def PAR_STEP_S_APP_APP_INV(p):
             p.have(
                 "h_inj2_L: App_t S_t M = S_t"
             ).by_thm(_C1(p.fact("h_inj2")))
-            p.have(
-                "h_inj2_L_sym: S_t = App_t S_t M"
-            ).by_thm(SYM(p.fact("h_inj2_L")))
             p.have("h_neq: ~(S_t = App_t S_t M)").by(
                 S_T_NEQ_APP_T, "S_t", "M"
             )
-            p.absurd().by_conj("h_neq", "h_inj2_L_sym")
+            p.absurd().by_conj("h_neq", "h_inj2_L")
         p.thus(
             f"{_q_body('(App_t (App_t (App_t S_t M) N) P)', '(App_t (App_t M1 P1) (App_t N1 P1))')}"
         ).by_thm(_CONJ(p.fact("h_par_Sred"), p.fact("h_inv_S")))

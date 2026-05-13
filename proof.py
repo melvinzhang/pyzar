@@ -2921,7 +2921,9 @@ class _Absurd:
         """Discharge F from a fact ``P`` and a fact ``~P`` (in either order).
 
         The two refs name a positive fact and its direct negation; we run
-        ``MP(NOT_ELIM(neg), pos)``."""
+        ``MP(NOT_ELIM(neg), pos)``. Sym-tolerant when both sides are
+        equations: if ``inner`` is ``a = b`` and ``pos`` is ``b = a``,
+        retries against ``SYM(pos)``."""
         if len(refs) != 2:
             raise HolError(
                 f"absurd: by_conj requires exactly two facts, got {len(refs)}"
@@ -2940,6 +2942,15 @@ class _Absurd:
             lifted = self.p.simp_match(inner, pos)
             if lifted is not None:
                 return self._finish(MP(NOT_ELIM(neg), lifted))
+            # Sym-tolerant retry: if both inner and pos are equations,
+            # try matching against SYM(pos).
+            if is_eq(inner) and is_eq(pos._concl):
+                pos_sym = SYM(pos)
+                if aconv(inner, pos_sym._concl):
+                    return self._finish(MP(NOT_ELIM(neg), pos_sym))
+                lifted = self.p.simp_match(inner, pos_sym)
+                if lifted is not None:
+                    return self._finish(MP(NOT_ELIM(neg), lifted))
         raise HolError(
             "absurd: by_conj could not match P / ~P among "
             f"{pp(a._concl)} / {pp(b._concl)}"

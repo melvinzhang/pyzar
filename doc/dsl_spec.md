@@ -496,7 +496,7 @@ frame's result. Methods:
 
 * `.by_thm(th)` — `th` already proves `F`.
 * `.by(just, *args)` — SPEC/MP chain (non-simp); or callable.
-* `.by_conj(ref_a, ref_b)` — match `P` against `~P` (either order); `MP(NOT_ELIM, P)`.
+* `.by_conj(ref_a, ref_b)` — match `P` against `~P` (either order); `MP(NOT_ELIM, P)`. Sym-tolerant when both sides are equations: retries against `SYM(pos)` if `~(a=b)` is paired with `b=a`.
 * `.auto(ref)` / `.auto(ref_a, ref_b)` — one-fact: discharge `~(t = t)` via `MP(NOT_ELIM, REFL(t))`. Two-fact: look up a contradiction finder for `(rel(a), rel(b))` in `_CONTRA_FINDERS`.
 * `.via(forward, case, *, source)` — lift `case` through `forward` (an implication) into a fact contradicting `source` via `auto`.
 
