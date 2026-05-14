@@ -15,14 +15,14 @@ has been redirected to the set-native checker.
 | # | Theorem                          | Line | Est. size  | Depends on (sorry)        | Depends on (other)                                          |
 |---|----------------------------------|-----:|-----------:|---------------------------|-------------------------------------------------------------|
 | A | `HF4_INST`                       | 1400 | done       | —                         | `_prov_of_hf_axiom`, `PROV_HF_UI`, substitute reductions    |
-| B | `QUOTE_HF_NEQ_FROM_LOW_BIT`      | 1709 | large      | —                         | `HF4_INST`, `HF2`/`HF3_INST`, canonical nonmembership/order  |
-| C | `QUOTE_HF_NEQ_FROM_CLEAR_LOW`    | 1741 | large      | —                         | same as B                                                    |
-| D | `IS_SUBSTITUTE_STEP_REPRESENTS`  | 2699 | ~150 lines | —                         | `IS_IN_REPRESENTS` (✓), `IS_PAIR_ORD_REPRESENTS` (✓), `QUOTE_HF_AT_PAIR_ORD` (✓), HF1–HF3 (✓); **body of `is_substitute_step_internal`** |
-| E | `IS_SUBSTITUTE_TRACE_REPRESENTS` | 2740 |  ~80 lines | D                         | `HF_INDUCTION` (✓); **body of `is_substitute_trace_internal`** |
-| F | `SUBSTITUTE_REPRESENTS`          | 2772 |  moderate  | E                         | `TRACE_EXISTS` (✓); **body of `substitute_internal`**       |
-| G | `PROV_HF_REPRESENTS`             | 2850 | large      | F                         | Σ₁ completeness (forward) — Σ₁ soundness deferred to Stage 6; **body of `Prov_HF_internal`** |
-| H | `IS_FORM_PROV_HF_INTERNAL`       | 2863 | small      | G's body def              | `is_form` closure under HF-formula constructors             |
-| I | `FREE_IN_PROV_HF_INTERNAL`       | 2875 | small      | G's body def              | `free_in` recursion                                          |
+| B | `QUOTE_HF_NEQ_FROM_LOW_BIT`      | 1711 | large      | —                         | `HF4_INST`, `HF2`/`HF3_INST`, canonical nonmembership/order  |
+| C | `QUOTE_HF_NEQ_FROM_CLEAR_LOW`    | 1745 | large      | —                         | same as B                                                    |
+| D | `IS_SUBSTITUTE_STEP_REPRESENTS`  | 2975 | ~150 lines | —                         | `IS_IN_REPRESENTS` (✓), `IS_PAIR_ORD_REPRESENTS` (✓), `QUOTE_HF_AT_PAIR_ORD` (✓), HF1–HF3 (✓); **body of `is_substitute_step_internal`** |
+| E | `IS_SUBSTITUTE_TRACE_REPRESENTS` | 3026 |  ~80 lines | D                         | `HF_INDUCTION` (✓); **body of `is_substitute_trace_internal`** |
+| F | `SUBSTITUTE_REPRESENTS`          | 3067 |  moderate  | E                         | `TRACE_EXISTS` (✓); **body of `substitute_internal`**       |
+| G | `PROV_HF_REPRESENTS`             | 3156 | large      | F                         | Σ₁ completeness (forward) — Σ₁ soundness deferred to Stage 6; **body of `Prov_HF_internal`** |
+| H | `IS_FORM_PROV_HF_INTERNAL`       | 3170 | small      | G's body def              | `is_form` closure under HF-formula constructors             |
+| I | `FREE_IN_PROV_HF_INTERNAL`       | 3183 | small      | G's body def              | `free_in` recursion                                          |
 
 ✓ = already proven and exported (no sorry).
 
@@ -124,20 +124,22 @@ A/B/C path.
 
 2. **B — `QUOTE_HF_NEQ_FROM_LOW_BIT`** and
    **C — `QUOTE_HF_NEQ_FROM_CLEAR_LOW`**.
-   - HF4 is no longer the blocker. The remaining unknown is the
-     canonical nonmembership/order bridge:
-
-     ```text
-     low_bit h is below every element in clear_low s
-     ```
-
-     expressed strongly enough to derive object-level
-     `Prov_HF (Not_f (In_a (quote_hf i) (quote_hf (clear_low s))))`
-     without using `IS_IN_REPRESENTS`, because `IS_IN_REPRESENTS`
-     itself depends on `QUOTE_HF_PROV_NEQ`.
-   - Settle this bridge first. Once it exists, B/C become applications
-     of `HF2_INST`, `HF3_INST`, `HF4_INST`, and the existing
-     propositional toolkit.
+   - Do not keep these as standalone low-bit/tail injectivity lemmas.
+     The better route is a strengthened induction that proves
+     membership decision and quote inequality together, then derives
+     `QUOTE_HF_PROV_NEQ` and `IS_IN_REPRESENTS` as projections.
+   - The object-level endpoint for the equality side is now available:
+     `PROV_HF_NEQ_FROM_MEM_DIFF` proves that a single membership
+     difference
+     `Prov_HF (In_a (quote_hf w) s)` and
+     `Prov_HF (Not_f (In_a (quote_hf w) t))`
+     implies `Prov_HF (Not_f (Eq_f s t))`.
+   - Next implementation step: replace the current
+     `QUOTE_HF_PROV_NEQ`/`IS_IN_REPRESENTS` cycle with one strengthened
+     induction. For the equality projection, use HOL `IN_EXT` plus
+     `NOT_FORALL_TO_EX_NOT` to choose a discriminating element, then
+     dispatch via the two membership-decision projections and
+     `PROV_HF_NEQ_FROM_MEM_DIFF`.
 
 ### Phase 2 — `substitute` representability
 
@@ -255,6 +257,13 @@ definitions.
   nonmembership/order bridge needed by `QUOTE_HF_NEQ_FROM_LOW_BIT`
   and `QUOTE_HF_NEQ_FROM_CLEAR_LOW`.
 
+* **Membership-difference discriminator (done)** —
+  `PROV_HF_NEQ_FROM_MEM_DIFF` is closed. This is the reusable final
+  step for the mutual-induction strategy: once the induction supplies
+  object-level positive membership on one quoted set and object-level
+  negative membership on the other, it yields object-level inequality
+  of the quoted sets by equality substitution and contraposition.
+
 * **Prerequisite for D — Python builders for godelnum shapes.**
   The body of `is_substitute_step_internal` needs to express
   godelnum-shape claims like ``a = Var_t v`` in HF formulas with
@@ -321,7 +330,8 @@ definitions.
   builders now keep those terms aligned with the substitute rewriter's
   unfolded `Var_t 0` / `Var_t (SUC0 0)` / `Var_t (SUC0 (SUC0 0))`
   normal forms.
-* **B/C**: do not start by writing the final lift proof. First prove
-  the canonical nonmembership/order bridge for quote towers without
-  using `IS_IN_REPRESENTS`, otherwise the dependency loops back through
+* **B/C**: bypass as independent lemmas. Build the strengthened
+  induction and then delete these two proof obligations or reduce them
+  to projections of the strengthened theorem. The induction must not
+  call the existing `IS_IN_REPRESENTS`, because that loops back through
   `QUOTE_HF_PROV_NEQ`.

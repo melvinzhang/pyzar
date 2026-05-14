@@ -123,6 +123,7 @@ from hf_repr_core import IS_TERM_QUOTE_HF, SUBSTITUTE_QUOTE_HF, PROV_HF_MP
 _t_n0 = Var("t", nat0_ty)
 _u_n0 = Var("u", nat0_ty)
 _w_n0 = Var("w", nat0_ty)
+_s_n0 = Var("s", nat0_ty)
 
 
 # ---------------------------------------------------------------------------
@@ -2105,6 +2106,137 @@ def _empty_neq_insert_quotes(p, lb_label, cl_label, nz_label, dir_left_zero):
 
 
 @proof
+def PROV_HF_NEQ_FROM_MEM_DIFF(p):
+    """|- !w s t. is_term s /\\ is_term t
+                  /\\ Prov_HF (In_a (quote_hf w) s)
+                  /\\ Prov_HF (Not_f (In_a (quote_hf w) t))
+                  ==> Prov_HF (Not_f (Eq_f s t)).
+
+    Object-level extensional discriminator.  If equality of ``s`` and
+    ``t`` held, substitution into ``In_a (quote_hf w) (Var_t 0)`` would
+    transport membership of ``quote_hf w`` from ``s`` to ``t``;
+    contraposition against the supplied nonmembership closes
+    ``Not_f (Eq_f s t)``.
+    """
+    p.goal(
+        "!w s t. is_term s /\\ is_term t "
+        "/\\ Prov_HF (In_a (quote_hf w) s) "
+        "/\\ Prov_HF (Not_f (In_a (quote_hf w) t)) "
+        "==> Prov_HF (Not_f (Eq_f s t))",
+        types={"w": nat0_ty, "s": nat0_ty, "t": nat0_ty},
+    )
+    p.fix("w s t")
+    p.assume(
+        "(hs, ht, h_in_s, h_not_in_t): "
+        "is_term s /\\ is_term t "
+        "/\\ Prov_HF (In_a (quote_hf w) s) "
+        "/\\ Prov_HF (Not_f (In_a (quote_hf w) t))"
+    )
+    p.have("h_tqw: is_term (quote_hf w)").by(IS_TERM_QUOTE_HF, "w")
+
+    is_term_v0 = EQT_ELIM(SPEC(ZERO, IS_TERM_AT_VAR))
+    p.have("h_t_v0: is_term (Var_t 0)").by_thm(is_term_v0)
+
+    is_form_phi = EQ_MP(
+        SYM(SPECL([p._parse("quote_hf w"), p._parse("Var_t 0")], IS_FORM_AT_IN)),
+        CONJ(p.fact("h_tqw"), p.fact("h_t_v0")),
+    )
+    p.have("h_f_phi: is_form (In_a (quote_hf w) (Var_t 0))").by_thm(is_form_phi)
+    is_form_in_s = EQ_MP(
+        SYM(SPECL([p._parse("quote_hf w"), _s_n0], IS_FORM_AT_IN)),
+        CONJ(p.fact("h_tqw"), p.fact("hs")),
+    )
+    p.have("h_f_in_s: is_form (In_a (quote_hf w) s)").by_thm(is_form_in_s)
+    is_form_in_t = EQ_MP(
+        SYM(SPECL([p._parse("quote_hf w"), _t_n0], IS_FORM_AT_IN)),
+        CONJ(p.fact("h_tqw"), p.fact("ht")),
+    )
+    p.have("h_f_in_t: is_form (In_a (quote_hf w) t)").by_thm(is_form_in_t)
+    is_form_eq = EQ_MP(
+        SYM(SPECL([_s_n0, _t_n0], IS_FORM_AT_EQ)),
+        CONJ(p.fact("hs"), p.fact("ht")),
+    )
+    p.have("h_f_eq: is_form (Eq_f s t)").by_thm(is_form_eq)
+
+    p.have(
+        "h_subst_eq: Prov_HF (Imp_f (Eq_f s t) "
+        "  (Imp_f (substitute (In_a (quote_hf w) (Var_t 0)) s 0) "
+        "         (substitute (In_a (quote_hf w) (Var_t 0)) t 0)))"
+    ).by(
+        PROV_HF_SUBST_EQ, "0", "In_a (quote_hf w) (Var_t 0)", "s", "t",
+        CONJ(
+            p.fact("h_f_phi"),
+            CONJ(p.fact("hs"), p.fact("ht")),
+        ),
+    )
+
+    subst_v0_s = MP(
+        SPECL([ZERO, _s_n0, ZERO], SUBSTITUTE_AT_VAR_HIT),
+        REFL(ZERO),
+    )
+    subst_v0_t = MP(
+        SPECL([ZERO, _t_n0, ZERO], SUBSTITUTE_AT_VAR_HIT),
+        REFL(ZERO),
+    )
+    p.have(
+        "h_imp_in: Prov_HF (Imp_f (Eq_f s t) "
+        "  (Imp_f (In_a (quote_hf w) s) (In_a (quote_hf w) t)))"
+    ).by_rewrite_of(
+        "h_subst_eq",
+        [
+            SUBSTITUTE_AT_IN,
+            subst_v0_s,
+            subst_v0_t,
+            SUBSTITUTE_QUOTE_HF,
+        ],
+    )
+
+    p.have(
+        "h_drop_in_s: Prov_HF (Imp_f (Eq_f s t) (In_a (quote_hf w) s))"
+    ).by(
+        PROV_HF_HYP_DROP,
+        "Eq_f s t", "In_a (quote_hf w) s",
+        CONJ(
+            p.fact("h_f_eq"),
+            CONJ(p.fact("h_f_in_s"), p.fact("h_in_s")),
+        ),
+    )
+    p.have(
+        "h_eq_to_in_t: Prov_HF (Imp_f (Eq_f s t) (In_a (quote_hf w) t))"
+    ).by(
+        PROV_HF_DT_MP,
+        "Eq_f s t", "In_a (quote_hf w) s", "In_a (quote_hf w) t",
+        CONJ(
+            p.fact("h_f_eq"),
+            CONJ(
+                p.fact("h_f_in_s"),
+                CONJ(
+                    p.fact("h_f_in_t"),
+                    CONJ(p.fact("h_drop_in_s"), p.fact("h_imp_in")),
+                ),
+            ),
+        ),
+    )
+    p.have(
+        "h_contrap: Prov_HF (Imp_f (Not_f (In_a (quote_hf w) t)) "
+        "                         (Not_f (Eq_f s t)))"
+    ).by(
+        PROV_HF_CONTRAP,
+        "Eq_f s t", "In_a (quote_hf w) t",
+        CONJ(
+            p.fact("h_f_eq"),
+            CONJ(p.fact("h_f_in_t"), p.fact("h_eq_to_in_t")),
+        ),
+    )
+    p.thus("Prov_HF (Not_f (Eq_f s t))").by(
+        PROV_HF_MP,
+        "Not_f (In_a (quote_hf w) t)",
+        "Not_f (Eq_f s t)",
+        CONJ(p.fact("h_not_in_t"), p.fact("h_contrap")),
+    )
+
+
+@proof
 def QUOTE_HF_PROV_NEQ(p):
     """|- !s t. ~(s = t) ==>
                 Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))).
@@ -3211,6 +3343,7 @@ if __name__ == "__main__":
         "    QUOTE_HF_NEQ_FROM_CLEAR_LOW (SORRY) :",
         pp_thm(QUOTE_HF_NEQ_FROM_CLEAR_LOW),
     )
+    print("    PROV_HF_NEQ_FROM_MEM_DIFF     :", pp_thm(PROV_HF_NEQ_FROM_MEM_DIFF))
     print("    QUOTE_HF_PROV_NEQ              :", pp_thm(QUOTE_HF_PROV_NEQ))
     print("    IS_IN_REPRESENTS                       :", pp_thm(IS_IN_REPRESENTS))
     print(
