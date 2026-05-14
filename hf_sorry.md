@@ -145,6 +145,19 @@ A/B/C path.
      `NOT_FORALL_TO_EX_NOT` to choose a discriminating element, then
      dispatch via the two membership-decision projections and
      `PROV_HF_NEQ_FROM_MEM_DIFF`.
+   - Current code now has the strengthened consumer-facing contract
+     `QUOTE_HF_MEM_DECISION_AND_NEQ`:
+     direct HF membership decision for quoted HF sets bundled with
+     quoted inequality. Its body intentionally still factors through
+     `IS_IN_REPRESENTS` and `QUOTE_HF_PROV_NEQ`; this pins the theorem
+     statement and gives downstream work one target to cite while the
+     mutual induction replaces the implementation.
+   - Arithmetic orientation needed by that mutual induction is now
+     exported from `nat0_order.py` as `NAT0_LT_TRICHOTOMY` and
+     `NAT0_LT_TOTAL_NEQ`. The next real unknown is not whether unequal
+     `nat0`s can be ordered, but whether the chosen pair/measure index
+     decreases for all recursive calls required by the membership and
+     inequality projections.
 
 ### Phase 2 — `substitute` representability
 
@@ -268,6 +281,70 @@ definitions.
   object-level positive membership on one quoted set and object-level
   negative membership on the other, it yields object-level inequality
   of the quoted sets by equality substitution and contraposition.
+
+* **Strengthened theorem contract (done as a stable target)** —
+  `QUOTE_HF_MEM_DECISION_AND_NEQ` now bundles direct quoted-membership
+  decision and quoted inequality. It is deliberately a projection
+  wrapper over the old theorems for the moment; the mutual induction
+  should be built under this exact statement and then the wrapper
+  dependencies can be deleted.
+
+* **Reverse discriminator (done)** —
+  `PROV_HF_NEQ_FROM_MEM_DIFF_RIGHT` is closed. The mutual proof can now
+  use either witness orientation:
+  positive-left/negative-right via `PROV_HF_NEQ_FROM_MEM_DIFF`, or
+  negative-left/positive-right via `PROV_HF_NEQ_FROM_MEM_DIFF_RIGHT`.
+
+* **nat0 order orientation (done)** —
+  `NAT0_LT_TRICHOTOMY` and `NAT0_LT_TOTAL_NEQ` are closed in
+  `nat0_order.py` by transporting `nat.py` trichotomy through
+  `rep_nat0`. This removes a foundational unknown for any strategy that
+  orients `quote_hf i` versus `quote_hf x` before using an ordered
+  inequality projection.
+
+* **Measure correction for the mutual induction** —
+  `Pair_ord x y` is not a valid decreasing measure; numerically,
+  `Pair_ord 1 0 > Pair_ord 1 1`. The membership recursion should use
+  the set-native measure `Insert x y` instead. In the `x != low_bit y`
+  branch, the recursive call from `(x, y)` to `(x, clear_low y)`
+  should decrease because removing `low_bit y` removes a bit different
+  from `x`. The first bit lemma for this route is now closed:
+  `SET_BIT_COMMUTE_DIFF` in `bits.py`.
+  The canonical-clearing fact `BIT_CLEAR_LOW_LOW_BIT` is also closed:
+  after clearing a nonzero set's low bit, that bit is absent. This is
+  needed to prove the formal decrease of
+  `quote_hf_mem_measure x (clear_low y)` below
+  `quote_hf_mem_measure x y`.
+
+* **Induction-target experiments** —
+  `hf_induction_targets.py` brute-checks candidate measures
+  against the mutual proof's decrease obligations:
+  membership tail recursion, the membership proof's call to quoted
+  head inequality, quote decomposition recursion, and the extensional
+  symmetric-difference witness route. Up to `--limit 128`, the only
+  tested target passing all obligations is:
+
+  ```text
+  quote_hf_mem_measure x y = Insert x y
+  quote_hf_neq_measure s t =
+    max(Insert s t, Insert t s)
+  ```
+
+  These are now defined in `hf_repr_thms.py`. The formal
+  `quote_hf_neq_measure` avoids a general `max` operator by using
+  `COND_nat0 (nat0_lt (Insert s t) (Insert t s))`.
+
+* **Measured mutual target (done as a stable target)** —
+  `QUOTE_HF_MUTUAL_MEASURED` states the strong-induction target over a
+  bound `n`: all membership decisions with
+  `quote_hf_mem_measure x y < n`, and all quote inequalities with
+  `quote_hf_neq_measure s t < n`. Its body now has the correct outer
+  strong-induction frame on `n`, but the leaves still use the old
+  projection wrapper until the remaining measure-decrease lemmas are
+  formalized.
+
+  `Pair_ord` is kept behind `--include-pair-ord` because exact values
+  explode; small runs still reject it as the membership measure.
 
 * **Prerequisite for D — Python builders for godelnum shapes.**
   The body of `is_substitute_step_internal` needs to express

@@ -30,7 +30,8 @@
 from fusion import Var
 from basics import mk_app, mk_eq
 from nat0 import nat0_ty, ZERO, mk_suc0
-from proof import proof
+from parser import parse_type
+from proof import proof, define_with_at
 from tactics import (
     SPEC,
     SPECL,
@@ -2237,6 +2238,169 @@ def PROV_HF_NEQ_FROM_MEM_DIFF(p):
 
 
 @proof
+def PROV_HF_NEQ_FROM_MEM_DIFF_RIGHT(p):
+    """|- !w s t. is_term s /\\ is_term t
+                  /\\ Prov_HF (Not_f (In_a (quote_hf w) s))
+                  /\\ Prov_HF (In_a (quote_hf w) t)
+                  ==> Prov_HF (Not_f (Eq_f s t)).
+
+    Reverse-orientation discriminator for the mutual quote_hf proof. If
+    equality of ``s`` and ``t`` held, substitution into
+    ``Not_f (In_a (quote_hf w) (Var_t 0))`` would transport
+    nonmembership from ``s`` to ``t``; contraposition against positive
+    membership of ``t`` closes ``Not_f (Eq_f s t)``.
+    """
+    p.goal(
+        "!w s t. is_term s /\\ is_term t "
+        "/\\ Prov_HF (Not_f (In_a (quote_hf w) s)) "
+        "/\\ Prov_HF (In_a (quote_hf w) t) "
+        "==> Prov_HF (Not_f (Eq_f s t))",
+        types={"w": nat0_ty, "s": nat0_ty, "t": nat0_ty},
+    )
+    p.fix("w s t")
+    p.assume(
+        "(hs, ht, h_not_in_s, h_in_t): "
+        "is_term s /\\ is_term t "
+        "/\\ Prov_HF (Not_f (In_a (quote_hf w) s)) "
+        "/\\ Prov_HF (In_a (quote_hf w) t)"
+    )
+    p.have("h_tqw: is_term (quote_hf w)").by(IS_TERM_QUOTE_HF, "w")
+
+    is_term_v0 = EQT_ELIM(SPEC(ZERO, IS_TERM_AT_VAR))
+    p.have("h_t_v0: is_term (Var_t 0)").by_thm(is_term_v0)
+
+    is_form_in_v0 = EQ_MP(
+        SYM(SPECL([p._parse("quote_hf w"), p._parse("Var_t 0")], IS_FORM_AT_IN)),
+        CONJ(p.fact("h_tqw"), p.fact("h_t_v0")),
+    )
+    is_form_phi = EQ_MP(
+        SYM(SPEC(p._parse("In_a (quote_hf w) (Var_t 0)"), IS_FORM_AT_NOT)),
+        is_form_in_v0,
+    )
+    p.have("h_f_phi: is_form (Not_f (In_a (quote_hf w) (Var_t 0)))").by_thm(
+        is_form_phi
+    )
+    is_form_in_s = EQ_MP(
+        SYM(SPECL([p._parse("quote_hf w"), _s_n0], IS_FORM_AT_IN)),
+        CONJ(p.fact("h_tqw"), p.fact("hs")),
+    )
+    is_form_not_in_s = EQ_MP(
+        SYM(SPEC(p._parse("In_a (quote_hf w) s"), IS_FORM_AT_NOT)),
+        is_form_in_s,
+    )
+    p.have("h_f_not_in_s: is_form (Not_f (In_a (quote_hf w) s))").by_thm(
+        is_form_not_in_s
+    )
+    is_form_in_t = EQ_MP(
+        SYM(SPECL([p._parse("quote_hf w"), _t_n0], IS_FORM_AT_IN)),
+        CONJ(p.fact("h_tqw"), p.fact("ht")),
+    )
+    p.have("h_f_in_t: is_form (In_a (quote_hf w) t)").by_thm(is_form_in_t)
+    is_form_not_in_t = EQ_MP(
+        SYM(SPEC(p._parse("In_a (quote_hf w) t"), IS_FORM_AT_NOT)),
+        is_form_in_t,
+    )
+    p.have("h_f_not_in_t: is_form (Not_f (In_a (quote_hf w) t))").by_thm(
+        is_form_not_in_t
+    )
+    is_form_eq = EQ_MP(
+        SYM(SPECL([_s_n0, _t_n0], IS_FORM_AT_EQ)),
+        CONJ(p.fact("hs"), p.fact("ht")),
+    )
+    p.have("h_f_eq: is_form (Eq_f s t)").by_thm(is_form_eq)
+
+    p.have(
+        "h_subst_eq: Prov_HF (Imp_f (Eq_f s t) "
+        "  (Imp_f (substitute (Not_f (In_a (quote_hf w) (Var_t 0))) s 0) "
+        "         (substitute (Not_f (In_a (quote_hf w) (Var_t 0))) t 0)))"
+    ).by(
+        PROV_HF_SUBST_EQ, "0", "Not_f (In_a (quote_hf w) (Var_t 0))", "s", "t",
+        CONJ(
+            p.fact("h_f_phi"),
+            CONJ(p.fact("hs"), p.fact("ht")),
+        ),
+    )
+
+    subst_v0_s = MP(
+        SPECL([ZERO, _s_n0, ZERO], SUBSTITUTE_AT_VAR_HIT),
+        REFL(ZERO),
+    )
+    subst_v0_t = MP(
+        SPECL([ZERO, _t_n0, ZERO], SUBSTITUTE_AT_VAR_HIT),
+        REFL(ZERO),
+    )
+    p.have(
+        "h_imp_not_in: Prov_HF (Imp_f (Eq_f s t) "
+        "  (Imp_f (Not_f (In_a (quote_hf w) s)) "
+        "         (Not_f (In_a (quote_hf w) t))))"
+    ).by_rewrite_of(
+        "h_subst_eq",
+        [
+            SUBSTITUTE_AT_NOT,
+            SUBSTITUTE_AT_IN,
+            subst_v0_s,
+            subst_v0_t,
+            SUBSTITUTE_QUOTE_HF,
+        ],
+    )
+
+    p.have(
+        "h_drop_not_in_s: Prov_HF (Imp_f (Eq_f s t) "
+        "  (Not_f (In_a (quote_hf w) s)))"
+    ).by(
+        PROV_HF_HYP_DROP,
+        "Eq_f s t", "Not_f (In_a (quote_hf w) s)",
+        CONJ(
+            p.fact("h_f_eq"),
+            CONJ(p.fact("h_f_not_in_s"), p.fact("h_not_in_s")),
+        ),
+    )
+    p.have(
+        "h_eq_to_not_in_t: Prov_HF (Imp_f (Eq_f s t) "
+        "  (Not_f (In_a (quote_hf w) t)))"
+    ).by(
+        PROV_HF_DT_MP,
+        "Eq_f s t",
+        "Not_f (In_a (quote_hf w) s)",
+        "Not_f (In_a (quote_hf w) t)",
+        CONJ(
+            p.fact("h_f_eq"),
+            CONJ(
+                p.fact("h_f_not_in_s"),
+                CONJ(
+                    p.fact("h_f_not_in_t"),
+                    CONJ(p.fact("h_drop_not_in_s"), p.fact("h_imp_not_in")),
+                ),
+            ),
+        ),
+    )
+    p.have(
+        "h_contrap: Prov_HF (Imp_f (Not_f (Not_f (In_a (quote_hf w) t))) "
+        "                         (Not_f (Eq_f s t)))"
+    ).by(
+        PROV_HF_CONTRAP,
+        "Eq_f s t", "Not_f (In_a (quote_hf w) t)",
+        CONJ(
+            p.fact("h_f_eq"),
+            CONJ(p.fact("h_f_not_in_t"), p.fact("h_eq_to_not_in_t")),
+        ),
+    )
+    p.have(
+        "h_dni_in_t: Prov_HF (Not_f (Not_f (In_a (quote_hf w) t)))"
+    ).by(
+        PROV_HF_DOUBLE_NEG_INTRO,
+        "In_a (quote_hf w) t",
+        CONJ(p.fact("h_f_in_t"), p.fact("h_in_t")),
+    )
+    p.thus("Prov_HF (Not_f (Eq_f s t))").by(
+        PROV_HF_MP,
+        "Not_f (Not_f (In_a (quote_hf w) t))",
+        "Not_f (Eq_f s t)",
+        CONJ(p.fact("h_dni_in_t"), p.fact("h_contrap")),
+    )
+
+
+@proof
 def QUOTE_HF_PROV_NEQ(p):
     """|- !s t. ~(s = t) ==>
                 Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))).
@@ -2539,6 +2703,29 @@ _SUBST_V1_AT_S0 = GEN(
         REFL(mk_suc0(ZERO)),
     ),
 )  # |- !t. substitute (Var_t (SUC0 0)) t (SUC0 0) = t
+
+
+# Mutual quote_hf induction measures found by `hf_induction_targets.py`.
+#
+# Membership decision recurses on `quote_hf_mem_measure x y = Insert x y`.
+# Quote inequality uses the symmetric larger side of the two membership
+# measures, matching the experiment's `Q(s,t) = max(Insert s t, Insert t s)`.
+# The definition avoids adding a general max operator by selecting with
+# `nat0_lt` directly.
+QUOTE_HF_MEM_MEASURE_DEF, QUOTE_HF_MEM_MEASURE_AT = define_with_at(
+    "quote_hf_mem_measure",
+    parse_type("nat0 -> nat0 -> nat0"),
+    "\\x:nat0. \\y:nat0. Insert x y",
+)
+
+QUOTE_HF_NEQ_MEASURE_DEF, QUOTE_HF_NEQ_MEASURE_AT = define_with_at(
+    "quote_hf_neq_measure",
+    parse_type("nat0 -> nat0 -> nat0"),
+    "\\s:nat0. \\t:nat0. "
+    "COND_nat0 (nat0_lt (Insert s t) (Insert t s)) "
+    "          (Insert t s) "
+    "          (Insert s t)",
+)
 
 
 @proof
@@ -3092,6 +3279,151 @@ def IS_IN_REPRESENTS(p):
     ).by(ind_inst, "h_conj")
 
 
+@proof
+def QUOTE_HF_MEM_DECISION_AND_NEQ(p):
+    """|- !x y.
+          ((In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y)))
+           /\\ (~In x y ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y)))))
+          /\\ (~(x = y) ==> Prov_HF (Not_f (Eq_f (quote_hf x) (quote_hf y)))).
+
+    Strengthened Phase-1 contract.  Downstream set-native proofs should
+    consume this bundled theorem instead of separately depending on the
+    ``is_In_internal`` wrapper and quote inequality projection.
+
+    DSL friction: this body currently proves the direct membership
+    projection from ``IS_IN_REPRESENTS`` and repeats its substitute
+    normalisation locally.  The no-sorry replacement should keep this
+    statement stable and replace this body with the mutual pair/measure
+    induction, so callers do not change again.
+    """
+    p.goal(
+        "!x y. ((In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
+        "/\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))) "
+        "/\\ (~(x = y) ==> Prov_HF (Not_f (Eq_f (quote_hf x) (quote_hf y))))"
+    )
+    p.fix("x y")
+
+    F_xy = (
+        "substitute (substitute is_In_internal (quote_hf x) idx_x) "
+        "(quote_hf y) idx_y"
+    )
+    p.have(
+        f"h_red: {F_xy} = In_a (quote_hf x) (quote_hf y)"
+    ).by_rewrite([
+        IS_IN_INTERNAL_DEF, IDX_X_DEF, IDX_Y_DEF,
+        VAR_X_DEF, VAR_Y_DEF,
+        SUBSTITUTE_AT_IN, SUBSTITUTE_QUOTE_HF,
+        _SUBST_V0_AT_0, _SUBST_V1_AT_0_MISS, _SUBST_V1_AT_S0,
+    ])
+    p.have(
+        f"h_in_repr: (In x y ==> Prov_HF ({F_xy})) "
+        f"/\\ (~(In x y) ==> Prov_HF (Not_f ({F_xy})))"
+    ).by(IS_IN_REPRESENTS, "x", "y")
+    p.split("h_in_repr", "(h_in_pos, h_in_neg)")
+
+    with p.have(
+        "h_pos: In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))"
+    ).proof():
+        p.assume("h_in: In x y")
+        p.have(f"h_pf: Prov_HF ({F_xy})").by("h_in_pos", "h_in")
+        p.thus("Prov_HF (In_a (quote_hf x) (quote_hf y))").by_rewrite_of(
+            "h_pf", ["h_red"]
+        )
+    with p.have(
+        "h_neg: ~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y)))"
+    ).proof():
+        p.assume("h_nin: ~(In x y)")
+        p.have(f"h_pf: Prov_HF (Not_f ({F_xy}))").by("h_in_neg", "h_nin")
+        p.thus("Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y)))").by_rewrite_of(
+            "h_pf", ["h_red"]
+        )
+    with p.have(
+        "h_neq: ~(x = y) ==> Prov_HF (Not_f (Eq_f (quote_hf x) (quote_hf y)))"
+    ).proof():
+        p.assume("hxy_ne: ~(x = y)")
+        p.thus("Prov_HF (Not_f (Eq_f (quote_hf x) (quote_hf y)))").by(
+            QUOTE_HF_PROV_NEQ, "x", "y", "hxy_ne"
+        )
+
+    p.thus(
+        "((In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
+        "/\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))) "
+        "/\\ (~(x = y) ==> Prov_HF (Not_f (Eq_f (quote_hf x) (quote_hf y))))"
+    ).by_thm(CONJ(CONJ(p.fact("h_pos"), p.fact("h_neg")), p.fact("h_neq")))
+
+
+@proof
+def QUOTE_HF_MUTUAL_MEASURED(p):
+    """Measured mutual-induction target for the quote_hf replacement.
+
+    |- !n.
+       (!x y. nat0_lt (quote_hf_mem_measure x y) n ==>
+          membership decision for quote_hf x in quote_hf y)
+       /\\
+       (!s t. ~(s = t) /\\ nat0_lt (quote_hf_neq_measure s t) n ==>
+          quoted inequality).
+
+    DSL friction: this now uses the right outer strong-induction frame.
+    The leaves still project through ``QUOTE_HF_MEM_DECISION_AND_NEQ``
+    until the bit-level measure-decrease lemmas are closed; replace the
+    leaf closers with IH calls once those lemmas exist.
+    """
+    p.goal(
+        "!n. "
+        "(!x y. nat0_lt (quote_hf_mem_measure x y) n ==> "
+        "  ((In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
+        "   /\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y)))))) "
+        "/\\ "
+        "(!s t. ~(s = t) /\\ nat0_lt (quote_hf_neq_measure s t) n ==> "
+        "  Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))))"
+    )
+    with p.strong_induction("n", "IH"):
+        with p.have(
+            "h_mem: !x y. nat0_lt (quote_hf_mem_measure x y) n ==> "
+            "  ((In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
+            "   /\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y)))))"
+        ).proof():
+            p.fix("x y")
+            p.assume("hlt: nat0_lt (quote_hf_mem_measure x y) n")
+            p.have(
+                "h_bundle: ((In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
+                "/\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))) "
+                "/\\ (~(x = y) ==> Prov_HF (Not_f (Eq_f (quote_hf x) (quote_hf y))))"
+            ).by(QUOTE_HF_MEM_DECISION_AND_NEQ, "x", "y")
+            p.split("h_bundle", "((h_pos, h_neg), _)")
+            p.thus(
+                "(In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
+                "/\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))"
+            ).by_thm(CONJ(p.fact("h_pos"), p.fact("h_neg")))
+
+        with p.have(
+            "h_neq: !s t. ~(s = t) /\\ nat0_lt (quote_hf_neq_measure s t) n ==> "
+            "  Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))"
+        ).proof():
+            p.fix("s t")
+            p.assume(
+                "(hst_ne, hlt): ~(s = t) /\\ nat0_lt (quote_hf_neq_measure s t) n"
+            )
+            p.have(
+                "h_bundle: ((In s t ==> Prov_HF (In_a (quote_hf s) (quote_hf t))) "
+                "/\\ (~(In s t) ==> Prov_HF (Not_f (In_a (quote_hf s) (quote_hf t))))) "
+                "/\\ (~(s = t) ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))))"
+            ).by(QUOTE_HF_MEM_DECISION_AND_NEQ, "s", "t")
+            p.split("h_bundle", "(_, h_neq_proj)")
+            p.thus("Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))").by(
+                "h_neq_proj", "hst_ne"
+            )
+
+        p.thus(
+            "(!x y. nat0_lt (quote_hf_mem_measure x y) n ==> "
+            "  ((In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
+            "   /\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y)))))) "
+            "/\\ "
+            "(!s t. ~(s = t) /\\ nat0_lt (quote_hf_neq_measure s t) n ==> "
+            "  Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))))"
+        ).by_thm(CONJ(p.fact("h_mem"), p.fact("h_neq")))
+
+
 # ---------------------------------------------------------------------------
 # Stage-3 SORRY scaffolding moved from hf_repr_core.py.  Each proof needs the
 # Prov_HF logical toolkit when discharged (PROV_HF_UI for HF axiom
@@ -3344,8 +3676,19 @@ if __name__ == "__main__":
         pp_thm(QUOTE_HF_NEQ_FROM_CLEAR_LOW),
     )
     print("    PROV_HF_NEQ_FROM_MEM_DIFF     :", pp_thm(PROV_HF_NEQ_FROM_MEM_DIFF))
+    print(
+        "    PROV_HF_NEQ_FROM_MEM_DIFF_RIGHT:",
+        pp_thm(PROV_HF_NEQ_FROM_MEM_DIFF_RIGHT),
+    )
     print("    QUOTE_HF_PROV_NEQ              :", pp_thm(QUOTE_HF_PROV_NEQ))
     print("    IS_IN_REPRESENTS                       :", pp_thm(IS_IN_REPRESENTS))
+    print(
+        "    QUOTE_HF_MEM_DECISION_AND_NEQ          :",
+        pp_thm(QUOTE_HF_MEM_DECISION_AND_NEQ),
+    )
+    print("    QUOTE_HF_MEM_MEASURE_AT                :", pp_thm(QUOTE_HF_MEM_MEASURE_AT))
+    print("    QUOTE_HF_NEQ_MEASURE_AT                :", pp_thm(QUOTE_HF_NEQ_MEASURE_AT))
+    print("    QUOTE_HF_MUTUAL_MEASURED               :", pp_thm(QUOTE_HF_MUTUAL_MEASURED))
     print(
         "    IS_SUBSTITUTE_STEP_REPRESENTS (SORRY)  :",
         pp_thm(IS_SUBSTITUTE_STEP_REPRESENTS),

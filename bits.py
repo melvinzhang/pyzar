@@ -970,6 +970,97 @@ def BIT_AT_SET_BIT_DIFF(p):
                             )
 
 
+@proof
+def SET_BIT_COMMUTE_DIFF(p):
+    """|- !i j n. ~(i = j) ==> set_bit i (set_bit j n) = set_bit j (set_bit i n)."""
+    from tactics import NE_SYM, SYM
+
+    p.goal("!i j n. ~(i = j) ==> set_bit i (set_bit j n) = set_bit j (set_bit i n)")
+    p.fix("i j n")
+    p.assume("hij: ~(i = j)")
+    p.have("hji: ~(j = i)").by(NE_SYM, "hij")
+    with p.have(
+        "h_bits: !k. bit k (set_bit i (set_bit j n)) = "
+        "bit k (set_bit j (set_bit i n))"
+    ).proof():
+        p.fix("k")
+        with p.cases_on(EXCLUDED_MIDDLE, "k = i"):
+            with p.case("hki: k = i"):
+                p.have(
+                    "h_left: bit k (set_bit i (set_bit j n)) = T"
+                ).by_rewrite(["hki", BIT_AT_SET_BIT_SAME])
+                p.have(
+                    "h_right_diff: bit i (set_bit j (set_bit i n)) = "
+                    "bit i (set_bit i n)"
+                ).by(BIT_AT_SET_BIT_DIFF, "j", "i", "set_bit i n", "hji")
+                p.have(
+                    "h_right: bit k (set_bit j (set_bit i n)) = T"
+                ).by_rewrite(["hki", "h_right_diff", BIT_AT_SET_BIT_SAME])
+                p.thus(
+                    "bit k (set_bit i (set_bit j n)) = "
+                    "bit k (set_bit j (set_bit i n))"
+                ).by_rewrite(["h_left", "h_right"])
+            with p.case("hki_ne: ~(k = i)"):
+                p.have("hik_ne: ~(i = k)").by(NE_SYM, "hki_ne")
+                with p.cases_on(EXCLUDED_MIDDLE, "k = j"):
+                    with p.case("hkj: k = j"):
+                        p.have(
+                            "h_left_diff: bit j (set_bit i (set_bit j n)) = "
+                            "bit j (set_bit j n)"
+                        ).by(
+                            BIT_AT_SET_BIT_DIFF,
+                            "i", "j", "set_bit j n", "hij",
+                        )
+                        p.have(
+                            "h_left: bit k (set_bit i (set_bit j n)) = T"
+                        ).by_rewrite(["hkj", "h_left_diff", BIT_AT_SET_BIT_SAME])
+                        p.have(
+                            "h_right: bit k (set_bit j (set_bit i n)) = T"
+                        ).by_rewrite(["hkj", BIT_AT_SET_BIT_SAME])
+                        p.thus(
+                            "bit k (set_bit i (set_bit j n)) = "
+                            "bit k (set_bit j (set_bit i n))"
+                        ).by_rewrite(["h_left", "h_right"])
+                    with p.case("hkj_ne: ~(k = j)"):
+                        p.have("hjk_ne: ~(j = k)").by(NE_SYM, "hkj_ne")
+                        p.have(
+                            "h_left_i: bit k (set_bit i (set_bit j n)) = "
+                            "bit k (set_bit j n)"
+                        ).by(
+                            BIT_AT_SET_BIT_DIFF,
+                            "i", "k", "set_bit j n", "hik_ne",
+                        )
+                        p.have(
+                            "h_left_j: bit k (set_bit j n) = bit k n"
+                        ).by(BIT_AT_SET_BIT_DIFF, "j", "k", "n", "hjk_ne")
+                        p.have(
+                            "h_left: bit k (set_bit i (set_bit j n)) = bit k n"
+                        ).by_trans("h_left_i", "h_left_j")
+                        p.have(
+                            "h_right_j: bit k (set_bit j (set_bit i n)) = "
+                            "bit k (set_bit i n)"
+                        ).by(
+                            BIT_AT_SET_BIT_DIFF,
+                            "j", "k", "set_bit i n", "hjk_ne",
+                        )
+                        p.have(
+                            "h_right_i: bit k (set_bit i n) = bit k n"
+                        ).by(BIT_AT_SET_BIT_DIFF, "i", "k", "n", "hik_ne")
+                        p.have(
+                            "h_right: bit k (set_bit j (set_bit i n)) = bit k n"
+                        ).by_trans("h_right_j", "h_right_i")
+                        p.thus(
+                            "bit k (set_bit i (set_bit j n)) = "
+                            "bit k (set_bit j (set_bit i n))"
+                        ).by_trans("h_left", SYM(p.fact("h_right")))
+    p.thus("set_bit i (set_bit j n) = set_bit j (set_bit i n)").by(
+        BIT_EXTENSIONALITY,
+        "set_bit i (set_bit j n)",
+        "set_bit j (set_bit i n)",
+        "h_bits",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Bit-monotonicity:  |- !n i. bit i n ==> nat0_lt i n.
 #
@@ -2053,6 +2144,63 @@ def BIT_CLEAR_LOW_DIFF(p):
 
 
 @proof
+def BIT_CLEAR_LOW_LOW_BIT(p):
+    """|- !s. ~(s = 0) ==> bit (low_bit s) (clear_low s) = F."""
+    from tactics import EQT_INTRO, EQF_INTRO
+
+    p.goal("!s. ~(s = 0) ==> bit (low_bit s) (clear_low s) = F")
+    with p.strong_induction("s", "IH"):
+        p.assume("hnz: ~(s = 0)")
+        p.have("hnz_eq: (s = 0) = F").by_thm(EQF_INTRO(p.fact("hnz")))
+        p.have(
+            "lb_s: low_bit s = COND_nat0 (s = 0) 0 "
+            "(COND_nat0 (ODD s) 0 (SUC0 (low_bit (HALF s))))"
+        ).by(LOW_BIT_AT, "s")
+        p.have(
+            "cl_s: clear_low s = COND_nat0 (s = 0) 0 "
+            "(COND_nat0 (ODD s) (double (HALF s)) "
+            "                   (double (clear_low (HALF s))))"
+        ).by(CLEAR_LOW_AT, "s")
+        with p.cases_on(EXCLUDED_MIDDLE, "ODD s"):
+            with p.case("hO: ODD s"):
+                p.have("hO_eq: ODD s = T").by_thm(EQT_INTRO(p.fact("hO")))
+                p.have("lb_zero: low_bit s = 0").by_rewrite_of(
+                    "lb_s", ["hnz_eq", "hO_eq", COND_F_NAT0, COND_T_NAT0]
+                )
+                p.have("cl_eq: clear_low s = double (HALF s)").by_rewrite_of(
+                    "cl_s", ["hnz_eq", "hO_eq", COND_F_NAT0, COND_T_NAT0]
+                )
+                p.thus("bit (low_bit s) (clear_low s) = F").by_rewrite(
+                    ["lb_zero", "cl_eq", BIT_BASE, ODD_DOUBLE]
+                )
+            with p.case("hF: ~(ODD s)"):
+                p.have("hF_eq: ODD s = F").by_thm(EQF_INTRO(p.fact("hF")))
+                with p.have("hh_nz: ~(HALF s = 0)").proof():
+                    with p.suppose("hh_z: HALF s = 0"):
+                        p.have(
+                            "recon: s = COND_nat0 (ODD s) "
+                            "(SUC0 (double (HALF s))) (double (HALF s))"
+                        ).by(RECONSTRUCT, "s")
+                        p.have("s_zero: s = 0").by_rewrite_of(
+                            "recon", ["hF_eq", "hh_z", COND_F_NAT0, DOUBLE_BASE]
+                        )
+                        p.absurd().by_conj("hnz", "s_zero")
+                p.have(
+                    "lb_eq: low_bit s = SUC0 (low_bit (HALF s))"
+                ).by_rewrite_of("lb_s", ["hnz_eq", "hF_eq", COND_F_NAT0])
+                p.have(
+                    "cl_eq: clear_low s = double (clear_low (HALF s))"
+                ).by_rewrite_of("cl_s", ["hnz_eq", "hF_eq", COND_F_NAT0])
+                p.have("hh_lt: nat0_lt (HALF s) s").by(HALF_LT_NZ, "s", "hnz")
+                p.have(
+                    "ih_at: bit (low_bit (HALF s)) (clear_low (HALF s)) = F"
+                ).by("IH", "HALF s", "hh_lt", "hh_nz")
+                p.thus("bit (low_bit s) (clear_low s) = F").by_rewrite(
+                    ["lb_eq", "cl_eq", BIT_STEP_AT, HALF_DOUBLE, "ih_at"]
+                )
+
+
+@proof
 def INSERT_LOW_BIT_CLEAR_LOW(p):
     """|- !s. ~(s = 0) ==> s = set_bit (low_bit s) (clear_low s).
 
@@ -2645,6 +2793,7 @@ if __name__ == "__main__":
     print("Step 0 OK -- bit-level reconstruction.")
     print("  BIT_LOW_BIT             :", pp_thm(BIT_LOW_BIT))
     print("  BIT_CLEAR_LOW_DIFF      :", pp_thm(BIT_CLEAR_LOW_DIFF))
+    print("  BIT_CLEAR_LOW_LOW_BIT   :", pp_thm(BIT_CLEAR_LOW_LOW_BIT))
     print("  INSERT_LOW_BIT_CLEAR_LOW:", pp_thm(INSERT_LOW_BIT_CLEAR_LOW))
     print("  DOUBLE_NZ               :", pp_thm(DOUBLE_NZ))
     print("  LOW_BIT_DOUBLE_NZ       :", pp_thm(LOW_BIT_DOUBLE_NZ))
@@ -2699,6 +2848,7 @@ if __name__ == "__main__":
     print("  BIT_AT_SET_BIT_SAME:", pp_thm(BIT_AT_SET_BIT_SAME))
     print("Step 20 OK -- BIT_AT_SET_BIT_DIFF proved.")
     print("  BIT_AT_SET_BIT_DIFF:", pp_thm(BIT_AT_SET_BIT_DIFF))
+    print("  SET_BIT_COMMUTE_DIFF:", pp_thm(SET_BIT_COMMUTE_DIFF))
     print("Step 21 OK -- BIT_LT proved.")
     print("  BIT_LT          :", pp_thm(BIT_LT))
     print("Step 22 OK -- low_bit / clear_low defined.")
