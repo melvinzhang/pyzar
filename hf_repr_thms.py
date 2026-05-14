@@ -108,11 +108,17 @@ from hf_repr_core import (
     IS_IN_INTERNAL_DEF,
 )
 from hf_sets import EMPTY_DEF, INSERT_AT, NOT_IN_EMPTY, IN_INSERT_SAME, IN_INSERT_DIFF
+from hf_sets import IN_AT
 from hf_sets import IN_EXT
 from hf_syntax import INSERT_T_INJ, INSERT_T_NEQ_EMPTY
 from bits import (
+    BIT_ABOVE_FALSE,
     BIT_AT_SET_BIT_DIFF,
+    BIT_AT_SET_BIT_OTHER_SELF_FALSE,
+    BIT_AT_SET_BIT_SAME,
     BIT_CLEAR_LOW_LOW_BIT,
+    BIT_LOW_BIT,
+    BITWISE_LT_BY_TOP_DIFF,
     COND_F_NAT0,
     COND_T_NAT0,
     INSERT_LOW_BIT_CLEAR_LOW,
@@ -120,8 +126,10 @@ from bits import (
     CLEAR_LOW_LT,
     SET_BIT_COMMUTE_DIFF,
     SET_BIT_GT_NEW,
+    SET_BIT_PRESENT_ID,
 )
 from classical import EXCLUDED_MIDDLE, NOT_FORALL_TO_EX_NOT
+from nat0_order import NAT0_LT_TRANS
 from hf_logic import (
     PROV_HF_UI,
     PROV_HF_SUBST_EQ,
@@ -3043,10 +3051,9 @@ QUOTE_HF_NEQ_MEASURE_DEF, QUOTE_HF_NEQ_MEASURE_AT = define_with_at(
 def QUOTE_HF_MEM_HEAD_NEQ_RAW_DECREASE(p):
     """Raw Ackermann bit-order obligation for the head-neq recursive call.
 
-    This is intentionally still a ``p.sorry()`` rather than a direct
-    ``new_axiom`` so the import warning exposes the remaining arithmetic
-    gap. It should eventually be discharged by bit-order lemmas about
-    inserting into the low-bit decomposition of ``y``.
+    This packages the two possible ``quote_hf_neq_measure`` branches as
+    raw membership-measure decreases. Both are top-difference bit-order
+    comparisons against ``Insert x y``.
     """
 
     p.goal(
@@ -3056,7 +3063,152 @@ def QUOTE_HF_MEM_HEAD_NEQ_RAW_DECREASE(p):
         " /\\ nat0_lt (quote_hf_mem_measure (low_bit y) x) "
         "            (quote_hf_mem_measure x y)"
     )
-    p.sorry()
+    p.fix("x y")
+    p.assume("(hy_nz,hx_ne): ~(y = 0) /\\ ~(x = low_bit y)")
+
+    with p.have(
+        "h_hi_lb: !i. nat0_lt (low_bit y) i "
+        "==> bit i (set_bit x (low_bit y)) ==> bit i (set_bit x y)"
+    ).proof():
+        p.fix("i")
+        p.assume("hlti: nat0_lt (low_bit y) i", "hbit: bit i (set_bit x (low_bit y))")
+        with p.cases_on(EXCLUDED_MIDDLE, "i = x"):
+            with p.case("hix: i = x"):
+                p.have("h_x_T: bit x (set_bit x y) = T").by(
+                    BIT_AT_SET_BIT_SAME, "x", "y"
+                )
+                p.have("h_x: bit x (set_bit x y)").by_thm(
+                    EQT_ELIM(p.fact("h_x_T"))
+                )
+                p.thus("bit i (set_bit x y)").by_rewrite_of(
+                    "h_x", [SYM(p.fact("hix"))]
+                )
+            with p.case("hix_ne: ~(i = x)"):
+                with p.have("hxi_ne: ~(x = i)").proof():
+                    with p.suppose("hxi: x = i"):
+                        p.have("hix2: i = x").by_thm(SYM(p.fact("hxi")))
+                        p.absurd().by_conj("hix_ne", "hix2")
+                p.have(
+                    "hbit_i_lb_eq: bit i (set_bit x (low_bit y)) "
+                    "= bit i (low_bit y)"
+                ).by(BIT_AT_SET_BIT_DIFF, "x", "i", "low_bit y", "hxi_ne")
+                p.have("hbit_i_lb: bit i (low_bit y)").by_eq_mp(
+                    "hbit_i_lb_eq", "hbit"
+                )
+                p.have("h_above_F: bit i (low_bit y) = F").by(
+                    BIT_ABOVE_FALSE, "low_bit y", "i", "hlti"
+                )
+                p.absurd().by_thm(EQ_MP(p.fact("h_above_F"), p.fact("hbit_i_lb")))
+    p.have("h_lb_left_F: bit (low_bit y) (set_bit x (low_bit y)) = F").by(
+        BIT_AT_SET_BIT_OTHER_SELF_FALSE, "x", "low_bit y", "hx_ne"
+    )
+    p.have("h_lb_left_not: ~(bit (low_bit y) (set_bit x (low_bit y)))").by_thm(
+        EQF_ELIM(p.fact("h_lb_left_F"))
+    )
+    p.have(
+        "h_lb_right_eq: bit (low_bit y) (set_bit x y) = bit (low_bit y) y"
+    ).by(BIT_AT_SET_BIT_DIFF, "x", "low_bit y", "y", "hx_ne")
+    p.have("h_lb_y_T: bit (low_bit y) y = T").by(
+        BIT_LOW_BIT, "y", "hy_nz"
+    )
+    p.have("h_lb_right_T: bit (low_bit y) (set_bit x y) = T").by_trans(
+        "h_lb_right_eq", "h_lb_y_T"
+    )
+    p.have("h_lb_right: bit (low_bit y) (set_bit x y)").by_thm(
+        EQT_ELIM(p.fact("h_lb_right_T"))
+    )
+    p.have(
+        "h_left_raw: nat0_lt (set_bit x (low_bit y)) (set_bit x y)"
+    ).by(
+        BITWISE_LT_BY_TOP_DIFF,
+        "low_bit y",
+        "set_bit x (low_bit y)",
+        "set_bit x y",
+        CONJ(p.fact("h_hi_lb"), CONJ(p.fact("h_lb_left_not"), p.fact("h_lb_right"))),
+    )
+
+    with p.have(
+        "h_hi_x: !i. nat0_lt x i "
+        "==> bit i (set_bit (low_bit y) x) ==> bit i (set_bit x y)"
+    ).proof():
+        p.fix("i")
+        p.assume("hlti: nat0_lt x i", "hbit: bit i (set_bit (low_bit y) x)")
+        with p.cases_on(EXCLUDED_MIDDLE, "i = low_bit y"):
+            with p.case("hi_lb: i = low_bit y"):
+                p.have("h_x_lt_lb: nat0_lt x (low_bit y)").by_rewrite_of(
+                    "hlti", ["hi_lb"]
+                )
+                p.have("h_lb_y_T2: bit (low_bit y) y = T").by(
+                    BIT_LOW_BIT, "y", "hy_nz"
+                )
+                p.have("h_lb_y: bit (low_bit y) y").by_thm(
+                    EQT_ELIM(p.fact("h_lb_y_T2"))
+                )
+                p.have(
+                    "h_lb_setx_y_eq: bit (low_bit y) (set_bit x y) "
+                    "= bit (low_bit y) y"
+                ).by(BIT_AT_SET_BIT_DIFF, "x", "low_bit y", "y", "hx_ne")
+                p.have("h_lb_setx_y: bit (low_bit y) (set_bit x y)").by_eq_mp(
+                    SYM(p.fact("h_lb_setx_y_eq")), "h_lb_y"
+                )
+                p.thus("bit i (set_bit x y)").by_rewrite_of(
+                    "h_lb_setx_y", ["hi_lb"]
+                )
+            with p.case("hi_lb_ne: ~(i = low_bit y)"):
+                with p.have("h_lb_i_ne: ~(low_bit y = i)").proof():
+                    with p.suppose("h_lb_i: low_bit y = i"):
+                        p.have("hi_lb2: i = low_bit y").by_thm(SYM(p.fact("h_lb_i")))
+                        p.absurd().by_conj("hi_lb_ne", "hi_lb2")
+                p.have(
+                    "hbit_i_x_eq: bit i (set_bit (low_bit y) x) = bit i x"
+                ).by(BIT_AT_SET_BIT_DIFF, "low_bit y", "i", "x", "h_lb_i_ne")
+                p.have("hbit_i_x: bit i x").by_eq_mp(
+                    "hbit_i_x_eq", "hbit"
+                )
+                p.have("h_above_F: bit i x = F").by(
+                    BIT_ABOVE_FALSE, "x", "i", "hlti"
+                )
+                p.absurd().by_thm(EQ_MP(p.fact("h_above_F"), p.fact("hbit_i_x")))
+    with p.have("h_lb_x_ne: ~(low_bit y = x)").proof():
+        with p.suppose("h_lb_x: low_bit y = x"):
+            p.have("h_x_lb: x = low_bit y").by_thm(SYM(p.fact("h_lb_x")))
+            p.absurd().by_conj("hx_ne", "h_x_lb")
+    p.have("h_x_left_F: bit x (set_bit (low_bit y) x) = F").by(
+        BIT_AT_SET_BIT_OTHER_SELF_FALSE, "low_bit y", "x", "h_lb_x_ne"
+    )
+    p.have("h_x_left_not: ~(bit x (set_bit (low_bit y) x))").by_thm(
+        EQF_ELIM(p.fact("h_x_left_F"))
+    )
+    p.have("h_x_right_T: bit x (set_bit x y) = T").by(
+        BIT_AT_SET_BIT_SAME, "x", "y"
+    )
+    p.have("h_x_right: bit x (set_bit x y)").by_thm(
+        EQT_ELIM(p.fact("h_x_right_T"))
+    )
+    p.have(
+        "h_right_raw: nat0_lt (set_bit (low_bit y) x) (set_bit x y)"
+    ).by(
+        BITWISE_LT_BY_TOP_DIFF,
+        "x",
+        "set_bit (low_bit y) x",
+        "set_bit x y",
+        CONJ(p.fact("h_hi_x"), CONJ(p.fact("h_x_left_not"), p.fact("h_x_right"))),
+    )
+
+    p.have(
+        "h_left: nat0_lt (quote_hf_mem_measure x (low_bit y)) "
+        "                (quote_hf_mem_measure x y)"
+    ).by_rewrite_of("h_left_raw", [QUOTE_HF_MEM_MEASURE_AT, INSERT_AT])
+    p.have(
+        "h_right: nat0_lt (quote_hf_mem_measure (low_bit y) x) "
+        "                 (quote_hf_mem_measure x y)"
+    ).by_rewrite_of("h_right_raw", [QUOTE_HF_MEM_MEASURE_AT, INSERT_AT])
+    p.thus(
+        "nat0_lt (quote_hf_mem_measure x (low_bit y)) "
+        "        (quote_hf_mem_measure x y) "
+        "/\\ nat0_lt (quote_hf_mem_measure (low_bit y) x) "
+        "        (quote_hf_mem_measure x y)"
+    ).by_thm(CONJ(p.fact("h_left"), p.fact("h_right")))
 
 
 @proof
@@ -3330,6 +3482,49 @@ def QUOTE_HF_NEQ_MEASURE_LT_FROM_FOUR_MEM_BOUNDS(p):
                 "quote_hf_neq_measure s t",
                 "h_both_q",
             )
+
+
+@proof
+def QUOTE_HF_EXT_DIFF_LEFT_MEM_DECREASES(p):
+    """|- !w s t. In w s /\\ ~In w t ==>
+          nat0_lt (quote_hf_mem_measure w s) (quote_hf_neq_measure s t)
+       /\\ nat0_lt (quote_hf_mem_measure w t) (quote_hf_neq_measure s t).
+
+    Decrease package for the extensional witness branch where ``w`` is
+    present on the left and absent on the right.
+
+    Proof plan:
+      * ``M(w,s) = s`` by ``SET_BIT_PRESENT_ID``.
+      * ``s < Q(s,t)`` by a top-difference split on whether ``s`` is
+        already a bit of ``t``.
+      * ``M(w,t) < Q(s,t)`` by top-difference at ``s`` when ``s`` is
+        absent from ``t``; otherwise at ``t`` against ``Insert t s``.
+    """
+
+    p.goal(
+        "!w s t. In w s /\\ ~(In w t) ==> "
+        "nat0_lt (quote_hf_mem_measure w s) (quote_hf_neq_measure s t) "
+        "/\\ nat0_lt (quote_hf_mem_measure w t) (quote_hf_neq_measure s t)"
+    )
+    p.sorry()
+
+
+@proof
+def QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES(p):
+    """|- !w s t. ~In w s /\\ In w t ==>
+          nat0_lt (quote_hf_mem_measure w s) (quote_hf_neq_measure s t)
+       /\\ nat0_lt (quote_hf_mem_measure w t) (quote_hf_neq_measure s t).
+
+    Symmetric decrease package for the extensional witness branch where
+    ``w`` is absent on the left and present on the right.
+    """
+
+    p.goal(
+        "!w s t. ~(In w s) /\\ In w t ==> "
+        "nat0_lt (quote_hf_mem_measure w s) (quote_hf_neq_measure s t) "
+        "/\\ nat0_lt (quote_hf_mem_measure w t) (quote_hf_neq_measure s t)"
+    )
+    p.sorry()
 
 
 @proof
@@ -4100,10 +4295,10 @@ def QUOTE_HF_MUTUAL_MEASURED(p):
        (!s t. ~(s = t) /\\ nat0_lt (quote_hf_neq_measure s t) n ==>
           quoted inequality).
 
-    DSL friction: this now uses the right outer strong-induction frame.
-    The leaves still project through ``QUOTE_HF_MEM_DECISION_AND_NEQ``
-    until the bit-level measure-decrease lemmas are closed; replace the
-    leaf closers with IH calls once those lemmas exist.
+    This is the non-circular measured route.  The proof calls the strong
+    IH at the current measure, then uses strictly smaller membership /
+    inequality calls underneath it.  The remaining ``sorry`` leaves are
+    object-level branch bridges, not global quote-decision shortcuts.
     """
     p.goal(
         "!n. "
@@ -4123,15 +4318,77 @@ def QUOTE_HF_MUTUAL_MEASURED(p):
             p.fix("x y")
             p.assume("hlt: nat0_lt (quote_hf_mem_measure x y) n")
             p.have(
-                "h_bundle: ((In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
-                "/\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))) "
-                "/\\ (~(x = y) ==> Prov_HF (Not_f (Eq_f (quote_hf x) (quote_hf y))))"
-            ).by(QUOTE_HF_MEM_DECISION_AND_NEQ, "x", "y")
-            p.split("h_bundle", "((h_pos, h_neg), _)")
-            p.thus(
-                "(In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
-                "/\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))"
-            ).by_thm(CONJ(p.fact("h_pos"), p.fact("h_neg")))
+                "h_IH_cur: "
+                "(!a b. nat0_lt (quote_hf_mem_measure a b) "
+                "                  (quote_hf_mem_measure x y) ==> "
+                "  ((In a b ==> Prov_HF (In_a (quote_hf a) (quote_hf b))) "
+                "   /\\ (~(In a b) ==> Prov_HF (Not_f (In_a (quote_hf a) "
+                "                                      (quote_hf b)))))) "
+                "/\\ "
+                "(!a b. ~(a = b) /\\ nat0_lt (quote_hf_neq_measure a b) "
+                "                  (quote_hf_mem_measure x y) ==> "
+                "  Prov_HF (Not_f (Eq_f (quote_hf a) (quote_hf b))))"
+            ).by("IH", "quote_hf_mem_measure x y", "hlt")
+            p.split("h_IH_cur", "(h_mem_smaller,h_neq_smaller)")
+
+            with p.cases_on(EXCLUDED_MIDDLE, "y = 0"):
+                with p.case("hy_zero: y = 0"):
+                    # Missing branch bridge: combine HF1_INST with
+                    # NOT_IN_EMPTY and quote_hf y = Empty_t to close both
+                    # membership-decision directions.
+                    p.sorry()
+                with p.case("hy_nz: ~(y = 0)"):
+                    with p.cases_on(EXCLUDED_MIDDLE, "x = low_bit y"):
+                        with p.case("hx_head: x = low_bit y"):
+                            # Missing branch bridge: HF2_INST proves the
+                            # positive head membership in the Insert_t quote;
+                            # the negative implication is contradictory.
+                            p.sorry()
+                        with p.case("hx_ne_head: ~(x = low_bit y)"):
+                            p.have(
+                                "h_tail_decr: nat0_lt "
+                                "(quote_hf_mem_measure x (clear_low y)) "
+                                "(quote_hf_mem_measure x y)"
+                            ).by(
+                                QUOTE_HF_MEM_MEASURE_CLEAR_LOW_DECREASE,
+                                "x",
+                                "y",
+                                CONJ(p.fact("hy_nz"), p.fact("hx_ne_head")),
+                            )
+                            p.have(
+                                "h_tail_dec: "
+                                "(In x (clear_low y) ==> "
+                                " Prov_HF (In_a (quote_hf x) "
+                                "                 (quote_hf (clear_low y)))) "
+                                "/\\ (~(In x (clear_low y)) ==> "
+                                " Prov_HF (Not_f (In_a (quote_hf x) "
+                                "                         (quote_hf (clear_low y)))))"
+                            ).by("h_mem_smaller", "x", "clear_low y", "h_tail_decr")
+                            p.have(
+                                "h_head_neq_decr: nat0_lt "
+                                "(quote_hf_neq_measure x (low_bit y)) "
+                                "(quote_hf_mem_measure x y)"
+                            ).by(
+                                QUOTE_HF_MEM_NEEDS_HEAD_NEQ_DECREASE,
+                                "x",
+                                "y",
+                                CONJ(p.fact("hy_nz"), p.fact("hx_ne_head")),
+                            )
+                            p.have(
+                                "h_head_neq: Prov_HF "
+                                "(Not_f (Eq_f (quote_hf x) "
+                                "               (quote_hf (low_bit y))))"
+                            ).by(
+                                "h_neq_smaller",
+                                "x",
+                                "low_bit y",
+                                CONJ(p.fact("hx_ne_head"), p.fact("h_head_neq_decr")),
+                            )
+                            # Missing branch bridge: use h_tail_dec and
+                            # h_head_neq with HF3_INST plus the quote_hf
+                            # decomposition of y to transfer membership
+                            # decision from clear_low y to y.
+                            p.sorry()
 
         with p.have(
             "h_neq: !s t. ~(s = t) /\\ nat0_lt (quote_hf_neq_measure s t) n ==> "
@@ -4142,14 +4399,116 @@ def QUOTE_HF_MUTUAL_MEASURED(p):
                 "(hst_ne, hlt): ~(s = t) /\\ nat0_lt (quote_hf_neq_measure s t) n"
             )
             p.have(
-                "h_bundle: ((In s t ==> Prov_HF (In_a (quote_hf s) (quote_hf t))) "
-                "/\\ (~(In s t) ==> Prov_HF (Not_f (In_a (quote_hf s) (quote_hf t))))) "
-                "/\\ (~(s = t) ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))))"
-            ).by(QUOTE_HF_MEM_DECISION_AND_NEQ, "s", "t")
-            p.split("h_bundle", "(_, h_neq_proj)")
-            p.thus("Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))").by(
-                "h_neq_proj", "hst_ne"
-            )
+                "h_IH_cur: "
+                "(!a b. nat0_lt (quote_hf_mem_measure a b) "
+                "                  (quote_hf_neq_measure s t) ==> "
+                "  ((In a b ==> Prov_HF (In_a (quote_hf a) (quote_hf b))) "
+                "   /\\ (~(In a b) ==> Prov_HF (Not_f (In_a (quote_hf a) "
+                "                                      (quote_hf b)))))) "
+                "/\\ "
+                "(!a b. ~(a = b) /\\ nat0_lt (quote_hf_neq_measure a b) "
+                "                  (quote_hf_neq_measure s t) ==> "
+                "  Prov_HF (Not_f (Eq_f (quote_hf a) (quote_hf b))))"
+            ).by("IH", "quote_hf_neq_measure s t", "hlt")
+            p.split("h_IH_cur", "(h_mem_smaller,_)")
+            p.have(
+                "h_ext: ?w. (In w s /\\ ~(In w t)) "
+                "\\/ (~(In w s) /\\ In w t)"
+            ).by(HF_EXT_DIFF, "s", "t", "hst_ne")
+            p.choose("w", "h_ext")
+            with p.thus(
+                "Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))"
+            ).by_cases("w_eq"):
+                with p.case("h_left: In w s /\\ ~(In w t)"):
+                    p.have(
+                        "h_decrs: nat0_lt (quote_hf_mem_measure w s) "
+                        "                    (quote_hf_neq_measure s t) "
+                        "/\\ nat0_lt (quote_hf_mem_measure w t) "
+                        "          (quote_hf_neq_measure s t)"
+                    ).by(QUOTE_HF_EXT_DIFF_LEFT_MEM_DECREASES, "w", "s", "t", "h_left")
+                    p.split("h_left", "(h_in_s,h_not_in_t)")
+                    p.split("h_decrs", "(h_ws_decr,h_wt_decr)")
+                    p.have(
+                        "h_dec_s: (In w s ==> Prov_HF "
+                        "(In_a (quote_hf w) (quote_hf s))) "
+                        "/\\ (~(In w s) ==> Prov_HF "
+                        "(Not_f (In_a (quote_hf w) (quote_hf s))))"
+                    ).by("h_mem_smaller", "w", "s", "h_ws_decr")
+                    p.have(
+                        "h_dec_t: (In w t ==> Prov_HF "
+                        "(In_a (quote_hf w) (quote_hf t))) "
+                        "/\\ (~(In w t) ==> Prov_HF "
+                        "(Not_f (In_a (quote_hf w) (quote_hf t))))"
+                    ).by("h_mem_smaller", "w", "t", "h_wt_decr")
+                    p.split("h_dec_s", "(h_s_pos, _)")
+                    p.split("h_dec_t", "(_, h_t_neg)")
+                    p.have("h_pf_in_s: Prov_HF (In_a (quote_hf w) (quote_hf s))").by(
+                        "h_s_pos", "h_in_s"
+                    )
+                    p.have(
+                        "h_pf_not_in_t: Prov_HF "
+                        "(Not_f (In_a (quote_hf w) (quote_hf t)))"
+                    ).by("h_t_neg", "h_not_in_t")
+                    p.have("h_qs_term: is_term (quote_hf s)").by(IS_TERM_QUOTE_HF, "s")
+                    p.have("h_qt_term: is_term (quote_hf t)").by(IS_TERM_QUOTE_HF, "t")
+                    p.thus("Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))").by(
+                        PROV_HF_NEQ_FROM_MEM_DIFF,
+                        "w",
+                        "quote_hf s",
+                        "quote_hf t",
+                        CONJ(
+                            p.fact("h_qs_term"),
+                            CONJ(
+                                p.fact("h_qt_term"),
+                                CONJ(p.fact("h_pf_in_s"), p.fact("h_pf_not_in_t")),
+                            ),
+                        ),
+                    )
+                with p.case("h_right: ~(In w s) /\\ In w t"):
+                    p.have(
+                        "h_decrs: nat0_lt (quote_hf_mem_measure w s) "
+                        "                    (quote_hf_neq_measure s t) "
+                        "/\\ nat0_lt (quote_hf_mem_measure w t) "
+                        "          (quote_hf_neq_measure s t)"
+                    ).by(QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES, "w", "s", "t", "h_right")
+                    p.split("h_right", "(h_not_in_s,h_in_t)")
+                    p.split("h_decrs", "(h_ws_decr,h_wt_decr)")
+                    p.have(
+                        "h_dec_s: (In w s ==> Prov_HF "
+                        "(In_a (quote_hf w) (quote_hf s))) "
+                        "/\\ (~(In w s) ==> Prov_HF "
+                        "(Not_f (In_a (quote_hf w) (quote_hf s))))"
+                    ).by("h_mem_smaller", "w", "s", "h_ws_decr")
+                    p.have(
+                        "h_dec_t: (In w t ==> Prov_HF "
+                        "(In_a (quote_hf w) (quote_hf t))) "
+                        "/\\ (~(In w t) ==> Prov_HF "
+                        "(Not_f (In_a (quote_hf w) (quote_hf t))))"
+                    ).by("h_mem_smaller", "w", "t", "h_wt_decr")
+                    p.split("h_dec_s", "(_, h_s_neg)")
+                    p.split("h_dec_t", "(h_t_pos, _)")
+                    p.have(
+                        "h_pf_not_in_s: Prov_HF "
+                        "(Not_f (In_a (quote_hf w) (quote_hf s)))"
+                    ).by("h_s_neg", "h_not_in_s")
+                    p.have("h_pf_in_t: Prov_HF (In_a (quote_hf w) (quote_hf t))").by(
+                        "h_t_pos", "h_in_t"
+                    )
+                    p.have("h_qs_term: is_term (quote_hf s)").by(IS_TERM_QUOTE_HF, "s")
+                    p.have("h_qt_term: is_term (quote_hf t)").by(IS_TERM_QUOTE_HF, "t")
+                    p.thus("Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))").by(
+                        PROV_HF_NEQ_FROM_MEM_DIFF_RIGHT,
+                        "w",
+                        "quote_hf s",
+                        "quote_hf t",
+                        CONJ(
+                            p.fact("h_qs_term"),
+                            CONJ(
+                                p.fact("h_qt_term"),
+                                CONJ(p.fact("h_pf_not_in_s"), p.fact("h_pf_in_t")),
+                            ),
+                        ),
+                    )
 
         p.thus(
             "(!x y. nat0_lt (quote_hf_mem_measure x y) n ==> "
@@ -4468,7 +4827,7 @@ if __name__ == "__main__":
         pp_thm(QUOTE_HF_MEM_MEASURE_CLEAR_LOW_DECREASE),
     )
     print(
-        "    QUOTE_HF_MEM_HEAD_NEQ_RAW_DECREASE (SORRY):",
+        "    QUOTE_HF_MEM_HEAD_NEQ_RAW_DECREASE:",
         pp_thm(QUOTE_HF_MEM_HEAD_NEQ_RAW_DECREASE),
     )
     print(
@@ -4483,7 +4842,15 @@ if __name__ == "__main__":
         "    QUOTE_HF_NEQ_MEASURE_LT_FROM_FOUR_MEM_BOUNDS:",
         pp_thm(QUOTE_HF_NEQ_MEASURE_LT_FROM_FOUR_MEM_BOUNDS),
     )
-    print("    QUOTE_HF_MUTUAL_MEASURED               :", pp_thm(QUOTE_HF_MUTUAL_MEASURED))
+    print(
+        "    QUOTE_HF_EXT_DIFF_LEFT_MEM_DECREASES (SORRY):",
+        pp_thm(QUOTE_HF_EXT_DIFF_LEFT_MEM_DECREASES),
+    )
+    print(
+        "    QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES (SORRY):",
+        pp_thm(QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES),
+    )
+    print("    QUOTE_HF_MUTUAL_MEASURED (SORRY bridges):", pp_thm(QUOTE_HF_MUTUAL_MEASURED))
     print(
         "    IS_SUBSTITUTE_STEP_REPRESENTS (SORRY)  :",
         pp_thm(IS_SUBSTITUTE_STEP_REPRESENTS),

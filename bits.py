@@ -972,6 +972,36 @@ def BIT_AT_SET_BIT_DIFF(p):
 
 
 @proof
+def SET_BIT_PRESENT_ID(p):
+    """|- !i n. bit i n ==> set_bit i n = n."""
+
+    from tactics import EQT_INTRO, SYM
+
+    p.goal("!i n. bit i n ==> set_bit i n = n")
+    p.fix("i n")
+    p.assume("hin: bit i n")
+    with p.have("hbits: !k. bit k (set_bit i n) = bit k n").proof():
+        p.fix("k")
+        with p.cases_on(EXCLUDED_MIDDLE, "i = k"):
+            with p.case("hik: i = k"):
+                p.have("h_left_T: bit i (set_bit i n) = T").by(
+                    BIT_AT_SET_BIT_SAME, "i", "n"
+                )
+                p.have("h_right_T: bit i n = T").by(EQT_INTRO, "hin")
+                p.have("h_right_T_k: bit k n = T").by_rewrite_of(
+                    "h_right_T", ["hik"]
+                )
+                p.thus("bit k (set_bit i n) = bit k n").by_rewrite_of(
+                    "h_left_T", ["hik", SYM(p.fact("h_right_T_k"))]
+                )
+            with p.case("hik_ne: ~(i = k)"):
+                p.thus("bit k (set_bit i n) = bit k n").by(
+                    BIT_AT_SET_BIT_DIFF, "i", "k", "n", "hik_ne"
+                )
+    p.thus("set_bit i n = n").by(BIT_EXTENSIONALITY, "set_bit i n", "n", "hbits")
+
+
+@proof
 def SET_BIT_COMMUTE_DIFF(p):
     """|- !i j n. ~(i = j) ==> set_bit i (set_bit j n) = set_bit j (set_bit i n)."""
     from tactics import NE_SYM, SYM

@@ -101,16 +101,20 @@ Two implementation clusters plus one representation switch:
   The branch-specific formulas needed by the current public quote stubs
   (`x in y`, `not x in y`, and `y != t`) are not
   membership-inductive. This means membership-IND alone does not close
-  `HF_IND_QUOTE_MEM_AND_NEQ` through a simple object-level bundle; either
-  the quote theorem remains a meta-level proof construction, or the
-  bundle must go through a real internal representability predicate such
-  as `Prov_HF_internal`.
+  `HF_IND_QUOTE_MEM_AND_NEQ` through a simple object-level bundle.
 
-  This removes `IS_IN_REPRESENTS`, `QUOTE_HF_NEQ_FROM_LOW_BIT`,
-  `QUOTE_HF_NEQ_FROM_CLEAR_LOW`, and `QUOTE_HF_MUTUAL_MEASURED` from the
-  active quote path. Those legacy theorems remain in the file for now as
-  compatibility/debt, but new work should cite the HF-IND-routed public
-  interfaces.
+  The active quote proof is therefore back on the meta-level measured
+  mutual induction:
+
+  ```text
+  QUOTE_HF_MUTUAL_MEASURED
+  ```
+
+  This is the bigger unknown because it must show that every recursive
+  membership/inequality call is below the current measure. The theorem
+  now uses the strong IH non-circularly; remaining sorries are the local
+  object-level branch bridges and the two extensional-witness decrease
+  helpers, not the induction shape itself.
 * **Legacy canonical-form/quote_hf cluster (A → B, C).** This remains
   in the file for compatibility through `QUOTE_HF_PROV_NEQ`, but it is
   no longer the recommended blocker for G1. Close it later if the
@@ -121,10 +125,10 @@ Two implementation clusters plus one representation switch:
   Builds the Stage-3C/3D `…_REPRESENTS` chain consumed by the diagonal
   lemma in `hf_godel1.py`.
 
-The active no-sorry dependency graph now factors through the HF-IND
-quote stubs rather than through the old low-bit quote decomposition.
-Legacy proofs still exist in the file and still warn, but new
-representability work should not depend on them.
+The active no-sorry dependency graph should factor through the measured
+mutual theorem once its local branch bridges are discharged. The HF-IND
+quote bundle remains as a spike/stub, but it is not the current lowest
+risk path for closing the quote layer.
 
 ## Recommended order
 
@@ -221,6 +225,43 @@ and use certified inequality.
      formulas are not inductive, so this route probably requires the
      later internal representability layer rather than closing the
      current meta-level quote stubs directly.
+
+2a. **Measured mutual quote theorem.**
+   - Current active proof target:
+
+     ```text
+     QUOTE_HF_MUTUAL_MEASURED
+     ```
+
+   - Status: the strong-induction scaffold is now wired through the IH at
+     the current measure. The membership miss branch obtains both needed
+     recursive facts from the IH:
+
+     ```text
+     h_tail_dec  : membership decision for (x, clear_low y)
+     h_head_neq  : quoted inequality for (x, low_bit y)
+     ```
+
+     using the closed decreases
+     `QUOTE_HF_MEM_MEASURE_CLEAR_LOW_DECREASE` and
+     `QUOTE_HF_MEM_NEEDS_HEAD_NEQ_DECREASE`.
+   - The inequality branch is also routed through the IH. `HF_EXT_DIFF`
+     supplies a witness `w`; the branch then uses
+     `QUOTE_HF_EXT_DIFF_LEFT_MEM_DECREASES` or
+     `QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES` to obtain the two smaller
+     membership decisions and closes with
+     `PROV_HF_NEQ_FROM_MEM_DIFF` / `_RIGHT`.
+   - Remaining visible sorries in `QUOTE_HF_MUTUAL_MEASURED`: exactly
+     three membership branch bridges:
+
+     ```text
+     y = 0
+     y != 0 /\ x = low_bit y
+     y != 0 /\ x != low_bit y
+     ```
+
+     These are object-level HF1/HF2/HF3 transfer proofs, not measure or
+     induction unknowns.
 
 3. **Interface theorem — `QUOTE_HF_MEM_DECISION`.**
    - This is the membership-only theorem downstream code should cite:
@@ -435,10 +476,8 @@ definitions.
          < quote_hf_mem_measure x y
   ```
 
-  That raw fact is intentionally an explicit `p.sorry()`, so imports show
-  the remaining arithmetic gap. The proof work has moved down to a
-  cleaner target: prove the two strict `Insert` inequalities under the
-  low-bit side condition.
+  That raw fact is now closed. It applies the top-difference bridge to
+  the two strict `Insert` inequalities under the low-bit side condition.
 
   The required bit-order layer is now closed in `bits.py`. It includes
   the false-bit helpers:
@@ -474,8 +513,8 @@ definitions.
      ==> nat0_lt a b
   ```
 
-  The next raw-decrease task is now just to apply this bridge to the two
-  specialized `set_bit` bounds:
+  The raw-decrease proof applies this bridge to the two specialized
+  `set_bit` bounds:
 
   ```text
   |- y != 0 /\ x != low_bit y
@@ -489,6 +528,23 @@ definitions.
   discriminator bit `x`. Both need `BIT_LOW_BIT`, `BIT_AT_SET_BIT_DIFF`,
   `BIT_AT_SET_BIT_SAME`, and the newly closed false-bit helpers for the
   high-bit-containment side condition.
+
+  The remaining inequality-branch decreases are now named explicitly:
+
+  ```text
+  QUOTE_HF_EXT_DIFF_LEFT_MEM_DECREASES
+  |- In w s /\ ~In w t
+     ==> M(w,s) < Q(s,t) /\ M(w,t) < Q(s,t)
+
+  QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES
+  |- ~In w s /\ In w t
+     ==> M(w,s) < Q(s,t) /\ M(w,t) < Q(s,t)
+  ```
+
+  These are currently visible `p.sorry()` helpers. They should be
+  discharged with `BITWISE_LT_BY_TOP_DIFF`, `SET_BIT_PRESENT_ID`, and
+  branch splits over whether the outer set is already a bit of the
+  opposite side.
 
 * **Induction-target experiments** —
   `hf_induction_targets.py` brute-checks candidate measures
@@ -508,14 +564,38 @@ definitions.
   `quote_hf_neq_measure` avoids a general `max` operator by using
   `COND_nat0 (nat0_lt (Insert s t) (Insert t s))`.
 
-* **Measured mutual target (done as a stable target)** —
+* **Measured mutual target (active, induction shape validated)** —
   `QUOTE_HF_MUTUAL_MEASURED` states the strong-induction target over a
   bound `n`: all membership decisions with
   `quote_hf_mem_measure x y < n`, and all quote inequalities with
   `quote_hf_neq_measure s t < n`. Its body now has the correct outer
-  strong-induction frame on `n`, but the leaves still use the old
-  projection wrapper until the remaining measure-decrease lemmas are
-  formalized.
+  strong-induction frame on `n` and no longer uses the old projection
+  wrapper `QUOTE_HF_MEM_DECISION_AND_NEQ`.
+
+  The membership half calls the IH at the current membership measure
+  `M(x,y)` and, in the miss branch, uses the closed measure decreases to
+  obtain the tail membership decision and head inequality recursively.
+  The remaining three `p.sorry()` leaves are the object-level branch
+  bridges:
+
+  ```text
+  y = 0:
+    HF1/NOT_IN_EMPTY bridge for the empty quoted set
+
+  y != 0 /\ x = low_bit y:
+    HF2 bridge for head membership in the Insert_t quote
+
+  y != 0 /\ x != low_bit y:
+    HF3 bridge transferring the tail decision across Insert_t, using
+    the recursive quoted inequality between x and low_bit y
+  ```
+
+  The inequality half is structurally closed through the IH: it obtains
+  a discriminating member from `HF_EXT_DIFF`, gets both smaller
+  membership decisions using the left/right ext-diff decrease helpers,
+  and closes via the certified object-level discriminators. Its only
+  remaining dependency is that the two ext-diff decrease helpers are
+  still visible `p.sorry()` lemmas.
 
   `Pair_ord` is kept behind `--include-pair-ord` because exact values
   explode; small runs still reject it as the membership measure.
