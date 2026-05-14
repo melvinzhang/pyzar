@@ -21,7 +21,7 @@ import dataclasses
 from fusion import Var, ASSUME, EQ_MP, DEDUCT_ANTISYM_RULE
 from fusion import mk_type, new_basic_type_definition
 from basics import mk_const, mk_abs, mk_app, mk_eq, dest_eq, rator, rand
-from parser import add_const, add_type
+from parser import add_const, add_type, define, parse_type
 from axioms import mk_and, mk_exists, dest_exists, dest_forall, dest_imp
 from proof import proof, define_with_at
 from tactics import (
@@ -37,8 +37,10 @@ from tactics import (
     REWRITE_CONV,
     TRANS,
     BETA_NORM,
+    REFL,
     GEN,
 )
+from tactics import or_chain_collapse
 
 
 @dataclasses.dataclass(frozen=True)
@@ -79,6 +81,22 @@ class ConstructorDef:
     const: object
     def_thm: object
     at_thm: object
+
+
+@dataclasses.dataclass(frozen=True)
+class Nat0BinaryClosurePredicate:
+    """Recognizer package for ``atoms | binary recursive constructor``."""
+
+    name: str
+    pred: object
+    body_def: object
+    body_const: object
+    mono: object
+    def_thm: object
+    rec_raw: object
+    rec: object
+    atom_intros: list
+    binary_intro: object
 
 
 def define_constructor(name, ty, body, *, sig=None, infix=None, prefix=False, **bindings):
@@ -316,3 +334,118 @@ def _unfold_rec_via_F_def(rec_raw, F_def):
     """Compatibility alias for the historical helper name."""
 
     return unfold_rec_via_body_def(rec_raw, F_def)
+
+
+def define_nat0_binary_closure_predicate(
+    pred_name,
+    body_name,
+    *,
+    atoms,
+    binary,
+):
+    r"""Define a nat0 recognizer closed under one binary constructor.
+
+    ``atoms`` is a list of ``(surface_name, term)`` pairs. ``binary`` is
+    ``(surface_name, const, size_left, size_right)``. The generated recognizer
+    has body:
+
+    ``n = atom1 \/ ... \/ (?a b. n = C a b /\\ f a /\\ f b)``.
+
+    The function returns the helper body definition, monotonicity theorem,
+    ``define_wf_lt`` definition/recursion theorem, the unfolded ``REC`` theorem,
+    atom intro theorems, and the binary intro theorem.
+    """
+
+    from nat0 import nat0_ty
+    from nat0_order import define_wf_lt
+
+    pred_ty = parse_type("nat0 -> bool")
+    body_ty = parse_type("(nat0 -> bool) -> nat0 -> bool")
+    ctor_name, ctor_const, size_l, size_r = binary
+    atom_disjuncts = [f"n = {atom_name}" for atom_name, _ in atoms]
+    binary_disjunct = f"(?a b. n = {ctor_name} a b /\\ f a /\\ f b)"
+    body_src = " \\/ ".join(atom_disjuncts + [binary_disjunct])
+
+    body_def = define(
+        body_name,
+        body_ty,
+        f"\\f:nat0->bool. \\n:nat0. {body_src}",
+    )
+    body_const = mk_const(body_name, [])
+
+    @proof
+    def mono(p):
+        p.goal(
+            f"!f g n. (!k. nat0_lt k n ==> f k = g k) "
+            f"==> {body_name} f n = {body_name} g n",
+            types={"f": pred_ty, "g": pred_ty, "n": nat0_ty, "k": nat0_ty},
+        )
+        p.fix("f g n")
+        p.assume("h: !k. nat0_lt k n ==> f k = g k")
+        h_th = p.fact("h")
+        eqs = [REFL(p._parse(f"n = {atom_name}")) for atom_name, _ in atoms]
+        eqs.append(mono_iff_binary_step(ctor_const, size_l, size_r, h_th))
+        p.thus(f"{body_name} f n = {body_name} g n").by_unfold(
+            or_chain_collapse(eqs), body_def
+        )
+
+    def_thm, rec_raw = define_wf_lt(pred_name, pred_ty, body_const, mono)
+    pred_const = mk_const(pred_name, [])
+    rec = unfold_rec_via_body_def(rec_raw, body_def)
+
+    body_at = {
+        atom_name: " \\/ ".join(
+            [f"{atom_name} = {other_name}" for other_name, _ in atoms]
+            + [f"(?a b. {atom_name} = {ctor_name} a b /\\ {pred_name} a /\\ {pred_name} b)"]
+        )
+        for atom_name, _ in atoms
+    }
+
+    atom_intros = []
+    for atom_name, atom_term in atoms:
+
+        @proof
+        def atom_intro(p, atom_name=atom_name, atom_term=atom_term):
+            p.goal(f"{pred_name} {atom_name}")
+            p.have(f"h_self: {atom_name} = {atom_name}").by_thm(REFL(atom_term))
+            p.have(f"rhs: {body_at[atom_name]}").by_disj("h_self")
+            p.thus(f"{pred_name} {atom_name}").by_eq_mp(SPEC(atom_term, rec), "rhs")
+
+        atom_intros.append(atom_intro)
+
+    @proof
+    def binary_intro(p):
+        p.goal(
+            f"!a b. {pred_name} a /\\ {pred_name} b ==> "
+            f"{pred_name} ({ctor_name} a b)"
+        )
+        p.fix("a b")
+        p.assume(f"(ha, hb): {pred_name} a /\\ {pred_name} b")
+        p.have(
+            f"inner: ?x y. {ctor_name} a b = {ctor_name} x y /\\ "
+            f"{pred_name} x /\\ {pred_name} y"
+        ).by_exists(["a", "b"], "ha", "hb")
+        ctor_ab = f"{ctor_name} a b"
+        rhs = " \\/ ".join(
+            [f"{ctor_ab} = {atom_name}" for atom_name, _ in atoms]
+            + [
+                f"(?x y. {ctor_ab} = {ctor_name} x y /\\ "
+                f"{pred_name} x /\\ {pred_name} y)"
+            ]
+        )
+        p.have(f"rhs: {rhs}").by_disj("inner")
+        spec = SPEC(mk_app(ctor_const, p._parse("a"), p._parse("b")), rec)
+        p.thus(f"{pred_name} ({ctor_name} a b)").by_eq_mp(spec, "rhs")
+
+    return Nat0BinaryClosurePredicate(
+        pred_name,
+        pred_const,
+        body_def,
+        body_const,
+        mono,
+        def_thm,
+        rec_raw,
+        rec,
+        atom_intros,
+        binary_intro,
+    )

@@ -130,19 +130,16 @@ from fusion import Var
 from basics import mk_const, mk_app, rand, aconv
 from parser import define, parse_type, pp
 from nat0 import nat0_ty, ZERO, mk_suc0
-from nat0_order import define_wf_lt
 from proof import proof, register_intro_set
-from tactics import REFL, SPEC, SPECL, SYM, EQ_MP, DISJ1, DISJ2, CONJ, MP
+from tactics import REFL, SPEC, SPECL, SYM, EQ_MP, CONJ, MP
 from tactics import TRANS, unfold_def_at
 from hf_sets import Pair_ord
 from data_type import (
     define_constructor,
+    define_nat0_binary_closure_predicate,
     _proof_lt_binary_left,
     _proof_lt_binary_right,
-    _unfold_rec_via_F_def,
-    mono_iff_binary_step,
 )
-from tactics import or_chain_collapse
 
 
 # ---------------------------------------------------------------------------
@@ -205,140 +202,21 @@ NAT0_LT_APP_T_R = _proof_lt_binary_right(
 )
 
 
-# ``is_sk_term`` is the SK-closure predicate, defined by well-founded
-# recursion on Pair_ord-depth via ``define_wf_lt`` (the same pattern
-# ``hf_syntax.IS_TERM_DEF`` uses for is_term).
-#
-# Body of the recursion functional ``_is_sk_term_F : (nat0 -> bool) ->
-# nat0 -> bool``:
-#
-#   _is_sk_term_F f n  :=  n = S_t \/
-#                          n = K_t \/
-#                          ?a b. n = App_t a b /\ f a /\ f b
-#
-# The S_t / K_t disjuncts are non-recursive in f; only the App_t branch
-# feeds back, and there only at strictly-smaller arguments (NAT0_LT_APP_T_*).
-# That makes ``_is_sk_term_F`` monotone for the WF-lt fixed point.
-#
-# Trade-off vs. the impredicative encoding (previously tried):
-#   * Impredicative: three intro rules trivial, inversion (CASES) hard.
-#   * define_wf_lt: needs setup (size lemmas + monotonicity), but
-#     ``IS_SK_TERM_REC`` is bidirectional, so intros, inversion, and
-#     structural induction all become routine downstream.
-_pred_ty = parse_type("nat0 -> bool")
-_F_pred_ty = parse_type("(nat0 -> bool) -> nat0 -> bool")
-
-
-_IS_SK_TERM_F_DEF = define(
-    "_is_sk_term_F",
-    _F_pred_ty,
-    "\\f:nat0->bool. \\n:nat0. "
-    "n = S_t \\/ n = K_t \\/ "
-    "(?a b. n = App_t a b /\\ f a /\\ f b)",
-)
-_IS_SK_TERM_F = mk_const("_is_sk_term_F", [])
-
-
-@proof
-def IS_SK_TERM_MONO(p):
-    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
-    ==> _is_sk_term_F f n = _is_sk_term_F g n.
-
-    Monotonicity of the recursion body.  The S_t and K_t disjuncts
-    don't mention f at all (REFL); only the App_t disjunct uses the
-    size lemmas NAT0_LT_APP_T_L/R to recover f-eq at strictly-smaller
-    arguments.
-    """
-    p.goal(
-        "!f g n. (!k. nat0_lt k n ==> f k = g k) "
-        "==> _is_sk_term_F f n = _is_sk_term_F g n",
-        types={"f": _pred_ty, "g": _pred_ty, "n": nat0_ty, "k": nat0_ty},
-    )
-    p.fix("f g n")
-    p.assume("h: !k. nat0_lt k n ==> f k = g k")
-
-    h_th = p.fact("h")
-    eq_S = REFL(p._parse("n = S_t"))
-    eq_K = REFL(p._parse("n = K_t"))
-    eq_app = mono_iff_binary_step(
-        App_t, NAT0_LT_APP_T_L, NAT0_LT_APP_T_R, h_th
-    )
-    body_eq = or_chain_collapse([eq_S, eq_K, eq_app])
-
-    p.thus("_is_sk_term_F f n = _is_sk_term_F g n").by_unfold(
-        body_eq, _IS_SK_TERM_F_DEF
-    )
-
-
-IS_SK_TERM_DEF, _IS_SK_TERM_REC_RAW = define_wf_lt(
+_SK_TERM = define_nat0_binary_closure_predicate(
     "is_sk_term",
-    _pred_ty,
-    _IS_SK_TERM_F,
-    IS_SK_TERM_MONO,
+    "_is_sk_term_F",
+    atoms=[("S_t", S_t), ("K_t", K_t)],
+    binary=("App_t", App_t, NAT0_LT_APP_T_L, NAT0_LT_APP_T_R),
 )
-is_sk_term = mk_const("is_sk_term", [])
-
-
-# IS_SK_TERM_REC : |- !n. is_sk_term n =
-#                          n = S_t \/ n = K_t \/
-#                          (?a b. n = App_t a b /\ is_sk_term a /\ is_sk_term b).
-# The headline recursion equation; everything downstream is a SPEC away.
-IS_SK_TERM_REC = _unfold_rec_via_F_def(_IS_SK_TERM_REC_RAW, _IS_SK_TERM_F_DEF)
-
-
-@proof
-def IS_SK_TERM_S(p):
-    """|- is_sk_term S_t.  First-disjunct witness from IS_SK_TERM_REC."""
-    p.goal("is_sk_term S_t")
-    # Strategy: build the RHS-disjunction of IS_SK_TERM_REC at S_t via
-    # DISJ1(REFL S_t), then EQ_MP via the (symmetric) specialized REC.
-    spec = SPEC(S_t, IS_SK_TERM_REC)  # |- is_sk_term S_t = (S_t = S_t \/ ...)
-    rhs_disj_th = DISJ1(REFL(S_t), p._parse(
-        "S_t = K_t \\/ (?a b. S_t = App_t a b /\\ is_sk_term a /\\ is_sk_term b)"
-    ))
-    p.thus("is_sk_term S_t").by_eq_mp(spec, rhs_disj_th)
-
-
-@proof
-def IS_SK_TERM_K(p):
-    """|- is_sk_term K_t.  Second-disjunct witness."""
-    p.goal("is_sk_term K_t")
-    spec = SPEC(K_t, IS_SK_TERM_REC)
-    # K_t case: DISJ2 past ``K_t = S_t``, then DISJ1 on REFL K_t.
-    inner = DISJ1(REFL(K_t), p._parse(
-        "?a b. K_t = App_t a b /\\ is_sk_term a /\\ is_sk_term b"
-    ))
-    rhs_disj_th = DISJ2(p._parse("K_t = S_t"), inner)
-    p.thus("is_sk_term K_t").by_eq_mp(spec, rhs_disj_th)
-
-
-@proof
-def IS_SK_TERM_APP(p):
-    """|- !a b. is_sk_term a /\\ is_sk_term b ==> is_sk_term (App_t a b).
-
-    Third-disjunct witness: build ``?a' b'. App_t a b = App_t a' b'
-    /\\ is_sk_term a' /\\ is_sk_term b'`` by witnessing a' := a,
-    b' := b with REFL.  Then chain through DISJ2 / DISJ2 and EQ_MP via
-    REC.
-    """
-    p.goal("!a b. is_sk_term a /\\ is_sk_term b ==> is_sk_term (App_t a b)")
-    p.fix("a b")
-    p.assume("(ha, hb): is_sk_term a /\\ is_sk_term b")
-    # Use witness builders: the inner body is ``App_t a b = App_t a' b'
-    # /\\ is_sk_term a' /\\ is_sk_term b'`` -- witness (a, b).
-    # DSL friction: parser identifiers can't contain primes, so we use
-    # x, y as the fresh bound names for the existential witnesses.
-    p.have(
-        "inner: ?x y. App_t a b = App_t x y /\\ "
-        "       is_sk_term x /\\ is_sk_term y"
-    ).by_exists(["a", "b"], "ha", "hb")
-    p.have(
-        "rhs: App_t a b = S_t \\/ App_t a b = K_t \\/ "
-        "     (?x y. App_t a b = App_t x y /\\ "
-        "      is_sk_term x /\\ is_sk_term y)"
-    ).by_disj("inner")
-    spec = SPEC(mk_app(App_t, p._parse("a"), p._parse("b")), IS_SK_TERM_REC)
-    p.thus("is_sk_term (App_t a b)").by_eq_mp(spec, "rhs")
+_IS_SK_TERM_F_DEF = _SK_TERM.body_def
+_IS_SK_TERM_F = _SK_TERM.body_const
+IS_SK_TERM_MONO = _SK_TERM.mono
+IS_SK_TERM_DEF = _SK_TERM.def_thm
+_IS_SK_TERM_REC_RAW = _SK_TERM.rec_raw
+is_sk_term = _SK_TERM.pred
+IS_SK_TERM_REC = _SK_TERM.rec
+IS_SK_TERM_S, IS_SK_TERM_K = _SK_TERM.atom_intros
+IS_SK_TERM_APP = _SK_TERM.binary_intro
 
 
 # IS_SK_TERM_CASES coincides with IS_SK_TERM_REC up to surface phrasing;
