@@ -113,6 +113,7 @@ from nat0 import (
 from bits import BIT_AT_ZERO, BIT_LT, BIT_EXTENSIONALITY
 from nat0_order import nat0_lt, NAT0_LT_ASYM  # noqa: F401  -- parser alias
 from proof import proof
+from data_type import define_constructor
 
 
 # ``hf`` is a synonym for ``nat0`` -- no nominal subtype.
@@ -569,25 +570,14 @@ def SINGLETON_LT_PAIR(p):
 # {{x}, {x, y}}.)
 # ---------------------------------------------------------------------------
 
-PAIR_ORD_DEF = define(
+_PAIR_ORD_CTOR = define_constructor(
     "Pair_ord",
     parse_type("nat0 -> nat0 -> nat0"),
     "\\x:nat0. \\y:nat0. Pair (Singleton x) (Pair x y)",
 )
-Pair_ord = mk_const("Pair_ord", [])
-
-
-# Pointwise: |- !x y. Pair_ord x y = Pair (Singleton x) (Pair x y).
-def _prove_pair_ord_at():
-    from tactics import AP_THM, BETA_CONV, TRANS, GENL
-
-    th_x = AP_THM(PAIR_ORD_DEF, _x_n0)
-    th_x_eq = TRANS(th_x, BETA_CONV(rand(th_x._concl)))
-    th_xy = AP_THM(th_x_eq, _y_n0)
-    return GENL([_x_n0, _y_n0], TRANS(th_xy, BETA_CONV(rand(th_xy._concl))))
-
-
-PAIR_ORD_AT = _prove_pair_ord_at()
+PAIR_ORD_DEF = _PAIR_ORD_CTOR.def_thm
+PAIR_ORD_AT = _PAIR_ORD_CTOR.at_thm
+Pair_ord = _PAIR_ORD_CTOR.const
 
 
 # Membership characterisation:

@@ -55,17 +55,15 @@ from num import (
     NUM_RECURSION,
 )
 from fusion import aty, INST_TYPE
-from fusion import mk_type, new_basic_type_definition
 from parser import (
     define as _define,
     define,
     parse_type,
-    add_const,
-    add_type,
 )
 from tactics import unfold_def_at, REWRITE_RULE
 from axioms import SELECT_AX, mk_and, mk_forall
 from proof import proof, register_induction, InductionStrategy
+from data_type import define_basic_subtype
 
 
 # ---------------------------------------------------------------------------
@@ -86,19 +84,15 @@ _NAT0_WITNESS = EQ_MP(SYM(_beta_at_one), REFL(ONE))  # |- (\n. n = n) 1
 # Step 2.  Carve out ``nat0`` as a (trivial) subtype of ``num``.
 # ---------------------------------------------------------------------------
 
-ABS_REP_NAT0, REP_ABS_NAT0 = new_basic_type_definition(
-    "nat0", ("abs_nat0", "rep_nat0"), _NAT0_WITNESS
-)
+_NAT0_SUBTYPE = define_basic_subtype("nat0", ("abs_nat0", "rep_nat0"), _NAT0_WITNESS)
+ABS_REP_NAT0 = _NAT0_SUBTYPE.abs_rep
+REP_ABS_NAT0 = _NAT0_SUBTYPE.rep_abs
 # ABS_REP_NAT0 : |- abs_nat0 (rep_nat0 a) = a                          (a : nat0)
 # REP_ABS_NAT0 : |- (\n. n = n) r = (rep_nat0 (abs_nat0 r) = r)        (r : num)
 
-nat0_ty = mk_type("nat0", [])
-abs_nat0 = mk_const("abs_nat0", [])
-rep_nat0 = mk_const("rep_nat0", [])
-
-add_type("nat0", nat0_ty)
-add_const("abs_nat0", abs_nat0)
-add_const("rep_nat0", rep_nat0)
+nat0_ty = _NAT0_SUBTYPE.ty
+abs_nat0 = _NAT0_SUBTYPE.abs_const
+rep_nat0 = _NAT0_SUBTYPE.rep_const
 
 
 # Specialise REP_ABS_NAT0 once: the predicate ``(\n. n = n) r`` reduces to the

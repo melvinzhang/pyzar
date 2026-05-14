@@ -131,11 +131,12 @@ from basics import mk_const, mk_app, rand, aconv
 from parser import define, parse_type, pp
 from nat0 import nat0_ty, ZERO, mk_suc0
 from nat0_order import define_wf_lt
-from proof import proof, define_with_at, register_intro_set
+from proof import proof, register_intro_set
 from tactics import REFL, SPEC, SPECL, SYM, EQ_MP, DISJ1, DISJ2, CONJ, MP
 from tactics import TRANS, unfold_def_at
 from hf_sets import Pair_ord
-from hf_syntax import (
+from data_type import (
+    define_constructor,
     _proof_lt_binary_left,
     _proof_lt_binary_right,
     _unfold_rec_via_F_def,
@@ -175,15 +176,17 @@ K_T_DEF = define(
     mk_app(Pair_ord, _tag_K, ZERO),
 )
 K_t = mk_const("K_t", [])
-# ``define_with_at`` yields both ``App_t = \t u. body`` and the pointwise
+# ``define_constructor`` yields both ``App_t = \t u. body`` and the pointwise
 # ``!t u. App_t t u = body``; the latter feeds the NAT0_LT_APP_T_*
 # size lemmas required by ``define_wf_lt``.
-APP_T_DEF, APP_T_AT = define_with_at(
+_APP_T_CTOR = define_constructor(
     "App_t",
     parse_type("nat0 -> nat0 -> nat0"),
     "\\t:nat0. \\u:nat0. Pair_ord (SUC0 (SUC0 0)) (Pair_ord t u)",
 )
-App_t = mk_const("App_t", [])
+APP_T_DEF = _APP_T_CTOR.def_thm
+APP_T_AT = _APP_T_CTOR.at_thm
+App_t = _APP_T_CTOR.const
 
 # Tag literal for App_t, used by the size-lemma builders.
 _APP_T_TAG = "SUC0 (SUC0 0)"
@@ -192,8 +195,8 @@ _APP_T_TAG = "SUC0 (SUC0 0)"
 # NAT0_LT_APP_T_L : |- !a b. nat0_lt a (App_t a b)
 # NAT0_LT_APP_T_R : |- !a b. nat0_lt b (App_t a b)
 # These bound the recursion depth so ``define_wf_lt`` can take a least
-# fixed point.  Identical shape to the Imp_f / Insert_t cases in
-# ``hf_syntax.py``; we reuse the private builders directly.
+# fixed point. Identical shape to the Imp_f / Insert_t cases, now produced by
+# the shared encoded-datatype helpers.
 NAT0_LT_APP_T_L = _proof_lt_binary_left(
     "NAT0_LT_APP_T_L", "a", "b", "App_t", APP_T_AT, _APP_T_TAG
 )
@@ -1707,5 +1710,3 @@ if __name__ == "__main__":
     print("DIAGONAL_TERM_EXISTS      :", pp_thm(DIAGONAL_TERM_EXISTS))
     print("HALTING_UNDECIDABLE       :", pp_thm(HALTING_UNDECIDABLE))
     print("HALTS_NOT_SK_REPRESENTABLE:", pp_thm(HALTS_NOT_SK_REPRESENTABLE))
-
-
