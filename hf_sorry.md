@@ -1,8 +1,10 @@
 # Order of attack — HF Gödel-I `sorry()` plan
 
-This document is primarily the plan for the nine `p.sorry()` calls in
-`hf_repr_thms.py`. The full HF Gödel-I path also has nine additional
-`p.sorry()` calls in `hf_godel1.py`; those are listed here as downstream
+This document is primarily the plan for the `p.sorry()` calls in
+`hf_repr_thms.py`. The pivot demotes the old global quoted-inequality
+path to legacy compatibility and exposes the smaller membership-plus-
+certificate interface. The full HF Gödel-I path also has
+additional `p.sorry()` calls in `hf_godel1.py`; those are downstream
 work, but the detailed inventory below is file-local to `hf_repr_thms.py`.
 
 The plan is ordered to settle the greatest unknown first. The switch is
@@ -23,6 +25,9 @@ has been redirected to the set-native checker.
 | G | `PROV_HF_REPRESENTS`             | 3156 | large      | F                         | Σ₁ completeness (forward) — Σ₁ soundness deferred to Stage 6; **body of `Prov_HF_internal`** |
 | H | `IS_FORM_PROV_HF_INTERNAL`       | 3170 | small      | G's body def              | `is_form` closure under HF-formula constructors             |
 | I | `FREE_IN_PROV_HF_INTERNAL`       | 3183 | small      | G's body def              | `free_in` recursion                                          |
+| J | `HF_IND_QUOTE_MEM_DECISION`      | 2413 | spike stub | —                         | intended consequence of HF-IND schema                        |
+| K | `HF_IND_QUOTE_PROV_NEQ`          | 2429 | spike stub | —                         | intended consequence of HF-IND schema                        |
+| L | `QUOTE_HF_MEM_DECISION`          | 3509 | done       | J                         | public wrapper for downstream                                |
 
 ✓ = already proven and exported (no sorry).
 
@@ -34,8 +39,46 @@ Two implementation clusters plus one representation switch:
   `Prov_HF` and `Prov_HF_internal` now target ranked HF-set proof
   objects.
 
-* **Canonical-form/quote_hf cluster (A → B, C).** Closes the residual gap
-  inside `QUOTE_HF_PROV_NEQ` (the `s≠0 ∧ t≠0` branch).
+* **Quote layer pivot.** The preferred route no longer makes global
+  quoted inequality the blocking theorem. The new interface is
+  membership decision plus certified inequality:
+
+  ```text
+  QUOTE_HF_MEM_DECISION
+  |- !x y.
+     (In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y)))
+     /\
+     (~In x y ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))
+
+  QUOTE_HF_CERTIFIED_NEQ_FROM_MEM_DIFF
+  |- !w s t. In w s /\ ~In w t
+     ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))
+
+  QUOTE_HF_CERTIFIED_NEQ_FROM_MEM_DIFF_RIGHT
+  |- !w s t. ~In w s /\ In w t
+     ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))
+  ```
+
+  Minimal HF-IND spike: the public quote interfaces are currently routed
+  through two explicit stubs that are intended to follow from adding the
+  object-level HF induction schema:
+
+  ```text
+  HF_IND_QUOTE_MEM_DECISION
+  HF_IND_QUOTE_PROV_NEQ
+  ```
+
+  This removes `IS_IN_REPRESENTS`, `QUOTE_HF_NEQ_FROM_LOW_BIT`,
+  `QUOTE_HF_NEQ_FROM_CLEAR_LOW`, and `QUOTE_HF_MUTUAL_MEASURED` from the
+  active quote path. Those legacy theorems remain in the file for now as
+  compatibility/debt, but new work should cite the HF-IND-routed public
+  interfaces.
+* **Legacy canonical-form/quote_hf cluster (A → B, C).** This remains
+  in the file for compatibility through `QUOTE_HF_PROV_NEQ`, but it is
+  no longer the recommended blocker for G1. Close it later if the
+  elegant global theorem
+  `s != t ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))`
+  is still wanted as a convenience.
 * **Representability cluster (D → E → F → G; H, I attached to G).**
   Builds the Stage-3C/3D `…_REPRESENTS` chain consumed by the diagonal
   lemma in `hf_godel1.py`.
@@ -108,12 +151,14 @@ Phase 0 has now settled the largest representation risk. G remains the
 deepest theorem, but the proof-object shape is no longer the main
 unknown.
 
-### Phase 1 — canonical-form quote_hf inequality (close `QUOTE_HF_PROV_NEQ`)
+### Phase 1 — quote membership plus certified inequality
 
-Close this before claiming the substitute representability chain is
-fully no-sorry. `IS_IN_REPRESENTS` already exists, but it depends on
-`QUOTE_HF_PROV_NEQ`, whose nonzero/nonzero branch is still closed by the
-A/B/C path.
+Do **not** block the substitute/provability representability chain on
+the global theorem
+`s != t ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))`.
+Most downstream constructor/tag inequalities know a concrete reason the
+two HF sets differ. Carry that reason as a discriminating member `w`
+and use certified inequality.
 
 1. **A — `HF4_INST`**. **Done.**
    - Mechanical extension of `HF2_INST`/`HF3_INST` template: two
@@ -122,42 +167,42 @@ A/B/C path.
    - This is now closed with no `p.sorry()`. It removed the largest
      mechanical unknown in Phase 1.
 
-2. **B — `QUOTE_HF_NEQ_FROM_LOW_BIT`** and
-   **C — `QUOTE_HF_NEQ_FROM_CLEAR_LOW`**.
-   - Do not keep these as standalone low-bit/tail injectivity lemmas.
-     The better route is a strengthened induction that proves
-     membership decision and quote inequality together, then derives
-     `QUOTE_HF_PROV_NEQ` and `IS_IN_REPRESENTS` as projections.
-   - The object-level endpoint for the equality side is now available:
-     `PROV_HF_NEQ_FROM_MEM_DIFF` proves that a single membership
-     difference
-     `Prov_HF (In_a (quote_hf w) s)` and
-     `Prov_HF (Not_f (In_a (quote_hf w) t))`
-     implies `Prov_HF (Not_f (Eq_f s t))`.
-   - Next implementation step: replace the current
-     `QUOTE_HF_PROV_NEQ`/`IS_IN_REPRESENTS` cycle with one strengthened
-     induction indexed by a pair/measure, not a single `HF_INDUCTION`
-     over the right-hand set. A single-set induction is insufficient:
-     the `IS_IN_REPRESENTS` step for `Insert i s` needs
-     `Prov_HF (Not_f (Eq_f (quote_hf i) (quote_hf x)))` for an
-     arbitrary query element `x`, and `x` is not necessarily below
-     `s`. For the equality projection, use HOL `IN_EXT` plus
-     `NOT_FORALL_TO_EX_NOT` to choose a discriminating element, then
-     dispatch via the two membership-decision projections and
-     `PROV_HF_NEQ_FROM_MEM_DIFF`.
-   - Current code now has the strengthened consumer-facing contract
-     `QUOTE_HF_MEM_DECISION_AND_NEQ`:
-     direct HF membership decision for quoted HF sets bundled with
-     quoted inequality. Its body intentionally still factors through
-     `IS_IN_REPRESENTS` and `QUOTE_HF_PROV_NEQ`; this pins the theorem
-     statement and gives downstream work one target to cite while the
-     mutual induction replaces the implementation.
-   - Arithmetic orientation needed by that mutual induction is now
-     exported from `nat0_order.py` as `NAT0_LT_TRICHOTOMY` and
-     `NAT0_LT_TOTAL_NEQ`. The next real unknown is not whether unequal
-     `nat0`s can be ordered, but whether the chosen pair/measure index
-     decreases for all recursive calls required by the membership and
-     inequality projections.
+2. **HF-IND spike stubs.**
+   - Current intentional quote-layer assumptions:
+
+     ```text
+     HF_IND_QUOTE_MEM_DECISION
+     HF_IND_QUOTE_PROV_NEQ
+     ```
+
+   - `QUOTE_HF_MEM_DECISION` is routed directly to the first;
+     `QUOTE_HF_PROV_NEQ` is routed directly to the second.
+     This validates the strengthened-theory architecture before
+     encoding the induction-schema recognizer.
+
+3. **Interface theorem — `QUOTE_HF_MEM_DECISION`.**
+   - This is the membership-only theorem downstream code should cite:
+
+     ```text
+     |- !x y.
+        (In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y)))
+        /\
+        (~In x y ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))
+     ```
+
+   - In the spike it no longer projects from `IS_IN_REPRESENTS`; it is
+     a public wrapper over `HF_IND_QUOTE_MEM_DECISION`.
+
+4. **Certified inequality is already pushed through.**
+   - `QUOTE_HF_CERTIFIED_NEQ_FROM_MEM_DIFF` and `_RIGHT` are closed
+     from `QUOTE_HF_MEM_DECISION` plus the existing object-level
+     discriminators. This checks that the interface is strong enough:
+     once callers can name a witness `w`, no global symmetric-difference
+     search is needed inside the quote layer.
+   - Use `QUOTE_HF_MEMBERSHIP_AND_CERTIFIED_NEQ` as the downstream
+     bundle. Treat `QUOTE_HF_MEM_DECISION_AND_NEQ`,
+     `QUOTE_HF_PROV_NEQ`, `QUOTE_HF_NEQ_FROM_LOW_BIT`, and
+     `QUOTE_HF_NEQ_FROM_CLEAR_LOW` as legacy compatibility targets.
 
 ### Phase 2 — `substitute` representability
 
@@ -271,9 +316,10 @@ definitions.
   `Prov_HF HF4_axiom`, prove the nested `is_form` obligations, run
   two `PROV_HF_UI` steps, then normalize the capture-blind
   substitutions through the `Forall_f` and encoded-iff body.
-  The Phase 1 blocker has moved to the canonical
-  nonmembership/order bridge needed by `QUOTE_HF_NEQ_FROM_LOW_BIT`
-  and `QUOTE_HF_NEQ_FROM_CLEAR_LOW`.
+  The old Phase 1 blocker was the canonical nonmembership/order bridge
+  needed by `QUOTE_HF_NEQ_FROM_LOW_BIT` and
+  `QUOTE_HF_NEQ_FROM_CLEAR_LOW`. That path is now legacy in the
+  HF-IND spike; public quote interfaces no longer route through it.
 
 * **Membership-difference discriminator (done)** —
   `PROV_HF_NEQ_FROM_MEM_DIFF` is closed. This is the reusable final
@@ -282,12 +328,12 @@ definitions.
   negative membership on the other, it yields object-level inequality
   of the quoted sets by equality substitution and contraposition.
 
-* **Strengthened theorem contract (done as a stable target)** —
-  `QUOTE_HF_MEM_DECISION_AND_NEQ` now bundles direct quoted-membership
-  decision and quoted inequality. It is deliberately a projection
-  wrapper over the old theorems for the moment; the mutual induction
-  should be built under this exact statement and then the wrapper
-  dependencies can be deleted.
+* **Pivot theorem contract (active target)** —
+  `QUOTE_HF_MEMBERSHIP_AND_CERTIFIED_NEQ` bundles direct
+  quoted-membership decision with the two certified inequality
+  orientations. This is the downstream interface to use for new
+  representability work. `QUOTE_HF_MEM_DECISION_AND_NEQ` remains as a
+  compatibility wrapper, now routed through the HF-IND quote stubs.
 
 * **Reverse discriminator (done)** —
   `PROV_HF_NEQ_FROM_MEM_DIFF_RIGHT` is closed. The mutual proof can now
