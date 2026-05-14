@@ -2793,8 +2793,8 @@ def SUBSTITUTE_REPRESENTS(p):
 #                                          <=> v = var_x.
 #
 # Discharge plan -- via HF1-HF5 (no Goedel-beta sequence coding).
-# The internal proof predicate is switching to HF-native proof objects,
-# not ``cons_l`` lists. The preferred shape is a ranked finite HF set of
+# The internal proof predicate uses HF-native proof objects, not
+# ``cons_l`` lists. The shape is a ranked finite HF set of
 # proof-step records:
 #
 #     P contains records (rank, formula)
@@ -2809,14 +2809,12 @@ def SUBSTITUTE_REPRESENTS(p):
 # keeping HF-internal membership as ordinary ``In_a``.
 #
 # The current list-based ``Proof_HF`` in ``hf_repr_core.py`` remains
-# useful as external scaffolding, but it is not the formula shape for
-# ``Prov_HF_internal``. Phase 0 in ``hf_sorry.md`` chooses between
-# bridging from that checker to ``Proof_HF_set`` or retiring it in favor
-# of the set-native checker.
+# legacy external scaffolding, but it is not the formula shape for
+# ``Prov_HF_internal`` and is no longer the definition of ``Prov_HF``.
 #
 # Forward direction (HOL ``Prov_HF n`` ==> HF proves the substituted
-# form): Sigma_1 completeness for HF. Extract a Proof_HF witness via
-# PROV_HF_AT, exhibit its HF encoding as a HF-numeral, verify each
+# form): Sigma_1 completeness for HF. Extract a ``Proof_HF_set`` witness
+# via PROV_HF_AT, exhibit its HF encoding as a HF-numeral, verify each
 # conjunct term-by-term (each a closed Sigma_0 fact HF decides at
 # numerals).
 #

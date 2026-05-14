@@ -23,10 +23,9 @@
 #                          image is what matters).
 #
 # This file still contains the older list-based ``Proof_HF`` scaffolding
-# used by the external closure lemmas. The HF-internal route is switching
-# to ranked finite HF-set proof objects, introduced below as
-# ``Proof_HF_set``. Once its closure prototypes are in place, ``Prov_HF``
-# should be bridged to it or redirected to it.
+# as legacy external code. The active provability route is ranked finite
+# HF-set proof objects via ``Proof_HF_set``; ``Prov_HF`` is defined from
+# that predicate, not from lists.
 #
 
 from fusion import Var
@@ -291,8 +290,8 @@ def IS_TERM_NUMERAL(p):
 #
 # ``substitute`` and ``Not_f`` are referenced by name from this point on;
 # the ``represents_pred`` scaffolding (which mentions ``Prov_HF``) lives
-# in Stage 3B (k) below, after ``Prov_HF`` has been defined as the
-# Sigma_1 form ``\n. ?p. Proof_HF p n``.
+# in Stage 3B (m) below, after ``Prov_HF`` has been defined as the
+# set-native Sigma_1 form ``\n. ?P. Proof_HF_set P n``.
 # ---------------------------------------------------------------------------
 
 
@@ -357,8 +356,7 @@ Proof_HF_set = mk_const("Proof_HF_set", [])
 # HF-internal representation of proofs. ``Prov_HF_internal`` should use
 # HF-native proof objects (ranked finite sets / proof trees), so HF does
 # not have to internalise ``cons_l`` list theory. The code below remains
-# external scaffolding until it is bridged to, or replaced by, the
-# set-native proof checker.
+# legacy external scaffolding and is not part of the ``Prov_HF`` route.
 #
 #   mem_l p x  :<=>  ?h t. p = cons_l h t /\ (x = h \/ mem_l t x).
 #
@@ -1800,8 +1798,10 @@ def PROOF_HF_HEAD_MEM(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 3B (i) -- the three admissibility clauses for the
-# impredicative ``Prov_HF``, lifted to ``\n. ?p. Proof_HF p n``.
+# Stage 3B (i) -- legacy list-proof admissibility clauses.
+#
+# These no longer define the active ``Prov_HF`` route; the set-native
+# closure rules below use ``Proof_HF_set`` instead.
 # ---------------------------------------------------------------------------
 
 
@@ -2023,94 +2023,34 @@ def MP_HAS_PROOF(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 3B (j) -- Sigma_1 definition of Prov_HF.
+# Stage 3B (j) -- set-native Sigma_1 definition of Prov_HF.
 #
-#   Prov_HF n  :<=>  ?p. Proof_HF p n.
+#   Prov_HF n  :<=>  ?P. Proof_HF_set P n.
 #
-# This is the canonical form: provability is the existence of an
-# explicit list-of-formulas proof. The closure rules under axioms,
-# modus ponens, and generalisation are derived from AXIOM_HAS_PROOF,
-# MP_HAS_PROOF, GEN_HAS_PROOF below.
+# This is the canonical HF-native form: provability is the existence of
+# a ranked finite HF-set proof object. The legacy list checker remains
+# external scaffolding only; it is not used by ``Prov_HF``.
 # ---------------------------------------------------------------------------
 
 
-# |- !n. Prov_HF n = (?p. Proof_HF p n).
+# |- !n. Prov_HF n = (?P. Proof_HF_set P n).
 PROV_HF_DEF, PROV_HF_AT = define_with_at(
     "Prov_HF",
     parse_type("nat0 -> bool"),
-    "\\n:nat0. ?p:nat0. Proof_HF p n",
+    "\\n:nat0. ?P:nat0. Proof_HF_set P n",
 )
 Prov_HF = mk_const("Prov_HF", [])
 
 
 # ---------------------------------------------------------------------------
-# Stage 3B (k) -- closure rules.
-#
-#   (1) |- !n. is_axiom n ==> Prov_HF n.
-#   (2) |- !f g. Prov_HF f /\ Prov_HF (Imp_f f g) ==> Prov_HF g.
-#   (3) |- !f x. Prov_HF f ==> Prov_HF (Forall_f x f).
-#
-# Each one is the corresponding *_HAS_PROOF lemma packaged through
-# PROV_HF_AT (which folds ``?p. Proof_HF p _`` into ``Prov_HF _``).
+# Stage 3B (k/l) closure rules for ``Prov_HF`` live below the
+# HF-set proof-object prototypes, because the Python proof decorators
+# need ``AXIOM_HAS_PROOF_HF_SET``, ``MP_HAS_PROOF_HF_SET``, and
+# ``GEN_HAS_PROOF_HF_SET`` to exist before the closure proof functions
+# are defined.
 # ---------------------------------------------------------------------------
 
 
-@proof
-def PROV_HF_AXIOM(p):
-    """|- !n. is_axiom n ==> Prov_HF n."""
-    p.goal("!n. is_axiom n ==> Prov_HF n")
-    p.fix("n")
-    p.assume("ax: is_axiom n")
-    p.have("ex: ?p. Proof_HF p n").by(AXIOM_HAS_PROOF, "n", "ax")
-    pq_at_n = SPEC(p._parse("n"), PROV_HF_AT)
-    p.thus("Prov_HF n").by_eq_mp(SYM(pq_at_n), "ex")
-
-
-@proof
-def PROV_HF_MP(p):
-    """|- !f g. Prov_HF f /\\ Prov_HF (Imp_f f g) ==> Prov_HF g."""
-    p.goal("!f g. (Prov_HF f /\\ Prov_HF (Imp_f f g)) ==> Prov_HF g")
-    p.fix("f g")
-    p.assume("(pf, pfg): Prov_HF f /\\ Prov_HF (Imp_f f g)")
-    pq_at_f = SPEC(p._parse("f"), PROV_HF_AT)
-    pq_at_fg = SPEC(p._parse("Imp_f f g"), PROV_HF_AT)
-    pq_at_g = SPEC(p._parse("g"), PROV_HF_AT)
-    p.have("ex_f: ?p. Proof_HF p f").by_eq_mp(pq_at_f, "pf")
-    p.have("ex_fg: ?p. Proof_HF p (Imp_f f g)").by_eq_mp(pq_at_fg, "pfg")
-    p.have("ex_g: ?p. Proof_HF p g").by(
-        MP_HAS_PROOF, "f", "g", CONJ(p.fact("ex_f"), p.fact("ex_fg"))
-    )
-    p.thus("Prov_HF g").by_eq_mp(SYM(pq_at_g), "ex_g")
-
-
-@proof
-def PROV_HF_GEN(p):
-    """|- !f x. Prov_HF f ==> Prov_HF (Forall_f x f)."""
-    p.goal("!f x. Prov_HF f ==> Prov_HF (Forall_f x f)")
-    p.fix("f x")
-    p.assume("pf: Prov_HF f")
-    pq_at_f = SPEC(p._parse("f"), PROV_HF_AT)
-    pq_at_fx = SPEC(p._parse("Forall_f x f"), PROV_HF_AT)
-    p.have("ex_f: ?p. Proof_HF p f").by_eq_mp(pq_at_f, "pf")
-    p.have("ex_fx: ?p. Proof_HF p (Forall_f x f)").by(
-        GEN_HAS_PROOF, "f", "x", "ex_f"
-    )
-    p.thus("Prov_HF (Forall_f x f)").by_eq_mp(SYM(pq_at_fx), "ex_fx")
-
-
-# ---------------------------------------------------------------------------
-# Stage 3B (l) -- the equivalence ``Prov_HF n <=> ?p. Proof_HF p n``.
-#
-# It is the defining equation, packaged via ``PROV_HF_AT``. Kept under
-# the historic name so downstream code that imports
-# ``PROV_HF_IFF_PROOF_HF`` keeps working.
-# ---------------------------------------------------------------------------
-
-
-PROV_HF_IFF_PROOF_HF = PROV_HF_AT
-
-
-# ---------------------------------------------------------------------------
 # Stage 3B (m) -- representability scaffolding.
 #
 # A unary predicate ``P : nat0 -> bool`` is *represented* by a
@@ -3229,6 +3169,72 @@ def GEN_HAS_PROOF_HF_SET(p):
     ).by_exists([kR], "in_gen_R", "valid_all")
     p.have(f"proof_R: Proof_HF_set ({R}) (Forall_f x f)").by_eq_mp(SYM(proof_at), "body")
     p.thus("?R. Proof_HF_set R (Forall_f x f)").by_witness(R, "proof_R")
+
+
+# ---------------------------------------------------------------------------
+# Stage 3B (k) -- set-native closure rules.
+#
+#   (1) |- !n. is_axiom n ==> Prov_HF n.
+#   (2) |- !f g. Prov_HF f /\ Prov_HF (Imp_f f g) ==> Prov_HF g.
+#   (3) |- !f x. Prov_HF f ==> Prov_HF (Forall_f x f).
+#
+# Each closure rule now packages the corresponding HF-set proof-object
+# prototype through ``PROV_HF_AT``. No list proof object, ``mem_l``, or
+# ``append_l`` occurs in the ``Prov_HF`` route.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def PROV_HF_AXIOM(p):
+    """|- !n. is_axiom n ==> Prov_HF n."""
+    p.goal("!n. is_axiom n ==> Prov_HF n")
+    p.fix("n")
+    p.assume("ax: is_axiom n")
+    p.have("ex: ?P. Proof_HF_set P n").by(AXIOM_HAS_PROOF_HF_SET, "n", "ax")
+    pq_at_n = SPEC(p._parse("n"), PROV_HF_AT)
+    p.thus("Prov_HF n").by_eq_mp(SYM(pq_at_n), "ex")
+
+
+@proof
+def PROV_HF_MP(p):
+    """|- !f g. Prov_HF f /\\ Prov_HF (Imp_f f g) ==> Prov_HF g."""
+    p.goal("!f g. (Prov_HF f /\\ Prov_HF (Imp_f f g)) ==> Prov_HF g")
+    p.fix("f g")
+    p.assume("(pf, pfg): Prov_HF f /\\ Prov_HF (Imp_f f g)")
+    pq_at_f = SPEC(p._parse("f"), PROV_HF_AT)
+    pq_at_fg = SPEC(p._parse("Imp_f f g"), PROV_HF_AT)
+    pq_at_g = SPEC(p._parse("g"), PROV_HF_AT)
+    p.have("ex_f: ?P. Proof_HF_set P f").by_eq_mp(pq_at_f, "pf")
+    p.have("ex_fg: ?Q. Proof_HF_set Q (Imp_f f g)").by_eq_mp(pq_at_fg, "pfg")
+    p.have("ex_g: ?R. Proof_HF_set R g").by(
+        MP_HAS_PROOF_HF_SET, "f", "g", CONJ(p.fact("ex_f"), p.fact("ex_fg"))
+    )
+    p.thus("Prov_HF g").by_eq_mp(SYM(pq_at_g), "ex_g")
+
+
+@proof
+def PROV_HF_GEN(p):
+    """|- !f x. Prov_HF f ==> Prov_HF (Forall_f x f)."""
+    p.goal("!f x. Prov_HF f ==> Prov_HF (Forall_f x f)")
+    p.fix("f x")
+    p.assume("pf: Prov_HF f")
+    pq_at_f = SPEC(p._parse("f"), PROV_HF_AT)
+    pq_at_fx = SPEC(p._parse("Forall_f x f"), PROV_HF_AT)
+    p.have("ex_f: ?P. Proof_HF_set P f").by_eq_mp(pq_at_f, "pf")
+    p.have("ex_fx: ?R. Proof_HF_set R (Forall_f x f)").by(
+        GEN_HAS_PROOF_HF_SET, "f", "x", "ex_f"
+    )
+    p.thus("Prov_HF (Forall_f x f)").by_eq_mp(SYM(pq_at_fx), "ex_fx")
+
+
+# ---------------------------------------------------------------------------
+# Stage 3B (l) -- the equivalence ``Prov_HF n <=> ?P. Proof_HF_set P n``.
+#
+# It is the set-native defining equation, packaged via ``PROV_HF_AT``.
+# ---------------------------------------------------------------------------
+
+
+PROV_HF_IFF_PROOF_HF_SET = PROV_HF_AT
 
 
 @proof
@@ -5312,24 +5318,24 @@ if __name__ == "__main__":
     print("    APPEND_L_AT_NIL  :", pp_thm(APPEND_L_AT_NIL))
     print("    APPEND_L_AT_CONS :", pp_thm(APPEND_L_AT_CONS))
     print()
-    print("Stage 3B (e-g) -- preservation lemmas.")
+    print("Stage 3B (e-g) -- legacy list preservation lemmas.")
     print("    MEM_L_APPEND_PRESERVES :", pp_thm(MEM_L_APPEND_PRESERVES))
     print("    VALID_STEP_PRESERVES   :", pp_thm(VALID_STEP_PRESERVES))
     print("    PROOF_HF_APPEND         :", pp_thm(PROOF_HF_APPEND))
     print("    PROOF_HF_HEAD_MEM       :", pp_thm(PROOF_HF_HEAD_MEM))
     print()
-    print("Stage 3B (i) -- proof witnesses for the closure rules.")
+    print("Stage 3B (i) -- legacy list proof witnesses.")
     print("    AXIOM_HAS_PROOF   :", pp_thm(AXIOM_HAS_PROOF))
     print("    GEN_HAS_PROOF     :", pp_thm(GEN_HAS_PROOF))
     print("    MP_HAS_PROOF      :", pp_thm(MP_HAS_PROOF))
     print()
-    print("Stage 3B (j-l) -- Sigma_1 Prov_HF and closure rules.")
+    print("Stage 3B (j-l) -- set-native Sigma_1 Prov_HF and closure rules.")
     print("    PROV_HF_DEF         :", pp_thm(PROV_HF_DEF))
     print("    PROV_HF_AT          :", pp_thm(PROV_HF_AT))
     print("    PROV_HF_AXIOM       :", pp_thm(PROV_HF_AXIOM))
     print("    PROV_HF_MP          :", pp_thm(PROV_HF_MP))
     print("    PROV_HF_GEN         :", pp_thm(PROV_HF_GEN))
-    print("    PROV_HF_IFF_PROOF_HF :", pp_thm(PROV_HF_IFF_PROOF_HF))
+    print("    PROV_HF_IFF_PROOF_HF_SET :", pp_thm(PROV_HF_IFF_PROOF_HF_SET))
     print()
     print("Stage 3B (m) -- representability scaffolding.")
     print("    REPRESENTS_PRED_DEF :", pp_thm(REPRESENTS_PRED_DEF))

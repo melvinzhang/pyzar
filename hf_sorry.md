@@ -7,9 +7,8 @@ work, but the detailed inventory below is file-local to `hf_repr_thms.py`.
 
 The plan is ordered to settle the greatest unknown first. The switch is
 now decided: `Prov_HF_internal` must use HF-native proof objects, not
-`cons_l` lists. The remaining design work is to pin the exact HF-set
-proof-object shape and bridge or retire the current external list
-checker.
+`cons_l` lists. The HF-set proof-object shape is pinned, and `Prov_HF`
+has been redirected to the set-native checker.
 
 ## Inventory
 
@@ -104,8 +103,8 @@ Exit criterion for Phase 0:
 * Prove the Gen closure prototype: **Done:**
   `GEN_HAS_PROOF_HF_SET` proves
   `(?P. Proof_HF_set P f) ==> ?R. Proof_HF_set R (Forall_f x f)`.
-* Remaining bridge work: redirect `Prov_HF` or prove
-  `Prov_HF n = (?P. Proof_HF_set P n)`.
+* Redirect `Prov_HF` to the set-native checker: **Done:**
+  `PROV_HF_AT` is now `Prov_HF n = (?P. Proof_HF_set P n)`.
 
 Phase 0 has now settled the largest representation risk. G remains the
 deepest theorem, but the proof-object shape is no longer the main
@@ -234,8 +233,9 @@ definitions.
   sets. The Phase 0 prototype also proves
   `VALID_STEP_HF_SET_PRESERVES`, `AXIOM_HAS_PROOF_HF_SET`, and
   the two closure prototypes `MP_HAS_PROOF_HF_SET` and
-  `GEN_HAS_PROOF_HF_SET`. Next work is the bridge from `Prov_HF` to
-  `?P. Proof_HF_set P n`.
+  `GEN_HAS_PROOF_HF_SET`. `Prov_HF` has been redirected to
+  `?P. Proof_HF_set P n`; next work is internalizing
+  `Proof_HF_set_internal`.
 
 * **Prerequisite for D — Python builders for godelnum shapes.**
   The body of `is_substitute_step_internal` needs to express
