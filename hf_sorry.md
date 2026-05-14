@@ -21,7 +21,7 @@ has been redirected to the set-native checker.
 | B | `QUOTE_HF_EXT_DIFF_LEFT_MEM_DECREASES`  | active | small/med | — | bit top-difference layer |
 | C | `QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES` | active | small/med | — | symmetric bit top-difference layer |
 | D | `QUOTE_HF_MUTUAL_MEASURED`       | active | med/large  | B, C                      | three object-level HF1/HF2/HF3 branch bridges               |
-| E | `QUOTE_HF_MEM_DECISION`          | active | small      | D                         | final unbounded projection from measured theorem             |
+| E | `QUOTE_HF_MEM_DECISION`          | done   | done       | D                         | final unbounded projection from measured theorem             |
 | F | `IS_SUBSTITUTE_STEP_REPRESENTS`  | active | ~150 lines | E                         | `IS_PAIR_ORD_REPRESENTS` (✓), `QUOTE_HF_AT_PAIR_ORD` (✓), HF1–HF3 (✓); **body of `is_substitute_step_internal`** |
 | G | `IS_SUBSTITUTE_TRACE_REPRESENTS` | active |  ~80 lines | F                         | `HF_INDUCTION` (✓); **body of `is_substitute_trace_internal`** |
 | H | `SUBSTITUTE_REPRESENTS`          | active |  moderate  | G                         | `TRACE_EXISTS` (✓); **body of `substitute_internal`**       |
@@ -40,8 +40,9 @@ Two implementation clusters plus one representation switch:
   objects.
 
 * **Quote layer pivot.** The preferred route no longer makes global
-  quoted inequality the blocking theorem. The target interface is
-  membership decision plus certified inequality:
+  quoted inequality the blocking induction theorem. The target
+  interfaces are membership decision and global quoted inequality,
+  both projected from the measured mutual theorem:
 
   ```text
   QUOTE_HF_MEM_DECISION
@@ -50,12 +51,8 @@ Two implementation clusters plus one representation switch:
      /\
      (~In x y ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))
 
-  QUOTE_HF_CERTIFIED_NEQ_FROM_MEM_DIFF
-  |- !w s t. In w s /\ ~In w t
-     ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))
-
-  QUOTE_HF_CERTIFIED_NEQ_FROM_MEM_DIFF_RIGHT
-  |- !w s t. ~In w s /\ In w t
+  QUOTE_HF_PROV_NEQ
+  |- !s t. ~(s = t)
      ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))
   ```
 
@@ -75,11 +72,11 @@ Two implementation clusters plus one representation switch:
   now uses the strong IH non-circularly; remaining sorries are the local
   object-level branch bridges and the two extensional-witness decrease
   helpers, not the induction shape itself.
-* **Removed legacy quote cluster.** The old
+* **Removed legacy quote cluster.** The old proof path through
   `QUOTE_HF_NEQ_FROM_LOW_BIT` / `QUOTE_HF_NEQ_FROM_CLEAR_LOW` /
-  `QUOTE_HF_PROV_NEQ` path is gone from `hf_repr_thms.py`; the mutual
-  proof handles inequality by an extensional witness and smaller
-  membership decisions.
+  direct global induction is gone from `hf_repr_thms.py`;
+  `QUOTE_HF_PROV_NEQ` has been reintroduced only as a projection from
+  the measured mutual theorem.
 * **Representability cluster (D → E → F → G; H, I attached to G).**
   Builds the Stage-3C/3D `…_REPRESENTS` chain consumed by the diagonal
   lemma in `hf_godel1.py`.
@@ -148,14 +145,11 @@ Phase 0 has now settled the largest representation risk. G remains the
 deepest theorem, but the proof-object shape is no longer the main
 unknown.
 
-### Phase 1 — quote membership plus certified inequality
+### Phase 1 — measured quote theorem and projected interfaces
 
-Do **not** block the substitute/provability representability chain on
-the global theorem
-`s != t ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))`.
-Most downstream constructor/tag inequalities know a concrete reason the
-two HF sets differ. Carry that reason as a discriminating member `w`
-and use certified inequality.
+Do **not** prove the global theorem by direct induction. It is now a
+small projection from `QUOTE_HF_MUTUAL_MEASURED`; downstream code can
+use `QUOTE_HF_PROV_NEQ` directly.
 
 1. **A — `HF4_INST`**. **Done.**
    - Mechanical extension of `HF2_INST`/`HF3_INST` template: two
@@ -189,8 +183,17 @@ and use certified inequality.
      `QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES` to obtain the two smaller
      membership decisions and closes with
      `PROV_HF_NEQ_FROM_MEM_DIFF` / `_RIGHT`.
-   - Remaining visible sorries in `QUOTE_HF_MUTUAL_MEASURED`: exactly
-     three membership branch bridges:
+   - Remaining Phase 1 proof obligations:
+
+     ```text
+     QUOTE_HF_EXT_DIFF_LEFT_MEM_DECREASES
+     QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES
+     ```
+
+     These are the two bit/order decrease packages needed by the
+     inequality branch after `HF_EXT_DIFF` finds a witness.
+   - Remaining visible sorries inside `QUOTE_HF_MUTUAL_MEASURED`:
+     exactly three membership branch bridges:
 
      ```text
      y = 0
@@ -199,9 +202,12 @@ and use certified inequality.
      ```
 
      These are object-level HF1/HF2/HF3 transfer proofs, not measure or
-     induction unknowns.
+     induction unknowns. The tail branch
+     `y != 0 /\ x != low_bit y` is the largest remaining bridge because
+     it must use the smaller tail membership decision plus the smaller
+     quoted inequality through `HF3_INST`.
 
-3. **Interface theorem — `QUOTE_HF_MEM_DECISION`.**
+3. **Projected interfaces — done.**
    - This is the membership-only theorem downstream code should cite:
 
      ```text
@@ -211,19 +217,20 @@ and use certified inequality.
         (~In x y ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))
      ```
 
-   - It is currently a visible `p.sorry()` public interface. It should be
-     projected from `QUOTE_HF_MUTUAL_MEASURED` after the three branch
-     bridges, the two ext-diff decrease helpers, and the final
-     unbounded-measure wrapper are closed.
+   - This is now closed as the unbounded projection of
+     `QUOTE_HF_MUTUAL_MEASURED`, instantiating the measured theorem at
+     `SUC0 (quote_hf_mem_measure x y)` and using `NAT0_LT_SUC0`.
+   - The global quoted inequality theorem is also closed as the
+     analogous unbounded projection:
 
-4. **Certified inequality is already pushed through.**
-   - `QUOTE_HF_CERTIFIED_NEQ_FROM_MEM_DIFF` and `_RIGHT` are closed
-     from `QUOTE_HF_MEM_DECISION` plus the existing object-level
-     discriminators. This checks that the interface is strong enough:
-     once callers can name a witness `w`, no global symmetric-difference
-     search is needed inside the quote layer.
-   - Use `QUOTE_HF_MEMBERSHIP_AND_CERTIFIED_NEQ` as the downstream
-     bundle once `QUOTE_HF_MEM_DECISION` is no longer a stub.
+     ```text
+     QUOTE_HF_PROV_NEQ
+     |- !s t. ~(s = t)
+        ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))
+     ```
+
+     It instantiates `QUOTE_HF_MUTUAL_MEASURED` at
+     `SUC0 (quote_hf_neq_measure s t)` and uses `NAT0_LT_SUC0`.
 
 ### Phase 2 — `substitute` representability
 
@@ -285,7 +292,9 @@ substitute layer.
   Substitute-trace work still helps, but it will not close the headline
   G1 path until the HF-native proof-object representation is viable.
 * **Phase 1 next** because it concentrates the quote dependency into
-  `QUOTE_HF_MEM_DECISION` and removes the old circular quote paths.
+  `QUOTE_HF_MUTUAL_MEASURED`, with `QUOTE_HF_MEM_DECISION` and
+  `QUOTE_HF_PROV_NEQ` as small projected interfaces for downstream
+  code.
 * **Phase 2 after that** because it is high-leverage and comparatively
   local once `QUOTE_HF_MEM_DECISION` is closed.
 * **Phase 3 last** because G carries the deepest semantic content and
@@ -339,9 +348,10 @@ definitions.
   two `PROV_HF_UI` steps, then normalize the capture-blind
   substitutions through the `Forall_f` and encoded-iff body.
   The old Phase 1 blocker was a canonical nonmembership/order bridge for
-  a global low-bit quoted inequality theorem. That path has been removed;
-  the active proof uses extensional witnesses plus smaller membership
-  decisions.
+  a direct global low-bit quoted inequality theorem. That path has been
+  removed; the active proof uses extensional witnesses plus smaller
+  membership decisions, with the global theorem now recovered as
+  `QUOTE_HF_PROV_NEQ`.
 
 * **Small diagonal side condition (done)** — `hf_godel1.py` no longer
   axiomatizes `VAR_Y_NEQ_VAR_X`; it is proved from `VAR_T_INJ`,
@@ -354,12 +364,9 @@ definitions.
   negative membership on the other, it yields object-level inequality
   of the quoted sets by equality substitution and contraposition.
 
-* **Pivot theorem contract (active target)** —
-  `QUOTE_HF_MEMBERSHIP_AND_CERTIFIED_NEQ` bundles direct
-  quoted-membership decision with the two certified inequality
-  orientations. This is the downstream interface to use for new
-  representability work once `QUOTE_HF_MEM_DECISION` is no longer a
-  visible stub.
+* **Projected interface contract (active target)** —
+  `QUOTE_HF_MEM_DECISION` and `QUOTE_HF_PROV_NEQ` are now the clean
+  downstream interfaces.
 
 * **Reverse discriminator (done)** —
   `PROV_HF_NEQ_FROM_MEM_DIFF_RIGHT` is closed. The mutual proof can now
@@ -532,9 +539,9 @@ definitions.
   The inequality half is structurally closed through the IH: it obtains
   a discriminating member from `HF_EXT_DIFF`, gets both smaller
   membership decisions using the left/right ext-diff decrease helpers,
-  and closes via the certified object-level discriminators. Its only
-  remaining dependency is that the two ext-diff decrease helpers are
-  still visible `p.sorry()` lemmas.
+  and closes via the object-level membership-difference lemmas. Its
+  only remaining dependency is that the two ext-diff decrease helpers
+  are still visible `p.sorry()` lemmas.
 
   `Pair_ord` is kept behind `--include-pair-ord` because exact values
   explode; small runs still reject it as the membership measure.

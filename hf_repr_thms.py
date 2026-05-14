@@ -124,6 +124,7 @@ from hf_logic import (
     PROV_HF_DOUBLE_NEG_INTRO,
 )
 from hf_repr_core import IS_TERM_QUOTE_HF, SUBSTITUTE_QUOTE_HF, PROV_HF_MP
+from nat0_order import NAT0_LT_SUC0
 
 
 _t_n0 = Var("t", nat0_ty)
@@ -2565,174 +2566,6 @@ def QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES(p):
 
 
 @proof
-def QUOTE_HF_MEM_DECISION(p):
-    """|- !x y.
-          (In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y)))
-          /\\
-          (~In x y ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y)))).
-
-    Pivot interface for the quote layer.  The HF-IND and old
-    ``IS_IN_REPRESENTS`` routes are gone; this should be projected from
-    ``QUOTE_HF_MUTUAL_MEASURED`` once the remaining branch bridges and
-    final unbounded-measure wrapper are closed.
-    """
-
-    p.goal(
-        "!x y. (In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
-        "/\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))"
-    )
-    p.sorry()
-
-
-@proof
-def QUOTE_HF_CERTIFIED_NEQ_FROM_MEM_DIFF(p):
-    """|- !w s t. In w s /\\ ~In w t
-          ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))).
-
-    Certified quoted inequality: callers provide the discriminating
-    member ``w`` instead of asking the quote layer to discover one from
-    ``s != t``.
-    """
-
-    p.goal(
-        "!w s t. In w s /\\ ~(In w t) "
-        "==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))"
-    )
-    p.fix("w s t")
-    p.assume("(h_in_s,h_not_in_t): In w s /\\ ~(In w t)")
-    p.have(
-        "h_dec_s: (In w s ==> Prov_HF (In_a (quote_hf w) (quote_hf s))) "
-        "/\\ (~(In w s) ==> Prov_HF (Not_f (In_a (quote_hf w) (quote_hf s))))"
-    ).by(QUOTE_HF_MEM_DECISION, "w", "s")
-    p.have(
-        "h_dec_t: (In w t ==> Prov_HF (In_a (quote_hf w) (quote_hf t))) "
-        "/\\ (~(In w t) ==> Prov_HF (Not_f (In_a (quote_hf w) (quote_hf t))))"
-    ).by(QUOTE_HF_MEM_DECISION, "w", "t")
-    p.split("h_dec_s", "(h_s_pos, _)")
-    p.split("h_dec_t", "(_, h_t_neg)")
-    p.have("h_pf_in_s: Prov_HF (In_a (quote_hf w) (quote_hf s))").by(
-        "h_s_pos", "h_in_s"
-    )
-    p.have("h_pf_not_in_t: Prov_HF (Not_f (In_a (quote_hf w) (quote_hf t)))").by(
-        "h_t_neg", "h_not_in_t"
-    )
-    p.have("h_qs_term: is_term (quote_hf s)").by(IS_TERM_QUOTE_HF, "s")
-    p.have("h_qt_term: is_term (quote_hf t)").by(IS_TERM_QUOTE_HF, "t")
-    p.thus("Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))").by(
-        PROV_HF_NEQ_FROM_MEM_DIFF,
-        "w",
-        "quote_hf s",
-        "quote_hf t",
-        CONJ(
-            p.fact("h_qs_term"),
-            CONJ(
-                p.fact("h_qt_term"),
-                CONJ(p.fact("h_pf_in_s"), p.fact("h_pf_not_in_t")),
-            ),
-        ),
-    )
-
-
-@proof
-def QUOTE_HF_CERTIFIED_NEQ_FROM_MEM_DIFF_RIGHT(p):
-    """|- !w s t. ~In w s /\\ In w t
-          ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))).
-
-    Reverse-orientation certified quoted inequality.
-    """
-
-    p.goal(
-        "!w s t. ~(In w s) /\\ In w t "
-        "==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))"
-    )
-    p.fix("w s t")
-    p.assume("(h_not_in_s,h_in_t): ~(In w s) /\\ In w t")
-    p.have(
-        "h_dec_s: (In w s ==> Prov_HF (In_a (quote_hf w) (quote_hf s))) "
-        "/\\ (~(In w s) ==> Prov_HF (Not_f (In_a (quote_hf w) (quote_hf s))))"
-    ).by(QUOTE_HF_MEM_DECISION, "w", "s")
-    p.have(
-        "h_dec_t: (In w t ==> Prov_HF (In_a (quote_hf w) (quote_hf t))) "
-        "/\\ (~(In w t) ==> Prov_HF (Not_f (In_a (quote_hf w) (quote_hf t))))"
-    ).by(QUOTE_HF_MEM_DECISION, "w", "t")
-    p.split("h_dec_s", "(_, h_s_neg)")
-    p.split("h_dec_t", "(h_t_pos, _)")
-    p.have("h_pf_not_in_s: Prov_HF (Not_f (In_a (quote_hf w) (quote_hf s)))").by(
-        "h_s_neg", "h_not_in_s"
-    )
-    p.have("h_pf_in_t: Prov_HF (In_a (quote_hf w) (quote_hf t))").by(
-        "h_t_pos", "h_in_t"
-    )
-    p.have("h_qs_term: is_term (quote_hf s)").by(IS_TERM_QUOTE_HF, "s")
-    p.have("h_qt_term: is_term (quote_hf t)").by(IS_TERM_QUOTE_HF, "t")
-    p.thus("Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))").by(
-        PROV_HF_NEQ_FROM_MEM_DIFF_RIGHT,
-        "w",
-        "quote_hf s",
-        "quote_hf t",
-        CONJ(
-            p.fact("h_qs_term"),
-            CONJ(
-                p.fact("h_qt_term"),
-                CONJ(p.fact("h_pf_not_in_s"), p.fact("h_pf_in_t")),
-            ),
-        ),
-    )
-
-
-@proof
-def QUOTE_HF_MEMBERSHIP_AND_CERTIFIED_NEQ(p):
-    """Bundled pivot interface.
-
-    |- (!x y. membership decision)
-       /\\ (!w s t. In w s /\\ ~In w t ==> quoted inequality)
-       /\\ (!w s t. ~In w s /\\ In w t ==> quoted inequality).
-
-    This is the replacement headline for downstream representability:
-    use membership directly, and use certified inequality when a
-    constructor/tag proof supplies a discriminating member.
-    """
-
-    p.goal(
-        "(!x y. (In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
-        " /\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))) "
-        "/\\ "
-        "(!w s t. In w s /\\ ~(In w t) "
-        " ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))) "
-        "/\\ "
-        "(!w s t. ~(In w s) /\\ In w t "
-        " ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))))"
-    )
-    with p.have(
-        "h_mem: !x y. (In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
-        "/\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))"
-    ).proof():
-        p.fix("x y")
-        p.thus(
-            "(In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
-            "/\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))"
-        ).by(QUOTE_HF_MEM_DECISION, "x", "y")
-    p.thus(
-        "(!x y. (In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
-        " /\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))) "
-        "/\\ "
-        "(!w s t. In w s /\\ ~(In w t) "
-        " ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))) "
-        "/\\ "
-        "(!w s t. ~(In w s) /\\ In w t "
-        " ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))))"
-    ).by_thm(
-        CONJ(
-            p.fact("h_mem"),
-            CONJ(
-                QUOTE_HF_CERTIFIED_NEQ_FROM_MEM_DIFF,
-                QUOTE_HF_CERTIFIED_NEQ_FROM_MEM_DIFF_RIGHT,
-            ),
-        )
-    )
-
-
-@proof
 def QUOTE_HF_MUTUAL_MEASURED(p):
     """Measured mutual-induction target for the quote_hf replacement.
 
@@ -2966,6 +2799,86 @@ def QUOTE_HF_MUTUAL_MEASURED(p):
             "(!s t. ~(s = t) /\\ nat0_lt (quote_hf_neq_measure s t) n ==> "
             "  Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))))"
         ).by_thm(CONJ(p.fact("h_mem"), p.fact("h_neq")))
+
+
+@proof
+def QUOTE_HF_MEM_DECISION(p):
+    """|- !x y.
+          (In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y)))
+          /\\
+          (~In x y ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y)))).
+
+    Pivot interface for the quote layer.  The HF-IND and old
+    ``IS_IN_REPRESENTS`` routes are gone; this is the unbounded
+    projection of ``QUOTE_HF_MUTUAL_MEASURED`` at
+    ``SUC0 (quote_hf_mem_measure x y)``.
+    """
+
+    p.goal(
+        "!x y. (In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
+        "/\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))"
+    )
+    p.fix("x y")
+    p.have(
+        "h_bound: nat0_lt (quote_hf_mem_measure x y) "
+        "                  (SUC0 (quote_hf_mem_measure x y))"
+    ).by(NAT0_LT_SUC0, "quote_hf_mem_measure x y")
+    p.have(
+        "h_mutual: "
+        "(!a b. nat0_lt (quote_hf_mem_measure a b) "
+        "                  (SUC0 (quote_hf_mem_measure x y)) ==> "
+        "  ((In a b ==> Prov_HF (In_a (quote_hf a) (quote_hf b))) "
+        "   /\\ (~(In a b) ==> Prov_HF (Not_f (In_a (quote_hf a) "
+        "                                      (quote_hf b)))))) "
+        "/\\ "
+        "(!s t. ~(s = t) /\\ nat0_lt (quote_hf_neq_measure s t) "
+        "                  (SUC0 (quote_hf_mem_measure x y)) ==> "
+        "  Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))))"
+    ).by(QUOTE_HF_MUTUAL_MEASURED, "SUC0 (quote_hf_mem_measure x y)")
+    p.split("h_mutual", "(h_mem,_)")
+    p.thus(
+        "(In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
+        "/\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))"
+    ).by("h_mem", "x", "y", "h_bound")
+
+
+@proof
+def QUOTE_HF_PROV_NEQ(p):
+    """|- !s t. ~(s = t)
+          ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))).
+
+    Global quoted inequality, recovered as an unbounded projection of
+    ``QUOTE_HF_MUTUAL_MEASURED`` rather than as the induction target.
+    The extensional witness search remains internal to the measured
+    theorem; downstream callers only need ``s != t``.
+    """
+
+    p.goal(
+        "!s t. ~(s = t) "
+        "==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))"
+    )
+    p.fix("s t")
+    p.assume("hst_ne: ~(s = t)")
+    p.have(
+        "h_bound: nat0_lt (quote_hf_neq_measure s t) "
+        "                  (SUC0 (quote_hf_neq_measure s t))"
+    ).by(NAT0_LT_SUC0, "quote_hf_neq_measure s t")
+    p.have(
+        "h_mutual: "
+        "(!x y. nat0_lt (quote_hf_mem_measure x y) "
+        "                  (SUC0 (quote_hf_neq_measure s t)) ==> "
+        "  ((In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
+        "   /\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) "
+        "                                      (quote_hf y)))))) "
+        "/\\ "
+        "(!a b. ~(a = b) /\\ nat0_lt (quote_hf_neq_measure a b) "
+        "                  (SUC0 (quote_hf_neq_measure s t)) ==> "
+        "  Prov_HF (Not_f (Eq_f (quote_hf a) (quote_hf b))))"
+    ).by(QUOTE_HF_MUTUAL_MEASURED, "SUC0 (quote_hf_neq_measure s t)")
+    p.split("h_mutual", "(_,h_neq)")
+    p.thus("Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))").by(
+        "h_neq", "s", "t", CONJ(p.fact("hst_ne"), p.fact("h_bound"))
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3223,16 +3136,8 @@ if __name__ == "__main__":
         pp_thm(QUOTE_HF_MEM_DECISION),
     )
     print(
-        "    QUOTE_HF_CERTIFIED_NEQ_FROM_MEM_DIFF  :",
-        pp_thm(QUOTE_HF_CERTIFIED_NEQ_FROM_MEM_DIFF),
-    )
-    print(
-        "    QUOTE_HF_CERTIFIED_NEQ_FROM_MEM_DIFF_RIGHT:",
-        pp_thm(QUOTE_HF_CERTIFIED_NEQ_FROM_MEM_DIFF_RIGHT),
-    )
-    print(
-        "    QUOTE_HF_MEMBERSHIP_AND_CERTIFIED_NEQ :",
-        pp_thm(QUOTE_HF_MEMBERSHIP_AND_CERTIFIED_NEQ),
+        "    QUOTE_HF_PROV_NEQ                      :",
+        pp_thm(QUOTE_HF_PROV_NEQ),
     )
     print("    QUOTE_HF_MEM_MEASURE_AT                :", pp_thm(QUOTE_HF_MEM_MEASURE_AT))
     print("    QUOTE_HF_NEQ_MEASURE_AT                :", pp_thm(QUOTE_HF_NEQ_MEASURE_AT))
