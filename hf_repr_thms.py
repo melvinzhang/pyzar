@@ -108,6 +108,7 @@ from hf_repr_core import (
     IS_IN_INTERNAL_DEF,
 )
 from hf_sets import EMPTY_DEF, INSERT_AT, NOT_IN_EMPTY, IN_INSERT_SAME, IN_INSERT_DIFF
+from hf_sets import IN_EXT
 from hf_syntax import INSERT_T_INJ, INSERT_T_NEQ_EMPTY
 from bits import (
     BIT_AT_SET_BIT_DIFF,
@@ -120,7 +121,7 @@ from bits import (
     SET_BIT_COMMUTE_DIFF,
     SET_BIT_GT_NEW,
 )
-from classical import EXCLUDED_MIDDLE
+from classical import EXCLUDED_MIDDLE, NOT_FORALL_TO_EX_NOT
 from hf_logic import (
     PROV_HF_UI,
     PROV_HF_SUBST_EQ,
@@ -2515,28 +2516,115 @@ def PROV_HF_MEM_IND(p):
 
 
 @proof
-def HF_IND_QUOTE_MEM_DECISION(p):
-    """HF-IND spike stub for quoted membership correctness.
+def HF_IND_QUOTE_MEM_AND_NEQ(p):
+    r"""Bundled membership-induction target for the quote layer.
 
-    Intended source: HF1-HF5 plus the object-level HF induction schema.
-    This is a deliberate architecture spike, not a derivation from the
-    current five finite HF axioms.
+    This is the single remaining HF-IND quote assumption. The public
+    ``HF_IND_QUOTE_MEM_DECISION`` and ``HF_IND_QUOTE_PROV_NEQ`` theorems
+    are projections from this bundle, so closing this theorem closes both
+    public quote stubs.
+
+    Proof sketch.
+
+    1. Use the parameterized membership-induction axiom through
+       ``PROV_HF_MEM_IND``. The intended schema formula has induction
+       variable slot ``2`` and packages, for the current set ``y``:
+
+         * object-level membership decision for every query ``x`` into
+           ``y``;
+         * object-level quoted inequality between ``y`` and any
+           comparison set, in both orientations or in one symmetric
+           orientation plus a symmetry lemma.
+
+       The formula must leave comparison/query variables in parameter
+       slots other than ``0`` and ``SUC0 0``; those two slots are reserved
+       for the member and current-set binders of membership induction.
+
+    2. Prove the object-level induction step:
+
+          !y. ((!z. In_a z y -> Bundle(z)) -> Bundle(y))
+
+       The step assumption supplies the bundle for every object member of
+       ``y``. After universal-instantiating that assumption at
+       ``quote_hf z`` and normalizing substitutions, it gives recursive
+       membership/inequality facts for each actual HF member ``z`` of
+       ``y``.
+
+    3. Membership-positive branch. Given HOL ``In x y``, use the
+       step-IH at member ``x`` plus the object membership antecedent to
+       obtain ``Prov_HF (In_a (quote_hf x) (quote_hf y))``. The bridge
+       needed here is a small specialization lemma that turns the HOL
+       member witness into the object antecedent expected by the
+       induction-step formula.
+
+    4. Membership-negative branch. Given HOL ``~In x y``, prove
+       ``Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y)))`` by
+       contradiction from the positive membership clause and quoted
+       inequality/equality substitution. This is where the bundle avoids
+       the old circularity: the inequality component is available in the
+       same induction predicate rather than as a separate theorem.
+
+    5. Inequality branch. From HOL ``s != t``, use a HOL extensional
+       discriminator lemma:
+
+          ?w. (In w s /\ ~In w t) \/ (~In w s /\ In w t)
+
+       Then use the bundled membership-decision clauses for the two
+       sides and the already-closed certified discriminators
+       ``PROV_HF_NEQ_FROM_MEM_DIFF`` /
+       ``PROV_HF_NEQ_FROM_MEM_DIFF_RIGHT``.
+
+    6. Project the final universal conclusion from the object-level
+       induction result with ``PROV_HF_UI`` and encoded conjunction
+       eliminators. The public theorems below are then plain HOL
+       projections from this bundle.
+
+    Main remaining prerequisites:
+
+      * the concrete bundled object formula and its ``is_form`` /
+        ``free_in`` side conditions;
+      * substitution-reduction lemmas for that formula after replacing
+        slot ``2`` with ``Var_t 0``, ``Var_t (SUC0 0)``, and concrete
+        ``quote_hf`` terms;
+      * a HOL extensional-discriminator theorem for unequal HF sets;
+      * small object-level propositional wrappers for the step branches
+        not already covered by ``PROV_HF_AND_ELIM_*``,
+        ``PROV_HF_CONTRAP``, and ``PROV_HF_MP``.
+    """
+
+    p.goal(
+        "(!x y. (In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
+        " /\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) "
+        "                                      (quote_hf y))))) "
+        "/\\ (!s t. ~(s = t) ==> "
+        "    Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))))",
+        types={"s": nat0_ty, "t": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def HF_IND_QUOTE_MEM_DECISION(p):
+    """HF-IND quoted membership correctness, projected from the bundle.
+
+    The remaining proof work lives in ``HF_IND_QUOTE_MEM_AND_NEQ``.
     """
 
     p.goal(
         "!x y. (In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
         "/\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))"
     )
-    p.sorry()
+    p.thus(
+        "!x y. (In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
+        "/\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y))))"
+    ).by_thm(CONJUNCT1(HF_IND_QUOTE_MEM_AND_NEQ))
 
 
 @proof
 def HF_IND_QUOTE_PROV_NEQ(p):
-    """HF-IND spike stub for quoted inequality correctness.
+    """HF-IND quoted inequality correctness, projected from the bundle.
 
-    Intended source: HF1-HF5 plus the object-level HF induction schema.
-    This replaces the legacy low-bit/tail decomposition route while we
-    validate the strengthened-theory architecture.
+    The remaining proof work lives in ``HF_IND_QUOTE_MEM_AND_NEQ``.
     """
 
     p.goal(
@@ -2544,7 +2632,10 @@ def HF_IND_QUOTE_PROV_NEQ(p):
         "Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))",
         types={"s": nat0_ty, "t": nat0_ty},
     )
-    p.sorry()
+    p.thus(
+        "!s t. ~(s = t) ==> "
+        "Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))"
+    ).by_thm(CONJUNCT2(HF_IND_QUOTE_MEM_AND_NEQ))
 
 
 @proof
@@ -2857,6 +2948,74 @@ _SUBST_V1_AT_S0 = GEN(
 )  # |- !t. substitute (Var_t (SUC0 0)) t (SUC0 0) = t
 
 
+@proof
+def BOOL_NEQ_XOR(p):
+    """|- !p q. ~(p = q) ==> (p /\\ ~q) \\/ (~p /\\ q)."""
+
+    p.goal("!p:bool. !q:bool. ~(p = q) ==> (p /\\ ~q) \\/ (~p /\\ q)")
+    p.fix("p q")
+    p.assume("hne: ~(p = q)")
+    with p.cases_on(EXCLUDED_MIDDLE, "p"):
+        with p.case("hp: p"):
+            with p.cases_on(EXCLUDED_MIDDLE, "q"):
+                with p.case("hq: q"):
+                    p.have("p_eq_T: p = T").by_thm(EQT_INTRO(p.fact("hp")))
+                    p.have("q_eq_T: q = T").by_thm(EQT_INTRO(p.fact("hq")))
+                    p.have("peq: p = q").by_thm(
+                        TRANS(p.fact("p_eq_T"), SYM(p.fact("q_eq_T")))
+                    )
+                    p.absurd().by_conj("hne", "peq")
+                with p.case("hnq: ~q"):
+                    p.thus("(p /\\ ~q) \\/ (~p /\\ q)").by_disj(
+                        CONJ(p.fact("hp"), p.fact("hnq"))
+                    )
+        with p.case("hnp: ~p"):
+            with p.cases_on(EXCLUDED_MIDDLE, "q"):
+                with p.case("hq: q"):
+                    p.thus("(p /\\ ~q) \\/ (~p /\\ q)").by_disj(
+                        CONJ(p.fact("hnp"), p.fact("hq"))
+                    )
+                with p.case("hnq: ~q"):
+                    p.have("p_eq_F: p = F").by_thm(EQF_INTRO(p.fact("hnp")))
+                    p.have("q_eq_F: q = F").by_thm(EQF_INTRO(p.fact("hnq")))
+                    p.have("peq: p = q").by_thm(
+                        TRANS(p.fact("p_eq_F"), SYM(p.fact("q_eq_F")))
+                    )
+                    p.absurd().by_conj("hne", "peq")
+
+
+@proof
+def HF_EXT_DIFF(p):
+    """|- !s t. ~(s = t) ==>
+          ?w. (In w s /\\ ~In w t) \\/ (~In w s /\\ In w t).
+
+    HOL-level extensional discriminator for HF sets. This is the witness
+    source for the inequality half of the mutual measured quote proof.
+    """
+
+    p.goal(
+        "!s t. ~(s = t) ==> "
+        "?w. (In w s /\\ ~(In w t)) \\/ (~(In w s) /\\ In w t)"
+    )
+    p.fix("s t")
+    p.assume("hst_ne: ~(s = t)")
+    with p.have("h_not_all: ~(!w. In w s = In w t)").proof():
+        with p.suppose("hall: !w. In w s = In w t"):
+            p.have("hst: s = t").by(IN_EXT, "s", "t", "hall")
+            p.absurd().by_conj("hst_ne", "hst")
+    diff_pred = p._parse("\\w:nat0. In w s = In w t")
+    p.have("h_ex: ?w. ~(In w s = In w t)").by_thm(
+        NOT_FORALL_TO_EX_NOT(p.fact("h_not_all"), diff_pred)
+    )
+    p.choose("w", "h_ex")
+    p.have(
+        "h_xor: (In w s /\\ ~(In w t)) \\/ (~(In w s) /\\ In w t)"
+    ).by(BOOL_NEQ_XOR, "In w s", "In w t", "w_eq")
+    p.thus("?w. (In w s /\\ ~(In w t)) \\/ (~(In w s) /\\ In w t)").by_witness(
+        "w", "h_xor"
+    )
+
+
 # Mutual quote_hf induction measures found by `hf_induction_targets.py`.
 #
 # Membership decision recurses on `quote_hf_mem_measure x y = Insert x y`.
@@ -2878,6 +3037,26 @@ QUOTE_HF_NEQ_MEASURE_DEF, QUOTE_HF_NEQ_MEASURE_AT = define_with_at(
     "          (Insert t s) "
     "          (Insert s t)",
 )
+
+
+@proof
+def QUOTE_HF_MEM_HEAD_NEQ_RAW_DECREASE(p):
+    """Raw Ackermann bit-order obligation for the head-neq recursive call.
+
+    This is intentionally still a ``p.sorry()`` rather than a direct
+    ``new_axiom`` so the import warning exposes the remaining arithmetic
+    gap. It should eventually be discharged by bit-order lemmas about
+    inserting into the low-bit decomposition of ``y``.
+    """
+
+    p.goal(
+        "!x y. ~(y = 0) /\\ ~(x = low_bit y) "
+        "==> nat0_lt (quote_hf_mem_measure x (low_bit y)) "
+        "            (quote_hf_mem_measure x y) "
+        " /\\ nat0_lt (quote_hf_mem_measure (low_bit y) x) "
+        "            (quote_hf_mem_measure x y)"
+    )
+    p.sorry()
 
 
 @proof
@@ -2931,6 +3110,82 @@ def QUOTE_HF_MEM_MEASURE_CLEAR_LOW_DECREASE(p):
         "nat0_lt (quote_hf_mem_measure x (clear_low y)) "
         "        (quote_hf_mem_measure x y)"
     ).by_rewrite_of("h_lt_raw", [QUOTE_HF_MEM_MEASURE_AT, INSERT_AT, "h_setx_y"])
+
+
+@proof
+def QUOTE_HF_MEM_NEEDS_HEAD_NEQ_DECREASE(p):
+    """|- !x y. ~(y = 0) /\\ ~(x = low_bit y)
+          ==> nat0_lt (quote_hf_neq_measure x (low_bit y))
+                      (quote_hf_mem_measure x y).
+
+    This is the recursive-call bound for the membership miss branch.  To
+    use HF3 on ``x`` versus the current head ``low_bit y``, membership
+    decision needs quoted inequality for that pair; this lemma says that
+    inequality call is below the current membership measure.
+
+    The remaining arithmetic proof is bit-order bookkeeping for
+    ``max(Insert x (low_bit y), Insert (low_bit y) x) < Insert x y`` under
+    ``y != 0`` and ``x != low_bit y``.
+    """
+
+    p.goal(
+        "!x y. ~(y = 0) /\\ ~(x = low_bit y) "
+        "==> nat0_lt (quote_hf_neq_measure x (low_bit y)) "
+        "            (quote_hf_mem_measure x y)"
+    )
+    p.fix("x y")
+    p.assume("(hy_nz,hx_ne): ~(y = 0) /\\ ~(x = low_bit y)")
+    p.have(
+        "h_raw: nat0_lt (quote_hf_mem_measure x (low_bit y)) "
+        "                  (quote_hf_mem_measure x y) "
+        "/\\ nat0_lt (quote_hf_mem_measure (low_bit y) x) "
+        "                  (quote_hf_mem_measure x y)"
+    ).by(
+        QUOTE_HF_MEM_HEAD_NEQ_RAW_DECREASE,
+        "x",
+        "y",
+        CONJ(p.fact("hy_nz"), p.fact("hx_ne")),
+    )
+    p.split("h_raw", "(h_x_lb,h_lb_x)")
+    branch = "nat0_lt (Insert x (low_bit y)) (Insert (low_bit y) x)"
+    with p.cases_on(EXCLUDED_MIDDLE, branch):
+        with p.case(
+            "h_branch: nat0_lt (Insert x (low_bit y)) (Insert (low_bit y) x)"
+        ):
+            p.have(
+                "h_branch_eq: nat0_lt (Insert x (low_bit y)) "
+                "(Insert (low_bit y) x) = T"
+            ).by_thm(EQT_INTRO(p.fact("h_branch")))
+            p.have(
+                "h_lb_x_insert: nat0_lt (Insert (low_bit y) x) "
+                "                         (quote_hf_mem_measure x y)"
+            ).by_rewrite_of("h_lb_x", [QUOTE_HF_MEM_MEASURE_AT])
+            p.thus(
+                "nat0_lt (quote_hf_neq_measure x (low_bit y)) "
+                "        (quote_hf_mem_measure x y)"
+            ).by_rewrite_of(
+                "h_lb_x_insert",
+                [QUOTE_HF_NEQ_MEASURE_AT, "h_branch_eq", COND_T_NAT0],
+            )
+        with p.case(
+            "h_branch: ~(nat0_lt (Insert x (low_bit y)) "
+            "(Insert (low_bit y) x))"
+        ):
+            p.have(
+                "h_branch_eq: nat0_lt (Insert x (low_bit y)) "
+                "(Insert (low_bit y) x) = F"
+            ).by_thm(EQF_INTRO(p.fact("h_branch")))
+            p.have(
+                "h_x_lb_insert: nat0_lt (Insert x (low_bit y)) "
+                "                         (quote_hf_mem_measure x y)"
+            ).by_rewrite_of("h_x_lb", [QUOTE_HF_MEM_MEASURE_AT])
+            p.thus(
+                "nat0_lt (quote_hf_neq_measure x (low_bit y)) "
+                "        (quote_hf_mem_measure x y)"
+            ).by_rewrite_of(
+                "h_x_lb_insert",
+                [QUOTE_HF_NEQ_MEASURE_AT, "h_branch_eq", COND_F_NAT0],
+            )
 
 
 @proof
@@ -4162,6 +4417,8 @@ if __name__ == "__main__":
         "    PROV_HF_NEQ_FROM_MEM_DIFF_RIGHT:",
         pp_thm(PROV_HF_NEQ_FROM_MEM_DIFF_RIGHT),
     )
+    print("    BOOL_NEQ_XOR                         :", pp_thm(BOOL_NEQ_XOR))
+    print("    HF_EXT_DIFF                          :", pp_thm(HF_EXT_DIFF))
     print(
         "    PROV_HF_IND_INSTANCE                  :",
         pp_thm(PROV_HF_IND_INSTANCE),
@@ -4171,11 +4428,15 @@ if __name__ == "__main__":
         pp_thm(PROV_HF_MEM_IND),
     )
     print(
-        "    HF_IND_QUOTE_MEM_DECISION (SORRY spike):",
+        "    HF_IND_QUOTE_MEM_AND_NEQ (SORRY spike):",
+        pp_thm(HF_IND_QUOTE_MEM_AND_NEQ),
+    )
+    print(
+        "    HF_IND_QUOTE_MEM_DECISION             :",
         pp_thm(HF_IND_QUOTE_MEM_DECISION),
     )
     print(
-        "    HF_IND_QUOTE_PROV_NEQ (SORRY spike)    :",
+        "    HF_IND_QUOTE_PROV_NEQ                 :",
         pp_thm(HF_IND_QUOTE_PROV_NEQ),
     )
     print(
@@ -4205,6 +4466,14 @@ if __name__ == "__main__":
     print(
         "    QUOTE_HF_MEM_MEASURE_CLEAR_LOW_DECREASE:",
         pp_thm(QUOTE_HF_MEM_MEASURE_CLEAR_LOW_DECREASE),
+    )
+    print(
+        "    QUOTE_HF_MEM_HEAD_NEQ_RAW_DECREASE (SORRY):",
+        pp_thm(QUOTE_HF_MEM_HEAD_NEQ_RAW_DECREASE),
+    )
+    print(
+        "    QUOTE_HF_MEM_NEEDS_HEAD_NEQ_DECREASE:",
+        pp_thm(QUOTE_HF_MEM_NEEDS_HEAD_NEQ_DECREASE),
     )
     print(
         "    QUOTE_HF_NEQ_MEASURE_LT_FROM_BOTH      :",

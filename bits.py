@@ -39,6 +39,7 @@ from nat0_order import (
     nat0_lt,  # noqa: F401  -- referenced by the parser via type alias.
     NAT0_LT_SUC0,
     NAT0_LT_TRANS,
+    NAT0_LT_NOT_REFL,
     NAT0_LT_SUC0_MONO,
     NAT0_LT_0_SUC0,
     NAT0_LT_SUC0_INSERT,
@@ -532,7 +533,7 @@ def BIT_AT_POW2_DIFF(p):
 
 @proof
 def HALF_LT_SUC0(p):
-    from tactics import EQT_INTRO, EQF_INTRO
+    from tactics import EQT_INTRO, EQF_INTRO, SYM, CONJ
 
     p.goal("!n. nat0_lt (HALF (SUC0 n)) (SUC0 n)")
     p.fix("n")
@@ -1127,6 +1128,66 @@ def BIT_LT(p):
                 )
 
 
+@proof
+def BIT_SELF_FALSE(p):
+    """|- !n. bit n n = F.
+
+    A set cannot contain itself in the Ackermann encoding: any set bit
+    ``bit n n`` would imply ``n < n`` by ``BIT_LT``.
+    """
+
+    from tactics import EQF_INTRO
+
+    p.goal("!n. bit n n = F")
+    p.fix("n")
+    with p.cases_on(EXCLUDED_MIDDLE, "bit n n"):
+        with p.case("hb: bit n n"):
+            p.have("hlt: nat0_lt n n").by(BIT_LT, "n", "n", "hb")
+            p.have("hnlt: ~(nat0_lt n n)").by(NAT0_LT_NOT_REFL, "n")
+            p.absurd().by_conj("hnlt", "hlt")
+        with p.case("hnb: ~(bit n n)"):
+            p.thus("bit n n = F").by(EQF_INTRO, "hnb")
+
+
+@proof
+def BIT_ABOVE_FALSE(p):
+    """|- !n i. nat0_lt n i ==> bit i n = F.
+
+    If bit ``i`` were set in ``n``, ``BIT_LT`` would give ``i < n``,
+    contradicting ``n < i`` by transitivity and irreflexivity.
+    """
+
+    from tactics import EQF_INTRO
+
+    p.goal("!n i. nat0_lt n i ==> bit i n = F")
+    p.fix("n i")
+    p.assume("hni: nat0_lt n i")
+    with p.cases_on(EXCLUDED_MIDDLE, "bit i n"):
+        with p.case("hb: bit i n"):
+            p.have("hin: nat0_lt i n").by(BIT_LT, "n", "i", "hb")
+            p.have("hnn: nat0_lt n n").by(
+                NAT0_LT_TRANS, "n", "i", "n", "hni", "hin"
+            )
+            p.have("hnn_not: ~(nat0_lt n n)").by(NAT0_LT_NOT_REFL, "n")
+            p.absurd().by_conj("hnn_not", "hnn")
+        with p.case("hnb: ~(bit i n)"):
+            p.thus("bit i n = F").by(EQF_INTRO, "hnb")
+
+
+@proof
+def BIT_AT_SET_BIT_OTHER_SELF_FALSE(p):
+    """|- !i j. ~(i = j) ==> bit j (set_bit i j) = F."""
+
+    p.goal("!i j. ~(i = j) ==> bit j (set_bit i j) = F")
+    p.fix("i j")
+    p.assume("hij: ~(i = j)")
+    p.have("h_diff: bit j (set_bit i j) = bit j j").by(
+        BIT_AT_SET_BIT_DIFF, "i", "j", "j", "hij"
+    )
+    p.have("h_self: bit j j = F").by(BIT_SELF_FALSE, "j")
+    p.thus("bit j (set_bit i j) = F").by_trans("h_diff", "h_self")
+
+
 # ---------------------------------------------------------------------------
 # 8. ``low_bit n`` and ``clear_low n`` -- canonical low-bit decomposition.
 #
@@ -1371,6 +1432,441 @@ def DOUBLE_MONO_LT(p):
                     p.thus("nat0_lt (double a) (double (SUC0 b))").by_rewrite_of(
                         "trans_lt", ["step_eq"]
                     )
+
+
+@proof
+def DOUBLE_LT_SUC0_DOUBLE_SELF(p):
+    """|- !n. nat0_lt (double n) (SUC0 (double n))."""
+
+    p.goal("!n. nat0_lt (double n) (SUC0 (double n))")
+    p.fix("n")
+    p.thus("nat0_lt (double n) (SUC0 (double n))").by(
+        NAT0_LT_SUC0, "double n"
+    )
+
+
+@proof
+def DOUBLE_LT_SUC0_DOUBLE(p):
+    """|- !a b. nat0_lt a b ==> nat0_lt (double a) (SUC0 (double b))."""
+
+    p.goal("!a b. nat0_lt a b ==> nat0_lt (double a) (SUC0 (double b))")
+    p.fix("a b")
+    p.assume("hab: nat0_lt a b")
+    p.have("hd: nat0_lt (double a) (double b)").by(
+        DOUBLE_MONO_LT, "a", "b", "hab"
+    )
+    p.have("hs: nat0_lt (double b) (SUC0 (double b))").by(
+        DOUBLE_LT_SUC0_DOUBLE_SELF, "b"
+    )
+    p.thus("nat0_lt (double a) (SUC0 (double b))").by(
+        NAT0_LT_TRANS, "double a", "double b", "SUC0 (double b)", "hd", "hs"
+    )
+
+
+@proof
+def SUC0_DOUBLE_LT_DOUBLE(p):
+    """|- !a b. nat0_lt a b ==> nat0_lt (SUC0 (double a)) (double b)."""
+
+    p.goal("!a b. nat0_lt a b ==> nat0_lt (SUC0 (double a)) (double b)")
+    p.fix("a b")
+    with p.induction("b"):
+        with p.base():
+            p.assume("hab: nat0_lt a 0")
+            p.have("notlt: ~(nat0_lt a 0)").by(NAT0_NOT_LT_ZERO, "a")
+            p.absurd().by_conj("notlt", "hab")
+        with p.step("IH"):
+            p.assume("hab: nat0_lt a (SUC0 b)")
+            p.have("cases: a = b \\/ nat0_lt a b").by(
+                NAT0_LT_SUC0_CASES, "a", "b", "hab"
+            )
+            p.have("step_eq: double (SUC0 b) = SUC0 (SUC0 (double b))").by(
+                DOUBLE_STEP, "b"
+            )
+            with p.cases_on("cases"):
+                with p.case("heq: a = b"):
+                    p.have("hs: nat0_lt (SUC0 (double b)) (SUC0 (SUC0 (double b)))").by(
+                        NAT0_LT_SUC0, "SUC0 (double b)"
+                    )
+                    p.thus(
+                        "nat0_lt (SUC0 (double a)) (double (SUC0 b))"
+                    ).by_rewrite_of("hs", ["heq", "step_eq"])
+                with p.case("hlt: nat0_lt a b"):
+                    p.have("ih_at: nat0_lt (SUC0 (double a)) (double b)").by(
+                        "IH", "hlt"
+                    )
+                    p.have("hop1: nat0_lt (double b) (SUC0 (double b))").by(
+                        DOUBLE_LT_SUC0_DOUBLE_SELF, "b"
+                    )
+                    p.have(
+                        "hop2: nat0_lt (SUC0 (double b)) "
+                        "                  (SUC0 (SUC0 (double b)))"
+                    ).by(NAT0_LT_SUC0, "SUC0 (double b)")
+                    p.have("hop: nat0_lt (double b) (SUC0 (SUC0 (double b)))").by(
+                        NAT0_LT_TRANS,
+                        "double b",
+                        "SUC0 (double b)",
+                        "SUC0 (SUC0 (double b))",
+                        "hop1",
+                        "hop2",
+                    )
+                    p.have(
+                        "trans_lt: nat0_lt (SUC0 (double a)) "
+                        "                   (SUC0 (SUC0 (double b)))"
+                    ).by(
+                        NAT0_LT_TRANS,
+                        "SUC0 (double a)",
+                        "double b",
+                        "SUC0 (SUC0 (double b))",
+                        "ih_at",
+                        "hop",
+                    )
+                    p.thus(
+                        "nat0_lt (SUC0 (double a)) (double (SUC0 b))"
+                    ).by_rewrite_of("trans_lt", ["step_eq"])
+
+
+@proof
+def HALF_LT_IMP_LT(p):
+    """|- !a b. nat0_lt (HALF a) (HALF b) ==> nat0_lt a b."""
+
+    from tactics import EQT_INTRO, EQF_INTRO, SYM, CONJ
+
+    p.goal("!a b. nat0_lt (HALF a) (HALF b) ==> nat0_lt a b")
+    p.fix("a b")
+    p.assume("hh: nat0_lt (HALF a) (HALF b)")
+    p.have(
+        "ra: a = COND_nat0 (ODD a) "
+        "(SUC0 (double (HALF a))) (double (HALF a))"
+    ).by(RECONSTRUCT, "a")
+    p.have(
+        "rb: b = COND_nat0 (ODD b) "
+        "(SUC0 (double (HALF b))) (double (HALF b))"
+    ).by(RECONSTRUCT, "b")
+    with p.cases_on(EXCLUDED_MIDDLE, "ODD a"):
+        with p.case("hoa: ODD a"):
+            p.have("hoa_eq: ODD a = T").by(EQT_INTRO, "hoa")
+            p.have("a_odd: a = SUC0 (double (HALF a))").by_rewrite_of(
+                "ra", ["hoa_eq", COND_T_NAT0]
+            )
+            with p.cases_on(EXCLUDED_MIDDLE, "ODD b"):
+                with p.case("hob: ODD b"):
+                    p.have("hob_eq: ODD b = T").by(EQT_INTRO, "hob")
+                    p.have("b_odd: b = SUC0 (double (HALF b))").by_rewrite_of(
+                        "rb", ["hob_eq", COND_T_NAT0]
+                    )
+                    p.have("hd: nat0_lt (double (HALF a)) (double (HALF b))").by(
+                        DOUBLE_MONO_LT, "HALF a", "HALF b", "hh"
+                    )
+                    p.have(
+                        "hs: nat0_lt (SUC0 (double (HALF a))) "
+                        "             (SUC0 (double (HALF b)))"
+                    ).by(
+                        NAT0_LT_SUC0_MONO,
+                        "double (HALF a)",
+                        "double (HALF b)",
+                        "hd",
+                    )
+                    p.thus("nat0_lt a b").by_rewrite_of(
+                        "hs", [SYM(p.fact("a_odd")), SYM(p.fact("b_odd"))]
+                    )
+                with p.case("hnb: ~(ODD b)"):
+                    p.have("hnb_eq: ODD b = F").by(EQF_INTRO, "hnb")
+                    p.have("b_even: b = double (HALF b)").by_rewrite_of(
+                        "rb", ["hnb_eq", COND_F_NAT0]
+                    )
+                    p.have(
+                        "hsd: nat0_lt (SUC0 (double (HALF a))) "
+                        "              (double (HALF b))"
+                    ).by(SUC0_DOUBLE_LT_DOUBLE, "HALF a", "HALF b", "hh")
+                    p.thus("nat0_lt a b").by_rewrite_of(
+                        "hsd", [SYM(p.fact("a_odd")), SYM(p.fact("b_even"))]
+                    )
+        with p.case("hna: ~(ODD a)"):
+            p.have("hna_eq: ODD a = F").by(EQF_INTRO, "hna")
+            p.have("a_even: a = double (HALF a)").by_rewrite_of(
+                "ra", ["hna_eq", COND_F_NAT0]
+            )
+            with p.cases_on(EXCLUDED_MIDDLE, "ODD b"):
+                with p.case("hob: ODD b"):
+                    p.have("hob_eq: ODD b = T").by(EQT_INTRO, "hob")
+                    p.have("b_odd: b = SUC0 (double (HALF b))").by_rewrite_of(
+                        "rb", ["hob_eq", COND_T_NAT0]
+                    )
+                    p.have(
+                        "hds: nat0_lt (double (HALF a)) "
+                        "              (SUC0 (double (HALF b)))"
+                    ).by(DOUBLE_LT_SUC0_DOUBLE, "HALF a", "HALF b", "hh")
+                    p.thus("nat0_lt a b").by_rewrite_of(
+                        "hds", [SYM(p.fact("a_even")), SYM(p.fact("b_odd"))]
+                    )
+                with p.case("hnb: ~(ODD b)"):
+                    p.have("hnb_eq: ODD b = F").by(EQF_INTRO, "hnb")
+                    p.have("b_even: b = double (HALF b)").by_rewrite_of(
+                        "rb", ["hnb_eq", COND_F_NAT0]
+                    )
+                    p.have("hd: nat0_lt (double (HALF a)) (double (HALF b))").by(
+                        DOUBLE_MONO_LT, "HALF a", "HALF b", "hh"
+                    )
+                    p.thus("nat0_lt a b").by_rewrite_of(
+                        "hd", [SYM(p.fact("a_even")), SYM(p.fact("b_even"))]
+                    )
+
+
+@proof
+def BIT_SUBSET_LE(p):
+    """|- !a b. (!i. bit i a ==> bit i b) ==> a = b \\/ nat0_lt a b."""
+
+    from tactics import EQT_INTRO, EQF_INTRO, EQT_ELIM, SYM
+    from fusion import EQ_MP
+
+    p.goal("!b. !a. (!i. bit i a ==> bit i b) ==> a = b \\/ nat0_lt a b")
+    with p.strong_induction("b", "IH"):
+        p.fix("a")
+        p.assume("hsub: !i. bit i a ==> bit i b")
+        with p.cases_on(EXCLUDED_MIDDLE, "b = 0"):
+            with p.case("hb0: b = 0"):
+                with p.have("azbits: !i. bit i a = F").proof():
+                    p.fix("i")
+                    with p.cases_on(EXCLUDED_MIDDLE, "bit i a"):
+                        with p.case("hia: bit i a"):
+                            p.have("hib: bit i b").by("hsub", "i", "hia")
+                            p.have("hi0: bit i 0 = F").by(BIT_AT_ZERO, "i")
+                            p.have("hib0: bit i 0").by_rewrite_of("hib", ["hb0"])
+                            p.absurd().by_thm(EQ_MP(p.fact("hi0"), p.fact("hib0")))
+                        with p.case("hnia: ~(bit i a)"):
+                            p.thus("bit i a = F").by(EQF_INTRO, "hnia")
+                p.have("ha0: a = 0").by(ZERO_BITS, "a", "azbits")
+                p.have("hab: a = b").by_rewrite_of("ha0", [SYM(p.fact("hb0"))])
+                p.disj("hab")
+            with p.case("hb_nz: ~(b = 0)"):
+                with p.have(
+                    "hsub_half: !i. bit i (HALF a) ==> bit i (HALF b)"
+                ).proof():
+                    p.fix("i")
+                    p.assume("hia: bit i (HALF a)")
+                    p.have(
+                        "eq_a: bit (SUC0 i) a = bit i (HALF a)"
+                    ).by(BIT_STEP_AT, "i", "a")
+                    p.have("hsia: bit (SUC0 i) a").by_eq_mp(
+                        SYM(p.fact("eq_a")), "hia"
+                    )
+                    p.have("hsib: bit (SUC0 i) b").by("hsub", "SUC0 i", "hsia")
+                    p.have(
+                        "eq_b: bit (SUC0 i) b = bit i (HALF b)"
+                    ).by(BIT_STEP_AT, "i", "b")
+                    p.thus("bit i (HALF b)").by_eq_mp("eq_b", "hsib")
+                p.have("hb_half_lt: nat0_lt (HALF b) b").by(
+                    HALF_LT_NZ, "b", "hb_nz"
+                )
+                p.have(
+                    "hhalf_cases: HALF a = HALF b "
+                    "\\/ nat0_lt (HALF a) (HALF b)"
+                ).by("IH", "HALF b", "hb_half_lt", "HALF a", "hsub_half")
+                with p.cases_on("hhalf_cases"):
+                    with p.case("hhalf_eq: HALF a = HALF b"):
+                        p.have(
+                            "ra: a = COND_nat0 (ODD a) "
+                            "(SUC0 (double (HALF a))) (double (HALF a))"
+                        ).by(RECONSTRUCT, "a")
+                        p.have(
+                            "rb: b = COND_nat0 (ODD b) "
+                            "(SUC0 (double (HALF b))) (double (HALF b))"
+                        ).by(RECONSTRUCT, "b")
+                        with p.cases_on(EXCLUDED_MIDDLE, "ODD a"):
+                            with p.case("hoa: ODD a"):
+                                p.have("hoa_eq: ODD a = T").by(EQT_INTRO, "hoa")
+                                p.have(
+                                    "a_odd: a = SUC0 (double (HALF a))"
+                                ).by_rewrite_of("ra", ["hoa_eq", COND_T_NAT0])
+                                p.have("eq_bita: bit 0 a = ODD a").by_rewrite(
+                                    [BIT_BASE]
+                                )
+                                p.have("hbit0a: bit 0 a").by_eq_mp(
+                                    SYM(p.fact("eq_bita")), "hoa"
+                                )
+                                p.have("hbit0b: bit 0 b").by("hsub", "0", "hbit0a")
+                                p.have("eq_bitb: bit 0 b = ODD b").by_rewrite(
+                                    [BIT_BASE]
+                                )
+                                p.have("hob: ODD b").by_eq_mp("eq_bitb", "hbit0b")
+                                p.have("hob_eq: ODD b = T").by(EQT_INTRO, "hob")
+                                p.have(
+                                    "b_odd: b = SUC0 (double (HALF b))"
+                                ).by_rewrite_of("rb", ["hob_eq", COND_T_NAT0])
+                                p.have("hab: a = b").by_rewrite_of(
+                                    "a_odd", ["hhalf_eq", SYM(p.fact("b_odd"))]
+                                )
+                                p.disj("hab")
+                            with p.case("hna: ~(ODD a)"):
+                                p.have("hna_eq: ODD a = F").by(EQF_INTRO, "hna")
+                                p.have("a_even: a = double (HALF a)").by_rewrite_of(
+                                    "ra", ["hna_eq", COND_F_NAT0]
+                                )
+                                with p.cases_on(EXCLUDED_MIDDLE, "ODD b"):
+                                    with p.case("hob: ODD b"):
+                                        p.have("hob_eq: ODD b = T").by(EQT_INTRO, "hob")
+                                        p.have(
+                                            "b_odd: b = SUC0 (double (HALF b))"
+                                        ).by_rewrite_of("rb", ["hob_eq", COND_T_NAT0])
+                                        p.have(
+                                            "a_even_b: a = double (HALF b)"
+                                        ).by_rewrite_of("a_even", ["hhalf_eq"])
+                                        p.have(
+                                            "b_suca: b = SUC0 a"
+                                        ).by_rewrite_of("b_odd", [SYM(p.fact("a_even_b"))])
+                                        p.have("hstep: nat0_lt a (SUC0 a)").by(
+                                            NAT0_LT_SUC0, "a"
+                                        )
+                                        p.have("hlt: nat0_lt a b").by_rewrite_of(
+                                            "hstep", [SYM(p.fact("b_suca"))]
+                                        )
+                                        p.disj("hlt")
+                                    with p.case("hnb: ~(ODD b)"):
+                                        p.have("hnb_eq: ODD b = F").by(EQF_INTRO, "hnb")
+                                        p.have(
+                                            "b_even: b = double (HALF b)"
+                                        ).by_rewrite_of("rb", ["hnb_eq", COND_F_NAT0])
+                                        p.have("hab: a = b").by_rewrite_of(
+                                            "a_even",
+                                            ["hhalf_eq", SYM(p.fact("b_even"))],
+                                        )
+                                        p.disj("hab")
+                    with p.case("hhalf_lt: nat0_lt (HALF a) (HALF b)"):
+                        p.have("hlt: nat0_lt a b").by(
+                            HALF_LT_IMP_LT, "a", "b", "hhalf_lt"
+                        )
+                        p.disj("hlt")
+
+
+@proof
+def BITWISE_LT_BY_TOP_DIFF(p):
+    """|- !k a b.
+          ((!i. nat0_lt k i ==> bit i a ==> bit i b)
+           /\\ ~(bit k a) /\\ bit k b)
+          ==> nat0_lt a b.
+
+    Numeric comparison from the highest relevant bit difference.
+    Bits above ``k`` in ``a`` are contained in ``b``; at ``k`` the bit is
+    absent from ``a`` and present in ``b``.
+    """
+
+    from tactics import EQT_INTRO, EQF_INTRO, SYM, CONJ
+
+    p.goal(
+        "!k a b. ((!i. nat0_lt k i ==> bit i a ==> bit i b) "
+        "/\\ ~(bit k a) /\\ bit k b) ==> nat0_lt a b"
+    )
+    with p.induction("k"):
+        with p.base():
+            p.fix("a b")
+            p.assume(
+                "(hhi,haF,hbT): (!i. nat0_lt 0 i ==> bit i a ==> bit i b) "
+                "/\\ ~(bit 0 a) /\\ bit 0 b"
+            )
+            with p.have(
+                "hsub_half: !i. bit i (HALF a) ==> bit i (HALF b)"
+            ).proof():
+                p.fix("i")
+                p.assume("hia: bit i (HALF a)")
+                p.have("eq_a: bit (SUC0 i) a = bit i (HALF a)").by(
+                    BIT_STEP_AT, "i", "a"
+                )
+                p.have("hsia: bit (SUC0 i) a").by_eq_mp(
+                    SYM(p.fact("eq_a")), "hia"
+                )
+                p.have("h0i: nat0_lt 0 (SUC0 i)").by(NAT0_LT_0_SUC0, "i")
+                p.have("hsib: bit (SUC0 i) b").by(
+                    "hhi", "SUC0 i", "h0i", "hsia"
+                )
+                p.have("eq_b: bit (SUC0 i) b = bit i (HALF b)").by(
+                    BIT_STEP_AT, "i", "b"
+                )
+                p.thus("bit i (HALF b)").by_eq_mp("eq_b", "hsib")
+            p.have(
+                "hhalf_cases: HALF a = HALF b "
+                "\\/ nat0_lt (HALF a) (HALF b)"
+            ).by(BIT_SUBSET_LE, "HALF b", "HALF a", "hsub_half")
+            p.have("haF_odd: ~(ODD a)").by_rewrite_of("haF", [BIT_BASE])
+            p.have("haF_eq: ODD a = F").by(EQF_INTRO, "haF_odd")
+            p.have("hbT_odd: ODD b").by_rewrite_of("hbT", [BIT_BASE])
+            p.have("hbT_eq: ODD b = T").by(EQT_INTRO, "hbT_odd")
+            p.have(
+                "ra: a = COND_nat0 (ODD a) "
+                "(SUC0 (double (HALF a))) (double (HALF a))"
+            ).by(RECONSTRUCT, "a")
+            p.have(
+                "rb: b = COND_nat0 (ODD b) "
+                "(SUC0 (double (HALF b))) (double (HALF b))"
+            ).by(RECONSTRUCT, "b")
+            p.have("a_even: a = double (HALF a)").by_rewrite_of(
+                "ra", ["haF_eq", COND_F_NAT0]
+            )
+            p.have("b_odd: b = SUC0 (double (HALF b))").by_rewrite_of(
+                "rb", ["hbT_eq", COND_T_NAT0]
+            )
+            with p.cases_on("hhalf_cases"):
+                with p.case("hhalf_eq: HALF a = HALF b"):
+                    p.have(
+                        "a_even_b: a = double (HALF b)"
+                    ).by_rewrite_of("a_even", ["hhalf_eq"])
+                    p.have(
+                        "b_suca: b = SUC0 a"
+                    ).by_rewrite_of("b_odd", [SYM(p.fact("a_even_b"))])
+                    p.have("hstep: nat0_lt a (SUC0 a)").by(NAT0_LT_SUC0, "a")
+                    p.thus("nat0_lt a b").by_rewrite_of(
+                        "hstep", [SYM(p.fact("b_suca"))]
+                    )
+                with p.case("hhalf_lt: nat0_lt (HALF a) (HALF b)"):
+                    p.have(
+                        "hds: nat0_lt (double (HALF a)) "
+                        "              (SUC0 (double (HALF b)))"
+                    ).by(DOUBLE_LT_SUC0_DOUBLE, "HALF a", "HALF b", "hhalf_lt")
+                    p.thus("nat0_lt a b").by_rewrite_of(
+                        "hds", [SYM(p.fact("a_even")), SYM(p.fact("b_odd"))]
+                    )
+        with p.step("IH"):
+            p.fix("a b")
+            p.assume(
+                "(hhi,haF,hbT): "
+                "(!i. nat0_lt (SUC0 k) i ==> bit i a ==> bit i b) "
+                "/\\ ~(bit (SUC0 k) a) /\\ bit (SUC0 k) b"
+            )
+            with p.have(
+                "hhi_half: !i. nat0_lt k i ==> bit i (HALF a) ==> bit i (HALF b)"
+            ).proof():
+                p.fix("i")
+                p.assume("hki: nat0_lt k i", "hia: bit i (HALF a)")
+                p.have("hsk_si: nat0_lt (SUC0 k) (SUC0 i)").by(
+                    NAT0_LT_SUC0_MONO, "k", "i", "hki"
+                )
+                p.have("eq_a: bit (SUC0 i) a = bit i (HALF a)").by(
+                    BIT_STEP_AT, "i", "a"
+                )
+                p.have("hsia: bit (SUC0 i) a").by_eq_mp(
+                    SYM(p.fact("eq_a")), "hia"
+                )
+                p.have("hsib: bit (SUC0 i) b").by(
+                    "hhi", "SUC0 i", "hsk_si", "hsia"
+                )
+                p.have("eq_b: bit (SUC0 i) b = bit i (HALF b)").by(
+                    BIT_STEP_AT, "i", "b"
+                )
+                p.thus("bit i (HALF b)").by_eq_mp("eq_b", "hsib")
+            p.have("haF_half: ~(bit k (HALF a))").by_rewrite_of(
+                "haF", [BIT_STEP_AT]
+            )
+            p.have("hbT_half: bit k (HALF b)").by_rewrite_of(
+                "hbT", [BIT_STEP_AT]
+            )
+            p.have(
+                "hh_lt: nat0_lt (HALF a) (HALF b)"
+            ).by(
+                "IH",
+                "HALF a",
+                "HALF b",
+                CONJ(p.fact("hhi_half"), CONJ(p.fact("haF_half"), p.fact("hbT_half"))),
+            )
+            p.thus("nat0_lt a b").by(HALF_LT_IMP_LT, "a", "b", "hh_lt")
 
 
 # ---------------------------------------------------------------------------
@@ -2851,6 +3347,9 @@ if __name__ == "__main__":
     print("  SET_BIT_COMMUTE_DIFF:", pp_thm(SET_BIT_COMMUTE_DIFF))
     print("Step 21 OK -- BIT_LT proved.")
     print("  BIT_LT          :", pp_thm(BIT_LT))
+    print("  BIT_SELF_FALSE  :", pp_thm(BIT_SELF_FALSE))
+    print("  BIT_ABOVE_FALSE :", pp_thm(BIT_ABOVE_FALSE))
+    print("  BIT_AT_SET_BIT_OTHER_SELF_FALSE:", pp_thm(BIT_AT_SET_BIT_OTHER_SELF_FALSE))
     print("Step 22 OK -- low_bit / clear_low defined.")
     print("  LOW_BIT_REC     :", pp_thm(LOW_BIT_REC))
     print("  LOW_BIT_AT      :", pp_thm(LOW_BIT_AT))
@@ -2858,6 +3357,12 @@ if __name__ == "__main__":
     print("  CLEAR_LOW_AT    :", pp_thm(CLEAR_LOW_AT))
     print("Step 23 OK -- DOUBLE_MONO_LT proved.")
     print("  DOUBLE_MONO_LT  :", pp_thm(DOUBLE_MONO_LT))
+    print("  DOUBLE_LT_SUC0_DOUBLE_SELF:", pp_thm(DOUBLE_LT_SUC0_DOUBLE_SELF))
+    print("  DOUBLE_LT_SUC0_DOUBLE     :", pp_thm(DOUBLE_LT_SUC0_DOUBLE))
+    print("  SUC0_DOUBLE_LT_DOUBLE     :", pp_thm(SUC0_DOUBLE_LT_DOUBLE))
+    print("  HALF_LT_IMP_LT            :", pp_thm(HALF_LT_IMP_LT))
+    print("  BIT_SUBSET_LE             :", pp_thm(BIT_SUBSET_LE))
+    print("  BITWISE_LT_BY_TOP_DIFF    :", pp_thm(BITWISE_LT_BY_TOP_DIFF))
     print("Step 24 OK -- LOW_BIT_LT proved.")
     print("  LOW_BIT_LT      :", pp_thm(LOW_BIT_LT))
     print("Step 25 OK -- CLEAR_LOW_LT proved.")

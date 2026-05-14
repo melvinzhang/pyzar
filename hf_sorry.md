@@ -25,9 +25,10 @@ has been redirected to the set-native checker.
 | G | `PROV_HF_REPRESENTS`             | 3156 | large      | F                         | Σ₁ completeness (forward) — Σ₁ soundness deferred to Stage 6; **body of `Prov_HF_internal`** |
 | H | `IS_FORM_PROV_HF_INTERNAL`       | 3170 | small      | G's body def              | `is_form` closure under HF-formula constructors             |
 | I | `FREE_IN_PROV_HF_INTERNAL`       | 3183 | small      | G's body def              | `free_in` recursion                                          |
-| J | `HF_IND_QUOTE_MEM_DECISION`      | 2413 | spike stub | —                         | intended consequence of HF-IND schema                        |
-| K | `HF_IND_QUOTE_PROV_NEQ`          | 2429 | spike stub | —                         | intended consequence of HF-IND schema                        |
-| L | `QUOTE_HF_MEM_DECISION`          | 3509 | done       | J                         | public wrapper for downstream                                |
+| J | `HF_IND_QUOTE_MEM_AND_NEQ`       | 2518 | spike stub | —                         | intended consequence of membership-IND schema                |
+| K | `HF_IND_QUOTE_MEM_DECISION`      | 2539 | done       | J                         | projection from bundled theorem                              |
+| L | `HF_IND_QUOTE_PROV_NEQ`          | 2556 | done       | J                         | projection from bundled theorem                              |
+| M | `QUOTE_HF_MEM_DECISION`          | 3509 | done       | K                         | public wrapper for downstream                                |
 
 ✓ = already proven and exported (no sorry).
 
@@ -59,11 +60,12 @@ Two implementation clusters plus one representation switch:
      ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))
   ```
 
-  Membership-IND spike: the public quote interfaces are currently routed
-  through two explicit stubs that are intended to follow from the
+  Membership-IND spike: the public quote interfaces are currently
+  projected from one bundled theorem that is intended to follow from the
   object-level HF membership-induction schema:
 
   ```text
+  HF_IND_QUOTE_MEM_AND_NEQ
   HF_IND_QUOTE_MEM_DECISION
   HF_IND_QUOTE_PROV_NEQ
   ```
@@ -93,6 +95,16 @@ Two implementation clusters plus one representation switch:
   form. Given the side conditions on `F` plus a `Prov_HF` proof of the
   membership-induction step, it derives `Prov_HF` of the universal
   conclusion by applying the schema instance with `PROV_HF_MP`.
+
+  Negative validation: `hf_ind_object_bundle_spike.py` checks the
+  obvious object-level candidates against the standard HF bit semantics.
+  The branch-specific formulas needed by the current public quote stubs
+  (`x in y`, `not x in y`, and `y != t`) are not
+  membership-inductive. This means membership-IND alone does not close
+  `HF_IND_QUOTE_MEM_AND_NEQ` through a simple object-level bundle; either
+  the quote theorem remains a meta-level proof construction, or the
+  bundle must go through a real internal representability predicate such
+  as `Prov_HF_internal`.
 
   This removes `IS_IN_REPRESENTS`, `QUOTE_HF_NEQ_FROM_LOW_BIT`,
   `QUOTE_HF_NEQ_FROM_CLEAR_LOW`, and `QUOTE_HF_MUTUAL_MEASURED` from the
@@ -191,22 +203,24 @@ and use certified inequality.
    - This is now closed with no `p.sorry()`. It removed the largest
      mechanical unknown in Phase 1.
 
-2. **Membership-IND quote stubs.**
-   - Current intentional quote-layer assumptions:
+2. **Membership-IND bundled quote theorem.**
+   - Current intentional quote-layer assumption:
 
      ```text
-     HF_IND_QUOTE_MEM_DECISION
-     HF_IND_QUOTE_PROV_NEQ
+     HF_IND_QUOTE_MEM_AND_NEQ
      ```
 
-   - `QUOTE_HF_MEM_DECISION` is routed directly to the first;
-     `QUOTE_HF_PROV_NEQ` is routed directly to the second.
+   - `HF_IND_QUOTE_MEM_DECISION` and `HF_IND_QUOTE_PROV_NEQ` are now
+     projections from this bundle. `QUOTE_HF_MEM_DECISION` routes through
+     the membership projection; `QUOTE_HF_PROV_NEQ` routes through the
+     inequality projection.
      The parameterized membership-induction recognizer is now present in
-     `is_axiom`; the remaining work is deriving these two quote stubs
-     from one bundled membership/inequality theorem.
-   - The schema-application plumbing is validated by `PROV_HF_MEM_IND`;
-     the next unknown is the actual bundled object formula and its
-     step proof.
+     `is_axiom`; the remaining work is deriving the bundled theorem.
+   - The schema-application plumbing is validated by `PROV_HF_MEM_IND`.
+     The object-bundle spike is negative: the simple branch-specific
+     formulas are not inductive, so this route probably requires the
+     later internal representability layer rather than closing the
+     current meta-level quote stubs directly.
 
 3. **Interface theorem — `QUOTE_HF_MEM_DECISION`.**
    - This is the membership-only theorem downstream code should cite:
@@ -393,6 +407,88 @@ definitions.
   needed to prove the formal decrease of
   `quote_hf_mem_measure x (clear_low y)` below
   `quote_hf_mem_measure x y`.
+
+  The HOL extensional discriminator needed by the inequality branch is
+  now closed as `HF_EXT_DIFF`, with a small closed Boolean splitter
+  `BOOL_NEQ_XOR`.
+
+  The membership miss branch now has the exact named recursive-call
+  bound:
+
+  ```text
+  QUOTE_HF_MEM_NEEDS_HEAD_NEQ_DECREASE
+  |- y != 0 /\ x != low_bit y
+     ==> quote_hf_neq_measure x (low_bit y)
+         < quote_hf_mem_measure x y
+  ```
+
+  Its public proof no longer uses `p.sorry()`. It is derived by splitting
+  the `quote_hf_neq_measure` max/`COND_nat0` branch after citing the raw
+  Ackermann bit-order obligation:
+
+  ```text
+  QUOTE_HF_MEM_HEAD_NEQ_RAW_DECREASE
+  |- y != 0 /\ x != low_bit y
+     ==> quote_hf_mem_measure x (low_bit y)
+         < quote_hf_mem_measure x y
+      /\ quote_hf_mem_measure (low_bit y) x
+         < quote_hf_mem_measure x y
+  ```
+
+  That raw fact is intentionally an explicit `p.sorry()`, so imports show
+  the remaining arithmetic gap. The proof work has moved down to a
+  cleaner target: prove the two strict `Insert` inequalities under the
+  low-bit side condition.
+
+  The required bit-order layer is now closed in `bits.py`. It includes
+  the false-bit helpers:
+
+  ```text
+  BIT_SELF_FALSE
+  |- !n. bit n n = F
+
+  BIT_ABOVE_FALSE
+  |- !n i. n < i ==> bit i n = F
+
+  BIT_AT_SET_BIT_OTHER_SELF_FALSE
+  |- !i j. i != j ==> bit j (set_bit i j) = F
+  ```
+
+  plus the double/half order helpers:
+
+  ```text
+  DOUBLE_LT_SUC0_DOUBLE_SELF
+  DOUBLE_LT_SUC0_DOUBLE
+  SUC0_DOUBLE_LT_DOUBLE
+  HALF_LT_IMP_LT
+  BIT_SUBSET_LE
+  ```
+
+  and the main top-difference comparison lemma:
+
+  ```text
+  BITWISE_LT_BY_TOP_DIFF
+  |- !k a b.
+     (!i. nat0_lt k i ==> bit i a ==> bit i b)
+     /\ ~(bit k a) /\ bit k b
+     ==> nat0_lt a b
+  ```
+
+  The next raw-decrease task is now just to apply this bridge to the two
+  specialized `set_bit` bounds:
+
+  ```text
+  |- y != 0 /\ x != low_bit y
+     ==> nat0_lt (set_bit x (low_bit y)) (set_bit x y)
+
+  |- y != 0 /\ x != low_bit y
+     ==> nat0_lt (set_bit (low_bit y) x) (set_bit x y)
+  ```
+
+  The first uses discriminator bit `low_bit y`; the second uses
+  discriminator bit `x`. Both need `BIT_LOW_BIT`, `BIT_AT_SET_BIT_DIFF`,
+  `BIT_AT_SET_BIT_SAME`, and the newly closed false-bit helpers for the
+  high-bit-containment side condition.
 
 * **Induction-target experiments** —
   `hf_induction_targets.py` brute-checks candidate measures
