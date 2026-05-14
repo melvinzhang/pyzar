@@ -23,7 +23,6 @@
 # Rules: modus ponens; generalization.
 #
 # Stage 2A (foundations):
-#   * List encoding on nat0 (proofs are lists of formula godelnums).
 #   * The five HF axioms as concrete encoded nat0 terms.
 #   * ``is_hf_axiom``: decidable recogniser for the five HF axioms
 #     (name retained for now to limit refactor blast radius).
@@ -42,48 +41,19 @@
 #     PROV_HF_DT_GEN / DTChain.gen unconditionally proved.
 #   * ``is_logical_axiom`` (disjunction over the eight schemas) and
 #     ``is_axiom = is_hf_axiom \/ is_logical_axiom``.
-#   * ``NAT0_LT_CONS_L_HEAD`` / ``NAT0_LT_CONS_L_TAIL``: list size
-#     lemmas needed for any future well-founded recursion on lists.
-#   * ``Prov_HF``: provability predicate, defined as the impredicative
-#     intersection of all sets closed under the inference rules:
-#         Prov_HF n  :<=>  !P:nat0->bool.
-#                          ( (!m. is_axiom m ==> P m)
-#                          /\ (!f g. P f /\ P (Imp_f f g) ==> P g)
-#                          /\ (!f x. P f ==> P (Forall_f x f)) )
-#                          ==> P n.
+#   * ``Prov_HF``: provability predicate, defined in ``hf_repr_core.py``
+#     as existence of a ranked HF-set proof object:
+#         Prov_HF n  :<=>  ?P. Proof_HF_set P n.
 #   * Closure rules:
 #         |- !n. is_axiom n ==> Prov_HF n.                  (PROV_HF_AXIOM)
 #         |- !f g. Prov_HF f /\ Prov_HF (Imp_f f g)
 #                  ==> Prov_HF g.                           (PROV_HF_MP)
 #         |- !f x. Prov_HF f ==> Prov_HF (Forall_f x f).     (PROV_HF_GEN)
 #
-# Design note -- why ``Prov_HF`` via impredicative intersection rather
-# than the textbook ``?p. Proof_HF(p, n)``:
-#
-# The original ``hf_godel1.py`` blueprint specified
-# ``Prov_HF(n) :<=> ?p. Proof_HF(p, n)`` with a list-based proof checker.
-# In HOL the two definitions are provably equivalent (Knaster-Tarski:
-# the impredicative intersection is the least fixed point of the
-# closure operator, which agrees with the inductively generated set
-# of provable godelnums). We pick the impredicative form here because:
-#
-#   (1) The closure rules (axiom inclusion, MP, generalisation) drop
-#       out by direct specialisation -- no recursion, no MONO.
-#   (2) A list-based ``Proof_HF`` would require ``mem_l`` (list
-#       membership) defined via ``define_wf_lt``, which carries a
-#       non-trivial MONO obligation under existential binders -- the
-#       per-(h, t) iff has to use ``NAT0_LT_CONS_L_TAIL`` to discharge
-#       the recursive call after CHOOSE'ing the cons witness.
-#   (3) Stage 4 (diagonal lemma) and Stage 5 (the main incompleteness
-#       theorem) only consume the closure rules and ``PROV_HF_AT``; they
-#       never inspect an explicit proof witness.
-#
-# Stage 3 originally planned to internalise a list-based ``Proof_HF``.
-# That is no longer the target: HF-internal provability should use
-# HF-native proof objects (ranked finite sets of proof-step records, or
-# another set/tree representation), not list theory encoded by ``cons_l``.
-# Any list-based checker in ``hf_repr_core`` is external scaffolding to
-# bridge or retire, not the formula shape for ``Prov_HF_internal``.
+# Design note: Stage 3 originally planned to internalise a list-based
+# ``Proof_HF``. That path has been removed. HF provability now uses
+# ranked finite HF sets of proof-step records, so no list theory is
+# needed in the proof checker.
 
 # ---------------------------------------------------------------------------
 # Imports.
@@ -93,18 +63,10 @@ from fusion import Var
 from basics import mk_const, mk_app, mk_eq
 from parser import define, parse_type
 from nat0 import nat0_ty
-from hf_sets import (
-    PAIR_ORD_INJ,
-)
 from proof import proof, define_with_at
 from tactics import (
     SPECL,
-    GEN,
-    GENL,
     SYM,
-    AP_THM,
-    BETA_CONV,
-    TRANS,
     DISJ1,
     DISJ2,
     EQ_MP,
@@ -122,90 +84,6 @@ from hf_syntax import (
 # The HF primitives Empty_t, Insert_t, In_a are referenced by name from
 # parser strings in this file; importing hf_syntax above is sufficient
 # to register them as kernel constants.
-
-
-# ---------------------------------------------------------------------------
-# List encoding on nat0.
-#
-# A list of nat0s is itself a nat0:
-#
-#   nil_l         :=  0                                   (= Empty in HF)
-#   cons_l h t    :=  Pair_ord (SUC0 0) (Pair_ord h t)
-#
-# The leading ``SUC0 0`` tag distinguishes a non-empty list from the
-# empty list (which is just ``0``); the inner ``Pair_ord h t`` carries
-# the head and tail. PAIR_ORD_INJ gives projection / injectivity for
-# free.
-#
-# We do not need decidable ``is_cons`` at this stage -- the list shape
-# is fixed in every position where lists appear (proof = non-empty list
-# of formula godelnums).
-# ---------------------------------------------------------------------------
-
-
-_h_n0 = Var("h", nat0_ty)
-_t_n0 = Var("t", nat0_ty)
-_h1_n0 = Var("h1", nat0_ty)
-_t1_n0 = Var("t1", nat0_ty)
-_h2_n0 = Var("h2", nat0_ty)
-_t2_n0 = Var("t2", nat0_ty)
-
-
-NIL_L_DEF = define("nil_l", parse_type("nat0"), "0")
-nil_l = mk_const("nil_l", [])
-
-# Pointwise: |- !h t. cons_l h t = Pair_ord (SUC0 0) (Pair_ord h t).
-CONS_L_DEF, CONS_L_AT = define_with_at(
-    "cons_l",
-    parse_type("nat0 -> nat0 -> nat0"),
-    "\\h:nat0. \\t:nat0. Pair_ord (SUC0 0) (Pair_ord h t)",
-)
-cons_l = mk_const("cons_l", [])
-
-
-# Injectivity:  |- !h1 t1 h2 t2. cons_l h1 t1 = cons_l h2 t2 ==>
-#                                 h1 = h2 /\ t1 = t2.
-@proof
-def CONS_L_INJ(p):
-    p.goal("!h1 t1 h2 t2. cons_l h1 t1 = cons_l h2 t2 ==> (h1 = h2 /\\ t1 = t2)")
-    p.fix("h1 t1 h2 t2")
-    p.assume("h: cons_l h1 t1 = cons_l h2 t2")
-    cons_at_1 = SPECL([p._parse("h1"), p._parse("t1")], CONS_L_AT)
-    cons_at_2 = SPECL([p._parse("h2"), p._parse("t2")], CONS_L_AT)
-    p.have(
-        "h_outer: Pair_ord (SUC0 0) (Pair_ord h1 t1) = "
-        "Pair_ord (SUC0 0) (Pair_ord h2 t2)"
-    ).by_rewrite_of("h", [cons_at_1, cons_at_2])
-    p.have("h_inner_conj: SUC0 0 = SUC0 0 /\\ Pair_ord h1 t1 = Pair_ord h2 t2").by(
-        PAIR_ORD_INJ, "SUC0 0", "Pair_ord h1 t1", "SUC0 0", "Pair_ord h2 t2", "h_outer"
-    )
-    p.split("h_inner_conj", "(_, h_inner)")
-    p.thus("h1 = h2 /\\ t1 = t2").by(PAIR_ORD_INJ, "h1", "t1", "h2", "t2", "h_inner")
-
-
-# Disjointness with nil:  |- !h t. ~(cons_l h t = nil_l).
-#
-# Direct: cons_l h t = Pair_ord (SUC0 0) (Pair_ord h t) and nil_l = 0;
-# Pair_ord _ _ != 0 from ``_NEQ_PAIR_ORD_ZERO`` (hf_syntax).
-
-
-from hf_syntax import _NEQ_PAIR_ORD_ZERO  # noqa: E402 -- imported just before CONS_L_NEQ_NIL
-
-
-@proof
-def CONS_L_NEQ_NIL(p):
-    """|- !h t. ~(cons_l h t = nil_l)."""
-    p.goal("!h t. ~(cons_l h t = nil_l)")
-    p.fix("h t")
-    cons_at_ht = SPECL([p._parse("h"), p._parse("t")], CONS_L_AT)
-    with p.suppose("h_eq: cons_l h t = nil_l"):
-        p.have("h_po: Pair_ord (SUC0 0) (Pair_ord h t) = 0").by_rewrite_of(
-            "h_eq", [cons_at_ht, NIL_L_DEF]
-        )
-        p.have("h_neg: ~(Pair_ord (SUC0 0) (Pair_ord h t) = 0)").by(
-            _NEQ_PAIR_ORD_ZERO, "SUC0 0", "Pair_ord h t"
-        )
-        p.absurd().by_conj("h_neg", "h_po")
 
 
 # ---------------------------------------------------------------------------
@@ -783,106 +661,29 @@ is_axiom = mk_const("is_axiom", [])
 
 
 # ---------------------------------------------------------------------------
-# Stage 2B (d) -- list size lemmas (head and tail strictly smaller than cons).
-#
-#   |- !h t. nat0_lt h (cons_l h t).
-#   |- !h t. nat0_lt t (cons_l h t).
-#
-# Each is a two-layer descent through PAIR_ORD chained via NAT0_LT_TRANS.
-# Same pattern as the constructor size lemmas in hf_syntax.py.
-# ---------------------------------------------------------------------------
-
-
-from hf_sets import NAT0_LT_PAIR_ORD_L, NAT0_LT_PAIR_ORD_R  # noqa: E402 -- pair-order lemmas used right below
-from nat0_order import NAT0_LT_TRANS  # noqa: E402 -- transitivity used right below
-
-
-@proof
-def NAT0_LT_CONS_L_HEAD(p):
-    """|- !h t. nat0_lt h (cons_l h t)."""
-    p.goal("!h t. nat0_lt h (cons_l h t)")
-    p.fix("h t")
-    cons_at_ht = SPECL([p._parse("h"), p._parse("t")], CONS_L_AT)
-    p.have("h1: nat0_lt h (Pair_ord h t)").by(NAT0_LT_PAIR_ORD_L, "h", "t")
-    p.have("h2: nat0_lt (Pair_ord h t) (Pair_ord (SUC0 0) (Pair_ord h t))").by(
-        NAT0_LT_PAIR_ORD_R, "SUC0 0", "Pair_ord h t"
-    )
-    p.have("h3: nat0_lt h (Pair_ord (SUC0 0) (Pair_ord h t))").by(
-        NAT0_LT_TRANS,
-        "h",
-        "Pair_ord h t",
-        "Pair_ord (SUC0 0) (Pair_ord h t)",
-        "h1",
-        "h2",
-    )
-    p.thus("nat0_lt h (cons_l h t)").by_rewrite_of("h3", [SYM(cons_at_ht)])
-
-
-@proof
-def NAT0_LT_CONS_L_TAIL(p):
-    """|- !h t. nat0_lt t (cons_l h t)."""
-    p.goal("!h t. nat0_lt t (cons_l h t)")
-    p.fix("h t")
-    cons_at_ht = SPECL([p._parse("h"), p._parse("t")], CONS_L_AT)
-    p.have("h1: nat0_lt t (Pair_ord h t)").by(NAT0_LT_PAIR_ORD_R, "h", "t")
-    p.have("h2: nat0_lt (Pair_ord h t) (Pair_ord (SUC0 0) (Pair_ord h t))").by(
-        NAT0_LT_PAIR_ORD_R, "SUC0 0", "Pair_ord h t"
-    )
-    p.have("h3: nat0_lt t (Pair_ord (SUC0 0) (Pair_ord h t))").by(
-        NAT0_LT_TRANS,
-        "t",
-        "Pair_ord h t",
-        "Pair_ord (SUC0 0) (Pair_ord h t)",
-        "h1",
-        "h2",
-    )
-    p.thus("nat0_lt t (cons_l h t)").by_rewrite_of("h3", [SYM(cons_at_ht)])
-
-
-# ---------------------------------------------------------------------------
 # Stage 2B (e) -- Prov_HF is defined in hf_repr_core.py.
 #
-#   Prov_HF n  :<=>  ?p. Proof_HF p n.
+#   Prov_HF n  :<=>  ?P. Proof_HF_set P n.
 #
-# The Sigma_1 form is the canonical one: it makes provability a witness
-# predicate (every provable formula has an explicit list-of-formulas
-# proof), and matches the shape that the diagonal lemma's internal
-# provability formula will internalise. The closure lemmas
-# ``PROV_HF_AXIOM``, ``PROV_HF_MP``, ``PROV_HF_GEN`` are derived from the
-# explicit proof-list constructions ``AXIOM_HAS_PROOF``,
-# ``MP_HAS_PROOF``, ``GEN_HAS_PROOF`` in hf_repr_core.py.
-#
-# Historical note: an earlier draft defined ``Prov_HF`` via impredicative
-# intersection (``!P. (closure clauses) ==> P n``) here in hf_proof.py,
-# before ``Proof_HF`` was available. That definition was equivalent
-# (Knaster-Tarski) but redundant once the list-based ``Proof_HF`` was
-# built. The audit found that nothing downstream used the impredicative
-# shape essentially -- every consumer treats ``Prov_HF`` as a black box
-# closed under axiom/MP/Gen -- so we collapsed to the single Sigma_1
-# definition.
+# The closure lemmas ``PROV_HF_AXIOM``, ``PROV_HF_MP``, and
+# ``PROV_HF_GEN`` are derived in ``hf_repr_core.py`` from the set-native
+# proof-object constructors.
 # ---------------------------------------------------------------------------
 
 
 if __name__ == "__main__":
     from parser import pp_thm
 
-    print("Stage 2 (a) -- list encoding on nat0.")
-    print("    NIL_L_DEF      :", pp_thm(NIL_L_DEF))
-    print("    CONS_L_DEF     :", pp_thm(CONS_L_DEF))
-    print("    CONS_L_AT      :", pp_thm(CONS_L_AT))
-    print("    CONS_L_INJ     :", pp_thm(CONS_L_INJ))
-    print("    CONS_L_NEQ_NIL :", pp_thm(CONS_L_NEQ_NIL))
-    print()
-    print("Stage 2 (b) -- variable-index conventions.")
+    print("Stage 2 (a) -- variable-index conventions.")
     print("    VAR_X_DEF      :", pp_thm(VAR_X_DEF))
     print("    VAR_Y_DEF      :", pp_thm(VAR_Y_DEF))
     print("    VAR_Z_DEF      :", pp_thm(VAR_Z_DEF))
     print()
-    print("Stage 2 (c) -- the five HF axioms (encoded).")
+    print("Stage 2 (b) -- the five HF axioms (encoded).")
     for name, _ax, def_th in HF_AXIOMS:
         print(f"    {name:<10} :", pp_thm(def_th))
     print()
-    print("Stage 2 (d) -- is_hf_axiom recogniser.")
+    print("Stage 2 (c) -- is_hf_axiom recogniser.")
     print("    IS_HF_AXIOM_DEF :", pp_thm(IS_HF_AXIOM_DEF))
     print("    IS_HF_AXIOM_AT  :", pp_thm(IS_HF_AXIOM_AT))
     print("    Each axiom is recognised:")
@@ -907,8 +708,4 @@ if __name__ == "__main__":
     print("    IS_LOGICAL_AXIOM_AT :", pp_thm(IS_LOGICAL_AXIOM_AT))
     print("    IS_AXIOM_AT         :", pp_thm(IS_AXIOM_AT))
     print()
-    print("Stage 2B (d) -- list size lemmas.")
-    print("    NAT0_LT_CONS_L_HEAD :", pp_thm(NAT0_LT_CONS_L_HEAD))
-    print("    NAT0_LT_CONS_L_TAIL :", pp_thm(NAT0_LT_CONS_L_TAIL))
-    print()
-    print("Stage 2B (e) -- Prov_HF is defined in hf_repr_core.py via ?p. Proof_HF p n.")
+    print("Stage 2B (d) -- Prov_HF is defined in hf_repr_core.py via ?P. Proof_HF_set P n.")

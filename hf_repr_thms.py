@@ -2808,9 +2808,9 @@ def SUBSTITUTE_REPRESENTS(p):
 # records preserve the Hilbert proof-sequence well-foundedness while
 # keeping HF-internal membership as ordinary ``In_a``.
 #
-# The current list-based ``Proof_HF`` in ``hf_repr_core.py`` remains
-# legacy external scaffolding, but it is not the formula shape for
-# ``Prov_HF_internal`` and is no longer the definition of ``Prov_HF``.
+# The previous list-based ``Proof_HF`` scaffolding has been removed from
+# ``hf_repr_core.py``; both ``Prov_HF`` and ``Prov_HF_internal`` follow
+# the set-native route.
 #
 # Forward direction (HOL ``Prov_HF n`` ==> HF proves the substituted
 # form): Sigma_1 completeness for HF. Extract a ``Proof_HF_set`` witness

@@ -57,12 +57,12 @@ Three ingredients:
       we pick for syntax.
 
   (2) *Representation.* Define the primitive recursive predicate
-      ``Proof_HF(p, n)`` -- "the HF-encoded proof ``p`` is an HF
-      derivation of the formula with HF-encoding ``n``" -- as a HOL
-      predicate on ``num``. Define
-            Prov_HF(n)  :<=>  ?p. Proof_HF(p, n).
-      Both ``Proof_HF`` and ``Prov_HF`` are *HOL* predicates; they are
-      not at this stage statements *inside* HF.
+      ``Proof_HF_set(P, n)`` -- "the ranked HF-set proof object ``P``
+      derives the formula with HF-encoding ``n``" -- as a HOL predicate
+      on ``num``. Define
+            Prov_HF(n)  :<=>  ?P. Proof_HF_set(P, n).
+      Both ``Proof_HF_set`` and ``Prov_HF`` are *HOL* predicates; they
+      are not at this stage statements *inside* HF.
 
   (3) *Diagonal lemma.* For every HF formula ``phi(x)`` with one free
       variable there is a sentence ``psi`` such that
@@ -102,23 +102,17 @@ The work is in writing down a *concrete* proof system and a *concrete*
 provability predicate -- and in proving the diagonal lemma and the
 representability theorem against that concrete choice.
 
-Two design choices:
+Proof-object design:
 
-  (a) *Hilbert-style*. HF has five closed set-theoretic axioms plus the
+  *Hilbert-style*. HF has five closed set-theoretic axioms plus the
       standard finite list of propositional, quantifier, and equality
-      axioms; rules are modus ponens and generalization. Proof = list
-      of formulas, each either an axiom instance or following by a
-      rule from earlier lines. Easy to encode, ugly to do real proofs
-      in. We use this because we never *do* real proofs in HF -- we
-      only check that a few specific proofs exist.
+      axioms; rules are modus ponens and generalization. Proof objects
+      are ranked HF sets of proof-step records, where a step may cite
+      only lower-ranked records.
 
-  (b) *Natural deduction*. Cleaner proof terms; more work to encode.
-      Skippable.
-
-We take (a). ``Proof_HF(p, n)`` becomes a primitive recursive predicate
-on ``num x num`` -- decidable, hence representable in HF by a Sigma_1
-formula. That representability is the only nontrivial arithmetization
-theorem in the file.
+We take the ranked HF-set route. ``Proof_HF_set(P, n)`` is decidable,
+hence representable in HF by a Sigma_1 formula. That representability
+is the only nontrivial arithmetization theorem in the file.
 
 (There is no "Sigma_1-soundness axiom" to post: HOL + HF proves
 Sigma_1 soundness of HF outright, since HF *is* the standard model.)
@@ -277,17 +271,14 @@ Sigma_1 soundness of HF outright, since HF *is* the standard model.)
 #      variable analysis. ~300 lines. (Same shape as PA's syntax
 #      module; the signature is identical.)
 #
-#   2. ``hf_proof.py`` -- the seven HF axioms and the logical axioms
-#      as predicates on godelnums; ``Proof_HF``; ``Prov_HF``; closure
-#      rules. ~250 lines. (vs ~400 for PA, the saving coming from no
-#      induction-schema recogniser.)
+#   2. ``hf_proof.py`` / ``hf_repr_core.py`` -- the HF axioms and
+#      logical axioms as predicates on godelnums; set-native
+#      ``Proof_HF_set``; ``Prov_HF``; closure rules.
 #
-#   3. ``hf_repr_core.py`` -- representability of primitive recursive
-#      predicates, specialised to ``Proof_HF``, ``substitute``, and the
-#      diagonal function, via the Goedel-Bernays beta function. Yields
-#      ``Prov_HF_internal`` and the representability theorem. ~500
-#      lines. (No saving over PA: this proof is independent of
-#      induction.)
+#   3. ``hf_repr_core.py`` / ``hf_repr_thms.py`` -- representability of
+#      primitive recursive predicates, specialised to ``Proof_HF_set``,
+#      ``substitute``, and the diagonal function. Yields
+#      ``Prov_HF_internal`` and the representability theorem.
 #
 #   4. ``godel_first.py`` (this file, fleshed out) -- diagonal lemma,
 #      ``G_HF``, the main theorem, the essential-undecidability

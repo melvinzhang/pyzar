@@ -29,12 +29,10 @@ has been redirected to the set-native checker.
 Two implementation clusters plus one representation switch:
 
 * **Representation switch: HF-native proof objects.** The internal
-  proof predicate will not encode list theory in HF. The current
-  external proof objects are `cons_l` lists
-  (`cons_l h t = Pair_ord (SUC0 0) (Pair_ord h t)`), and `mem_l` is a
-  recursive list predicate. That machinery may remain temporarily as
-  external scaffolding, but it is no longer the target for
-  `Prov_HF_internal`.
+  proof predicate will not encode list theory in HF. The previous
+  `hf_repr_core.py` list checker has been removed from the active core;
+  `Prov_HF` and `Prov_HF_internal` now target ranked HF-set proof
+  objects.
 
 * **Canonical-form/quote_hf cluster (A → B, C).** Closes the residual gap
   inside `QUOTE_HF_PROV_NEQ` (the `s≠0 ∧ t≠0` branch).
