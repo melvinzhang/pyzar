@@ -5,10 +5,11 @@ This document is primarily the plan for the nine `p.sorry()` calls in
 `p.sorry()` calls in `hf_godel1.py`; those are listed here as downstream
 work, but the detailed inventory below is file-local to `hf_repr_thms.py`.
 
-The plan is ordered to settle the greatest unknown first. At the moment
-that unknown is not the substitute trace machinery; it is whether the
-intended `Prov_HF_internal` / `Proof_HF_internal` encoding matches the
-current external `Proof_HF` representation.
+The plan is ordered to settle the greatest unknown first. The switch is
+now decided: `Prov_HF_internal` must use HF-native proof objects, not
+`cons_l` lists. The remaining design work is to pin the exact HF-set
+proof-object shape and bridge or retire the current external list
+checker.
 
 ## Inventory
 
@@ -26,13 +27,15 @@ current external `Proof_HF` representation.
 
 ✓ = already proven and exported (no sorry).
 
-Two implementation clusters plus one design gate:
+Two implementation clusters plus one representation switch:
 
-* **Design gate: internal proof predicate.** The notes below used to say
-  `mem_l_internal` "collapses to `In_a`" because proof lists are HF sets.
-  That is only true after a refactor. The current external proof objects
-  are `cons_l` lists (`cons_l h t = Pair_ord (SUC0 0) (Pair_ord h t)`),
-  and `mem_l` is a recursive list predicate, not HF set membership.
+* **Representation switch: HF-native proof objects.** The internal
+  proof predicate will not encode list theory in HF. The current
+  external proof objects are `cons_l` lists
+  (`cons_l h t = Pair_ord (SUC0 0) (Pair_ord h t)`), and `mem_l` is a
+  recursive list predicate. That machinery may remain temporarily as
+  external scaffolding, but it is no longer the target for
+  `Prov_HF_internal`.
 
 * **Canonical-form/quote_hf cluster (A → B, C).** Closes the residual gap
   inside `QUOTE_HF_PROV_NEQ` (the `s≠0 ∧ t≠0` branch).
@@ -49,38 +52,53 @@ for a fully closed substitute-representability chain.
 
 ## Recommended order
 
-### Phase 0 — settle `Prov_HF_internal` / `Proof_HF_internal` design
+### Phase 0 — switch to HF-native proof objects
 
 Do this first, before investing in hundreds of lines of substitute-trace
-proof code. The current plan for G says:
+proof code. The target for G is:
 
 ```text
-mem_l_internal collapses to In_a
-valid_step_internal mirrors valid_step
-Proof_HF_internal is a bounded conjunction over members
+Prov_HF_internal(x) := ?P. Proof_HF_set_internal(P, x)
 ```
 
-That is a plausible plan only if proof objects are represented as HF
-sets. The current external checker in `hf_repr_core.py` uses `cons_l`
-lists and recursive `mem_l`. Pick one path:
+where `P` is an HF-native proof object. Do **not** internalise
+`cons_l`, `mem_l`, `append_l`, or list recursion.
 
-1. **Refactor external `Proof_HF` to HF-set proof objects.**
-   Then `mem_l_internal = In_a` is honest, and the bottom-up internal
-   proof predicate can be as simple as the current comments suggest.
-   This is a larger refactor but may shrink Stage 3D substantially.
+The exact shape still has to be pinned. Two viable HF-native designs:
 
-2. **Keep current `cons_l` proof objects.**
-   Then define real internal formulas for `mem_l`, `valid_step`,
-   `Proof_HF`, and `Prov_HF` over the `cons_l` encoding. This avoids a
-   refactor but means the "HF sets make lists free" shortcut is false.
+1. **Ranked proof-step set.**
+   `P` is a finite HF set of records `(rank, formula)`. A step at rank
+   `k` is valid if it is an axiom, or follows by MP/Gen from records
+   in `P` whose ranks are strictly below `k`. This keeps membership as
+   `In_a` while preserving the well-founded "earlier step" relation.
 
-Exit criterion for Phase 0: a tiny no-sorry prototype that demonstrates
-the chosen encoding. Good prototypes:
+2. **Proof tree.**
+   `P` is a finite HF tree whose root formula is `x`; children are the
+   immediate subproofs for MP/Gen. This avoids global step membership,
+   but duplicates shared subproofs and makes proof combination more
+   tree-shaped.
 
-* If refactoring to HF-set proof objects: prove the axiom-only proof
-  witness is internally recognised.
-* If keeping `cons_l`: define `mem_l_internal` and prove the internal
-  cons case corresponding to `mem_l (cons_l h t) x = (x = h \/ mem_l t x)`.
+Do **not** use a naive unordered "closed set of formulas" predicate.
+That admits circular justifications: a formula could be justified from
+itself if the whole set is available at every step. The proof object
+must carry a well-founded dependency relation, either explicit ranks or
+tree structure.
+
+Recommended choice: **ranked proof-step set**. It is closest to the
+current Hilbert proof-sequence semantics while keeping the internal HF
+formula set-native.
+
+Exit criterion for Phase 0:
+
+* Define the external HOL predicate, e.g. `Proof_HF_set P n`. **Done:**
+  `hf_repr_core.py` now has `valid_step_hf_set` and `Proof_HF_set`
+  as the ranked-set target predicates.
+* Prove the axiom-only witness: `is_axiom n ==> ?P. Proof_HF_set P n`.
+* Prove at least one closure prototype, preferably MP:
+  `(?P. Proof_HF_set P f) /\ (?Q. Proof_HF_set Q (Imp_f f g))
+   ==> ?R. Proof_HF_set R g`.
+* Only after those prototypes work, redirect `Prov_HF` or prove
+  `Prov_HF n = (?P. Proof_HF_set P n)`.
 
 Until this is done, G is the highest-risk item in the whole HF G1 plan.
 
@@ -139,9 +157,8 @@ substitute layer.
 
 6. **G — `PROV_HF_REPRESENTS`** (the deepest semantic step).
    - Define `Prov_HF_internal(x) := ?_internal y. Proof_HF_internal(y, x)`.
-     The shape of `Proof_HF_internal` must follow the Phase 0 decision:
-     either HF-set proof objects with `In_a`, or current `cons_l` proof
-     objects with an internal `mem_l`.
+     The shape of `Proof_HF_internal` follows Phase 0's HF-native
+     proof objects. There is no `cons_l` / `mem_l` internal path.
    - **Forward direction** (HOL ⇒ HF): Σ₁ completeness for HF.
      Extract a `Proof_HF` witness via `PROV_HF_AT`, encode as
      HF-numeral, verify each conjunct as a closed Σ₀ fact.
@@ -159,9 +176,10 @@ substitute layer.
 
 ## Why this order
 
-* **Phase 0 first** because it can invalidate the current comments for
-  G. If the proof-object representation is wrong, substitute-trace work
-  still helps, but it will not close the headline G1 path.
+* **Phase 0 first** because it removes the largest architectural risk:
+  list theory must not be smuggled into HF just to internalise proofs.
+  Substitute-trace work still helps, but it will not close the headline
+  G1 path until the HF-native proof-object representation is viable.
 * **Phase 1 next** because it removes the hidden `IS_IN_REPRESENTS` /
   `QUOTE_HF_PROV_NEQ` dependency under D and E.
 * **Phase 2 after that** because it is high-leverage and comparatively
@@ -199,6 +217,13 @@ definitions.
   `hf_syntax` and `hf_repr_core`). `hf_godel1.py` re-imports them.
   This unblocks the outer logical scaffolding of the
   `is_*_internal` bodies.
+
+* **HF-set proof predicate skeleton (done)** — `valid_step_hf_set` and
+  `Proof_HF_set` now live in `hf_repr_core.py`. They use ranked proof
+  records `Pair_ord k h` and only allow MP/Gen citations from lower
+  ranks, avoiding the cyclicity problem of unordered closed formula
+  sets. Next Phase 0 work is proving the axiom-only witness and one
+  closure prototype, then bridging `Prov_HF` to `?P. Proof_HF_set P n`.
 
 * **Prerequisite for D — Python builders for godelnum shapes.**
   The body of `is_substitute_step_internal` needs to express

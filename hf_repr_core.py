@@ -17,15 +17,16 @@
 #
 # We need representability of three specific predicates:
 #
-#   (i)   ``Proof_HF``     (the list-based proof-checking predicate).
+#   (i)   ``Proof_HF_set`` (the HF-native proof-checking predicate).
 #   (ii)  ``substitute``  (primitive recursive on godelnums).
 #   (iii) ``godelnum``    (identity on encoded syntax; its numeral
 #                          image is what matters).
 #
-# This file builds the list-based ``Proof_HF`` predicate, defines
-# ``Prov_HF n :<=> ?p. Proof_HF p n`` (Sigma_1), and lays the kernel
-# constants for the substitute/Prov_HF representability proofs whose
-# bodies live in ``hf_repr_thms.py``.
+# This file still contains the older list-based ``Proof_HF`` scaffolding
+# used by the external closure lemmas. The HF-internal route is switching
+# to ranked finite HF-set proof objects, introduced below as
+# ``Proof_HF_set``. Once its closure prototypes are in place, ``Prov_HF``
+# should be bridged to it or redirected to it.
 #
 
 from fusion import Var
@@ -310,7 +311,52 @@ def _subst_at_numeral(F_term, n_term):
 
 
 # ---------------------------------------------------------------------------
-# Stage 3B (a) -- list membership ``mem_l``.
+# Stage 3B (set-native target) -- ranked HF-set proof objects.
+#
+# This is the intended representation for ``Prov_HF_internal``. A proof
+# object ``P`` is a finite HF set of records ``Pair_ord k h`` where ``k``
+# is the step rank and ``h`` is the formula proved at that rank. A record
+# at rank ``k`` may cite only records with lower ranks. This keeps the
+# object-language proof predicate set-native while preserving the
+# well-founded "earlier proof step" discipline of Hilbert proofs.
+#
+# The definitions here are external HOL predicates. The HF-formula bodies
+# for the corresponding internal predicates are still Phase 0 work in
+# ``hf_sorry.md``.
+# ---------------------------------------------------------------------------
+
+
+VALID_STEP_HF_SET_DEF, VALID_STEP_HF_SET_AT = define_with_at(
+    "valid_step_hf_set",
+    parse_type("nat0 -> nat0 -> nat0 -> bool"),
+    "\\P:nat0. \\k:nat0. \\h:nat0. "
+    "is_axiom h "
+    "\\/ (?i f j g. In (Pair_ord i f) P /\\ In (Pair_ord j g) P "
+    "      /\\ nat0_lt i k /\\ nat0_lt j k /\\ is_mp f g h) "
+    "\\/ (?i f. In (Pair_ord i f) P /\\ nat0_lt i k /\\ is_gen f h)",
+)
+valid_step_hf_set = mk_const("valid_step_hf_set", [])
+
+
+PROOF_HF_SET_DEF, PROOF_HF_SET_AT = define_with_at(
+    "Proof_HF_set",
+    parse_type("nat0 -> nat0 -> bool"),
+    "\\P:nat0. \\n:nat0. "
+    "?k. In (Pair_ord k n) P "
+    "    /\\ (!j h. In (Pair_ord j h) P ==> valid_step_hf_set P j h)",
+)
+Proof_HF_set = mk_const("Proof_HF_set", [])
+
+
+# ---------------------------------------------------------------------------
+# Stage 3B (a) -- legacy external list membership ``mem_l``.
+#
+# NOTE: this list-based proof infrastructure is no longer the intended
+# HF-internal representation of proofs. ``Prov_HF_internal`` should use
+# HF-native proof objects (ranked finite sets / proof trees), so HF does
+# not have to internalise ``cons_l`` list theory. The code below remains
+# external scaffolding until it is bridged to, or replaced by, the
+# set-native proof checker.
 #
 #   mem_l p x  :<=>  ?h t. p = cons_l h t /\ (x = h \/ mem_l t x).
 #

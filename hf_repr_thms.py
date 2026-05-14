@@ -2793,31 +2793,26 @@ def SUBSTITUTE_REPRESENTS(p):
 #                                          <=> v = var_x.
 #
 # Discharge plan -- via HF1-HF5 (no Goedel-beta sequence coding).
-# ``Prov_HF`` has been collapsed in Stage 2 to ``\n. ?p. Proof_HF p n``,
-# so the HF-internal form is the existential closure
+# The internal proof predicate is switching to HF-native proof objects,
+# not ``cons_l`` lists. The preferred shape is a ranked finite HF set of
+# proof-step records:
 #
-#     Prov_HF_internal(x) := ?_internal y. Proof_HF_internal(y, x).
+#     P contains records (rank, formula)
+#     a record at rank k is valid if it is an axiom, or follows by
+#     MP/Gen from records in P whose ranks are strictly below k
+#     Prov_HF_internal(x) := ?P. Proof_HF_set_internal(P, x)
 #
-# Under the HF strengthening (HF1-HF5, already available from
-# ``hf_proof.py``) the bottom-up construction collapses dramatically
-# relative to the textbook beta-function path (BBJ Ch. 17 / Smullyan
-# Ch. 4):
+# The rank guard is important. A naive unordered "closed set of formulas"
+# would allow cyclic justifications, because every formula in the set
+# could be used to justify every other formula at the same time. Ranked
+# records preserve the Hilbert proof-sequence well-foundedness while
+# keeping HF-internal membership as ordinary ``In_a``.
 #
-#   * ``mem_l_internal`` collapses to ``In_a`` -- proof lists are HF
-#     sets; "p has formula f" is just membership. (~5 lines vs the
-#     ~200-line list-recursion encoding in the beta-function path.)
-#   * ``valid_step_internal`` is the Sigma_0 disjunction
-#         is_axiom_internal h \/
-#         (?f1 f2. In f1 t /\ In f2 t /\ is_mp_internal f1 f2 h) \/
-#         (?f1. In f1 t /\ is_gen_internal f1 h)
-#     directly mirroring the HOL ``valid_step`` in hf_repr_core.py.
-#   * ``Proof_HF_internal(p, n)`` is then the conjunction over members
-#     of the HF set p -- bounded by p itself via foundation HF5 --
-#     plus a designated-head clause picking out n. Sigma_1; not
-#     recursive because the HF foundation axiom bounds the search.
-#   * ``Prov_HF_internal`` is the existential closure, encoded with
-#     ``Not_f (Forall_f var_y_idx (Not_f ...))`` since HF's only native
-#     quantifier is ``Forall_f``.
+# The current list-based ``Proof_HF`` in ``hf_repr_core.py`` remains
+# useful as external scaffolding, but it is not the formula shape for
+# ``Prov_HF_internal``. Phase 0 in ``hf_sorry.md`` chooses between
+# bridging from that checker to ``Proof_HF_set`` or retiring it in favor
+# of the set-native checker.
 #
 # Forward direction (HOL ``Prov_HF n`` ==> HF proves the substituted
 # form): Sigma_1 completeness for HF. Extract a Proof_HF witness via

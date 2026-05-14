@@ -60,8 +60,8 @@
 # Design note -- why ``Prov_HF`` via impredicative intersection rather
 # than the textbook ``?p. Proof_HF(p, n)``:
 #
-# The ``godel_first.py`` blueprint specifies ``Prov_HF(n) :<=> ?p.
-# Proof_HF(p, n)`` where ``Proof_HF`` is the list-based proof checker.
+# The original ``hf_godel1.py`` blueprint specified
+# ``Prov_HF(n) :<=> ?p. Proof_HF(p, n)`` with a list-based proof checker.
 # In HOL the two definitions are provably equivalent (Knaster-Tarski:
 # the impredicative intersection is the least fixed point of the
 # closure operator, which agrees with the inductively generated set
@@ -78,10 +78,12 @@
 #       theorem) only consume the closure rules and ``PROV_HF_AT``; they
 #       never inspect an explicit proof witness.
 #
-# A list-based ``Proof_HF`` *is* needed in Stage 3 for representability
-# -- the diagonal lemma's ``Prov_HF_internal`` formula must internalise
-# explicit proofs into HF's own language. We build it there against
-# this ``Prov_HF``, not as a defining predicate.
+# Stage 3 originally planned to internalise a list-based ``Proof_HF``.
+# That is no longer the target: HF-internal provability should use
+# HF-native proof objects (ranked finite sets of proof-step records, or
+# another set/tree representation), not list theory encoded by ``cons_l``.
+# Any list-based checker in ``hf_repr_core`` is external scaffolding to
+# bridge or retire, not the formula shape for ``Prov_HF_internal``.
 
 # ---------------------------------------------------------------------------
 # Imports.
@@ -357,13 +359,12 @@ HF_AXIOMS = [
 #
 #   * Rewrite the *_internal predicates in hf_repr_core.py against the HF
 #     primitives:
-#       - mem_l_internal collapses to In_a (list-as-HF-set).
 #       - substitute_internal: Sigma_1 over an HF trace set of
 #         (input-shape, output-shape) pairs.
-#       - Proof_HF_internal: HF set of formulas + per-member
-#         valid_step_internal, bounded by Q12 / HF_IND.
+#       - Proof_HF_internal: ranked finite HF set of proof-step records
+#         with dependencies restricted to lower-ranked records.
 #
-#   * Discharge DIAG_REPRESENTS / DIAG_FUNCTIONAL in godel_first.py
+#   * Discharge DIAG_REPRESENTS / DIAG_FUNCTIONAL in hf_godel1.py
 #     by composing substitute_internal with the von Neumann numeral
 #     predicate, both Sigma_1 and HF-expressible.
 # ---------------------------------------------------------------------------
