@@ -123,6 +123,8 @@ from hf_sets import (
     IN_UNION,
     NOT_IN_EMPTY,
     PAIR_ORD_INJ,
+    NAT0_LT_PAIR_ORD_L,
+    NAT0_LT_PAIR_ORD_R,
 )
 from bits import (  # noqa: E402 -- canonical low-bit decomposition for quote_hf
     low_bit,
@@ -321,7 +323,7 @@ def _subst_at_numeral(F_term, n_term):
 # well-founded "earlier proof step" discipline of Hilbert proofs.
 #
 # The definitions here are external HOL predicates. The HF-formula bodies
-# for the corresponding internal predicates are still Phase 0 work in
+# for the corresponding internal predicates are the next bridge work in
 # ``hf_sorry.md``.
 # ---------------------------------------------------------------------------
 
@@ -2878,6 +2880,357 @@ def IN_UNION_RIGHT(p):
     p.thus("In x (Union a b)").by_eq_mp("h_eq", "hd")
 
 
+# ---------------------------------------------------------------------------
+# Phase 0 prototype for HF-native proof objects.
+#
+# These lemmas exercise the ranked-set proof-object design before any
+# ``Prov_HF_internal`` body is written. They deliberately avoid ``cons_l``
+# and list membership. DSL friction is noted inline where the proof needs
+# low-level shaping rather than a compact declarative step.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def VALID_STEP_HF_SET_PRESERVES(p):
+    """|- !P Q k h. (!x. In x P ==> In x Q)
+                     ==> valid_step_hf_set P k h
+                     ==> valid_step_hf_set Q k h."""
+    p.goal(
+        "!P Q k h. (!x. In x P ==> In x Q) "
+        "==> valid_step_hf_set P k h "
+        "==> valid_step_hf_set Q k h",
+        types={"P": nat0_ty, "Q": nat0_ty, "k": nat0_ty, "h": nat0_ty},
+    )
+    p.fix("P Q k h")
+    p.assume("sub: !x. In x P ==> In x Q")
+    p.assume("vP: valid_step_hf_set P k h")
+
+    atP = SPECL([p._parse("P"), p._parse("k"), p._parse("h")], VALID_STEP_HF_SET_AT)
+    atQ = SPECL([p._parse("Q"), p._parse("k"), p._parse("h")], VALID_STEP_HF_SET_AT)
+    bodyP = (
+        "is_axiom h "
+        "\\/ (?i f j g. In (Pair_ord i f) P /\\ In (Pair_ord j g) P "
+        "/\\ nat0_lt i k /\\ nat0_lt j k /\\ is_mp f g h) "
+        "\\/ (?i f. In (Pair_ord i f) P /\\ nat0_lt i k /\\ is_gen f h)"
+    )
+    bodyQ = (
+        "is_axiom h "
+        "\\/ (?i f j g. In (Pair_ord i f) Q /\\ In (Pair_ord j g) Q "
+        "/\\ nat0_lt i k /\\ nat0_lt j k /\\ is_mp f g h) "
+        "\\/ (?i f. In (Pair_ord i f) Q /\\ nat0_lt i k /\\ is_gen f h)"
+    )
+    p.have(f"bodyP: {bodyP}").by_eq_mp(atP, "vP")
+    with p.cases_on("bodyP"):
+        with p.case("ax: is_axiom h"):
+            p.have(f"bodyQ: {bodyQ}").by_disj("ax")
+            p.thus("valid_step_hf_set Q k h").by_eq_mp(SYM(atQ), "bodyQ")
+        with p.case(
+            "mpP: ?i f j g. In (Pair_ord i f) P /\\ In (Pair_ord j g) P "
+            "/\\ nat0_lt i k /\\ nat0_lt j k /\\ is_mp f g h"
+        ):
+            p.split("g_eq", "(in_i_P, in_j_P, lt_i, lt_j, mp)")
+            p.have("in_i_Q: In (Pair_ord i f) Q").by("sub", "Pair_ord i f", "in_i_P")
+            p.have("in_j_Q: In (Pair_ord j g) Q").by("sub", "Pair_ord j g", "in_j_P")
+            # DSL friction: by_exists wants each substituted conjunct as
+            # a separate rule; passing a prebuilt conjunction is rejected.
+            p.have(
+                "mpQ: ?i f j g. In (Pair_ord i f) Q /\\ In (Pair_ord j g) Q "
+                "/\\ nat0_lt i k /\\ nat0_lt j k /\\ is_mp f g h"
+            ).by_exists(["i", "f", "j", "g"], "in_i_Q", "in_j_Q", "lt_i", "lt_j", "mp")
+            p.have(f"bodyQ: {bodyQ}").by_disj("mpQ")
+            p.thus("valid_step_hf_set Q k h").by_eq_mp(SYM(atQ), "bodyQ")
+        with p.case("genP: ?i f. In (Pair_ord i f) P /\\ nat0_lt i k /\\ is_gen f h"):
+            p.split("f_eq", "(in_i_P, lt_i, gen)")
+            p.have("in_i_Q: In (Pair_ord i f) Q").by("sub", "Pair_ord i f", "in_i_P")
+            p.have("genQ: ?i f. In (Pair_ord i f) Q /\\ nat0_lt i k /\\ is_gen f h").by_exists(
+                ["i", "f"], "in_i_Q", "lt_i", "gen"
+            )
+            p.have(f"bodyQ: {bodyQ}").by_disj("genQ")
+            p.thus("valid_step_hf_set Q k h").by_eq_mp(SYM(atQ), "bodyQ")
+
+
+@proof
+def AXIOM_HAS_PROOF_HF_SET(p):
+    """|- !m. is_axiom m ==> ?P. Proof_HF_set P m."""
+    from tactics import EQT_ELIM
+
+    p.goal("!m. is_axiom m ==> ?P. Proof_HF_set P m")
+    p.fix("m")
+    p.assume("ax: is_axiom m")
+
+    P = "Insert (Pair_ord 0 m) Empty"
+    p.have(f"in_head_eq: In (Pair_ord 0 m) ({P}) = T").by_rewrite([IN_INSERT_SAME])
+    p.have(f"in_head: In (Pair_ord 0 m) ({P})").by_thm(EQT_ELIM(p.fact("in_head_eq")))
+
+    with p.have(
+        f"valid_all: !j h. In (Pair_ord j h) ({P}) ==> valid_step_hf_set ({P}) j h"
+    ).proof():
+        p.fix("j h")
+        p.assume(f"hin: In (Pair_ord j h) ({P})")
+        with p.cases_on(EXCLUDED_MIDDLE, "Pair_ord 0 m = Pair_ord j h"):
+            with p.case("heq: Pair_ord 0 m = Pair_ord j h"):
+                p.have("inj: 0 = j /\\ m = h").by(PAIR_ORD_INJ, "0", "m", "j", "h", "heq")
+                p.split("inj", "(_j_eq, m_eq_h)")
+                p.have("ax_h: is_axiom h").by_rewrite_of("ax", ["m_eq_h"])
+                atP = SPECL([p._parse(P), p._parse("j"), p._parse("h")], VALID_STEP_HF_SET_AT)
+                body = (
+                    f"is_axiom h \\/ (?i f j0 g. In (Pair_ord i f) ({P}) "
+                    f"/\\ In (Pair_ord j0 g) ({P}) /\\ nat0_lt i j "
+                    f"/\\ nat0_lt j0 j /\\ is_mp f g h) "
+                    f"\\/ (?i f. In (Pair_ord i f) ({P}) /\\ nat0_lt i j /\\ is_gen f h)"
+                )
+                p.have(f"vbody: {body}").by_disj("ax_h")
+                p.thus(f"valid_step_hf_set ({P}) j h").by_eq_mp(SYM(atP), "vbody")
+            with p.case("hne: ~(Pair_ord 0 m = Pair_ord j h)"):
+                p.have(f"hin_empty_eq: In (Pair_ord j h) ({P}) = In (Pair_ord j h) Empty").by(
+                    IN_INSERT_DIFF, "Pair_ord 0 m", "Pair_ord j h", "Empty", "hne"
+                )
+                p.have("hin_empty: In (Pair_ord j h) Empty").by_eq_mp("hin_empty_eq", "hin")
+                p.have("not_empty: ~In (Pair_ord j h) Empty").by(
+                    NOT_IN_EMPTY, "Pair_ord j h"
+                )
+                # DSL friction: there is no direct "ex falso" have-step
+                # for an arbitrary target. Build the F theorem explicitly
+                # and feed it through CONTR.
+                F_th = MP(NOT_ELIM(p.fact("not_empty")), p.fact("hin_empty"))
+                target = p._parse(f"valid_step_hf_set ({P}) j h")
+                p.thus(f"valid_step_hf_set ({P}) j h").by_thm(CONTR(target, F_th))
+
+    proof_at = SPECL([p._parse(P), p._parse("m")], PROOF_HF_SET_AT)
+    p.have(
+        f"body: ?k. In (Pair_ord k m) ({P}) "
+        f"/\\ (!j h. In (Pair_ord j h) ({P}) ==> valid_step_hf_set ({P}) j h)"
+    ).by_exists(["0"], "in_head", "valid_all")
+    p.have(f"proof_set: Proof_HF_set ({P}) m").by_eq_mp(SYM(proof_at), "body")
+    p.thus("?P. Proof_HF_set P m").by_witness(P, "proof_set")
+
+
+@proof
+def MP_HAS_PROOF_HF_SET(p):
+    """|- !f g. (?P. Proof_HF_set P f)
+              /\\ (?Q. Proof_HF_set Q (Imp_f f g))
+              ==> ?R. Proof_HF_set R g."""
+    from tactics import EQT_ELIM
+
+    p.goal(
+        "!f g. (?P. Proof_HF_set P f) /\\ (?Q. Proof_HF_set Q (Imp_f f g)) "
+        "==> ?R. Proof_HF_set R g"
+    )
+    p.fix("f g")
+    p.assume("(pf_ex, pfg_ex): (?P. Proof_HF_set P f) /\\ (?Q. Proof_HF_set Q (Imp_f f g))")
+    p.choose("P", "pf_ex", eq_label="pf")
+    p.choose("Q", "pfg_ex", eq_label="pfg")
+
+    atP = SPECL([p._parse("P"), p._parse("f")], PROOF_HF_SET_AT)
+    atQ = SPECL([p._parse("Q"), p._parse("Imp_f f g")], PROOF_HF_SET_AT)
+    p.have(
+        "bodyP: ?k. In (Pair_ord k f) P "
+        "/\\ (!j h. In (Pair_ord j h) P ==> valid_step_hf_set P j h)"
+    ).by_eq_mp(atP, "pf")
+    p.have(
+        "bodyQ: ?k. In (Pair_ord k (Imp_f f g)) Q "
+        "/\\ (!j h. In (Pair_ord j h) Q ==> valid_step_hf_set Q j h)"
+    ).by_eq_mp(atQ, "pfg")
+    p.choose("kf", "bodyP", eq_label="pf_body")
+    p.split("pf_body", "(in_f_P, validP)")
+    p.choose("kg", "bodyQ", eq_label="pfg_body")
+    p.split("pfg_body", "(in_imp_Q, validQ)")
+
+    R = "Insert (Pair_ord (Pair_ord kf kg) g) (Union P Q)"
+    kR = "Pair_ord kf kg"
+
+    with p.have(f"subP: !x. In x P ==> In x ({R})").proof():
+        p.fix("x")
+        p.assume("hx: In x P")
+        p.have("h_union: In x (Union P Q)").by(IN_UNION_LEFT, "P", "Q", "x", "hx")
+        p.thus(f"In x ({R})").by(IN_INSERT_GROW, f"Pair_ord ({kR}) g", "Union P Q", "x", "h_union")
+
+    with p.have(f"subQ: !x. In x Q ==> In x ({R})").proof():
+        p.fix("x")
+        p.assume("hx: In x Q")
+        p.have("h_union: In x (Union P Q)").by(IN_UNION_RIGHT, "P", "Q", "x", "hx")
+        p.thus(f"In x ({R})").by(IN_INSERT_GROW, f"Pair_ord ({kR}) g", "Union P Q", "x", "h_union")
+
+    p.have(f"in_f_R: In (Pair_ord kf f) ({R})").by("subP", "Pair_ord kf f", "in_f_P")
+    p.have(f"in_imp_R: In (Pair_ord kg (Imp_f f g)) ({R})").by(
+        "subQ", "Pair_ord kg (Imp_f f g)", "in_imp_Q"
+    )
+    p.have(f"in_g_R_eq: In (Pair_ord ({kR}) g) ({R}) = T").by_rewrite([IN_INSERT_SAME])
+    p.have(f"in_g_R: In (Pair_ord ({kR}) g) ({R})").by_thm(EQT_ELIM(p.fact("in_g_R_eq")))
+
+    with p.have(
+        f"valid_all: !j h. In (Pair_ord j h) ({R}) ==> valid_step_hf_set ({R}) j h"
+    ).proof():
+        p.fix("j h")
+        p.assume(f"hin: In (Pair_ord j h) ({R})")
+        with p.cases_on(EXCLUDED_MIDDLE, f"Pair_ord ({kR}) g = Pair_ord j h"):
+            with p.case(f"heq: Pair_ord ({kR}) g = Pair_ord j h"):
+                p.have(f"inj: ({kR}) = j /\\ g = h").by(
+                    PAIR_ORD_INJ, kR, "g", "j", "h", "heq"
+                )
+                p.split("inj", "(rank_eq, g_eq_h)")
+                p.have(f"lt_f_rank: nat0_lt kf ({kR})").by(NAT0_LT_PAIR_ORD_L, "kf", "kg")
+                p.have(f"lt_imp_rank: nat0_lt kg ({kR})").by(NAT0_LT_PAIR_ORD_R, "kf", "kg")
+                p.have("lt_f_j: nat0_lt kf j").by_rewrite_of("lt_f_rank", ["rank_eq"])
+                p.have("lt_imp_j: nat0_lt kg j").by_rewrite_of("lt_imp_rank", ["rank_eq"])
+                is_mp_at = SPECL(
+                    [p._parse("f"), p._parse("Imp_f f g"), p._parse("g")],
+                    IS_MP_AT,
+                )
+                p.have("mp_g: is_mp f (Imp_f f g) g").by_eq_mp(
+                    SYM(is_mp_at), REFL(p._parse("Imp_f f g"))
+                )
+                p.have("mp_h: is_mp f (Imp_f f g) h").by_rewrite_of("mp_g", ["g_eq_h"])
+                p.have(
+                    f"mp_ex: ?i f0 j0 g0. In (Pair_ord i f0) ({R}) "
+                    f"/\\ In (Pair_ord j0 g0) ({R}) /\\ nat0_lt i j "
+                    f"/\\ nat0_lt j0 j /\\ is_mp f0 g0 h"
+                ).by_exists(
+                    ["kf", "f", "kg", "Imp_f f g"],
+                    "in_f_R",
+                    "in_imp_R",
+                    "lt_f_j",
+                    "lt_imp_j",
+                    "mp_h",
+                )
+                atR = SPECL([p._parse(R), p._parse("j"), p._parse("h")], VALID_STEP_HF_SET_AT)
+                body = (
+                    f"is_axiom h \\/ (?i f0 j0 g0. In (Pair_ord i f0) ({R}) "
+                    f"/\\ In (Pair_ord j0 g0) ({R}) /\\ nat0_lt i j "
+                    f"/\\ nat0_lt j0 j /\\ is_mp f0 g0 h) "
+                    f"\\/ (?i f0. In (Pair_ord i f0) ({R}) /\\ nat0_lt i j /\\ is_gen f0 h)"
+                )
+                p.have(f"vbody: {body}").by_disj("mp_ex")
+                p.thus(f"valid_step_hf_set ({R}) j h").by_eq_mp(SYM(atR), "vbody")
+            with p.case(f"hne: ~(Pair_ord ({kR}) g = Pair_ord j h)"):
+                p.have(f"hin_union_eq: In (Pair_ord j h) ({R}) = In (Pair_ord j h) (Union P Q)").by(
+                    IN_INSERT_DIFF, f"Pair_ord ({kR}) g", "Pair_ord j h", "Union P Q", "hne"
+                )
+                p.have("hin_union: In (Pair_ord j h) (Union P Q)").by_eq_mp(
+                    "hin_union_eq", "hin"
+                )
+                p.have(
+                    "hin_disj: In (Pair_ord j h) P \\/ In (Pair_ord j h) Q"
+                ).by_eq_mp(
+                    SYM(SPECL([p._parse("Pair_ord j h"), p._parse("P"), p._parse("Q")], IN_UNION)),
+                    "hin_union",
+                )
+                with p.cases_on("hin_disj"):
+                    with p.case("hinP: In (Pair_ord j h) P"):
+                        p.have("vP: valid_step_hf_set P j h").by("validP", "j", "h", "hinP")
+                        p.thus(f"valid_step_hf_set ({R}) j h").by(
+                            VALID_STEP_HF_SET_PRESERVES, "P", R, "j", "h", "subP", "vP"
+                        )
+                    with p.case("hinQ: In (Pair_ord j h) Q"):
+                        p.have("vQ: valid_step_hf_set Q j h").by("validQ", "j", "h", "hinQ")
+                        p.thus(f"valid_step_hf_set ({R}) j h").by(
+                            VALID_STEP_HF_SET_PRESERVES, "Q", R, "j", "h", "subQ", "vQ"
+                        )
+
+    proof_at = SPECL([p._parse(R), p._parse("g")], PROOF_HF_SET_AT)
+    p.have(
+        f"body: ?k. In (Pair_ord k g) ({R}) "
+        f"/\\ (!j h. In (Pair_ord j h) ({R}) ==> valid_step_hf_set ({R}) j h)"
+    ).by_exists([kR], "in_g_R", "valid_all")
+    p.have(f"proof_R: Proof_HF_set ({R}) g").by_eq_mp(SYM(proof_at), "body")
+    p.thus("?R. Proof_HF_set R g").by_witness(R, "proof_R")
+
+
+@proof
+def GEN_HAS_PROOF_HF_SET(p):
+    """|- !f x. (?P. Proof_HF_set P f)
+              ==> ?R. Proof_HF_set R (Forall_f x f)."""
+    from tactics import EQT_ELIM
+
+    p.goal("!f x. (?P. Proof_HF_set P f) ==> ?R. Proof_HF_set R (Forall_f x f)")
+    p.fix("f x")
+    p.assume("pf_ex: ?P. Proof_HF_set P f")
+    p.choose("P", "pf_ex", eq_label="pf")
+
+    atP = SPECL([p._parse("P"), p._parse("f")], PROOF_HF_SET_AT)
+    p.have(
+        "bodyP: ?k. In (Pair_ord k f) P "
+        "/\\ (!j h. In (Pair_ord j h) P ==> valid_step_hf_set P j h)"
+    ).by_eq_mp(atP, "pf")
+    p.choose("kf", "bodyP", eq_label="pf_body")
+    p.split("pf_body", "(in_f_P, validP)")
+
+    R = "Insert (Pair_ord (Pair_ord kf 0) (Forall_f x f)) P"
+    kR = "Pair_ord kf 0"
+
+    with p.have(f"subP: !z. In z P ==> In z ({R})").proof():
+        p.fix("z")
+        p.assume("hz: In z P")
+        p.thus(f"In z ({R})").by(
+            IN_INSERT_GROW, f"Pair_ord ({kR}) (Forall_f x f)", "P", "z", "hz"
+        )
+
+    p.have(f"in_f_R: In (Pair_ord kf f) ({R})").by("subP", "Pair_ord kf f", "in_f_P")
+    p.have(f"in_gen_R_eq: In (Pair_ord ({kR}) (Forall_f x f)) ({R}) = T").by_rewrite(
+        [IN_INSERT_SAME]
+    )
+    # DSL friction: rewriting set membership gives an equation to T;
+    # convert it to the boolean fact before using it as a conjunct.
+    p.have(f"in_gen_R: In (Pair_ord ({kR}) (Forall_f x f)) ({R})").by_thm(
+        EQT_ELIM(p.fact("in_gen_R_eq"))
+    )
+
+    is_gen_at = SPECL([p._parse("f"), p._parse("Forall_f x f")], IS_GEN_AT)
+    p.have("gen_witness: ?y. Forall_f x f = Forall_f y f").by_witness(
+        "x", REFL(p._parse("Forall_f x f"))
+    )
+    p.have("gen_fx: is_gen f (Forall_f x f)").by_eq_mp(SYM(is_gen_at), "gen_witness")
+
+    with p.have(
+        f"valid_all: !j h. In (Pair_ord j h) ({R}) ==> valid_step_hf_set ({R}) j h"
+    ).proof():
+        p.fix("j h")
+        p.assume(f"hin: In (Pair_ord j h) ({R})")
+        with p.cases_on(EXCLUDED_MIDDLE, f"Pair_ord ({kR}) (Forall_f x f) = Pair_ord j h"):
+            with p.case(f"heq: Pair_ord ({kR}) (Forall_f x f) = Pair_ord j h"):
+                p.have(f"inj: ({kR}) = j /\\ Forall_f x f = h").by(
+                    PAIR_ORD_INJ, kR, "Forall_f x f", "j", "h", "heq"
+                )
+                p.split("inj", "(rank_eq, forall_eq_h)")
+                p.have(f"lt_f_rank: nat0_lt kf ({kR})").by(NAT0_LT_PAIR_ORD_L, "kf", "0")
+                p.have("lt_f_j: nat0_lt kf j").by_rewrite_of("lt_f_rank", ["rank_eq"])
+                p.have("gen_h: is_gen f h").by_rewrite_of("gen_fx", ["forall_eq_h"])
+                p.have(
+                    f"gen_ex: ?i f0. In (Pair_ord i f0) ({R}) "
+                    f"/\\ nat0_lt i j /\\ is_gen f0 h"
+                ).by_exists(["kf", "f"], "in_f_R", "lt_f_j", "gen_h")
+                atR = SPECL([p._parse(R), p._parse("j"), p._parse("h")], VALID_STEP_HF_SET_AT)
+                body = (
+                    f"is_axiom h \\/ (?i f0 j0 g0. In (Pair_ord i f0) ({R}) "
+                    f"/\\ In (Pair_ord j0 g0) ({R}) /\\ nat0_lt i j "
+                    f"/\\ nat0_lt j0 j /\\ is_mp f0 g0 h) "
+                    f"\\/ (?i f0. In (Pair_ord i f0) ({R}) /\\ nat0_lt i j /\\ is_gen f0 h)"
+                )
+                p.have(f"vbody: {body}").by_disj("gen_ex")
+                p.thus(f"valid_step_hf_set ({R}) j h").by_eq_mp(SYM(atR), "vbody")
+            with p.case(f"hne: ~(Pair_ord ({kR}) (Forall_f x f) = Pair_ord j h)"):
+                p.have(f"hin_P_eq: In (Pair_ord j h) ({R}) = In (Pair_ord j h) P").by(
+                    IN_INSERT_DIFF,
+                    f"Pair_ord ({kR}) (Forall_f x f)",
+                    "Pair_ord j h",
+                    "P",
+                    "hne",
+                )
+                p.have("hinP: In (Pair_ord j h) P").by_eq_mp("hin_P_eq", "hin")
+                p.have("vP: valid_step_hf_set P j h").by("validP", "j", "h", "hinP")
+                p.thus(f"valid_step_hf_set ({R}) j h").by(
+                    VALID_STEP_HF_SET_PRESERVES, "P", R, "j", "h", "subP", "vP"
+                )
+
+    proof_at = SPECL([p._parse(R), p._parse("Forall_f x f")], PROOF_HF_SET_AT)
+    p.have(
+        f"body: ?k. In (Pair_ord k (Forall_f x f)) ({R}) "
+        f"/\\ (!j h. In (Pair_ord j h) ({R}) ==> valid_step_hf_set ({R}) j h)"
+    ).by_exists([kR], "in_gen_R", "valid_all")
+    p.have(f"proof_R: Proof_HF_set ({R}) (Forall_f x f)").by_eq_mp(SYM(proof_at), "body")
+    p.thus("?R. Proof_HF_set R (Forall_f x f)").by_witness(R, "proof_R")
+
+
 @proof
 def TRACE_EXTEND_BIN(p):
     """Generic trace extension.
@@ -4924,6 +5277,16 @@ if __name__ == "__main__":
     print("    IS_TERM_EMPTY    :", pp_thm(IS_TERM_EMPTY))
     print("    IS_TERM_INSERT   :", pp_thm(IS_TERM_INSERT))
     print("    IS_TERM_NUMERAL  :", pp_thm(IS_TERM_NUMERAL))
+    print()
+    print("Stage 3B (set-native target) -- ranked HF-set proof objects.")
+    print("    VALID_STEP_HF_SET_DEF       :", pp_thm(VALID_STEP_HF_SET_DEF))
+    print("    VALID_STEP_HF_SET_AT        :", pp_thm(VALID_STEP_HF_SET_AT))
+    print("    PROOF_HF_SET_DEF            :", pp_thm(PROOF_HF_SET_DEF))
+    print("    PROOF_HF_SET_AT             :", pp_thm(PROOF_HF_SET_AT))
+    print("    VALID_STEP_HF_SET_PRESERVES :", pp_thm(VALID_STEP_HF_SET_PRESERVES))
+    print("    AXIOM_HAS_PROOF_HF_SET      :", pp_thm(AXIOM_HAS_PROOF_HF_SET))
+    print("    MP_HAS_PROOF_HF_SET         :", pp_thm(MP_HAS_PROOF_HF_SET))
+    print("    GEN_HAS_PROOF_HF_SET        :", pp_thm(GEN_HAS_PROOF_HF_SET))
     print()
     print("Stage 3B (a) -- list membership ``mem_l``.")
     print("    MEM_L_DEF       :", pp_thm(MEM_L_DEF))

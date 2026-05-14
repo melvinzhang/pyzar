@@ -64,7 +64,8 @@ Prov_HF_internal(x) := ?P. Proof_HF_set_internal(P, x)
 where `P` is an HF-native proof object. Do **not** internalise
 `cons_l`, `mem_l`, `append_l`, or list recursion.
 
-The exact shape still has to be pinned. Two viable HF-native designs:
+The Phase 0 prototype has pinned the shape to ranked proof-step sets.
+For reference, the viable HF-native designs were:
 
 1. **Ranked proof-step set.**
    `P` is a finite HF set of records `(rank, formula)`. A step at rank
@@ -84,7 +85,7 @@ itself if the whole set is available at every step. The proof object
 must carry a well-founded dependency relation, either explicit ranks or
 tree structure.
 
-Recommended choice: **ranked proof-step set**. It is closest to the
+Chosen design: **ranked proof-step set**. It is closest to the
 current Hilbert proof-sequence semantics while keeping the internal HF
 formula set-native.
 
@@ -93,14 +94,22 @@ Exit criterion for Phase 0:
 * Define the external HOL predicate, e.g. `Proof_HF_set P n`. **Done:**
   `hf_repr_core.py` now has `valid_step_hf_set` and `Proof_HF_set`
   as the ranked-set target predicates.
-* Prove the axiom-only witness: `is_axiom n ==> ?P. Proof_HF_set P n`.
-* Prove at least one closure prototype, preferably MP:
+* Prove the axiom-only witness: **Done:**
+  `AXIOM_HAS_PROOF_HF_SET` proves
+  `is_axiom n ==> ?P. Proof_HF_set P n`.
+* Prove at least one closure prototype, preferably MP: **Done:**
+  `MP_HAS_PROOF_HF_SET` proves
   `(?P. Proof_HF_set P f) /\ (?Q. Proof_HF_set Q (Imp_f f g))
    ==> ?R. Proof_HF_set R g`.
-* Only after those prototypes work, redirect `Prov_HF` or prove
+* Prove the Gen closure prototype: **Done:**
+  `GEN_HAS_PROOF_HF_SET` proves
+  `(?P. Proof_HF_set P f) ==> ?R. Proof_HF_set R (Forall_f x f)`.
+* Remaining bridge work: redirect `Prov_HF` or prove
   `Prov_HF n = (?P. Proof_HF_set P n)`.
 
-Until this is done, G is the highest-risk item in the whole HF G1 plan.
+Phase 0 has now settled the largest representation risk. G remains the
+deepest theorem, but the proof-object shape is no longer the main
+unknown.
 
 ### Phase 1 — canonical-form quote_hf inequality (close `QUOTE_HF_PROV_NEQ`)
 
@@ -218,12 +227,15 @@ definitions.
   This unblocks the outer logical scaffolding of the
   `is_*_internal` bodies.
 
-* **HF-set proof predicate skeleton (done)** — `valid_step_hf_set` and
+* **HF-set proof predicate prototype (done)** — `valid_step_hf_set` and
   `Proof_HF_set` now live in `hf_repr_core.py`. They use ranked proof
   records `Pair_ord k h` and only allow MP/Gen citations from lower
   ranks, avoiding the cyclicity problem of unordered closed formula
-  sets. Next Phase 0 work is proving the axiom-only witness and one
-  closure prototype, then bridging `Prov_HF` to `?P. Proof_HF_set P n`.
+  sets. The Phase 0 prototype also proves
+  `VALID_STEP_HF_SET_PRESERVES`, `AXIOM_HAS_PROOF_HF_SET`, and
+  the two closure prototypes `MP_HAS_PROOF_HF_SET` and
+  `GEN_HAS_PROOF_HF_SET`. Next work is the bridge from `Prov_HF` to
+  `?P. Proof_HF_set P n`.
 
 * **Prerequisite for D — Python builders for godelnum shapes.**
   The body of `is_substitute_step_internal` needs to express
