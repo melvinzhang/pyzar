@@ -3462,7 +3462,7 @@ IS_IN_INTERNAL_DEF = define(
 is_In_internal = mk_const("is_In_internal", [])
 
 
-# IS_IN_REPRESENTS, IS_SUBSTITUTE_STEP_REPRESENTS,
+# QUOTE_HF_MEM_DECISION, IS_SUBSTITUTE_STEP_REPRESENTS,
 # IS_SUBSTITUTE_TRACE_REPRESENTS, SUBSTITUTE_REPRESENTS,
 # PROV_HF_REPRESENTS, IS_FORM_PROV_HF_INTERNAL, FREE_IN_PROV_HF_INTERNAL
 # all live in ``hf_repr_thms.py`` (the high layer). Their proofs need
@@ -3477,7 +3477,7 @@ is_In_internal = mk_const("is_In_internal", [])
 # B1.1 -- HF-encoding of is_substitute_step.
 # 9-disjunct HF-formula matching the HOL ``is_substitute_step``. Free
 # vars: var_T (trace), var_y (t), var_z (v), var_a (a), var_b (b).
-# Composes IS_PAIR_ORD_REPRESENTS + IS_IN_REPRESENTS for the In-checks
+# Composes IS_PAIR_ORD_REPRESENTS + QUOTE_HF_MEM_DECISION for the In-checks
 # inside each recursive disjunct.
 new_constant("is_substitute_step_internal", nat0_ty)
 is_substitute_step_internal = mk_const("is_substitute_step_internal", [])
@@ -3645,7 +3645,7 @@ if __name__ == "__main__":
     print("    IS_PAIR_ORD_REPRESENTS                :", pp_thm(IS_PAIR_ORD_REPRESENTS))
     print()
     print(
-        "    (Stage 3 high-layer reps -- IS_IN_REPRESENTS,",
+        "    (Stage 3 high-layer reps -- QUOTE_HF_MEM_DECISION,",
         "IS_SUBSTITUTE_*_REPRESENTS,",
     )
     print("     PROV_HF_REPRESENTS, IS_FORM_PROV_HF_INTERNAL,")
