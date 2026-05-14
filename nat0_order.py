@@ -52,10 +52,11 @@ from tactics import (
     CHOOSE_WITNESS,
     UNFOLD,
     REWRITE_RULE,
+    CONTR,
 )
 from classical import NOT_NOT_ELIM
 from num import num_ty
-from nat import LT_DEF, SATZ_27
+from nat import LT_DEF, SATZ_10, SATZ_11, SATZ_27
 from nat0 import nat0_ty, abs_nat0, rep_nat0, REP_ABS, ABS_REP_NAT0
 from parser import define, parse_type
 from proof import proof, StrongInductionStrategy, register_strong_induction
@@ -694,6 +695,80 @@ def NAT0_LT_SUC0_INV(p):
             )
 
 
+# NAT0_LT_TRICHOTOMY :
+#   |- !a b. a = b \/ nat0_lt a b \/ nat0_lt b a.
+#
+# Transport num trichotomy (SATZ_10) across the nat0 representation
+# isomorphism.  The middle/right branches are just LT_NAT0 folding; the
+# equality branch applies abs_nat0 to both represented sides and peels
+# abs_nat0 (rep_nat0 _) by ABS_REP_NAT0.
+@proof
+def NAT0_LT_TRICHOTOMY(p):
+    p.goal(
+        "!a b. a = b \\/ nat0_lt a b \\/ nat0_lt b a",
+        types={"a": nat0_ty, "b": nat0_ty},
+    )
+    p.fix("a b")
+    p.have(
+        "h_tri: rep_nat0 a = rep_nat0 b "
+        "\\/ rep_nat0 a > rep_nat0 b "
+        "\\/ rep_nat0 a < rep_nat0 b"
+    ).by(SATZ_10, "rep_nat0 a", "rep_nat0 b")
+    with p.cases_on("h_tri"):
+        with p.case("h_rep_eq: rep_nat0 a = rep_nat0 b"):
+            a_var = Var("a", nat0_ty)
+            abs_a = INST([(p._parse("a"), a_var)], ABS_REP_NAT0)
+            abs_b = INST([(p._parse("b"), a_var)], ABS_REP_NAT0)
+            h_abs = AP_TERM(abs_nat0, p.fact("h_rep_eq"))
+            p.have("h_abs_eq: abs_nat0 (rep_nat0 a) = abs_nat0 (rep_nat0 b)").by_thm(
+                h_abs
+            )
+            with p.calc("h_ab: a") as c:
+                c.step("= abs_nat0 (rep_nat0 a)").by_thm(SYM(abs_a))
+                c.step("= abs_nat0 (rep_nat0 b)").by_thm(p.fact("h_abs_eq"))
+                c.step("= b").by_thm(abs_b)
+            p.thus("a = b \\/ nat0_lt a b \\/ nat0_lt b a").by_disj("h_ab")
+        with p.case("h_rep_gt: rep_nat0 a > rep_nat0 b"):
+            p.have("h_rep_lt_ba: rep_nat0 b < rep_nat0 a").by(
+                SATZ_11, "rep_nat0 a", "rep_nat0 b", "h_rep_gt"
+            )
+            p.have("h_ba: nat0_lt b a").by_eq_mp(
+                SYM(SPECL([p._parse("b"), p._parse("a")], LT_NAT0)),
+                "h_rep_lt_ba",
+            )
+            p.thus("a = b \\/ nat0_lt a b \\/ nat0_lt b a").by_disj("h_ba")
+        with p.case("h_rep_lt: rep_nat0 a < rep_nat0 b"):
+            p.have("h_ab: nat0_lt a b").by_eq_mp(
+                SYM(SPECL([p._parse("a"), p._parse("b")], LT_NAT0)),
+                "h_rep_lt",
+            )
+            p.thus("a = b \\/ nat0_lt a b \\/ nat0_lt b a").by_disj("h_ab")
+
+
+@proof
+def NAT0_LT_TOTAL_NEQ(p):
+    """|- !a b. ~(a = b) ==> nat0_lt a b \\/ nat0_lt b a."""
+    p.goal(
+        "!a b. ~(a = b) ==> nat0_lt a b \\/ nat0_lt b a",
+        types={"a": nat0_ty, "b": nat0_ty},
+    )
+    p.fix("a b")
+    p.assume("h_ne: ~(a = b)")
+    p.have("h_tri: a = b \\/ nat0_lt a b \\/ nat0_lt b a").by(
+        NAT0_LT_TRICHOTOMY, "a", "b"
+    )
+    with p.cases_on("h_tri"):
+        with p.case("h_eq: a = b"):
+            contra = MP(NOT_ELIM(p.fact("h_ne")), p.fact("h_eq"))
+            p.thus("nat0_lt a b \\/ nat0_lt b a").by_thm(
+                CONTR(p._parse("nat0_lt a b \\/ nat0_lt b a"), contra)
+            )
+        with p.case("h_ab: nat0_lt a b"):
+            p.thus("nat0_lt a b \\/ nat0_lt b a").by_disj("h_ab")
+        with p.case("h_ba: nat0_lt b a"):
+            p.thus("nat0_lt a b \\/ nat0_lt b a").by_disj("h_ba")
+
+
 # ---------------------------------------------------------------------------
 # Step 5.  NUM_RECURSION_LT -- polymorphic well-founded-recursion existence.
 #
@@ -1200,5 +1275,7 @@ if __name__ == "__main__":
     print("  NAT0_NEQ_ZERO_PRED :", pp_thm(NAT0_NEQ_ZERO_PRED))
     print("  NAT0_LT_SUC0_CASES :", pp_thm(NAT0_LT_SUC0_CASES))
     print("  NAT0_LT_SUC0_INV   :", pp_thm(NAT0_LT_SUC0_INV))
+    print("  NAT0_LT_TRICHOTOMY :", pp_thm(NAT0_LT_TRICHOTOMY))
+    print("  NAT0_LT_TOTAL_NEQ  :", pp_thm(NAT0_LT_TOTAL_NEQ))
     print("Step 5 OK -- NUM_RECURSION_LT (well-founded recursion existence).")
     print("  NUM_RECURSION_LT   :", pp_thm(NUM_RECURSION_LT))

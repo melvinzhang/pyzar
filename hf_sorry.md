@@ -136,7 +136,12 @@ A/B/C path.
      implies `Prov_HF (Not_f (Eq_f s t))`.
    - Next implementation step: replace the current
      `QUOTE_HF_PROV_NEQ`/`IS_IN_REPRESENTS` cycle with one strengthened
-     induction. For the equality projection, use HOL `IN_EXT` plus
+     induction indexed by a pair/measure, not a single `HF_INDUCTION`
+     over the right-hand set. A single-set induction is insufficient:
+     the `IS_IN_REPRESENTS` step for `Insert i s` needs
+     `Prov_HF (Not_f (Eq_f (quote_hf i) (quote_hf x)))` for an
+     arbitrary query element `x`, and `x` is not necessarily below
+     `s`. For the equality projection, use HOL `IN_EXT` plus
      `NOT_FORALL_TO_EX_NOT` to choose a discriminating element, then
      dispatch via the two membership-decision projections and
      `PROV_HF_NEQ_FROM_MEM_DIFF`.
@@ -331,7 +336,8 @@ definitions.
   unfolded `Var_t 0` / `Var_t (SUC0 0)` / `Var_t (SUC0 (SUC0 0))`
   normal forms.
 * **B/C**: bypass as independent lemmas. Build the strengthened
-  induction and then delete these two proof obligations or reduce them
-  to projections of the strengthened theorem. The induction must not
-  call the existing `IS_IN_REPRESENTS`, because that loops back through
-  `QUOTE_HF_PROV_NEQ`.
+  pair-indexed induction and then delete these two proof obligations or
+  reduce them to projections of the strengthened theorem. The induction
+  must not call the existing `IS_IN_REPRESENTS`, because that loops
+  back through `QUOTE_HF_PROV_NEQ`. A one-variable HF-set induction is
+  too weak for the `x != i` branch of membership decision.
