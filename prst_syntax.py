@@ -342,7 +342,7 @@ def _mono_iff_app_pt_step(pred_const, size_lemma_r, hyp_th):
         ASSUME, CHOOSE_WITNESS, CONJUNCT1, CONJUNCT2, CONJ, EQ_MP, EXISTS,
         REWRITE_RULE, SPEC, SYM, MP, DEDUCT_ANTISYM_RULE,
     )
-    from hf_syntax import _extract_nfg
+    from data_type import _extract_nfg
     from basics import mk_eq, rand, rator
     from axioms import mk_and, mk_exists, dest_exists
 
@@ -797,7 +797,7 @@ def IS_PARTIAL_PR_SYM_MONO(p):
     a := 6).
     """
     from tactics import REFL, or_chain_collapse, SPEC
-    from hf_syntax import mono_iff_unary_step
+    from data_type import mono_iff_unary_step
 
     p.goal(
         "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> "
@@ -908,7 +908,7 @@ def IS_PTERM_MONO(p):
               ==> _is_pterm_F f n = _is_pterm_F g n.
     """
     from tactics import REFL, or_chain_collapse
-    from hf_syntax import mono_iff_binary_step
+    from data_type import mono_iff_binary_step
 
     p.goal(
         "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> "
@@ -1097,7 +1097,7 @@ def VAR_PT_NEQ_APP_PT(p):
 # carry the name and var_names list (the other tuple slots are unused
 # by derive_rec_eq's hot path so we pad with ``None``).
 # ---------------------------------------------------------------------------
-from hf_syntax import CtorRegistry as _CtorRegistry
+from data_type import CtorRegistry as _CtorRegistry
 
 _PRST_CTORS = {
     "Var_pt": ("Var_pt", None, None, ["v"], None),
@@ -1135,7 +1135,7 @@ PRST_REGISTRY = _CtorRegistry(
 
 
 # AT-equations: now derive_rec_eq with PRST_REGISTRY handles each one.
-from hf_syntax import derive_rec_eq as _derive_rec_eq
+from data_type import derive_rec_eq as _derive_rec_eq
 
 
 # Empty_pt's AT is the trivial T-shape; derive_rec_eq doesn't ship a
@@ -1445,7 +1445,7 @@ def IS_PFORM_MONO(p):
               ==> _is_pform_F f n = _is_pform_F g n.
     """
     from tactics import REFL, or_chain_collapse
-    from hf_syntax import mono_iff_unary_step, mono_iff_binary_step
+    from data_type import mono_iff_unary_step, mono_iff_binary_step
 
     p.goal(
         "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> "
@@ -1541,7 +1541,7 @@ def FREE_IN_P_MONO(p):
               ==> _free_in_p_F f n = _free_in_p_F g n.
     """
     from tactics import REFL, or_chain_collapse, ABS
-    from hf_syntax import (
+    from data_type import (
         mono_iff_unary_pw_step,
         mono_iff_binary_disj_pw_step,
         _mono_iff_binary_pw_step,
@@ -1618,7 +1618,7 @@ FREE_IN_P_REC = _unfold_prst_rec(_FREE_IN_P_REC_RAW, _FREE_IN_P_F_DEF)
 # (matching the body's orientation). DSL friction: the stub previously
 # asserted ``u = v`` but that's just SYM of the natural derivation, so
 # the natural form is exposed instead.
-from hf_syntax import derive_rec_eq_pw as _derive_rec_eq_pw
+from data_type import derive_rec_eq_pw as _derive_rec_eq_pw
 
 
 FREE_IN_P_AT_VAR = _derive_rec_eq_pw(
@@ -1699,7 +1699,7 @@ def SUBSTITUTE_P_MONO(p):
               ==> _substitute_p_F f n = _substitute_p_F g n.
     """
     from tactics import REFL, or_chain_collapse, ABS, AP_TERM
-    from hf_syntax import (
+    from data_type import (
         mono_iff_value_unary_pw_step,
         mono_iff_value_binary_pw_step,
         _mono_iff_value_binary_pw_step,
@@ -1825,7 +1825,7 @@ SUBSTITUTE_P_REC = _unfold_prst_rec(_SUBSTITUTE_P_REC_RAW, _SUBSTITUTE_P_F_DEF)
 # under SYM_EQ but not syntactically the same as the natural
 # derivation. We expose the natural form here since no external
 # consumer of these names exists yet.
-from hf_syntax import (  # noqa: E402
+from data_type import (  # noqa: E402
     derive_rec_eq_select as _derive_rec_eq_select,
     derive_rec_eq_select_cond as _derive_rec_eq_select_cond,
 )
@@ -1985,7 +1985,6 @@ def SUBSTITUTE_P_PRESERVES_IS_PTERM(p):
                 "c_app: ?fn args. s = App_pt fn args "
                 "/\\ is_partial_pr_sym fn /\\ is_pterm args"
             ):
-                p.choose("args", "fn_eq")
                 p.split("args_eq", "(s_eq, h_pr, h_args)")
                 p.have("lt_args: nat0_lt args s").by_rewrite_of(
                     SPECL(

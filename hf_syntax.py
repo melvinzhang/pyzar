@@ -67,6 +67,8 @@ own Goedel number, so no separate godelnum-of-tree wrapper is needed.
 # Imports.
 # ---------------------------------------------------------------------------
 
+from collections import namedtuple
+
 from fusion import Var, ASSUME, DEDUCT_ANTISYM_RULE, REFL, vsubst, INST_TYPE
 from basics import mk_const, mk_app, mk_eq, mk_abs, dest_eq, is_eq, rator, rand
 from parser import define, parse_type
@@ -79,7 +81,6 @@ from axioms import (
     mk_select,
     dest_conj,
     dest_forall,
-    dest_imp,
     dest_exists,
     dest_disj,
     SELECT_AX,
@@ -97,6 +98,19 @@ from hf_sets import (  # noqa: F401  -- parser aliases for Pair_ord
 from nat0 import AXIOM_3_0, AXIOM_4_0
 from nat0_order import NAT0_LT_TRANS, define_wf_lt
 from proof import proof, define_with_at
+from data_type import (
+    _extract_nfg,  # noqa: F401  -- compatibility re-export
+    mono_iff_unary_step,
+    mono_iff_binary_step,
+    mono_iff_binary_right_step,
+    mono_iff_unary_pw_step,
+    _mono_iff_binary_pw_step,
+    mono_iff_binary_disj_pw_step,
+    mono_iff_eq_or_pw_step,  # noqa: F401  -- compatibility re-export
+    mono_iff_value_unary_pw_step,
+    _mono_iff_value_binary_pw_step,
+    mono_iff_value_binary_pw_step,
+)
 from fusion import ABS
 from classical import EXCLUDED_MIDDLE
 from tactics import (
@@ -831,396 +845,19 @@ for _i in range(len(_CTOR_NAMES)):
 # ---------------------------------------------------------------------------
 # MONO helpers: per-disjunct iffs for define_wf_lt bodies.
 #
-# A predicate body for is_term / is_form / free_in / ... is a disjunction
-# whose disjuncts have one of two recursive shapes:
-#
-#   unary:   ?x.   n = C x     /\ f x
-#   binary:  ?a b. n = C a b   /\ f a /\ f b
-#
-# Each shape's f-version equals its g-version when ``f`` and ``g`` agree
-# on every k strictly less than n (under nat0_lt). The two helpers below
-# produce that per-disjunct iff as a kernel theorem; the outer MONO
-# equality is then ``OR_CONG``-chained over the per-disjunct results
-# (plus REFL for non-recursive disjuncts), instead of a single 200-line
-# nested case-analysis.
-#
-# The shape of a helper call is:
-#   step = mono_iff_unary_step(C, NAT0_LT_C, p.fact("h"))
-#   p.have("e: ...").by_thm(step)
-# inside an outer @proof whose hypothesis is
-#   h : |- !k. nat0_lt k n ==> f k = g k.
+# The generic builders live in ``data_type.py``.  Re-export them here so
+# existing downstream modules that import from ``hf_syntax`` keep working.
+# The two ``Forall_f`` helpers remain as thin HF-specific wrappers because
+# they mention the encoded universal constructor directly.
 # ---------------------------------------------------------------------------
-
-
-def _extract_nfg(hyp_th):
-    """Pull n, f, g out of |- !k. nat0_lt k n ==> f k = g k."""
-    forall_pred = dest_forall(hyp_th._concl)
-    if forall_pred is None:
-        raise ValueError(f"_extract_nfg: hyp_th not !k. ...; got {hyp_th._concl}")
-    imp_parts = dest_imp(forall_pred.body)
-    if imp_parts is None:
-        raise ValueError(
-            f"_extract_nfg: hyp body not implication; got {forall_pred.body}"
-        )
-    ant, conseq = imp_parts
-    n_t = rand(ant)  # nat0_lt k n
-    fk, gk = dest_eq(conseq)
-    return n_t, rator(fk), rator(gk), forall_pred.bvar.ty
-
-
-def mono_iff_unary_step(ctor, size_lemma, hyp_th):
-    """Per-disjunct iff for a unary recursive case.
-
-    Args:
-      ctor       : term, type ``nat0 -> nat0`` (e.g. ``Succ_t``).
-      size_lemma : ``|- !x. nat0_lt x (ctor x)``.
-      hyp_th     : ``|- !k. nat0_lt k n ==> f k = g k`` (the MONO hypothesis).
-
-    Returns:
-      ``|- (?x. n = ctor x /\\ f x) = (?x. n = ctor x /\\ g x)``
-    where n, f, g are read from ``hyp_th``.
-    """
-    n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
-    x_var = Var("x", k_ty)
-    n_eq_ctor_x = mk_eq(n_t, mk_app(ctor, x_var))
-    body_l = mk_and(n_eq_ctor_x, mk_app(f_t, x_var))
-    body_r = mk_and(n_eq_ctor_x, mk_app(g_t, x_var))
-    pred_l = mk_abs(x_var, body_l)
-    pred_r = mk_abs(x_var, body_r)
-    LHS = mk_exists(x_var, body_l)
-    RHS = mk_exists(x_var, body_r)
-
-    # Forward: {LHS} |- RHS.
-    chosen_l = CHOOSE_WITNESS(pred_l, ASSUME(LHS))  # {LHS} |- n = ctor w /\ f w
-    n_eq_l = CONJUNCT1(chosen_l)
-    fw_th = CONJUNCT2(chosen_l)
-    w_t = rand(n_eq_l._concl)  # ctor w; we just need w
-    # Strip the ctor to get w itself (= rand of ctor w).
-    w_t = rand(w_t)
-    sl_at_w = SPEC(w_t, size_lemma)  # |- nat0_lt w (ctor w)
-    lt_w_n = REWRITE_RULE([SYM(n_eq_l)], sl_at_w)  # {LHS} |- nat0_lt w n
-    fw_eq_gw = MP(SPEC(w_t, hyp_th), lt_w_n)  # {LHS} |- f w = g w
-    gw_th = EQ_MP(fw_eq_gw, fw_th)  # {LHS} |- g w
-    R_th = EXISTS(pred_r, w_t, CONJ(n_eq_l, gw_th))  # {LHS} |- RHS
-
-    # Reverse: {RHS} |- LHS.  Same shape, swap f <-> g via SYM.
-    chosen_r = CHOOSE_WITNESS(pred_r, ASSUME(RHS))
-    n_eq_r = CONJUNCT1(chosen_r)
-    gw2_th = CONJUNCT2(chosen_r)
-    w2_t = rand(rand(n_eq_r._concl))
-    sl_at_w2 = SPEC(w2_t, size_lemma)
-    lt_w2_n = REWRITE_RULE([SYM(n_eq_r)], sl_at_w2)
-    fw2_eq_gw2 = MP(SPEC(w2_t, hyp_th), lt_w2_n)
-    fw2_th = EQ_MP(SYM(fw2_eq_gw2), gw2_th)
-    L_th = EXISTS(pred_l, w2_t, CONJ(n_eq_r, fw2_th))
-
-    return DEDUCT_ANTISYM_RULE(L_th, R_th)
-
-
-def mono_iff_binary_step(ctor, size_lemma_l, size_lemma_r, hyp_th):
-    """Per-disjunct iff for a binary recursive case.
-
-    Args:
-      ctor          : term, type ``nat0 -> nat0 -> nat0`` (e.g. ``Plus_t``).
-      size_lemma_l  : ``|- !a b. nat0_lt a (ctor a b)``.
-      size_lemma_r  : ``|- !a b. nat0_lt b (ctor a b)``.
-      hyp_th        : ``|- !k. nat0_lt k n ==> f k = g k``.
-
-    Returns:
-      ``|- (?a b. n = ctor a b /\\ f a /\\ f b)
-            = (?a b. n = ctor a b /\\ g a /\\ g b)``
-    where n, f, g are read from ``hyp_th``.
-    """
-    n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
-    a_var = Var("a", k_ty)
-    b_var = Var("b", k_ty)
-
-    def _bodies(fn):
-        ctor_ab = mk_app(ctor, a_var, b_var)
-        return mk_and(
-            mk_eq(n_t, ctor_ab),
-            mk_and(mk_app(fn, a_var), mk_app(fn, b_var)),
-        )
-
-    body_inner_l = _bodies(f_t)
-    body_inner_r = _bodies(g_t)
-    LHS = mk_exists(a_var, mk_exists(b_var, body_inner_l))
-    RHS = mk_exists(a_var, mk_exists(b_var, body_inner_r))
-
-    def _direction(src, target_inner_body, swap_fg):
-        """Prove {src} |- ?a b. target_inner_body, where target_inner_body
-        is body_inner_r when src=LHS (fwd) or body_inner_l when src=RHS (rev).
-        ``swap_fg=True`` flips f<->g via SYM on the per-arg eq."""
-        h_top = ASSUME(src)
-        # Outer choose: bind a := w_a.
-        outer_pred = dest_exists(src)
-        chosen_outer = CHOOSE_WITNESS(outer_pred, h_top)  # |- ?b. body[w_a, b]
-        # Inner choose: bind b := w_b. The new inner pred's `a` slot
-        # has already been substituted to the outer SELECT, so re-read
-        # it from chosen_outer's concl.
-        new_inner_pred = dest_exists(chosen_outer._concl)
-        chosen_inner = CHOOSE_WITNESS(new_inner_pred, chosen_outer)
-        # chosen_inner : {src} |- (n = ctor w_a w_b) /\ (h_a /\ h_b)
-        n_eq_th = CONJUNCT1(chosen_inner)
-        rest = CONJUNCT2(chosen_inner)
-        ha_th = CONJUNCT1(rest)
-        hb_th = CONJUNCT2(rest)
-        ctor_app = rand(n_eq_th._concl)
-        w_b = rand(ctor_app)
-        w_a = rand(rator(ctor_app))
-        # Size lemmas at (w_a, w_b).
-        sl_a = SPEC(w_b, SPEC(w_a, size_lemma_l))
-        sl_b = SPEC(w_b, SPEC(w_a, size_lemma_r))
-        lt_a_n = REWRITE_RULE([SYM(n_eq_th)], sl_a)
-        lt_b_n = REWRITE_RULE([SYM(n_eq_th)], sl_b)
-        eq_a = MP(SPEC(w_a, hyp_th), lt_a_n)
-        eq_b = MP(SPEC(w_b, hyp_th), lt_b_n)
-        if swap_fg:
-            ha_out = EQ_MP(SYM(eq_a), ha_th)
-            hb_out = EQ_MP(SYM(eq_b), hb_th)
-        else:
-            ha_out = EQ_MP(eq_a, ha_th)
-            hb_out = EQ_MP(eq_b, hb_th)
-        new_body = CONJ(n_eq_th, CONJ(ha_out, hb_out))
-        # Re-existentialise: inner pred is target body with a := w_a (so b
-        # is the only remaining bvar); outer pred is the result of inner
-        # quantification with a still free, which we then bind to w_a.
-        # Build via INST'd term shapes:
-        target_outer_pred_body = mk_abs(a_var, mk_exists(b_var, target_inner_body))
-        # EXISTS at b := w_b: substitutes b in target_inner_pred_body.
-        # But we need substitution of a := w_a too; do it by picking the
-        # right pred shape. EXISTS only substitutes the bvar of the
-        # supplied Abs, so use a transient pred with `a := w_a`.
-        inner_pred_aw = mk_abs(
-            b_var,
-            mk_and(
-                mk_eq(n_t, mk_app(ctor, w_a, b_var)),
-                mk_and(
-                    mk_app(g_t if not swap_fg else f_t, w_a),
-                    mk_app(g_t if not swap_fg else f_t, b_var),
-                ),
-            ),
-        )
-        inner_th = EXISTS(inner_pred_aw, w_b, new_body)
-        outer_th = EXISTS(target_outer_pred_body, w_a, inner_th)
-        return outer_th
-
-    R_th = _direction(LHS, body_inner_r, swap_fg=False)
-    L_th = _direction(RHS, body_inner_l, swap_fg=True)
-    return DEDUCT_ANTISYM_RULE(L_th, R_th)
-
-
-def mono_iff_binary_right_step(ctor, size_lemma_r, hyp_th):
-    """Per-disjunct iff for a binary disjunct where ONLY the right argument
-    feeds back into the recursive predicate (e.g. ``Forall_f v phi /\\ f phi``,
-    where ``v`` is a bound-variable index that doesn't recurse).
-
-    Args:
-      ctor          : term, type ``nat0 -> nat0 -> nat0`` (e.g. ``Forall_f``).
-      size_lemma_r  : ``|- !a b. nat0_lt b (ctor a b)``.
-      hyp_th        : ``|- !k. nat0_lt k n ==> f k = g k``.
-
-    Returns:
-      ``|- (?a b. n = ctor a b /\\ f b) = (?a b. n = ctor a b /\\ g b)``
-    where n, f, g are read from ``hyp_th``.
-    """
-    n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
-    a_var = Var("a", k_ty)
-    b_var = Var("b", k_ty)
-
-    def _bodies(fn):
-        ctor_ab = mk_app(ctor, a_var, b_var)
-        return mk_and(mk_eq(n_t, ctor_ab), mk_app(fn, b_var))
-
-    body_inner_l = _bodies(f_t)
-    body_inner_r = _bodies(g_t)
-    LHS = mk_exists(a_var, mk_exists(b_var, body_inner_l))
-    RHS = mk_exists(a_var, mk_exists(b_var, body_inner_r))
-
-    def _direction(src, target_inner_body, swap_fg):
-        h_top = ASSUME(src)
-        outer_pred = dest_exists(src)
-        chosen_outer = CHOOSE_WITNESS(outer_pred, h_top)
-        new_inner_pred = dest_exists(chosen_outer._concl)
-        chosen_inner = CHOOSE_WITNESS(new_inner_pred, chosen_outer)
-        n_eq_th = CONJUNCT1(chosen_inner)
-        hb_th = CONJUNCT2(chosen_inner)
-        ctor_app = rand(n_eq_th._concl)
-        w_b = rand(ctor_app)
-        w_a = rand(rator(ctor_app))
-        sl_b = SPEC(w_b, SPEC(w_a, size_lemma_r))
-        lt_b_n = REWRITE_RULE([SYM(n_eq_th)], sl_b)
-        eq_b = MP(SPEC(w_b, hyp_th), lt_b_n)
-        if swap_fg:
-            hb_out = EQ_MP(SYM(eq_b), hb_th)
-        else:
-            hb_out = EQ_MP(eq_b, hb_th)
-        new_body = CONJ(n_eq_th, hb_out)
-        target_outer_pred_body = mk_abs(a_var, mk_exists(b_var, target_inner_body))
-        inner_pred_aw = mk_abs(
-            b_var,
-            mk_and(
-                mk_eq(n_t, mk_app(ctor, w_a, b_var)),
-                mk_app(g_t if not swap_fg else f_t, b_var),
-            ),
-        )
-        inner_th = EXISTS(inner_pred_aw, w_b, new_body)
-        outer_th = EXISTS(target_outer_pred_body, w_a, inner_th)
-        return outer_th
-
-    R_th = _direction(LHS, body_inner_r, swap_fg=False)
-    L_th = _direction(RHS, body_inner_l, swap_fg=True)
-    return DEDUCT_ANTISYM_RULE(L_th, R_th)
-
-
-# ---------------------------------------------------------------------------
-# Pointwise MONO helpers for function-valued recursion (free_in, substitute).
-#
-# When the recursion target type is ``A = nat0 -> bool`` (or any function
-# type), the body is ``\v. <bool disjunction over n with f x v references>``.
-# The MONO obligation
-#   |- (!k. nat0_lt k n ==> f k = g k) ==> F f n = F g n
-# is a function-equality. We prove it pointwise: for an arbitrary ``v``,
-# build per-disjunct iffs at the bool level using the helpers below, chain
-# via ``or_chain_collapse``, generalize with ``GEN(v)``, lift via
-# ``FUN_EXT`` to the function equality, then ``by_unfold`` through the
-# helper-constant DEF to bridge to ``F f n = F g n``.
-#
-# Each helper takes the same ``hyp_th`` (function-eq form) and an extra
-# ``v_term`` to apply at the bool-result level via ``AP_THM``.
-# ---------------------------------------------------------------------------
-
-
-def mono_iff_unary_pw_step(ctor, size_lemma, hyp_th, v_term):
-    """For ``f, g : nat0 -> nat0 -> bool`` and a fixed ``v``, prove
-    ``(?x. n = ctor x /\\ f x v) = (?x. n = ctor x /\\ g x v)``.
-    """
-    n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
-    x_var = Var("x", k_ty)
-    n_eq_ctor_x = mk_eq(n_t, mk_app(ctor, x_var))
-    body_l = mk_and(n_eq_ctor_x, mk_app(f_t, x_var, v_term))
-    body_r = mk_and(n_eq_ctor_x, mk_app(g_t, x_var, v_term))
-    pred_l = mk_abs(x_var, body_l)
-    pred_r = mk_abs(x_var, body_r)
-    LHS = mk_exists(x_var, body_l)
-    RHS = mk_exists(x_var, body_r)
-
-    chosen_l = CHOOSE_WITNESS(pred_l, ASSUME(LHS))
-    n_eq_l = CONJUNCT1(chosen_l)
-    fxv_th = CONJUNCT2(chosen_l)
-    w_t = rand(rand(n_eq_l._concl))
-    sl_at_w = SPEC(w_t, size_lemma)
-    lt_w_n = REWRITE_RULE([SYM(n_eq_l)], sl_at_w)
-    fw_eq_gw = MP(SPEC(w_t, hyp_th), lt_w_n)
-    fw_v_eq_gw_v = AP_THM(fw_eq_gw, v_term)
-    gxv_th = EQ_MP(fw_v_eq_gw_v, fxv_th)
-    R_th = EXISTS(pred_r, w_t, CONJ(n_eq_l, gxv_th))
-
-    chosen_r = CHOOSE_WITNESS(pred_r, ASSUME(RHS))
-    n_eq_r = CONJUNCT1(chosen_r)
-    gxv2_th = CONJUNCT2(chosen_r)
-    w2_t = rand(rand(n_eq_r._concl))
-    sl_at_w2 = SPEC(w2_t, size_lemma)
-    lt_w2_n = REWRITE_RULE([SYM(n_eq_r)], sl_at_w2)
-    fw2_eq_gw2 = MP(SPEC(w2_t, hyp_th), lt_w2_n)
-    fw2_v_eq_gw2_v = AP_THM(fw2_eq_gw2, v_term)
-    fxv2_th = EQ_MP(SYM(fw2_v_eq_gw2_v), gxv2_th)
-    L_th = EXISTS(pred_l, w2_t, CONJ(n_eq_r, fxv2_th))
-
-    return DEDUCT_ANTISYM_RULE(L_th, R_th)
-
-
-def _mono_iff_binary_pw_step(
-    ctor, size_lemma_l, size_lemma_r, hyp_th, v_term, rest_builder, recurses_l
-):
-    """Generic binary pointwise step.
-
-    ``rest_builder(fn_t, a, b, v)`` returns the term plugged in as the
-    second conjunct of the disjunct (after ``n = ctor a b /\\ ...``).
-    ``recurses_l`` says whether the helper should derive ``f a = g a`` (in
-    addition to ``f b = g b``); set ``False`` for right-only cases.
-    """
-    n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
-    a_var = Var("a", k_ty)
-    b_var = Var("b", k_ty)
-
-    def _bodies(fn):
-        ctor_ab = mk_app(ctor, a_var, b_var)
-        return mk_and(
-            mk_eq(n_t, ctor_ab),
-            rest_builder(fn, a_var, b_var, v_term),
-        )
-
-    body_inner_l = _bodies(f_t)
-    body_inner_r = _bodies(g_t)
-    LHS = mk_exists(a_var, mk_exists(b_var, body_inner_l))
-    RHS = mk_exists(a_var, mk_exists(b_var, body_inner_r))
-
-    def _direction(src, target_inner_body, swap_fg):
-        h_top = ASSUME(src)
-        outer_pred = dest_exists(src)
-        chosen_outer = CHOOSE_WITNESS(outer_pred, h_top)
-        new_inner_pred = dest_exists(chosen_outer._concl)
-        chosen_inner = CHOOSE_WITNESS(new_inner_pred, chosen_outer)
-        n_eq_th = CONJUNCT1(chosen_inner)
-        rest = CONJUNCT2(chosen_inner)
-        ctor_app = rand(n_eq_th._concl)
-        w_b = rand(ctor_app)
-        w_a = rand(rator(ctor_app))
-        rewrites = []
-        if recurses_l:
-            sl_a = SPEC(w_b, SPEC(w_a, size_lemma_l))
-            lt_a_n = REWRITE_RULE([SYM(n_eq_th)], sl_a)
-            eq_a = MP(SPEC(w_a, hyp_th), lt_a_n)
-            eq_a_v = AP_THM(eq_a, v_term)
-            rewrites.append(eq_a_v)
-        sl_b = SPEC(w_b, SPEC(w_a, size_lemma_r))
-        lt_b_n = REWRITE_RULE([SYM(n_eq_th)], sl_b)
-        eq_b = MP(SPEC(w_b, hyp_th), lt_b_n)
-        eq_b_v = AP_THM(eq_b, v_term)
-        rewrites.append(eq_b_v)
-        if swap_fg:
-            rewrites = [SYM(r) for r in rewrites]
-        rest_out = REWRITE_RULE(rewrites, rest)
-        new_body = CONJ(n_eq_th, rest_out)
-        target_fn = g_t if not swap_fg else f_t
-        target_outer_pred_body = mk_abs(a_var, mk_exists(b_var, target_inner_body))
-        inner_pred_aw = mk_abs(
-            b_var,
-            mk_and(
-                mk_eq(n_t, mk_app(ctor, w_a, b_var)),
-                rest_builder(target_fn, w_a, b_var, v_term),
-            ),
-        )
-        inner_th = EXISTS(inner_pred_aw, w_b, new_body)
-        outer_th = EXISTS(target_outer_pred_body, w_a, inner_th)
-        return outer_th
-
-    R_th = _direction(LHS, body_inner_r, swap_fg=False)
-    L_th = _direction(RHS, body_inner_l, swap_fg=True)
-    return DEDUCT_ANTISYM_RULE(L_th, R_th)
-
-
-def mono_iff_binary_disj_pw_step(ctor, size_lemma_l, size_lemma_r, hyp_th, v_term):
-    """``(?a b. n = ctor a b /\\ (f a v \\/ f b v))
-    = (?a b. n = ctor a b /\\ (g a v \\/ g b v))``."""
-    return _mono_iff_binary_pw_step(
-        ctor,
-        size_lemma_l,
-        size_lemma_r,
-        hyp_th,
-        v_term,
-        rest_builder=lambda fn, a, b, v: mk_or(mk_app(fn, a, v), mk_app(fn, b, v)),
-        recurses_l=True,
-    )
-
 
 def mono_iff_forall_pw_step(size_lemma_r, hyp_th, v_term):
-    """``(?a b. n = Forall_f a b /\\ ~(v = a) /\\ f b v)
-        = (?a b. n = Forall_f a b /\\ ~(v = a) /\\ g b v)``.
+    r"""``(?a b. n = Forall_f a b /\ ~(v = a) /\ f b v)
+        = (?a b. n = Forall_f a b /\ ~(v = a) /\ g b v)``.
 
     The ``a`` slot is the bound-variable index of the encoded universal;
-    only the body slot ``b`` recurses through ``f``."""
+    only the body slot ``b`` recurses through ``f``.
+    """
     return _mono_iff_binary_pw_step(
         Forall_f,
         None,
@@ -1232,207 +869,8 @@ def mono_iff_forall_pw_step(size_lemma_r, hyp_th, v_term):
     )
 
 
-def mono_iff_eq_or_pw_step(ctor, size_lemma_r, hyp_th, v_term):
-    """``(?a b. n = ctor a b /\\ (v = a \\/ f b v))
-        = (?a b. n = ctor a b /\\ (v = a \\/ g b v))``.
-
-    Used for list-membership-style recursion ``mem_l p x  :=
-    ?h t. p = cons_l h t /\\ (x = h \\/ mem_l t x)``: the head slot ``a``
-    is non-recursive (just an equality test against the query value),
-    only the tail slot ``b`` recurses through ``f``."""
-    return _mono_iff_binary_pw_step(
-        ctor,
-        None,
-        size_lemma_r,
-        hyp_th,
-        v_term,
-        rest_builder=lambda fn, a, b, v: mk_or(mk_eq(v, a), mk_app(fn, b, v)),
-        recurses_l=False,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Value-shape pointwise MONO helpers (for ``substitute``-style recursion).
-#
-# When the recursion target type is ``A = nat0 -> nat0 -> nat0`` (or any
-# function type returning a value rather than a bool), the body has the
-# SELECT shape ``\new_t v. @r. <disjunction over r-values>``. Each
-# r-value disjunct's "rest" is ``r = ctor_value(... f x args ...)`` --
-# the f-call lives buried inside a value-builder on the RHS of an
-# equation, not as a bool conjunct.
-#
-# These helpers prove the per-disjunct iff at the bool level (with r,
-# new_t, v as free variables); the outer MONO proof ABSes over r,
-# AP_TERMs through the SELECT, ABSes over v and new_t, and finally
-# unfolds through the helper-constant DEF.
-#
-# Each helper applies an ``AP_THM`` chain over ``args`` to lift the
-# function-eq ``f w = g w`` to ``f w args1 ... argsk = g w args1 ... argsk``
-# and then ``REWRITE_RULE`` substitutes the f-call inside the rest's RHS.
-# ---------------------------------------------------------------------------
-
-
-def _ap_thm_chain(eq_th, args):
-    """``|- f w = g w`` plus ``args = [a1, ..., ak]`` -> ``|- f w a1...ak = g w a1...ak``."""
-    out = eq_th
-    for arg in args:
-        out = AP_THM(out, arg)
-    return out
-
-
-def mono_iff_value_unary_pw_step(ctor, size_lemma, hyp_th, args, r_term, value_fn):
-    """Per-disjunct iff for a unary value-shape disjunct.
-
-    Args:
-      ctor       : term, type ``nat0 -> nat0`` (e.g. ``Succ_t``).
-      size_lemma : ``|- !x. nat0_lt x (ctor x)``.
-      hyp_th     : ``|- !k. nat0_lt k n ==> f k = g k`` (function eq).
-      args       : list of extra argument terms applied to ``f`` / ``g``.
-      r_term     : the SELECT-bound result variable (free in the result).
-      value_fn   : Python callable taking one term and returning the value
-                   term (e.g. ``lambda t: mk_app(Succ_t, t)``).
-
-    Returns:
-      ``|- (?x. n = ctor x /\\ r = value_fn(f x args))
-            = (?x. n = ctor x /\\ r = value_fn(g x args))``.
-    """
-    n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
-    x_var = Var("x", k_ty)
-    n_eq_ctor_x = mk_eq(n_t, mk_app(ctor, x_var))
-
-    def _body(fn):
-        f_call = mk_app(fn, x_var, *args)
-        return mk_and(n_eq_ctor_x, mk_eq(r_term, value_fn(f_call)))
-
-    body_l = _body(f_t)
-    body_r = _body(g_t)
-    pred_l = mk_abs(x_var, body_l)
-    pred_r = mk_abs(x_var, body_r)
-    LHS = mk_exists(x_var, body_l)
-    RHS = mk_exists(x_var, body_r)
-
-    def _direction(src_pred, src_term, target_pred, swap_fg):
-        chosen = CHOOSE_WITNESS(src_pred, ASSUME(src_term))
-        n_eq_th = CONJUNCT1(chosen)
-        val_eq_th = CONJUNCT2(chosen)
-        w_t = rand(rand(n_eq_th._concl))
-        sl_at_w = SPEC(w_t, size_lemma)
-        lt_w_n = REWRITE_RULE([SYM(n_eq_th)], sl_at_w)
-        fw_eq_gw = MP(SPEC(w_t, hyp_th), lt_w_n)
-        fw_args_eq = _ap_thm_chain(fw_eq_gw, args)
-        if swap_fg:
-            fw_args_eq = SYM(fw_args_eq)
-        new_val_eq = REWRITE_RULE([fw_args_eq], val_eq_th)
-        new_body = CONJ(n_eq_th, new_val_eq)
-        return EXISTS(target_pred, w_t, new_body)
-
-    R_th = _direction(pred_l, LHS, pred_r, swap_fg=False)
-    L_th = _direction(pred_r, RHS, pred_l, swap_fg=True)
-    return DEDUCT_ANTISYM_RULE(L_th, R_th)
-
-
-def _mono_iff_value_binary_pw_step(
-    ctor, size_lemma_l, size_lemma_r, hyp_th, args, rest_builder, recurses_l
-):
-    """Generic binary value-shape pointwise step.
-
-    ``rest_builder(fn, a, b, args)`` returns the rest term plugged in
-    after ``n = ctor a b /\\ ...``; it may freely use
-    ``mk_app(fn, a, *args)`` and ``mk_app(fn, b, *args)`` -- the helper
-    derives ``f a args = g a args`` and ``f b args = g b args`` and
-    ``REWRITE_RULE``s with them. ``recurses_l`` flips off the left-arg
-    rewrite (e.g. for ``Forall_f`` whose ``a`` slot is a bound-variable
-    index, not a recursive subterm).
-    """
-    n_t, f_t, g_t, k_ty = _extract_nfg(hyp_th)
-    a_var = Var("a", k_ty)
-    b_var = Var("b", k_ty)
-
-    def _bodies(fn):
-        ctor_ab = mk_app(ctor, a_var, b_var)
-        return mk_and(mk_eq(n_t, ctor_ab), rest_builder(fn, a_var, b_var, args))
-
-    body_inner_l = _bodies(f_t)
-    body_inner_r = _bodies(g_t)
-    LHS = mk_exists(a_var, mk_exists(b_var, body_inner_l))
-    RHS = mk_exists(a_var, mk_exists(b_var, body_inner_r))
-
-    def _direction(src, target_inner_body, target_fn, swap_fg):
-        h_top = ASSUME(src)
-        outer_pred = dest_exists(src)
-        chosen_outer = CHOOSE_WITNESS(outer_pred, h_top)
-        new_inner_pred = dest_exists(chosen_outer._concl)
-        chosen_inner = CHOOSE_WITNESS(new_inner_pred, chosen_outer)
-        n_eq_th = CONJUNCT1(chosen_inner)
-        rest = CONJUNCT2(chosen_inner)
-        ctor_app = rand(n_eq_th._concl)
-        w_b = rand(ctor_app)
-        w_a = rand(rator(ctor_app))
-        rewrites = []
-        if recurses_l:
-            sl_a = SPEC(w_b, SPEC(w_a, size_lemma_l))
-            lt_a_n = REWRITE_RULE([SYM(n_eq_th)], sl_a)
-            eq_a = MP(SPEC(w_a, hyp_th), lt_a_n)
-            rewrites.append(_ap_thm_chain(eq_a, args))
-        sl_b = SPEC(w_b, SPEC(w_a, size_lemma_r))
-        lt_b_n = REWRITE_RULE([SYM(n_eq_th)], sl_b)
-        eq_b = MP(SPEC(w_b, hyp_th), lt_b_n)
-        rewrites.append(_ap_thm_chain(eq_b, args))
-        if swap_fg:
-            rewrites = [SYM(r) for r in rewrites]
-        rest_out = REWRITE_RULE(rewrites, rest)
-        new_body = CONJ(n_eq_th, rest_out)
-        target_outer_pred_body = mk_abs(a_var, mk_exists(b_var, target_inner_body))
-        inner_pred_aw = mk_abs(
-            b_var,
-            mk_and(
-                mk_eq(n_t, mk_app(ctor, w_a, b_var)),
-                rest_builder(target_fn, w_a, b_var, args),
-            ),
-        )
-        inner_th = EXISTS(inner_pred_aw, w_b, new_body)
-        outer_th = EXISTS(target_outer_pred_body, w_a, inner_th)
-        return outer_th
-
-    R_th = _direction(LHS, body_inner_r, g_t, swap_fg=False)
-    L_th = _direction(RHS, body_inner_l, f_t, swap_fg=True)
-    return DEDUCT_ANTISYM_RULE(L_th, R_th)
-
-
-def mono_iff_value_binary_pw_step(
-    ctor, size_lemma_l, size_lemma_r, hyp_th, args, r_term, value_fn
-):
-    """``(?a b. n = ctor a b /\\ r = value_fn(f a args, f b args))
-        = (?a b. n = ctor a b /\\ r = value_fn(g a args, g b args))``.
-
-    ``value_fn(a_term, b_term)`` builds the value -- typically
-    ``lambda a, b: mk_app(ctor, a, b)``.
-    """
-    return _mono_iff_value_binary_pw_step(
-        ctor,
-        size_lemma_l,
-        size_lemma_r,
-        hyp_th,
-        args,
-        rest_builder=lambda fn, a, b, ags: mk_eq(
-            r_term,
-            value_fn(mk_app(fn, a, *ags), mk_app(fn, b, *ags)),
-        ),
-        recurses_l=True,
-    )
-
-
 def mono_iff_forall_value_pw_step(size_lemma_r, hyp_th, args, r_term, v_for_eq):
-    """Per-disjunct iff for the ``Forall_f`` value disjunct.
-
-    Body shape (LHS):
-      ``?a b. n = Forall_f a b /\\
-              ((v_for_eq = a /\\ r = Forall_f a b) \\/
-               (~(v_for_eq = a) /\\ r = Forall_f a (f b args)))``.
-
-    Only ``b`` recurses; the ``v_for_eq = a`` ``then`` branch has no
-    f-reference.
-    """
+    """Per-disjunct iff for the ``Forall_f`` value disjunct."""
     return _mono_iff_value_binary_pw_step(
         Forall_f,
         None,
@@ -1686,8 +1124,6 @@ def _disjunct_eq_match_binary(disj, target_app, target_args, inj_lemma):
     outer_th = EXISTS(out_a_pred, a_t, inner_th)
     return DEDUCT_ANTISYM_RULE(outer_th, rest_at_target)
 
-
-from collections import namedtuple
 
 # CtorRegistry: bundles the lookup tables consumed by ``derive_rec_eq``
 # and its siblings. Splitting them out from module-level globals lets

@@ -1960,7 +1960,6 @@ def FREE_IN_P_AT_EMPTY(p):
                     "c7: ?fn args. Empty_pt = App_pt fn args /\\ "
                     "        free_in_p args v"
                 ):
-                    p.choose("args", "fn_eq")
                     p.split("args_eq", "(c_eq, _)")
                     p.have("c_neq: ~(App_pt fn args = Empty_pt)").by(
                         APP_PT_NEQ_EMPTY_PT, "fn", "args"
