@@ -55,9 +55,11 @@ from hf_proof import (
     HF1_axiom,
     HF2_axiom,
     HF3_axiom,
+    HF4_axiom,
     HF1_AXIOM_DEF,
     HF2_AXIOM_DEF,
     HF3_AXIOM_DEF,
+    HF4_AXIOM_DEF,
     IS_HF_AXIOM_HOLDS,
     is_logical_axiom,
     IS_AXIOM_AT,
@@ -1326,11 +1328,72 @@ def QUOTE_HF_INJ(p):
 #            (Eq_f var_x var_y))).
 #
 # Two UI steps + substitute reductions, structurally identical to
-# HF2/HF3_INST.  Stubbed (sorry) for now; the discharge follows the
-# same template (``_prov_of_hf_axiom`` + UI + reductions) but the body's
-# ∀z layer plus encoded-iff make the substitute reduction longer than
-# HF3 -- estimated ~600 lines.  We use it as a black-box lemma below.
+# HF2/HF3_INST.  The only extra wrinkle is that the body contains a
+# nested encoded biconditional under the ∀z layer, so the `is_form`
+# evidence and substitute-normalization steps must name the folded and
+# unfolded shapes explicitly.
 # ---------------------------------------------------------------------------
+
+
+def _body4_iff_at(z, x, y):
+    """HF4's encoded iff body at parser-syntax terms z, x, y."""
+    return (
+        f"(Not_f (Imp_f "
+        f"(Imp_f (In_a {z} {x}) (In_a {z} {y})) "
+        f"(Not_f (Imp_f (In_a {z} {y}) (In_a {z} {x})))))"
+    )
+
+
+def _body4_at(x, y):
+    """HF4 body `(!z. In z x <-> In z y) -> x = y` at x, y."""
+    return (
+        f"(Imp_f (Forall_f (SUC0 (SUC0 0)) "
+        f"{_body4_iff_at(_VS2, x, y)}) "
+        f"(Eq_f {x} {y}))"
+    )
+
+
+def _B4_0_text():
+    return (
+        "Not_f (Imp_f "
+        "(Imp_f (In_a var_z var_x) (In_a var_z var_y)) "
+        "(Not_f (Imp_f (In_a var_z var_y) (In_a var_z var_x))))"
+    )
+
+
+def _B4_1_text():
+    return (
+        "Imp_f (Forall_f (SUC0 (SUC0 0)) ("
+        + _B4_0_text()
+        + ")) (Eq_f var_x var_y)"
+    )
+
+
+def _B4_2_text():
+    return "Forall_f (SUC0 0) (" + _B4_1_text() + ")"
+
+
+def _B4_0_unfolded(p):
+    return p._parse(_body4_iff_at(_VS2, _VS0, _VS1))
+
+
+def _B4_1_unfolded(p):
+    return p._parse(_body4_at(_VS0, _VS1))
+
+
+def _B4_0_at_a(p):
+    return p._parse(_B4_0_at_a_text())
+
+
+def _B4_0_at_a_text():
+    return (
+        "Not_f (Imp_f "
+        "(Imp_f (In_a (Var_t (SUC0 (SUC0 0))) a) "
+        "       (In_a (Var_t (SUC0 (SUC0 0))) (Var_t (SUC0 0)))) "
+        "(Not_f (Imp_f "
+        "       (In_a (Var_t (SUC0 (SUC0 0))) (Var_t (SUC0 0))) "
+        "       (In_a (Var_t (SUC0 (SUC0 0))) a))))"
+    )
 
 
 @proof
@@ -1347,10 +1410,10 @@ def HF4_INST(p):
                                (In_a (Var_t (SUC0 (SUC0 0))) a))))))
                        (Eq_f a b)).
 
-    HF4 (extensionality) instantiated at (a, b).  SORRY -- mechanical
-    extension of HF2/HF3_INST: two PROV_HF_UI steps interleaved with
-    substitute reductions through the body's ∀z + encoded-iff
-    structure.  Estimated ~600 lines.
+    HF4 (extensionality) instantiated at (a, b).  This is the same
+    mechanical pattern as HF2/HF3_INST: two PROV_HF_UI steps interleaved
+    with substitute reductions through the body's ∀z + encoded-iff
+    structure.
 
     DSL note: encoded biconditional is
         Not_f (Imp_f (Imp_f (In z a) (In z b)) (Not_f (Imp_f (In z b) (In z a))))
@@ -1370,7 +1433,261 @@ def HF4_INST(p):
         "      (Eq_f a b))",
         types={"a": nat0_ty, "b": nat0_ty},
     )
-    p.sorry()
+    p.fix("a b")
+    p.assume(
+        "(ha, hb, h_ab): is_term a /\\ is_term b "
+        "/\\ (substitute a b (SUC0 0) = a)"
+    )
+
+    prov_h4_raw = _prov_of_hf_axiom(HF4_axiom)
+    p.have(
+        "h_prov_4a: Prov_HF (Forall_f 0 (" + _B4_2_text() + "))"
+    ).by_rewrite_of(prov_h4_raw, [HF4_AXIOM_DEF])
+
+    # is_form for the axiom body with var_x/var_y/var_z folded.
+    in_z_x_at = SPECL([var_z, var_x], IS_FORM_AT_IN)
+    is_form_in_z_x = EQ_MP(
+        SYM(in_z_x_at), CONJ(IS_TERM_VAR_Z, IS_TERM_VAR_X)
+    )
+    in_z_y_at = SPECL([var_z, var_y], IS_FORM_AT_IN)
+    is_form_in_z_y = EQ_MP(
+        SYM(in_z_y_at), CONJ(IS_TERM_VAR_Z, IS_TERM_VAR_Y)
+    )
+    is_form_imp_pq = EQ_MP(
+        SYM(SPECL(
+            [p._parse("In_a var_z var_x"), p._parse("In_a var_z var_y")],
+            IS_FORM_AT_IMP,
+        )),
+        CONJ(is_form_in_z_x, is_form_in_z_y),
+    )
+    is_form_imp_qp = EQ_MP(
+        SYM(SPECL(
+            [p._parse("In_a var_z var_y"), p._parse("In_a var_z var_x")],
+            IS_FORM_AT_IMP,
+        )),
+        CONJ(is_form_in_z_y, is_form_in_z_x),
+    )
+    is_form_not_imp_qp = EQ_MP(
+        SYM(SPEC(
+            p._parse("Imp_f (In_a var_z var_y) (In_a var_z var_x)"),
+            IS_FORM_AT_NOT,
+        )),
+        is_form_imp_qp,
+    )
+    is_form_imp_outer = EQ_MP(
+        SYM(SPECL(
+            [
+                p._parse("Imp_f (In_a var_z var_x) (In_a var_z var_y)"),
+                p._parse(
+                    "Not_f (Imp_f (In_a var_z var_y) (In_a var_z var_x))"
+                ),
+            ],
+            IS_FORM_AT_IMP,
+        )),
+        CONJ(is_form_imp_pq, is_form_not_imp_qp),
+    )
+    is_form_B4_0 = EQ_MP(
+        SYM(SPEC(
+            p._parse(
+                "Imp_f (Imp_f (In_a var_z var_x) (In_a var_z var_y)) "
+                "      (Not_f (Imp_f (In_a var_z var_y) "
+                "                         (In_a var_z var_x)))"
+            ),
+            IS_FORM_AT_NOT,
+        )),
+        is_form_imp_outer,
+    )
+    is_form_forall_z = EQ_MP(
+        SYM(SPECL([_idx2, p._parse(_B4_0_text())], IS_FORM_AT_FORALL)),
+        is_form_B4_0,
+    )
+    is_form_eq_xy = EQ_MP(
+        SYM(SPECL([var_x, var_y], IS_FORM_AT_EQ)),
+        CONJ(IS_TERM_VAR_X, IS_TERM_VAR_Y),
+    )
+    is_form_B4_1 = EQ_MP(
+        SYM(SPECL(
+            [
+                p._parse("Forall_f (SUC0 (SUC0 0)) (" + _B4_0_text() + ")"),
+                p._parse("Eq_f var_x var_y"),
+            ],
+            IS_FORM_AT_IMP,
+        )),
+        CONJ(is_form_forall_z, is_form_eq_xy),
+    )
+    is_form_B4_2 = EQ_MP(
+        SYM(SPECL([_idx1, p._parse(_B4_1_text())], IS_FORM_AT_FORALL)),
+        is_form_B4_1,
+    )
+    p.have("h_is_form_B4_2: is_form (" + _B4_2_text() + ")").by_thm(
+        is_form_B4_2
+    )
+
+    # ---- UI 1 (substitute a for var_x = Var_t 0) ----
+    subst_v0_at_0 = _subst_var_hit(_idx0, _a_n0)
+    subst_v1_at_0 = _subst_var_miss(_idx1, _a_n0, _idx0, _neq_0_s0)
+    subst_v2_at_0 = _subst_var_miss(_idx2, _a_n0, _idx0, _neq_0_ss0)
+    fa_miss_b4_1_at_0 = _subst_forall_miss(
+        _idx1, _B4_1_unfolded(p), _a_n0, _idx0, _neq_0_s0
+    )
+    fa_miss_b4_0_at_0 = _subst_forall_miss(
+        _idx2, _B4_0_unfolded(p), _a_n0, _idx0, _neq_0_ss0
+    )
+    body_after_ui1 = _body4_at("a", _VS1)
+    full_after_ui1 = f"(Forall_f (SUC0 0) {body_after_ui1})"
+
+    p.have(
+        "h_ui1: Prov_HF (substitute (" + _B4_2_text() + ") a 0)"
+    ).by(
+        PROV_HF_UI, "0", _B4_2_text(), "a",
+        CONJ(
+            p.fact("h_is_form_B4_2"),
+            CONJ(p.fact("ha"), p.fact("h_prov_4a")),
+        ),
+    )
+    p.have(f"h_ui1_red: Prov_HF {full_after_ui1}").by_rewrite_of(
+        "h_ui1",
+        [
+            VAR_X_DEF, VAR_Y_DEF, VAR_Z_DEF,
+            fa_miss_b4_1_at_0, fa_miss_b4_0_at_0,
+            SUBSTITUTE_AT_IMP, SUBSTITUTE_AT_NOT,
+            SUBSTITUTE_AT_EQ, SUBSTITUTE_AT_IN,
+            subst_v0_at_0, subst_v1_at_0, subst_v2_at_0,
+        ],
+    )
+
+    # ---- UI 2 (substitute b for var_y = Var_t (SUC0 0)) ----
+    is_term_v1 = EQT_ELIM(SPEC(_idx1, IS_TERM_AT_VAR))
+    is_term_v2 = EQT_ELIM(SPEC(_idx2, IS_TERM_AT_VAR))
+    is_form_in_v2_a = EQ_MP(
+        SYM(SPECL([p._parse("Var_t (SUC0 (SUC0 0))"), _a_n0], IS_FORM_AT_IN)),
+        CONJ(is_term_v2, p.fact("ha")),
+    )
+    is_form_in_v2_v1 = EQ_MP(
+        SYM(SPECL(
+            [
+                p._parse("Var_t (SUC0 (SUC0 0))"),
+                p._parse("Var_t (SUC0 0)"),
+            ],
+            IS_FORM_AT_IN,
+        )),
+        CONJ(is_term_v2, is_term_v1),
+    )
+    is_form_imp_pq_a = EQ_MP(
+        SYM(SPECL(
+            [
+                p._parse("In_a (Var_t (SUC0 (SUC0 0))) a"),
+                p._parse(
+                    "In_a (Var_t (SUC0 (SUC0 0))) (Var_t (SUC0 0))"
+                ),
+            ],
+            IS_FORM_AT_IMP,
+        )),
+        CONJ(is_form_in_v2_a, is_form_in_v2_v1),
+    )
+    is_form_imp_qp_a = EQ_MP(
+        SYM(SPECL(
+            [
+                p._parse(
+                    "In_a (Var_t (SUC0 (SUC0 0))) (Var_t (SUC0 0))"
+                ),
+                p._parse("In_a (Var_t (SUC0 (SUC0 0))) a"),
+            ],
+            IS_FORM_AT_IMP,
+        )),
+        CONJ(is_form_in_v2_v1, is_form_in_v2_a),
+    )
+    is_form_not_imp_qp_a = EQ_MP(
+        SYM(SPEC(
+            p._parse(
+                "Imp_f (In_a (Var_t (SUC0 (SUC0 0))) (Var_t (SUC0 0))) "
+                "      (In_a (Var_t (SUC0 (SUC0 0))) a)"
+            ),
+            IS_FORM_AT_NOT,
+        )),
+        is_form_imp_qp_a,
+    )
+    is_form_imp_outer_a = EQ_MP(
+        SYM(SPECL(
+            [
+                p._parse(
+                    "Imp_f (In_a (Var_t (SUC0 (SUC0 0))) a) "
+                    "      (In_a (Var_t (SUC0 (SUC0 0))) (Var_t (SUC0 0)))"
+                ),
+                p._parse(
+                    "Not_f (Imp_f "
+                    "(In_a (Var_t (SUC0 (SUC0 0))) (Var_t (SUC0 0))) "
+                    "(In_a (Var_t (SUC0 (SUC0 0))) a))"
+                ),
+            ],
+            IS_FORM_AT_IMP,
+        )),
+        CONJ(is_form_imp_pq_a, is_form_not_imp_qp_a),
+    )
+    is_form_B4_0_a = EQ_MP(
+        SYM(SPEC(
+            p._parse(
+                "Imp_f "
+                "(Imp_f (In_a (Var_t (SUC0 (SUC0 0))) a) "
+                "       (In_a (Var_t (SUC0 (SUC0 0))) (Var_t (SUC0 0)))) "
+                "(Not_f (Imp_f "
+                "(In_a (Var_t (SUC0 (SUC0 0))) (Var_t (SUC0 0))) "
+                "(In_a (Var_t (SUC0 (SUC0 0))) a)))"
+            ),
+            IS_FORM_AT_NOT,
+        )),
+        is_form_imp_outer_a,
+    )
+    is_form_forall_z_a = EQ_MP(
+        SYM(SPECL([_idx2, _B4_0_at_a(p)], IS_FORM_AT_FORALL)),
+        is_form_B4_0_a,
+    )
+    is_form_eq_a_v1 = EQ_MP(
+        SYM(SPECL([_a_n0, p._parse("Var_t (SUC0 0)")], IS_FORM_AT_EQ)),
+        CONJ(p.fact("ha"), is_term_v1),
+    )
+    is_form_B4_1_a = EQ_MP(
+        SYM(SPECL(
+            [
+                p._parse(
+                    "Forall_f (SUC0 (SUC0 0)) (" + _B4_0_at_a_text() + ")"
+                ),
+                p._parse("Eq_f a (Var_t (SUC0 0))"),
+            ],
+            IS_FORM_AT_IMP,
+        )),
+        CONJ(is_form_forall_z_a, is_form_eq_a_v1),
+    )
+    p.have(f"h_is_form_B4_1_a: is_form {body_after_ui1}").by_thm(
+        is_form_B4_1_a
+    )
+
+    fa_miss_b4_0_at_s0 = _subst_forall_miss(
+        _idx2, _B4_0_at_a(p), _b_n0, _idx1, _neq_s0_ss0
+    )
+    subst_v1_at_s0 = _subst_var_hit(_idx1, _b_n0)
+    subst_v2_at_s0 = _subst_var_miss(_idx2, _b_n0, _idx1, _neq_s0_ss0)
+    body_final = _body4_at("a", "b")
+
+    p.have(
+        f"h_ui2: Prov_HF (substitute {body_after_ui1} b (SUC0 0))"
+    ).by(
+        PROV_HF_UI, "SUC0 0", body_after_ui1, "b",
+        CONJ(
+            p.fact("h_is_form_B4_1_a"),
+            CONJ(p.fact("hb"), p.fact("h_ui1_red")),
+        ),
+    )
+    p.thus(f"Prov_HF {body_final}").by_rewrite_of(
+        "h_ui2",
+        [
+            fa_miss_b4_0_at_s0,
+            SUBSTITUTE_AT_IMP, SUBSTITUTE_AT_NOT,
+            SUBSTITUTE_AT_EQ, SUBSTITUTE_AT_IN,
+            subst_v1_at_s0, subst_v2_at_s0,
+            "h_ab",
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1381,10 +1698,12 @@ def HF4_INST(p):
 # {a}).  Under the canonical-form precondition that the head element is
 # strictly less than every element of the tail (LOW_BIT_CLEAR_LOW_PRECOND),
 # Insert is injective in *both* arguments jointly.  These two helpers
-# encapsulate that fact at the Prov_HF level for ``quote_hf`` images;
-# they are SORRY pending the full HF4_INST + canonical-form chain
-# (each ~150 lines on top of HF4_INST).  Used by QUOTE_HF_PROV_NEQ to
-# lift bit-component inequalities to whole-quote_hf inequalities.
+# encapsulate that fact at the Prov_HF level for ``quote_hf`` images.
+# HF4_INST is now closed; the remaining work is the canonical
+# nonmembership/order chain needed to turn ``low_bit``/``clear_low``
+# facts into object-level membership contradictions.  Used by
+# QUOTE_HF_PROV_NEQ to lift bit-component inequalities to
+# whole-quote_hf inequalities.
 # ---------------------------------------------------------------------------
 
 
@@ -1395,7 +1714,9 @@ def QUOTE_HF_NEQ_FROM_LOW_BIT(p):
                                          (quote_hf (low_bit t))))
                 ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))).
 
-    SORRY (~150 lines on top of HF4_INST).
+    SORRY. HF4_INST is available; the missing ingredient is the
+    canonical nonmembership/order bridge for low_bit/clear_low quote
+    towers.
 
     Outline -- under canonical form ``low_bit s ∉ clear_low s`` and
     similarly for t, distinct heads force distinct Insert_t towers:
@@ -1428,7 +1749,9 @@ def QUOTE_HF_NEQ_FROM_CLEAR_LOW(p):
                                          (quote_hf (clear_low t))))
                 ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t))).
 
-    SORRY (~150 lines on top of HF4_INST).
+    SORRY. HF4_INST is available; the missing ingredient is the
+    canonical nonmembership/order bridge for low_bit/clear_low quote
+    towers.
 
     Outline -- under canonical form, with matching heads and distinct
     tails, the Insert_t towers differ in the tail.  The proof uses
@@ -2879,7 +3202,7 @@ if __name__ == "__main__":
     print("    HF2_INST      :", pp_thm(HF2_INST))
     print("    HF3_INST      :", pp_thm(HF3_INST))
     print("    QUOTE_HF_INJ  :", pp_thm(QUOTE_HF_INJ))
-    print("    HF4_INST (SORRY)               :", pp_thm(HF4_INST))
+    print("    HF4_INST                       :", pp_thm(HF4_INST))
     print(
         "    QUOTE_HF_NEQ_FROM_LOW_BIT (SORRY) :",
         pp_thm(QUOTE_HF_NEQ_FROM_LOW_BIT),

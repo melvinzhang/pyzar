@@ -14,9 +14,9 @@ has been redirected to the set-native checker.
 
 | # | Theorem                          | Line | Est. size  | Depends on (sorry)        | Depends on (other)                                          |
 |---|----------------------------------|-----:|-----------:|---------------------------|-------------------------------------------------------------|
-| A | `HF4_INST`                       | 1373 | ~600 lines | —                         | `_prov_of_hf_axiom`, `PROV_HF_UI`, substitute reductions    |
-| B | `QUOTE_HF_NEQ_FROM_LOW_BIT`      | 1420 | ~150 lines | A                         | `HF2`/`HF3_INST`, canonical-form lemmas, `LOW_BIT_LT`        |
-| C | `QUOTE_HF_NEQ_FROM_CLEAR_LOW`    | 1451 | ~150 lines | A                         | same as B                                                    |
+| A | `HF4_INST`                       | 1400 | done       | —                         | `_prov_of_hf_axiom`, `PROV_HF_UI`, substitute reductions    |
+| B | `QUOTE_HF_NEQ_FROM_LOW_BIT`      | 1709 | large      | —                         | `HF4_INST`, `HF2`/`HF3_INST`, canonical nonmembership/order  |
+| C | `QUOTE_HF_NEQ_FROM_CLEAR_LOW`    | 1741 | large      | —                         | same as B                                                    |
 | D | `IS_SUBSTITUTE_STEP_REPRESENTS`  | 2699 | ~150 lines | —                         | `IS_IN_REPRESENTS` (✓), `IS_PAIR_ORD_REPRESENTS` (✓), `QUOTE_HF_AT_PAIR_ORD` (✓), HF1–HF3 (✓); **body of `is_substitute_step_internal`** |
 | E | `IS_SUBSTITUTE_TRACE_REPRESENTS` | 2740 |  ~80 lines | D                         | `HF_INDUCTION` (✓); **body of `is_substitute_trace_internal`** |
 | F | `SUBSTITUTE_REPRESENTS`          | 2772 |  moderate  | E                         | `TRACE_EXISTS` (✓); **body of `substitute_internal`**       |
@@ -113,20 +113,31 @@ unknown.
 Close this before claiming the substitute representability chain is
 fully no-sorry. `IS_IN_REPRESENTS` already exists, but it depends on
 `QUOTE_HF_PROV_NEQ`, whose nonzero/nonzero branch is still closed by the
-A/B/C sorries.
+A/B/C path.
 
-1. **A — `HF4_INST`** (~600 lines).
+1. **A — `HF4_INST`**. **Done.**
    - Mechanical extension of `HF2_INST`/`HF3_INST` template: two
      `PROV_HF_UI` steps + substitute reductions through the body's
      `∀z` + encoded-iff. Tedious, not deep.
-   - Tax/value ratio is poor, but it removes the hidden sorry under
-     `IS_IN_REPRESENTS`.
+   - This is now closed with no `p.sorry()`. It removed the largest
+     mechanical unknown in Phase 1.
 
 2. **B — `QUOTE_HF_NEQ_FROM_LOW_BIT`** and
-   **C — `QUOTE_HF_NEQ_FROM_CLEAR_LOW`** (~150 lines each).
-   - Symmetric uses of A + canonical-form (`LOW_BIT_CLEAR_LOW_PRECOND`)
-     to lift bit-component inequalities to whole-`quote_hf`
-     inequalities. B and C can be done in parallel after A.
+   **C — `QUOTE_HF_NEQ_FROM_CLEAR_LOW`**.
+   - HF4 is no longer the blocker. The remaining unknown is the
+     canonical nonmembership/order bridge:
+
+     ```text
+     low_bit h is below every element in clear_low s
+     ```
+
+     expressed strongly enough to derive object-level
+     `Prov_HF (Not_f (In_a (quote_hf i) (quote_hf (clear_low s))))`
+     without using `IS_IN_REPRESENTS`, because `IS_IN_REPRESENTS`
+     itself depends on `QUOTE_HF_PROV_NEQ`.
+   - Settle this bridge first. Once it exists, B/C become applications
+     of `HF2_INST`, `HF3_INST`, `HF4_INST`, and the existing
+     propositional toolkit.
 
 ### Phase 2 — `substitute` representability
 
@@ -235,6 +246,15 @@ definitions.
   `?P. Proof_HF_set P n`; next work is internalizing
   `Proof_HF_set_internal`.
 
+* **HF4 instantiation (done)** — `HF4_INST` is now a closed proof,
+  not a `p.sorry()`. It follows the `HF3_INST` pattern: obtain
+  `Prov_HF HF4_axiom`, prove the nested `is_form` obligations, run
+  two `PROV_HF_UI` steps, then normalize the capture-blind
+  substitutions through the `Forall_f` and encoded-iff body.
+  The Phase 1 blocker has moved to the canonical
+  nonmembership/order bridge needed by `QUOTE_HF_NEQ_FROM_LOW_BIT`
+  and `QUOTE_HF_NEQ_FROM_CLEAR_LOW`.
+
 * **Prerequisite for D — Python builders for godelnum shapes.**
   The body of `is_substitute_step_internal` needs to express
   godelnum-shape claims like ``a = Var_t v`` in HF formulas with
@@ -296,7 +316,12 @@ definitions.
 * **G**: keep the forward/backward split explicit — only forward
   direction is in scope for this file; backward gets a parked
   Stage-6 citation, not a sorry-on-sorry.
-* **A**: when extending the `HF2_INST`/`HF3_INST` template, the
-  encoded-iff `Not_f (Imp_f (Imp_f …) (Not_f (Imp_f …)))` is the
-  shape that lengthens the substitute-reduction tail; budget for
-  one full `Imp_f`-tower walk per layer.
+* **A**: done. The main DSL friction was exact parser shape
+  management for the encoded iff under `Forall_f`; private string
+  builders now keep those terms aligned with the substitute rewriter's
+  unfolded `Var_t 0` / `Var_t (SUC0 0)` / `Var_t (SUC0 (SUC0 0))`
+  normal forms.
+* **B/C**: do not start by writing the final lift proof. First prove
+  the canonical nonmembership/order bridge for quote towers without
+  using `IS_IN_REPRESENTS`, otherwise the dependency loops back through
+  `QUOTE_HF_PROV_NEQ`.
