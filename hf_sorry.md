@@ -59,14 +59,40 @@ Two implementation clusters plus one representation switch:
      ==> Prov_HF (Not_f (Eq_f (quote_hf s) (quote_hf t)))
   ```
 
-  Minimal HF-IND spike: the public quote interfaces are currently routed
-  through two explicit stubs that are intended to follow from adding the
-  object-level HF induction schema:
+  Membership-IND spike: the public quote interfaces are currently routed
+  through two explicit stubs that are intended to follow from the
+  object-level HF membership-induction schema:
 
   ```text
   HF_IND_QUOTE_MEM_DECISION
   HF_IND_QUOTE_PROV_NEQ
   ```
+
+  The schema recognizer itself is encoded in `hf_proof.py` as
+  `is_hf_ind_axiom`. It now recognizes the parameterized membership
+  induction schema:
+
+  ```text
+  (!y. ((!z. In z y ==> F z) ==> F y)) ==> !y. F y
+  ```
+
+  The only freshness restrictions are on the two bound slots `0` and
+  `SUC0 0`; all other free slots of `F` remain available as parameters.
+  `is_axiom` has the shape:
+
+  ```text
+  is_hf_axiom n \/ is_hf_ind_axiom n \/ is_logical_axiom n
+  ```
+
+  `PROV_HF_IND_INSTANCE` is closed for this strengthened schema: every
+  admissible membership-induction instance is available through
+  `Prov_HF` by recognizing it as an `is_hf_ind_axiom` case and lifting
+  it through `PROV_HF_AXIOM`.
+
+  Validation is also closed: `PROV_HF_MEM_IND` packages the usable rule
+  form. Given the side conditions on `F` plus a `Prov_HF` proof of the
+  membership-induction step, it derives `Prov_HF` of the universal
+  conclusion by applying the schema instance with `PROV_HF_MP`.
 
   This removes `IS_IN_REPRESENTS`, `QUOTE_HF_NEQ_FROM_LOW_BIT`,
   `QUOTE_HF_NEQ_FROM_CLEAR_LOW`, and `QUOTE_HF_MUTUAL_MEASURED` from the
@@ -83,12 +109,10 @@ Two implementation clusters plus one representation switch:
   Builds the Stage-3C/3D `…_REPRESENTS` chain consumed by the diagonal
   lemma in `hf_godel1.py`.
 
-The two proof clusters are mostly separable, but the no-sorry dependency
-graph is stricter than the previous version of this note claimed:
-`IS_SUBSTITUTE_STEP_REPRESENTS` uses `IS_IN_REPRESENTS`, and
-`IS_IN_REPRESENTS` calls `QUOTE_HF_PROV_NEQ`. Since `QUOTE_HF_PROV_NEQ`
-still contains the A/B/C residual branch, A/B/C are latent prerequisites
-for a fully closed substitute-representability chain.
+The active no-sorry dependency graph now factors through the HF-IND
+quote stubs rather than through the old low-bit quote decomposition.
+Legacy proofs still exist in the file and still warn, but new
+representability work should not depend on them.
 
 ## Recommended order
 
@@ -167,7 +191,7 @@ and use certified inequality.
    - This is now closed with no `p.sorry()`. It removed the largest
      mechanical unknown in Phase 1.
 
-2. **HF-IND spike stubs.**
+2. **Membership-IND quote stubs.**
    - Current intentional quote-layer assumptions:
 
      ```text
@@ -177,8 +201,12 @@ and use certified inequality.
 
    - `QUOTE_HF_MEM_DECISION` is routed directly to the first;
      `QUOTE_HF_PROV_NEQ` is routed directly to the second.
-     This validates the strengthened-theory architecture before
-     encoding the induction-schema recognizer.
+     The parameterized membership-induction recognizer is now present in
+     `is_axiom`; the remaining work is deriving these two quote stubs
+     from one bundled membership/inequality theorem.
+   - The schema-application plumbing is validated by `PROV_HF_MEM_IND`;
+     the next unknown is the actual bundled object formula and its
+     step proof.
 
 3. **Interface theorem — `QUOTE_HF_MEM_DECISION`.**
    - This is the membership-only theorem downstream code should cite:
@@ -320,6 +348,10 @@ definitions.
   needed by `QUOTE_HF_NEQ_FROM_LOW_BIT` and
   `QUOTE_HF_NEQ_FROM_CLEAR_LOW`. That path is now legacy in the
   HF-IND spike; public quote interfaces no longer route through it.
+
+* **Small diagonal side condition (done)** — `hf_godel1.py` no longer
+  axiomatizes `VAR_Y_NEQ_VAR_X`; it is proved from `VAR_T_INJ`,
+  `VAR_X_DEF`, `VAR_Y_DEF`, and `AXIOM_3_0`.
 
 * **Membership-difference discriminator (done)** —
   `PROV_HF_NEQ_FROM_MEM_DIFF` is closed. This is the reusable final

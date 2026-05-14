@@ -39,8 +39,9 @@
 #     ``is_FaImp`` is Mendelson's K6 -- ``!v.(F -> G) -> (F -> !v.G)``
 #     when ``v`` not free in ``F`` -- adopted to make
 #     PROV_HF_DT_GEN / DTChain.gen unconditionally proved.
-#   * ``is_logical_axiom`` (disjunction over the eight schemas) and
-#     ``is_axiom = is_hf_axiom \/ is_logical_axiom``.
+#   * ``is_hf_ind_axiom`` (HF induction schema), ``is_logical_axiom``
+#     (disjunction over the eight Hilbert schemas), and
+#     ``is_axiom = is_hf_axiom \/ is_hf_ind_axiom \/ is_logical_axiom``.
 #   * ``Prov_HF``: provability predicate, defined in ``hf_repr_core.py``
 #     as existence of a ranked HF-set proof object:
 #         Prov_HF n  :<=>  ?P. Proof_HF_set P n.
@@ -62,7 +63,7 @@
 from fusion import Var
 from basics import mk_const, mk_app, mk_eq
 from parser import define, parse_type
-from nat0 import nat0_ty
+from nat0 import nat0_ty, ZERO, mk_suc0
 from proof import proof, define_with_at
 from tactics import (
     SPECL,
@@ -75,10 +76,14 @@ from basics import mk_abs, rand
 from axioms import mk_or
 from fusion import REFL
 from hf_syntax import (
+    Empty_t,
     Eq_f,
+    In_a,
+    Insert_t,
     Not_f,
     Imp_f,
     Forall_f,
+    Var_t,
 )
 
 # The HF primitives Empty_t, Insert_t, In_a are referenced by name from
@@ -618,13 +623,84 @@ is_Subst = mk_const("is_Subst", [])
 
 
 # ---------------------------------------------------------------------------
-# Stage 2B (c) -- is_logical_axiom and is_axiom.
+# Stage 2B (c) -- HF induction schema, is_logical_axiom and is_axiom.
+#
+#   is_hf_ind_axiom(n) :<=> ?F.
+#      is_form F
+#      /\ ~free_in F 0
+#      /\ ~free_in F (SUC0 0)
+#      /\ n =
+#         ((!1. ((!0. In_a (Var_t 0) (Var_t 1)
+#                       -> F[Var_t 0 / 2])
+#                 -> F[Var_t 1 / 2]))
+#          -> !1. F[Var_t 1 / 2])
+#
+# Fixed slots:
+#   0, 1  are scratch binders for member/current set.
+#   2     is the induction-variable slot in F.
+#
+# The freshness side conditions prevent the two scratch binders from
+# capturing existing free parameters of F. Parameters in all other slots
+# remain free, so this is the ordinary first-order membership-induction
+# schema with parameters.
+#
+# ---------------------------------------------------------------------------
+
+
+_idx0_n0 = ZERO
+_idx1_n0 = mk_suc0(ZERO)
+_idx2_n0 = mk_suc0(_idx1_n0)
+
+
+def _subst_ind(term):
+    return mk_app(substitute, _F_n0, term, _idx2_n0)
+
+
+_ind_at_member = _subst_ind(mk_app(Var_t, _idx0_n0))
+_ind_at_current = _subst_ind(mk_app(Var_t, _idx1_n0))
+_ind_member_hyp = mk_app(
+    Forall_f,
+    _idx0_n0,
+    mk_app(
+        Imp_f,
+        mk_app(In_a, mk_app(Var_t, _idx0_n0), mk_app(Var_t, _idx1_n0)),
+        _ind_at_member,
+    ),
+)
+_ind_step = mk_app(
+    Forall_f,
+    _idx1_n0,
+    mk_app(Imp_f, _ind_member_hyp, _ind_at_current),
+)
+_ind_conclusion = mk_app(Forall_f, _idx1_n0, _ind_at_current)
+_is_hf_ind_axiom_body = _exists_chain(
+    [_F_n0],
+    _and_chain(
+        [
+            _isf(_F_n0),
+            _mk_not(mk_app(free_in, _F_n0, _idx0_n0)),
+            _mk_not(mk_app(free_in, _F_n0, _idx1_n0)),
+            mk_eq(_n_n0, mk_app(Imp_f, _ind_step, _ind_conclusion)),
+        ]
+    ),
+)
+IS_HF_IND_AXIOM_DEF, IS_HF_IND_AXIOM_AT = define_with_at(
+    "is_hf_ind_axiom",
+    parse_type("nat0 -> bool"),
+    mk_abs(_n_n0, _is_hf_ind_axiom_body),
+)
+is_hf_ind_axiom = mk_const("is_hf_ind_axiom", [])
+
+
+# ---------------------------------------------------------------------------
+# Stage 2B (d) -- is_logical_axiom and is_axiom.
 #
 #   is_logical_axiom(n)  :<=>  is_K n \/ is_S n \/ is_N n \/
 #                              is_UI n \/ is_Vac n \/
 #                              is_Refl n \/ is_Subst n \/ is_FaImp n.
 #
-#   is_axiom(n)          :<=>  is_hf_axiom n \/ is_logical_axiom n.
+#   is_axiom(n)          :<=>  is_hf_axiom n \/ is_hf_ind_axiom n
+#                              \/ is_logical_axiom n.
 #
 # Slot indices consumed by ``hf_logic._prov_of_logical``:
 #   0=K, 1=S, 2=N, 3=UI, 4=Vac, 5=Refl, 6=Subst, 7=FaImp.
@@ -651,7 +727,13 @@ IS_LOGICAL_AXIOM_DEF, IS_LOGICAL_AXIOM_AT = define_with_at(
 is_logical_axiom = mk_const("is_logical_axiom", [])
 
 
-_is_axiom_body = mk_or(mk_app(is_hf_axiom, _n_n0), mk_app(is_logical_axiom, _n_n0))
+_is_axiom_body = _disj_chain(
+    [
+        mk_app(is_hf_axiom, _n_n0),
+        mk_app(is_hf_ind_axiom, _n_n0),
+        mk_app(is_logical_axiom, _n_n0),
+    ]
+)
 IS_AXIOM_DEF, IS_AXIOM_AT = define_with_at(
     "is_axiom",
     parse_type("nat0 -> bool"),
@@ -704,8 +786,11 @@ if __name__ == "__main__":
     print("    IS_SUBST_AT    :", pp_thm(IS_SUBST_AT))
     print("    IS_FaImp_AT    :", pp_thm(IS_FaImp_AT))
     print()
-    print("Stage 2B (c) -- is_logical_axiom and is_axiom.")
+    print("Stage 2B (c) -- HF induction schema.")
+    print("    IS_HF_IND_AXIOM_AT :", pp_thm(IS_HF_IND_AXIOM_AT))
+    print()
+    print("Stage 2B (d) -- is_logical_axiom and is_axiom.")
     print("    IS_LOGICAL_AXIOM_AT :", pp_thm(IS_LOGICAL_AXIOM_AT))
     print("    IS_AXIOM_AT         :", pp_thm(IS_AXIOM_AT))
     print()
-    print("Stage 2B (d) -- Prov_HF is defined in hf_repr_core.py via ?P. Proof_HF_set P n.")
+    print("Stage 2B (e) -- Prov_HF is defined in hf_repr_core.py via ?P. Proof_HF_set P n.")

@@ -362,7 +362,7 @@ Sigma_1 soundness of HF outright, since HF *is* the standard model.)
 from fusion import Var
 from basics import mk_const, mk_app, mk_abs
 from parser import define, parse_type
-from nat0 import nat0_ty
+from nat0 import AXIOM_3_0, nat0_ty
 from proof import proof
 from tactics import SPECL, MP
 from hf_syntax import (
@@ -373,8 +373,9 @@ from hf_syntax import (
     SUBSTITUTE_AT_IMP,  # noqa: F401  -- re-exported
     SUBSTITUTE_AT_FORALL_MISS,  # noqa: F401  -- re-exported
     SUBSTITUTE_PRESERVES_IS_FORM,
+    VAR_T_INJ,
 )
-from hf_proof import var_x, var_y
+from hf_proof import VAR_X_DEF, VAR_Y_DEF, var_x, var_y
 from hf_repr_core import (
     numeral,
     substitute,
@@ -616,10 +617,16 @@ def VAR_Y_NEQ_VAR_X(p):
     constructor disjointness).
 
     Used to ensure capture-avoidance when substituting var_y for var_x
-    inside phi during the theta_of_phi construction. STUB.
+    inside phi during the theta_of_phi construction.
     """
     p.goal("~(var_y = var_x)")
-    p.sorry()
+    with p.suppose("h: var_y = var_x"):
+        p.have("h_var: Var_t (SUC0 0) = Var_t 0").by_rewrite_of(
+            "h", [VAR_Y_DEF, VAR_X_DEF]
+        )
+        p.have("h_idx: SUC0 0 = 0").by(VAR_T_INJ, "SUC0 0", "0", "h_var")
+        p.have("h_ne: ~(SUC0 0 = 0)").by(AXIOM_3_0, "0")
+        p.absurd().by_conj("h_ne", "h_idx")
 
 
 @proof
@@ -766,7 +773,7 @@ if __name__ == "__main__":
     print("Stage 4 (b.2) -- theta-of-phi construction.")
     print("    THETA_OF_PHI_DEF :", pp_thm(THETA_OF_PHI_DEF))
     print()
-    print("Stage 4 (b.3) -- HOL-level subst/free_in/is_form lemmas (STUB).")
+    print("Stage 4 (b.3) -- HOL-level subst/free_in/is_form lemmas.")
     print("    VAR_X_NEQ_SUC0_0                  :", pp_thm(VAR_X_NEQ_SUC0_0))
     print("    VAR_Y_NEQ_VAR_X                   :", pp_thm(VAR_Y_NEQ_VAR_X))
     print(

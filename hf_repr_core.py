@@ -143,6 +143,7 @@ from hf_proof import (
     VAR_Z_DEF,
     is_axiom,
     is_hf_axiom,
+    is_hf_ind_axiom,
     is_mp,
     is_gen,
     IS_MP_AT,
@@ -3100,7 +3101,9 @@ def _prov_of_logical_lift(slot_th, slot_idx, n_term):
     is_logical_th = EQ_MP(SYM(is_logical_at), th)
     is_axiom_at = SPEC(n_term, IS_AXIOM_AT)
     q_hf_part = mk_app(is_hf_axiom, n_term)
-    is_axiom_th = EQ_MP(SYM(is_axiom_at), DISJ2(q_hf_part, is_logical_th))
+    ind_part = mk_app(is_hf_ind_axiom, n_term)
+    ind_or_logical_th = DISJ2(ind_part, is_logical_th)
+    is_axiom_th = EQ_MP(SYM(is_axiom_at), DISJ2(q_hf_part, ind_or_logical_th))
     prov_at_n = SPEC(n_term, PROV_HF_AXIOM)
     return MP(prov_at_n, is_axiom_th)
 

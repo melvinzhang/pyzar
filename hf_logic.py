@@ -51,6 +51,7 @@ from hf_proof import (
     IS_SUBST_AT,
     IS_FaImp_AT,
     is_hf_axiom,
+    is_hf_ind_axiom,
     IS_LOGICAL_AXIOM_AT,
     IS_AXIOM_AT,
 )
@@ -68,7 +69,8 @@ from hf_repr_core import (
 # Chain:  is_<X> n  ->  is_logical_axiom n  ->  is_axiom n  ->  Prov_HF n.
 #
 # is_<X> sits as one disjunct in IS_LOGICAL_AXIOM_AT's right-associated
-# 8-way OR. is_logical_axiom sits as the right disjunct of IS_AXIOM_AT.
+# 8-way OR. is_logical_axiom sits in the third disjunct of IS_AXIOM_AT:
+# is_hf_axiom n \/ (is_hf_ind_axiom n \/ is_logical_axiom n).
 # Caller specifies which logical-axiom slot via ``slot``: 0=K, 1=S,
 # 2=N, 3=UI, 4=Vac, 5=Refl, 6=Subst, 7=FaImp.
 # ---------------------------------------------------------------------------
@@ -154,9 +156,12 @@ def _prov_of_logical(p, name, slot_th, slot_idx, n_term):
     # is_logical_th : |- is_logical_axiom n_term
 
     is_axiom_at = SPEC(n_term, IS_AXIOM_AT)
-    # is_axiom_at : |- is_axiom n = is_hf_axiom n \/ is_logical_axiom n
+    # is_axiom_at : |- is_axiom n =
+    #                  is_hf_axiom n \/ (is_hf_ind_axiom n \/ is_logical_axiom n)
     q_axiom_part = mk_app(is_hf_axiom, n_term)
-    is_axiom_th = EQ_MP(SYM(is_axiom_at), DISJ2(q_axiom_part, is_logical_th))
+    ind_axiom_part = mk_app(is_hf_ind_axiom, n_term)
+    ind_or_logical_th = DISJ2(ind_axiom_part, is_logical_th)
+    is_axiom_th = EQ_MP(SYM(is_axiom_at), DISJ2(q_axiom_part, ind_or_logical_th))
     # is_axiom_th : |- is_axiom n_term
 
     # Apply PROV_HF_AXIOM at n_term.

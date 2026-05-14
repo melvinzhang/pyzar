@@ -28,7 +28,7 @@
 
 
 from fusion import Var
-from basics import mk_app, mk_eq
+from basics import mk_app, mk_const, mk_eq
 from nat0 import nat0_ty, ZERO, mk_suc0
 from parser import parse_type
 from proof import proof, define_with_at
@@ -44,6 +44,7 @@ from tactics import (
     CONJUNCT1,
     CONJUNCT2,
     DISJ1,
+    DISJ2,
     NOT_ELIM,
     CONTR,
     EQF_ELIM,
@@ -65,7 +66,10 @@ from hf_proof import (
     HF3_AXIOM_DEF,
     HF4_AXIOM_DEF,
     IS_HF_AXIOM_HOLDS,
+    is_hf_axiom,
+    is_hf_ind_axiom,
     is_logical_axiom,
+    IS_HF_IND_AXIOM_AT,
     IS_AXIOM_AT,
     var_x,
     var_y,
@@ -142,14 +146,16 @@ _s_n0 = Var("s", nat0_ty)
 def _prov_of_hf_axiom(axiom_const):
     """|- Prov_HF HF{n}_axiom from |- is_hf_axiom HF{n}_axiom.
 
-    is_axiom = is_hf_axiom \\/ is_logical_axiom; lift through DISJ1
-    then PROV_HF_AXIOM.
+    is_axiom = is_hf_axiom \\/ (is_hf_ind_axiom \\/ is_logical_axiom);
+    lift through DISJ1 then PROV_HF_AXIOM.
     """
     name = axiom_const.name
     is_hf_th = IS_HF_AXIOM_HOLDS[name]  # |- is_hf_axiom HF{n}_axiom
     is_axiom_at = SPEC(axiom_const, IS_AXIOM_AT)
+    ind_part = mk_app(is_hf_ind_axiom, axiom_const)
     log_part = mk_app(is_logical_axiom, axiom_const)
-    is_axiom_th = EQ_MP(SYM(is_axiom_at), DISJ1(is_hf_th, log_part))
+    ind_or_log_part = mk_app(mk_const("\\/", []), ind_part, log_part)
+    is_axiom_th = EQ_MP(SYM(is_axiom_at), DISJ1(is_hf_th, ind_or_log_part))
     prov_at = SPEC(axiom_const, PROV_HF_AXIOM)
     return MP(prov_at, is_axiom_th)
 
@@ -2409,6 +2415,105 @@ def PROV_HF_NEQ_FROM_MEM_DIFF_RIGHT(p):
     )
 
 
+_HF_IND_IDX = "(SUC0 (SUC0 0))"
+
+
+def _hf_ind_formula(var):
+    step, concl = _hf_ind_parts(var)
+    return f"Imp_f ({step}) ({concl})"
+
+
+def _hf_ind_parts(var):
+    at_member = f"substitute {var} (Var_t 0) {_HF_IND_IDX}"
+    at_current = f"substitute {var} (Var_t (SUC0 0)) {_HF_IND_IDX}"
+    member_hyp = (
+        "Forall_f 0 "
+        f"(Imp_f (In_a (Var_t 0) (Var_t (SUC0 0))) ({at_member}))"
+    )
+    step = (
+        "Forall_f (SUC0 0) "
+        f"(Imp_f ({member_hyp}) ({at_current}))"
+    )
+    concl = f"Forall_f (SUC0 0) ({at_current})"
+    return step, concl
+
+
+_HF_IND_FORMULA = _hf_ind_formula("F")
+_HF_IND_FORMULA_G = _hf_ind_formula("G")
+_HF_IND_STEP, _HF_IND_CONCL = _hf_ind_parts("F")
+
+
+@proof
+def PROV_HF_IND_INSTANCE(p):
+    """|- !F. is_form F /\\ ~free_in F 0 /\\ ~free_in F 1
+          ==> Prov_HF (membership HF-IND instance for F).
+
+    This is the concrete bridge from the encoded ``is_hf_ind_axiom``
+    recognizer to the proof system. It does not prove the quote stubs by
+    itself; it proves that every admissible induction-schema instance is
+    available as an object-theory axiom.
+    """
+
+    p.goal(
+        "!F. is_form F /\\ ~(free_in F 0) /\\ ~(free_in F (SUC0 0)) "
+        f"==> Prov_HF ({_HF_IND_FORMULA})"
+    )
+    p.fix("F")
+    p.assume("hF: is_form F /\\ ~(free_in F 0) /\\ ~(free_in F (SUC0 0))")
+    p.split("hF", "(h_form, h_fresh0, h_fresh1)")
+    p.have(f"h_refl: {_HF_IND_FORMULA} = {_HF_IND_FORMULA}").by_thm(
+        REFL(p._parse(_HF_IND_FORMULA))
+    )
+    p.have(
+        "h_body: ?G. is_form G /\\ ~(free_in G 0) /\\ ~(free_in G (SUC0 0)) "
+        f"/\\ ({_HF_IND_FORMULA} = {_HF_IND_FORMULA_G})"
+    ).by_exists(["F"], "h_form", "h_fresh0", "h_fresh1", "h_refl")
+    ind_at = SPEC(p._parse(_HF_IND_FORMULA), IS_HF_IND_AXIOM_AT)
+    p.have(f"h_ind: is_hf_ind_axiom ({_HF_IND_FORMULA})").by_rewrite_of(
+        "h_body", [ind_at]
+    )
+    ind_term = p._parse(_HF_IND_FORMULA)
+    ind_or_log = DISJ1(p.fact("h_ind"), mk_app(is_logical_axiom, ind_term))
+    full_or = DISJ2(mk_app(is_hf_axiom, ind_term), ind_or_log)
+    p.have(f"h_axiom: is_axiom ({_HF_IND_FORMULA})").by_rewrite_of(
+        full_or, [SPEC(ind_term, IS_AXIOM_AT)]
+    )
+    p.thus(f"Prov_HF ({_HF_IND_FORMULA})").by(
+        PROV_HF_AXIOM, _HF_IND_FORMULA, "h_axiom"
+    )
+
+
+@proof
+def PROV_HF_MEM_IND(p):
+    """Derived object-level membership-induction rule.
+
+    Given an admissible schema formula ``F`` and an object proof of the
+    induction step, derive the object proof of the universal conclusion.
+    This validates that the strengthened ``is_hf_ind_axiom`` schema can
+    actually be applied through ``Prov_HF``.
+    """
+
+    p.goal(
+        "!F. (is_form F /\\ ~(free_in F 0) /\\ ~(free_in F (SUC0 0))) "
+        f"/\\ Prov_HF ({_HF_IND_STEP}) ==> Prov_HF ({_HF_IND_CONCL})"
+    )
+    p.fix("F")
+    p.assume(
+        "h: (is_form F /\\ ~(free_in F 0) /\\ ~(free_in F (SUC0 0))) "
+        f"/\\ Prov_HF ({_HF_IND_STEP})"
+    )
+    p.split("h", "(h_side, h_step)")
+    p.have(f"h_ind: Prov_HF ({_HF_IND_FORMULA})").by(
+        PROV_HF_IND_INSTANCE, "F", "h_side"
+    )
+    p.thus(f"Prov_HF ({_HF_IND_CONCL})").by(
+        PROV_HF_MP,
+        _HF_IND_STEP,
+        _HF_IND_CONCL,
+        CONJ(p.fact("h_step"), p.fact("h_ind")),
+    )
+
+
 @proof
 def HF_IND_QUOTE_MEM_DECISION(p):
     """HF-IND spike stub for quoted membership correctness.
@@ -4056,6 +4161,14 @@ if __name__ == "__main__":
     print(
         "    PROV_HF_NEQ_FROM_MEM_DIFF_RIGHT:",
         pp_thm(PROV_HF_NEQ_FROM_MEM_DIFF_RIGHT),
+    )
+    print(
+        "    PROV_HF_IND_INSTANCE                  :",
+        pp_thm(PROV_HF_IND_INSTANCE),
+    )
+    print(
+        "    PROV_HF_MEM_IND                       :",
+        pp_thm(PROV_HF_MEM_IND),
     )
     print(
         "    HF_IND_QUOTE_MEM_DECISION (SORRY spike):",
