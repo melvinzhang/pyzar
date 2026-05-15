@@ -73,6 +73,7 @@ from prst_syntax import (
     App_pt,
     Tup_pt,  # noqa: F401  -- parser alias for args-tuple cons cells
     is_pterm,  # noqa: F401  -- parser alias
+    substitute_p,  # noqa: F401  -- parser alias for is_pr_def_instance
     suc_chain,
 )
 from prst_pr_builders import (  # tier-1 readable-body helpers
@@ -507,7 +508,7 @@ def PR_ARITY_REC(p):
 # equation; the closure rule PROV_PRST_AXIOM combined with the
 # generalisation rule produces the universal closure when needed; in
 # practice consumers use the substitute-into-axiom derived rule (see
-# PROV_PRST_SUBST_AXIOM in prst_proof) to specialise directly.
+# PROV_PRST_SUBST in prst_proof) to specialise directly.
 #
 # Variable slot conventions (chosen once, reused across axioms):
 #   Var_t 0           -- first formal argument
@@ -891,6 +892,58 @@ IS_PR_DEF_DEF = define(
     "(?a b. n = pair_ord_def_axiom_at a b)",
 )
 is_pr_def = mk_const("is_pr_def", [])
+
+
+IS_PR_DEF_INSTANCE_DEF, IS_PR_DEF_INSTANCE_AT = define_with_at(
+    "is_pr_def_instance",
+    parse_type("nat0 -> bool"),
+    "\\n:nat0. is_pr_def n \\/ "
+    "(?F t v. is_pr_def F /\\ n = substitute_p F t v)",
+)
+is_pr_def_instance = mk_const("is_pr_def_instance", [])
+
+
+@proof
+def IS_PR_DEF_INSTANCE_FROM_DEF(p):
+    """|- !n. is_pr_def n ==> is_pr_def_instance n."""
+    p.goal("!n. is_pr_def n ==> is_pr_def_instance n", types={"n": nat0_ty})
+    p.fix("n")
+    p.assume("h_def: is_pr_def n")
+    p.have(
+        "h_body: is_pr_def n \\/ "
+        "(?F t v. is_pr_def F /\\ n = substitute_p F t v)"
+    ).by_disj("h_def")
+    p.thus("is_pr_def_instance n").by_unfold(
+        "h_body", IS_PR_DEF_INSTANCE_DEF
+    )
+
+
+@proof
+def IS_PR_DEF_INSTANCE_SUBST(p):
+    """|- !F t v. is_pr_def F ==> is_pr_def_instance (substitute_p F t v)."""
+    from tactics import REFL
+
+    p.goal(
+        "!F t v. is_pr_def F ==> is_pr_def_instance (substitute_p F t v)",
+        types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    p.fix("F t v")
+    p.assume("h_def: is_pr_def F")
+    p.have(
+        "h_refl: substitute_p F t v = substitute_p F t v"
+    ).by_thm(REFL(p._parse("substitute_p F t v")))
+    p.have(
+        "h_ex: ?F0 t0 v0. is_pr_def F0 "
+        "      /\\ substitute_p F t v = substitute_p F0 t0 v0"
+    ).by_exists(["F", "t", "v"], "h_def", "h_refl")
+    p.have(
+        "h_body: is_pr_def (substitute_p F t v) \\/ "
+        "(?F0 t0 v0. is_pr_def F0 "
+        " /\\ substitute_p F t v = substitute_p F0 t0 v0)"
+    ).by_disj("h_ex")
+    p.thus("is_pr_def_instance (substitute_p F t v)").by_unfold(
+        "h_body", IS_PR_DEF_INSTANCE_DEF
+    )
 
 
 # Same proof shape as the IS_PR_SYM_* lemmas: build the 7-disjunct body
@@ -1949,9 +2002,11 @@ if __name__ == "__main__":
     print()
     print("Stage 2A (e) -- is_pr_def recogniser.")
     print("    IS_PR_DEF_DEF             :", pp_thm(IS_PR_DEF_DEF))
+    print("    IS_PR_DEF_INSTANCE_DEF    :", pp_thm(IS_PR_DEF_INSTANCE_DEF))
     print("    IS_PR_DEF_HOLDS_ZERO      :", pp_thm(IS_PR_DEF_HOLDS_ZERO))
     print("    IS_PR_DEF_HOLDS_PROJ      :", pp_thm(IS_PR_DEF_HOLDS_PROJ))
     print("    IS_PR_DEF_HOLDS_REC_BASE  :", pp_thm(IS_PR_DEF_HOLDS_REC_BASE))
+    print("    IS_PR_DEF_INSTANCE_SUBST  :", pp_thm(IS_PR_DEF_INSTANCE_SUBST))
     print()
     print("Prov_PRST claims about these axioms are one-line specialisations")
     print("of PROV_PRST_AXIOM in prst_proof.")

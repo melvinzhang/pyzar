@@ -15,7 +15,7 @@ The sole explicit PRST axiom outside this ledger is `MU_CORRECTNESS`.
 - `PR_ARITY_IF_IN`
 - `PR_ARITY_REC`
 
-### `prst_proof.py` — 16
+### `prst_proof.py` — 15
 
 - `MEM_PRST_MONO`
 - `VALID_PROOF_PRST_MONO`
@@ -23,7 +23,6 @@ The sole explicit PRST axiom outside this ledger is `MU_CORRECTNESS`.
 - `PROOF_PRST_NIL`
 - `PROOF_PRST_CONS`
 - `PROV_PRST_AXIOM`
-- `PROV_PRST_SUBST_AXIOM`
 - `PRST_REFL_AXIOM`
 - `PROOF_PRST_PR_CORRECT`
 - `PROOF_PRST_PR_INTERNAL_EVAL`
@@ -66,4 +65,4 @@ The sole explicit PRST axiom outside this ledger is `MU_CORRECTNESS`.
 
 ## Counts
 
-- Remaining `p.sorry()` sites: 42
+- Remaining `p.sorry()` sites: 41

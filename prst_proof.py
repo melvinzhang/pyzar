@@ -8,12 +8,13 @@
 # object-level Forall_pf, no UI/Gen rules. The non-logical axiom layer
 # is purely equational:
 #
-#   * PR-defining-equation axioms (one per registered PR symbol's
-#     defining clause). Recognised by ``is_pr_def`` from prst_pr.
+#   * PR-defining-equation axiom instances (one per registered PR symbol's
+#     defining clause, after optional term substitution). Recognised by
+#     ``is_pr_def_instance`` from prst_pr.
 #
 # So:
 #
-#   is_pr_axiom n   :<=>   is_pr_def n  \/  is_logical_axiom n.
+#   is_pr_axiom n   :<=>   is_pr_def_instance n  \/  is_logical_axiom n.
 #
 # Following Jensen-Karp 1971 ("Primitive Recursive Set Functions"):
 # PRST has *no* set-theoretic axioms in the object language. PR
@@ -35,9 +36,9 @@
 #   (1) |- !n. is_pr_axiom n ==> Prov_PRST n.
 #   (2) |- !f g. Prov_PRST f /\ Prov_PRST (Imp_pf f g) ==> Prov_PRST g.
 #
-# Specialisation of free Var_pt indices is intended to be provided by
-# PROV_PRST_SUBST_AXIOM: each axiom schema is closed under substitution into
-# its free Var_pt slots. It is currently tracked as a sorry obligation.
+# Specialisation of free Var_pt indices is handled by the axiom-instance
+# recogniser: substituting into a PR-defining template produces an
+# is_pr_def_instance, hence a PRST axiom.
 #
 # This file re-uses hf_proof's logical axiom schemas (IS_K / IS_S /
 # ... / IS_SUBST), wraps them under is_pr_axiom, and defines the new
@@ -65,6 +66,7 @@ from hf_godel1 import (
 )
 from prst_pr import (
     is_pr_def,  # noqa: F401  -- parser alias
+    is_pr_def_instance,  # noqa: F401  -- parser alias
     is_pr_sym,  # noqa: F401  -- referenced by is_pr_axiom transitively via is_pterm
     zero_sym,  # noqa: F401  -- parser alias
     adj_sym,  # noqa: F401  -- parser alias
@@ -93,6 +95,8 @@ from prst_pr import (
     IS_PR_DEF_HOLDS_IF_IN_FALSE,
     IS_PR_DEF_HOLDS_REC_BASE,
     IS_PR_DEF_HOLDS_REC_STEP,
+    IS_PR_DEF_INSTANCE_FROM_DEF,
+    IS_PR_DEF_INSTANCE_SUBST,
 )
 from hf_proof import (
     var_x,  # noqa: F401  -- parser alias
@@ -110,19 +114,19 @@ from prst_syntax import (
 # ---------------------------------------------------------------------------
 # Stage 2B (a) -- the PRST axiom recogniser.
 #
-# is_pr_axiom n  <=>  is_pr_def n  \/  is_logical_axiom n.
+# is_pr_axiom n  <=>  is_pr_def_instance n  \/  is_logical_axiom n.
 #
-# is_pr_def from prst_pr.py recognises defining equations for the PR
-# function symbols (ZERO/PROJ/IF_IN/REC + derived symbols). adj_sym
-# has no defining equation -- it is a primitive PR symbol whose
-# semantics is fixed by the standard nat0 HOL model, not by an axiom.
+# is_pr_def_instance from prst_pr.py recognises defining equations for the PR
+# function symbols and their term-substitution instances. adj_sym has no
+# defining equation -- it is a primitive PR symbol whose semantics is fixed by
+# the standard nat0 HOL model, not by an axiom.
 # ---------------------------------------------------------------------------
 
 
 IS_PR_AXIOM_DEF, IS_PR_AXIOM_AT = define_with_at(
     "is_pr_axiom",
     parse_type("nat0 -> bool"),
-    "\\n:nat0. is_pr_def n \\/ is_logical_axiom n",
+    "\\n:nat0. is_pr_def_instance n \\/ is_logical_axiom n",
 )
 is_pr_axiom = mk_const("is_pr_axiom", [])
 
@@ -638,11 +642,13 @@ def PROV_PRST_AXIOM(p):
 # specialisations of PROV_PRST_AXIOM.
 #
 # Each axiom godelnum (from prst_pr) is in is_pr_def, hence is in
+# is_pr_def_instance, hence is in
 # is_pr_axiom, hence Prov_PRST holds of it. One MP per axiom; no fresh
 # @proof body needed once the chain is in place.
 #
 # Pattern (filled in -- not a sorry; falls out of MP + IS_PR_DEF_HOLDS_*
-# + IS_PR_AXIOM_DEF unfolding + PROV_PRST_AXIOM):
+# + IS_PR_DEF_INSTANCE_FROM_DEF + IS_PR_AXIOM_DEF unfolding
+# + PROV_PRST_AXIOM):
 #
 #     PROV_PRST_ZERO_DEF :=
 #         MP PROV_PRST_AXIOM (DISJ1 IS_PR_DEF_HOLDS_ZERO)
@@ -654,18 +660,23 @@ def PROV_PRST_AXIOM(p):
 # ---------------------------------------------------------------------------
 
 
-# Helper: lift `is_pr_def n` to `is_pr_axiom n` via DISJ1 of
-# `is_pr_def n \/ is_logical_axiom n` (the body of IS_PR_AXIOM_DEF).
+# Helper: lift `is_pr_def n` to `is_pr_axiom n` via
+# IS_PR_DEF_INSTANCE_FROM_DEF and DISJ1 of
+# `is_pr_def_instance n \/ is_logical_axiom n` (IS_PR_AXIOM_DEF).
 def _is_pr_axiom_from_pr_def(p, axiom_name_str, is_pr_def_fact):
     """Inside an @proof body, derive `is_pr_axiom <axiom_name>` from a
-    fact `is_pr_def <axiom_name>` via DISJ1 + IS_PR_AXIOM_DEF unfold.
+    fact `is_pr_def <axiom_name>` via is_pr_def_instance + DISJ1 +
+    IS_PR_AXIOM_DEF unfold.
     `axiom_name_str` is parenthesised so multi-token forms like
     'proj_def_axiom_at i n' parse correctly."""
     n_paren = "(" + axiom_name_str + ")"
+    p.have("h_inst: is_pr_def_instance " + n_paren).by(
+        IS_PR_DEF_INSTANCE_FROM_DEF, n_paren, is_pr_def_fact
+    )
     p.have(
-        "h_disj: is_pr_def " + n_paren + " "
+        "h_disj: is_pr_def_instance " + n_paren + " "
         "\\/ is_logical_axiom " + n_paren
-    ).by_disj(is_pr_def_fact)
+    ).by_disj("h_inst")
     p.have("h_axiom: is_pr_axiom " + n_paren).by_unfold(
         "h_disj", IS_PR_AXIOM_DEF
     )
@@ -912,60 +923,49 @@ def PROV_PRST_PAIR_ORD_DEF(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 2B (d.2) -- substitute-into-axiom derived rule (sorry obligation).
+# Stage 2B (d.2) -- substitute-into-axiom derived rule.
 #
 # Because PRST defining equations are stated with free Var_pt indices
 # (implicit universal closure convention), consumers need to specialise
-# them at concrete terms. PRST is quantifier-free, so the rule cannot
-# come from Gen + UI in the way HF gets it.
+# them at concrete terms. PRST is quantifier-free, so the rule does not
+# come from object-level Gen + UI in the way HF gets it. Instead,
+# is_pr_axiom recognises is_pr_def_instance, and prst_pr proves that
+# substituting into an is_pr_def template yields such an instance.
 #
-#     PROV_PRST_SUBST_AXIOM :
+#     PROV_PRST_SUBST :
 #         |- !F t v. is_pr_def F ==> Prov_PRST (substitute_p F t v)
 #
-# This is the PRST analog of UI: a primitive rule that lets the proof
-# system instantiate axiom schemas. The mechanisation route via
-# IS_PR_DEF_CLOSED_UNDER_SUBST (suggested in the initial design) does
-# NOT go through, because closure fails for parametric axiom families:
-#
-#   * Closed-form axioms (zero_def_axiom, if_in_true/false_def_axiom):
-#     substitute_p is a no-op (no Var_pt in body), so closure holds
-#     trivially.
-#   * Parametric families (proj_def_axiom_at i n, rec_*_def_axiom_at
-#     g h, ...): these embed Var_t k slots for k = 0..n-1 at FIXED
-#     positions. Substituting at v < arity replaces a Var_t v slot with
-#     t -- the result is no longer of the form `axiom_at i' n'` for any
-#     i', n'. So is_pr_def is NOT closed under substitution in general.
-#
-# Two mechanisable alternatives:
-#   (a) Structural induction on the proof witness p (Proof_PRST p F):
-#       construct a substituted witness p' s.t. Proof_PRST p' (subst F).
-#       ~200 lines; requires building the substitution lemma at the
-#       proof-term level.
-#   (b) Extend is_pr_def to recognise all substitution instances of each
-#       axiom family. Intractable to characterise syntactically for the
-#       parametric families (would need a recogniser for "n is a
-#       substitution-instance of some proj_def_axiom_at i n0").
-#
-# This is currently a sorry obligation. It is a primitive inference-rule
-# schema of PRST, semantically equivalent to UI restricted to the
-# theory-axiom case. Soundness in the standard nat0 HOL model: every
-# PR-defining axiom is a universal truth about its parametric specialisation,
-# so any substitution instance is also true.
+# This is now a theorem over the axiom-instance recogniser, not a primitive
+# axiom or a sorry obligation.
 # ---------------------------------------------------------------------------
 
 
 @proof
-def PROV_PRST_SUBST_AXIOM(p):
+def PROV_PRST_SUBST(p):
     """|- !F t v. is_pr_def F ==> Prov_PRST (substitute_p F t v)."""
     p.goal(
         "!F t v. is_pr_def F ==> Prov_PRST (substitute_p F t v)",
         types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
     )
-    p.sorry()
+    p.fix("F t v")
+    p.assume("h_def: is_pr_def F")
+    p.have("h_inst: is_pr_def_instance (substitute_p F t v)").by(
+        IS_PR_DEF_INSTANCE_SUBST, "F", "t", "v", "h_def"
+    )
+    p.have(
+        "h_disj: is_pr_def_instance (substitute_p F t v) "
+        "\\/ is_logical_axiom (substitute_p F t v)"
+    ).by_disj("h_inst")
+    p.have("h_axiom: is_pr_axiom (substitute_p F t v)").by_unfold(
+        "h_disj", IS_PR_AXIOM_DEF
+    )
+    p.thus("Prov_PRST (substitute_p F t v)").by(
+        PROV_PRST_AXIOM, "substitute_p F t v", "h_axiom"
+    )
 
 
 # Convenience corollaries for specific axioms at specific terms.
-# Each is one application of PROV_PRST_SUBST_AXIOM at the appropriate
+# Each is one application of PROV_PRST_SUBST at the appropriate
 # axiom; the substitute_p reduces by AT-equations to give the
 # HOL-quantified form that consumers actually want.
 #
@@ -1146,7 +1146,7 @@ def PROV_PRST_ADJ_DEF_AT(p):
 # Reading: "if any q makes f hold at args, then the witness returned by
 # mu_sym f at args also makes f hold." No quantifier elimination, no
 # bound proof-variable -- just a free q that gets specialised by
-# PROV_PRST_SUBST_AXIOM at each use site.
+# PROV_PRST_SUBST at each use site.
 # ---------------------------------------------------------------------------
 
 
@@ -1368,15 +1368,16 @@ def PROV_PRST_SUBSTITUTE_EVAL(p):
 
     Dependency chain (what's needed for a real proof):
 
-    1. PROV_PRST_SUBST_AXIOM (Layer 6, sorry'd). Required to substitute
+    1. PROV_PRST_SUBST. Required to substitute
        formal Var_t slots in the parametric defining axioms (PROV_PRST_
        COURSE_REC_STEP_DEF, PROV_PRST_PROJ_DEF, etc.) at the concrete
-       (F, t, v) values for each reduction step.
+       (F, t, v) values for each reduction step. This now follows from
+       is_pr_def_instance.
 
-    2. PROV_PRST_MP (Layer 6, sorry'd). Required to chain conditional
+    2. PROV_PRST_MP. Required to chain conditional
        axioms like IF_IN_TRUE/FALSE_DEF_AXIOM (which carry an In_pa /
        ~In_pa antecedent) into the dispatch reduction at each formula-
-       tag case in h_subst.
+       tag case in h_subst. This is now proved over PRST-list API stubs.
 
     3. PRST equality reasoning (reflexivity, transitivity, congruence).
        Possibly derivable from the existing axiom infrastructure, but
@@ -1964,7 +1965,7 @@ if __name__ == "__main__":
     print("    PROV_PRST_REC_BASE_DEF   :", pp_thm(PROV_PRST_REC_BASE_DEF))
     print()
     print("Stage 2B (d.2) -- substitute-into-axiom derived rule.")
-    print("    PROV_PRST_SUBST_AXIOM       :", pp_thm(PROV_PRST_SUBST_AXIOM))
+    print("    PROV_PRST_SUBST             :", pp_thm(PROV_PRST_SUBST))
     print("    PRST_REFL_AXIOM             :", pp_thm(PRST_REFL_AXIOM))
     print("    PROV_PRST_ADJ_DEF_AT     :", pp_thm(PROV_PRST_ADJ_DEF_AT))
     print()
