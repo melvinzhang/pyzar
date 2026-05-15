@@ -18,11 +18,10 @@
 #       the substitute reduction lemmas.
 #   (b) QUOTE_HF_INJ -- HOL-level injectivity for the quote_hf map.
 #   (c) Measured quote membership / inequality scaffolding.
-#   (d) Stage-3 SORRY scaffolding (IS_SUBSTITUTE_STEP_REPRESENTS,
-#       IS_SUBSTITUTE_TRACE_REPRESENTS, SUBSTITUTE_REPRESENTS,
-#       PROV_HF_REPRESENTS, IS_FORM_PROV_HF_INTERNAL,
-#       FREE_IN_PROV_HF_INTERNAL) -- moved here so future discharges
-#       have the toolkit in scope without re-creating the cycle.
+#   (d) Stage-3 remaining SORRY scaffolding
+#       (PROV_HF_REPRESENTS, IS_FORM_PROV_HF_INTERNAL,
+#       FREE_IN_PROV_HF_INTERNAL). Substitute representability is now
+#       provided by the syntax-recursion package in hf_repr_core.
 # ---------------------------------------------------------------------------
 
 
@@ -127,7 +126,16 @@ from hf_logic import (
     PROV_HF_AND_ELIM_LEFT,
     PROV_HF_AND_ELIM_RIGHT,
 )
-from hf_repr_core import IS_TERM_QUOTE_HF, SUBSTITUTE_QUOTE_HF, PROV_HF_MP
+from hf_repr_core import (
+    IS_TERM_QUOTE_HF,
+    SUBSTITUTE_QUOTE_HF,
+    PROV_HF_MP,
+    HF_SYNTAX_REC_PACKAGE,
+    SUBSTITUTE_REPRESENTS_SYNTACTIC,
+    SUBSTITUTE_REPRESENTS_TERM,
+    SUBSTITUTE_REPRESENTS_FORM,
+    SUBSTITUTE_REPRESENTS,
+)
 from nat0_order import NAT0_LT_ASYM, NAT0_LT_NOT_REFL, NAT0_LT_SUC0, NAT0_LT_TOTAL_NEQ, NAT0_LT_TRANS
 
 
@@ -3810,138 +3818,19 @@ def QUOTE_HF_PROV_NEQ(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage-3 SORRY scaffolding moved from hf_repr_core.py.  Each proof needs the
-# Prov_HF logical toolkit when discharged (PROV_HF_UI for HF axiom
-# instantiation, PROV_HF_AND_ELIM_*/CONTRAP for propositional walking),
-# so they live here rather than in hf_repr to avoid the cycle.  The
-# kernel constants they mention (``is_substitute_step_internal``,
-# ``is_substitute_trace_internal``, ``substitute_internal``,
-# ``Prov_HF_internal``) are still declared in hf_repr.
+# Stage 3C -- substitute representability.
+#
+# The old operational checker route has been removed from the high-layer path.
+# ``hf_repr_core`` now exports the readability-first syntax-recursion package:
+#
+#   HF_SYNTAX_REC_PACKAGE
+#   SUBSTITUTE_REPRESENTS_SYNTACTIC
+#   SUBSTITUTE_REPRESENTS_TERM
+#   SUBSTITUTE_REPRESENTS_FORM
+#
+# For backwards compatibility in formula-level consumers,
+# ``SUBSTITUTE_REPRESENTS`` is an alias of ``SUBSTITUTE_REPRESENTS_FORM``.
 # ---------------------------------------------------------------------------
-
-
-@proof
-def IS_SUBSTITUTE_STEP_REPRESENTS(p):
-    """|- !T t v a b. is_substitute_step T t v a b ==>
-                         Prov_HF (substitute^5 is_substitute_step_internal
-                                 (quote_hf T) var_T
-                                 (quote_hf t) var_y
-                                 (quote_hf v) var_z
-                                 (quote_hf a) var_a
-                                 (quote_hf b) var_b).
-
-    SORRY (thin-interface strategy).
-
-    Body of is_substitute_step_internal: a 9-disjunction (Or_f-chain)
-    mirroring ``is_substitute_step``'s HOL body; each ``In (Pair_ord _ _) T``
-    check is encoded as ``In_a (Pair_ord_q var_a var_b) var_T`` (with
-    ``Pair_ord_q`` the HF-syntax Kuratowski Insert_t-tower) and each
-    constructor pattern ``a = Var_t v`` is an Eq_f equality verified by
-    HF reflexivity on identical Insert_t-tower shapes.
-
-    Proof strategy: case-split on the 9 IS_SUBSTITUTE_STEP_DEF disjuncts.
-    Each case dispatches the matching HF-disjunct via:
-      * IS_PAIR_ORD_REPRESENTS for the Kuratowski-shape clauses;
-      * QUOTE_HF_MEM_DECISION for the trace-membership clauses;
-      * QUOTE_HF_AT_PAIR_ORD to unfold tagged HF-syntax constructors
-        (``Var_t v = Pair_ord 2 v``, ``Eq_f a b = Pair_ord 5 (Pair_ord a b)``,
-        ...). The ``~(x = y)`` side condition reduces to a closed
-        numerical inequality at each constructor (``~(2 = v)``,
-        ``~(5 = Pair_ord a b)``, ...) and is discharged once per
-        constructor.
-      * QUOTE_HF_AT_SINGLETON / QUOTE_HF_AT_EMPTY to fold the leaf
-        layers;
-      * HF axioms HF1-HF3 walking the resulting trees (no bit-level
-        reasoning -- the canonical-form precondition is consumed inside
-        the QUOTE_HF_AT_* rewrites).
-
-    ~150 lines once is_substitute_step_internal has a body and HF1-HF5
-    are available as kernel theorems.
-    """
-    p.goal(
-        "!T t v a b. is_substitute_step T t v a b ==> "
-        "Prov_HF (substitute (substitute (substitute (substitute (substitute "
-        "  is_substitute_step_internal "
-        "  (quote_hf T) idx_T) "
-        "  (quote_hf t) idx_y) "
-        "  (quote_hf v) idx_z) "
-        "  (quote_hf a) idx_a) "
-        "  (quote_hf b) idx_b)"
-    )
-    p.sorry()
-
-
-@proof
-def IS_SUBSTITUTE_TRACE_REPRESENTS(p):
-    """|- !T F t v r. is_substitute_trace T F t v r ==>
-                         Prov_HF (substitute^5 is_substitute_trace_internal
-                                 (quote_hf T) var_T
-                                 (quote_hf F) var_x
-                                 (quote_hf t) var_y
-                                 (quote_hf v) var_z
-                                 (quote_hf r) var_w).
-
-    SORRY (thin-interface strategy).
-
-    Combines the previous three stubs:
-      * IS_PAIR_ORD_REPRESENTS for clause (i) ``In (Pair_ord F r) T``,
-        which becomes a Kuratowski-shape membership claim about the
-        Insert_t-tower image of ``quote_hf T``.
-      * QUOTE_HF_MEM_DECISION for the membership atoms inside the trace.
-      * IS_SUBSTITUTE_STEP_REPRESENTS for clause (ii) ``!a b. In ... T
-        ==> is_substitute_step ...``: the HOL universal over trace
-        members corresponds to a HF-bounded forall, expanded by induction
-        on the Insert-tower of T via ``HF_INDUCTION``. Each step of the
-        induction discharges one trace entry using
-        IS_SUBSTITUTE_STEP_REPRESENTS at the corresponding ``(a, b)``.
-
-    The induction on T is the only place this proof reaches for set
-    structure; HF_INDUCTION hides the bit decomposition entirely.
-    ~80 lines once is_substitute_trace_internal has a body.
-    """
-    p.goal(
-        "!T F t v r. is_substitute_trace T F t v r ==> "
-        "Prov_HF (substitute (substitute (substitute (substitute (substitute "
-        "  is_substitute_trace_internal "
-        "  (quote_hf T) idx_T) "
-        "  (quote_hf F) idx_x) "
-        "  (quote_hf t) idx_y) "
-        "  (quote_hf v) idx_z) "
-        "  (quote_hf r) idx_w)"
-    )
-    p.sorry()
-
-
-@proof
-def SUBSTITUTE_REPRESENTS(p):
-    """|- !F t v. Prov_HF (
-              substitute (substitute (substitute (substitute
-                  substitute_internal (numeral F) var_x)
-                  (numeral t) var_y)
-                  (numeral v) var_z)
-                  (numeral (substitute F t v)) var_w).
-
-    Stage 3C(a) representability of ``substitute``. AXIOMATIZED via
-    ``p.sorry()``; see Stage 3C section comment in hf_repr_core.py for the
-    deferred HF-native construction:
-
-        substitute_internal := ?T. is_substitute_trace T F t v r
-
-    where ``T`` is an HF set of Pair_ord-encoded (subterm-shape,
-    output-shape) pairs, exhibited explicitly at each numeral
-    instance via TRACE_EXISTS. No sequence coding (Goedel beta /
-    Cantor pairing) and no arithmetic representability prereqs --
-    HF gives finite traces as first-class objects.
-    """
-    p.goal(
-        "!F t v. Prov_HF ("
-        "substitute (substitute (substitute (substitute "
-        "  substitute_internal (numeral F) idx_x) "
-        "  (numeral t) idx_y) "
-        "  (numeral v) idx_z) "
-        "  (numeral (substitute F t v)) idx_w)"
-    )
-    p.sorry()
 
 
 # ---------------------------------------------------------------------------
@@ -4098,18 +3987,13 @@ if __name__ == "__main__":
         pp_thm(QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES),
     )
     print("    QUOTE_HF_MUTUAL_MEASURED                :", pp_thm(QUOTE_HF_MUTUAL_MEASURED))
+    print("    HF_SYNTAX_REC_PACKAGE                  :", pp_thm(HF_SYNTAX_REC_PACKAGE))
     print(
-        "    IS_SUBSTITUTE_STEP_REPRESENTS (SORRY)  :",
-        pp_thm(IS_SUBSTITUTE_STEP_REPRESENTS),
+        "    SUBSTITUTE_REPRESENTS_SYNTACTIC        :",
+        pp_thm(SUBSTITUTE_REPRESENTS_SYNTACTIC),
     )
-    print(
-        "    IS_SUBSTITUTE_TRACE_REPRESENTS (SORRY) :",
-        pp_thm(IS_SUBSTITUTE_TRACE_REPRESENTS),
-    )
-    print(
-        "    SUBSTITUTE_REPRESENTS (SORRY)          :",
-        pp_thm(SUBSTITUTE_REPRESENTS),
-    )
+    print("    SUBSTITUTE_REPRESENTS_TERM             :", pp_thm(SUBSTITUTE_REPRESENTS_TERM))
+    print("    SUBSTITUTE_REPRESENTS_FORM             :", pp_thm(SUBSTITUTE_REPRESENTS_FORM))
     print(
         "    PROV_HF_REPRESENTS (SORRY)             :",
         pp_thm(PROV_HF_REPRESENTS),

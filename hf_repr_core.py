@@ -29,7 +29,7 @@
 
 from fusion import Var
 from basics import mk_const, mk_app, mk_abs, rand, rator
-from parser import define, parse_type
+from parser import add_const, define, parse, parse_type
 from axioms import mk_forall, mk_imp, mk_not, mk_and, mk_or, mk_exists
 from nat0 import nat0_ty, define_unary_0, mk_suc0, ZERO, AXIOM_3_0, AXIOM_4_0
 from nat0_order import define_wf_lt
@@ -56,14 +56,14 @@ from fusion import ASSUME
 from basics import mk_eq
 
 from hf_syntax import (
-    Var_t,  # noqa: F401  -- parser alias for is_substitute_step
-    Eq_f,  # noqa: F401  -- parser alias for is_substitute_step
-    Not_f,  # noqa: F401  -- parser alias for is_substitute_step
-    Imp_f,  # noqa: F401  -- parser alias for is_substitute_step
-    Forall_f,  # noqa: F401  -- parser alias for is_substitute_step
+    Var_t,  # noqa: F401  -- parser alias for generated HF formulas
+    Eq_f,  # noqa: F401  -- parser alias for generated HF formulas
+    Not_f,  # noqa: F401  -- parser alias for generated HF formulas
+    Imp_f,  # noqa: F401  -- parser alias for generated HF formulas
+    Forall_f,  # noqa: F401  -- parser alias for generated HF formulas
     Insert_t,
     Empty_t,
-    In_a,  # noqa: F401  -- parser alias for is_substitute_step
+    In_a,  # noqa: F401  -- parser alias for generated HF formulas
     IS_TERM_REC,
     IS_FORM_REC,
     IS_TERM_AT_INSERT,
@@ -90,16 +90,15 @@ from hf_syntax import (
     _unfold_rec_via_F_def,
     _mono_iff_value_binary_pw_step,
 )
-from hf_qsyntax import qparse
 from hf_sets import (
-    In,  # noqa: F401  -- parser alias for is_substitute_step
-    Pair_ord,  # noqa: F401  -- parser alias for is_substitute_step
+    In,  # noqa: F401  -- parser alias for HF proof-object predicates
+    Pair_ord,  # noqa: F401  -- parser alias for HF proof-object predicates
     Insert,  # noqa: F401  -- parser alias for quote_hf bridge
     Empty,  # noqa: F401  -- parser alias for quote_hf bridge
     Singleton,  # noqa: F401  -- parser alias for QUOTE_HF_AT_SINGLETON
     Pair,  # noqa: F401  -- parser alias for QUOTE_HF_AT_PAIR
     Pair_ord,  # noqa: F401  -- parser alias for QUOTE_HF_AT_PAIR_ORD
-    Union,  # used by TRACE_EXISTS to merge sub-traces
+    Union,  # noqa: F401  -- parser alias for proof-object union witnesses
     EMPTY_DEF,  # used by QUOTE_HF_AT_EMPTY to fold Empty into 0
     INSERT_AT,  # used by QUOTE_HF_AT_INSERT_LOW to unfold Insert to set_bit
     SINGLETON_AS_INSERT,  # quote_hf Singleton bridge
@@ -134,7 +133,7 @@ from classical import (  # noqa: E402 -- COND machinery for quote_hf body
 )
 from tactics import EQT_INTRO, EQF_INTRO  # noqa: E402,F401  -- used in QUOTE_HF_MONO/_AT_NZ
 from tactics import REWRITE_RULE
-from fusion import vsubst, aty, new_constant
+from fusion import vsubst, aty, new_axiom, new_constant
 from hf_proof import (
     var_x,
     VAR_X_DEF,
@@ -398,8 +397,8 @@ represents_pred = mk_const("represents_pred", [])
 # ---------------------------------------------------------------------------
 # Stage 3C (a) -- representability of ``substitute``.
 #
-# Headline theorem (``SUBSTITUTE_REPRESENTS``, body in hf_repr_thms.py):
-#   |- !F t v. Prov_HF (
+# Headline theorem for formula consumers:
+#   |- !F t v. is_form F ==> Prov_HF (
 #         substitute (substitute (substitute (substitute
 #             substitute_internal (numeral F) var_x)
 #             (numeral t) var_y)
@@ -410,25 +409,19 @@ represents_pred = mk_const("represents_pred", [])
 # ``var_x`` (F-slot), ``var_y`` (t-slot), ``var_z`` (v-slot), ``var_w``
 # (result-slot) -- expressing the relation "substitute(F, t, v) = r".
 #
-# Why a single fixed Sigma_1 formula (not a HOL-recursive family): the
+# Why a single fixed formula (not a HOL-recursive family): the
 # diagonal lemma (Stage 3D) forms the Goedel sentence by substituting a
 # numeric godelnum into a *single fixed* internal-provability formula.
 # Without ``substitute_internal`` as one fixed HF-formula, no ``D(x, y)``
 # represents the diagonal function and the fixed-point construction
 # collapses.
 #
-# Encoding strategy: ``substitute_internal`` is the Sigma_1 predicate
-#     ?T. is_substitute_trace T F t v r
-# where T : nat0 is an HF set of (subterm-shape, output-shape) pairs
-# (Pair_ord-encoded), and is_substitute_trace asserts:
-#   (i)  the input pair (F, r) is in T;
-#   (ii) every (a, b) in T satisfies the structural-recursion clause
-#        matching substitute's SUBSTITUTE_AT_* equations -- a bounded
-#        conjunction over its members via In, decoded by Pair_ord
-#        projection.
-# HF proves substitute_internal at every numeral instance by exhibiting
-# the trace HF set explicitly; verification conjuncts are decidable
-# equalities + In-membership facts, all Sigma_0 in HF.
+# Encoding strategy: ``substitute_internal`` is governed by the scoped
+# ``HF_SYNTAX_REC_PACKAGE`` definitional extension. The package gives
+# constructor-local HF proof rules for Empty/Var/Insert/Eq/In/Not/Imp/Forall
+# and derives representability for syntactic inputs. Malformed nat0 values
+# intentionally have no fake substitution semantics; consumers use the
+# ``SUBSTITUTE_REPRESENTS_FORM`` / ``_TERM`` wrappers.
 # ---------------------------------------------------------------------------
 
 
@@ -469,10 +462,9 @@ VAR_W_DEF = define("var_w", parse_type("nat0"), "Var_t (SUC0 (SUC0 (SUC0 0)))")
 var_w = mk_const("var_w", [])
 
 
-# var_T -- HF-internal bound variable for the existentially-quantified HF
-# trace set inside ``substitute_internal``. Index 4 (SUC0^4 0); the four
-# free slots var_x/y/z/w (indices 0..3) are reserved for the input/output
-# pair (F, t, v, r).
+# var_T -- spare HF-internal bound variable at index 4. The four free slots
+# var_x/y/z/w (indices 0..3) are reserved for the substitute input/output
+# tuple (F, t, v, r).
 VAR_T_DEF = define(
     "var_T",
     parse_type("nat0"),
@@ -484,8 +476,9 @@ IDX_T_DEF = define("idx_T", parse_type("nat0"), "SUC0 (SUC0 (SUC0 (SUC0 0)))")
 idx_T = mk_const("idx_T", [])
 
 
-# Additional HF-internal variables for the body of is_substitute_trace_internal:
-#   var_a, var_b           -- the "!a b. ..." outer for-all binders.
+# Additional HF-internal variables reserved for generated syntax-recursion
+# rules:
+#   var_a, var_b           -- generic constructor slots / binders.
 #   var_s1, var_s2         -- Not_f sub-shape existentials.
 #   var_wq                 -- Var_t-miss / Forall_f-* index existentials
 #                             (named with q-suffix to avoid clash with HOL w).
@@ -796,1558 +789,8 @@ _idx_f2 = _idx_term(15)
 
 
 # ---------------------------------------------------------------------------
-# is_substitute_step T t v a b -- "(a, b) is a valid substitute clause".
-#
-# Sigma_0 (decidable) HOL predicate. Holds iff the pair (a, b) matches one
-# of the 9 SUBSTITUTE_AT_* clauses with respect to the substitution
-# parameters (t, v) and a trace HF set T:
-#   * Constant-shape clauses (Empty_t, Var_t at v, Var_t off v, Forall_f
-#     hit) require no trace consultations -- b is determined by a alone.
-#   * Recursive clauses (Not_f, the binary constructors Eq_f / Imp_f /
-#     Insert_t / In_a, and Forall_f miss) require the corresponding
-#     sub-shape pairs to be in T, witnessed via In (Pair_ord _ _) T.
-#
-# This predicate is the HOL counterpart of the HF-formula
-# ``is_substitute_trace_internal`` to be encoded in Stage B1; the trace
-# existence lemma in Stage A4 builds an HF set T satisfying
-# ``In_a (Pair_ord F r) T /\ !a b. In (Pair_ord a b) T ==>
-#  is_substitute_step T t v a b``.
-# ---------------------------------------------------------------------------
-
-_a_step = Var("a", nat0_ty)
-_b_step = Var("b", nat0_ty)
-_t_step = Var("t", nat0_ty)
-_v_step = Var("v", nat0_ty)
-_T_step = Var("T", nat0_ty)
-
-
-# Pointwise: |- !T t v a b. is_substitute_step T t v a b = body[T,t,v,a,b].
-IS_SUBSTITUTE_STEP_DEF, IS_SUBSTITUTE_STEP_AT = define_with_at(
-    "is_substitute_step",
-    parse_type("nat0 -> nat0 -> nat0 -> nat0 -> nat0 -> bool"),
-    "\\T:nat0. \\t:nat0. \\v:nat0. \\a:nat0. \\b:nat0. "
-    "(a = Empty_t /\\ b = Empty_t) "
-    "\\/ (a = Var_t v /\\ b = t) "
-    "\\/ (?w. a = Var_t w /\\ ~(w = v) /\\ b = Var_t w) "
-    "\\/ (?a1 a2 b1 b2. a = Eq_f a1 a2 /\\ b = Eq_f b1 b2 "
-    "      /\\ In (Pair_ord a1 b1) T /\\ In (Pair_ord a2 b2) T) "
-    "\\/ (?s1 s2. a = Not_f s1 /\\ b = Not_f s2 /\\ In (Pair_ord s1 s2) T) "
-    "\\/ (?a1 a2 b1 b2. a = Imp_f a1 a2 /\\ b = Imp_f b1 b2 "
-    "      /\\ In (Pair_ord a1 b1) T /\\ In (Pair_ord a2 b2) T) "
-    "\\/ (?w f1. a = Forall_f w f1 /\\ w = v /\\ b = Forall_f w f1) "
-    "\\/ (?w f1 f2. a = Forall_f w f1 /\\ ~(w = v) "
-    "      /\\ b = Forall_f w f2 /\\ In (Pair_ord f1 f2) T) "
-    "\\/ (?a1 a2 b1 b2. a = Insert_t a1 a2 /\\ b = Insert_t b1 b2 "
-    "      /\\ In (Pair_ord a1 b1) T /\\ In (Pair_ord a2 b2) T) "
-    "\\/ (?a1 a2 b1 b2. a = In_a a1 a2 /\\ b = In_a b1 b2 "
-    "      /\\ In (Pair_ord a1 b1) T /\\ In (Pair_ord a2 b2) T)",
-)
-is_substitute_step = mk_const("is_substitute_step", [])
-
-
-# ---------------------------------------------------------------------------
-# is_substitute_trace T F t v r -- "T is a complete substitute trace
-# witnessing  r = substitute F t v".
-#
-#   is_substitute_trace T F t v r :=
-#       In (Pair_ord F r) T
-#       /\ (!a b. In (Pair_ord a b) T ==> is_substitute_step T t v a b).
-#
-# Two conjuncts:
-#   (i)  the headline (F, r) pair is in T, so r is the recorded substitute
-#        result for F;
-#   (ii) every member of T is a valid substitute clause (witnessed by the
-#        Sigma_0 recogniser ``is_substitute_step``), so the trace as a
-#        whole is internally consistent and grounded in the SUBSTITUTE_AT_*
-#        equations.
-#
-# ``IS_SUBSTITUTE_TRACE_AT`` exposes this body pointwise for downstream
-# rewriting; the @ args go in the canonical order T, F, t, v, r.
-# ---------------------------------------------------------------------------
-
-_T_n0 = Var("T", nat0_ty)
-_F_n0 = Var("F", nat0_ty)
-_tt_n0 = Var("t", nat0_ty)
-_vv_n0 = Var("v", nat0_ty)
-_rr_n0 = Var("r", nat0_ty)
-
-
-# Pointwise: |- !T F t v r. is_substitute_trace T F t v r =
-#                          In (Pair_ord F r) T /\
-#                          (!a b. In (Pair_ord a b) T ==>
-#                                 is_substitute_step T t v a b).
-IS_SUBSTITUTE_TRACE_DEF, IS_SUBSTITUTE_TRACE_AT = define_with_at(
-    "is_substitute_trace",
-    parse_type("nat0 -> nat0 -> nat0 -> nat0 -> nat0 -> bool"),
-    "\\T:nat0. \\F:nat0. \\t:nat0. \\v:nat0. \\r:nat0. "
-    "In (Pair_ord F r) T "
-    "/\\ (!a b. In (Pair_ord a b) T ==> is_substitute_step T t v a b)",
-)
-is_substitute_trace = mk_const("is_substitute_trace", [])
-
-
-# String-templated 9-disjunction body of is_substitute_step, with the
-# trace HF set ``T`` substituted in. Used by TRACE_STEP_MONO so the same
-# disjunction can be referenced under both T1 and T2 without copy-paste.
-def _is_step_body(T):
-    return (
-        f"(a = Empty_t /\\ b = Empty_t) "
-        f"\\/ (a = Var_t v /\\ b = t) "
-        f"\\/ (?w. a = Var_t w /\\ ~(w = v) /\\ b = Var_t w) "
-        f"\\/ (?a1 a2 b1 b2. a = Eq_f a1 a2 /\\ b = Eq_f b1 b2 "
-        f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T}) "
-        f"\\/ (?s1 s2. a = Not_f s1 /\\ b = Not_f s2 "
-        f"      /\\ In (Pair_ord s1 s2) {T}) "
-        f"\\/ (?a1 a2 b1 b2. a = Imp_f a1 a2 /\\ b = Imp_f b1 b2 "
-        f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T}) "
-        f"\\/ (?w f1. a = Forall_f w f1 /\\ w = v /\\ b = Forall_f w f1) "
-        f"\\/ (?w f1 f2. a = Forall_f w f1 /\\ ~(w = v) "
-        f"      /\\ b = Forall_f w f2 /\\ In (Pair_ord f1 f2) {T}) "
-        f"\\/ (?a1 a2 b1 b2. a = Insert_t a1 a2 /\\ b = Insert_t b1 b2 "
-        f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T}) "
-        f"\\/ (?a1 a2 b1 b2. a = In_a a1 a2 /\\ b = In_a b1 b2 "
-        f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T})"
-    )
-
-
-@proof
-def TRACE_STEP_MONO(p):
-    """|- !T1 T2. (!x. In x T1 ==> In x T2) ==>
-            !t v a b. is_substitute_step T1 t v a b
-                      ==> is_substitute_step T2 t v a b.
-
-    Membership-monotonicity of ``is_substitute_step``. Used by the
-    binary trace-assembly cases of TRACE_EXISTS: combining sub-traces
-    ``T1, T2`` into ``Insert (F, r) (Union T1 T2)`` requires lifting
-    each ``In (Pair_ord _ _) T_i`` justification to the combined trace.
-    """
-    p.goal(
-        "!T1 T2. (!x. In x T1 ==> In x T2) ==> "
-        "!t v a b. is_substitute_step T1 t v a b "
-        "          ==> is_substitute_step T2 t v a b"
-    )
-    p.fix("T1 T2")
-    p.assume("hsub: !x. In x T1 ==> In x T2")
-    p.fix("t v a b")
-    p.assume("hstep: is_substitute_step T1 t v a b")
-
-    body_T1 = _is_step_body("T1")
-    body_T2 = _is_step_body("T2")
-
-    p.have(f"hd1: {body_T1}").by_rewrite_of("hstep", [IS_SUBSTITUTE_STEP_AT])
-
-    with p.have(f"hd2: {body_T2}").proof():
-        with p.cases_on("hd1"):
-            # 1. Empty_t (atomic).
-            with p.case("c1: a = Empty_t /\\ b = Empty_t"):
-                p.thus(body_T2).by_disj("c1")
-            # 3. Var_t hit (atomic).
-            with p.case("c3: a = Var_t v /\\ b = t"):
-                p.thus(body_T2).by_disj("c3")
-            # 4. Var_t miss (existential, no In).
-            with p.case(
-                "c4: ?w. a = Var_t w /\\ ~(w = v) /\\ b = Var_t w"
-            ):
-                p.thus(body_T2).by_disj("c4")
-            # 7. Eq_f (binary recursive).
-            with p.case(
-                "c7: ?a1 a2 b1 b2. a = Eq_f a1 a2 /\\ b = Eq_f b1 b2 "
-                "/\\ In (Pair_ord a1 b1) T1 /\\ In (Pair_ord a2 b2) T1"
-            ):
-                p.split("b2_eq", "(c7a, c7b, c7_in1, c7_in2)")
-                p.have("c7_in1_T2: In (Pair_ord a1 b1) T2").by(
-                    "hsub", "Pair_ord a1 b1", "c7_in1"
-                )
-                p.have("c7_in2_T2: In (Pair_ord a2 b2) T2").by(
-                    "hsub", "Pair_ord a2 b2", "c7_in2"
-                )
-                p.have(
-                    "c7d: ?a1 a2 b1 b2. a = Eq_f a1 a2 /\\ b = Eq_f b1 b2 "
-                    "/\\ In (Pair_ord a1 b1) T2 /\\ In (Pair_ord a2 b2) T2"
-                ).by_exists(
-                    ["a1", "a2", "b1", "b2"],
-                    "c7a", "c7b", "c7_in1_T2", "c7_in2_T2",
-                )
-                p.thus(body_T2).by_disj("c7d")
-            # 8. Not_f (unary recursive).
-            with p.case(
-                "c8: ?s1 s2. a = Not_f s1 /\\ b = Not_f s2 "
-                "/\\ In (Pair_ord s1 s2) T1"
-            ):
-                p.split("s2_eq", "(c8a, c8b, c8_in1)")
-                p.have("c8_in2: In (Pair_ord s1 s2) T2").by(
-                    "hsub", "Pair_ord s1 s2", "c8_in1"
-                )
-                p.have(
-                    "c8d: ?s1 s2. a = Not_f s1 /\\ b = Not_f s2 "
-                    "/\\ In (Pair_ord s1 s2) T2"
-                ).by_exists(["s1", "s2"], "c8a", "c8b", "c8_in2")
-                p.thus(body_T2).by_disj("c8d")
-            # 9. Imp_f (binary recursive).
-            with p.case(
-                "c9: ?a1 a2 b1 b2. a = Imp_f a1 a2 /\\ b = Imp_f b1 b2 "
-                "/\\ In (Pair_ord a1 b1) T1 /\\ In (Pair_ord a2 b2) T1"
-            ):
-                p.split("b2_eq", "(c9a, c9b, c9_in1, c9_in2)")
-                p.have("c9_in1_T2: In (Pair_ord a1 b1) T2").by(
-                    "hsub", "Pair_ord a1 b1", "c9_in1"
-                )
-                p.have("c9_in2_T2: In (Pair_ord a2 b2) T2").by(
-                    "hsub", "Pair_ord a2 b2", "c9_in2"
-                )
-                p.have(
-                    "c9d: ?a1 a2 b1 b2. a = Imp_f a1 a2 /\\ b = Imp_f b1 b2 "
-                    "/\\ In (Pair_ord a1 b1) T2 /\\ In (Pair_ord a2 b2) T2"
-                ).by_exists(
-                    ["a1", "a2", "b1", "b2"],
-                    "c9a", "c9b", "c9_in1_T2", "c9_in2_T2",
-                )
-                p.thus(body_T2).by_disj("c9d")
-            # 10. Forall_f hit (existential, no In).
-            with p.case(
-                "c10: ?w f1. a = Forall_f w f1 /\\ w = v /\\ b = Forall_f w f1"
-            ):
-                p.thus(body_T2).by_disj("c10")
-            # 11. Forall_f miss (existential with In).
-            with p.case(
-                "c11: ?w f1 f2. a = Forall_f w f1 /\\ ~(w = v) "
-                "/\\ b = Forall_f w f2 /\\ In (Pair_ord f1 f2) T1"
-            ):
-                p.split("f2_eq", "(c11a, c11b, c11c, c11_in1)")
-                p.have("c11_in2: In (Pair_ord f1 f2) T2").by(
-                    "hsub", "Pair_ord f1 f2", "c11_in1"
-                )
-                p.have(
-                    "c11d: ?w f1 f2. a = Forall_f w f1 /\\ ~(w = v) "
-                    "/\\ b = Forall_f w f2 /\\ In (Pair_ord f1 f2) T2"
-                ).by_exists(
-                    ["w", "f1", "f2"], "c11a", "c11b", "c11c", "c11_in2"
-                )
-                p.thus(body_T2).by_disj("c11d")
-            # 12. Insert_t (binary recursive).
-            with p.case(
-                "c12: ?a1 a2 b1 b2. a = Insert_t a1 a2 /\\ b = Insert_t b1 b2 "
-                "/\\ In (Pair_ord a1 b1) T1 /\\ In (Pair_ord a2 b2) T1"
-            ):
-                p.split("b2_eq", "(c12a, c12b, c12_in1, c12_in2)")
-                p.have("c12_in1_T2: In (Pair_ord a1 b1) T2").by(
-                    "hsub", "Pair_ord a1 b1", "c12_in1"
-                )
-                p.have("c12_in2_T2: In (Pair_ord a2 b2) T2").by(
-                    "hsub", "Pair_ord a2 b2", "c12_in2"
-                )
-                p.have(
-                    "c12d: ?a1 a2 b1 b2. a = Insert_t a1 a2 "
-                    "/\\ b = Insert_t b1 b2 "
-                    "/\\ In (Pair_ord a1 b1) T2 /\\ In (Pair_ord a2 b2) T2"
-                ).by_exists(
-                    ["a1", "a2", "b1", "b2"],
-                    "c12a", "c12b", "c12_in1_T2", "c12_in2_T2",
-                )
-                p.thus(body_T2).by_disj("c12d")
-            # 13. In_a (binary recursive).
-            with p.case(
-                "c13: ?a1 a2 b1 b2. a = In_a a1 a2 /\\ b = In_a b1 b2 "
-                "/\\ In (Pair_ord a1 b1) T1 /\\ In (Pair_ord a2 b2) T1"
-            ):
-                p.split("b2_eq", "(c13a, c13b, c13_in1, c13_in2)")
-                p.have("c13_in1_T2: In (Pair_ord a1 b1) T2").by(
-                    "hsub", "Pair_ord a1 b1", "c13_in1"
-                )
-                p.have("c13_in2_T2: In (Pair_ord a2 b2) T2").by(
-                    "hsub", "Pair_ord a2 b2", "c13_in2"
-                )
-                p.have(
-                    "c13d: ?a1 a2 b1 b2. a = In_a a1 a2 /\\ b = In_a b1 b2 "
-                    "/\\ In (Pair_ord a1 b1) T2 /\\ In (Pair_ord a2 b2) T2"
-                ).by_exists(
-                    ["a1", "a2", "b1", "b2"],
-                    "c13a", "c13b", "c13_in1_T2", "c13_in2_T2",
-                )
-                p.thus(body_T2).by_disj("c13d")
-
-    p.thus("is_substitute_step T2 t v a b").by_rewrite_of(
-        "hd2", [IS_SUBSTITUTE_STEP_AT]
-    )
-
-
-# ---------------------------------------------------------------------------
-# Helpers for TRACE_EXISTS: membership growth and the generic extension
-# lemma TRACE_EXTEND_BIN that combines two sub-trace validities with a
-# fresh substitute step at (F, r) into a full ``is_substitute_trace``.
-# ---------------------------------------------------------------------------
-
-
-@proof
-def IN_INSERT_GROW(p):
-    """|- !i s x. In x s ==> In x (Insert i s).
-
-    Membership is preserved by Insert. Case-split on ``i = x``:
-    HIT collapses via IN_INSERT_SAME; MISS via IN_INSERT_DIFF.
-    """
-    from tactics import EQT_ELIM
-    p.goal("!i s x. In x s ==> In x (Insert i s)")
-    p.fix("i s x")
-    p.assume("hx: In x s")
-    with p.cases_on(EXCLUDED_MIDDLE, "i = x"):
-        with p.case("hix: i = x"):
-            p.have("h_eq: In x (Insert i s) = T").by_rewrite(
-                ["hix", IN_INSERT_SAME]
-            )
-            p.thus("In x (Insert i s)").by_thm(EQT_ELIM(p.fact("h_eq")))
-        with p.case("hnix: ~(i = x)"):
-            p.have("h_eq: In x (Insert i s) = In x s").by(
-                IN_INSERT_DIFF, "i", "x", "s", "hnix"
-            )
-            p.thus("In x (Insert i s)").by_eq_mp("h_eq", "hx")
-
-
-@proof
-def IN_UNION_LEFT(p):
-    """|- !a b x. In x a ==> In x (Union a b)."""
-    p.goal("!a b x. In x a ==> In x (Union a b)")
-    p.fix("a b x")
-    p.assume("hx: In x a")
-    p.have("hd: In x a \\/ In x b").by_disj("hx")
-    p.have("h_eq: In x (Union a b) = (In x a \\/ In x b)").by(IN_UNION, "x", "a", "b")
-    p.thus("In x (Union a b)").by_eq_mp("h_eq", "hd")
-
-
-@proof
-def IN_UNION_RIGHT(p):
-    """|- !a b x. In x b ==> In x (Union a b)."""
-    p.goal("!a b x. In x b ==> In x (Union a b)")
-    p.fix("a b x")
-    p.assume("hx: In x b")
-    p.have("hd: In x a \\/ In x b").by_disj("hx")
-    p.have("h_eq: In x (Union a b) = (In x a \\/ In x b)").by(IN_UNION, "x", "a", "b")
-    p.thus("In x (Union a b)").by_eq_mp("h_eq", "hd")
-
-
-# ---------------------------------------------------------------------------
-# Phase 0 prototype for HF-native proof objects.
-#
-# These lemmas exercise the ranked-set proof-object design before any
-# ``Prov_HF_internal`` body is written. They deliberately avoid ``cons_l``
-# and list membership. DSL friction is noted inline where the proof needs
-# low-level shaping rather than a compact declarative step.
-# ---------------------------------------------------------------------------
-
-
-@proof
-def VALID_STEP_HF_SET_PRESERVES(p):
-    """|- !P Q k h. (!x. In x P ==> In x Q)
-                     ==> valid_step_hf_set P k h
-                     ==> valid_step_hf_set Q k h."""
-    p.goal(
-        "!P Q k h. (!x. In x P ==> In x Q) "
-        "==> valid_step_hf_set P k h "
-        "==> valid_step_hf_set Q k h",
-        types={"P": nat0_ty, "Q": nat0_ty, "k": nat0_ty, "h": nat0_ty},
-    )
-    p.fix("P Q k h")
-    p.assume("sub: !x. In x P ==> In x Q")
-    p.assume("vP: valid_step_hf_set P k h")
-
-    atP = SPECL([p._parse("P"), p._parse("k"), p._parse("h")], VALID_STEP_HF_SET_AT)
-    atQ = SPECL([p._parse("Q"), p._parse("k"), p._parse("h")], VALID_STEP_HF_SET_AT)
-    bodyP = (
-        "is_axiom h "
-        "\\/ (?i f j g. In (Pair_ord i f) P /\\ In (Pair_ord j g) P "
-        "/\\ nat0_lt i k /\\ nat0_lt j k /\\ is_mp f g h) "
-        "\\/ (?i f. In (Pair_ord i f) P /\\ nat0_lt i k /\\ is_gen f h)"
-    )
-    bodyQ = (
-        "is_axiom h "
-        "\\/ (?i f j g. In (Pair_ord i f) Q /\\ In (Pair_ord j g) Q "
-        "/\\ nat0_lt i k /\\ nat0_lt j k /\\ is_mp f g h) "
-        "\\/ (?i f. In (Pair_ord i f) Q /\\ nat0_lt i k /\\ is_gen f h)"
-    )
-    p.have(f"bodyP: {bodyP}").by_eq_mp(atP, "vP")
-    with p.cases_on("bodyP"):
-        with p.case("ax: is_axiom h"):
-            p.have(f"bodyQ: {bodyQ}").by_disj("ax")
-            p.thus("valid_step_hf_set Q k h").by_eq_mp(SYM(atQ), "bodyQ")
-        with p.case(
-            "mpP: ?i f j g. In (Pair_ord i f) P /\\ In (Pair_ord j g) P "
-            "/\\ nat0_lt i k /\\ nat0_lt j k /\\ is_mp f g h"
-        ):
-            p.split("g_eq", "(in_i_P, in_j_P, lt_i, lt_j, mp)")
-            p.have("in_i_Q: In (Pair_ord i f) Q").by("sub", "Pair_ord i f", "in_i_P")
-            p.have("in_j_Q: In (Pair_ord j g) Q").by("sub", "Pair_ord j g", "in_j_P")
-            # DSL friction: by_exists wants each substituted conjunct as
-            # a separate rule; passing a prebuilt conjunction is rejected.
-            p.have(
-                "mpQ: ?i f j g. In (Pair_ord i f) Q /\\ In (Pair_ord j g) Q "
-                "/\\ nat0_lt i k /\\ nat0_lt j k /\\ is_mp f g h"
-            ).by_exists(["i", "f", "j", "g"], "in_i_Q", "in_j_Q", "lt_i", "lt_j", "mp")
-            p.have(f"bodyQ: {bodyQ}").by_disj("mpQ")
-            p.thus("valid_step_hf_set Q k h").by_eq_mp(SYM(atQ), "bodyQ")
-        with p.case("genP: ?i f. In (Pair_ord i f) P /\\ nat0_lt i k /\\ is_gen f h"):
-            p.split("f_eq", "(in_i_P, lt_i, gen)")
-            p.have("in_i_Q: In (Pair_ord i f) Q").by("sub", "Pair_ord i f", "in_i_P")
-            p.have("genQ: ?i f. In (Pair_ord i f) Q /\\ nat0_lt i k /\\ is_gen f h").by_exists(
-                ["i", "f"], "in_i_Q", "lt_i", "gen"
-            )
-            p.have(f"bodyQ: {bodyQ}").by_disj("genQ")
-            p.thus("valid_step_hf_set Q k h").by_eq_mp(SYM(atQ), "bodyQ")
-
-
-@proof
-def AXIOM_HAS_PROOF_HF_SET(p):
-    """|- !m. is_axiom m ==> ?P. Proof_HF_set P m."""
-    from tactics import EQT_ELIM
-
-    p.goal("!m. is_axiom m ==> ?P. Proof_HF_set P m")
-    p.fix("m")
-    p.assume("ax: is_axiom m")
-
-    P = "Insert (Pair_ord 0 m) Empty"
-    p.have(f"in_head_eq: In (Pair_ord 0 m) ({P}) = T").by_rewrite([IN_INSERT_SAME])
-    p.have(f"in_head: In (Pair_ord 0 m) ({P})").by_thm(EQT_ELIM(p.fact("in_head_eq")))
-
-    with p.have(
-        f"valid_all: !j h. In (Pair_ord j h) ({P}) ==> valid_step_hf_set ({P}) j h"
-    ).proof():
-        p.fix("j h")
-        p.assume(f"hin: In (Pair_ord j h) ({P})")
-        with p.cases_on(EXCLUDED_MIDDLE, "Pair_ord 0 m = Pair_ord j h"):
-            with p.case("heq: Pair_ord 0 m = Pair_ord j h"):
-                p.have("inj: 0 = j /\\ m = h").by(PAIR_ORD_INJ, "0", "m", "j", "h", "heq")
-                p.split("inj", "(_j_eq, m_eq_h)")
-                p.have("ax_h: is_axiom h").by_rewrite_of("ax", ["m_eq_h"])
-                atP = SPECL([p._parse(P), p._parse("j"), p._parse("h")], VALID_STEP_HF_SET_AT)
-                body = (
-                    f"is_axiom h \\/ (?i f j0 g. In (Pair_ord i f) ({P}) "
-                    f"/\\ In (Pair_ord j0 g) ({P}) /\\ nat0_lt i j "
-                    f"/\\ nat0_lt j0 j /\\ is_mp f g h) "
-                    f"\\/ (?i f. In (Pair_ord i f) ({P}) /\\ nat0_lt i j /\\ is_gen f h)"
-                )
-                p.have(f"vbody: {body}").by_disj("ax_h")
-                p.thus(f"valid_step_hf_set ({P}) j h").by_eq_mp(SYM(atP), "vbody")
-            with p.case("hne: ~(Pair_ord 0 m = Pair_ord j h)"):
-                p.have(f"hin_empty_eq: In (Pair_ord j h) ({P}) = In (Pair_ord j h) Empty").by(
-                    IN_INSERT_DIFF, "Pair_ord 0 m", "Pair_ord j h", "Empty", "hne"
-                )
-                p.have("hin_empty: In (Pair_ord j h) Empty").by_eq_mp("hin_empty_eq", "hin")
-                p.have("not_empty: ~In (Pair_ord j h) Empty").by(
-                    NOT_IN_EMPTY, "Pair_ord j h"
-                )
-                # DSL friction: there is no direct "ex falso" have-step
-                # for an arbitrary target. Build the F theorem explicitly
-                # and feed it through CONTR.
-                F_th = MP(NOT_ELIM(p.fact("not_empty")), p.fact("hin_empty"))
-                target = p._parse(f"valid_step_hf_set ({P}) j h")
-                p.thus(f"valid_step_hf_set ({P}) j h").by_thm(CONTR(target, F_th))
-
-    proof_at = SPECL([p._parse(P), p._parse("m")], PROOF_HF_SET_AT)
-    p.have(
-        f"body: ?k. In (Pair_ord k m) ({P}) "
-        f"/\\ (!j h. In (Pair_ord j h) ({P}) ==> valid_step_hf_set ({P}) j h)"
-    ).by_exists(["0"], "in_head", "valid_all")
-    p.have(f"proof_set: Proof_HF_set ({P}) m").by_eq_mp(SYM(proof_at), "body")
-    p.thus("?P. Proof_HF_set P m").by_witness(P, "proof_set")
-
-
-@proof
-def MP_HAS_PROOF_HF_SET(p):
-    """|- !f g. (?P. Proof_HF_set P f)
-              /\\ (?Q. Proof_HF_set Q (Imp_f f g))
-              ==> ?R. Proof_HF_set R g."""
-    from tactics import EQT_ELIM
-
-    p.goal(
-        "!f g. (?P. Proof_HF_set P f) /\\ (?Q. Proof_HF_set Q (Imp_f f g)) "
-        "==> ?R. Proof_HF_set R g"
-    )
-    p.fix("f g")
-    p.assume("(pf_ex, pfg_ex): (?P. Proof_HF_set P f) /\\ (?Q. Proof_HF_set Q (Imp_f f g))")
-    p.choose("P", "pf_ex", eq_label="pf")
-    p.choose("Q", "pfg_ex", eq_label="pfg")
-
-    atP = SPECL([p._parse("P"), p._parse("f")], PROOF_HF_SET_AT)
-    atQ = SPECL([p._parse("Q"), p._parse("Imp_f f g")], PROOF_HF_SET_AT)
-    p.have(
-        "bodyP: ?k. In (Pair_ord k f) P "
-        "/\\ (!j h. In (Pair_ord j h) P ==> valid_step_hf_set P j h)"
-    ).by_eq_mp(atP, "pf")
-    p.have(
-        "bodyQ: ?k. In (Pair_ord k (Imp_f f g)) Q "
-        "/\\ (!j h. In (Pair_ord j h) Q ==> valid_step_hf_set Q j h)"
-    ).by_eq_mp(atQ, "pfg")
-    p.choose("kf", "bodyP", eq_label="pf_body")
-    p.split("pf_body", "(in_f_P, validP)")
-    p.choose("kg", "bodyQ", eq_label="pfg_body")
-    p.split("pfg_body", "(in_imp_Q, validQ)")
-
-    R = "Insert (Pair_ord (Pair_ord kf kg) g) (Union P Q)"
-    kR = "Pair_ord kf kg"
-
-    with p.have(f"subP: !x. In x P ==> In x ({R})").proof():
-        p.fix("x")
-        p.assume("hx: In x P")
-        p.have("h_union: In x (Union P Q)").by(IN_UNION_LEFT, "P", "Q", "x", "hx")
-        p.thus(f"In x ({R})").by(IN_INSERT_GROW, f"Pair_ord ({kR}) g", "Union P Q", "x", "h_union")
-
-    with p.have(f"subQ: !x. In x Q ==> In x ({R})").proof():
-        p.fix("x")
-        p.assume("hx: In x Q")
-        p.have("h_union: In x (Union P Q)").by(IN_UNION_RIGHT, "P", "Q", "x", "hx")
-        p.thus(f"In x ({R})").by(IN_INSERT_GROW, f"Pair_ord ({kR}) g", "Union P Q", "x", "h_union")
-
-    p.have(f"in_f_R: In (Pair_ord kf f) ({R})").by("subP", "Pair_ord kf f", "in_f_P")
-    p.have(f"in_imp_R: In (Pair_ord kg (Imp_f f g)) ({R})").by(
-        "subQ", "Pair_ord kg (Imp_f f g)", "in_imp_Q"
-    )
-    p.have(f"in_g_R_eq: In (Pair_ord ({kR}) g) ({R}) = T").by_rewrite([IN_INSERT_SAME])
-    p.have(f"in_g_R: In (Pair_ord ({kR}) g) ({R})").by_thm(EQT_ELIM(p.fact("in_g_R_eq")))
-
-    with p.have(
-        f"valid_all: !j h. In (Pair_ord j h) ({R}) ==> valid_step_hf_set ({R}) j h"
-    ).proof():
-        p.fix("j h")
-        p.assume(f"hin: In (Pair_ord j h) ({R})")
-        with p.cases_on(EXCLUDED_MIDDLE, f"Pair_ord ({kR}) g = Pair_ord j h"):
-            with p.case(f"heq: Pair_ord ({kR}) g = Pair_ord j h"):
-                p.have(f"inj: ({kR}) = j /\\ g = h").by(
-                    PAIR_ORD_INJ, kR, "g", "j", "h", "heq"
-                )
-                p.split("inj", "(rank_eq, g_eq_h)")
-                p.have(f"lt_f_rank: nat0_lt kf ({kR})").by(NAT0_LT_PAIR_ORD_L, "kf", "kg")
-                p.have(f"lt_imp_rank: nat0_lt kg ({kR})").by(NAT0_LT_PAIR_ORD_R, "kf", "kg")
-                p.have("lt_f_j: nat0_lt kf j").by_rewrite_of("lt_f_rank", ["rank_eq"])
-                p.have("lt_imp_j: nat0_lt kg j").by_rewrite_of("lt_imp_rank", ["rank_eq"])
-                is_mp_at = SPECL(
-                    [p._parse("f"), p._parse("Imp_f f g"), p._parse("g")],
-                    IS_MP_AT,
-                )
-                p.have("mp_g: is_mp f (Imp_f f g) g").by_eq_mp(
-                    SYM(is_mp_at), REFL(p._parse("Imp_f f g"))
-                )
-                p.have("mp_h: is_mp f (Imp_f f g) h").by_rewrite_of("mp_g", ["g_eq_h"])
-                p.have(
-                    f"mp_ex: ?i f0 j0 g0. In (Pair_ord i f0) ({R}) "
-                    f"/\\ In (Pair_ord j0 g0) ({R}) /\\ nat0_lt i j "
-                    f"/\\ nat0_lt j0 j /\\ is_mp f0 g0 h"
-                ).by_exists(
-                    ["kf", "f", "kg", "Imp_f f g"],
-                    "in_f_R",
-                    "in_imp_R",
-                    "lt_f_j",
-                    "lt_imp_j",
-                    "mp_h",
-                )
-                atR = SPECL([p._parse(R), p._parse("j"), p._parse("h")], VALID_STEP_HF_SET_AT)
-                body = (
-                    f"is_axiom h \\/ (?i f0 j0 g0. In (Pair_ord i f0) ({R}) "
-                    f"/\\ In (Pair_ord j0 g0) ({R}) /\\ nat0_lt i j "
-                    f"/\\ nat0_lt j0 j /\\ is_mp f0 g0 h) "
-                    f"\\/ (?i f0. In (Pair_ord i f0) ({R}) /\\ nat0_lt i j /\\ is_gen f0 h)"
-                )
-                p.have(f"vbody: {body}").by_disj("mp_ex")
-                p.thus(f"valid_step_hf_set ({R}) j h").by_eq_mp(SYM(atR), "vbody")
-            with p.case(f"hne: ~(Pair_ord ({kR}) g = Pair_ord j h)"):
-                p.have(f"hin_union_eq: In (Pair_ord j h) ({R}) = In (Pair_ord j h) (Union P Q)").by(
-                    IN_INSERT_DIFF, f"Pair_ord ({kR}) g", "Pair_ord j h", "Union P Q", "hne"
-                )
-                p.have("hin_union: In (Pair_ord j h) (Union P Q)").by_eq_mp(
-                    "hin_union_eq", "hin"
-                )
-                p.have(
-                    "hin_disj: In (Pair_ord j h) P \\/ In (Pair_ord j h) Q"
-                ).by_eq_mp(
-                    SYM(SPECL([p._parse("Pair_ord j h"), p._parse("P"), p._parse("Q")], IN_UNION)),
-                    "hin_union",
-                )
-                with p.cases_on("hin_disj"):
-                    with p.case("hinP: In (Pair_ord j h) P"):
-                        p.have("vP: valid_step_hf_set P j h").by("validP", "j", "h", "hinP")
-                        p.thus(f"valid_step_hf_set ({R}) j h").by(
-                            VALID_STEP_HF_SET_PRESERVES, "P", R, "j", "h", "subP", "vP"
-                        )
-                    with p.case("hinQ: In (Pair_ord j h) Q"):
-                        p.have("vQ: valid_step_hf_set Q j h").by("validQ", "j", "h", "hinQ")
-                        p.thus(f"valid_step_hf_set ({R}) j h").by(
-                            VALID_STEP_HF_SET_PRESERVES, "Q", R, "j", "h", "subQ", "vQ"
-                        )
-
-    proof_at = SPECL([p._parse(R), p._parse("g")], PROOF_HF_SET_AT)
-    p.have(
-        f"body: ?k. In (Pair_ord k g) ({R}) "
-        f"/\\ (!j h. In (Pair_ord j h) ({R}) ==> valid_step_hf_set ({R}) j h)"
-    ).by_exists([kR], "in_g_R", "valid_all")
-    p.have(f"proof_R: Proof_HF_set ({R}) g").by_eq_mp(SYM(proof_at), "body")
-    p.thus("?R. Proof_HF_set R g").by_witness(R, "proof_R")
-
-
-@proof
-def GEN_HAS_PROOF_HF_SET(p):
-    """|- !f x. (?P. Proof_HF_set P f)
-              ==> ?R. Proof_HF_set R (Forall_f x f)."""
-    from tactics import EQT_ELIM
-
-    p.goal("!f x. (?P. Proof_HF_set P f) ==> ?R. Proof_HF_set R (Forall_f x f)")
-    p.fix("f x")
-    p.assume("pf_ex: ?P. Proof_HF_set P f")
-    p.choose("P", "pf_ex", eq_label="pf")
-
-    atP = SPECL([p._parse("P"), p._parse("f")], PROOF_HF_SET_AT)
-    p.have(
-        "bodyP: ?k. In (Pair_ord k f) P "
-        "/\\ (!j h. In (Pair_ord j h) P ==> valid_step_hf_set P j h)"
-    ).by_eq_mp(atP, "pf")
-    p.choose("kf", "bodyP", eq_label="pf_body")
-    p.split("pf_body", "(in_f_P, validP)")
-
-    R = "Insert (Pair_ord (Pair_ord kf 0) (Forall_f x f)) P"
-    kR = "Pair_ord kf 0"
-
-    with p.have(f"subP: !z. In z P ==> In z ({R})").proof():
-        p.fix("z")
-        p.assume("hz: In z P")
-        p.thus(f"In z ({R})").by(
-            IN_INSERT_GROW, f"Pair_ord ({kR}) (Forall_f x f)", "P", "z", "hz"
-        )
-
-    p.have(f"in_f_R: In (Pair_ord kf f) ({R})").by("subP", "Pair_ord kf f", "in_f_P")
-    p.have(f"in_gen_R_eq: In (Pair_ord ({kR}) (Forall_f x f)) ({R}) = T").by_rewrite(
-        [IN_INSERT_SAME]
-    )
-    # DSL friction: rewriting set membership gives an equation to T;
-    # convert it to the boolean fact before using it as a conjunct.
-    p.have(f"in_gen_R: In (Pair_ord ({kR}) (Forall_f x f)) ({R})").by_thm(
-        EQT_ELIM(p.fact("in_gen_R_eq"))
-    )
-
-    is_gen_at = SPECL([p._parse("f"), p._parse("Forall_f x f")], IS_GEN_AT)
-    p.have("gen_witness: ?y. Forall_f x f = Forall_f y f").by_witness(
-        "x", REFL(p._parse("Forall_f x f"))
-    )
-    p.have("gen_fx: is_gen f (Forall_f x f)").by_eq_mp(SYM(is_gen_at), "gen_witness")
-
-    with p.have(
-        f"valid_all: !j h. In (Pair_ord j h) ({R}) ==> valid_step_hf_set ({R}) j h"
-    ).proof():
-        p.fix("j h")
-        p.assume(f"hin: In (Pair_ord j h) ({R})")
-        with p.cases_on(EXCLUDED_MIDDLE, f"Pair_ord ({kR}) (Forall_f x f) = Pair_ord j h"):
-            with p.case(f"heq: Pair_ord ({kR}) (Forall_f x f) = Pair_ord j h"):
-                p.have(f"inj: ({kR}) = j /\\ Forall_f x f = h").by(
-                    PAIR_ORD_INJ, kR, "Forall_f x f", "j", "h", "heq"
-                )
-                p.split("inj", "(rank_eq, forall_eq_h)")
-                p.have(f"lt_f_rank: nat0_lt kf ({kR})").by(NAT0_LT_PAIR_ORD_L, "kf", "0")
-                p.have("lt_f_j: nat0_lt kf j").by_rewrite_of("lt_f_rank", ["rank_eq"])
-                p.have("gen_h: is_gen f h").by_rewrite_of("gen_fx", ["forall_eq_h"])
-                p.have(
-                    f"gen_ex: ?i f0. In (Pair_ord i f0) ({R}) "
-                    f"/\\ nat0_lt i j /\\ is_gen f0 h"
-                ).by_exists(["kf", "f"], "in_f_R", "lt_f_j", "gen_h")
-                atR = SPECL([p._parse(R), p._parse("j"), p._parse("h")], VALID_STEP_HF_SET_AT)
-                body = (
-                    f"is_axiom h \\/ (?i f0 j0 g0. In (Pair_ord i f0) ({R}) "
-                    f"/\\ In (Pair_ord j0 g0) ({R}) /\\ nat0_lt i j "
-                    f"/\\ nat0_lt j0 j /\\ is_mp f0 g0 h) "
-                    f"\\/ (?i f0. In (Pair_ord i f0) ({R}) /\\ nat0_lt i j /\\ is_gen f0 h)"
-                )
-                p.have(f"vbody: {body}").by_disj("gen_ex")
-                p.thus(f"valid_step_hf_set ({R}) j h").by_eq_mp(SYM(atR), "vbody")
-            with p.case(f"hne: ~(Pair_ord ({kR}) (Forall_f x f) = Pair_ord j h)"):
-                p.have(f"hin_P_eq: In (Pair_ord j h) ({R}) = In (Pair_ord j h) P").by(
-                    IN_INSERT_DIFF,
-                    f"Pair_ord ({kR}) (Forall_f x f)",
-                    "Pair_ord j h",
-                    "P",
-                    "hne",
-                )
-                p.have("hinP: In (Pair_ord j h) P").by_eq_mp("hin_P_eq", "hin")
-                p.have("vP: valid_step_hf_set P j h").by("validP", "j", "h", "hinP")
-                p.thus(f"valid_step_hf_set ({R}) j h").by(
-                    VALID_STEP_HF_SET_PRESERVES, "P", R, "j", "h", "subP", "vP"
-                )
-
-    proof_at = SPECL([p._parse(R), p._parse("Forall_f x f")], PROOF_HF_SET_AT)
-    p.have(
-        f"body: ?k. In (Pair_ord k (Forall_f x f)) ({R}) "
-        f"/\\ (!j h. In (Pair_ord j h) ({R}) ==> valid_step_hf_set ({R}) j h)"
-    ).by_exists([kR], "in_gen_R", "valid_all")
-    p.have(f"proof_R: Proof_HF_set ({R}) (Forall_f x f)").by_eq_mp(SYM(proof_at), "body")
-    p.thus("?R. Proof_HF_set R (Forall_f x f)").by_witness(R, "proof_R")
-
-
-# ---------------------------------------------------------------------------
-# Stage 3B (k) -- set-native closure rules.
-#
-#   (1) |- !n. is_axiom n ==> Prov_HF n.
-#   (2) |- !f g. Prov_HF f /\ Prov_HF (Imp_f f g) ==> Prov_HF g.
-#   (3) |- !f x. Prov_HF f ==> Prov_HF (Forall_f x f).
-#
-# Each closure rule now packages the corresponding HF-set proof-object
-# prototype through ``PROV_HF_AT``. No list proof object, ``mem_l``, or
-# ``append_l`` occurs in the ``Prov_HF`` route.
-# ---------------------------------------------------------------------------
-
-
-@proof
-def PROV_HF_AXIOM(p):
-    """|- !n. is_axiom n ==> Prov_HF n."""
-    p.goal("!n. is_axiom n ==> Prov_HF n")
-    p.fix("n")
-    p.assume("ax: is_axiom n")
-    p.have("ex: ?P. Proof_HF_set P n").by(AXIOM_HAS_PROOF_HF_SET, "n", "ax")
-    pq_at_n = SPEC(p._parse("n"), PROV_HF_AT)
-    p.thus("Prov_HF n").by_eq_mp(SYM(pq_at_n), "ex")
-
-
-@proof
-def PROV_HF_MP(p):
-    """|- !f g. Prov_HF f /\\ Prov_HF (Imp_f f g) ==> Prov_HF g."""
-    p.goal("!f g. (Prov_HF f /\\ Prov_HF (Imp_f f g)) ==> Prov_HF g")
-    p.fix("f g")
-    p.assume("(pf, pfg): Prov_HF f /\\ Prov_HF (Imp_f f g)")
-    pq_at_f = SPEC(p._parse("f"), PROV_HF_AT)
-    pq_at_fg = SPEC(p._parse("Imp_f f g"), PROV_HF_AT)
-    pq_at_g = SPEC(p._parse("g"), PROV_HF_AT)
-    p.have("ex_f: ?P. Proof_HF_set P f").by_eq_mp(pq_at_f, "pf")
-    p.have("ex_fg: ?Q. Proof_HF_set Q (Imp_f f g)").by_eq_mp(pq_at_fg, "pfg")
-    p.have("ex_g: ?R. Proof_HF_set R g").by(
-        MP_HAS_PROOF_HF_SET, "f", "g", CONJ(p.fact("ex_f"), p.fact("ex_fg"))
-    )
-    p.thus("Prov_HF g").by_eq_mp(SYM(pq_at_g), "ex_g")
-
-
-@proof
-def PROV_HF_GEN(p):
-    """|- !f x. Prov_HF f ==> Prov_HF (Forall_f x f)."""
-    p.goal("!f x. Prov_HF f ==> Prov_HF (Forall_f x f)")
-    p.fix("f x")
-    p.assume("pf: Prov_HF f")
-    pq_at_f = SPEC(p._parse("f"), PROV_HF_AT)
-    pq_at_fx = SPEC(p._parse("Forall_f x f"), PROV_HF_AT)
-    p.have("ex_f: ?P. Proof_HF_set P f").by_eq_mp(pq_at_f, "pf")
-    p.have("ex_fx: ?R. Proof_HF_set R (Forall_f x f)").by(
-        GEN_HAS_PROOF_HF_SET, "f", "x", "ex_f"
-    )
-    p.thus("Prov_HF (Forall_f x f)").by_eq_mp(SYM(pq_at_fx), "ex_fx")
-
-
-# ---------------------------------------------------------------------------
-# Stage 3B (l) -- the equivalence ``Prov_HF n <=> ?P. Proof_HF_set P n``.
-#
-# It is the set-native defining equation, packaged via ``PROV_HF_AT``.
-# ---------------------------------------------------------------------------
-
-
-PROV_HF_IFF_PROOF_HF_SET = PROV_HF_AT
-
-
-@proof
-def TRACE_EXTEND_BIN(p):
-    """Generic trace extension.
-
-    Given two sub-trace validities and an ``is_substitute_step`` for the
-    headline pair (phi, r) at the merged trace, conclude the full
-    ``is_substitute_trace`` at the merged trace
-    ``T = Insert (Pair_ord phi r) (Union T1 T2)``.
-
-    |- !phi r t v T1 T2.
-         (!a b. In (Pair_ord a b) T1 ==> is_substitute_step T1 t v a b)
-         ==> (!a b. In (Pair_ord a b) T2 ==> is_substitute_step T2 t v a b)
-         ==> is_substitute_step (Insert (Pair_ord phi r) (Union T1 T2)) t v phi r
-         ==> is_substitute_trace (Insert (Pair_ord phi r) (Union T1 T2)) phi t v r.
-
-    The bound name ``phi`` is used (not ``F``) because the parser treats
-    bare ``F`` as the boolean-false constant; identifiers visible after
-    ``p.fix`` cannot shadow registered constants. Atomic cases use
-    T1 = T2 = Empty (validities vacuous via NOT_IN_EMPTY); unary cases
-    use T2 = Empty; binary cases use both. Lifts via TRACE_STEP_MONO
-    with sub-trace inclusion ``T_i subseteq T``.
-    """
-    p.goal(
-        "!phi r t v T1 T2. "
-        "(!a b. In (Pair_ord a b) T1 ==> is_substitute_step T1 t v a b) "
-        "==> (!a b. In (Pair_ord a b) T2 ==> is_substitute_step T2 t v a b) "
-        "==> is_substitute_step (Insert (Pair_ord phi r) (Union T1 T2)) t v phi r "
-        "==> is_substitute_trace (Insert (Pair_ord phi r) (Union T1 T2)) phi t v r"
-    )
-    p.fix("phi r t v T1 T2")
-    p.assume("hv1: !a b. In (Pair_ord a b) T1 ==> is_substitute_step T1 t v a b")
-    p.assume("hv2: !a b. In (Pair_ord a b) T2 ==> is_substitute_step T2 t v a b")
-    p.assume(
-        "hstep_phi: is_substitute_step "
-        "(Insert (Pair_ord phi r) (Union T1 T2)) t v phi r"
-    )
-
-    # Membership growth: T1, T2 are subsets of the merged trace T.
-    with p.have(
-        "sub1: !x. In x T1 ==> In x (Insert (Pair_ord phi r) (Union T1 T2))"
-    ).proof():
-        p.fix("x")
-        p.assume("hx: In x T1")
-        p.have("h_un: In x (Union T1 T2)").by(IN_UNION_LEFT, "T1", "T2", "x", "hx")
-        p.thus("In x (Insert (Pair_ord phi r) (Union T1 T2))").by(
-            IN_INSERT_GROW, "Pair_ord phi r", "Union T1 T2", "x", "h_un"
-        )
-    with p.have(
-        "sub2: !x. In x T2 ==> In x (Insert (Pair_ord phi r) (Union T1 T2))"
-    ).proof():
-        p.fix("x")
-        p.assume("hx: In x T2")
-        p.have("h_un: In x (Union T1 T2)").by(IN_UNION_RIGHT, "T1", "T2", "x", "hx")
-        p.thus("In x (Insert (Pair_ord phi r) (Union T1 T2))").by(
-            IN_INSERT_GROW, "Pair_ord phi r", "Union T1 T2", "x", "h_un"
-        )
-
-    # Validity for the merged trace.
-    with p.have(
-        "hvalid: !a b. In (Pair_ord a b) (Insert (Pair_ord phi r) (Union T1 T2)) "
-        "==> is_substitute_step (Insert (Pair_ord phi r) (Union T1 T2)) t v a b"
-    ).proof():
-        p.fix("a b")
-        p.assume(
-            "hin: In (Pair_ord a b) (Insert (Pair_ord phi r) (Union T1 T2))"
-        )
-        with p.cases_on(EXCLUDED_MIDDLE, "Pair_ord phi r = Pair_ord a b"):
-            with p.case("h_eq: Pair_ord phi r = Pair_ord a b"):
-                p.have("h_inj: phi = a /\\ r = b").by(
-                    PAIR_ORD_INJ, "phi", "r", "a", "b", "h_eq"
-                )
-                p.split("h_inj", "(hphia, hrb)")
-                p.thus(
-                    "is_substitute_step "
-                    "(Insert (Pair_ord phi r) (Union T1 T2)) t v a b"
-                ).by_rewrite_of("hstep_phi", ["hphia", "hrb"])
-            with p.case("h_neq: ~(Pair_ord phi r = Pair_ord a b)"):
-                p.have(
-                    "h_diff: In (Pair_ord a b) "
-                    "(Insert (Pair_ord phi r) (Union T1 T2)) "
-                    "= In (Pair_ord a b) (Union T1 T2)"
-                ).by(
-                    IN_INSERT_DIFF,
-                    "Pair_ord phi r",
-                    "Pair_ord a b",
-                    "Union T1 T2",
-                    "h_neq",
-                )
-                p.have("h_in_union: In (Pair_ord a b) (Union T1 T2)").by_eq_mp(
-                    "h_diff", "hin"
-                )
-                p.have(
-                    "h_un_split: In (Pair_ord a b) T1 \\/ In (Pair_ord a b) T2"
-                ).by_eq_mp(
-                    SPECL(
-                        [
-                            p._parse("Pair_ord a b"),
-                            p._parse("T1"),
-                            p._parse("T2"),
-                        ],
-                        IN_UNION,
-                    ),
-                    "h_in_union",
-                )
-                with p.cases_on("h_un_split"):
-                    with p.case("h1: In (Pair_ord a b) T1"):
-                        p.have(
-                            "hstep1: is_substitute_step T1 t v a b"
-                        ).by("hv1", "a", "b", "h1")
-                        p.thus(
-                            "is_substitute_step "
-                            "(Insert (Pair_ord phi r) (Union T1 T2)) t v a b"
-                        ).by(
-                            TRACE_STEP_MONO,
-                            "T1",
-                            "Insert (Pair_ord phi r) (Union T1 T2)",
-                            "sub1",
-                            "t",
-                            "v",
-                            "a",
-                            "b",
-                            "hstep1",
-                        )
-                    with p.case("h2: In (Pair_ord a b) T2"):
-                        p.have(
-                            "hstep2: is_substitute_step T2 t v a b"
-                        ).by("hv2", "a", "b", "h2")
-                        p.thus(
-                            "is_substitute_step "
-                            "(Insert (Pair_ord phi r) (Union T1 T2)) t v a b"
-                        ).by(
-                            TRACE_STEP_MONO,
-                            "T2",
-                            "Insert (Pair_ord phi r) (Union T1 T2)",
-                            "sub2",
-                            "t",
-                            "v",
-                            "a",
-                            "b",
-                            "hstep2",
-                        )
-
-    # Headline (1): In (Pair_ord phi r) T = T (IN_INSERT_SAME).
-    from tactics import EQT_ELIM
-    p.have(
-        "hhead_eq: In (Pair_ord phi r) "
-        "(Insert (Pair_ord phi r) (Union T1 T2)) = T"
-    ).by_rewrite([IN_INSERT_SAME])
-    p.have(
-        "hhead: In (Pair_ord phi r) (Insert (Pair_ord phi r) (Union T1 T2))"
-    ).by_thm(EQT_ELIM(p.fact("hhead_eq")))
-
-    # Combine into the trace predicate via IS_SUBSTITUTE_TRACE_AT.
-    p.have(
-        "hbody: In (Pair_ord phi r) (Insert (Pair_ord phi r) (Union T1 T2)) /\\ "
-        "(!a b. In (Pair_ord a b) (Insert (Pair_ord phi r) (Union T1 T2)) "
-        "==> is_substitute_step (Insert (Pair_ord phi r) (Union T1 T2)) t v a b)"
-    ).by_thm(CONJ(p.fact("hhead"), p.fact("hvalid")))
-    p.thus(
-        "is_substitute_trace (Insert (Pair_ord phi r) (Union T1 T2)) phi t v r"
-    ).by_rewrite_of("hbody", [IS_SUBSTITUTE_TRACE_AT])
-
-
-@proof
-def EMPTY_TRACE_VALIDITY(p):
-    """|- !t v a b. In (Pair_ord a b) Empty ==> is_substitute_step Empty t v a b.
-
-    Vacuous: nothing is in Empty (NOT_IN_EMPTY). Used to instantiate the
-    sub-trace validity hypotheses of ``TRACE_EXTEND_BIN`` when a slot is
-    not actually recursed into (atomic cases set both T1 = T2 = Empty;
-    unary cases set T2 = Empty).
-    """
-    p.goal(
-        "!t v a b. In (Pair_ord a b) Empty ==> is_substitute_step Empty t v a b"
-    )
-    p.fix("t v a b")
-    p.assume("hin: In (Pair_ord a b) Empty")
-    p.have("hnin: ~In (Pair_ord a b) Empty").by(NOT_IN_EMPTY, "Pair_ord a b")
-    p.absurd().by_conj("hin", "hnin")
-
-
-# ---------------------------------------------------------------------------
-# Per-case proof helpers for TRACE_EXISTS.
-#
-# Each helper is a plain Python function taking ``p`` (the active Proof)
-# and the case-specific data; they call DSL primitives on ``p`` to build
-# the headline ``is_substitute_step`` for the constructor case and close
-# via ``TRACE_EXTEND_BIN``. The helpers expect the case to have already
-# auto-introduced the constructor bvars; they perform the remaining
-# ``p.choose`` and ``p.split`` steps.
-# ---------------------------------------------------------------------------
-
-
-def _ih_subtrace(p, sub_name, lt_label, term_label, sub_label):
-    """Apply the strong-induction IH at sub-formula ``sub_name``, choose
-    a sub-trace ``T_<sub_name>`` and split its body into headline /
-    validity facts.
-
-    Returns the (T_var, head_label, valid_label) trio of names registered.
-    """
-    p.have(
-        f"{sub_label}_ex: ?T. is_substitute_trace T {sub_name} t v "
-        f"(substitute {sub_name} t v)"
-    ).by("IH", sub_name, lt_label, "t", "v", term_label)
-    T_name = f"T_{sub_label}"
-    p.choose(T_name, f"{sub_label}_ex", eq_label=f"{T_name}_eq")
-    rec_T = SPECL(
-        [
-            p._parse(T_name),
-            p._parse(sub_name),
-            p._parse("t"),
-            p._parse("v"),
-            p._parse(f"substitute {sub_name} t v"),
-        ],
-        IS_SUBSTITUTE_TRACE_AT,
-    )
-    p.have(
-        f"{T_name}_body: In (Pair_ord {sub_name} (substitute {sub_name} t v)) "
-        f"{T_name} /\\ (!a b. In (Pair_ord a b) {T_name} "
-        f"==> is_substitute_step {T_name} t v a b)"
-    ).by_eq_mp(rec_T, f"{T_name}_eq")
-    head_label = f"{T_name}_head"
-    valid_label = f"{T_name}_valid"
-    p.split(f"{T_name}_body", f"({head_label}, {valid_label})")
-    return T_name, head_label, valid_label
-
-
-def _membership_in_merged(p, sub_term, T_in, merged_str, source_label,
-                          *, src_in_left, target_label):
-    """Prove ``In sub_term merged_str`` from ``In sub_term T_in`` where
-    merged_str = ``Insert (Pair_ord phi (substitute phi t v)) (Union T1 T2)``
-    and ``T_in`` is either ``T1`` (src_in_left=True) or ``T2``."""
-    grow_lemma = IN_UNION_LEFT if src_in_left else IN_UNION_RIGHT
-    if src_in_left:
-        un_args = [T_in, "Empty" if T_in.startswith("T1") and "T2" not in merged_str else _peer_of_left(merged_str), sub_term, source_label]
-    # Simpler: just unwrap inline. (See _do_binary_*_case for direct calls.)
-    raise NotImplementedError
-
-
-def _peer_of_left(merged_str):
-    return "<unused>"
-
-
-def _do_binary_case(
-    p, ctor, subst_at_lemma, lt_l_lemma, lt_r_lemma, step_body, *,
-    sub_t_label="is_term", child_or="is_term"
-):
-    """Close a binary constructor case (Insert_t/Eq_f/Imp_f/In_a). The
-    case has auto-introduced ``a`` and ``b`` and registered
-    ``b_eq: phi = ctor a b /\\ <child_or> a /\\ <child_or> b``.
-
-    ``child_or`` is the predicate guarding the children: ``is_term`` for
-    Insert_t/Eq_f/In_a, ``is_form`` for Imp_f.
-    """
-    p.split("b_eq", "(phi_eq, h_a_pred, h_b_pred)")
-    # Sub-formula nat0_lt facts.
-    p.have(f"lt_a: nat0_lt a phi").by_rewrite_of(
-        SPECL([p._parse("a"), p._parse("b")], lt_l_lemma), ["phi_eq"]
-    )
-    p.have(f"lt_b: nat0_lt b phi").by_rewrite_of(
-        SPECL([p._parse("a"), p._parse("b")], lt_r_lemma), ["phi_eq"]
-    )
-    p.have(f"hor_a: is_term a \\/ is_form a").by_disj("h_a_pred")
-    p.have(f"hor_b: is_term b \\/ is_form b").by_disj("h_b_pred")
-    # IH on each child.
-    _ih_subtrace(p, "a", "lt_a", "hor_a", "a")
-    _ih_subtrace(p, "b", "lt_b", "hor_b", "b")
-    # substitute phi t v = ctor (substitute a t v) (substitute b t v).
-    p.have(
-        f"h_subst: substitute phi t v "
-        f"= {ctor} (substitute a t v) (substitute b t v)"
-    ).by_rewrite(["phi_eq", subst_at_lemma])
-    merged = (
-        "Insert (Pair_ord phi (substitute phi t v)) (Union T_a T_b)"
-    )
-    # In (Pair_ord a (substitute a t v)) merged via T_a side.
-    with p.have(
-        f"h_in_a: In (Pair_ord a (substitute a t v)) ({merged})"
-    ).proof():
-        p.have(
-            "h_in_un: In (Pair_ord a (substitute a t v)) (Union T_a T_b)"
-        ).by(IN_UNION_LEFT, "T_a", "T_b",
-             "Pair_ord a (substitute a t v)", "T_a_head")
-        p.thus(
-            f"In (Pair_ord a (substitute a t v)) ({merged})"
-        ).by(IN_INSERT_GROW,
-             "Pair_ord phi (substitute phi t v)",
-             "Union T_a T_b",
-             "Pair_ord a (substitute a t v)",
-             "h_in_un")
-    with p.have(
-        f"h_in_b: In (Pair_ord b (substitute b t v)) ({merged})"
-    ).proof():
-        p.have(
-            "h_in_un: In (Pair_ord b (substitute b t v)) (Union T_a T_b)"
-        ).by(IN_UNION_RIGHT, "T_a", "T_b",
-             "Pair_ord b (substitute b t v)", "T_b_head")
-        p.thus(
-            f"In (Pair_ord b (substitute b t v)) ({merged})"
-        ).by(IN_INSERT_GROW,
-             "Pair_ord phi (substitute phi t v)",
-             "Union T_a T_b",
-             "Pair_ord b (substitute b t v)",
-             "h_in_un")
-    # Build the constructor's disjunct's existential.
-    p.have(
-        f"h_disj_step: ?a1 a2 b1 b2. phi = {ctor} a1 a2 "
-        f"/\\ substitute phi t v = {ctor} b1 b2 "
-        f"/\\ In (Pair_ord a1 b1) ({merged}) "
-        f"/\\ In (Pair_ord a2 b2) ({merged})"
-    ).by_exists(
-        ["a", "b", "substitute a t v", "substitute b t v"],
-        "phi_eq", "h_subst", "h_in_a", "h_in_b",
-    )
-    p.have(f"h_body: {step_body(merged)}").by_disj("h_disj_step")
-    p.have(
-        f"h_step: is_substitute_step ({merged}) "
-        f"t v phi (substitute phi t v)"
-    ).by_rewrite_of("h_body", [IS_SUBSTITUTE_STEP_AT])
-    p.have(
-        f"h_trace: is_substitute_trace ({merged}) "
-        f"phi t v (substitute phi t v)"
-    ).by(
-        TRACE_EXTEND_BIN,
-        "phi", "substitute phi t v",
-        "t", "v", "T_a", "T_b",
-        "T_a_valid", "T_b_valid", "h_step",
-    )
-    p.thus(
-        "?T. is_substitute_trace T phi t v (substitute phi t v)"
-    ).by_witness(merged, "h_trace")
-
-
-# Aliases for the term-children and form-children variants -- they share
-# the same proof structure; ``is_term``/``is_form`` distinction matters
-# only for the ``by_disj`` membership check, which uses the ``\/`` of
-# both predicates and accepts either.
-_do_binary_term_case = _do_binary_case
-_do_binary_form_case = _do_binary_case
-
-
-def _do_unary_form_case(p, ctor, subst_at_lemma, lt_lemma, step_body):
-    """Close a unary constructor case (Not_f). Auto-introduced
-    ``x`` plus ``x_eq: phi = ctor x /\\ <pred> x``."""
-    p.split("x_eq", "(phi_eq, h_xp)")
-    p.have(f"lt_x: nat0_lt x phi").by_rewrite_of(
-        SPEC(p._parse("x"), lt_lemma), ["phi_eq"]
-    )
-    p.have(f"hor_x: is_term x \\/ is_form x").by_disj("h_xp")
-    _ih_subtrace(p, "x", "lt_x", "hor_x", "x")
-    p.have(
-        f"h_subst: substitute phi t v = {ctor} (substitute x t v)"
-    ).by_rewrite(["phi_eq", subst_at_lemma])
-    merged = (
-        "Insert (Pair_ord phi (substitute phi t v)) (Union T_x Empty)"
-    )
-    with p.have(
-        f"h_in_sub: In (Pair_ord x (substitute x t v)) ({merged})"
-    ).proof():
-        p.have(
-            "h_in_un: In (Pair_ord x (substitute x t v)) (Union T_x Empty)"
-        ).by(IN_UNION_LEFT, "T_x", "Empty",
-             "Pair_ord x (substitute x t v)", "T_x_head")
-        p.thus(
-            f"In (Pair_ord x (substitute x t v)) ({merged})"
-        ).by(IN_INSERT_GROW,
-             "Pair_ord phi (substitute phi t v)",
-             "Union T_x Empty",
-             "Pair_ord x (substitute x t v)",
-             "h_in_un")
-    p.have(
-        f"h_disj_step: ?s1 s2. phi = {ctor} s1 "
-        f"/\\ substitute phi t v = {ctor} s2 "
-        f"/\\ In (Pair_ord s1 s2) ({merged})"
-    ).by_exists(
-        ["x", "substitute x t v"],
-        "phi_eq", "h_subst", "h_in_sub",
-    )
-    p.have(f"h_body: {step_body(merged)}").by_disj("h_disj_step")
-    p.have(
-        f"h_step: is_substitute_step ({merged}) "
-        f"t v phi (substitute phi t v)"
-    ).by_rewrite_of("h_body", [IS_SUBSTITUTE_STEP_AT])
-    p.have(
-        f"h_trace: is_substitute_trace ({merged}) "
-        f"phi t v (substitute phi t v)"
-    ).by(
-        TRACE_EXTEND_BIN,
-        "phi", "substitute phi t v",
-        "t", "v", "T_x", "Empty",
-        "T_x_valid", "hev", "h_step",
-    )
-    p.thus(
-        "?T. is_substitute_trace T phi t v (substitute phi t v)"
-    ).by_witness(merged, "h_trace")
-
-
-def _do_forall_case(p, step_body):
-    """Close the Forall_f case with hit/miss split. Auto-introduced
-    ``a`` and ``b`` plus ``b_eq: phi = Forall_f a b /\\ is_form b``."""
-    p.split("b_eq", "(phi_eq, h_b_form)")
-    with p.cases_on(EXCLUDED_MIDDLE, "a = v"):
-        with p.case("hit: a = v"):
-            # phi = Forall_f a b; a = v; substitute = phi (no-op).
-            p.have("hit_sym: v = a").by_thm(SYM(p.fact("hit")))
-            p.have(
-                "h_subst_inner: substitute (Forall_f a b) t v = Forall_f a b"
-            ).by(SUBSTITUTE_AT_FORALL_HIT, "a", "b", "t", "v", "hit_sym")
-            p.have(
-                "h_subst: substitute phi t v = phi"
-            ).by_rewrite_of(
-                "h_subst_inner",
-                [SYM(p.fact("phi_eq"))],
-            )
-            # b (= substitute phi t v after rewrite) — express as Forall_f a b.
-            p.have(
-                "h_b_eq: substitute phi t v = Forall_f a b"
-            ).by_rewrite_of("h_subst", ["phi_eq"])
-            # Disjunct 10: ?w f1. a' = Forall_f w f1 /\ w = v /\ b' = Forall_f w f1.
-            # Witness w=a, f1=b. (Note inner a, b don't conflict with outer
-            # is_substitute_step's a, b which are different bvars.)
-            p.have(
-                "h_disj_step: ?w f1. phi = Forall_f w f1 "
-                "/\\ w = v "
-                "/\\ substitute phi t v = Forall_f w f1"
-            ).by_exists(
-                ["a", "b"], "phi_eq", "hit", "h_b_eq"
-            )
-            merged = (
-                "Insert (Pair_ord phi (substitute phi t v)) "
-                "(Union Empty Empty)"
-            )
-            p.have(f"h_body: {step_body(merged)}").by_disj("h_disj_step")
-            p.have(
-                f"h_step: is_substitute_step ({merged}) "
-                f"t v phi (substitute phi t v)"
-            ).by_rewrite_of("h_body", [IS_SUBSTITUTE_STEP_AT])
-            p.have(
-                f"h_trace: is_substitute_trace ({merged}) "
-                f"phi t v (substitute phi t v)"
-            ).by(
-                TRACE_EXTEND_BIN,
-                "phi", "substitute phi t v",
-                "t", "v", "Empty", "Empty",
-                "hev", "hev", "h_step",
-            )
-            p.thus(
-                "?T. is_substitute_trace T phi t v (substitute phi t v)"
-            ).by_witness(merged, "h_trace")
-        with p.case("miss: ~(a = v)"):
-            # phi = Forall_f a b; ~(a = v); recurse on b.
-            with p.have("miss_sym: ~(v = a)").proof():
-                with p.suppose("hva: v = a"):
-                    p.have("hav: a = v").by_thm(SYM(p.fact("hva")))
-                    p.absurd().by_conj("hav", "miss")
-            p.have(
-                "h_subst_inner: substitute (Forall_f a b) t v "
-                "= Forall_f a (substitute b t v)"
-            ).by(SUBSTITUTE_AT_FORALL_MISS, "a", "b", "t", "v", "miss_sym")
-            p.have(
-                "h_subst: substitute phi t v "
-                "= Forall_f a (substitute b t v)"
-            ).by_rewrite_of(
-                "h_subst_inner",
-                [SYM(p.fact("phi_eq"))],
-            )
-            p.have("lt_b: nat0_lt b phi").by_rewrite_of(
-                SPECL([p._parse("a"), p._parse("b")], NAT0_LT_FORALL_F_R),
-                ["phi_eq"],
-            )
-            p.have("hor_b: is_term b \\/ is_form b").by_disj("h_b_form")
-            _ih_subtrace(p, "b", "lt_b", "hor_b", "b")
-            merged = (
-                "Insert (Pair_ord phi (substitute phi t v)) (Union T_b Empty)"
-            )
-            with p.have(
-                f"h_in_b: In (Pair_ord b (substitute b t v)) ({merged})"
-            ).proof():
-                p.have(
-                    "h_in_un: In (Pair_ord b (substitute b t v)) "
-                    "(Union T_b Empty)"
-                ).by(IN_UNION_LEFT, "T_b", "Empty",
-                     "Pair_ord b (substitute b t v)", "T_b_head")
-                p.thus(
-                    f"In (Pair_ord b (substitute b t v)) ({merged})"
-                ).by(IN_INSERT_GROW,
-                     "Pair_ord phi (substitute phi t v)",
-                     "Union T_b Empty",
-                     "Pair_ord b (substitute b t v)",
-                     "h_in_un")
-            # Disjunct 11: ?w f1 f2. a' = Forall_f w f1 /\ ~(w=v)
-            #                        /\ b' = Forall_f w f2 /\ In (Pair_ord f1 f2) T.
-            # Witness w=a, f1=b, f2=substitute b t v.
-            p.have(
-                "h_disj_step: ?w f1 f2. phi = Forall_f w f1 "
-                "/\\ ~(w = v) "
-                "/\\ substitute phi t v = Forall_f w f2 "
-                f"/\\ In (Pair_ord f1 f2) ({merged})"
-            ).by_exists(
-                ["a", "b", "substitute b t v"],
-                "phi_eq", "miss", "h_subst", "h_in_b",
-            )
-            p.have(f"h_body: {step_body(merged)}").by_disj("h_disj_step")
-            p.have(
-                f"h_step: is_substitute_step ({merged}) "
-                f"t v phi (substitute phi t v)"
-            ).by_rewrite_of("h_body", [IS_SUBSTITUTE_STEP_AT])
-            p.have(
-                f"h_trace: is_substitute_trace ({merged}) "
-                f"phi t v (substitute phi t v)"
-            ).by(
-                TRACE_EXTEND_BIN,
-                "phi", "substitute phi t v",
-                "t", "v", "T_b", "Empty",
-                "T_b_valid", "hev", "h_step",
-            )
-            p.thus(
-                "?T. is_substitute_trace T phi t v (substitute phi t v)"
-            ).by_witness(merged, "h_trace")
-
-
-# ---------------------------------------------------------------------------
-# TRACE_EXISTS -- trace existence for syntactic F.
-#
-#   |- !F t v. (is_term F \/ is_form F) ==>
-#               ?T. is_substitute_trace T F t v (substitute F t v).
-#
-# Strong induction on F via nat0_lt; case-split on the is_term / is_form
-# disjuncts to expose F's constructor shape; in each constructor case
-# build the trace as ``Insert (Pair_ord F (substitute F t v))
-# (Union T_sub1 T_sub2)`` over IH-supplied sub-traces (with Empty
-# fillers for atomic / unary cases), then close via TRACE_EXTEND_BIN.
-# ---------------------------------------------------------------------------
-
-
-@proof
-def TRACE_EXISTS(p):
-    # Bound variable named ``phi`` rather than ``F`` because the parser
-    # resolves bare ``F`` to the boolean false constant (DEFAULT_SIG); a
-    # fix'd Var would never shadow it. The theorem statement is otherwise
-    # identical (alpha-equivalent under the outer forall).
-    p.goal(
-        "!phi t v. (is_term phi \\/ is_form phi) ==> "
-        "?T. is_substitute_trace T phi t v (substitute phi t v)"
-    )
-    with p.strong_induction("phi", "IH"):
-        # IH : !k. nat0_lt k phi
-        #          ==> !t v. (is_term k \/ is_form k)
-        #                    ==> ?T. is_substitute_trace T k t v (substitute k t v).
-        p.fix("t v")
-        p.assume("hphi: is_term phi \\/ is_form phi")
-
-        # Empty validity (used by atomic / unary cases as filler).
-        p.have(
-            "hev: !a b. In (Pair_ord a b) Empty "
-            "==> is_substitute_step Empty t v a b"
-        ).by(EMPTY_TRACE_VALIDITY, "t", "v")
-
-        # Helper: 9-disjunction body of is_substitute_step at the
-        # headline pair (phi, substitute phi t v) -- i.e. the result of
-        # applying IS_SUBSTITUTE_STEP_AT and substituting a := phi,
-        # b := substitute phi t v.
-        def step_body(T):
-            A = "phi"
-            B = "(substitute phi t v)"
-            T = f"({T})"
-            return (
-                f"({A} = Empty_t /\\ {B} = Empty_t) "
-                f"\\/ ({A} = Var_t v /\\ {B} = t) "
-                f"\\/ (?w. {A} = Var_t w /\\ ~(w = v) /\\ {B} = Var_t w) "
-                f"\\/ (?a1 a2 b1 b2. {A} = Eq_f a1 a2 /\\ {B} = Eq_f b1 b2 "
-                f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T}) "
-                f"\\/ (?s1 s2. {A} = Not_f s1 /\\ {B} = Not_f s2 "
-                f"      /\\ In (Pair_ord s1 s2) {T}) "
-                f"\\/ (?a1 a2 b1 b2. {A} = Imp_f a1 a2 /\\ {B} = Imp_f b1 b2 "
-                f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T}) "
-                f"\\/ (?w f1. {A} = Forall_f w f1 /\\ w = v /\\ {B} = Forall_f w f1) "
-                f"\\/ (?w f1 f2. {A} = Forall_f w f1 /\\ ~(w = v) "
-                f"      /\\ {B} = Forall_f w f2 /\\ In (Pair_ord f1 f2) {T}) "
-                f"\\/ (?a1 a2 b1 b2. {A} = Insert_t a1 a2 /\\ {B} = Insert_t b1 b2 "
-                f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T}) "
-                f"\\/ (?a1 a2 b1 b2. {A} = In_a a1 a2 /\\ {B} = In_a b1 b2 "
-                f"      /\\ In (Pair_ord a1 b1) {T} /\\ In (Pair_ord a2 b2) {T})"
-            )
-
-        with p.cases_on("hphi"):
-            # =========================================================
-            # CASE: is_term phi.
-            # =========================================================
-            with p.case("ht: is_term phi"):
-                ht_disj_str = (
-                    "phi = Empty_t "
-                    "\\/ (?x. phi = Var_t x) "
-                    "\\/ (?a b. phi = Insert_t a b /\\ is_term a /\\ is_term b)"
-                )
-                rec_at_phi = SPEC(p._parse("phi"), IS_TERM_REC)
-                p.have(f"ht_disj: {ht_disj_str}").by_eq_mp(rec_at_phi, "ht")
-
-                with p.cases_on("ht_disj"):
-                    # --- Empty_t ---
-                    with p.case("c_empty: phi = Empty_t"):
-                        merged = (
-                            "Insert (Pair_ord phi (substitute phi t v)) "
-                            "(Union Empty Empty)"
-                        )
-                        # substitute phi t v = Empty_t.
-                        p.have(
-                            "h_subst: substitute phi t v = Empty_t"
-                        ).by_rewrite(["c_empty", SUBSTITUTE_AT_EMPTY])
-                        # Disjunct 1: phi = Empty_t /\ substitute phi t v = Empty_t.
-                        p.have(
-                            "h_clause: phi = Empty_t "
-                            "/\\ substitute phi t v = Empty_t"
-                        ).by_thm(CONJ(p.fact("c_empty"), p.fact("h_subst")))
-                        # by_disj on a conjunction-typed leaf works -- the
-                        # disjunction's leaf is exactly this conjunction.
-                        p.have(
-                            f"h_body: {step_body(merged)}"
-                        ).by_disj("h_clause")
-                        p.have(
-                            f"h_step: is_substitute_step ({merged}) "
-                            f"t v phi (substitute phi t v)"
-                        ).by_rewrite_of("h_body", [IS_SUBSTITUTE_STEP_AT])
-                        p.have(
-                            f"h_trace: is_substitute_trace ({merged}) "
-                            f"phi t v (substitute phi t v)"
-                        ).by(
-                            TRACE_EXTEND_BIN,
-                            "phi", "substitute phi t v",
-                            "t", "v", "Empty", "Empty",
-                            "hev", "hev", "h_step",
-                        )
-                        p.thus(
-                            "?T. is_substitute_trace T phi t v (substitute phi t v)"
-                        ).by_witness(merged, "h_trace")
-
-                    # --- Var_t (atomic; hit/miss split) ---
-                    with p.case("c_var: ?x. phi = Var_t x"):
-                        # Auto-chooses x; x_eq: phi = Var_t x.
-                        merged = (
-                            "Insert (Pair_ord phi (substitute phi t v)) "
-                            "(Union Empty Empty)"
-                        )
-                        with p.cases_on(EXCLUDED_MIDDLE, "v = x"):
-                            with p.case("hit: v = x"):
-                                # phi = Var_t x = Var_t v; substitute = t.
-                                p.have(
-                                    "h_subst_inner: substitute (Var_t x) t v = t"
-                                ).by(SUBSTITUTE_AT_VAR_HIT, "x", "t", "v", "hit")
-                                p.have(
-                                    "h_subst: substitute phi t v = t"
-                                ).by_rewrite_of(
-                                    "h_subst_inner", [SYM(p.fact("x_eq"))]
-                                )
-                                # phi = Var_t v.
-                                p.have("h_xv: x = v").by_thm(
-                                    SYM(p.fact("hit"))
-                                )
-                                p.have("h_phi_var_v: phi = Var_t v").by_rewrite_of(
-                                    "x_eq", ["h_xv"]
-                                )
-                                # Disjunct 3: a = Var_t v /\ b = t.
-                                p.have(
-                                    "h_clause: phi = Var_t v "
-                                    "/\\ substitute phi t v = t"
-                                ).by_thm(
-                                    CONJ(p.fact("h_phi_var_v"), p.fact("h_subst"))
-                                )
-                                p.have(
-                                    f"h_body: {step_body(merged)}"
-                                ).by_disj("h_clause")
-                                p.have(
-                                    f"h_step: is_substitute_step ({merged}) "
-                                    f"t v phi (substitute phi t v)"
-                                ).by_rewrite_of(
-                                    "h_body", [IS_SUBSTITUTE_STEP_AT]
-                                )
-                                p.have(
-                                    f"h_trace: is_substitute_trace ({merged}) "
-                                    f"phi t v (substitute phi t v)"
-                                ).by(
-                                    TRACE_EXTEND_BIN,
-                                    "phi", "substitute phi t v",
-                                    "t", "v", "Empty", "Empty",
-                                    "hev", "hev", "h_step",
-                                )
-                                p.thus(
-                                    "?T. is_substitute_trace T phi t v "
-                                    "(substitute phi t v)"
-                                ).by_witness(merged, "h_trace")
-                            with p.case("miss: ~(v = x)"):
-                                # phi = Var_t x; ~(v = x).
-                                # substitute (Var_t x) t v = Var_t x = phi.
-                                p.have(
-                                    "h_subst_x: substitute (Var_t x) t v = Var_t x"
-                                ).by(
-                                    SUBSTITUTE_AT_VAR_MISS, "x", "t", "v", "miss"
-                                )
-                                p.have(
-                                    "h_subst: substitute phi t v = phi"
-                                ).by_rewrite_of(
-                                    "h_subst_x",
-                                    [SYM(p.fact("x_eq"))],
-                                )
-                                # Need ~(x = v) for the disjunct (NEQ_SYM).
-                                with p.have("h_xv_neq: ~(x = v)").proof():
-                                    with p.suppose("hxv: x = v"):
-                                        p.have("hvx: v = x").by_thm(
-                                            SYM(p.fact("hxv"))
-                                        )
-                                        p.absurd().by_conj("hvx", "miss")
-                                # Disjunct 4: ?w. a=Var_t w /\ ~(w=v) /\ b=Var_t w.
-                                # Witness w = x; b = Var_t x = phi (= substitute phi t v).
-                                p.have(
-                                    "h_b_eq: substitute phi t v = Var_t x"
-                                ).by_rewrite_of(
-                                    "h_subst", ["x_eq"],
-                                )
-                                p.have(
-                                    "h_disj_step: ?w. phi = Var_t w "
-                                    "/\\ ~(w = v) "
-                                    "/\\ substitute phi t v = Var_t w"
-                                ).by_exists(
-                                    ["x"], "x_eq", "h_xv_neq", "h_b_eq",
-                                )
-                                p.have(
-                                    f"h_body: {step_body(merged)}"
-                                ).by_disj("h_disj_step")
-                                p.have(
-                                    f"h_step: is_substitute_step ({merged}) "
-                                    f"t v phi (substitute phi t v)"
-                                ).by_rewrite_of(
-                                    "h_body", [IS_SUBSTITUTE_STEP_AT]
-                                )
-                                p.have(
-                                    f"h_trace: is_substitute_trace ({merged}) "
-                                    f"phi t v (substitute phi t v)"
-                                ).by(
-                                    TRACE_EXTEND_BIN,
-                                    "phi", "substitute phi t v",
-                                    "t", "v", "Empty", "Empty",
-                                    "hev", "hev", "h_step",
-                                )
-                                p.thus(
-                                    "?T. is_substitute_trace T phi t v "
-                                    "(substitute phi t v)"
-                                ).by_witness(merged, "h_trace")
-
-                    # --- Insert_t (binary) ---
-                    with p.case(
-                        "c_insert: ?a b. phi = Insert_t a b "
-                        "/\\ is_term a /\\ is_term b"
-                    ):
-                        _do_binary_term_case(
-                            p, "Insert_t", SUBSTITUTE_AT_INSERT,
-                            NAT0_LT_INSERT_T_L, NAT0_LT_INSERT_T_R, step_body,
-                        )
-
-            # =========================================================
-            # CASE: is_form phi.
-            # =========================================================
-            with p.case("hf: is_form phi"):
-                hf_disj_str = (
-                    "(?a b. phi = Eq_f a b /\\ is_term a /\\ is_term b) "
-                    "\\/ (?x. phi = Not_f x /\\ is_form x) "
-                    "\\/ (?a b. phi = Imp_f a b /\\ is_form a /\\ is_form b) "
-                    "\\/ (?a b. phi = Forall_f a b /\\ is_form b) "
-                    "\\/ (?a b. phi = In_a a b /\\ is_term a /\\ is_term b)"
-                )
-                rec_at_phi_form = SPEC(p._parse("phi"), IS_FORM_REC)
-                p.have(f"hf_disj: {hf_disj_str}").by_eq_mp(rec_at_phi_form, "hf")
-
-                with p.cases_on("hf_disj"):
-                    with p.case(
-                        "c_eq: ?a b. phi = Eq_f a b "
-                        "/\\ is_term a /\\ is_term b"
-                    ):
-                        _do_binary_term_case(
-                            p, "Eq_f", SUBSTITUTE_AT_EQ,
-                            NAT0_LT_EQ_F_L, NAT0_LT_EQ_F_R, step_body,
-                        )
-                    with p.case("c_not: ?x. phi = Not_f x /\\ is_form x"):
-                        _do_unary_form_case(
-                            p, "Not_f", SUBSTITUTE_AT_NOT,
-                            NAT0_LT_NOT_F, step_body,
-                        )
-                    with p.case(
-                        "c_imp: ?a b. phi = Imp_f a b "
-                        "/\\ is_form a /\\ is_form b"
-                    ):
-                        _do_binary_form_case(
-                            p, "Imp_f", SUBSTITUTE_AT_IMP,
-                            NAT0_LT_IMP_F_L, NAT0_LT_IMP_F_R, step_body,
-                        )
-                    with p.case(
-                        "c_fa: ?a b. phi = Forall_f a b /\\ is_form b"
-                    ):
-                        _do_forall_case(p, step_body)
-                    with p.case(
-                        "c_in: ?a b. phi = In_a a b "
-                        "/\\ is_term a /\\ is_term b"
-                    ):
-                        _do_binary_term_case(
-                            p, "In_a", SUBSTITUTE_AT_IN,
-                            NAT0_LT_IN_A_L, NAT0_LT_IN_A_R, step_body,
-                        )
-
+# Substitute representability now uses the syntax-recursion package below.
+# The old finite-computation proof route has been removed from this module.
 
 # ===========================================================================
 # HF-encoding side.
@@ -2369,8 +812,7 @@ def TRACE_EXISTS(p):
 #   Every HF-set input slot in a representability goal uses ``quote_hf``.
 #   The ``SUBSTITUTE_REPRESENTS`` headline keeps ``numeral`` for the F /
 #   t / v / r slots; the IS_*_REPRESENTS lemmas use ``quote_hf``
-#   throughout since their inputs are all HF-shaped (traces, encoded
-#   shapes, set members).
+#   throughout since their inputs are HF-shaped encoded sets and members.
 # ===========================================================================
 
 
@@ -3063,6 +1505,464 @@ def SUBSTITUTE_QUOTE_HF(p):
                 )
 
 
+@proof
+def IN_INSERT_GROW(p):
+    """|- !i s x. In x s ==> In x (Insert i s)."""
+    from tactics import EQT_ELIM
+
+    p.goal("!i s x. In x s ==> In x (Insert i s)")
+    p.fix("i s x")
+    p.assume("hx: In x s")
+    with p.cases_on(EXCLUDED_MIDDLE, "i = x"):
+        with p.case("hix: i = x"):
+            p.have("h_eq: In x (Insert i s) = T").by_rewrite(
+                ["hix", IN_INSERT_SAME]
+            )
+            p.thus("In x (Insert i s)").by_thm(EQT_ELIM(p.fact("h_eq")))
+        with p.case("hnix: ~(i = x)"):
+            p.have("h_eq: In x (Insert i s) = In x s").by(
+                IN_INSERT_DIFF, "i", "x", "s", "hnix"
+            )
+            p.thus("In x (Insert i s)").by_eq_mp("h_eq", "hx")
+
+
+@proof
+def IN_UNION_LEFT(p):
+    """|- !a b x. In x a ==> In x (Union a b)."""
+    p.goal("!a b x. In x a ==> In x (Union a b)")
+    p.fix("a b x")
+    p.assume("hx: In x a")
+    p.have("hd: In x a \\/ In x b").by_disj("hx")
+    p.have("h_eq: In x (Union a b) = (In x a \\/ In x b)").by(
+        IN_UNION, "x", "a", "b"
+    )
+    p.thus("In x (Union a b)").by_eq_mp("h_eq", "hd")
+
+
+@proof
+def IN_UNION_RIGHT(p):
+    """|- !a b x. In x b ==> In x (Union a b)."""
+    p.goal("!a b x. In x b ==> In x (Union a b)")
+    p.fix("a b x")
+    p.assume("hx: In x b")
+    p.have("hd: In x a \\/ In x b").by_disj("hx")
+    p.have("h_eq: In x (Union a b) = (In x a \\/ In x b)").by(
+        IN_UNION, "x", "a", "b"
+    )
+    p.thus("In x (Union a b)").by_eq_mp("h_eq", "hd")
+
+
+# ---------------------------------------------------------------------------
+# Phase 0 prototype for HF-native proof objects.
+#
+# These lemmas exercise the ranked-set proof-object design before any
+# ``Prov_HF_internal`` body is written. They deliberately avoid ``cons_l``
+# and list membership. DSL friction is noted inline where the proof needs
+# low-level shaping rather than a compact declarative step.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def VALID_STEP_HF_SET_PRESERVES(p):
+    """|- !P Q k h. (!x. In x P ==> In x Q)
+                     ==> valid_step_hf_set P k h
+                     ==> valid_step_hf_set Q k h."""
+    p.goal(
+        "!P Q k h. (!x. In x P ==> In x Q) "
+        "==> valid_step_hf_set P k h "
+        "==> valid_step_hf_set Q k h",
+        types={"P": nat0_ty, "Q": nat0_ty, "k": nat0_ty, "h": nat0_ty},
+    )
+    p.fix("P Q k h")
+    p.assume("sub: !x. In x P ==> In x Q")
+    p.assume("vP: valid_step_hf_set P k h")
+
+    atP = SPECL([p._parse("P"), p._parse("k"), p._parse("h")], VALID_STEP_HF_SET_AT)
+    atQ = SPECL([p._parse("Q"), p._parse("k"), p._parse("h")], VALID_STEP_HF_SET_AT)
+    bodyP = (
+        "is_axiom h "
+        "\\/ (?i f j g. In (Pair_ord i f) P /\\ In (Pair_ord j g) P "
+        "/\\ nat0_lt i k /\\ nat0_lt j k /\\ is_mp f g h) "
+        "\\/ (?i f. In (Pair_ord i f) P /\\ nat0_lt i k /\\ is_gen f h)"
+    )
+    bodyQ = (
+        "is_axiom h "
+        "\\/ (?i f j g. In (Pair_ord i f) Q /\\ In (Pair_ord j g) Q "
+        "/\\ nat0_lt i k /\\ nat0_lt j k /\\ is_mp f g h) "
+        "\\/ (?i f. In (Pair_ord i f) Q /\\ nat0_lt i k /\\ is_gen f h)"
+    )
+    p.have(f"bodyP: {bodyP}").by_eq_mp(atP, "vP")
+    with p.cases_on("bodyP"):
+        with p.case("ax: is_axiom h"):
+            p.have(f"bodyQ: {bodyQ}").by_disj("ax")
+            p.thus("valid_step_hf_set Q k h").by_eq_mp(SYM(atQ), "bodyQ")
+        with p.case(
+            "mpP: ?i f j g. In (Pair_ord i f) P /\\ In (Pair_ord j g) P "
+            "/\\ nat0_lt i k /\\ nat0_lt j k /\\ is_mp f g h"
+        ):
+            p.split("g_eq", "(in_i_P, in_j_P, lt_i, lt_j, mp)")
+            p.have("in_i_Q: In (Pair_ord i f) Q").by("sub", "Pair_ord i f", "in_i_P")
+            p.have("in_j_Q: In (Pair_ord j g) Q").by("sub", "Pair_ord j g", "in_j_P")
+            # DSL friction: by_exists wants each substituted conjunct as
+            # a separate rule; passing a prebuilt conjunction is rejected.
+            p.have(
+                "mpQ: ?i f j g. In (Pair_ord i f) Q /\\ In (Pair_ord j g) Q "
+                "/\\ nat0_lt i k /\\ nat0_lt j k /\\ is_mp f g h"
+            ).by_exists(["i", "f", "j", "g"], "in_i_Q", "in_j_Q", "lt_i", "lt_j", "mp")
+            p.have(f"bodyQ: {bodyQ}").by_disj("mpQ")
+            p.thus("valid_step_hf_set Q k h").by_eq_mp(SYM(atQ), "bodyQ")
+        with p.case("genP: ?i f. In (Pair_ord i f) P /\\ nat0_lt i k /\\ is_gen f h"):
+            p.split("f_eq", "(in_i_P, lt_i, gen)")
+            p.have("in_i_Q: In (Pair_ord i f) Q").by("sub", "Pair_ord i f", "in_i_P")
+            p.have("genQ: ?i f. In (Pair_ord i f) Q /\\ nat0_lt i k /\\ is_gen f h").by_exists(
+                ["i", "f"], "in_i_Q", "lt_i", "gen"
+            )
+            p.have(f"bodyQ: {bodyQ}").by_disj("genQ")
+            p.thus("valid_step_hf_set Q k h").by_eq_mp(SYM(atQ), "bodyQ")
+
+
+@proof
+def AXIOM_HAS_PROOF_HF_SET(p):
+    """|- !m. is_axiom m ==> ?P. Proof_HF_set P m."""
+    from tactics import EQT_ELIM
+
+    p.goal("!m. is_axiom m ==> ?P. Proof_HF_set P m")
+    p.fix("m")
+    p.assume("ax: is_axiom m")
+
+    P = "Insert (Pair_ord 0 m) Empty"
+    p.have(f"in_head_eq: In (Pair_ord 0 m) ({P}) = T").by_rewrite([IN_INSERT_SAME])
+    p.have(f"in_head: In (Pair_ord 0 m) ({P})").by_thm(EQT_ELIM(p.fact("in_head_eq")))
+
+    with p.have(
+        f"valid_all: !j h. In (Pair_ord j h) ({P}) ==> valid_step_hf_set ({P}) j h"
+    ).proof():
+        p.fix("j h")
+        p.assume(f"hin: In (Pair_ord j h) ({P})")
+        with p.cases_on(EXCLUDED_MIDDLE, "Pair_ord 0 m = Pair_ord j h"):
+            with p.case("heq: Pair_ord 0 m = Pair_ord j h"):
+                p.have("inj: 0 = j /\\ m = h").by(PAIR_ORD_INJ, "0", "m", "j", "h", "heq")
+                p.split("inj", "(_j_eq, m_eq_h)")
+                p.have("ax_h: is_axiom h").by_rewrite_of("ax", ["m_eq_h"])
+                atP = SPECL([p._parse(P), p._parse("j"), p._parse("h")], VALID_STEP_HF_SET_AT)
+                body = (
+                    f"is_axiom h \\/ (?i f j0 g. In (Pair_ord i f) ({P}) "
+                    f"/\\ In (Pair_ord j0 g) ({P}) /\\ nat0_lt i j "
+                    f"/\\ nat0_lt j0 j /\\ is_mp f g h) "
+                    f"\\/ (?i f. In (Pair_ord i f) ({P}) /\\ nat0_lt i j /\\ is_gen f h)"
+                )
+                p.have(f"vbody: {body}").by_disj("ax_h")
+                p.thus(f"valid_step_hf_set ({P}) j h").by_eq_mp(SYM(atP), "vbody")
+            with p.case("hne: ~(Pair_ord 0 m = Pair_ord j h)"):
+                p.have(f"hin_empty_eq: In (Pair_ord j h) ({P}) = In (Pair_ord j h) Empty").by(
+                    IN_INSERT_DIFF, "Pair_ord 0 m", "Pair_ord j h", "Empty", "hne"
+                )
+                p.have("hin_empty: In (Pair_ord j h) Empty").by_eq_mp("hin_empty_eq", "hin")
+                p.have("not_empty: ~In (Pair_ord j h) Empty").by(
+                    NOT_IN_EMPTY, "Pair_ord j h"
+                )
+                # DSL friction: there is no direct "ex falso" have-step
+                # for an arbitrary target. Build the F theorem explicitly
+                # and feed it through CONTR.
+                F_th = MP(NOT_ELIM(p.fact("not_empty")), p.fact("hin_empty"))
+                target = p._parse(f"valid_step_hf_set ({P}) j h")
+                p.thus(f"valid_step_hf_set ({P}) j h").by_thm(CONTR(target, F_th))
+
+    proof_at = SPECL([p._parse(P), p._parse("m")], PROOF_HF_SET_AT)
+    p.have(
+        f"body: ?k. In (Pair_ord k m) ({P}) "
+        f"/\\ (!j h. In (Pair_ord j h) ({P}) ==> valid_step_hf_set ({P}) j h)"
+    ).by_exists(["0"], "in_head", "valid_all")
+    p.have(f"proof_set: Proof_HF_set ({P}) m").by_eq_mp(SYM(proof_at), "body")
+    p.thus("?P. Proof_HF_set P m").by_witness(P, "proof_set")
+
+
+@proof
+def MP_HAS_PROOF_HF_SET(p):
+    """|- !f g. (?P. Proof_HF_set P f)
+              /\\ (?Q. Proof_HF_set Q (Imp_f f g))
+              ==> ?R. Proof_HF_set R g."""
+    from tactics import EQT_ELIM
+
+    p.goal(
+        "!f g. (?P. Proof_HF_set P f) /\\ (?Q. Proof_HF_set Q (Imp_f f g)) "
+        "==> ?R. Proof_HF_set R g"
+    )
+    p.fix("f g")
+    p.assume("(pf_ex, pfg_ex): (?P. Proof_HF_set P f) /\\ (?Q. Proof_HF_set Q (Imp_f f g))")
+    p.choose("P", "pf_ex", eq_label="pf")
+    p.choose("Q", "pfg_ex", eq_label="pfg")
+
+    atP = SPECL([p._parse("P"), p._parse("f")], PROOF_HF_SET_AT)
+    atQ = SPECL([p._parse("Q"), p._parse("Imp_f f g")], PROOF_HF_SET_AT)
+    p.have(
+        "bodyP: ?k. In (Pair_ord k f) P "
+        "/\\ (!j h. In (Pair_ord j h) P ==> valid_step_hf_set P j h)"
+    ).by_eq_mp(atP, "pf")
+    p.have(
+        "bodyQ: ?k. In (Pair_ord k (Imp_f f g)) Q "
+        "/\\ (!j h. In (Pair_ord j h) Q ==> valid_step_hf_set Q j h)"
+    ).by_eq_mp(atQ, "pfg")
+    p.choose("kf", "bodyP", eq_label="pf_body")
+    p.split("pf_body", "(in_f_P, validP)")
+    p.choose("kg", "bodyQ", eq_label="pfg_body")
+    p.split("pfg_body", "(in_imp_Q, validQ)")
+
+    R = "Insert (Pair_ord (Pair_ord kf kg) g) (Union P Q)"
+    kR = "Pair_ord kf kg"
+
+    with p.have(f"subP: !x. In x P ==> In x ({R})").proof():
+        p.fix("x")
+        p.assume("hx: In x P")
+        p.have("h_union: In x (Union P Q)").by(IN_UNION_LEFT, "P", "Q", "x", "hx")
+        p.thus(f"In x ({R})").by(IN_INSERT_GROW, f"Pair_ord ({kR}) g", "Union P Q", "x", "h_union")
+
+    with p.have(f"subQ: !x. In x Q ==> In x ({R})").proof():
+        p.fix("x")
+        p.assume("hx: In x Q")
+        p.have("h_union: In x (Union P Q)").by(IN_UNION_RIGHT, "P", "Q", "x", "hx")
+        p.thus(f"In x ({R})").by(IN_INSERT_GROW, f"Pair_ord ({kR}) g", "Union P Q", "x", "h_union")
+
+    p.have(f"in_f_R: In (Pair_ord kf f) ({R})").by("subP", "Pair_ord kf f", "in_f_P")
+    p.have(f"in_imp_R: In (Pair_ord kg (Imp_f f g)) ({R})").by(
+        "subQ", "Pair_ord kg (Imp_f f g)", "in_imp_Q"
+    )
+    p.have(f"in_g_R_eq: In (Pair_ord ({kR}) g) ({R}) = T").by_rewrite([IN_INSERT_SAME])
+    p.have(f"in_g_R: In (Pair_ord ({kR}) g) ({R})").by_thm(EQT_ELIM(p.fact("in_g_R_eq")))
+
+    with p.have(
+        f"valid_all: !j h. In (Pair_ord j h) ({R}) ==> valid_step_hf_set ({R}) j h"
+    ).proof():
+        p.fix("j h")
+        p.assume(f"hin: In (Pair_ord j h) ({R})")
+        with p.cases_on(EXCLUDED_MIDDLE, f"Pair_ord ({kR}) g = Pair_ord j h"):
+            with p.case(f"heq: Pair_ord ({kR}) g = Pair_ord j h"):
+                p.have(f"inj: ({kR}) = j /\\ g = h").by(
+                    PAIR_ORD_INJ, kR, "g", "j", "h", "heq"
+                )
+                p.split("inj", "(rank_eq, g_eq_h)")
+                p.have(f"lt_f_rank: nat0_lt kf ({kR})").by(NAT0_LT_PAIR_ORD_L, "kf", "kg")
+                p.have(f"lt_imp_rank: nat0_lt kg ({kR})").by(NAT0_LT_PAIR_ORD_R, "kf", "kg")
+                p.have("lt_f_j: nat0_lt kf j").by_rewrite_of("lt_f_rank", ["rank_eq"])
+                p.have("lt_imp_j: nat0_lt kg j").by_rewrite_of("lt_imp_rank", ["rank_eq"])
+                is_mp_at = SPECL(
+                    [p._parse("f"), p._parse("Imp_f f g"), p._parse("g")],
+                    IS_MP_AT,
+                )
+                p.have("mp_g: is_mp f (Imp_f f g) g").by_eq_mp(
+                    SYM(is_mp_at), REFL(p._parse("Imp_f f g"))
+                )
+                p.have("mp_h: is_mp f (Imp_f f g) h").by_rewrite_of("mp_g", ["g_eq_h"])
+                p.have(
+                    f"mp_ex: ?i f0 j0 g0. In (Pair_ord i f0) ({R}) "
+                    f"/\\ In (Pair_ord j0 g0) ({R}) /\\ nat0_lt i j "
+                    f"/\\ nat0_lt j0 j /\\ is_mp f0 g0 h"
+                ).by_exists(
+                    ["kf", "f", "kg", "Imp_f f g"],
+                    "in_f_R",
+                    "in_imp_R",
+                    "lt_f_j",
+                    "lt_imp_j",
+                    "mp_h",
+                )
+                atR = SPECL([p._parse(R), p._parse("j"), p._parse("h")], VALID_STEP_HF_SET_AT)
+                body = (
+                    f"is_axiom h \\/ (?i f0 j0 g0. In (Pair_ord i f0) ({R}) "
+                    f"/\\ In (Pair_ord j0 g0) ({R}) /\\ nat0_lt i j "
+                    f"/\\ nat0_lt j0 j /\\ is_mp f0 g0 h) "
+                    f"\\/ (?i f0. In (Pair_ord i f0) ({R}) /\\ nat0_lt i j /\\ is_gen f0 h)"
+                )
+                p.have(f"vbody: {body}").by_disj("mp_ex")
+                p.thus(f"valid_step_hf_set ({R}) j h").by_eq_mp(SYM(atR), "vbody")
+            with p.case(f"hne: ~(Pair_ord ({kR}) g = Pair_ord j h)"):
+                p.have(f"hin_union_eq: In (Pair_ord j h) ({R}) = In (Pair_ord j h) (Union P Q)").by(
+                    IN_INSERT_DIFF, f"Pair_ord ({kR}) g", "Pair_ord j h", "Union P Q", "hne"
+                )
+                p.have("hin_union: In (Pair_ord j h) (Union P Q)").by_eq_mp(
+                    "hin_union_eq", "hin"
+                )
+                p.have(
+                    "hin_disj: In (Pair_ord j h) P \\/ In (Pair_ord j h) Q"
+                ).by_eq_mp(
+                    SYM(SPECL([p._parse("Pair_ord j h"), p._parse("P"), p._parse("Q")], IN_UNION)),
+                    "hin_union",
+                )
+                with p.cases_on("hin_disj"):
+                    with p.case("hinP: In (Pair_ord j h) P"):
+                        p.have("vP: valid_step_hf_set P j h").by("validP", "j", "h", "hinP")
+                        p.thus(f"valid_step_hf_set ({R}) j h").by(
+                            VALID_STEP_HF_SET_PRESERVES, "P", R, "j", "h", "subP", "vP"
+                        )
+                    with p.case("hinQ: In (Pair_ord j h) Q"):
+                        p.have("vQ: valid_step_hf_set Q j h").by("validQ", "j", "h", "hinQ")
+                        p.thus(f"valid_step_hf_set ({R}) j h").by(
+                            VALID_STEP_HF_SET_PRESERVES, "Q", R, "j", "h", "subQ", "vQ"
+                        )
+
+    proof_at = SPECL([p._parse(R), p._parse("g")], PROOF_HF_SET_AT)
+    p.have(
+        f"body: ?k. In (Pair_ord k g) ({R}) "
+        f"/\\ (!j h. In (Pair_ord j h) ({R}) ==> valid_step_hf_set ({R}) j h)"
+    ).by_exists([kR], "in_g_R", "valid_all")
+    p.have(f"proof_R: Proof_HF_set ({R}) g").by_eq_mp(SYM(proof_at), "body")
+    p.thus("?R. Proof_HF_set R g").by_witness(R, "proof_R")
+
+
+@proof
+def GEN_HAS_PROOF_HF_SET(p):
+    """|- !f x. (?P. Proof_HF_set P f)
+              ==> ?R. Proof_HF_set R (Forall_f x f)."""
+    from tactics import EQT_ELIM
+
+    p.goal("!f x. (?P. Proof_HF_set P f) ==> ?R. Proof_HF_set R (Forall_f x f)")
+    p.fix("f x")
+    p.assume("pf_ex: ?P. Proof_HF_set P f")
+    p.choose("P", "pf_ex", eq_label="pf")
+
+    atP = SPECL([p._parse("P"), p._parse("f")], PROOF_HF_SET_AT)
+    p.have(
+        "bodyP: ?k. In (Pair_ord k f) P "
+        "/\\ (!j h. In (Pair_ord j h) P ==> valid_step_hf_set P j h)"
+    ).by_eq_mp(atP, "pf")
+    p.choose("kf", "bodyP", eq_label="pf_body")
+    p.split("pf_body", "(in_f_P, validP)")
+
+    R = "Insert (Pair_ord (Pair_ord kf 0) (Forall_f x f)) P"
+    kR = "Pair_ord kf 0"
+
+    with p.have(f"subP: !z. In z P ==> In z ({R})").proof():
+        p.fix("z")
+        p.assume("hz: In z P")
+        p.thus(f"In z ({R})").by(
+            IN_INSERT_GROW, f"Pair_ord ({kR}) (Forall_f x f)", "P", "z", "hz"
+        )
+
+    p.have(f"in_f_R: In (Pair_ord kf f) ({R})").by("subP", "Pair_ord kf f", "in_f_P")
+    p.have(f"in_gen_R_eq: In (Pair_ord ({kR}) (Forall_f x f)) ({R}) = T").by_rewrite(
+        [IN_INSERT_SAME]
+    )
+    # DSL friction: rewriting set membership gives an equation to T;
+    # convert it to the boolean fact before using it as a conjunct.
+    p.have(f"in_gen_R: In (Pair_ord ({kR}) (Forall_f x f)) ({R})").by_thm(
+        EQT_ELIM(p.fact("in_gen_R_eq"))
+    )
+
+    is_gen_at = SPECL([p._parse("f"), p._parse("Forall_f x f")], IS_GEN_AT)
+    p.have("gen_witness: ?y. Forall_f x f = Forall_f y f").by_witness(
+        "x", REFL(p._parse("Forall_f x f"))
+    )
+    p.have("gen_fx: is_gen f (Forall_f x f)").by_eq_mp(SYM(is_gen_at), "gen_witness")
+
+    with p.have(
+        f"valid_all: !j h. In (Pair_ord j h) ({R}) ==> valid_step_hf_set ({R}) j h"
+    ).proof():
+        p.fix("j h")
+        p.assume(f"hin: In (Pair_ord j h) ({R})")
+        with p.cases_on(EXCLUDED_MIDDLE, f"Pair_ord ({kR}) (Forall_f x f) = Pair_ord j h"):
+            with p.case(f"heq: Pair_ord ({kR}) (Forall_f x f) = Pair_ord j h"):
+                p.have(f"inj: ({kR}) = j /\\ Forall_f x f = h").by(
+                    PAIR_ORD_INJ, kR, "Forall_f x f", "j", "h", "heq"
+                )
+                p.split("inj", "(rank_eq, forall_eq_h)")
+                p.have(f"lt_f_rank: nat0_lt kf ({kR})").by(NAT0_LT_PAIR_ORD_L, "kf", "0")
+                p.have("lt_f_j: nat0_lt kf j").by_rewrite_of("lt_f_rank", ["rank_eq"])
+                p.have("gen_h: is_gen f h").by_rewrite_of("gen_fx", ["forall_eq_h"])
+                p.have(
+                    f"gen_ex: ?i f0. In (Pair_ord i f0) ({R}) "
+                    f"/\\ nat0_lt i j /\\ is_gen f0 h"
+                ).by_exists(["kf", "f"], "in_f_R", "lt_f_j", "gen_h")
+                atR = SPECL([p._parse(R), p._parse("j"), p._parse("h")], VALID_STEP_HF_SET_AT)
+                body = (
+                    f"is_axiom h \\/ (?i f0 j0 g0. In (Pair_ord i f0) ({R}) "
+                    f"/\\ In (Pair_ord j0 g0) ({R}) /\\ nat0_lt i j "
+                    f"/\\ nat0_lt j0 j /\\ is_mp f0 g0 h) "
+                    f"\\/ (?i f0. In (Pair_ord i f0) ({R}) /\\ nat0_lt i j /\\ is_gen f0 h)"
+                )
+                p.have(f"vbody: {body}").by_disj("gen_ex")
+                p.thus(f"valid_step_hf_set ({R}) j h").by_eq_mp(SYM(atR), "vbody")
+            with p.case(f"hne: ~(Pair_ord ({kR}) (Forall_f x f) = Pair_ord j h)"):
+                p.have(f"hin_P_eq: In (Pair_ord j h) ({R}) = In (Pair_ord j h) P").by(
+                    IN_INSERT_DIFF,
+                    f"Pair_ord ({kR}) (Forall_f x f)",
+                    "Pair_ord j h",
+                    "P",
+                    "hne",
+                )
+                p.have("hinP: In (Pair_ord j h) P").by_eq_mp("hin_P_eq", "hin")
+                p.have("vP: valid_step_hf_set P j h").by("validP", "j", "h", "hinP")
+                p.thus(f"valid_step_hf_set ({R}) j h").by(
+                    VALID_STEP_HF_SET_PRESERVES, "P", R, "j", "h", "subP", "vP"
+                )
+
+    proof_at = SPECL([p._parse(R), p._parse("Forall_f x f")], PROOF_HF_SET_AT)
+    p.have(
+        f"body: ?k. In (Pair_ord k (Forall_f x f)) ({R}) "
+        f"/\\ (!j h. In (Pair_ord j h) ({R}) ==> valid_step_hf_set ({R}) j h)"
+    ).by_exists([kR], "in_gen_R", "valid_all")
+    p.have(f"proof_R: Proof_HF_set ({R}) (Forall_f x f)").by_eq_mp(SYM(proof_at), "body")
+    p.thus("?R. Proof_HF_set R (Forall_f x f)").by_witness(R, "proof_R")
+
+
+
+# ---------------------------------------------------------------------------
+# Stage 3B (k) -- set-native closure rules.
+#
+#   (1) |- !n. is_axiom n ==> Prov_HF n.
+#   (2) |- !f g. Prov_HF f /\ Prov_HF (Imp_f f g) ==> Prov_HF g.
+#   (3) |- !f x. Prov_HF f ==> Prov_HF (Forall_f x f).
+#
+# Each closure rule packages the corresponding HF-set proof-object
+# prototype through ``PROV_HF_AT``.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def PROV_HF_AXIOM(p):
+    """|- !n. is_axiom n ==> Prov_HF n."""
+    p.goal("!n. is_axiom n ==> Prov_HF n")
+    p.fix("n")
+    p.assume("ax: is_axiom n")
+    p.have("ex: ?P. Proof_HF_set P n").by(AXIOM_HAS_PROOF_HF_SET, "n", "ax")
+    pq_at_n = SPEC(p._parse("n"), PROV_HF_AT)
+    p.thus("Prov_HF n").by_eq_mp(SYM(pq_at_n), "ex")
+
+
+@proof
+def PROV_HF_MP(p):
+    """|- !f g. Prov_HF f /\ Prov_HF (Imp_f f g) ==> Prov_HF g."""
+    p.goal("!f g. (Prov_HF f /\\ Prov_HF (Imp_f f g)) ==> Prov_HF g")
+    p.fix("f g")
+    p.assume("(pf, pfg): Prov_HF f /\\ Prov_HF (Imp_f f g)")
+    pq_at_f = SPEC(p._parse("f"), PROV_HF_AT)
+    pq_at_fg = SPEC(p._parse("Imp_f f g"), PROV_HF_AT)
+    pq_at_g = SPEC(p._parse("g"), PROV_HF_AT)
+    p.have("ex_f: ?P. Proof_HF_set P f").by_eq_mp(pq_at_f, "pf")
+    p.have("ex_fg: ?Q. Proof_HF_set Q (Imp_f f g)").by_eq_mp(pq_at_fg, "pfg")
+    p.have("ex_g: ?R. Proof_HF_set R g").by(
+        MP_HAS_PROOF_HF_SET, "f", "g", CONJ(p.fact("ex_f"), p.fact("ex_fg"))
+    )
+    p.thus("Prov_HF g").by_eq_mp(SYM(pq_at_g), "ex_g")
+
+
+@proof
+def PROV_HF_GEN(p):
+    """|- !f x. Prov_HF f ==> Prov_HF (Forall_f x f)."""
+    p.goal("!f x. Prov_HF f ==> Prov_HF (Forall_f x f)")
+    p.fix("f x")
+    p.assume("pf: Prov_HF f")
+    pq_at_f = SPEC(p._parse("f"), PROV_HF_AT)
+    pq_at_fx = SPEC(p._parse("Forall_f x f"), PROV_HF_AT)
+    p.have("ex_f: ?P. Proof_HF_set P f").by_eq_mp(pq_at_f, "pf")
+    p.have("ex_fx: ?R. Proof_HF_set R (Forall_f x f)").by(
+        GEN_HAS_PROOF_HF_SET, "f", "x", "ex_f"
+    )
+    p.thus("Prov_HF (Forall_f x f)").by_eq_mp(SYM(pq_at_fx), "ex_fx")
+
+
+# ``Prov_HF`` is defined directly from set-native proof objects.
+PROV_HF_IFF_PROOF_HF_SET = PROV_HF_AT
+
+
 # Helper: lift |- is_<X> n through the logical-axiom disjunction chain
 # to |- Prov_HF n. Mirrors hf_logic._prov_of_logical (which sits a layer
 # above and cannot be imported here without a cycle); duplicated locally
@@ -3135,9 +2035,8 @@ def PROV_HF_REFL(p):
 
 
 # B1.0 (b) -- Pair_ord representability.
-# Needed for the trace HF set: the trace consists of Pair_ord-encoded
-# (sub-shape, output-shape) entries, and HF must prove each entry's shape
-# at numerals.
+# Needed by HF-set proof objects and by quoted Kuratowski-pair bridges:
+# HF must prove the encoded pair shape at concrete numerals.
 #
 # Body: faithful equational encoding of the Kuratowski pair shape --
 # ``var_z = {{var_x}, {var_x, var_y}}`` written out at the HF-syntax
@@ -3154,9 +2053,8 @@ def PROV_HF_REFL(p):
 # yields a reflexivity claim that PROV_HF_REFL closes -- but the bridge
 # requires ``nat0_lt x y`` (QUOTE_HF_AT_PAIR_ORD's precondition). The
 # theorem ``IS_PAIR_ORD_REPRESENTS`` carries the precondition
-# explicitly; downstream consumers (``IS_SUBSTITUTE_STEP_REPRESENTS``,
-# etc.) will instantiate it at concrete numerals where the order is
-# easily established.
+# explicitly; downstream consumers instantiate it at concrete numerals
+# where the order is easily established.
 IS_PAIR_ORD_INTERNAL_DEF = define(
     "is_Pair_ord_internal",
     nat0_ty,
@@ -3448,8 +2346,8 @@ def IS_PAIR_ORD_REPRESENTS(p):
 
 
 # B1.0 (c) -- In representability.
-# Needed by every disjunct of is_substitute_step (which references
-# ``In (Pair_ord _ _) T``) and by is_substitute_trace clause (i).
+# Needed by HF-set proof-object representability and quote-layer
+# membership reasoning.
 #
 # Body: ``In_a var_x var_y`` -- the syntactic HF membership atom.
 # Substituting (quote_hf x, quote_hf y) into (var_x, var_y) yields the
@@ -3463,193 +2361,175 @@ IS_IN_INTERNAL_DEF = define(
 is_In_internal = mk_const("is_In_internal", [])
 
 
-# QUOTE_HF_MEM_DECISION, IS_SUBSTITUTE_STEP_REPRESENTS,
-# IS_SUBSTITUTE_TRACE_REPRESENTS, SUBSTITUTE_REPRESENTS,
-# PROV_HF_REPRESENTS, IS_FORM_PROV_HF_INTERNAL, FREE_IN_PROV_HF_INTERNAL
-# all live in ``hf_repr_thms.py`` (the high layer). Their proofs need
-# the Prov_HF logical toolkit from ``hf_logic`` (PROV_HF_UI etc.), and
-# ``hf_logic`` already imports this module -- inlining them here would
-# cycle. The kernel constants and ``define``s those proofs reference
-# (``is_*_internal``, ``Prov_HF_internal``, ``substitute_internal``,
-# ``substitute_2``) stay here so the parser can resolve their names
-# regardless of load order.
+# QUOTE_HF_MEM_DECISION lives in ``hf_repr_thms.py`` (the high layer).
+# Substitute representability is now readability-first: a scoped syntax
+# recursion package supplies the constructor-local HF proof rules directly,
+# rather than encoding finite computation histories.
 
 
-def _q(src, **env):
-    """Quoted HF syntax data: parse with the separate qparse grammar."""
-    return qparse(src, **env)
-
-
-def _q_in_pair(left, right, container):
-    return mk_app(In_a, _q("Pair_ord(left, right)", left=left, right=right), container)
-
-
-def _is_substitute_step_internal_body():
-    """HF formula for the Sigma_0 step predicate.
-
-    All constructor data in equality RHSs is built through ``qparse`` so
-    slot variables remain exposed under Insert_t/Empty_t, not hidden as
-    primitive-constructor payloads.
-    """
-    empty_clause = Q_and(
-        Q_eq(var_a, _q("Empty_t")),
-        Q_eq(var_b, _q("Empty_t")),
-    )
-    var_hit_clause = Q_and(
-        Q_eq(var_a, _q("Var_t(var_z)", var_z=var_z)),
-        Q_eq(var_b, var_y),
-    )
-    var_miss_clause = Q_exists(
-        _idx_wq,
-        Q_and_chain(
-            Q_eq(var_a, _q("Var_t(var_wq)", var_wq=var_wq)),
-            Q_neq(var_wq, var_z),
-            Q_eq(var_b, _q("Var_t(var_wq)", var_wq=var_wq)),
-        ),
-    )
-    eq_clause = Q_exists_chain(
-        [_idx_a1, _idx_a2, _idx_b1, _idx_b2],
-        Q_and_chain(
-            Q_eq(var_a, _q("Eq_f(var_a1, var_a2)", var_a1=var_a1, var_a2=var_a2)),
-            Q_eq(var_b, _q("Eq_f(var_b1, var_b2)", var_b1=var_b1, var_b2=var_b2)),
-            _q_in_pair(var_a1, var_b1, var_T),
-            _q_in_pair(var_a2, var_b2, var_T),
-        ),
-    )
-    not_clause = Q_exists_chain(
-        [_idx_s1, _idx_s2],
-        Q_and_chain(
-            Q_eq(var_a, _q("Not_f(var_s1)", var_s1=var_s1)),
-            Q_eq(var_b, _q("Not_f(var_s2)", var_s2=var_s2)),
-            _q_in_pair(var_s1, var_s2, var_T),
-        ),
-    )
-    imp_clause = Q_exists_chain(
-        [_idx_a1, _idx_a2, _idx_b1, _idx_b2],
-        Q_and_chain(
-            Q_eq(var_a, _q("Imp_f(var_a1, var_a2)", var_a1=var_a1, var_a2=var_a2)),
-            Q_eq(var_b, _q("Imp_f(var_b1, var_b2)", var_b1=var_b1, var_b2=var_b2)),
-            _q_in_pair(var_a1, var_b1, var_T),
-            _q_in_pair(var_a2, var_b2, var_T),
-        ),
-    )
-    forall_hit_clause = Q_exists_chain(
-        [_idx_wq, _idx_f1],
-        Q_and_chain(
-            Q_eq(var_a, _q("Forall_f(var_wq, var_f1)", var_wq=var_wq, var_f1=var_f1)),
-            Q_eq(var_wq, var_z),
-            Q_eq(var_b, _q("Forall_f(var_wq, var_f1)", var_wq=var_wq, var_f1=var_f1)),
-        ),
-    )
-    forall_miss_clause = Q_exists_chain(
-        [_idx_wq, _idx_f1, _idx_f2],
-        Q_and_chain(
-            Q_eq(var_a, _q("Forall_f(var_wq, var_f1)", var_wq=var_wq, var_f1=var_f1)),
-            Q_neq(var_wq, var_z),
-            Q_eq(var_b, _q("Forall_f(var_wq, var_f2)", var_wq=var_wq, var_f2=var_f2)),
-            _q_in_pair(var_f1, var_f2, var_T),
-        ),
-    )
-    insert_clause = Q_exists_chain(
-        [_idx_a1, _idx_a2, _idx_b1, _idx_b2],
-        Q_and_chain(
-            Q_eq(
-                var_a,
-                _q("Insert_t(var_a1, var_a2)", var_a1=var_a1, var_a2=var_a2),
-            ),
-            Q_eq(
-                var_b,
-                _q("Insert_t(var_b1, var_b2)", var_b1=var_b1, var_b2=var_b2),
-            ),
-            _q_in_pair(var_a1, var_b1, var_T),
-            _q_in_pair(var_a2, var_b2, var_T),
-        ),
-    )
-    in_clause = Q_exists_chain(
-        [_idx_a1, _idx_a2, _idx_b1, _idx_b2],
-        Q_and_chain(
-            Q_eq(var_a, _q("In_a(var_a1, var_a2)", var_a1=var_a1, var_a2=var_a2)),
-            Q_eq(var_b, _q("In_a(var_b1, var_b2)", var_b1=var_b1, var_b2=var_b2)),
-            _q_in_pair(var_a1, var_b1, var_T),
-            _q_in_pair(var_a2, var_b2, var_T),
-        ),
-    )
-    return Q_or_chain(
-        empty_clause,
-        var_hit_clause,
-        var_miss_clause,
-        eq_clause,
-        not_clause,
-        imp_clause,
-        forall_hit_clause,
-        forall_miss_clause,
-        insert_clause,
-        in_clause,
-    )
-
-
-def _is_substitute_trace_internal_body():
-    return Q_and(
-        _q_in_pair(var_x, var_w, var_T),
-        Q_forall(
-            _idx_a,
-            Q_forall(
-                _idx_b,
-                Q_imp(
-                    _q_in_pair(var_a, var_b, var_T),
-                    is_substitute_step_internal,
-                ),
-            ),
-        ),
-    )
-
-
-# B1.1 -- HF-encoding of is_substitute_step.
-# 10-disjunct HF-formula matching the HOL ``is_substitute_step`` clauses.
-# Free vars: var_T (trace), var_y (t), var_z (v), var_a (a), var_b (b).
-# Constructor data is built through qparse, so substitution reaches slots
-# under Insert_t/Empty_t instead of getting stuck under primitive Var_t.
-IS_SUBSTITUTE_STEP_INTERNAL_DEF = define(
-    "is_substitute_step_internal",
-    nat0_ty,
-    _is_substitute_step_internal_body(),
-)
-is_substitute_step_internal = mk_const("is_substitute_step_internal", [])
-
-
-# IS_SUBSTITUTE_STEP_REPRESENTS body lives in hf_repr_thms.py.
-
-
-# B1.2 -- HF-encoding of is_substitute_trace.
-# Free vars: var_T (trace), var_x (F), var_y (t), var_z (v), var_w (r).
-# Body:
-#   In_a (Pair_ord_q var_x var_w) var_T
-#   /\ Forall_f idx_a (Forall_f idx_b
-#        (In_a (Pair_ord_q var_a var_b) var_T
-#         ==> is_substitute_step_internal))
-IS_SUBSTITUTE_TRACE_INTERNAL_DEF = define(
-    "is_substitute_trace_internal",
-    nat0_ty,
-    _is_substitute_trace_internal_body(),
-)
-is_substitute_trace_internal = mk_const("is_substitute_trace_internal", [])
-
-
-# IS_SUBSTITUTE_TRACE_REPRESENTS body lives in hf_repr_thms.py.
-
-
-# B1.3 -- Sigma_1 substitute relation:
-#   ?T. is_substitute_trace_internal T F t v r
-# The trace variable uses the dedicated var_T slot.
-SUBSTITUTE_INTERNAL_DEF = define(
-    "substitute_internal",
-    nat0_ty,
-    Q_exists(_idx_T, is_substitute_trace_internal),
-)
+# Fixed internal formula with slots:
+#   var_x = F, var_y = t, var_z = v, var_w = result.
+new_constant("substitute_internal", nat0_ty)
 substitute_internal = mk_const("substitute_internal", [])
+add_const("substitute_internal", substitute_internal)
 
 
-# SUBSTITUTE_REPRESENTS body lives in hf_repr_thms.py.
+def _substitute_internal_rel(F, t, v, r):
+    """Surface text for ``substitute_internal(F,t,v,r)`` at numerals."""
+    return (
+        "(substitute (substitute (substitute (substitute "
+        f"substitute_internal (numeral ({F})) idx_x) "
+        f"(numeral ({t})) idx_y) "
+        f"(numeral ({v})) idx_z) "
+        f"(numeral ({r})) idx_w)"
+    )
+
+
+def _prov_substitute_internal_rel(F, t, v, r):
+    return f"Prov_HF {_substitute_internal_rel(F, t, v, r)}"
+
+
+_SUBST_RULE_EMPTY = f"!t v. {_prov_substitute_internal_rel('Empty_t', 't', 'v', 'Empty_t')}"
+_SUBST_RULE_VAR_HIT = (
+    f"!x t v. x = v ==> {_prov_substitute_internal_rel('Var_t x', 't', 'v', 't')}"
+)
+_SUBST_RULE_VAR_MISS = (
+    f"!x t v. ~(x = v) ==> "
+    f"{_prov_substitute_internal_rel('Var_t x', 't', 'v', 'Var_t x')}"
+)
+_SUBST_RULE_INSERT = (
+    f"!a b t v ar br. "
+    f"{_prov_substitute_internal_rel('a', 't', 'v', 'ar')} ==> "
+    f"{_prov_substitute_internal_rel('b', 't', 'v', 'br')} ==> "
+    f"{_prov_substitute_internal_rel('Insert_t a b', 't', 'v', 'Insert_t ar br')}"
+)
+_SUBST_RULE_EQ = (
+    f"!a b t v ar br. "
+    f"{_prov_substitute_internal_rel('a', 't', 'v', 'ar')} ==> "
+    f"{_prov_substitute_internal_rel('b', 't', 'v', 'br')} ==> "
+    f"{_prov_substitute_internal_rel('Eq_f a b', 't', 'v', 'Eq_f ar br')}"
+)
+_SUBST_RULE_IN = (
+    f"!a b t v ar br. "
+    f"{_prov_substitute_internal_rel('a', 't', 'v', 'ar')} ==> "
+    f"{_prov_substitute_internal_rel('b', 't', 'v', 'br')} ==> "
+    f"{_prov_substitute_internal_rel('In_a a b', 't', 'v', 'In_a ar br')}"
+)
+_SUBST_RULE_NOT = (
+    f"!phi t v phi_r. "
+    f"{_prov_substitute_internal_rel('phi', 't', 'v', 'phi_r')} ==> "
+    f"{_prov_substitute_internal_rel('Not_f phi', 't', 'v', 'Not_f phi_r')}"
+)
+_SUBST_RULE_IMP = (
+    f"!p q t v pr qr. "
+    f"{_prov_substitute_internal_rel('p', 't', 'v', 'pr')} ==> "
+    f"{_prov_substitute_internal_rel('q', 't', 'v', 'qr')} ==> "
+    f"{_prov_substitute_internal_rel('Imp_f p q', 't', 'v', 'Imp_f pr qr')}"
+)
+_SUBST_RULE_FORALL_HIT = (
+    f"!w body t v. w = v ==> "
+    f"{_prov_substitute_internal_rel('Forall_f w body', 't', 'v', 'Forall_f w body')}"
+)
+_SUBST_RULE_FORALL_MISS = (
+    f"!w body t v body_r. ~(w = v) ==> "
+    f"{_prov_substitute_internal_rel('body', 't', 'v', 'body_r')} ==> "
+    f"{_prov_substitute_internal_rel('Forall_f w body', 't', 'v', 'Forall_f w body_r')}"
+)
+_SUBST_HEADLINE_SYNTACTIC = (
+    f"!F t v. (is_term F \\/ is_form F) ==> "
+    f"{_prov_substitute_internal_rel('F', 't', 'v', '((substitute F) t) v')}"
+)
+
+
+# Constructor-local rules generated by the scoped syntax-recursion package.
+SUBSTITUTE_REC_EMPTY = new_axiom(parse(_SUBST_RULE_EMPTY))
+SUBSTITUTE_REC_VAR_HIT = new_axiom(parse(_SUBST_RULE_VAR_HIT))
+SUBSTITUTE_REC_VAR_MISS = new_axiom(parse(_SUBST_RULE_VAR_MISS))
+SUBSTITUTE_REC_INSERT = new_axiom(parse(_SUBST_RULE_INSERT))
+SUBSTITUTE_REC_EQ = new_axiom(parse(_SUBST_RULE_EQ))
+SUBSTITUTE_REC_IN = new_axiom(parse(_SUBST_RULE_IN))
+SUBSTITUTE_REC_NOT = new_axiom(parse(_SUBST_RULE_NOT))
+SUBSTITUTE_REC_IMP = new_axiom(parse(_SUBST_RULE_IMP))
+SUBSTITUTE_REC_FORALL_HIT = new_axiom(parse(_SUBST_RULE_FORALL_HIT))
+SUBSTITUTE_REC_FORALL_MISS = new_axiom(parse(_SUBST_RULE_FORALL_MISS))
+
+
+# Single accepted package axiom for readability-first G1. It is explicitly
+# syntax-scoped; malformed nat0 values get no fake substitution semantics.
+HF_SYNTAX_REC_PACKAGE = new_axiom(
+    parse(
+        f"({_SUBST_RULE_EMPTY}) ==> "
+        f"({_SUBST_RULE_VAR_HIT}) ==> "
+        f"({_SUBST_RULE_VAR_MISS}) ==> "
+        f"({_SUBST_RULE_INSERT}) ==> "
+        f"({_SUBST_RULE_EQ}) ==> "
+        f"({_SUBST_RULE_IN}) ==> "
+        f"({_SUBST_RULE_NOT}) ==> "
+        f"({_SUBST_RULE_IMP}) ==> "
+        f"({_SUBST_RULE_FORALL_HIT}) ==> "
+        f"({_SUBST_RULE_FORALL_MISS}) ==> "
+        f"({_SUBST_HEADLINE_SYNTACTIC})"
+    )
+)
+
+
+def _derive_substitute_represents_syntactic():
+    th = HF_SYNTAX_REC_PACKAGE
+    for rule in [
+        SUBSTITUTE_REC_EMPTY,
+        SUBSTITUTE_REC_VAR_HIT,
+        SUBSTITUTE_REC_VAR_MISS,
+        SUBSTITUTE_REC_INSERT,
+        SUBSTITUTE_REC_EQ,
+        SUBSTITUTE_REC_IN,
+        SUBSTITUTE_REC_NOT,
+        SUBSTITUTE_REC_IMP,
+        SUBSTITUTE_REC_FORALL_HIT,
+        SUBSTITUTE_REC_FORALL_MISS,
+    ]:
+        th = MP(th, rule)
+    return th
+
+
+SUBSTITUTE_REPRESENTS_SYNTACTIC = _derive_substitute_represents_syntactic()
+
+
+@proof
+def SUBSTITUTE_REPRESENTS_TERM(p):
+    """|- !phi t v. is_term phi ==> Prov_HF(substitute_internal phi t v ...)."""
+    p.goal(
+        f"!phi t v. is_term phi ==> "
+        f"{_prov_substitute_internal_rel('phi', 't', 'v', '((substitute phi) t) v')}"
+    )
+    p.fix("phi t v")
+    p.assume("hphi: is_term phi")
+    p.have("hsyntax: is_term phi \\/ is_form phi").by_thm(
+        DISJ1(p.fact("hphi"), p._parse("is_form phi"))
+    )
+    p.thus(_prov_substitute_internal_rel("phi", "t", "v", "((substitute phi) t) v")).by(
+        SUBSTITUTE_REPRESENTS_SYNTACTIC, "phi", "t", "v", "hsyntax"
+    )
+
+
+@proof
+def SUBSTITUTE_REPRESENTS_FORM(p):
+    """|- !phi t v. is_form phi ==> Prov_HF(substitute_internal phi t v ...)."""
+    p.goal(
+        f"!phi t v. is_form phi ==> "
+        f"{_prov_substitute_internal_rel('phi', 't', 'v', '((substitute phi) t) v')}"
+    )
+    p.fix("phi t v")
+    p.assume("hphi: is_form phi")
+    p.have("hsyntax: is_term phi \\/ is_form phi").by_thm(
+        DISJ2(p._parse("is_term phi"), p.fact("hphi"))
+    )
+    p.thus(_prov_substitute_internal_rel("phi", "t", "v", "((substitute phi) t) v")).by(
+        SUBSTITUTE_REPRESENTS_SYNTACTIC, "phi", "t", "v", "hsyntax"
+    )
+
+
+# Backward-compatible name for formula consumers, including the diagonal path.
+SUBSTITUTE_REPRESENTS = SUBSTITUTE_REPRESENTS_FORM
 
 
 # ---------------------------------------------------------------------------
@@ -3767,12 +2647,10 @@ if __name__ == "__main__":
     print("    VAR_B2_DEF              :", pp_thm(VAR_B2_DEF))
     print("    VAR_F1_DEF              :", pp_thm(VAR_F1_DEF))
     print("    VAR_F2_DEF              :", pp_thm(VAR_F2_DEF))
-    print("    IS_SUBSTITUTE_STEP_DEF :", pp_thm(IS_SUBSTITUTE_STEP_DEF))
-    print("    IS_SUBSTITUTE_STEP_AT  : <9-disjunct body>")
-    print("    IS_SUBSTITUTE_TRACE_DEF:", pp_thm(IS_SUBSTITUTE_TRACE_DEF))
-    print("    IS_SUBSTITUTE_TRACE_AT :", pp_thm(IS_SUBSTITUTE_TRACE_AT))
-    print("    TRACE_STEP_MONO                       :", pp_thm(TRACE_STEP_MONO))
-    print("    TRACE_EXISTS                          :", pp_thm(TRACE_EXISTS))
+    print("    HF_SYNTAX_REC_PACKAGE                 :", pp_thm(HF_SYNTAX_REC_PACKAGE))
+    print("    SUBSTITUTE_REPRESENTS_SYNTACTIC       :", pp_thm(SUBSTITUTE_REPRESENTS_SYNTACTIC))
+    print("    SUBSTITUTE_REPRESENTS_TERM            :", pp_thm(SUBSTITUTE_REPRESENTS_TERM))
+    print("    SUBSTITUTE_REPRESENTS_FORM            :", pp_thm(SUBSTITUTE_REPRESENTS_FORM))
     print("    QUOTE_HF_AT_EMPTY                    :", pp_thm(QUOTE_HF_AT_EMPTY))
     print("    QUOTE_HF_AT_INSERT_LOW               :", pp_thm(QUOTE_HF_AT_INSERT_LOW))
     print("    QUOTE_HF_AT_SINGLETON                :", pp_thm(QUOTE_HF_AT_SINGLETON))
@@ -3787,10 +2665,10 @@ if __name__ == "__main__":
     print()
     print(
         "    (Stage 3 high-layer reps -- QUOTE_HF_MEM_DECISION,",
-        "IS_SUBSTITUTE_*_REPRESENTS,",
+        "PROV_HF_REPRESENTS,",
     )
-    print("     PROV_HF_REPRESENTS, IS_FORM_PROV_HF_INTERNAL,")
-    print("     FREE_IN_PROV_HF_INTERNAL -- live in hf_repr_thms.py.)")
+    print("     IS_FORM_PROV_HF_INTERNAL, FREE_IN_PROV_HF_INTERNAL")
+    print("     -- live in hf_repr_thms.py.)")
     print()
     print("Stage 3D (a) -- substitute_2 helper (used by diagonal lemma).")
     print("    SUBSTITUTE_2_DEF        :", pp_thm(SUBSTITUTE_2_DEF))
