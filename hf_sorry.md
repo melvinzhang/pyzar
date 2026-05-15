@@ -249,9 +249,12 @@ HF-formula bodies and walk the resulting Σ₀/Σ₁ structure.
    - Then case-split on `IS_SUBSTITUTE_STEP_DEF`'s 9 disjuncts; each
      case dispatches one HF-disjunct via `IS_PAIR_ORD_REPRESENTS` /
      `QUOTE_HF_MEM_DECISION` / `QUOTE_HF_AT_PAIR_ORD` and walks HF1–HF3.
-   - **Risk:** the body shape is a design choice; pick it once and
-     keep all downstream reductions consistent. Expect to revisit
-     once if E/F surface a friction.
+   - **Body-shape conclusion:** build slot-bearing constructor data
+     through the separate quoted-syntax parser `qparse`, whose grammar
+     maps strings like `Var_t(var_z)` to the quoted
+     `Insert_t`/`Empty_t` tower. Do not write primitive syntax like
+     `Var_t var_z`; `substitute` treats that as a variable leaf and
+     will not reach `var_z`.
 
 4. **E — `IS_SUBSTITUTE_TRACE_REPRESENTS`**
    - Define `is_substitute_trace_internal` body.
@@ -557,42 +560,52 @@ definitions.
   position — `substitute` already pushes through those via
   `SUBSTITUTE_AT_INSERT` / `_EMPTY`, reaching the leaf placeholders.
 
-  Implement as **Python builders** (no new HOL constants, no new
-  lemmas): a small module of helper functions emitting the right
-  Insert_t-tower term at body-construction time.
+  Implement as **a separate quoted-syntax parser** (no new HOL
+  constants, no new lemmas): `hf_qsyntax.qparse` has its own small Lark
+  grammar and emits the right Insert_t-tower term at body-construction
+  time. The low-level builders remain private implementation machinery
+  behind the parser.
 
   ```python
-  def _quote_nat(n):
-      t = Empty_t
-      for _ in range(n):
-          t = mk_app(Insert_t, t, t)         # von Neumann successor
-      return t
-
-  def Q_pair_ord(a, b):
-      sing_a  = mk_app(Insert_t, a, Empty_t)
-      pair_ab = mk_app(Insert_t, a, mk_app(Insert_t, b, Empty_t))
-      return mk_app(Insert_t, sing_a, mk_app(Insert_t, pair_ab, Empty_t))
-
-  def Q_var_t(idx):       return Q_pair_ord(_quote_nat(2),  idx)
-  def Q_eq_f(a, b):       return Q_pair_ord(_quote_nat(5),  Q_pair_ord(a, b))
-  def Q_not_f(phi):       return Q_pair_ord(_quote_nat(6),  phi)
-  def Q_imp_f(a, b):      return Q_pair_ord(_quote_nat(7),  Q_pair_ord(a, b))
-  def Q_forall_f(n, phi): return Q_pair_ord(_quote_nat(8),  Q_pair_ord(n, phi))
-  def Q_insert_t(a, b):   return Q_pair_ord(_quote_nat(9),  Q_pair_ord(a, b))
-  def Q_in_a(a, b):       return Q_pair_ord(_quote_nat(10), Q_pair_ord(a, b))
+  qparse("Var_t(var_z)", var_z=var_z)
+  qparse("Eq_f(var_a1, var_a2)", var_a1=var_a1, var_a2=var_a2)
+  qparse("Forall_f(var_wq, var_f1)", var_wq=var_wq, var_f1=var_f1)
   ```
 
   Bodies are then constructed in Python like
-  ``Q_eq_f(var_a, Q_var_t(var_z))`` and substitute walks them
-  end-to-end via `SUBSTITUTE_AT_INSERT` alone. ~30 lines of Python
-  helpers; **zero kernel-side overhead**. The IS_PAIR_ORD_INTERNAL
-  precedent already does this manually with literal Insert_t-towers
-  — the helpers just package what's already in the codebase.
+  ``Q_eq(var_a, qparse("Var_t(var_z)", var_z=var_z))`` and substitute
+  walks the quoted data end-to-end via `SUBSTITUTE_AT_INSERT` alone.
+  This keeps the notation readable without overloading the ordinary HOL
+  parser. The IS_PAIR_ORD_INTERNAL precedent already does this manually
+  with literal Insert_t-towers — `qparse` just packages what's already
+  in the codebase.
 
   Tradeoff: theorem statements print with the body fully expanded
   into Insert_t/Empty_t towers (verbose). Downstream consumers cite
   `is_substitute_step_internal` as a constant and never need to see
   the expansion, so the cost is one-time at definition.
+
+  **Spike conclusion:** `spike_substitute_step_body.py` validates this
+  body-shape choice. Under the existing `SUBSTITUTE_AT_*` rewrites,
+  primitive `Var_t` with a slot in its index stays stuck, and primitive
+  `Forall_f` with the target variable as binder correctly stops under
+  the binder. The quoted builder shapes normalize as needed for
+  `Var_t`, `Eq_f`, `Not_f`, `Imp_f`, `Forall_f`, `Insert_t`, `In_a`,
+  and the shared `Pair_ord` expansion. The same run now validates the
+  `qparse` forms for `Var_t`, `Eq_f`, and `Forall_f`, so the public
+  body-construction API can be the grammar rather than direct builder
+  calls. The script run currently reports
+  `15/15 candidate expectations satisfied` with:
+
+  ```text
+  .venv/bin/python spike_substitute_step_body.py
+  ```
+
+  One nuance: primitive `Eq_f` and `In_a` bodies also validate because
+  their substitution equations recurse through both arguments. The
+  Phase 2 body should still prefer `qparse`/quoted data uniformly,
+  because `Var_t` and binder-index positions are exactly where the
+  primitive syntax becomes misleading.
 
 ## Notes per step (pitfalls to flag now)
 
