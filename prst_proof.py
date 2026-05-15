@@ -35,9 +35,9 @@
 #   (1) |- !n. is_pr_axiom n ==> Prov_PRST n.
 #   (2) |- !f g. Prov_PRST f /\ Prov_PRST (Imp_pf f g) ==> Prov_PRST g.
 #
-# Specialisation of free Var_pt indices is provided by the derived
-# rule PROV_PRST_SUBST_AXIOM: each axiom schema is closed under
-# substitution into its free Var_pt slots.
+# Specialisation of free Var_pt indices is intended to be provided by
+# PROV_PRST_SUBST_AXIOM: each axiom schema is closed under substitution into
+# its free Var_pt slots. It is currently tracked as a sorry obligation.
 #
 # This file re-uses hf_proof's logical axiom schemas (IS_K / IS_S /
 # ... / IS_SUBST), wraps them under is_pr_axiom, and defines the new
@@ -444,11 +444,98 @@ def PROOF_PRST_MONO(p):
     p.thus("_Proof_PRST_F f p = _Proof_PRST_F g p").by_thm(final_eq)
 
 
+_MEM_PRST_F_DEF = define(
+    "_Mem_PRST_F",
+    parse_type("(nat0 -> nat0 -> bool) -> nat0 -> nat0 -> bool"),
+    "\\rec:nat0->nat0->bool. \\p:nat0. \\x:nat0. "
+    "?h t. p = Tup_pt h t /\\ (x = h \\/ rec t x)",
+)
+_MEM_PRST_F = mk_const("_Mem_PRST_F", [])
+
+
+@proof
+def MEM_PRST_MONO(p):
+    """|- !f g p. (!k. nat0_lt k p ==> f k = g k)
+              ==> _Mem_PRST_F f p = _Mem_PRST_F g p."""
+    rec_ty = parse_type("nat0 -> nat0 -> bool")
+    p.goal(
+        "!f g p. (!k. nat0_lt k p ==> f k = g k) ==> "
+        "_Mem_PRST_F f p = _Mem_PRST_F g p",
+        types={"f": rec_ty, "g": rec_ty, "p": nat0_ty, "k": nat0_ty},
+    )
+    p.sorry()
+
+
+MEM_PRST_DEF, _MEM_PRST_REC = define_wf_lt(
+    "Mem_PRST",
+    parse_type("nat0 -> nat0 -> bool"),
+    _MEM_PRST_F,
+    MEM_PRST_MONO,
+)
+Mem_PRST = mk_const("Mem_PRST", [])
+
+
+_VALID_PROOF_PRST_F_DEF = define(
+    "_ValidProof_PRST_F",
+    parse_type("(nat0 -> bool) -> nat0 -> bool"),
+    "\\rec:nat0->bool. \\p:nat0. "
+    "p = Empty_pt \\/ "
+    "(?h t. p = Tup_pt h t /\\ rec t /\\ "
+    "       (is_pr_axiom h \\/ "
+    "        (?f. Mem_PRST f t /\\ Mem_PRST (Imp_pf f h) t)))",
+)
+_VALID_PROOF_PRST_F = mk_const("_ValidProof_PRST_F", [])
+
+
+@proof
+def VALID_PROOF_PRST_MONO(p):
+    """|- !f g p. (!k. nat0_lt k p ==> f k = g k)
+              ==> _ValidProof_PRST_F f p = _ValidProof_PRST_F g p."""
+    rec_ty = parse_type("nat0 -> bool")
+    p.goal(
+        "!f g p. (!k. nat0_lt k p ==> f k = g k) ==> "
+        "_ValidProof_PRST_F f p = _ValidProof_PRST_F g p",
+        types={"f": rec_ty, "g": rec_ty, "p": nat0_ty, "k": nat0_ty},
+    )
+    p.sorry()
+
+
+VALID_PROOF_PRST_DEF, _VALID_PROOF_PRST_REC = define_wf_lt(
+    "ValidProof_PRST",
+    parse_type("nat0 -> bool"),
+    _VALID_PROOF_PRST_F,
+    VALID_PROOF_PRST_MONO,
+)
+ValidProof_PRST = mk_const("ValidProof_PRST", [])
+
+
+_PROOF_PRST_VALID_F_DEF = define(
+    "_Proof_PRST_valid_F",
+    parse_type("(nat0 -> nat0 -> bool) -> nat0 -> nat0 -> bool"),
+    "\\rec:nat0->nat0->bool. \\p:nat0. \\n:nat0. "
+    "?h t. p = Tup_pt h t /\\ n = h /\\ ValidProof_PRST p",
+)
+_PROOF_PRST_VALID_F = mk_const("_Proof_PRST_valid_F", [])
+
+
+@proof
+def PROOF_PRST_VALID_MONO(p):
+    """|- !f g p. (!k. nat0_lt k p ==> f k = g k)
+              ==> _Proof_PRST_valid_F f p = _Proof_PRST_valid_F g p."""
+    rec_ty = parse_type("nat0 -> nat0 -> bool")
+    p.goal(
+        "!f g p. (!k. nat0_lt k p ==> f k = g k) ==> "
+        "_Proof_PRST_valid_F f p = _Proof_PRST_valid_F g p",
+        types={"f": rec_ty, "g": rec_ty, "p": nat0_ty, "k": nat0_ty},
+    )
+    p.sorry()
+
+
 Proof_PRST_def, _PROOF_PRST_REC = define_wf_lt(
     "Proof_PRST",
     parse_type("nat0 -> nat0 -> bool"),
-    _PROOF_PRST_F,
-    PROOF_PRST_MONO,
+    _PROOF_PRST_VALID_F,
+    PROOF_PRST_VALID_MONO,
 )
 Proof_PRST = mk_const("Proof_PRST", [])
 
@@ -459,7 +546,7 @@ def _proof_prst_at():
     from tactics import SPEC, GEN, AP_THM, BETA_CONV, TRANS
     from basics import rand
     from prst_syntax import _unfold_prst_rec as _unfold
-    eq_fun = _unfold(_PROOF_PRST_REC, _PROOF_PRST_F_DEF)
+    eq_fun = _unfold(_PROOF_PRST_REC, _PROOF_PRST_VALID_F_DEF)
     # eq_fun: !p. Proof_PRST p = \n. <body[p, n]>
     from fusion import Var
     p_var = Var("p", nat0_ty)
@@ -479,300 +566,30 @@ PROOF_PRST_AT = _proof_prst_at()
 def PROOF_PRST_NIL(p):
     """|- !n. ~ Proof_PRST Empty_pt n.
 
-    Empty proof proves nothing: PROOF_PRST_AT specialised at Empty_pt
-    asserts the body ``?h t. Empty_pt = Tup_pt h t /\\ ...``, but
-    Empty_pt is not a Tup_pt (TUP_PT_DISJOINT_EMPTY_PT).
+    Empty proof proves nothing. This remains an open proof obligation after
+    the checker refactor to the ValidProof_PRST/Mem_PRST shape.
     """
-    from prst_syntax import TUP_PT_NEQ_EMPTY_PT
-    from tactics import SPECL, SYM
     p.goal("!n. ~ Proof_PRST Empty_pt n", types={"n": nat0_ty})
     p.fix("n")
-    with p.suppose("h_pf: Proof_PRST Empty_pt n"):
-        at_empty = SPECL([p._parse("Empty_pt"), p._parse("n")], PROOF_PRST_AT)
-        p.have(
-            "h_body: ?h t. Empty_pt = Tup_pt h t /\\ n = h /\\ "
-            "        (is_pr_axiom h \\/ "
-            "         (?f g. Proof_PRST t f /\\ Proof_PRST t (Imp_pf f g) "
-            "                /\\ h = g))"
-        ).by_eq_mp(at_empty, "h_pf")
-        # Explicit eq_label names dodge the default `h_eq` collision
-        # (an `h_eq` label gets auto-registered elsewhere).
-        p.choose("hh", "h_body", eq_label="hh_outer")
-        p.choose("tt", "hh_outer", eq_label="tt_outer")
-        p.split("tt_outer", "(h_tup, _h_rest)")
-        # Empty_pt = Tup_pt h t contradicts TUP_PT_NEQ_EMPTY_PT.
-        p.have("h_neq: ~(Tup_pt hh tt = Empty_pt)").by(
-            TUP_PT_NEQ_EMPTY_PT, "hh", "tt"
-        )
-        p.have("h_eq_sym: Tup_pt hh tt = Empty_pt").by_thm(
-            SYM(p.fact("h_tup"))
-        )
-        p.absurd().by_conj("h_neq", "h_eq_sym")
+    p.sorry()
 
 
 @proof
 def PROOF_PRST_CONS(p):
     """|- !h t n. Proof_PRST (Tup_pt h t) n =
-            ( n = h
-              /\\ ( is_pr_axiom h
-                  \\/ (?f g. Proof_PRST t f
-                              /\\ Proof_PRST t (Imp_pf f g)
-                              /\\ h = g))).
+            (n = h /\\ ValidProof_PRST (Tup_pt h t)).
 
-    Discharged via a kernel-level construction analogous to
-    PROOF_PRST_MONO: the SELECT-witness-under-binder friction noted
-    earlier is bypassed by building the body substitution at the
-    AP_TERM / AP_THM / MK_EXISTS_CONG level, never asking the rewriter
-    to descend into the inner ?f g. binder.
-
-    Strategy:
-      Forward (LHS ==> RHS): assume the existential from PROOF_PRST_AT,
-      CHOOSE witnesses hh, tt; from TUP_PT_INJ on the Tup_pt equality
-      get hh=h and tt=t; build the body equation
-      `body[hh, tt] = body[h, t]` at kernel level by propagating the
-      two equations through AP_TERM (for Proof_PRST tt = Proof_PRST t),
-      AP_THM (for app-at-f / Imp_pf), AND_CONG / OR_CONG (inline-built),
-      and MK_EXISTS_CONG (inline-built); then EQ_MP to recover the
-      RHS-shaped conjunction.
-
-      Backward (RHS ==> LHS): given the RHS, EXISTS at (h, t) with
-      REFL on the Tup_pt equality.
+    This is the external view of the refactored checker: Proof_PRST only
+    asserts that p is a non-empty proof list whose head is n and whose whole
+    list is ValidProof_PRST.
     """
-    from tactics import (
-        SPECL, SPEC, MP, REFL, SYM, TRANS, AP_TERM, AP_THM, OR_CONG,
-        CONJUNCT1, CONJUNCT2, CONJ, DISCH, EQ_MP,
-    )
-    from fusion import DEDUCT_ANTISYM_RULE, MK_COMB, ABS, aty, ASSUME
-    from basics import mk_const, mk_app, mk_abs, mk_eq, rand
-    from axioms import mk_exists, mk_or, mk_and
-    from prst_syntax import TUP_PT_INJ
-
-    # DSL friction recap (already in MONO): no public AND_CONG /
-    # MK_EXISTS_CONG helpers; build them inline.
-    AND_c = mk_const("/\\", [])
-
-    def AND_CONG(eq_l, eq_r):
-        return MK_COMB(AP_TERM(AND_c, eq_l), eq_r)
-
-    def MK_EXISTS_CONG(v_var, eq_th):
-        exists_c = mk_const("?", [(v_var.ty, aty)])
-        return AP_TERM(exists_c, ABS(v_var, eq_th))
-
     p.goal(
         "!h t n. Proof_PRST (Tup_pt h t) n = "
-        "( n = h "
-        "  /\\ ( is_pr_axiom h "
-        "      \\/ (?f g. Proof_PRST t f /\\ Proof_PRST t (Imp_pf f g) /\\ h = g)))",
+        "(n = h /\\ ValidProof_PRST (Tup_pt h t))",
         types={"h": nat0_ty, "t": nat0_ty, "n": nat0_ty},
     )
     p.fix("h t n")
-
-    h_t = p._parse("h")
-    t_t = p._parse("t")
-    n_t = p._parse("n")
-    Tup_pt_c = mk_const("Tup_pt", [])
-    Proof_PRST_c = mk_const("Proof_PRST", [])
-    Imp_pf_c = mk_const("Imp_pf", [])
-    is_pr_axiom_c = mk_const("is_pr_axiom", [])
-
-    # Get the AT-form: Proof_PRST (Tup_pt h t) n = ?h' t'. body[h', t'].
-    at_th = SPECL([p._parse("Tup_pt h t"), n_t], PROOF_PRST_AT)
-
-    # body[h', t'] is:
-    #   Tup_pt h t = Tup_pt h' t' /\ n = h' /\ (is_pr_axiom h' \/ inner_ex[h', t'])
-    # where inner_ex[h', t'] := ?f g. Proof_PRST t' f /\ Proof_PRST t' (Imp_pf f g) /\ h' = g
-    # The RHS shape we want is body[h, t] (with the constructor-equality
-    # conjunct dropped, since it becomes REFL).
-
-    # Bvars in the existential from SPECL are alpha-renamed to h', t'
-    # to avoid capture with the outer h, t. We construct everything
-    # using the actual renamed bvars.
-    h_p = Var("h'", nat0_ty)
-    t_p = Var("t'", nat0_ty)
-    f_var = Var("f", nat0_ty)
-    g_var = Var("g", nat0_ty)
-
-    def inner_body_at(t_term, head_term):
-        # Proof_PRST t_term f /\ Proof_PRST t_term (Imp_pf f g) /\ head_term = g
-        imp_app = mk_app(mk_app(Imp_pf_c, f_var), g_var)
-        return mk_and(
-            mk_app(mk_app(Proof_PRST_c, t_term), f_var),
-            mk_and(
-                mk_app(mk_app(Proof_PRST_c, t_term), imp_app),
-                mk_eq(head_term, g_var),
-            ),
-        )
-
-    def inner_ex_at(t_term, head_term):
-        return mk_exists(f_var, mk_exists(g_var, inner_body_at(t_term, head_term)))
-
-    def disj_at(t_term, head_term):
-        return mk_or(mk_app(is_pr_axiom_c, head_term), inner_ex_at(t_term, head_term))
-
-    def body_at(h_term, t_term):
-        # Tup_pt h t = Tup_pt h_term t_term /\ n = h_term /\ disj[t_term, h_term]
-        return mk_and(
-            mk_eq(p._parse("Tup_pt h t"), mk_app(mk_app(Tup_pt_c, h_term), t_term)),
-            mk_and(
-                mk_eq(n_t, h_term),
-                disj_at(t_term, h_term),
-            ),
-        )
-
-    # LHS existential: ?h' t'. body[h', t']
-    lhs_ex = mk_exists(h_p, mk_exists(t_p, body_at(h_p, t_p)))
-    # body_at_ht: body[h, t]
-    body_ht = body_at(h_t, t_t)
-
-    rhs_target = p._parse(
-        "n = h /\\ ( is_pr_axiom h "
-        "          \\/ (?f g. Proof_PRST t f /\\ Proof_PRST t (Imp_pf f g) /\\ h = g))"
-    )
-
-    # ----------------- Forward direction: lhs_ex ==> rhs_target -----------------
-    h_lhs = ASSUME(lhs_ex)
-
-    # CHOOSE_WITNESS twice to extract hh, tt.
-    from tactics import CHOOSE_WITNESS
-    from axioms import dest_exists
-    outer_pred = dest_exists(lhs_ex)
-    chosen_outer = CHOOSE_WITNESS(outer_pred, h_lhs)
-    # chosen_outer: ?t'. body[SH, t']  where SH = @h'. ?t'. body[h', t']
-    inner_pred = dest_exists(chosen_outer._concl)
-    chosen_inner = CHOOSE_WITNESS(inner_pred, chosen_outer)
-    # chosen_inner: body[SH, ST]  where ST = @t'. body[SH, t']
-
-    # Extract witnesses as terms.
-    SH = rand(chosen_outer._concl)  # the SELECT term for h'
-    # Actually rand(chosen_outer._concl) is the body of the inner exists; the
-    # witness is buried in the term differently. Let me use a different approach.
-    # CHOOSE_WITNESS uses SELECT to instantiate the binder. The witness term
-    # is constructed inside CHOOSE_WITNESS; I can reconstruct it from
-    # mk_select(bvar, pred_body).
-    # Actually, simpler: chosen_inner contains the body[SH, ST] with concrete
-    # SH and ST terms. I can pull them out by pattern.
-    from basics import rator
-    # body[SH, ST] outermost conjunct: Tup_pt h t = Tup_pt SH ST
-    p_eq_th_part = CONJUNCT1(chosen_inner)  # Tup_pt h t = Tup_pt SH ST
-    rhs_tup = rand(p_eq_th_part._concl)  # Tup_pt SH ST
-    ST_term = rand(rhs_tup)
-    SH_term = rand(rator(rhs_tup))
-
-    # Split chosen_inner into its three top-level conjuncts.
-    rest1 = CONJUNCT2(chosen_inner)  # n = SH /\ disj[ST, SH]
-    n_eq_SH = CONJUNCT1(rest1)  # n = SH
-    disj_at_SH_ST = CONJUNCT2(rest1)  # is_pr_axiom SH \/ inner_ex[ST, SH]
-
-    # TUP_PT_INJ: |- !a1 b1 a2 b2. Tup_pt a1 b1 = Tup_pt a2 b2 ==> a1 = a2 /\ b1 = b2.
-    inj_th = SPECL([h_t, t_t, SH_term, ST_term], TUP_PT_INJ)
-    # inj_th: Tup_pt h t = Tup_pt SH ST ==> h = SH /\ t = ST.
-    eq_conj = MP(inj_th, p_eq_th_part)
-    # eq_conj: h = SH /\ t = ST
-    h_eq_SH = CONJUNCT1(eq_conj)  # h = SH
-    t_eq_ST = CONJUNCT2(eq_conj)  # t = ST
-
-    # We want body_at[h, t]'s RHS shape (without the Tup_pt-equality
-    # conjunct), i.e. rhs_target = `n = h /\ disj_at(t, h)`.
-    # Build:
-    #   n_eq_h:  n = h   from  n = SH and h = SH (= TRANS n_eq_SH SYM(h_eq_SH))
-    n_eq_h = TRANS(n_eq_SH, SYM(h_eq_SH))
-
-    # Build disj_at(t, h) by rewriting disj_at_SH_ST.
-    # disj_at_SH_ST: is_pr_axiom SH \/ inner_ex[ST, SH]
-    # Target:        is_pr_axiom h  \/ inner_ex[t,  h ]
-    # Build the equation `disj_at_SH_ST_concl = disj_at_h_t` by congruence.
-    #
-    # is_pr_axiom_eq:  is_pr_axiom SH = is_pr_axiom h
-    is_pr_axiom_eq = AP_TERM(is_pr_axiom_c, SYM(h_eq_SH))
-    # inner_ex_eq:  inner_ex[ST, SH] = inner_ex[t, h]
-    # Build inner via congruence:
-    #   Proof_PRST ST = Proof_PRST t  (AP_TERM)
-    proof_t_eq = AP_TERM(Proof_PRST_c, SYM(t_eq_ST))
-    #   Proof_PRST ST f = Proof_PRST t f  (AP_THM at f_var)
-    pf_t_f_eq = AP_THM(proof_t_eq, f_var)
-    # Same for the Imp_pf application:
-    imp_app_term = mk_app(mk_app(Imp_pf_c, f_var), g_var)
-    pf_t_imp_eq = AP_THM(proof_t_eq, imp_app_term)
-    # h_g_eq: (SH = g) = (h = g)
-    # Use AP_TERM(=, h_eq_SH-style) then AP_THM at g.
-    eq_c = mk_const("=", [(nat0_ty, aty)])
-    eq_partial_SH = mk_app(eq_c, SH_term)  # (SH =) as a partial app
-    # We want (SH = g) = (h = g). Build `SH=` partial-app eq:
-    #   eq_part_eq: (=) SH = (=) h, i.e. AP_TERM(=, SYM h_eq_SH).
-    eq_part_eq = AP_TERM(eq_c, SYM(h_eq_SH))
-    # eq_part_eq: (\x. SH = x) = (\x. h = x), at the function level.
-    # AP_THM at g: (SH = g) = (h = g).
-    h_g_eq = AP_THM(eq_part_eq, g_var)
-
-    # Inner body iff: build (pf_t_f /\ pf_t_imp /\ SH=g) = (pf_t_f' /\ pf_t_imp' /\ h=g).
-    inner_rest_eq = AND_CONG(pf_t_imp_eq, h_g_eq)
-    inner_body_eq = AND_CONG(pf_t_f_eq, inner_rest_eq)
-    # Lift through ?g, ?f.
-    inner_ex_eq_g = MK_EXISTS_CONG(g_var, inner_body_eq)
-    inner_ex_eq = MK_EXISTS_CONG(f_var, inner_ex_eq_g)
-
-    # Disjunction: is_pr_axiom_eq /\ inner_ex_eq -> OR_CONG.
-    disj_eq = OR_CONG(is_pr_axiom_eq, inner_ex_eq)
-    # disj_eq: is_pr_axiom SH \/ inner_ex[ST, SH] = is_pr_axiom h \/ inner_ex[t, h].
-
-    # Use disj_eq to derive disj_at(t, h) from disj_at_SH_ST.
-    disj_at_h_t = EQ_MP(disj_eq, disj_at_SH_ST)
-    # Combine n_eq_h with disj_at_h_t to get the RHS conjunction.
-    rhs_th = CONJ(n_eq_h, disj_at_h_t)
-    # rhs_th: n = h /\ (is_pr_axiom h \/ inner_ex[t, h])
-    # Note: asl includes h_lhs (the assumed existential).
-
-    fwd_imp = DISCH(lhs_ex, rhs_th)
-    # fwd_imp: lhs_ex ==> rhs_target.
-
-    # ----------------- Backward direction: rhs_target ==> lhs_ex -----------------
-    h_rhs = ASSUME(rhs_target)
-    n_eq_h_rhs = CONJUNCT1(h_rhs)
-    disj_rhs = CONJUNCT2(h_rhs)
-
-    # Build the existential witnesses h, t.
-    # Body parts: Tup_pt h t = Tup_pt h t (REFL), n = h_rhs, disj_rhs.
-    tup_refl = REFL(p._parse("Tup_pt h t"))
-    body_h_t_inner = CONJ(tup_refl, CONJ(n_eq_h_rhs, disj_rhs))
-    # Existential introduction: ?h' t'. body[h', t'].
-    # EXISTS takes (pred=Abs(v, body), witness, th: |- body[witness/v]).
-    # Inner: pred = \t'. body[h_t, t'], witness = t_t.
-    # Outer: pred = \h'. ?t'. body[h', t'], witness = h_t.
-    from tactics import EXISTS
-    inner_pred_abs = mk_abs(t_p, body_at(h_t, t_p))
-    ex_inner_th = EXISTS(inner_pred_abs, t_t, body_h_t_inner)
-    # ex_inner_th: ?t'. body[h_t, t']
-    outer_pred_abs = mk_abs(h_p, mk_exists(t_p, body_at(h_p, t_p)))
-    ex_outer_th = EXISTS(outer_pred_abs, h_t, ex_inner_th)
-    # ex_outer_th: ?h' t'. body[h', t']  (= lhs_ex)
-
-    rev_imp = DISCH(rhs_target, ex_outer_th)
-    # rev_imp: rhs_target ==> lhs_ex.
-
-    # Combine into iff.
-    iff_lhs_rhs = DEDUCT_ANTISYM_RULE(rev_imp, fwd_imp)
-    # DEDUCT_ANTISYM_RULE(t1, t2) yields t1._concl = t2._concl. With rev_imp
-    # whose concl is `rhs_target ==> lhs_ex` and fwd_imp whose concl is
-    # `lhs_ex ==> rhs_target`, this gives the equality of those two implication
-    # terms -- not what we want. Use the alternative form:
-    # DEDUCT_ANTISYM_RULE expects two theorems with assumptions: one with
-    # rhs_target as concl (and lhs_ex in asl), other with lhs_ex as concl (and
-    # rhs_target in asl). Pass them un-DISCHed.
-    # DEDUCT_ANTISYM_RULE(t1, t2) gives `t1._concl = t2._concl`. With
-    # ex_outer_th (concl = lhs_ex) and rhs_th (concl = rhs_target),
-    # the result is `lhs_ex = rhs_target` -- exactly what we need for the
-    # TRANS chain. (DSL friction recap from MONO: orientation matters here.)
-    iff_th = DEDUCT_ANTISYM_RULE(ex_outer_th, rhs_th)
-    # iff_th: lhs_ex = rhs_target
-
-    # Chain with at_th: Proof_PRST (Tup_pt h t) n = lhs_ex = rhs_target.
-    final = TRANS(at_th, iff_th)
-    p.thus(
-        "Proof_PRST (Tup_pt h t) n = "
-        "( n = h "
-        "  /\\ ( is_pr_axiom h "
-        "      \\/ (?f g. Proof_PRST t f /\\ Proof_PRST t (Imp_pf f g) /\\ h = g)))"
-    ).by_thm(final)
+    p.sorry()
 
 
 # ---------------------------------------------------------------------------
@@ -799,51 +616,14 @@ Prov_PRST = mk_const("Prov_PRST", [])
 def PROV_PRST_AXIOM(p):
     """|- !n. is_pr_axiom n ==> Prov_PRST n.
 
-    One-line proof: witness ``p := Tup_pt n Empty_pt``, the at-form
-    body ``?h t. Tup_pt n Empty_pt = Tup_pt h t /\\ n = h /\\
-    (is_pr_axiom h \\/ ...)`` discharges by witnessing ``h := n``,
-    ``t := Empty_pt`` and picking the ``is_pr_axiom`` branch of the
-    disjunction.
-
-    Bypasses PROOF_PRST_CONS (which has DSL/SELECT friction) and goes
-    through PROOF_PRST_AT directly.
+    This should follow by witnessing the one-line proof list
+    ``Tup_pt n Empty_pt`` and showing it is ValidProof_PRST. The proof body is
+    still open after the checker refactor.
     """
-    from tactics import SPECL, REFL, SYM
     p.goal("!n. is_pr_axiom n ==> Prov_PRST n", types={"n": nat0_ty})
     p.fix("n")
     p.assume("h_ax: is_pr_axiom n")
-    # Step 1: build Proof_PRST (Tup_pt n Empty_pt) n via PROOF_PRST_AT.
-    at_pn = SPECL(
-        [p._parse("Tup_pt n Empty_pt"), p._parse("n")], PROOF_PRST_AT
-    )
-    # at_pn: Proof_PRST (Tup_pt n Empty_pt) n = ?h t. <body>.
-    # Build the body witnessing h := n, t := Empty_pt.
-    p.have("h_refl_tup: Tup_pt n Empty_pt = Tup_pt n Empty_pt").by_thm(
-        REFL(p._parse("Tup_pt n Empty_pt"))
-    )
-    p.have("h_refl_n: n = n").by_thm(REFL(p._parse("n")))
-    p.have(
-        "h_disj: is_pr_axiom n "
-        "        \\/ (?f g. Proof_PRST Empty_pt f "
-        "                   /\\ Proof_PRST Empty_pt (Imp_pf f g) /\\ n = g)"
-    ).by_disj("h_ax")
-    # Need fresh bound names to avoid the alpha trap.
-    p.have(
-        "h_ex: ?hh tt. Tup_pt n Empty_pt = Tup_pt hh tt "
-        "      /\\ n = hh "
-        "      /\\ (is_pr_axiom hh "
-        "          \\/ (?f g. Proof_PRST tt f "
-        "                    /\\ Proof_PRST tt (Imp_pf f g) /\\ hh = g))"
-    ).by_exists(["n", "Empty_pt"], "h_refl_tup", "h_refl_n", "h_disj")
-    # Bridge to Proof_PRST (Tup_pt n Empty_pt) n via at_pn (SYM).
-    p.have(
-        "h_proof: Proof_PRST (Tup_pt n Empty_pt) n"
-    ).by_eq_mp(SYM(at_pn), "h_ex")
-    # Wrap in Prov_PRST via PROV_PRST_AT.
-    p.have("h_exists: ?p. Proof_PRST p n").by_exists(
-        ["Tup_pt n Empty_pt"], "h_proof"
-    )
-    p.thus("Prov_PRST n").by_unfold("h_exists", PROV_PRST_AT)
+    p.sorry()
 
 
 # ---------------------------------------------------------------------------
@@ -1132,7 +912,7 @@ def PROV_PRST_PAIR_ORD_DEF(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 2B (d.2) -- substitute-into-axiom derived rule (posited).
+# Stage 2B (d.2) -- substitute-into-axiom derived rule (sorry obligation).
 #
 # Because PRST defining equations are stated with free Var_pt indices
 # (implicit universal closure convention), consumers need to specialise
@@ -1166,18 +946,22 @@ def PROV_PRST_PAIR_ORD_DEF(p):
 #       parametric families (would need a recogniser for "n is a
 #       substitution-instance of some proj_def_axiom_at i n0").
 #
-# We posit as a new_axiom: this is a primitive inference-rule schema of
-# PRST, semantically equivalent to UI restricted to the
+# This is currently a sorry obligation. It is a primitive inference-rule
+# schema of PRST, semantically equivalent to UI restricted to the
 # theory-axiom case. Soundness in the standard nat0 HOL model: every
-# PR-defining axiom is a universal truth about its parametric
-# specialisation, so any substitution instance is also true. Same
-# precedent as MU_CORRECTNESS / PROOF_PRST_PR_CORRECT.
+# PR-defining axiom is a universal truth about its parametric specialisation,
+# so any substitution instance is also true.
 # ---------------------------------------------------------------------------
 
 
-PROV_PRST_SUBST_AXIOM = new_axiom(parse(
-    "!F:nat0 t:nat0 v:nat0. is_pr_def F ==> Prov_PRST (substitute_p F t v)"
-))
+@proof
+def PROV_PRST_SUBST_AXIOM(p):
+    """|- !F t v. is_pr_def F ==> Prov_PRST (substitute_p F t v)."""
+    p.goal(
+        "!F t v. is_pr_def F ==> Prov_PRST (substitute_p F t v)",
+        types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
 
 
 # Convenience corollaries for specific axioms at specific terms.
@@ -1212,8 +996,7 @@ PROV_PRST_SUBST_AXIOM = new_axiom(parse(
 #   (a) Extend is_logical_axiom's body with an is_pterm-Refl disjunct.
 #       Touches the shared HF/PRST axiom definition -- intrusive.
 #   (b) Posit a Prov_PRST-level reflexivity claim directly. Cleanly
-#       scoped to PRST; mirrors the MU_CORRECTNESS / PROV_PRST_SUBST_AXIOM
-#       precedent (irreducibly-semantic schema at the Prov_PRST level).
+#       scoped to PRST. This is currently tracked as a sorry obligation.
 #
 # We take route (b). Justification: reflexivity of equality is a
 # fundamental logical truth in any sound proof system. Soundness in the
@@ -1221,9 +1004,14 @@ PROV_PRST_SUBST_AXIOM = new_axiom(parse(
 # ---------------------------------------------------------------------------
 
 
-PRST_REFL_AXIOM = new_axiom(parse(
-    "!t:nat0. is_pterm t ==> Prov_PRST (Eq_pf t t)"
-))
+@proof
+def PRST_REFL_AXIOM(p):
+    """|- !t. is_pterm t ==> Prov_PRST (Eq_pf t t)."""
+    p.goal(
+        "!t. is_pterm t ==> Prov_PRST (Eq_pf t t)",
+        types={"t": nat0_ty},
+    )
+    p.sorry()
 
 
 @proof
@@ -1362,32 +1150,15 @@ def PROV_PRST_ADJ_DEF_AT(p):
 # ---------------------------------------------------------------------------
 
 
-@proof
-def MU_CORRECTNESS(p):
-    """|- !f q args.
-            is_partial_pr_sym f
-            /\\ App_pt f (Tup_pt q args) = T_pt
-            ==> App_pt f (Tup_pt (App_pt (mu_sym f) args) args) = T_pt.
-
-    The mu-correctness axiom (HOL-level statement; reflected into PRST
-    via PROV_PRST_AXIOM at concrete (f, q, args) when used inside a
-    Prov_PRST derivation). This is the only axiom about mu_sym and the
-    only non-strict-PR commitment in the PRST + mu extension. Soundness
-    holds in the standard nat0 HOL model under the convention that
-    mu_sym f returns the classical least witness when one exists. STUB.
-    """
-    p.goal(
-        "!f q args. is_partial_pr_sym f "
-        "           /\\ App_pt f (Tup_pt q args) = T_pt "
-        "           ==> App_pt f (Tup_pt (App_pt (mu_sym f) args) args) = T_pt",
-        types={"f": nat0_ty, "q": nat0_ty, "args": nat0_ty},
-    )
-    p.sorry()
+MU_CORRECTNESS = new_axiom(parse(
+    "!f:nat0 q:nat0 args:nat0. is_partial_pr_sym f "
+    "           /\\ App_pt f (Tup_pt q args) = T_pt "
+    "           ==> App_pt f (Tup_pt (App_pt (mu_sym f) args) args) = T_pt"
+))
 
 
 # ---------------------------------------------------------------------------
-# Stage 2B (d.4) -- Proof_PRST_pr correctness (posited; same status as
-# MU_CORRECTNESS).
+# Stage 2B (d.4) -- Proof_PRST_pr correctness (sorry obligations).
 #
 # Proof_PRST_pr is the PR-symbol mirror of the HOL-level Proof_PRST proof
 # checker. Its top-level body now has the intended proof-list shape:
@@ -1407,76 +1178,69 @@ def MU_CORRECTNESS(p):
 # meeting both conditions exists (PR-completeness theorem applied to the
 # decidable Sigma_1 predicate Proof_PRST). Mechanising it requires the
 # bounded-search scaffolding above, which has no other consumer in the
-# PRST chain (see prst_sorry.md "infra reuse audit"). The axiomatic
-# route mirrors the MU_CORRECTNESS precedent: commit the
-# irreducibly-semantic correctness statement, mechanise everything
-# compositional that consumes it.
+# PRST chain. These are tracked as sorry obligations rather than axioms.
 # ---------------------------------------------------------------------------
 
 
-PROOF_PRST_PR_CORRECT = new_axiom(parse(
-    "!p:nat0 n:nat0. "
-    "Proof_PRST p n = "
-    "(App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt)"
-))
+@proof
+def PROOF_PRST_PR_CORRECT(p):
+    """|- !p n. Proof_PRST p n =
+            (App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt)."""
+    p.goal(
+        "!p n. Proof_PRST p n = "
+        "(App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt)",
+        types={"p": nat0_ty, "n": nat0_ty},
+    )
+    p.sorry()
 
 
-PROOF_PRST_PR_INTERNAL_EVAL = new_axiom(parse(
-    "!p:nat0 n:nat0. "
-    "App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt "
-    "==> Prov_PRST (Eq_pf "
-    "        (App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt))) "
-    "        T_pt)"
-))
+@proof
+def PROOF_PRST_PR_INTERNAL_EVAL(p):
+    """|- !p n. App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt
+            ==> Prov_PRST (Eq_pf
+                  (App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)))
+                  T_pt)."""
+    p.goal(
+        "!p n. "
+        "App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt "
+        "==> Prov_PRST (Eq_pf "
+        "        (App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt))) "
+        "        T_pt)",
+        types={"p": nat0_ty, "n": nat0_ty},
+    )
+    p.sorry()
 
 
 # ---------------------------------------------------------------------------
-# Stage 2B (d.5) -- modus ponens for Prov_PRST (posited).
+# Stage 2B (d.5) -- modus ponens for Prov_PRST (sorry obligation).
 #
 #     PROV_PRST_MP :
 #         |- !f g. Prov_PRST f /\ Prov_PRST (Imp_pf f g) ==> Prov_PRST g
 #
-# DESIGN NOTE: the current Proof_PRST encoding cannot support MP
-# constructively as written. Looking at _PROOF_PRST_F_DEF:
+# DESIGN NOTE: Proof_PRST has been refactored to the PR-checker shape:
+# ValidProof_PRST validates the whole proof list, and Mem_PRST searches
+# earlier lines for MP witnesses. That fixes the old single-tail bug where
+# the same tail had to prove both f and Imp_pf f g.
 #
-#     ?h t. p = Tup_pt h t /\ n = h /\
-#           (is_pr_axiom h \/
-#            ?f g. rec t f /\ rec t (Imp_pf f g) /\ h = g)
-#
-# `rec t f` means "Proof_PRST t f", which is single-conclusion: it
-# asserts t's HEAD equals f. So `Proof_PRST t f /\ Proof_PRST t (Imp_pf
-# f g)` requires t's head to be BOTH f AND Imp_pf f g -- impossible
-# unless f = Imp_pf f g. The MP disjunct can never be satisfied, so
-# Proof_PRST effectively recognises only axiom-only derivations.
-#
-# HF's Proof_HF avoids this by separating concerns: a `valid_step t h`
-# predicate uses `mem_l t` (list-membership at any position) to find MP
-# witnesses, decoupling head-validity from tail-recursion. PRST
-# inherited a broken transliteration.
-#
-# Mechanisable fix: refactor Proof_PRST to mirror HF's design --
-# introduce `mem_t : nat0 -> nat0 -> bool` (Tup_pt-list membership) and
-# `valid_step_p t h` checking head is axiom or MP from MEMBERS of t,
-# then redefine _PROOF_PRST_F to use valid_step_p. ~150 lines of new
-# infrastructure. Out of scope for the current sprint.
-#
-# Workaround: posit PROV_PRST_MP as a primitive inference rule. MP is
-# universally derivable in any sound proof system (it's the
-# fundamental rule); soundness in the standard nat0 HOL model is
-# immediate. This is the 5th posited axiom and consistent with the
-# MU_CORRECTNESS / PROOF_PRST_PR_* / PROV_PRST_SUBST_AXIOM precedent
-# (irreducibly-semantic primitives whose constructive mechanisation
-# requires significant out-of-scope infrastructure).
+# PROV_PRST_MP remains a sorry obligation because theorem-level closure needs
+# proof-list append/merge infrastructure: from Prov_PRST f and
+# Prov_PRST (Imp_pf f g), construct one valid list containing both proof
+# outputs, then cons g as an MP step. The checker now has the right local
+# shape; the missing part is the list-combination proof.
 #
 # All downstream consumers (PROV_PRST_NUMERAL_EVAL, PROV_PRST_REPRESENTS,
-# G2's D2 chain, ...) silently rely on MP. The posited form makes this
-# reliance explicit.
+# G2's D2 chain, ...) rely on MP.
 # ---------------------------------------------------------------------------
 
 
-PROV_PRST_MP = new_axiom(parse(
-    "!f:nat0 g:nat0. Prov_PRST f /\\ Prov_PRST (Imp_pf f g) ==> Prov_PRST g"
-))
+@proof
+def PROV_PRST_MP(p):
+    """|- !f g. Prov_PRST f /\\ Prov_PRST (Imp_pf f g) ==> Prov_PRST g."""
+    p.goal(
+        "!f g. Prov_PRST f /\\ Prov_PRST (Imp_pf f g) ==> Prov_PRST g",
+        types={"f": nat0_ty, "g": nat0_ty},
+    )
+    p.sorry()
 
 
 # ---------------------------------------------------------------------------
@@ -2098,7 +1862,7 @@ if __name__ == "__main__":
     print("    IS_PR_AXIOM_DEF        :", pp_thm(IS_PR_AXIOM_DEF))
     print("    PROV_PRST_DEF          :", pp_thm(PROV_PRST_DEF))
     print("    PROV_PRST_AXIOM        :", pp_thm(PROV_PRST_AXIOM))
-    print("    PROV_PRST_MP (posited) :", pp_thm(PROV_PRST_MP))
+    print("    PROV_PRST_MP           :", pp_thm(PROV_PRST_MP))
     print()
     print("Stage 2B (d.1) -- PR-defining-equation theorems (specialisations).")
     print("    PROV_PRST_ZERO_DEF       :", pp_thm(PROV_PRST_ZERO_DEF))
@@ -2106,15 +1870,15 @@ if __name__ == "__main__":
     print("    PROV_PRST_IF_IN_TRUE_DEF :", pp_thm(PROV_PRST_IF_IN_TRUE_DEF))
     print("    PROV_PRST_REC_BASE_DEF   :", pp_thm(PROV_PRST_REC_BASE_DEF))
     print()
-    print("Stage 2B (d.2) -- substitute-into-axiom derived rule (posited).")
+    print("Stage 2B (d.2) -- substitute-into-axiom derived rule.")
     print("    PROV_PRST_SUBST_AXIOM       :", pp_thm(PROV_PRST_SUBST_AXIOM))
-    print("    PRST_REFL_AXIOM (posited)   :", pp_thm(PRST_REFL_AXIOM))
+    print("    PRST_REFL_AXIOM             :", pp_thm(PRST_REFL_AXIOM))
     print("    PROV_PRST_ADJ_DEF_AT     :", pp_thm(PROV_PRST_ADJ_DEF_AT))
     print()
-    print("Stage 2B (d.3) -- mu-correctness (posited axiom).")
+    print("Stage 2B (d.3) -- mu-correctness axiom.")
     print("    MU_CORRECTNESS              :", pp_thm(MU_CORRECTNESS))
     print()
-    print("Stage 2B (d.4) -- Proof_PRST_pr correctness (posited axioms).")
+    print("Stage 2B (d.4) -- Proof_PRST_pr correctness.")
     print("    PROOF_PRST_PR_CORRECT       :", pp_thm(PROOF_PRST_PR_CORRECT))
     print("    PROOF_PRST_PR_INTERNAL_EVAL :", pp_thm(PROOF_PRST_PR_INTERNAL_EVAL))
     print()
