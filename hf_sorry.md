@@ -542,9 +542,13 @@ definitions.
   bodies for `is_term_internal`, `is_form_internal`, `free_in_internal`,
   and `substitute_internal`. Term/form use finite closure sets; free-in
   uses a witness-path set; substitute uses a local evaluation graph. The
-  production definitions now live in `hf_repr_core.py`. Remaining proof
-  work is proving the closure/path/graph bodies equivalent to the
-  existing HOL predicates and proving substitute graph functionality.
+  production definitions now live in `hf_repr_core.py`. The public
+  support package `HF_SUPPORT_PREDICATE_PACKAGE` exports positive and
+  negative representability clauses for `is_term_internal`,
+  `is_form_internal`, and `free_in_internal`; `substitute_internal`
+  remains governed by `HF_SYNTAX_REC_PACKAGE`. Remaining proof work is
+  proving the closure/path/graph bodies equivalent to the existing HOL
+  predicates and proving substitute graph functionality.
 
 * **Forward dependency-set shape spike (done)** —
   `spike_forward_dep_shape.py` validates the proof-object witness shape
