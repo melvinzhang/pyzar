@@ -57,7 +57,7 @@ from hf_proof import (
     is_mp,  # noqa: F401
 )
 from hf_repr_core import (
-    numeral,  # noqa: F401  -- parser alias for PROV_PRST_NUMERAL_EVAL
+    quote_hf,  # noqa: F401  -- parser alias for PROV_PRST_NUMERAL_EVAL
     substitute,  # noqa: F401  -- parser alias for PROV_PRST_SUBSTITUTE_EVAL
 )
 from hf_godel1 import (
@@ -1554,12 +1554,12 @@ def PROV_PRST_SUBSTITUTE_EVAL(p):
 @proof
 def PROV_PRST_NUMERAL_EVAL(p):
     """|- !n. Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt n Empty_pt))
-                               (numeral n)).
+                               (quote_hf n)).
 
     Similar to PROV_PRST_SUBSTITUTE_EVAL, for numeral. STUB.
     """
     p.goal(
-        "!n. Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt n Empty_pt)) (numeral n))",
+        "!n. Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt n Empty_pt)) (quote_hf n))",
         types={"n": nat0_ty},
     )
     p.sorry()
@@ -2070,7 +2070,7 @@ def FREE_IN_PROV_PRST_INTERNAL(p):
 @proof
 def PROV_PRST_REPRESENTS(p):
     """|- !n. Prov_PRST n <=>
-              Prov_PRST (substitute_p Prov_PRST_internal (numeral n) var_x).
+              Prov_PRST (substitute_p Prov_PRST_internal (quote_hf n) var_x).
 
     The headline representability theorem for PRST's own provability
     predicate. Reduces to:
@@ -2084,7 +2084,7 @@ def PROV_PRST_REPRESENTS(p):
     """
     p.goal(
         "!n. Prov_PRST n = "
-        "    Prov_PRST (substitute_p Prov_PRST_internal (numeral n) var_x)",
+        "    Prov_PRST (substitute_p Prov_PRST_internal (quote_hf n) var_x)",
         types={"n": nat0_ty},
     )
     p.sorry()

@@ -70,6 +70,7 @@ from prst_proof import (
 from prst_repr import (
     DIAG_REPRESENTS_PRST,  # noqa: F401
 )
+from hf_repr_core import quote_hf  # noqa: F401  -- parser alias
 from hf_proof import var_x  # PRST re-uses the var_x constant from the encoding
 
 
@@ -82,7 +83,7 @@ from hf_proof import var_x  # PRST re-uses the var_x constant from the encoding
 #                                       (App_pt diag_pr (Tup_pt var_x Empty_pt))
 #                                       var_x.
 #
-# psi := substitute_p theta_of_phi_p(phi) (numeral (theta_of_phi_p phi)) var_x.
+# psi := substitute_p theta_of_phi_p(phi) (quote_hf (theta_of_phi_p phi)) var_x.
 #
 # Since ``diag_pr`` is a PR function symbol, the term
 # ``App_pt diag_pr (Tup_pt var_x Empty_pt)`` IS the value diag(x) at the
@@ -112,22 +113,22 @@ def DIAGONAL_LEMMA_PRST(p):
               ==> is_pform (diag (theta_of_phi_p phi))
                 /\\ Prov_PRST (Iff_pf (diag (theta_of_phi_p phi))
                                      (substitute_p phi
-                                                   (numeral
+                                                   (quote_hf
                                                      (diag (theta_of_phi_p phi)))
                                                    var_x)).
 
     The quantifier-free diagonal lemma. Because diag is a PR function
-    symbol, ``App_pt diag_pr (Tup_pt (numeral n) Empty_pt) = numeral
+    symbol, ``App_pt diag_pr (Tup_pt (quote_hf n) Empty_pt) = quote_hf
     (diag n)`` is one defining-equation step (DIAG_REPRESENTS_PRST):
     no functionality lemma, no existential elimination, no D-formula
     bookkeeping.
 
     Sketch: theta_of_phi_p(phi) is phi with var_x replaced by the
-    diag-term. Substituting (numeral (theta_of_phi_p phi)) for var_x
+    diag-term. Substituting (quote_hf (theta_of_phi_p phi)) for var_x
     in theta_of_phi_p(phi) gives phi with var_x replaced by
-    App_pt diag_pr (Tup_pt (numeral (theta_of_phi_p phi)) Empty_pt). By
+    App_pt diag_pr (Tup_pt (quote_hf (theta_of_phi_p phi)) Empty_pt). By
     DIAG_REPRESENTS_PRST that App_pt term equals
-    numeral (diag (theta_of_phi_p phi)), and substituting that into
+    quote_hf (diag (theta_of_phi_p phi)), and substituting that into
     phi gives the right-hand side. The Iff is then closed by PRST
     equality reasoning.
 
@@ -138,7 +139,7 @@ def DIAGONAL_LEMMA_PRST(p):
         "is_pform (diag (theta_of_phi_p phi)) /\\ "
         "Prov_PRST (Iff_pf (diag (theta_of_phi_p phi)) "
         "                  (substitute_p phi "
-        "                                (numeral (diag (theta_of_phi_p phi))) "
+        "                                (quote_hf (diag (theta_of_phi_p phi))) "
         "                                var_x))"
     )
     p.sorry()
@@ -155,7 +156,7 @@ def DIAGONAL_LEMMA_PRST(p):
 #
 #   Prov_PRST (Iff_pf G_PRST
 #                     (Not_pf (substitute_p Prov_PRST_internal
-#                                          (numeral G_PRST)
+#                                          (quote_hf G_PRST)
 #                                          var_x))).
 # ---------------------------------------------------------------------------
 
@@ -172,7 +173,7 @@ G_PRST = mk_const("G_PRST", [])
 def G_PRST_DIAGONAL_EQ(p):
     """|- Prov_PRST (Iff_pf G_PRST
                             (Not_pf (substitute_p Prov_PRST_internal
-                                                  (numeral G_PRST)
+                                                  (quote_hf G_PRST)
                                                   var_x))).
 
     Specialisation of DIAGONAL_LEMMA_PRST at phi = Not_pf
@@ -185,7 +186,7 @@ def G_PRST_DIAGONAL_EQ(p):
     p.goal(
         "Prov_PRST (Iff_pf G_PRST "
         "                  (Not_pf (substitute_p Prov_PRST_internal "
-        "                                        (numeral G_PRST) "
+        "                                        (quote_hf G_PRST) "
         "                                        var_x)))"
     )
     p.sorry()
@@ -263,7 +264,7 @@ def GODEL_FIRST_PRST(p):
       First conjunct (PRST does not prove G_PRST):
         Suppose Prov_PRST G_PRST.
         By PROV_PRST_REPRESENTS,
-            Prov_PRST (substitute_p Prov_PRST_internal (numeral G_PRST) var_x).
+            Prov_PRST (substitute_p Prov_PRST_internal (quote_hf G_PRST) var_x).
         By G_PRST_DIAGONAL_EQ,
             Prov_PRST (Not_pf G_PRST).
         Combined: Prov_PRST is inconsistent, contradicting PRST_CONSISTENT.
@@ -271,7 +272,7 @@ def GODEL_FIRST_PRST(p):
       Second conjunct (PRST does not prove Not_pf G_PRST):
         Suppose Prov_PRST (Not_pf G_PRST).
         By G_PRST_DIAGONAL_EQ,
-            Prov_PRST (substitute_p Prov_PRST_internal (numeral G_PRST) var_x).
+            Prov_PRST (substitute_p Prov_PRST_internal (quote_hf G_PRST) var_x).
         By PRST_SIGMA1_SOUND, Prov_PRST G_PRST holds (in HOL).
         Combined with the assumption, PRST inconsistent.
 

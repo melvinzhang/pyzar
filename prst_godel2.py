@@ -10,7 +10,7 @@ Headline theorem:
 Where ``Con_PRST`` is the PRST formula stating PRST's own consistency:
 
     Con_PRST := Not_pf (substitute_p Prov_PRST_internal
-                                     (numeral falsity_witness)
+                                     (quote_hf falsity_witness)
                                      var_x)
 
 and ``falsity_witness`` is some canonical PRST-refutable closed
@@ -19,28 +19,28 @@ formula -- we use ``Eq_pf Empty_pt (Adj_pt Empty_pt Empty_pt)`` (the
 
 Proof outline (Hilbert-Bernays-Loeb derivability conditions):
 
-  (D1) From PRST |- phi, conclude PRST |- Prov_internal(numeral phi).
+  (D1) From PRST |- phi, conclude PRST |- Prov_internal(quote_hf phi).
        Already available as PROV_PRST_REPRESENTS (the forward
        direction of the iff). Re-stated here under the standard name
        for the G2 argument.
 
   (D2) PRST proves the internalised modus ponens schema:
-           Prov_internal(numeral (Imp_pf phi psi))
-             -> Prov_internal(numeral phi)
-             -> Prov_internal(numeral psi).
+           Prov_internal(quote_hf (Imp_pf phi psi))
+             -> Prov_internal(quote_hf phi)
+             -> Prov_internal(quote_hf psi).
        Derived in the quantifier-free setting from:
          * a Pi_1 PR-side lemma MP_COMBINE_PR_CORRECT that combines two
            proof-witness terms p1, p2 into a single proof-witness term
            mp_combine_pr(p1, p2), and
          * MU_CORRECTNESS at f = Proof_PRST_pr, q = mp_combine_pr(...),
-           args = [numeral psi].
+           args = [quote_hf psi].
        The witness extraction that an Exists-elim rule would do is
        replaced by applying MU_CORRECTNESS at the explicit combined
        witness.
 
   (D3) PRST proves the internalised Sigma_1-completeness for its own
        provability predicate:
-           Prov_internal(numeral phi) -> Prov_internal(numeral
+           Prov_internal(quote_hf phi) -> Prov_internal(quote_hf
                                                        Prov_internal[phi]).
        Hardest derivability condition. Reduces to a Pi_1 structural
        induction on the formula encoding: PRST verifies each formula
@@ -50,9 +50,9 @@ Proof outline (Hilbert-Bernays-Loeb derivability conditions):
        filled in -- the bulk of the G2 cost lives here.
 
   (Loeb) For any closed PRST formula psi:
-           PRST |- (Prov_internal(numeral psi) -> psi)  ==>  PRST |- psi.
+           PRST |- (Prov_internal(quote_hf psi) -> psi)  ==>  PRST |- psi.
          Derived from D1-D3 via the Loeb diagonal construction (fixed
-         point of (phi |-> Prov_internal(numeral phi) -> psi)). G2 is
+         point of (phi |-> Prov_internal(quote_hf phi) -> psi)). G2 is
          the special case psi = falsity_witness.
 
   (G2)   Apply Loeb at psi = falsity_witness. ``Prov_internal(num fw)
@@ -104,7 +104,7 @@ from prst_godel1 import (
     DIAGONAL_LEMMA_PRST,  # noqa: F401  -- Loeb construction needs the diagonal
 )
 from hf_repr_core import (
-    numeral,  # noqa: F401  -- parser alias
+    quote_hf,  # noqa: F401  -- parser alias
 )
 from hf_proof import (
     var_x,  # noqa: F401  -- parser alias
@@ -132,7 +132,7 @@ falsity_witness = mk_const("falsity_witness", [])
 CON_PRST_DEF = define(
     "Con_PRST",
     parse_type("nat0"),
-    "Not_pf (substitute_p Prov_PRST_internal (numeral falsity_witness) var_x)",
+    "Not_pf (substitute_p Prov_PRST_internal (quote_hf falsity_witness) var_x)",
 )
 Con_PRST = mk_const("Con_PRST", [])
 
@@ -161,7 +161,7 @@ def IS_PFORM_CON_PRST(p):
 @proof
 def DERIV_D1(p):
     """|- !phi. Prov_PRST phi
-              ==> Prov_PRST (substitute_p Prov_PRST_internal (numeral phi) var_x).
+              ==> Prov_PRST (substitute_p Prov_PRST_internal (quote_hf phi) var_x).
 
     The first derivability condition, stated as a meta-rule (the
     Prov_PRST in the hypothesis is the HOL-level provability
@@ -172,7 +172,7 @@ def DERIV_D1(p):
     """
     p.goal(
         "!phi. Prov_PRST phi ==> "
-        "Prov_PRST (substitute_p Prov_PRST_internal (numeral phi) var_x)",
+        "Prov_PRST (substitute_p Prov_PRST_internal (quote_hf phi) var_x)",
         types={"phi": nat0_ty},
     )
     p.sorry()
@@ -221,12 +221,12 @@ def MP_COMBINE_PR_CORRECT(p):
 def DERIV_D2(p):
     """|- !phi psi. Prov_PRST (Imp_pf
                                 (substitute_p Prov_PRST_internal
-                                              (numeral (Imp_pf phi psi)) var_x)
+                                              (quote_hf (Imp_pf phi psi)) var_x)
                                 (Imp_pf
                                   (substitute_p Prov_PRST_internal
-                                                (numeral phi) var_x)
+                                                (quote_hf phi) var_x)
                                   (substitute_p Prov_PRST_internal
-                                                (numeral psi) var_x))).
+                                                (quote_hf psi) var_x))).
 
     The second derivability condition: PRST internally proves
     modus ponens for its own provability predicate. PRST-formula
@@ -235,23 +235,23 @@ def DERIV_D2(p):
     Proof sketch (entirely quantifier-free, the key win of the
     mu_sym design):
       1. Reduce the substituted forms: substitute_p
-         Prov_PRST_internal (numeral phi) var_x evaluates to
+         Prov_PRST_internal (quote_hf phi) var_x evaluates to
              Eq_pf (App_pt Proof_PRST_pr
-                     (Tup_pt (App_pt find_proof_pr (Tup_pt (numeral phi) Empty_pt))
-                       (Tup_pt (numeral phi) Empty_pt))) T_pt.
+                     (Tup_pt (App_pt find_proof_pr (Tup_pt (quote_hf phi) Empty_pt))
+                       (Tup_pt (quote_hf phi) Empty_pt))) T_pt.
          (one substitute_p step under each App_pt / Eq_pf clause)
       2. Under the antecedents we have two witnesses
-            p1 := App_pt find_proof_pr [numeral (Imp_pf phi psi)],
-            p2 := App_pt find_proof_pr [numeral phi]
-         certifying Proof_PRST_pr at (numeral (Imp_pf phi psi)) and
-         (numeral phi) respectively.
+            p1 := App_pt find_proof_pr [quote_hf (Imp_pf phi psi)],
+            p2 := App_pt find_proof_pr [quote_hf phi]
+         certifying Proof_PRST_pr at (quote_hf (Imp_pf phi psi)) and
+         (quote_hf phi) respectively.
       3. By MP_COMBINE_PR_CORRECT, mp_combine_pr(p1, p2) certifies
-         Proof_PRST_pr at (numeral psi).
+         Proof_PRST_pr at (quote_hf psi).
       4. By MU_CORRECTNESS at f = Proof_PRST_pr, q = mp_combine_pr(p1,
-         p2), args = [numeral psi]: the mu-witness also certifies, i.e.
+         p2), args = [quote_hf psi]: the mu-witness also certifies, i.e.
          App_pt Proof_PRST_pr
-           (Tup_pt (App_pt find_proof_pr (Tup_pt (numeral psi) Empty_pt))
-             (Tup_pt (numeral psi) Empty_pt)) = T_pt.
+           (Tup_pt (App_pt find_proof_pr (Tup_pt (quote_hf psi) Empty_pt))
+             (Tup_pt (quote_hf psi) Empty_pt)) = T_pt.
       5. Repackaging via Eq_pf gives the substituted-internal form,
          and Imp_pf-introduction closes the goal.
 
@@ -259,10 +259,10 @@ def DERIV_D2(p):
     """
     p.goal(
         "!phi psi. Prov_PRST (Imp_pf "
-        "  (substitute_p Prov_PRST_internal (numeral (Imp_pf phi psi)) var_x) "
+        "  (substitute_p Prov_PRST_internal (quote_hf (Imp_pf phi psi)) var_x) "
         "  (Imp_pf "
-        "    (substitute_p Prov_PRST_internal (numeral phi) var_x) "
-        "    (substitute_p Prov_PRST_internal (numeral psi) var_x)))",
+        "    (substitute_p Prov_PRST_internal (quote_hf phi) var_x) "
+        "    (substitute_p Prov_PRST_internal (quote_hf psi) var_x)))",
         types={"phi": nat0_ty, "psi": nat0_ty},
     )
     p.sorry()
@@ -272,11 +272,11 @@ def DERIV_D2(p):
 def DERIV_D3(p):
     """|- !phi. Prov_PRST (Imp_pf
                             (substitute_p Prov_PRST_internal
-                                          (numeral phi) var_x)
+                                          (quote_hf phi) var_x)
                             (substitute_p Prov_PRST_internal
-                                          (numeral
+                                          (quote_hf
                                             (substitute_p Prov_PRST_internal
-                                                          (numeral phi) var_x))
+                                                          (quote_hf phi) var_x))
                                           var_x)).
 
     The third derivability condition: PRST internally proves
@@ -307,9 +307,9 @@ def DERIV_D3(p):
     """
     p.goal(
         "!phi. Prov_PRST (Imp_pf "
-        "  (substitute_p Prov_PRST_internal (numeral phi) var_x) "
+        "  (substitute_p Prov_PRST_internal (quote_hf phi) var_x) "
         "  (substitute_p Prov_PRST_internal "
-        "    (numeral (substitute_p Prov_PRST_internal (numeral phi) var_x)) "
+        "    (quote_hf (substitute_p Prov_PRST_internal (quote_hf phi) var_x)) "
         "    var_x))",
         types={"phi": nat0_ty},
     )
@@ -322,7 +322,7 @@ def DERIV_D3(p):
 # Loeb generalises G2. For any closed PRST formula psi:
 #
 #     |- (Prov_PRST (Imp_pf (substitute_p Prov_PRST_internal
-#                                         (numeral psi) var_x) psi))
+#                                         (quote_hf psi) var_x) psi))
 #        ==> Prov_PRST psi.
 #
 # G2 is recovered at psi = falsity_witness.
@@ -333,7 +333,7 @@ def DERIV_D3(p):
 def LOEB_PRST(p):
     """|- !psi. is_pform psi
               /\\ Prov_PRST (Imp_pf (substitute_p Prov_PRST_internal
-                                                  (numeral psi) var_x)
+                                                  (quote_hf psi) var_x)
                                     psi)
               ==> Prov_PRST psi.
 
@@ -345,7 +345,7 @@ def LOEB_PRST(p):
     H with
         Prov_PRST (Iff_pf H (Imp_pf
                               (substitute_p Prov_PRST_internal
-                                            (numeral H) var_x)
+                                            (quote_hf H) var_x)
                               psi)).
     Then D1, D2, D3 chain (each one MP step) to derive Prov_PRST psi.
 
@@ -354,7 +354,7 @@ def LOEB_PRST(p):
     p.goal(
         "!psi. (is_pform psi /\\ "
         "       Prov_PRST (Imp_pf (substitute_p Prov_PRST_internal "
-        "                                       (numeral psi) var_x) psi)) "
+        "                                       (quote_hf psi) var_x) psi)) "
         "      ==> Prov_PRST psi",
         types={"psi": nat0_ty},
     )
@@ -376,13 +376,13 @@ def GODEL_SECOND_PRST(p):
     Proof:
       Suppose Prov_PRST Con_PRST, i.e. Prov_PRST of
             Not_pf (substitute_p Prov_PRST_internal
-                                 (numeral falsity_witness) var_x).
+                                 (quote_hf falsity_witness) var_x).
       This is propositionally equivalent (inside PRST, via
       propositional logic and the standard "Not_pf phi = (phi ->
       falsity_witness)" encoding modulo the choice of falsity_witness)
       to
             Prov_PRST (Imp_pf (substitute_p Prov_PRST_internal
-                                            (numeral falsity_witness) var_x)
+                                            (quote_hf falsity_witness) var_x)
                               falsity_witness).
       By LOEB_PRST at psi = falsity_witness, this yields
             Prov_PRST falsity_witness.
