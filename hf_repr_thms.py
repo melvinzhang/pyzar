@@ -19,9 +19,8 @@
 #   (b) QUOTE_HF_INJ -- HOL-level injectivity for the quote_hf map.
 #   (c) Measured quote membership / inequality scaffolding.
 #   (d) Stage-3 remaining SORRY scaffolding
-#       (PROV_HF_REPRESENTS, FREE_IN_PROV_HF_INTERNAL). Substitute
-#       representability is now provided by the syntax-recursion package
-#       in hf_repr_core.
+#       (PROV_HF_REPRESENTS). Substitute representability is now provided
+#       by the syntax-recursion package in hf_repr_core.
 # ---------------------------------------------------------------------------
 
 
@@ -164,6 +163,8 @@ from hf_repr_core import (
     FREE_IN_QPARSE_IMP_F,
     IS_TERM_QPARSE_FORALL_F,
     FREE_IN_QPARSE_FORALL_F,
+    HF_PROV_FREE_CONDITION_PACKAGE,
+    FREE_IN_PROV_HF_INTERNAL_BODY,
     IS_MP_INTERNAL_DEF,
     IS_GEN_INTERNAL_DEF,
     VALID_STEP_HF_SET_INTERNAL_DEF,
@@ -176,12 +177,18 @@ from hf_repr_core import (
     SUBSTITUTE_REPRESENTS_FORM,
     SUBSTITUTE_REPRESENTS,
     TEMPLATE_FILL_EMPTY,
+    TEMPLATE_FILL_EQ,
+    TEMPLATE_FILL_NOT,
+    TEMPLATE_FILL_IMP,
+    TEMPLATE_FILL_FORALL,
     TEMPLATE_FILL_HOLE_HIT,
     TEMPLATE_FILL_HOLE_MISS,
     TEMPLATE_FILL_INSERT,
+    TEMPLATE_FILL_IN,
     TEMPLATE_FILL_QPARSE_VAR_T,
     TEMPLATE_FILL_REPRESENTS_TERM,
     TEMPLATE_FILL_REPRESENTS,
+    TEMPLATE_FILL_PRESERVES_IS_FORM,
 )
 from nat0_order import NAT0_LT_ASYM, NAT0_LT_NOT_REFL, NAT0_LT_SUC0, NAT0_LT_TOTAL_NEQ, NAT0_LT_TRANS
 
@@ -4066,6 +4073,10 @@ def _prove_is_form_syntax(tm, memo=None, term_memo=None):
         formula = _prove_is_form_syntax(args[0], memo, term_memo)
         term = _prove_is_term_syntax(args[1], term_memo)
         th = MP(SPECL(args, SUBSTITUTE_PRESERVES_IS_FORM), CONJ(formula, term))
+    elif head == "template_fill" and len(args) == 3:
+        formula = _prove_is_form_syntax(args[0], memo, term_memo)
+        term = _prove_is_term_syntax(args[1], term_memo)
+        th = MP(MP(SPECL(args, TEMPLATE_FILL_PRESERVES_IS_FORM), formula), term)
     else:
         raise ValueError(f"no is_form syntax proof rule for {head or tm!r}")
 
@@ -4105,12 +4116,13 @@ def IS_FORM_PROV_HF_INTERNAL(p):
 def FREE_IN_PROV_HF_INTERNAL(p):
     """|- !v. free_in Prov_HF_internal v <=> v = var_x.
 
-    Side condition for the diagonal lemma. AXIOMATIZED via
-    ``p.sorry()``; ``var_x`` is the F-slot in the substitute-via-numeral
-    representation pattern.
+    Side condition for the diagonal lemma, discharged from the final
+    package free-variable contract for ``Prov_HF_internal``.
     """
     p.goal("!v. free_in Prov_HF_internal v = (v = idx_x)")
-    p.sorry()
+    p.thus("!v. free_in Prov_HF_internal v = (v = idx_x)").by_thm(
+        FREE_IN_PROV_HF_INTERNAL_BODY
+    )
 
 
 if __name__ == "__main__":
@@ -4194,6 +4206,8 @@ if __name__ == "__main__":
     print("    FREE_IN_QPARSE_IMP_F                   :", pp_thm(FREE_IN_QPARSE_IMP_F))
     print("    IS_TERM_QPARSE_FORALL_F                :", pp_thm(IS_TERM_QPARSE_FORALL_F))
     print("    FREE_IN_QPARSE_FORALL_F                :", pp_thm(FREE_IN_QPARSE_FORALL_F))
+    print("    HF_PROV_FREE_CONDITION_PACKAGE         :", pp_thm(HF_PROV_FREE_CONDITION_PACKAGE))
+    print("    FREE_IN_PROV_HF_INTERNAL_BODY          :", pp_thm(FREE_IN_PROV_HF_INTERNAL_BODY))
     print("    HF_SYNTAX_REC_PACKAGE                  :", pp_thm(HF_SYNTAX_REC_PACKAGE))
     print(
         "    SUBSTITUTE_REPRESENTS_SYNTACTIC        :",
@@ -4216,6 +4230,6 @@ if __name__ == "__main__":
         pp_thm(IS_FORM_PROV_HF_INTERNAL),
     )
     print(
-        "    FREE_IN_PROV_HF_INTERNAL (SORRY)       :",
+        "    FREE_IN_PROV_HF_INTERNAL              :",
         pp_thm(FREE_IN_PROV_HF_INTERNAL),
     )

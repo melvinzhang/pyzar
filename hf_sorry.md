@@ -35,7 +35,7 @@ are now decided:
 | G | `SUBSTITUTE_REPRESENTS`          | active | small/med  | F                         | direct recursive equations for `substitute_internal`         |
 | I | `PROV_HF_REPRESENTS`             | active | large      | G                         | Σ₁ completeness (forward) — Σ₁ soundness deferred to Stage 6; internal body landed |
 | J | `IS_FORM_PROV_HF_INTERNAL`       | done   | done       | —                         | structural syntax walk over `Prov_HF_internal`              |
-| K | `FREE_IN_PROV_HF_INTERNAL`       | active | small      | I's body def              | `free_in` recursion                                          |
+| K | `FREE_IN_PROV_HF_INTERNAL`       | done   | done       | —                         | package free contract for `Prov_HF_internal`                 |
 
 ✓ = already proven and exported (no sorry).
 
@@ -336,23 +336,25 @@ recursion equations.
      constructor bridges the main Phase 2 burden. They are object-level
      equality facts for finite `Insert_t` towers, and proving them
      directly would grow a separate finite-set algebra package.
-   - Instead, keep object-language substitution semantic and introduce a
-     separate quoted-data/template filling layer for body construction.
-     `qparse` remains the notation for readable quoted data templates;
-     template filling walks the `Empty_t`/`Insert_t` data and replaces
-     explicit hole variables. Any later bridge is localized to template
-     interpretation, not entangled with object substitution.
+   - Instead, keep object-language substitution semantic and use a
+     separate template-filling layer for body construction. `qparse`
+     remains the notation for readable quoted templates; template filling
+     replaces explicit hole variables and has its own `Forall_f` behavior:
+     preserve the binder slot and always fill the body. Any later bridge is
+     localized to template interpretation, not entangled with object
+     substitution.
    - Current bridge surface: only `QUOTE_HF_QPARSE_EMPTY` remains in
      `hf_repr_thms.py`, and it is a real closed proof. The non-empty
      `QUOTE_HF_QPARSE_*` bridge axioms have been removed from the main
      theorem layer.
    - Implemented package: `hf_repr_core.py` now exports
-     `template_fill`, `template_fill_internal`, the data-template rules
+     `template_fill`, `template_fill_internal`, the template rules
      `TEMPLATE_FILL_EMPTY`, `TEMPLATE_FILL_HOLE_HIT`,
-     `TEMPLATE_FILL_HOLE_MISS`, `TEMPLATE_FILL_INSERT`, and
-     `TEMPLATE_FILL_QPARSE_VAR_T`, plus `TEMPLATE_FILL_REPRESENTS_TERM`.
-     This package is definitional over the existing substitution
-     machinery, so it adds a clean API without adding another axiom.
+     `TEMPLATE_FILL_HOLE_MISS`, `TEMPLATE_FILL_EQ`,
+     `TEMPLATE_FILL_NOT`, `TEMPLATE_FILL_IMP`,
+     `TEMPLATE_FILL_FORALL`, `TEMPLATE_FILL_INSERT`,
+     `TEMPLATE_FILL_IN`, and `TEMPLATE_FILL_QPARSE_VAR_T`, plus
+     `TEMPLATE_FILL_REPRESENTS_TERM`.
 
 5. **Old operational checker — removed**
    - Done for the main path: the step-by-step substitution checker is no
@@ -450,10 +452,10 @@ substitute layer.
    **K — `FREE_IN_PROV_HF_INTERNAL`**.
    - `IS_FORM_PROV_HF_INTERNAL` is discharged by a structural syntax
      walk over the dependency-set body, using `IS_FORM_AT_*`,
-     `SUBSTITUTE_PRESERVES_IS_FORM`, and the package side lemma for
+     `TEMPLATE_FILL_PRESERVES_IS_FORM`, and the package side lemma for
      `is_axiom_internal`.
-   - `FREE_IN_PROV_HF_INTERNAL` remains: use the matching `free_in`
-     recursion walk over the same body.
+   - `FREE_IN_PROV_HF_INTERNAL` is discharged from the final package
+     free-contract theorem `HF_PROV_FREE_CONDITION_PACKAGE`.
 
 ## Why this order
 
@@ -578,7 +580,8 @@ definitions.
   are landed in `hf_repr_core.py` as `HF_PACKAGE_SIDE_CONDITION_PACKAGE`,
   exporting `IS_FORM_IS_AXIOM_INTERNAL`, `FREE_IN_IS_AXIOM_INTERNAL`, and
   qparse-template term/free clauses for `Pair_ord`, `Imp_f`, and
-  `Forall_f`.
+  `Forall_f`; the final `Prov_HF_internal` free-variable contract is
+  exported as `HF_PROV_FREE_CONDITION_PACKAGE`.
 
 * **Phase 3 design decision (confirmed and internal bodies landed)** —
   the main path uses the dependency-set proof checker, and the fixed
@@ -856,11 +859,13 @@ definitions.
   machinery for a large qparse bridge algebra.
 
   The first version of that layer is now in `hf_repr_core.py`:
-  `template_fill` is the HOL-side data operation, and
+  `template_fill` is a separate HOL recursion, and
   `template_fill_internal` is the internal formula alias. The exported
-  rules cover exactly the quoted-template structure (`Empty_t`,
-  `Var_t` hole hit/miss, and `Insert_t`) plus
-  `TEMPLATE_FILL_REPRESENTS_TERM`. The existing `is_Pair_ord_internal`
+  rules cover the quoted-template structure (`Empty_t`, `Var_t` hole
+  hit/miss, `Insert_t`) and the formula constructors (`Eq_f`, `Not_f`,
+  `Imp_f`, `Forall_f`, `In_a`) plus `TEMPLATE_FILL_REPRESENTS_TERM`.
+  The `Forall_f` rule is deliberately not object substitution: it keeps
+  the binder slot and fills the body. The existing `is_Pair_ord_internal`
   quoted-data body is now built through `qparse`, and
   `TEMPLATE_FILL_QPARSE_VAR_T` proves the representative qparse fill
   case in-repo.

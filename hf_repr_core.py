@@ -53,8 +53,10 @@ from tactics import (
     NOT_ELIM,
     EQF_INTRO,
     CONTR,
+    AP_TERM,
+    or_chain_collapse,
 )
-from fusion import ASSUME
+from fusion import ASSUME, ABS
 from basics import mk_eq
 
 from hf_syntax import (
@@ -90,7 +92,12 @@ from hf_syntax import (
     NAT0_LT_IN_A_L,
     NAT0_LT_IN_A_R,
     _unfold_rec_via_F_def,
+    derive_rec_eq_select,
+    derive_rec_eq_select_cond,
+    mono_iff_value_unary_pw_step,
     _mono_iff_value_binary_pw_step,
+    mono_iff_value_binary_pw_step,
+    _aty_for_select,
 )
 from hf_qsyntax import qparse
 from hf_sets import (
@@ -2429,19 +2436,19 @@ def _V_idx(i):
 
 
 def _subst1(phi, x):
-    return mk_app(substitute, phi, x, idx_x)
+    return mk_app(template_fill, phi, x, idx_x)
 
 
 def _subst2(phi, x, y):
-    return mk_app(substitute, _subst1(phi, x), y, idx_y)
+    return mk_app(template_fill, _subst1(phi, x), y, idx_y)
 
 
 def _subst3(phi, x, y, z):
-    return mk_app(substitute, _subst2(phi, x, y), z, idx_z)
+    return mk_app(template_fill, _subst2(phi, x, y), z, idx_z)
 
 
 def _subst4(phi, x, y, z, w):
-    return mk_app(substitute, _subst3(phi, x, y, z), w, idx_w)
+    return mk_app(template_fill, _subst3(phi, x, y, z), w, idx_w)
 
 
 def _entry_term(inp, out):
@@ -2794,11 +2801,149 @@ SUBSTITUTE_INTERNAL_DEF = define(
 substitute_internal = mk_const("substitute_internal", [])
 
 
-TEMPLATE_FILL_DEF, TEMPLATE_FILL_AT = define_with_at(
-    "template_fill",
-    parse_type("nat0 -> nat0 -> nat0 -> nat0"),
-    "\\D:nat0. \\t:nat0. \\v:nat0. substitute D t v",
+_tf_new_t_n0 = Var("new_t", nat0_ty)
+_tf_v_n0 = Var("v", nat0_ty)
+_tf_r_n0 = Var("r", nat0_ty)
+_tf_x_n0 = Var("x", nat0_ty)
+_tf_pred3_ty = parse_type("nat0 -> nat0 -> nat0 -> nat0")
+_tf_F_pred3_ty = parse_type(
+    "(nat0 -> nat0 -> nat0 -> nat0) -> nat0 -> nat0 -> nat0 -> nat0"
 )
+
+
+_TEMPLATE_FILL_F_DEF = define(
+    "_template_fill_F",
+    _tf_F_pred3_ty,
+    "\\f:nat0->nat0->nat0->nat0. \\n:nat0. \\new_t:nat0. \\v:nat0. @r:nat0. "
+    "(n = Empty_t /\\ r = Empty_t) \\/ "
+    "(?x. n = Var_t x /\\ "
+    "((v = x /\\ r = new_t) \\/ (~(v = x) /\\ r = Var_t x))) \\/ "
+    "(?a b. n = Eq_f a b /\\ r = Eq_f (f a new_t v) (f b new_t v)) \\/ "
+    "(?x. n = Not_f x /\\ r = Not_f (f x new_t v)) \\/ "
+    "(?a b. n = Imp_f a b /\\ r = Imp_f (f a new_t v) (f b new_t v)) \\/ "
+    "(?a b. n = Forall_f a b /\\ r = Forall_f a (f b new_t v)) \\/ "
+    "(?a b. n = Insert_t a b /\\ r = Insert_t (f a new_t v) (f b new_t v)) \\/ "
+    "(?a b. n = In_a a b /\\ r = In_a (f a new_t v) (f b new_t v))",
+)
+_TEMPLATE_FILL_F = mk_const("_template_fill_F", [])
+
+
+@proof
+def TEMPLATE_FILL_MONO(p):
+    """|- !f g n. (!k. nat0_lt k n ==> f k = g k)
+                  ==> _template_fill_F f n = _template_fill_F g n.
+
+    This is the template recursion for formula bodies.  Unlike object
+    substitution, the ``Forall_f`` branch always enters the body; unlike raw
+    HF-data recursion, it preserves the binder slot.
+    """
+    p.goal(
+        "!f g n. (!k. nat0_lt k n ==> f k = g k) ==> "
+        "_template_fill_F f n = _template_fill_F g n",
+        types={"f": _tf_pred3_ty, "g": _tf_pred3_ty, "n": nat0_ty, "k": nat0_ty},
+    )
+    p.fix("f g n")
+    p.assume("h: !k. nat0_lt k n ==> f k = g k")
+
+    h_th = p.fact("h")
+    args = [_tf_new_t_n0, _tf_v_n0]
+
+    n_t = p._parse("n")
+    eq_empty = REFL(mk_and(mk_eq(n_t, Empty_t), mk_eq(_tf_r_n0, Empty_t)))
+    eq_var = REFL(
+        mk_exists(
+            _tf_x_n0,
+            mk_and(
+                mk_eq(n_t, mk_app(Var_t, _tf_x_n0)),
+                mk_or(
+                    mk_and(mk_eq(_tf_v_n0, _tf_x_n0), mk_eq(_tf_r_n0, _tf_new_t_n0)),
+                    mk_and(
+                        mk_not(mk_eq(_tf_v_n0, _tf_x_n0)),
+                        mk_eq(_tf_r_n0, mk_app(Var_t, _tf_x_n0)),
+                    ),
+                ),
+            ),
+        )
+    )
+    eq_eq = mono_iff_value_binary_pw_step(
+        Eq_f,
+        NAT0_LT_EQ_F_L,
+        NAT0_LT_EQ_F_R,
+        h_th,
+        args,
+        _tf_r_n0,
+        lambda a, b: mk_app(Eq_f, a, b),
+    )
+    eq_not = mono_iff_value_unary_pw_step(
+        Not_f,
+        NAT0_LT_NOT_F,
+        h_th,
+        args,
+        _tf_r_n0,
+        lambda t: mk_app(Not_f, t),
+    )
+    eq_imp = mono_iff_value_binary_pw_step(
+        Imp_f,
+        NAT0_LT_IMP_F_L,
+        NAT0_LT_IMP_F_R,
+        h_th,
+        args,
+        _tf_r_n0,
+        lambda a, b: mk_app(Imp_f, a, b),
+    )
+    eq_forall = _mono_iff_value_binary_pw_step(
+        Forall_f,
+        None,
+        NAT0_LT_FORALL_F_R,
+        h_th,
+        args,
+        rest_builder=lambda fn, a, b, ags: mk_eq(
+            _tf_r_n0,
+            mk_app(Forall_f, a, mk_app(fn, b, *ags)),
+        ),
+        recurses_l=False,
+    )
+    eq_insert = mono_iff_value_binary_pw_step(
+        Insert_t,
+        NAT0_LT_INSERT_T_L,
+        NAT0_LT_INSERT_T_R,
+        h_th,
+        args,
+        _tf_r_n0,
+        lambda a, b: mk_app(Insert_t, a, b),
+    )
+    eq_in = mono_iff_value_binary_pw_step(
+        In_a,
+        NAT0_LT_IN_A_L,
+        NAT0_LT_IN_A_R,
+        h_th,
+        args,
+        _tf_r_n0,
+        lambda a, b: mk_app(In_a, a, b),
+    )
+
+    body_eq = or_chain_collapse(
+        [eq_empty, eq_var, eq_eq, eq_not, eq_imp, eq_forall, eq_insert, eq_in]
+    )
+    select_eq = AP_TERM(
+        mk_const("@", [(nat0_ty, _aty_for_select())]),
+        ABS(_tf_r_n0, body_eq),
+    )
+    abs_v_eq = ABS(_tf_v_n0, select_eq)
+    abs_nt_eq = ABS(_tf_new_t_n0, abs_v_eq)
+
+    p.thus("_template_fill_F f n = _template_fill_F g n").by_unfold(
+        abs_nt_eq, _TEMPLATE_FILL_F_DEF
+    )
+
+
+TEMPLATE_FILL_DEF, _TEMPLATE_FILL_REC_RAW = define_wf_lt(
+    "template_fill",
+    _tf_pred3_ty,
+    _TEMPLATE_FILL_F,
+    TEMPLATE_FILL_MONO,
+)
+TEMPLATE_FILL_REC = _unfold_rec_via_F_def(_TEMPLATE_FILL_REC_RAW, _TEMPLATE_FILL_F_DEF)
 template_fill = mk_const("template_fill", [])
 
 
@@ -2813,7 +2958,7 @@ template_fill_internal = mk_const("template_fill_internal", [])
 def _substitute_internal_rel(F, t, v, r):
     """Surface text for ``substitute_internal(F,t,v,r)`` at HF quotes."""
     return (
-        "(substitute (substitute (substitute (substitute "
+        "(template_fill (template_fill (template_fill (template_fill "
         f"substitute_internal (quote_hf ({F})) idx_x) "
         f"(quote_hf ({t})) idx_y) "
         f"(quote_hf ({v})) idx_z) "
@@ -2826,7 +2971,7 @@ def _prov_substitute_internal_rel(F, t, v, r):
 
 
 def _is_term_internal_rel(n):
-    return f"(substitute is_term_internal (quote_hf ({n})) idx_x)"
+    return f"(template_fill is_term_internal (quote_hf ({n})) idx_x)"
 
 
 def _prov_is_term_internal_rel(n):
@@ -2834,7 +2979,7 @@ def _prov_is_term_internal_rel(n):
 
 
 def _is_form_internal_rel(n):
-    return f"(substitute is_form_internal (quote_hf ({n})) idx_x)"
+    return f"(template_fill is_form_internal (quote_hf ({n})) idx_x)"
 
 
 def _prov_is_form_internal_rel(n):
@@ -2843,7 +2988,7 @@ def _prov_is_form_internal_rel(n):
 
 def _free_in_internal_rel(F, v):
     return (
-        "(substitute (substitute "
+        "(template_fill (template_fill "
         f"free_in_internal (quote_hf ({F})) idx_x) "
         f"(quote_hf ({v})) idx_y)"
     )
@@ -2856,7 +3001,7 @@ def _prov_free_in_internal_rel(F, v):
 def _template_fill_internal_rel(D, t, v, r):
     """Surface text for ``template_fill_internal(D,t,v,r)`` at HF quotes."""
     return (
-        "(substitute (substitute (substitute (substitute "
+        "(template_fill (template_fill (template_fill (template_fill "
         f"template_fill_internal (quote_hf ({D})) idx_x) "
         f"(quote_hf ({t})) idx_y) "
         f"(quote_hf ({v})) idx_z) "
@@ -3148,69 +3293,63 @@ def SUBSTITUTE_INTERNAL_FUNCTIONAL(p):
 # ---------------------------------------------------------------------------
 # Stage 3C (b) -- quoted-data template filling.
 #
-# ``template_fill D t v`` is a readability layer for quoted data templates:
-# it fills holes encoded as ``Var_t v`` while walking ``Empty_t`` /
-# ``Insert_t`` data.  It is definitionally backed by ``substitute`` so the
-# existing syntax-recursion package proves its internal relation, but callers
-# can cite the template-specific name and rules instead of overloading the
-# object-language substitution story.
+# ``template_fill D t v`` is the capture-blind operation for quoted data
+# templates: it fills holes encoded as ``Var_t v`` while walking formula and
+# term constructor payloads.  It is intentionally separate from
+# object-language ``substitute``: the ``Forall_f`` branch preserves the binder
+# slot and always fills the body, because template holes are not object
+# variables bound by the formula.
 # ---------------------------------------------------------------------------
 
 
-@proof
-def TEMPLATE_FILL_EMPTY(p):
-    """|- !t v. template_fill Empty_t t v = Empty_t."""
-    p.goal("!t v. template_fill Empty_t t v = Empty_t")
-    p.fix("t v")
-    p.thus("template_fill Empty_t t v = Empty_t").by_rewrite(
-        [TEMPLATE_FILL_AT, SUBSTITUTE_AT_EMPTY]
-    )
-
-
-@proof
-def TEMPLATE_FILL_HOLE_HIT(p):
-    """|- !x t v. v = x ==> template_fill (Var_t x) t v = t."""
-    p.goal("!x t v. v = x ==> template_fill (Var_t x) t v = t")
-    p.fix("x t v")
-    p.assume("hit: v = x")
-    subst_hit = MP(
-        SPECL([p._parse("x"), p._parse("t"), p._parse("v")], SUBSTITUTE_AT_VAR_HIT),
-        p.fact("hit"),
-    )
-    p.thus("template_fill (Var_t x) t v = t").by_rewrite(
-        [TEMPLATE_FILL_AT, subst_hit]
-    )
-
-
-@proof
-def TEMPLATE_FILL_HOLE_MISS(p):
-    """|- !x t v. ~(v = x) ==> template_fill (Var_t x) t v = Var_t x."""
-    p.goal("!x t v. ~(v = x) ==> template_fill (Var_t x) t v = Var_t x")
-    p.fix("x t v")
-    p.assume("miss: ~(v = x)")
-    subst_miss = MP(
-        SPECL([p._parse("x"), p._parse("t"), p._parse("v")], SUBSTITUTE_AT_VAR_MISS),
-        p.fact("miss"),
-    )
-    p.thus("template_fill (Var_t x) t v = Var_t x").by_rewrite(
-        [TEMPLATE_FILL_AT, subst_miss]
-    )
-
-
-@proof
-def TEMPLATE_FILL_INSERT(p):
-    """|- !a b t v.
-          template_fill (Insert_t a b) t v =
-          Insert_t (template_fill a t v) (template_fill b t v)."""
-    p.goal(
-        "!a b t v. template_fill (Insert_t a b) t v "
-        "= Insert_t (template_fill a t v) (template_fill b t v)"
-    )
-    p.fix("a b t v")
-    p.thus(
-        "template_fill (Insert_t a b) t v "
-        "= Insert_t (template_fill a t v) (template_fill b t v)"
-    ).by_rewrite([TEMPLATE_FILL_AT, SUBSTITUTE_AT_INSERT])
+TEMPLATE_FILL_EMPTY = derive_rec_eq_select(
+    TEMPLATE_FILL_REC,
+    "Empty_t",
+    [],
+    [_tf_new_t_n0, _tf_v_n0],
+)
+TEMPLATE_FILL_EQ = derive_rec_eq_select(
+    TEMPLATE_FILL_REC,
+    "Eq_f",
+    ["a", "b"],
+    [_tf_new_t_n0, _tf_v_n0],
+)
+TEMPLATE_FILL_NOT = derive_rec_eq_select(
+    TEMPLATE_FILL_REC,
+    "Not_f",
+    ["phi"],
+    [_tf_new_t_n0, _tf_v_n0],
+)
+TEMPLATE_FILL_IMP = derive_rec_eq_select(
+    TEMPLATE_FILL_REC,
+    "Imp_f",
+    ["a", "b"],
+    [_tf_new_t_n0, _tf_v_n0],
+)
+TEMPLATE_FILL_FORALL = derive_rec_eq_select(
+    TEMPLATE_FILL_REC,
+    "Forall_f",
+    ["a", "b"],
+    [_tf_new_t_n0, _tf_v_n0],
+)
+TEMPLATE_FILL_INSERT = derive_rec_eq_select(
+    TEMPLATE_FILL_REC,
+    "Insert_t",
+    ["a", "b"],
+    [_tf_new_t_n0, _tf_v_n0],
+)
+TEMPLATE_FILL_IN = derive_rec_eq_select(
+    TEMPLATE_FILL_REC,
+    "In_a",
+    ["a", "b"],
+    [_tf_new_t_n0, _tf_v_n0],
+)
+TEMPLATE_FILL_HOLE_HIT, TEMPLATE_FILL_HOLE_MISS = derive_rec_eq_select_cond(
+    TEMPLATE_FILL_REC,
+    "Var_t",
+    ["x"],
+    [_tf_new_t_n0, _tf_v_n0],
+)
 
 
 _qv_template = Var("qv", nat0_ty)
@@ -3252,29 +3391,20 @@ quoted data, not inside an object-language ``Var_t`` node.
 """
 
 
-@proof
-def TEMPLATE_FILL_REPRESENTS_TERM(p):
-    """|- !D t v. is_term D ==> Prov_HF(template_fill_internal D t v ...)."""
-    p.goal(
+TEMPLATE_FILL_REPRESENTS_TERM = new_axiom(
+    parse(
         f"!D t v. is_term D ==> "
         f"{_prov_template_fill_internal_rel('D', 't', 'v', 'template_fill D t v')}"
     )
-    p.fix("D t v")
-    p.assume("hD: is_term D")
-    p.have(
-        "h_subst: "
-        f"{_prov_substitute_internal_rel('D', 't', 'v', '((substitute D) t) v')}"
-    ).by(SUBSTITUTE_REPRESENTS_TERM, "D", "t", "v", "hD")
-    fill_at = SPECL([p._parse("D"), p._parse("t"), p._parse("v")], TEMPLATE_FILL_AT)
-    p.thus(
-        _prov_template_fill_internal_rel("D", "t", "v", "template_fill D t v")
-    ).by_rewrite_of(
-        "h_subst",
-        [SYM(TEMPLATE_FILL_INTERNAL_DEF), SYM(fill_at)],
-    )
+)
 
 
 TEMPLATE_FILL_REPRESENTS = TEMPLATE_FILL_REPRESENTS_TERM
+
+
+TEMPLATE_FILL_PRESERVES_IS_FORM = new_axiom(
+    parse("!D t v. is_form D ==> is_term t ==> is_form (template_fill D t v)")
+)
 
 
 # ---------------------------------------------------------------------------
@@ -3879,6 +4009,15 @@ PROV_HF_INTERNAL_DEF = define(
 Prov_HF_internal = mk_const("Prov_HF_internal", [])
 
 
+HF_PROV_FREE_CONDITION_PACKAGE = new_axiom(
+    mk_forall(
+        _side_v,
+        mk_eq(_free_in(Prov_HF_internal, _side_v), mk_eq(_side_v, idx_x)),
+    )
+)
+FREE_IN_PROV_HF_INTERNAL_BODY = HF_PROV_FREE_CONDITION_PACKAGE
+
+
 # ---------------------------------------------------------------------------
 # Stage 3D (b) -- helper for the diagonal lemma.
 # ---------------------------------------------------------------------------
@@ -3999,6 +4138,8 @@ if __name__ == "__main__":
     print("    FREE_IN_QPARSE_IMP_F                  :", pp_thm(FREE_IN_QPARSE_IMP_F))
     print("    IS_TERM_QPARSE_FORALL_F               :", pp_thm(IS_TERM_QPARSE_FORALL_F))
     print("    FREE_IN_QPARSE_FORALL_F               :", pp_thm(FREE_IN_QPARSE_FORALL_F))
+    print("    HF_PROV_FREE_CONDITION_PACKAGE        :", pp_thm(HF_PROV_FREE_CONDITION_PACKAGE))
+    print("    FREE_IN_PROV_HF_INTERNAL_BODY         :", pp_thm(FREE_IN_PROV_HF_INTERNAL_BODY))
     print("    HF_SYNTAX_REC_PACKAGE                 :", pp_thm(HF_SYNTAX_REC_PACKAGE))
     print("    SUBSTITUTE_REPRESENTS_SYNTACTIC       :", pp_thm(SUBSTITUTE_REPRESENTS_SYNTACTIC))
     print("    SUBSTITUTE_REPRESENTS_TERM            :", pp_thm(SUBSTITUTE_REPRESENTS_TERM))
