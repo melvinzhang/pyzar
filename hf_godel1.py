@@ -57,9 +57,9 @@ Three ingredients:
       we pick for syntax.
 
   (2) *Representation.* Define the primitive recursive predicate
-      ``Proof_HF_set(P, n)`` -- "the ranked HF-set proof object ``P``
-      derives the formula with HF-encoding ``n``" -- as a HOL predicate
-      on ``num``. Define
+      ``Proof_HF_set(P, n)`` -- "the dependency-set HF proof object
+      ``P`` derives the formula with HF-encoding ``n``" -- as a HOL
+      predicate on ``num``. Define
             Prov_HF(n)  :<=>  ?P. Proof_HF_set(P, n).
       Both ``Proof_HF_set`` and ``Prov_HF`` are *HOL* predicates; they
       are not at this stage statements *inside* HF.
@@ -107,12 +107,13 @@ Proof-object design:
   *Hilbert-style*. HF has five closed set-theoretic axioms plus the
       standard finite list of propositional, quantifier, and equality
       axioms; rules are modus ponens and generalization. Proof objects
-      are ranked HF sets of proof-step records, where a step may cite
-      only lower-ranked records.
+      are finite HF sets of proof-step records ``Pair_ord k h``, where
+      ``k`` is the finite set of predecessor ranks the step may cite.
 
-We take the ranked HF-set route. ``Proof_HF_set(P, n)`` is decidable,
-hence representable in HF by a Sigma_1 formula. That representability
-is the only nontrivial arithmetization theorem in the file.
+We take the dependency-set HF route. ``Proof_HF_set(P, n)`` is
+decidable, hence representable in HF by a Sigma_1 formula. That
+representability is the only nontrivial arithmetization theorem in the
+file.
 
 (There is no "Sigma_1-soundness axiom" to post: HOL + HF proves
 Sigma_1 soundness of HF outright, since HF *is* the standard model.)

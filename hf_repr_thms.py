@@ -3908,19 +3908,19 @@ def QUOTE_HF_QPARSE_EMPTY(p):
 #
 # Discharge plan -- via HF1-HF5 (no Goedel-beta sequence coding).
 # The internal proof predicate uses HF-native proof objects, not
-# ``cons_l`` lists. The shape is a ranked finite HF set of
+# ``cons_l`` lists. The shape is a dependency-set finite HF set of
 # proof-step records:
 #
-#     P contains records (rank, formula)
-#     a record at rank k is valid if it is an axiom, or follows by
-#     MP/Gen from records in P whose ranks are strictly below k
+#     P contains records (dependency-set, formula)
+#     a record with dependency set k is valid if it is an axiom, or
+#     follows by MP/Gen from records in P whose ranks are members of k
 #     Prov_HF_internal(x) := ?P. Proof_HF_set_internal(P, x)
 #
-# The rank guard is important. A naive unordered "closed set of formulas"
-# would allow cyclic justifications, because every formula in the set
-# could be used to justify every other formula at the same time. Ranked
-# records preserve the Hilbert proof-sequence well-foundedness while
-# keeping HF-internal membership as ordinary ``In_a``.
+# The dependency guard is important. A naive unordered "closed set of
+# formulas" would allow cyclic justifications, because every formula in
+# the set could be used to justify every other formula at the same time.
+# Dependency-set records preserve the Hilbert proof-sequence
+# well-foundedness while keeping citations as ordinary HF membership.
 #
 # The previous list-based ``Proof_HF`` scaffolding has been removed from
 # ``hf_repr_core.py``; both ``Prov_HF`` and ``Prov_HF_internal`` follow

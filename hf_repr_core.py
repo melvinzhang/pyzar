@@ -22,9 +22,9 @@
 #   (iii) ``godelnum``    (identity on encoded syntax; its numeral
 #                          image is what matters).
 #
-# The active provability route is ranked finite HF-set proof objects via
-# ``Proof_HF_set``; ``Prov_HF`` is defined from that predicate, not from
-# lists.
+# The active provability route is dependency-set finite HF proof objects
+# via ``Proof_HF_set``; ``Prov_HF`` is defined from that predicate, not
+# from lists.
 #
 
 from fusion import Var
@@ -110,6 +110,8 @@ from hf_sets import (
     IN_INSERT_SAME,
     IN_INSERT_DIFF,
     IN_UNION,
+    IN_PAIR,
+    IN_SINGLETON,
     NOT_IN_EMPTY,
     PAIR_ORD_INJ,
     NAT0_LT_PAIR_ORD_L,
@@ -290,14 +292,15 @@ def _subst_at_numeral(F_term, n_term):
 
 
 # ---------------------------------------------------------------------------
-# Stage 3B (set-native target) -- ranked HF-set proof objects.
+# Stage 3B (set-native target) -- dependency-set HF proof objects.
 #
 # This is the intended representation for ``Prov_HF_internal``. A proof
 # object ``P`` is a finite HF set of records ``Pair_ord k h`` where ``k``
-# is the step rank and ``h`` is the formula proved at that rank. A record
-# at rank ``k`` may cite only records with lower ranks. This keeps the
-# object-language proof predicate set-native while preserving the
-# well-founded "earlier proof step" discipline of Hilbert proofs.
+# is the step's finite dependency set and ``h`` is the formula proved at
+# that record. A record with dependency set ``k`` may cite only records
+# whose ranks are members of ``k``. Since HF membership is well-founded
+# under the Ackermann encoding, this preserves the "earlier proof step"
+# discipline without introducing an internal arithmetic ``lt`` relation.
 #
 # The definitions here are external HOL predicates. The HF-formula bodies
 # for the corresponding internal predicates are the next bridge work in
@@ -311,8 +314,8 @@ VALID_STEP_HF_SET_DEF, VALID_STEP_HF_SET_AT = define_with_at(
     "\\P:nat0. \\k:nat0. \\h:nat0. "
     "is_axiom h "
     "\\/ (?i f j g. In (Pair_ord i f) P /\\ In (Pair_ord j g) P "
-    "      /\\ nat0_lt i k /\\ nat0_lt j k /\\ is_mp f g h) "
-    "\\/ (?i f. In (Pair_ord i f) P /\\ nat0_lt i k /\\ is_gen f h)",
+    "      /\\ In i k /\\ In j k /\\ is_mp f g h) "
+    "\\/ (?i f. In (Pair_ord i f) P /\\ In i k /\\ is_gen f h)",
 )
 valid_step_hf_set = mk_const("valid_step_hf_set", [])
 
@@ -333,7 +336,7 @@ Proof_HF_set = mk_const("Proof_HF_set", [])
 #   Prov_HF n  :<=>  ?P. Proof_HF_set P n.
 #
 # This is the canonical HF-native form: provability is the existence of
-# a ranked finite HF-set proof object.
+# a dependency-set finite HF proof object.
 # ---------------------------------------------------------------------------
 
 
@@ -1556,9 +1559,9 @@ def IN_UNION_RIGHT(p):
 
 
 # ---------------------------------------------------------------------------
-# Phase 0 prototype for HF-native proof objects.
+# Phase 0/3 prototype for HF-native proof objects.
 #
-# These lemmas exercise the ranked-set proof-object design before any
+# These lemmas exercise the dependency-set proof-object design before any
 # ``Prov_HF_internal`` body is written. They deliberately avoid ``cons_l``
 # and list membership. DSL friction is noted inline where the proof needs
 # low-level shaping rather than a compact declarative step.
@@ -1585,14 +1588,14 @@ def VALID_STEP_HF_SET_PRESERVES(p):
     bodyP = (
         "is_axiom h "
         "\\/ (?i f j g. In (Pair_ord i f) P /\\ In (Pair_ord j g) P "
-        "/\\ nat0_lt i k /\\ nat0_lt j k /\\ is_mp f g h) "
-        "\\/ (?i f. In (Pair_ord i f) P /\\ nat0_lt i k /\\ is_gen f h)"
+        "/\\ In i k /\\ In j k /\\ is_mp f g h) "
+        "\\/ (?i f. In (Pair_ord i f) P /\\ In i k /\\ is_gen f h)"
     )
     bodyQ = (
         "is_axiom h "
         "\\/ (?i f j g. In (Pair_ord i f) Q /\\ In (Pair_ord j g) Q "
-        "/\\ nat0_lt i k /\\ nat0_lt j k /\\ is_mp f g h) "
-        "\\/ (?i f. In (Pair_ord i f) Q /\\ nat0_lt i k /\\ is_gen f h)"
+        "/\\ In i k /\\ In j k /\\ is_mp f g h) "
+        "\\/ (?i f. In (Pair_ord i f) Q /\\ In i k /\\ is_gen f h)"
     )
     p.have(f"bodyP: {bodyP}").by_eq_mp(atP, "vP")
     with p.cases_on("bodyP"):
@@ -1601,24 +1604,31 @@ def VALID_STEP_HF_SET_PRESERVES(p):
             p.thus("valid_step_hf_set Q k h").by_eq_mp(SYM(atQ), "bodyQ")
         with p.case(
             "mpP: ?i f j g. In (Pair_ord i f) P /\\ In (Pair_ord j g) P "
-            "/\\ nat0_lt i k /\\ nat0_lt j k /\\ is_mp f g h"
+            "/\\ In i k /\\ In j k /\\ is_mp f g h"
         ):
-            p.split("g_eq", "(in_i_P, in_j_P, lt_i, lt_j, mp)")
+            p.split("g_eq", "(in_i_P, in_j_P, in_i_dep, in_j_dep, mp)")
             p.have("in_i_Q: In (Pair_ord i f) Q").by("sub", "Pair_ord i f", "in_i_P")
             p.have("in_j_Q: In (Pair_ord j g) Q").by("sub", "Pair_ord j g", "in_j_P")
             # DSL friction: by_exists wants each substituted conjunct as
             # a separate rule; passing a prebuilt conjunction is rejected.
             p.have(
                 "mpQ: ?i f j g. In (Pair_ord i f) Q /\\ In (Pair_ord j g) Q "
-                "/\\ nat0_lt i k /\\ nat0_lt j k /\\ is_mp f g h"
-            ).by_exists(["i", "f", "j", "g"], "in_i_Q", "in_j_Q", "lt_i", "lt_j", "mp")
+                "/\\ In i k /\\ In j k /\\ is_mp f g h"
+            ).by_exists(
+                ["i", "f", "j", "g"],
+                "in_i_Q",
+                "in_j_Q",
+                "in_i_dep",
+                "in_j_dep",
+                "mp",
+            )
             p.have(f"bodyQ: {bodyQ}").by_disj("mpQ")
             p.thus("valid_step_hf_set Q k h").by_eq_mp(SYM(atQ), "bodyQ")
-        with p.case("genP: ?i f. In (Pair_ord i f) P /\\ nat0_lt i k /\\ is_gen f h"):
-            p.split("f_eq", "(in_i_P, lt_i, gen)")
+        with p.case("genP: ?i f. In (Pair_ord i f) P /\\ In i k /\\ is_gen f h"):
+            p.split("f_eq", "(in_i_P, in_i_dep, gen)")
             p.have("in_i_Q: In (Pair_ord i f) Q").by("sub", "Pair_ord i f", "in_i_P")
-            p.have("genQ: ?i f. In (Pair_ord i f) Q /\\ nat0_lt i k /\\ is_gen f h").by_exists(
-                ["i", "f"], "in_i_Q", "lt_i", "gen"
+            p.have("genQ: ?i f. In (Pair_ord i f) Q /\\ In i k /\\ is_gen f h").by_exists(
+                ["i", "f"], "in_i_Q", "in_i_dep", "gen"
             )
             p.have(f"bodyQ: {bodyQ}").by_disj("genQ")
             p.thus("valid_step_hf_set Q k h").by_eq_mp(SYM(atQ), "bodyQ")
@@ -1633,32 +1643,36 @@ def AXIOM_HAS_PROOF_HF_SET(p):
     p.fix("m")
     p.assume("ax: is_axiom m")
 
-    P = "Insert (Pair_ord 0 m) Empty"
-    p.have(f"in_head_eq: In (Pair_ord 0 m) ({P}) = T").by_rewrite([IN_INSERT_SAME])
-    p.have(f"in_head: In (Pair_ord 0 m) ({P})").by_thm(EQT_ELIM(p.fact("in_head_eq")))
+    P = "Insert (Pair_ord Empty m) Empty"
+    p.have(f"in_head_eq: In (Pair_ord Empty m) ({P}) = T").by_rewrite([IN_INSERT_SAME])
+    p.have(f"in_head: In (Pair_ord Empty m) ({P})").by_thm(
+        EQT_ELIM(p.fact("in_head_eq"))
+    )
 
     with p.have(
         f"valid_all: !j h. In (Pair_ord j h) ({P}) ==> valid_step_hf_set ({P}) j h"
     ).proof():
         p.fix("j h")
         p.assume(f"hin: In (Pair_ord j h) ({P})")
-        with p.cases_on(EXCLUDED_MIDDLE, "Pair_ord 0 m = Pair_ord j h"):
-            with p.case("heq: Pair_ord 0 m = Pair_ord j h"):
-                p.have("inj: 0 = j /\\ m = h").by(PAIR_ORD_INJ, "0", "m", "j", "h", "heq")
+        with p.cases_on(EXCLUDED_MIDDLE, "Pair_ord Empty m = Pair_ord j h"):
+            with p.case("heq: Pair_ord Empty m = Pair_ord j h"):
+                p.have("inj: Empty = j /\\ m = h").by(
+                    PAIR_ORD_INJ, "Empty", "m", "j", "h", "heq"
+                )
                 p.split("inj", "(_j_eq, m_eq_h)")
                 p.have("ax_h: is_axiom h").by_rewrite_of("ax", ["m_eq_h"])
                 atP = SPECL([p._parse(P), p._parse("j"), p._parse("h")], VALID_STEP_HF_SET_AT)
                 body = (
                     f"is_axiom h \\/ (?i f j0 g. In (Pair_ord i f) ({P}) "
-                    f"/\\ In (Pair_ord j0 g) ({P}) /\\ nat0_lt i j "
-                    f"/\\ nat0_lt j0 j /\\ is_mp f g h) "
-                    f"\\/ (?i f. In (Pair_ord i f) ({P}) /\\ nat0_lt i j /\\ is_gen f h)"
+                    f"/\\ In (Pair_ord j0 g) ({P}) /\\ In i j "
+                    f"/\\ In j0 j /\\ is_mp f g h) "
+                    f"\\/ (?i f. In (Pair_ord i f) ({P}) /\\ In i j /\\ is_gen f h)"
                 )
                 p.have(f"vbody: {body}").by_disj("ax_h")
                 p.thus(f"valid_step_hf_set ({P}) j h").by_eq_mp(SYM(atP), "vbody")
-            with p.case("hne: ~(Pair_ord 0 m = Pair_ord j h)"):
+            with p.case("hne: ~(Pair_ord Empty m = Pair_ord j h)"):
                 p.have(f"hin_empty_eq: In (Pair_ord j h) ({P}) = In (Pair_ord j h) Empty").by(
-                    IN_INSERT_DIFF, "Pair_ord 0 m", "Pair_ord j h", "Empty", "hne"
+                    IN_INSERT_DIFF, "Pair_ord Empty m", "Pair_ord j h", "Empty", "hne"
                 )
                 p.have("hin_empty: In (Pair_ord j h) Empty").by_eq_mp("hin_empty_eq", "hin")
                 p.have("not_empty: ~In (Pair_ord j h) Empty").by(
@@ -1675,7 +1689,7 @@ def AXIOM_HAS_PROOF_HF_SET(p):
     p.have(
         f"body: ?k. In (Pair_ord k m) ({P}) "
         f"/\\ (!j h. In (Pair_ord j h) ({P}) ==> valid_step_hf_set ({P}) j h)"
-    ).by_exists(["0"], "in_head", "valid_all")
+    ).by_exists(["Empty"], "in_head", "valid_all")
     p.have(f"proof_set: Proof_HF_set ({P}) m").by_eq_mp(SYM(proof_at), "body")
     p.thus("?P. Proof_HF_set P m").by_witness(P, "proof_set")
 
@@ -1711,8 +1725,8 @@ def MP_HAS_PROOF_HF_SET(p):
     p.choose("kg", "bodyQ", eq_label="pfg_body")
     p.split("pfg_body", "(in_imp_Q, validQ)")
 
-    R = "Insert (Pair_ord (Pair_ord kf kg) g) (Union P Q)"
-    kR = "Pair_ord kf kg"
+    R = "Insert (Pair_ord (Pair kf kg) g) (Union P Q)"
+    kR = "Pair kf kg"
 
     with p.have(f"subP: !x. In x P ==> In x ({R})").proof():
         p.fix("x")
@@ -1744,10 +1758,24 @@ def MP_HAS_PROOF_HF_SET(p):
                     PAIR_ORD_INJ, kR, "g", "j", "h", "heq"
                 )
                 p.split("inj", "(rank_eq, g_eq_h)")
-                p.have(f"lt_f_rank: nat0_lt kf ({kR})").by(NAT0_LT_PAIR_ORD_L, "kf", "kg")
-                p.have(f"lt_imp_rank: nat0_lt kg ({kR})").by(NAT0_LT_PAIR_ORD_R, "kf", "kg")
-                p.have("lt_f_j: nat0_lt kf j").by_rewrite_of("lt_f_rank", ["rank_eq"])
-                p.have("lt_imp_j: nat0_lt kg j").by_rewrite_of("lt_imp_rank", ["rank_eq"])
+                p.have("kf_refl: kf = kf").by_thm(REFL(p._parse("kf")))
+                p.have("kf_disj: kf = kf \\/ kf = kg").by_disj("kf_refl")
+                p.have("in_kf_eq: In kf (Pair kf kg) = (kf = kf \\/ kf = kg)").by(
+                    IN_PAIR, "kf", "kg", "kf"
+                )
+                p.have("in_kf_rank: In kf (Pair kf kg)").by_eq_mp(
+                    SYM(p.fact("in_kf_eq")), "kf_disj"
+                )
+                p.have("kg_refl: kg = kg").by_thm(REFL(p._parse("kg")))
+                p.have("kg_disj: kg = kf \\/ kg = kg").by_disj("kg_refl")
+                p.have("in_kg_eq: In kg (Pair kf kg) = (kg = kf \\/ kg = kg)").by(
+                    IN_PAIR, "kf", "kg", "kg"
+                )
+                p.have("in_kg_rank: In kg (Pair kf kg)").by_eq_mp(
+                    SYM(p.fact("in_kg_eq")), "kg_disj"
+                )
+                p.have("in_kf_j: In kf j").by_rewrite_of("in_kf_rank", ["rank_eq"])
+                p.have("in_kg_j: In kg j").by_rewrite_of("in_kg_rank", ["rank_eq"])
                 is_mp_at = SPECL(
                     [p._parse("f"), p._parse("Imp_f f g"), p._parse("g")],
                     IS_MP_AT,
@@ -1758,22 +1786,22 @@ def MP_HAS_PROOF_HF_SET(p):
                 p.have("mp_h: is_mp f (Imp_f f g) h").by_rewrite_of("mp_g", ["g_eq_h"])
                 p.have(
                     f"mp_ex: ?i f0 j0 g0. In (Pair_ord i f0) ({R}) "
-                    f"/\\ In (Pair_ord j0 g0) ({R}) /\\ nat0_lt i j "
-                    f"/\\ nat0_lt j0 j /\\ is_mp f0 g0 h"
+                    f"/\\ In (Pair_ord j0 g0) ({R}) /\\ In i j "
+                    f"/\\ In j0 j /\\ is_mp f0 g0 h"
                 ).by_exists(
                     ["kf", "f", "kg", "Imp_f f g"],
                     "in_f_R",
                     "in_imp_R",
-                    "lt_f_j",
-                    "lt_imp_j",
+                    "in_kf_j",
+                    "in_kg_j",
                     "mp_h",
                 )
                 atR = SPECL([p._parse(R), p._parse("j"), p._parse("h")], VALID_STEP_HF_SET_AT)
                 body = (
                     f"is_axiom h \\/ (?i f0 j0 g0. In (Pair_ord i f0) ({R}) "
-                    f"/\\ In (Pair_ord j0 g0) ({R}) /\\ nat0_lt i j "
-                    f"/\\ nat0_lt j0 j /\\ is_mp f0 g0 h) "
-                    f"\\/ (?i f0. In (Pair_ord i f0) ({R}) /\\ nat0_lt i j /\\ is_gen f0 h)"
+                    f"/\\ In (Pair_ord j0 g0) ({R}) /\\ In i j "
+                    f"/\\ In j0 j /\\ is_mp f0 g0 h) "
+                    f"\\/ (?i f0. In (Pair_ord i f0) ({R}) /\\ In i j /\\ is_gen f0 h)"
                 )
                 p.have(f"vbody: {body}").by_disj("mp_ex")
                 p.thus(f"valid_step_hf_set ({R}) j h").by_eq_mp(SYM(atR), "vbody")
@@ -1830,8 +1858,8 @@ def GEN_HAS_PROOF_HF_SET(p):
     p.choose("kf", "bodyP", eq_label="pf_body")
     p.split("pf_body", "(in_f_P, validP)")
 
-    R = "Insert (Pair_ord (Pair_ord kf 0) (Forall_f x f)) P"
-    kR = "Pair_ord kf 0"
+    R = "Insert (Pair_ord (Singleton kf) (Forall_f x f)) P"
+    kR = "Singleton kf"
 
     with p.have(f"subP: !z. In z P ==> In z ({R})").proof():
         p.fix("z")
@@ -1867,19 +1895,25 @@ def GEN_HAS_PROOF_HF_SET(p):
                     PAIR_ORD_INJ, kR, "Forall_f x f", "j", "h", "heq"
                 )
                 p.split("inj", "(rank_eq, forall_eq_h)")
-                p.have(f"lt_f_rank: nat0_lt kf ({kR})").by(NAT0_LT_PAIR_ORD_L, "kf", "0")
-                p.have("lt_f_j: nat0_lt kf j").by_rewrite_of("lt_f_rank", ["rank_eq"])
+                p.have("kf_refl: kf = kf").by_thm(REFL(p._parse("kf")))
+                p.have("in_kf_eq: In kf (Singleton kf) = (kf = kf)").by(
+                    IN_SINGLETON, "kf", "kf"
+                )
+                p.have("in_kf_rank: In kf (Singleton kf)").by_eq_mp(
+                    SYM(p.fact("in_kf_eq")), "kf_refl"
+                )
+                p.have("in_kf_j: In kf j").by_rewrite_of("in_kf_rank", ["rank_eq"])
                 p.have("gen_h: is_gen f h").by_rewrite_of("gen_fx", ["forall_eq_h"])
                 p.have(
                     f"gen_ex: ?i f0. In (Pair_ord i f0) ({R}) "
-                    f"/\\ nat0_lt i j /\\ is_gen f0 h"
-                ).by_exists(["kf", "f"], "in_f_R", "lt_f_j", "gen_h")
+                    f"/\\ In i j /\\ is_gen f0 h"
+                ).by_exists(["kf", "f"], "in_f_R", "in_kf_j", "gen_h")
                 atR = SPECL([p._parse(R), p._parse("j"), p._parse("h")], VALID_STEP_HF_SET_AT)
                 body = (
                     f"is_axiom h \\/ (?i f0 j0 g0. In (Pair_ord i f0) ({R}) "
-                    f"/\\ In (Pair_ord j0 g0) ({R}) /\\ nat0_lt i j "
-                    f"/\\ nat0_lt j0 j /\\ is_mp f0 g0 h) "
-                    f"\\/ (?i f0. In (Pair_ord i f0) ({R}) /\\ nat0_lt i j /\\ is_gen f0 h)"
+                    f"/\\ In (Pair_ord j0 g0) ({R}) /\\ In i j "
+                    f"/\\ In j0 j /\\ is_mp f0 g0 h) "
+                    f"\\/ (?i f0. In (Pair_ord i f0) ({R}) /\\ In i j /\\ is_gen f0 h)"
                 )
                 p.have(f"vbody: {body}").by_disj("gen_ex")
                 p.thus(f"valid_step_hf_set ({R}) j h").by_eq_mp(SYM(atR), "vbody")
@@ -2777,7 +2811,7 @@ if __name__ == "__main__":
     print("    IS_TERM_INSERT   :", pp_thm(IS_TERM_INSERT))
     print("    IS_TERM_NUMERAL  :", pp_thm(IS_TERM_NUMERAL))
     print()
-    print("Stage 3B (set-native target) -- ranked HF-set proof objects.")
+    print("Stage 3B (set-native target) -- dependency-set HF proof objects.")
     print("    VALID_STEP_HF_SET_DEF       :", pp_thm(VALID_STEP_HF_SET_DEF))
     print("    VALID_STEP_HF_SET_AT        :", pp_thm(VALID_STEP_HF_SET_AT))
     print("    PROOF_HF_SET_DEF            :", pp_thm(PROOF_HF_SET_DEF))
