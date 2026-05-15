@@ -276,6 +276,39 @@ recursion equations.
    - Scope this to syntax recursion, not arbitrary definability. The
      goal is readable Gödel I, not a broad new replacement/separation
      theory.
+   - Spike status: `hf_syntax_rec_spike.py` now models the desired API
+     shape. It introduces `substitute_internal_rec_spike`, generated
+     constructor rules for the substitution graph, and a derived
+     `Insert_t` composition theorem that uses only IH-style `Prov_HF`
+     premises. The second spike no longer axiomatizes the headline
+     substitute theorem directly: it derives `SUBSTITUTE_REPRESENTS_REC_SPIKE`
+     by applying one scoped `HF_SYNTAX_REC_SPIKE_INDUCT` package axiom
+     to the generated constructor rules.
+   - Third spike correction: the package theorem is now explicitly
+     syntax-scoped:
+
+     ```text
+     |- !F t v. (is_term F \/ is_form F) ==>
+          Prov_HF (substitute_internal_rec_spike F t v (substitute F t v))
+     ```
+
+     This closes the accidental "all nat0 values are syntax" gap. The
+     plan is to carry this premise through wrapper lemmas, not to add a
+     fake non-syntax default branch. The spike now has
+     `SUBSTITUTE_REPRESENTS_REC_SPIKE_FORM` and
+     `SUBSTITUTE_REPRESENTS_REC_SPIKE_TERM`, so downstream proof scripts
+     can cite the formula/term-specific theorem and discharge only
+     `is_form phi` or `is_term phi`.
+   - Final spike checks:
+     `SUBSTITUTE_REC_SPIKE_FORALL_HIT_COMPOSES` and
+     `SUBSTITUTE_REC_SPIKE_FORALL_MISS_COMPOSES` validate the binder
+     surface. `SUBSTITUTE_REPRESENTS_FORM_SPIKE` /
+     `SUBSTITUTE_REPRESENTS_TERM_SPIKE` are the downstream-facing names
+     to mirror in the real replacement.
+   - Consumer check: `hf_godel1.py`'s diagonal route already carries
+     formula side conditions (`is_form phi`, `IS_FORM_DIAG_INTERNAL`).
+     The main use should cite the form wrapper; no non-syntax default
+     branch is needed for readability-first G1.
 
 4. **G — `SUBSTITUTE_REPRESENTS`**
    - Define `substitute_internal` directly from the syntax-recursion
@@ -308,6 +341,13 @@ recursion equations.
    - Keep the code only if it remains useful for comparison or for a
      future weak-foundation variant. It should not drive the main
      `SUBSTITUTE_REPRESENTS` proof.
+   - Replacement map once the direct package lands:
+     keep/export `substitute_internal`, `SUBSTITUTE_REPRESENTS_FORM`,
+     `SUBSTITUTE_REPRESENTS_TERM`, and possibly a syntactic disjunction
+     wrapper. Remove or quarantine `is_substitute_step_internal`,
+     `is_substitute_trace_internal`, `TRACE_EXISTS`,
+     `IS_SUBSTITUTE_STEP_REPRESENTS`, and
+     `IS_SUBSTITUTE_TRACE_REPRESENTS` from the main import path.
 
 After Phase 2, the diagonal-lemma path is unblocked end-to-end at the
 substitute layer.
