@@ -95,7 +95,7 @@ from hf_repr_core import (
     QUOTE_HF_AT_EMPTY,
     _QUOTE_HF_AT_NZ,
 )
-from hf_sets import EMPTY_DEF, INSERT_AT, IN_AT, NOT_IN_EMPTY, IN_INSERT_DIFF
+from hf_sets import EMPTY_DEF, INSERT_AT, IN_AT, IN_LT, NOT_IN_EMPTY, IN_INSERT_DIFF
 from hf_sets import IN_EXT
 from hf_syntax import INSERT_T_INJ, INSERT_T_NEQ_EMPTY
 from bits import (
@@ -112,6 +112,7 @@ from bits import (
     INSERT_LOW_BIT_CLEAR_LOW,
     LOW_BIT_LT,
     CLEAR_LOW_LT,
+    SET_BIT_PRESENT_ID,
     SET_BIT_COMMUTE_DIFF,
     SET_BIT_GT_NEW,
 )
@@ -127,7 +128,7 @@ from hf_logic import (
     PROV_HF_AND_ELIM_RIGHT,
 )
 from hf_repr_core import IS_TERM_QUOTE_HF, SUBSTITUTE_QUOTE_HF, PROV_HF_MP
-from nat0_order import NAT0_LT_ASYM, NAT0_LT_SUC0, NAT0_LT_TOTAL_NEQ
+from nat0_order import NAT0_LT_ASYM, NAT0_LT_NOT_REFL, NAT0_LT_SUC0, NAT0_LT_TOTAL_NEQ, NAT0_LT_TRANS
 
 
 _t_n0 = Var("t", nat0_ty)
@@ -2635,6 +2636,226 @@ def NAT0_LT_SELF_INSERT_SELF(p):
 
 
 @proof
+def QUOTE_HF_EXT_DIFF_LEFT_ABSENT_TRUE_BRANCH(p):
+    """|- !w s t. In w s /\\ ~In w t
+                  /\\ nat0_lt (Insert s t) (Insert t s)
+          ==> nat0_lt (quote_hf_mem_measure w t) (Insert t s).
+
+    In the true selector branch Q(s,t)=Insert t s.  The absent recursive
+    membership call M(w,t) is below that side by top-difference at bit t.
+    """
+
+    p.goal(
+        "!w s t. In w s /\\ ~(In w t) "
+        "/\\ nat0_lt (Insert s t) (Insert t s) "
+        "==> nat0_lt (quote_hf_mem_measure w t) (Insert t s)"
+    )
+    p.fix("w s t")
+    p.assume(
+        "(hws, hnwt, hbranch): In w s /\\ ~(In w t) "
+        "/\\ nat0_lt (Insert s t) (Insert t s)"
+    )
+    p.have("hws_bit: bit w s").by_rewrite_of("hws", [IN_AT])
+    with p.have("h_not_bit_t_s: ~(bit t s)").proof():
+        with p.suppose("hts_bit: bit t s"):
+            p.have("h_set_ts_s: set_bit t s = s").by(
+                SET_BIT_PRESENT_ID, "t", "s", "hts_bit"
+            )
+            p.have("h_insert_ts_s: Insert t s = s").by_rewrite_of(
+                "h_set_ts_s", [INSERT_AT]
+            )
+            p.have("h_s_lt_insert_st: nat0_lt s (Insert s t)").by(
+                NAT0_LT_SELF_INSERT_SELF, "s", "t"
+            )
+            p.have("h_insert_st_lt_s: nat0_lt (Insert s t) s").by_rewrite_of(
+                "hbranch", ["h_insert_ts_s"]
+            )
+            p.have("h_s_lt_s: nat0_lt s s").by(
+                NAT0_LT_TRANS, "s", "Insert s t", "s",
+                "h_s_lt_insert_st", "h_insert_st_lt_s",
+            )
+            p.have("h_not_s_lt_s: ~(nat0_lt s s)").by(NAT0_LT_NOT_REFL, "s")
+            p.absurd().by_conj("h_not_s_lt_s", "h_s_lt_s")
+    with p.have("h_w_ne_t: ~(w = t)").proof():
+        with p.suppose("hwt: w = t"):
+            p.have("hts_bit: bit t s").by_rewrite_of("hws_bit", ["hwt"])
+            p.absurd().by_conj("h_not_bit_t_s", "hts_bit")
+    with p.have("h_t_ne_w: ~(t = w)").proof():
+        with p.suppose("htw: t = w"):
+            p.have("hwt: w = t").by_thm(SYM(p.fact("htw")))
+            p.absurd().by_conj("h_w_ne_t", "hwt")
+    with p.have(
+        "h_hi: !i. nat0_lt t i ==> bit i (set_bit w t) "
+        "==> bit i (set_bit t s)"
+    ).proof():
+        p.fix("i")
+        p.assume("hti: nat0_lt t i", "hbit: bit i (set_bit w t)")
+        with p.cases_on(EXCLUDED_MIDDLE, "i = w"):
+            with p.case("hiw: i = w"):
+                p.have("h_w_rhs_eq: bit w (set_bit t s) = bit w s").by(
+                    BIT_AT_SET_BIT_DIFF, "t", "w", "s", "h_t_ne_w"
+                )
+                p.have("h_w_rhs: bit w (set_bit t s)").by_eq_mp(
+                    SYM(p.fact("h_w_rhs_eq")), "hws_bit"
+                )
+                p.thus("bit i (set_bit t s)").by_rewrite_of(
+                    "h_w_rhs", [SYM(p.fact("hiw"))]
+                )
+            with p.case("hiw_ne: ~(i = w)"):
+                with p.have("h_w_i_ne: ~(w = i)").proof():
+                    with p.suppose("hwi: w = i"):
+                        p.have("hiw2: i = w").by_thm(SYM(p.fact("hwi")))
+                        p.absurd().by_conj("hiw_ne", "hiw2")
+                p.have("hbit_i_t_eq: bit i (set_bit w t) = bit i t").by(
+                    BIT_AT_SET_BIT_DIFF, "w", "i", "t", "h_w_i_ne"
+                )
+                p.have("hbit_i_t: bit i t").by_eq_mp("hbit_i_t_eq", "hbit")
+                p.have("h_i_t_F: bit i t = F").by(
+                    BIT_ABOVE_FALSE, "t", "i", "hti"
+                )
+                p.absurd().by_thm(EQ_MP(p.fact("h_i_t_F"), p.fact("hbit_i_t")))
+    p.have("h_t_left_eq: bit t (set_bit w t) = bit t t").by(
+        BIT_AT_SET_BIT_DIFF, "w", "t", "t", "h_w_ne_t"
+    )
+    p.have("h_t_t_F: bit t t = F").by(BIT_SELF_FALSE, "t")
+    p.have("h_t_left_F: bit t (set_bit w t) = F").by_trans(
+        "h_t_left_eq", "h_t_t_F"
+    )
+    p.have("h_t_left_not: ~(bit t (set_bit w t))").by_thm(
+        EQF_ELIM(p.fact("h_t_left_F"))
+    )
+    p.have("h_t_right_T: bit t (set_bit t s) = T").by(
+        BIT_AT_SET_BIT_SAME, "t", "s"
+    )
+    p.have("h_t_right: bit t (set_bit t s)").by_thm(
+        EQT_ELIM(p.fact("h_t_right_T"))
+    )
+    p.have("h_raw: nat0_lt (set_bit w t) (set_bit t s)").by(
+        BITWISE_LT_BY_TOP_DIFF,
+        "t",
+        "set_bit w t",
+        "set_bit t s",
+        CONJ(p.fact("h_hi"), CONJ(p.fact("h_t_left_not"), p.fact("h_t_right"))),
+    )
+    p.thus("nat0_lt (quote_hf_mem_measure w t) (Insert t s)").by_rewrite_of(
+        "h_raw", [QUOTE_HF_MEM_MEASURE_AT, INSERT_AT]
+    )
+
+
+@proof
+def QUOTE_HF_EXT_DIFF_LEFT_ABSENT_FALSE_BRANCH(p):
+    """|- !w s t. In w s /\\ ~In w t
+                  /\\ ~nat0_lt (Insert s t) (Insert t s)
+          ==> nat0_lt (quote_hf_mem_measure w t) (Insert s t).
+
+    In the false selector branch Q(s,t)=Insert s t.  The absent recursive
+    membership call M(w,t) is below that side by top-difference at bit s.
+    """
+
+    p.goal(
+        "!w s t. In w s /\\ ~(In w t) "
+        "/\\ ~(nat0_lt (Insert s t) (Insert t s)) "
+        "==> nat0_lt (quote_hf_mem_measure w t) (Insert s t)"
+    )
+    p.fix("w s t")
+    p.assume(
+        "(hws, hnwt, hbranch): In w s /\\ ~(In w t) "
+        "/\\ ~(nat0_lt (Insert s t) (Insert t s))"
+    )
+    p.have("h_w_lt_s: nat0_lt w s").by(IN_LT, "s", "w", "hws")
+    with p.have("h_w_ne_s: ~(w = s)").proof():
+        with p.suppose("hws_eq: w = s"):
+            p.have("h_s_lt_s: nat0_lt s s").by_rewrite_of(
+                "h_w_lt_s", ["hws_eq"]
+            )
+            p.have("h_not_s_lt_s: ~(nat0_lt s s)").by(NAT0_LT_NOT_REFL, "s")
+            p.absurd().by_conj("h_not_s_lt_s", "h_s_lt_s")
+    with p.have("h_s_ne_w: ~(s = w)").proof():
+        with p.suppose("hsw: s = w"):
+            p.have("hws_eq: w = s").by_thm(SYM(p.fact("hsw")))
+            p.absurd().by_conj("h_w_ne_s", "hws_eq")
+    with p.have("h_not_bit_s_t: ~(bit s t)").proof():
+        with p.suppose("hst_bit: bit s t"):
+            p.have("h_set_st_t: set_bit s t = t").by(
+                SET_BIT_PRESENT_ID, "s", "t", "hst_bit"
+            )
+            p.have("h_insert_st_t: Insert s t = t").by_rewrite_of(
+                "h_set_st_t", [INSERT_AT]
+            )
+            p.have("h_t_lt_insert_ts: nat0_lt t (Insert t s)").by(
+                NAT0_LT_SELF_INSERT_SELF, "t", "s"
+            )
+            p.have("h_branch_true: nat0_lt (Insert s t) (Insert t s)").by_rewrite_of(
+                "h_t_lt_insert_ts", ["h_insert_st_t"]
+            )
+            p.absurd().by_conj("hbranch", "h_branch_true")
+    p.have("h_s_t_F: bit s t = F").by_thm(EQF_INTRO(p.fact("h_not_bit_s_t")))
+    with p.have(
+        "h_hi: !i. nat0_lt s i ==> bit i (set_bit w t) "
+        "==> bit i (set_bit s t)"
+    ).proof():
+        p.fix("i")
+        p.assume("hsi: nat0_lt s i", "hbit: bit i (set_bit w t)")
+        with p.cases_on(EXCLUDED_MIDDLE, "i = w"):
+            with p.case("hiw: i = w"):
+                p.have("h_s_lt_w: nat0_lt s w").by_rewrite_of("hsi", ["hiw"])
+                p.have("h_w_lt_w: nat0_lt w w").by(
+                    NAT0_LT_TRANS, "w", "s", "w", "h_w_lt_s", "h_s_lt_w"
+                )
+                p.have("h_not_w_lt_w: ~(nat0_lt w w)").by(NAT0_LT_NOT_REFL, "w")
+                p.absurd().by_conj("h_not_w_lt_w", "h_w_lt_w")
+            with p.case("hiw_ne: ~(i = w)"):
+                with p.have("h_w_i_ne: ~(w = i)").proof():
+                    with p.suppose("hwi: w = i"):
+                        p.have("hiw2: i = w").by_thm(SYM(p.fact("hwi")))
+                        p.absurd().by_conj("hiw_ne", "hiw2")
+                with p.have("h_s_i_ne: ~(s = i)").proof():
+                    with p.suppose("hsi_eq: s = i"):
+                        p.have("h_s_lt_s: nat0_lt s s").by_rewrite_of(
+                            "hsi", [SYM(p.fact("hsi_eq"))]
+                        )
+                        p.have("h_not_s_lt_s: ~(nat0_lt s s)").by(
+                            NAT0_LT_NOT_REFL, "s"
+                        )
+                        p.absurd().by_conj("h_not_s_lt_s", "h_s_lt_s")
+                p.have("hbit_i_t_eq: bit i (set_bit w t) = bit i t").by(
+                    BIT_AT_SET_BIT_DIFF, "w", "i", "t", "h_w_i_ne"
+                )
+                p.have("hbit_i_t: bit i t").by_eq_mp("hbit_i_t_eq", "hbit")
+                p.have("hbit_i_rhs_eq: bit i (set_bit s t) = bit i t").by(
+                    BIT_AT_SET_BIT_DIFF, "s", "i", "t", "h_s_i_ne"
+                )
+                p.thus("bit i (set_bit s t)").by_eq_mp(
+                    SYM(p.fact("hbit_i_rhs_eq")), "hbit_i_t"
+                )
+    p.have("h_s_left_eq: bit s (set_bit w t) = bit s t").by(
+        BIT_AT_SET_BIT_DIFF, "w", "s", "t", "h_w_ne_s"
+    )
+    p.have("h_s_left_F: bit s (set_bit w t) = F").by_trans(
+        "h_s_left_eq", "h_s_t_F"
+    )
+    p.have("h_s_left_not: ~(bit s (set_bit w t))").by_thm(
+        EQF_ELIM(p.fact("h_s_left_F"))
+    )
+    p.have("h_s_right_T: bit s (set_bit s t) = T").by(
+        BIT_AT_SET_BIT_SAME, "s", "t"
+    )
+    p.have("h_s_right: bit s (set_bit s t)").by_thm(
+        EQT_ELIM(p.fact("h_s_right_T"))
+    )
+    p.have("h_raw: nat0_lt (set_bit w t) (set_bit s t)").by(
+        BITWISE_LT_BY_TOP_DIFF,
+        "s",
+        "set_bit w t",
+        "set_bit s t",
+        CONJ(p.fact("h_hi"), CONJ(p.fact("h_s_left_not"), p.fact("h_s_right"))),
+    )
+    p.thus("nat0_lt (quote_hf_mem_measure w t) (Insert s t)").by_rewrite_of(
+        "h_raw", [QUOTE_HF_MEM_MEASURE_AT, INSERT_AT]
+    )
+
+
+@proof
 def QUOTE_HF_EXT_DIFF_LEFT_MEM_DECREASES(p):
     """|- !w s t. In w s /\\ ~In w t ==>
           nat0_lt (quote_hf_mem_measure w s) (quote_hf_neq_measure s t)
@@ -2656,7 +2877,85 @@ def QUOTE_HF_EXT_DIFF_LEFT_MEM_DECREASES(p):
         "nat0_lt (quote_hf_mem_measure w s) (quote_hf_neq_measure s t) "
         "/\\ nat0_lt (quote_hf_mem_measure w t) (quote_hf_neq_measure s t)"
     )
-    p.sorry()
+    p.fix("w s t")
+    p.assume("(hws, hnwt): In w s /\\ ~(In w t)")
+    p.have("hws_bit: bit w s").by_rewrite_of("hws", [IN_AT])
+    p.have("h_set_ws_s: set_bit w s = s").by(
+        SET_BIT_PRESENT_ID, "w", "s", "hws_bit"
+    )
+    p.have("h_mws_s: quote_hf_mem_measure w s = s").by_rewrite(
+        [QUOTE_HF_MEM_MEASURE_AT, INSERT_AT, "h_set_ws_s"]
+    )
+    p.have("h_s_lt_st: nat0_lt s (Insert s t)").by(
+        NAT0_LT_SELF_INSERT_SELF, "s", "t"
+    )
+    with p.cases_on(EXCLUDED_MIDDLE, "nat0_lt (Insert s t) (Insert t s)"):
+        with p.case("hbranch: nat0_lt (Insert s t) (Insert t s)"):
+            p.have("hbranch_eq: nat0_lt (Insert s t) (Insert t s) = T").by_thm(
+                EQT_INTRO(p.fact("hbranch"))
+            )
+            p.have("h_s_lt_ts: nat0_lt s (Insert t s)").by(
+                NAT0_LT_TRANS, "s", "Insert s t", "Insert t s",
+                "h_s_lt_st", "hbranch",
+            )
+            p.have(
+                "h_ws_q: nat0_lt (quote_hf_mem_measure w s) "
+                "                  (quote_hf_neq_measure s t)"
+            ).by_rewrite_of(
+                "h_s_lt_ts",
+                [QUOTE_HF_NEQ_MEASURE_AT, "hbranch_eq", COND_T_NAT0, "h_mws_s"],
+            )
+            p.have(
+                "h_wt_ts: nat0_lt (quote_hf_mem_measure w t) (Insert t s)"
+            ).by(
+                QUOTE_HF_EXT_DIFF_LEFT_ABSENT_TRUE_BRANCH,
+                "w",
+                "s",
+                "t",
+                CONJ(p.fact("hws"), CONJ(p.fact("hnwt"), p.fact("hbranch"))),
+            )
+            p.have(
+                "h_wt_q: nat0_lt (quote_hf_mem_measure w t) "
+                "                  (quote_hf_neq_measure s t)"
+            ).by_rewrite_of(
+                "h_wt_ts",
+                [QUOTE_HF_NEQ_MEASURE_AT, "hbranch_eq", COND_T_NAT0],
+            )
+            p.thus(
+                "nat0_lt (quote_hf_mem_measure w s) (quote_hf_neq_measure s t) "
+                "/\\ nat0_lt (quote_hf_mem_measure w t) (quote_hf_neq_measure s t)"
+            ).by_thm(CONJ(p.fact("h_ws_q"), p.fact("h_wt_q")))
+        with p.case("hbranch: ~(nat0_lt (Insert s t) (Insert t s))"):
+            p.have("hbranch_eq: nat0_lt (Insert s t) (Insert t s) = F").by_thm(
+                EQF_INTRO(p.fact("hbranch"))
+            )
+            p.have(
+                "h_ws_q: nat0_lt (quote_hf_mem_measure w s) "
+                "                  (quote_hf_neq_measure s t)"
+            ).by_rewrite_of(
+                "h_s_lt_st",
+                [QUOTE_HF_NEQ_MEASURE_AT, "hbranch_eq", COND_F_NAT0, "h_mws_s"],
+            )
+            p.have(
+                "h_wt_st: nat0_lt (quote_hf_mem_measure w t) (Insert s t)"
+            ).by(
+                QUOTE_HF_EXT_DIFF_LEFT_ABSENT_FALSE_BRANCH,
+                "w",
+                "s",
+                "t",
+                CONJ(p.fact("hws"), CONJ(p.fact("hnwt"), p.fact("hbranch"))),
+            )
+            p.have(
+                "h_wt_q: nat0_lt (quote_hf_mem_measure w t) "
+                "                  (quote_hf_neq_measure s t)"
+            ).by_rewrite_of(
+                "h_wt_st",
+                [QUOTE_HF_NEQ_MEASURE_AT, "hbranch_eq", COND_F_NAT0],
+            )
+            p.thus(
+                "nat0_lt (quote_hf_mem_measure w s) (quote_hf_neq_measure s t) "
+                "/\\ nat0_lt (quote_hf_mem_measure w t) (quote_hf_neq_measure s t)"
+            ).by_thm(CONJ(p.fact("h_ws_q"), p.fact("h_wt_q")))
 
 
 @proof
@@ -2674,7 +2973,36 @@ def QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES(p):
         "nat0_lt (quote_hf_mem_measure w s) (quote_hf_neq_measure s t) "
         "/\\ nat0_lt (quote_hf_mem_measure w t) (quote_hf_neq_measure s t)"
     )
-    p.sorry()
+    p.fix("w s t")
+    p.assume("(hnws, hwt): ~(In w s) /\\ In w t")
+    p.have(
+        "h_left_swapped: nat0_lt (quote_hf_mem_measure w t) "
+        "                         (quote_hf_neq_measure t s) "
+        "/\\ nat0_lt (quote_hf_mem_measure w s) "
+        "          (quote_hf_neq_measure t s)"
+    ).by(
+        QUOTE_HF_EXT_DIFF_LEFT_MEM_DECREASES,
+        "w",
+        "t",
+        "s",
+        CONJ(p.fact("hwt"), p.fact("hnws")),
+    )
+    p.split("h_left_swapped", "(h_wt_qts,h_ws_qts)")
+    # DSL friction: using the fully quantified symmetry theorem as a
+    # rewrite rule loops, so specialize it to this s/t pair before rewriting.
+    q_sym_ts = SPECL([p._parse("t"), p._parse("s")], QUOTE_HF_NEQ_MEASURE_SYM)
+    p.have(
+        "h_ws_q: nat0_lt (quote_hf_mem_measure w s) "
+        "                  (quote_hf_neq_measure s t)"
+    ).by_rewrite_of("h_ws_qts", [q_sym_ts])
+    p.have(
+        "h_wt_q: nat0_lt (quote_hf_mem_measure w t) "
+        "                  (quote_hf_neq_measure s t)"
+    ).by_rewrite_of("h_wt_qts", [q_sym_ts])
+    p.thus(
+        "nat0_lt (quote_hf_mem_measure w s) (quote_hf_neq_measure s t) "
+        "/\\ nat0_lt (quote_hf_mem_measure w t) (quote_hf_neq_measure s t)"
+    ).by_thm(CONJ(p.fact("h_ws_q"), p.fact("h_wt_q")))
 
 
 @proof
@@ -3762,11 +4090,11 @@ if __name__ == "__main__":
         pp_thm(QUOTE_HF_NEQ_MEASURE_LT_FROM_FOUR_MEM_BOUNDS),
     )
     print(
-        "    QUOTE_HF_EXT_DIFF_LEFT_MEM_DECREASES (SORRY):",
+        "    QUOTE_HF_EXT_DIFF_LEFT_MEM_DECREASES:",
         pp_thm(QUOTE_HF_EXT_DIFF_LEFT_MEM_DECREASES),
     )
     print(
-        "    QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES (SORRY):",
+        "    QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES:",
         pp_thm(QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES),
     )
     print("    QUOTE_HF_MUTUAL_MEASURED                :", pp_thm(QUOTE_HF_MUTUAL_MEASURED))

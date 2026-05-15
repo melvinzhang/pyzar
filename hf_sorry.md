@@ -183,17 +183,17 @@ use `QUOTE_HF_PROV_NEQ` directly.
      `QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES` to obtain the two smaller
      membership decisions and closes with
      `PROV_HF_NEQ_FROM_MEM_DIFF` / `_RIGHT`.
-   - Remaining Phase 1 proof obligations:
+   - The Phase 1 bit/order obligations are now closed:
 
      ```text
      QUOTE_HF_EXT_DIFF_LEFT_MEM_DECREASES
      QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES
      ```
 
-     These are the two bit/order decrease packages needed by the
-     inequality branch after `HF_EXT_DIFF` finds a witness.
-   - Remaining visible sorries inside `QUOTE_HF_MUTUAL_MEASURED`:
-     exactly three membership branch bridges:
+     These are the two decrease packages used by the inequality branch
+     after `HF_EXT_DIFF` finds a witness.
+   - The three object-level membership branch bridges inside
+     `QUOTE_HF_MUTUAL_MEASURED` are also closed:
 
      ```text
      y = 0
@@ -201,8 +201,10 @@ use `QUOTE_HF_PROV_NEQ` directly.
      y != 0 /\ x != low_bit y
      ```
 
-     These are object-level HF1/HF2/HF3 transfer proofs, not measure or
-     induction unknowns. The tail branch
+     They are object-level HF1/HF2/HF3 transfer proofs, not measure or
+     induction unknowns. The tail branch uses the smaller tail
+     membership decision plus the smaller quoted inequality through
+     `HF3_INST`.
      `y != 0 /\ x != low_bit y` is the largest remaining bridge because
      it must use the smaller tail membership decision plus the smaller
      quoted inequality through `HF3_INST`.
@@ -487,10 +489,11 @@ definitions.
      ==> M(w,s) < Q(s,t) /\ M(w,t) < Q(s,t)
   ```
 
-  These are currently visible `p.sorry()` helpers. They should be
-  discharged with `BITWISE_LT_BY_TOP_DIFF`, `SET_BIT_PRESENT_ID`, and
-  branch splits over whether the outer set is already a bit of the
-  opposite side.
+  These are now closed. The proof uses `BITWISE_LT_BY_TOP_DIFF`,
+  `SET_BIT_PRESENT_ID`, and branch splits over the
+  `quote_hf_neq_measure` selector. The right-oriented package is derived
+  by applying the left-oriented package with `s`/`t` swapped and rewriting
+  through `QUOTE_HF_NEQ_MEASURE_SYM`.
 
 * **Induction-target experiments** —
   `hf_induction_targets.py` brute-checks candidate measures
@@ -521,8 +524,7 @@ definitions.
   The membership half calls the IH at the current membership measure
   `M(x,y)` and, in the miss branch, uses the closed measure decreases to
   obtain the tail membership decision and head inequality recursively.
-  The remaining three `p.sorry()` leaves are the object-level branch
-  bridges:
+  Its object-level branch bridges are closed:
 
   ```text
   y = 0:
@@ -539,9 +541,7 @@ definitions.
   The inequality half is structurally closed through the IH: it obtains
   a discriminating member from `HF_EXT_DIFF`, gets both smaller
   membership decisions using the left/right ext-diff decrease helpers,
-  and closes via the object-level membership-difference lemmas. Its
-  only remaining dependency is that the two ext-diff decrease helpers
-  are still visible `p.sorry()` lemmas.
+  and closes via the object-level membership-difference lemmas.
 
   `Pair_ord` is kept behind `--include-pair-ord` because exact values
   explode; small runs still reject it as the membership measure.
@@ -612,8 +612,6 @@ definitions.
   builders now keep those terms aligned with the substitute rewriter's
   unfolded `Var_t 0` / `Var_t (SUC0 0)` / `Var_t (SUC0 (SUC0 0))`
   normal forms.
-* **B/C**: current blockers are the two ext-diff decrease helpers, not
-  the removed low-bit global inequality lemmas. Keep the next work on
-  `QUOTE_HF_EXT_DIFF_LEFT_MEM_DECREASES` and
-  `QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES`, then discharge the three
-  membership branch bridges in `QUOTE_HF_MUTUAL_MEASURED`.
+* **B/C**: done. The ext-diff decrease helpers are closed; the main DSL
+  friction was avoiding global symmetric rewrite loops by specializing
+  `QUOTE_HF_NEQ_MEASURE_SYM` at use sites.
