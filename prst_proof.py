@@ -14,7 +14,9 @@
 #
 # So:
 #
-#   is_pr_axiom n   :<=>   is_pr_def_instance n  \/  is_logical_axiom n.
+#   is_pr_axiom n   :<=>   is_pr_def_instance n
+#                          \/ is_pr_refl n
+#                          \/ is_logical_axiom n.
 #
 # Following Jensen-Karp 1971 ("Primitive Recursive Set Functions"):
 # PRST has *no* set-theoretic axioms in the object language. PR
@@ -104,6 +106,7 @@ from hf_proof import (
 from prst_syntax import (
     Imp_pf,  # noqa: F401  -- parser alias for is_pr_axiom
     Eq_pf,  # noqa: F401  -- parser alias for Prov_PRST_internal
+    is_pterm,  # noqa: F401  -- parser alias for is_pr_refl
     Var_pt,  # noqa: F401  -- parser alias for Prov_PRST_internal
     App_pt,  # noqa: F401  -- parser alias for Prov_PRST_internal
     Tup_pt,  # noqa: F401  -- parser alias; args- and proof-list cons cells
@@ -114,21 +117,53 @@ from prst_syntax import (
 # ---------------------------------------------------------------------------
 # Stage 2B (a) -- the PRST axiom recogniser.
 #
-# is_pr_axiom n  <=>  is_pr_def_instance n  \/  is_logical_axiom n.
+# is_pr_axiom n  <=>  is_pr_def_instance n
+#                     \/ is_pr_refl n
+#                     \/ is_logical_axiom n.
 #
 # is_pr_def_instance from prst_pr.py recognises defining equations for the PR
-# function symbols and their term-substitution instances. adj_sym has no
-# defining equation -- it is a primitive PR symbol whose semantics is fixed by
-# the standard nat0 HOL model, not by an axiom.
+# function symbols and their term-substitution instances.
+#
+# is_pr_refl is PRST-local equality reflexivity over is_pterm/Eq_pf. HF's
+# inherited is_Refl ranges over is_term/Eq_f, which does not cover App_pt and
+# Tup_pt terms.
+#
+# adj_sym has no defining equation -- it is a primitive PR symbol whose
+# semantics is fixed by the standard nat0 HOL model, not by an axiom.
 # ---------------------------------------------------------------------------
+
+
+IS_PR_REFL_DEF, IS_PR_REFL_AT = define_with_at(
+    "is_pr_refl",
+    parse_type("nat0 -> bool"),
+    "\\n:nat0. ?t:nat0. is_pterm t /\\ n = Eq_pf t t",
+)
+is_pr_refl = mk_const("is_pr_refl", [])
 
 
 IS_PR_AXIOM_DEF, IS_PR_AXIOM_AT = define_with_at(
     "is_pr_axiom",
     parse_type("nat0 -> bool"),
-    "\\n:nat0. is_pr_def_instance n \\/ is_logical_axiom n",
+    "\\n:nat0. is_pr_def_instance n \\/ is_pr_refl n \\/ is_logical_axiom n",
 )
 is_pr_axiom = mk_const("is_pr_axiom", [])
+
+
+@proof
+def IS_PR_REFL_HOLDS(p):
+    """|- !t. is_pterm t ==> is_pr_refl (Eq_pf t t)."""
+    from tactics import REFL
+
+    p.goal("!t. is_pterm t ==> is_pr_refl (Eq_pf t t)", types={"t": nat0_ty})
+    p.fix("t")
+    p.assume("h_pt: is_pterm t")
+    p.have("h_refl: Eq_pf t t = Eq_pf t t").by_thm(
+        REFL(p._parse("Eq_pf t t"))
+    )
+    p.have("h_ex: ?u. is_pterm u /\\ Eq_pf t t = Eq_pf u u").by_exists(
+        ["t"], "h_pt", "h_refl"
+    )
+    p.thus("is_pr_refl (Eq_pf t t)").by_unfold("h_ex", IS_PR_REFL_DEF)
 
 # Note on is_logical_axiom: the bundle re-used from hf_proof includes
 # the quantifier schemas is_UI / is_Vac / is_FaImp. In PRST these
@@ -687,7 +722,8 @@ def PROV_PRST_AX(p):
 
 # Helper: lift `is_pr_def n` to `is_pr_axiom n` via
 # IS_PR_DEF_INSTANCE_FROM_DEF and DISJ1 of
-# `is_pr_def_instance n \/ is_logical_axiom n` (IS_PR_AXIOM_DEF).
+# `is_pr_def_instance n \/ is_pr_refl n \/ is_logical_axiom n`
+# (IS_PR_AXIOM_DEF).
 def _is_pr_axiom_from_pr_def(p, axiom_name_str, is_pr_def_fact):
     """Inside an @proof body, derive `is_pr_axiom <axiom_name>` from a
     fact `is_pr_def <axiom_name>` via is_pr_def_instance + DISJ1 +
@@ -700,6 +736,7 @@ def _is_pr_axiom_from_pr_def(p, axiom_name_str, is_pr_def_fact):
     )
     p.have(
         "h_disj: is_pr_def_instance " + n_paren + " "
+        "\\/ is_pr_refl " + n_paren + " "
         "\\/ is_logical_axiom " + n_paren
     ).by_disj("h_inst")
     p.have("h_axiom: is_pr_axiom " + n_paren).by_unfold(
@@ -979,6 +1016,7 @@ def PROV_PRST_SUBST(p):
     )
     p.have(
         "h_disj: is_pr_def_instance (substitute_p F t v) "
+        "\\/ is_pr_refl (substitute_p F t v) "
         "\\/ is_logical_axiom (substitute_p F t v)"
     ).by_disj("h_inst")
     p.have("h_axiom: is_pr_axiom (substitute_p F t v)").by_unfold(
@@ -1008,35 +1046,37 @@ def PROV_PRST_SUBST(p):
 
 
 # ---------------------------------------------------------------------------
-# PRST_REFL_AXIOM -- reflexivity of Eq_pf for is_pterm-typed terms.
+# PROV_PRST_REFL -- reflexivity of Eq_pf for is_pterm-typed terms.
 #
-# HF's is_Refl logical-axiom schema (one disjunct of is_logical_axiom)
-# delivers `Eq_f t t` for is_term-typed t. PRST inherits is_logical_axiom
-# verbatim, but is_term recognises only Var_t / Empty_t / Adj_t -- the
-# wider is_pterm class (which admits App_pt and Tup_pt) is NOT covered.
-# So PRST has weaker reflexivity than HF at the inherited level.
-#
-# Without an extension, PROV_PRST_ADJ_DEF_AT and similar "PRST-side
-# reflexivity" claims aren't derivable. Two routes:
-#   (a) Extend is_logical_axiom's body with an is_pterm-Refl disjunct.
-#       Touches the shared HF/PRST axiom definition -- intrusive.
-#   (b) Posit a Prov_PRST-level reflexivity claim directly. Cleanly
-#       scoped to PRST. This is currently tracked as a sorry obligation.
-#
-# We take route (b). Justification: reflexivity of equality is a
-# fundamental logical truth in any sound proof system. Soundness in the
-# standard nat0 HOL model is immediate.
+# This is now a derived PRST theorem. is_pr_axiom contains a PRST-local
+# is_pr_refl branch over is_pterm/Eq_pf, avoiding the mismatch with HF's
+# inherited is_Refl, which ranges over is_term/Eq_f.
 # ---------------------------------------------------------------------------
 
 
 @proof
-def PRST_REFL_AXIOM(p):
+def PROV_PRST_REFL(p):
     """|- !t. is_pterm t ==> Prov_PRST (Eq_pf t t)."""
     p.goal(
         "!t. is_pterm t ==> Prov_PRST (Eq_pf t t)",
         types={"t": nat0_ty},
     )
-    p.sorry()
+    p.fix("t")
+    p.assume("h_pt: is_pterm t")
+    p.have("h_refl: is_pr_refl (Eq_pf t t)").by(
+        IS_PR_REFL_HOLDS, "t", "h_pt"
+    )
+    p.have(
+        "h_disj: is_pr_def_instance (Eq_pf t t) "
+        "\\/ is_pr_refl (Eq_pf t t) "
+        "\\/ is_logical_axiom (Eq_pf t t)"
+    ).by_disj("h_refl")
+    p.have("h_axiom: is_pr_axiom (Eq_pf t t)").by_unfold(
+        "h_disj", IS_PR_AXIOM_DEF
+    )
+    p.thus("Prov_PRST (Eq_pf t t)").by(
+        PROV_PRST_AX, "Eq_pf t t", "h_axiom"
+    )
 
 
 @proof
@@ -1057,7 +1097,7 @@ def PROV_PRST_ADJ_DEF_AT(p):
       2. Build is_pterm of the LHS by chaining IS_PTERM_AT_APP /
          IS_PTERM_AT_TUP / IS_PTERM_AT_EMPTY with IS_PR_SYM_ADJ +
          IS_PR_SYM_IMP_PARTIAL for the App_pt's symbol slot.
-      3. By PRST_REFL_AXIOM at LHS: Prov_PRST (Eq_pf LHS LHS).
+      3. By PROV_PRST_REFL at LHS: Prov_PRST (Eq_pf LHS LHS).
       4. Rewrite the second LHS to Adj_pt x y via SYM(adj_at) to recover
          the goal shape.
     """
@@ -1119,13 +1159,13 @@ def PROV_PRST_ADJ_DEF_AT(p):
         h_conj_app,
     )
 
-    # Step 3: PRST_REFL_AXIOM at LHS.
+    # Step 3: PROV_PRST_REFL at LHS.
     p.have(
         "h_refl: Prov_PRST (Eq_pf "
         "  (App_pt adj_sym (Tup_pt x (Tup_pt y Empty_pt))) "
         "  (App_pt adj_sym (Tup_pt x (Tup_pt y Empty_pt))))"
     ).by(
-        PRST_REFL_AXIOM,
+        PROV_PRST_REFL,
         "App_pt adj_sym (Tup_pt x (Tup_pt y Empty_pt))",
         "h_pt_app",
     )
@@ -1189,7 +1229,8 @@ MU_CORRECTNESS = new_axiom(parse(
 # checker. Its top-level body now has the intended proof-list shape:
 # head check + valid-proof-list recursion + membership-based MP search.
 # The remaining constructive work is expanding the is_pr_axiom_pr leaf
-# and proving the correctness lemmas below instead of positing them:
+# (including PR-def instances, PRST reflexivity, and inherited logical
+# axioms) and proving the correctness lemmas below instead of positing them:
 #
 #   PROOF_PRST_PR_CORRECT       -- HOL-level semantic correctness:
 #                                  Proof_PRST p n <=> the PR symbol
@@ -1967,7 +2008,8 @@ def PROV_PRST_REPRESENTS(p):
 # Filled in: ~400 lines.
 #
 # This module re-uses is_logical_axiom from hf_proof verbatim (one
-# disjunct in is_pr_axiom), wraps it together with is_pr_def, and
+# disjunct in is_pr_axiom), wraps it together with is_pr_def_instance
+# and PRST-native reflexivity, and
 # defines Prov_PRST. PRST has no set-theoretic axioms (Jensen-Karp
 # 1971), and no quantifier rules. Any propositional fact needed inside
 # PRST is re-derived directly from the Hilbert axioms.
@@ -1978,6 +2020,8 @@ if __name__ == "__main__":
     from parser import pp_thm
 
     print("Stage 2B (PRST) -- the PRST proof system.")
+    print("    IS_PR_REFL_DEF         :", pp_thm(IS_PR_REFL_DEF))
+    print("    IS_PR_REFL_HOLDS       :", pp_thm(IS_PR_REFL_HOLDS))
     print("    IS_PR_AXIOM_DEF        :", pp_thm(IS_PR_AXIOM_DEF))
     print("    PROV_PRST_DEF          :", pp_thm(PROV_PRST_DEF))
     print("    PROV_PRST_AX           :", pp_thm(PROV_PRST_AX))
@@ -1991,7 +2035,7 @@ if __name__ == "__main__":
     print()
     print("Stage 2B (d.2) -- substitute-into-axiom derived rule.")
     print("    PROV_PRST_SUBST             :", pp_thm(PROV_PRST_SUBST))
-    print("    PRST_REFL_AXIOM             :", pp_thm(PRST_REFL_AXIOM))
+    print("    PROV_PRST_REFL              :", pp_thm(PROV_PRST_REFL))
     print("    PROV_PRST_ADJ_DEF_AT     :", pp_thm(PROV_PRST_ADJ_DEF_AT))
     print()
     print("Stage 2B (d.3) -- mu-correctness axiom.")

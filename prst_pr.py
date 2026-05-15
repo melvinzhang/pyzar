@@ -1480,7 +1480,8 @@ def IS_PARTIAL_PR_SYM_MU(p):
 # equation: one Prov_PRST equation via PRST_COMP_DEF.
 #
 # ``Proof_PRST_pr`` -- decidable list-of-formulas proof checker; uses
-# ``is_pr_axiom`` (= is_pr_def \/ is_logical_axiom) and ``is_mp``.
+# ``is_pr_axiom`` (= is_pr_def_instance \/ is_pr_refl \/ is_logical_axiom)
+# and ``is_mp``.
 # All primitive recursive. Total: ~50 base-layer symbols composed.
 #
 # The full implementation is ~600 lines; PR symbols are first-class
@@ -1676,8 +1677,8 @@ diag_pr = mk_const("diag_pr", [])
 #
 # The only leaf intentionally left as a separate recogniser symbol is
 # ``is_pr_axiom_pr``.  Expanding that symbol into
-# is_pr_def_pr \/ is_logical_axiom_pr is the next schema-recogniser
-# task, not part of the proof-list recursion itself.
+# is_pr_def_instance_pr \/ is_pr_refl_pr \/ is_logical_axiom_pr is the next
+# schema-recogniser task, not part of the proof-list recursion itself.
 
 
 def _const_at(value_term, arity):
