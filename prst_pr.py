@@ -1801,26 +1801,235 @@ imp_code_pr = mk_const("imp_code_pr", [])
 # The large schema-recogniser leaves are intentionally separate PR symbols so
 # Proof_PRST_pr has the right shape now, while the remaining bounded
 # recogniser work is localized.
+def _or_many_pr(items):
+    """Right-associated boolean OR over same-arity PR predicate symbols."""
+    out = items[-1]
+    for item in reversed(items[:-1]):
+        out = comp(or_bool_pr, item, out)
+    return out
+
+
+def _and_many_pr(items):
+    """Right-associated boolean AND over same-arity PR predicate symbols."""
+    out = items[-1]
+    for item in reversed(items[:-1]):
+        out = comp(and_bool_pr, item, out)
+    return out
+
+
+def _eq_const_at(value_term, arity):
+    return comp(eq_nat_pr, proj(0, arity), _const_at(value_term, arity))
+
+
+def _tag_eq_at(tag_val, arity, term_pr):
+    return comp(eq_nat_pr, comp(pair_left_sym, term_pr), _const_at(nat(tag_val), arity))
+
+
+def _payload_at(term_pr):
+    return comp(pair_right_sym, term_pr)
+
+
+def _pair_left_at(term_pr):
+    return comp(pair_left_sym, term_pr)
+
+
+def _pair_right_at(term_pr):
+    return comp(pair_right_sym, term_pr)
+
+
+def _imp_left_at(term_pr):
+    return _pair_left_at(_payload_at(term_pr))
+
+
+def _imp_right_at(term_pr):
+    return _pair_right_at(_payload_at(term_pr))
+
+
+def _not_payload_at(term_pr):
+    return _payload_at(term_pr)
+
+
+# Direct closed PR-def recogniser slice.  This is a real PR body for the
+# closed defining axioms used by the checker examples.  The full
+# is_pr_def_instance branch still needs bounded witness search for
+# parametric definitions and substituted instances.
 is_pr_def_instance_pr_def = define(
     "is_pr_def_instance_pr",
     parse_type("nat0"),
-    mk_app(const_sym, F_pt),
+    _or_many_pr([
+        _eq_const_at(zero_def_axiom, 1),
+        _eq_const_at(if_in_true_def_axiom, 1),
+        _eq_const_at(if_in_false_def_axiom, 1),
+    ]),
 )
 is_pr_def_instance_pr = mk_const("is_pr_def_instance_pr", [])
 
 
+# PR-symbol-shape recogniser used by is_pterm_pr's App_pt branch.  This is
+# intentionally syntactic: it accepts the registered literal symbols and the
+# parametric PR-symbol tag families, including the mu tag used by partial PR
+# symbols.  Closure/arity correctness remains with the HOL-side registry.
+is_partial_pr_sym_pr_def = define(
+    "is_partial_pr_sym_pr",
+    parse_type("nat0"),
+    _or_many_pr([
+        _eq_const_at(nat(0), 1),
+        _eq_const_at(nat(1), 1),
+        _eq_const_at(nat(3), 1),
+        _eq_const_at(nat(8), 1),
+        _eq_const_at(nat(9), 1),
+        _eq_const_at(nat(10), 1),
+        _tag_eq_at(2, 1, proj(0, 1)),
+        _tag_eq_at(4, 1, proj(0, 1)),
+        _tag_eq_at(5, 1, proj(0, 1)),
+        _tag_eq_at(6, 1, proj(0, 1)),
+        _tag_eq_at(7, 1, proj(0, 1)),
+    ]),
+)
+is_partial_pr_sym_pr = mk_const("is_partial_pr_sym_pr", [])
+
+
+# is_pterm_pr is computed by a Pair_ord course recursion that returns an
+# auxiliary pair Pair_ord(is_term_bool, child_bool_pair).  Constructor nodes
+# expose is_term_bool; intermediate payload pairs expose their child booleans
+# so App_pt can check only its argument tuple while treating the function id
+# through is_partial_pr_sym_pr.
+_is_pterm_aux_true = _pair_ord_b(T_pt, Empty_pt)
+g_is_pterm_aux_pr_def = define(
+    "g_is_pterm_aux_pr",
+    parse_type("nat0"),
+    mk_app(const_sym, _is_pterm_aux_true),
+)
+g_is_pterm_aux_pr = mk_const("g_is_pterm_aux_pr", [])
+
+_h_is_pterm_rec_left_bool = comp(pair_left_sym, proj(2, 5))
+_h_is_pterm_rec_right_bool = comp(pair_left_sym, proj(3, 5))
+_h_is_pterm_child_bools = comp(
+    pair_ord_sym,
+    _h_is_pterm_rec_left_bool,
+    _h_is_pterm_rec_right_bool,
+)
+_h_is_pterm_default = comp(
+    pair_ord_sym,
+    _const_at(F_pt, 5),
+    _h_is_pterm_child_bools,
+)
+_h_is_pterm_var = comp(
+    pair_ord_sym,
+    _const_at(T_pt, 5),
+    _const_at(Empty_pt, 5),
+)
+_h_is_pterm_payload_bools = comp(pair_right_sym, proj(3, 5))
+_h_is_pterm_payload_left_bool = comp(pair_left_sym, _h_is_pterm_payload_bools)
+_h_is_pterm_payload_right_bool = comp(pair_right_sym, _h_is_pterm_payload_bools)
+_h_is_pterm_tup_bool = comp(
+    and_bool_pr,
+    _h_is_pterm_payload_left_bool,
+    _h_is_pterm_payload_right_bool,
+)
+_h_is_pterm_tup = comp(
+    pair_ord_sym,
+    _h_is_pterm_tup_bool,
+    _const_at(Empty_pt, 5),
+)
+_h_is_pterm_app_bool = comp(
+    and_bool_pr,
+    comp(is_partial_pr_sym_pr, comp(pair_left_sym, proj(1, 5))),
+    _h_is_pterm_payload_right_bool,
+)
+_h_is_pterm_app = comp(
+    pair_ord_sym,
+    _h_is_pterm_app_bool,
+    _const_at(Empty_pt, 5),
+)
+_h_is_pterm_aux_body = _if_eq_literal_at(
+    2, 5, proj(0, 5), _h_is_pterm_var,
+    _if_eq_literal_at(
+        11, 5, proj(0, 5), _h_is_pterm_app,
+        _if_eq_literal_at(12, 5, proj(0, 5), _h_is_pterm_tup, _h_is_pterm_default),
+    ),
+)
+h_is_pterm_aux_pr_def = define(
+    "h_is_pterm_aux_pr",
+    parse_type("nat0"),
+    _h_is_pterm_aux_body,
+)
+h_is_pterm_aux_pr = mk_const("h_is_pterm_aux_pr", [])
+
 is_pterm_pr_def = define(
     "is_pterm_pr",
     parse_type("nat0"),
-    mk_app(const_sym, F_pt),
+    comp(
+        pair_left_sym,
+        comp(
+            mk_app(mk_app(course_rec_sym, g_is_pterm_aux_pr), h_is_pterm_aux_pr),
+            proj(0, 1),
+            _const_at(nat(0), 1),
+        ),
+    ),
 )
 is_pterm_pr = mk_const("is_pterm_pr", [])
 
 
+# Propositional logical axiom slice over PRST formula constructors:
+#   K: A -> (B -> A)
+#   S: (A -> (B -> C)) -> ((A -> B) -> (A -> C))
+#   N: (~B -> ~A) -> (A -> B)
+# Quantifier and substitution schemas are left out of this PR spike because
+# PRST has no object-level Forall_pf and substitution is handled through
+# is_pr_def_instance.
+_n_pr = proj(0, 1)
+_n_is_imp_pr = _tag_eq_at(7, 1, _n_pr)
+
+_k_A_pr = _imp_left_at(_n_pr)
+_k_R_pr = _imp_right_at(_n_pr)
+_k_pr = _and_many_pr([
+    _n_is_imp_pr,
+    _tag_eq_at(7, 1, _k_R_pr),
+    comp(eq_nat_pr, _k_A_pr, _imp_right_at(_k_R_pr)),
+])
+
+_s_L_pr = _imp_left_at(_n_pr)
+_s_R_pr = _imp_right_at(_n_pr)
+_s_A_pr = _imp_left_at(_s_L_pr)
+_s_L2_pr = _imp_right_at(_s_L_pr)
+_s_B_pr = _imp_left_at(_s_L2_pr)
+_s_C_pr = _imp_right_at(_s_L2_pr)
+_s_R1_pr = _imp_left_at(_s_R_pr)
+_s_R2_pr = _imp_right_at(_s_R_pr)
+_s_pr = _and_many_pr([
+    _n_is_imp_pr,
+    _tag_eq_at(7, 1, _s_L_pr),
+    _tag_eq_at(7, 1, _s_L2_pr),
+    _tag_eq_at(7, 1, _s_R_pr),
+    _tag_eq_at(7, 1, _s_R1_pr),
+    _tag_eq_at(7, 1, _s_R2_pr),
+    comp(eq_nat_pr, _s_A_pr, _imp_left_at(_s_R1_pr)),
+    comp(eq_nat_pr, _s_B_pr, _imp_right_at(_s_R1_pr)),
+    comp(eq_nat_pr, _s_A_pr, _imp_left_at(_s_R2_pr)),
+    comp(eq_nat_pr, _s_C_pr, _imp_right_at(_s_R2_pr)),
+])
+
+_n_L_pr = _imp_left_at(_n_pr)
+_n_R_pr = _imp_right_at(_n_pr)
+_n_not_B_pr = _imp_left_at(_n_L_pr)
+_n_not_A_pr = _imp_right_at(_n_L_pr)
+_n_A_pr = _imp_left_at(_n_R_pr)
+_n_B_pr = _imp_right_at(_n_R_pr)
+_n_axiom_pr = _and_many_pr([
+    _n_is_imp_pr,
+    _tag_eq_at(7, 1, _n_L_pr),
+    _tag_eq_at(7, 1, _n_R_pr),
+    _tag_eq_at(6, 1, _n_not_B_pr),
+    _tag_eq_at(6, 1, _n_not_A_pr),
+    comp(eq_nat_pr, _not_payload_at(_n_not_B_pr), _n_B_pr),
+    comp(eq_nat_pr, _not_payload_at(_n_not_A_pr), _n_A_pr),
+])
+
 is_logical_axiom_pr_def = define(
     "is_logical_axiom_pr",
     parse_type("nat0"),
-    mk_app(const_sym, F_pt),
+    _or_many_pr([_k_pr, _s_pr, _n_axiom_pr]),
 )
 is_logical_axiom_pr = mk_const("is_logical_axiom_pr", [])
 

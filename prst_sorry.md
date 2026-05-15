@@ -116,6 +116,31 @@ Success criterion: each example satisfies both the HOL recognizer
 `is_pr_axiom` and the PR symbol recognizer `is_pr_axiom_pr`, with the same
 branch responsible for success.
 
+Status: partially unblocked. The HOL-side branch alignment is already in
+place:
+
+- `zero_def_axiom` reaches `is_pr_axiom` through
+  `is_pr_def_instance`/`is_pr_def`;
+- `substitute_p zero_def_axiom t v` reaches `is_pr_axiom` through
+  `is_pr_def_instance`/substitution;
+- `Eq_pf t t` reaches `is_pr_axiom` through `is_pr_refl` when `is_pterm t`.
+
+The PR-side recognizer now has real bodies for the three leaves:
+
+- `is_pr_def_instance_pr` recognizes the closed direct PR-def axioms
+  `zero_def_axiom`, `if_in_true_def_axiom`, and `if_in_false_def_axiom`;
+- `is_pterm_pr` uses a Pair_ord course recursion for `Empty_pt`, `Var_pt`,
+  `Tup_pt`, and `App_pt`, with App heads checked by a syntactic
+  `is_partial_pr_sym_pr` shape recognizer;
+- `is_logical_axiom_pr` recognizes the propositional K/S/N Hilbert schemas
+  by PR-level destructuring of `Imp_pf`/`Not_pf` shapes.
+
+Remaining gap: the full `is_pr_def_instance_pr` leaf still needs bounded
+witness search for parametric PR-def axioms and nontrivial substituted
+instances. The `substitute_p zero_def_axiom t v` example is covered only when
+it reduces back to the closed `zero_def_axiom`; it is not yet evidence for the
+general substitution branch.
+
 ### Spike 4 — `substitute_pr` External Correctness Slice
 
 Goal: prove correctness for the easy constructor cases before attempting the
@@ -147,6 +172,28 @@ Target facts:
 Success criterion: the remaining `PROOF_PRST_PR_CORRECT` proof decomposes into
 `Mem_PRST`/`mem_t_pr`, `ValidProof_PRST`/`valid_proof_pr`, and the
 `is_pr_axiom_pr` leaf, rather than needing a different proof representation.
+
+Status: structurally passed. `prst_checker_spike.py` now validates the three
+small cases against an executable reference model with the same final-line
+first `Tup_pt` orientation as `Proof_PRST_pr`:
+
+- singleton axiom proof lists validate from the `is_pr_axiom_pr` leaf;
+- `Empty_pt` never validates as a proof list;
+- a new head `g` validates by MP when the tail already contains both `f` and
+  `Imp_pf f g`.
+
+The current `Proof_PRST_pr` body in `prst_pr.py` matches this decomposition:
+top-level `is_tup_pr`, head equality via `tup_head_pr`, full-list validation
+via `valid_proof_list_pr`, membership via `mem_t_pr`, and MP search via
+`exists_mp_witness_pr`. The remaining proof work is local evaluator API:
+boolean helper correctness, Tup destructors, `mem_t_pr` correctness,
+`valid_proof_list_pr` correctness, and branch correctness for
+`is_pr_axiom_pr`.
+
+One separate blocker remains for the D2/proof-combinator path:
+`mp_combine_pr` in `prst_godel2.py` is still the constant-0 stub, so the
+two-line checker shape is validated only for an explicit proof list, not yet
+for `App_pt mp_combine_pr ...`.
 
 ### Spike 6 — Internal Evaluation Chain
 
