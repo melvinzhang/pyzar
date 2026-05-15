@@ -2487,8 +2487,14 @@ class _Have:
         if not aconv(n_src, n_tgt):
             raise HolError(
                 f"{op}: normal forms differ\n"
-                f"  source reduces to: {pp(n_src)}\n"
-                f"  target reduces to: {pp(n_tgt)}"
+                f"  source:\n"
+                f"    {pp(th_src._concl)}\n"
+                f"  target:\n"
+                f"    {pp(self.term)}\n"
+                f"  source normal form:\n"
+                f"    {pp(n_src)}\n"
+                f"  target normal form:\n"
+                f"    {pp(n_tgt)}"
             )
         # Chain: src = src_n = X = tgt_n = tgt
         eq_src_full = TRANS(src_simp, eq_src_rw)  # |- src = X

@@ -1102,14 +1102,22 @@ def REWRITE_CONV(rules_thms, tm, max_passes=SIMP_OUTER_PASS_LIMIT, *, ac=None):
                     f"consecutive passes (size now {new_size}); rules "
                     "likely non-terminating under a binder (e.g. an "
                     "equation whose RHS contains the LHS inside a SELECT "
-                    "term)"
+                    "term)\n"
+                    f"  input term:\n"
+                    f"    {pp(tm)}\n"
+                    f"  current normal form:\n"
+                    f"    {pp(rand(th._concl))}"
                 )
         else:
             consec_growth = 0
         prev_size = new_size
     raise HolError(
         f"REWRITE_CONV: did not reach fixpoint in {max_passes} passes "
-        "(rules likely non-terminating)"
+        "(rules likely non-terminating)\n"
+        f"  input term:\n"
+        f"    {pp(tm)}\n"
+        f"  current normal form:\n"
+        f"    {pp(rand(th._concl))}"
     )
 
 
@@ -1147,8 +1155,12 @@ def REWRITE_PROVE(rules_thms, target_eq, *, ac=None, ac_rules=()):
     if not triples:
         raise HolError(
             "REWRITE_PROVE: normal forms differ\n"
-            f"  LHS reduces to: {pp(nl)}\n"
-            f"  RHS reduces to: {pp(nr)}"
+            f"  target:\n"
+            f"    {pp(target_eq)}\n"
+            f"  lhs normal form:\n"
+            f"    {pp(nl)}\n"
+            f"  rhs normal form:\n"
+            f"    {pp(nr)}"
         )
     for op_const, assoc_thm, comm_thm in triples:
         if _is_op_app(op_const, nl) and _is_op_app(op_const, nr):
@@ -1157,8 +1169,12 @@ def REWRITE_PROVE(rules_thms, target_eq, *, ac=None, ac_rules=()):
     raise HolError(
         "REWRITE_PROVE: normal forms differ and no registered AC operator "
         "heads both sides\n"
-        f"  LHS reduces to: {pp(nl)}\n"
-        f"  RHS reduces to: {pp(nr)}"
+        f"  target:\n"
+        f"    {pp(target_eq)}\n"
+        f"  lhs normal form:\n"
+        f"    {pp(nl)}\n"
+        f"  rhs normal form:\n"
+        f"    {pp(nr)}"
     )
 
 
@@ -1290,8 +1306,12 @@ def AC_PROVE(op_const, assoc_thm, comm_thm, target_eq):
     if not aconv(nl, nr):
         raise HolError(
             "AC_PROVE: AC normal forms differ\n"
-            f"  LHS canonical: {pp(nl)}\n"
-            f"  RHS canonical: {pp(nr)}"
+            f"  target:\n"
+            f"    {pp(target_eq)}\n"
+            f"  lhs canonical form:\n"
+            f"    {pp(nl)}\n"
+            f"  rhs canonical form:\n"
+            f"    {pp(nr)}"
         )
     return TRANS(eq_l, SYM(eq_r))
 
