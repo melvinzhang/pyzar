@@ -1222,6 +1222,60 @@ MU_CORRECTNESS = new_axiom(parse(
 ))
 
 
+@proof
+def FIND_PROOF_PR_MU_CORRECT(p):
+    """|- !pf n. App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt
+              ==> App_pt Proof_PRST_pr
+                    (Tup_pt (App_pt find_proof_pr (Tup_pt n Empty_pt))
+                            (Tup_pt n Empty_pt)) = T_pt.
+
+    This is the mu-strength check specialized to the proof checker. It uses
+    only MU_CORRECTNESS; no leastness or totality property of mu is needed.
+    """
+    from prst_pr import FIND_PROOF_PR_DEF, IS_PR_SYM_PROOF_PRST_PR
+    from prst_syntax import IS_PR_SYM_IMP_PARTIAL
+    from tactics import CONJ, SYM
+
+    p.goal(
+        "!pf n. "
+        "App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt "
+        "==> App_pt Proof_PRST_pr "
+        "      (Tup_pt (App_pt find_proof_pr (Tup_pt n Empty_pt)) "
+        "              (Tup_pt n Empty_pt)) = T_pt",
+        types={"pf": nat0_ty, "n": nat0_ty},
+    )
+    p.fix("pf n")
+    p.assume(
+        "h_pf: App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt"
+    )
+    p.have("h_pr_proof: is_pr_sym Proof_PRST_pr").by_thm(
+        IS_PR_SYM_PROOF_PRST_PR
+    )
+    p.have(
+        "h_pp_proof: is_partial_pr_sym Proof_PRST_pr"
+    ).by(IS_PR_SYM_IMP_PARTIAL, "Proof_PRST_pr", "h_pr_proof")
+    p.have(
+        "h_mu_payload: is_partial_pr_sym Proof_PRST_pr /\\ "
+        "App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt"
+    ).by_thm(CONJ(p.fact("h_pp_proof"), p.fact("h_pf")))
+    p.have(
+        "h_mu: App_pt Proof_PRST_pr "
+        "        (Tup_pt (App_pt (mu_sym Proof_PRST_pr) (Tup_pt n Empty_pt)) "
+        "                (Tup_pt n Empty_pt)) = T_pt"
+    ).by(
+        MU_CORRECTNESS,
+        "Proof_PRST_pr",
+        "pf",
+        "Tup_pt n Empty_pt",
+        "h_mu_payload",
+    )
+    p.thus(
+        "App_pt Proof_PRST_pr "
+        "  (Tup_pt (App_pt find_proof_pr (Tup_pt n Empty_pt)) "
+        "          (Tup_pt n Empty_pt)) = T_pt"
+    ).by_rewrite_of("h_mu", [SYM(FIND_PROOF_PR_DEF)])
+
+
 # ---------------------------------------------------------------------------
 # Stage 2B (d.4) -- Proof_PRST_pr correctness (sorry obligations).
 #
@@ -2040,6 +2094,7 @@ if __name__ == "__main__":
     print()
     print("Stage 2B (d.3) -- mu-correctness axiom.")
     print("    MU_CORRECTNESS              :", pp_thm(MU_CORRECTNESS))
+    print("    FIND_PROOF_PR_MU_CORRECT   :", pp_thm(FIND_PROOF_PR_MU_CORRECT))
     print()
     print("Stage 2B (d.4) -- Proof_PRST_pr correctness.")
     print("    PROOF_PRST_PR_CORRECT       :", pp_thm(PROOF_PRST_PR_CORRECT))
