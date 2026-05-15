@@ -20,7 +20,7 @@
 #   (c) Measured quote membership / inequality scaffolding.
 #   (d) Stage-3 remaining SORRY scaffolding
 #       (PROV_HF_REPRESENTS). Substitute representability is now provided
-#       by the syntax-recursion package in hf_repr_core.
+#       by the syntax-recursion package in hf_repr_subst.
 # ---------------------------------------------------------------------------
 
 
@@ -171,11 +171,6 @@ from hf_repr_core import (
     PROOF_HF_SET_INTERNAL_DEF,
     PROV_HF_INTERNAL_DEF,
     Prov_HF_internal,
-    HF_SYNTAX_REC_PACKAGE,
-    SUBSTITUTE_REPRESENTS_SYNTACTIC,
-    SUBSTITUTE_REPRESENTS_TERM,
-    SUBSTITUTE_REPRESENTS_FORM,
-    SUBSTITUTE_REPRESENTS,
     TEMPLATE_FILL_EMPTY,
     TEMPLATE_FILL_EQ,
     TEMPLATE_FILL_NOT,
@@ -186,9 +181,16 @@ from hf_repr_core import (
     TEMPLATE_FILL_INSERT,
     TEMPLATE_FILL_IN,
     TEMPLATE_FILL_QPARSE_VAR_T,
+    TEMPLATE_FILL_PRESERVES_IS_FORM,
+)
+from hf_repr_subst import (
+    HF_SYNTAX_REC_PACKAGE,
+    SUBSTITUTE_REPRESENTS_SYNTACTIC,
+    SUBSTITUTE_REPRESENTS_TERM,
+    SUBSTITUTE_REPRESENTS_FORM,
+    SUBSTITUTE_REPRESENTS,
     TEMPLATE_FILL_REPRESENTS_TERM,
     TEMPLATE_FILL_REPRESENTS,
-    TEMPLATE_FILL_PRESERVES_IS_FORM,
 )
 from nat0_order import NAT0_LT_ASYM, NAT0_LT_NOT_REFL, NAT0_LT_SUC0, NAT0_LT_TOTAL_NEQ, NAT0_LT_TRANS
 
@@ -3909,13 +3911,15 @@ def QUOTE_HF_QPARSE_EMPTY(p):
 # Stage 3C -- substitute representability.
 #
 # The old operational checker route has been removed from the high-layer path.
-# ``hf_repr_core`` now exports the readability-first syntax-recursion package:
+# ``hf_repr_subst`` now exports the readability-first syntax-recursion package:
 #
 #   HF_SYNTAX_REC_PACKAGE
 #   SUBSTITUTE_REPRESENTS_SYNTACTIC
 #   SUBSTITUTE_REPRESENTS_TERM
 #   SUBSTITUTE_REPRESENTS_FORM
 #   TEMPLATE_FILL_REPRESENTS_TERM
+#   TEMPLATE_FILL_REPRESENTS
+# while ``hf_repr_core`` still exports:
 #   TEMPLATE_FILL_QPARSE_VAR_T
 #
 # For backwards compatibility in formula-level consumers,

@@ -22,18 +22,18 @@ using `p.sorry()`.
 
 | Group | File | Count | Role |
 |---|---|---:|---|
-| A | `hf_repr_core.py` | 15 | support predicate and substitution packages |
+| A | `hf_repr_core.py`, `hf_repr_subst.py` | 13 | support predicate and substitution packages |
 | B | `hf_repr_thms.py` | 11 | internal proof-checker representability |
 | C | `hf_godel1.py` | 8 | diagonal-function and diagonal-lemma layer |
 
-Total live HF/G1 stubs: **34**.
+Total live HF/G1 stubs: **32**.
 
 ## Dependency Order
 
 Clear the remaining sorries in this order:
 
-1. `hf_repr_core.py` substitution constructor rules.
-2. `hf_repr_core.py` syntax-recursion package.
+1. `hf_repr_subst.py` object-level graph-witness helpers.
+2. `hf_repr_subst.py` syntax-recursion package.
 3. `hf_repr_core.py` support predicate and support equivalence packages.
 4. `hf_repr_core.py` qparse/body side-condition packages.
 5. `hf_repr_thms.py` recognizer representability.
@@ -48,20 +48,33 @@ The most useful immediate target is group A. Group B depends on the
 support equivalences and substitution package. Group C depends on the
 representability path plus ordinary substitution/free-variable facts.
 
-## Group A — `hf_repr_core.py`
+## Group A — `hf_repr_core.py`, `hf_repr_subst.py`
 
-### A1. Substitute Constructor Rules
+### A1. Substitute Graph-Witness Rules
 
 Live stubs:
+
+```text
+SUBSTITUTE_GRAPH_NOT_ELIMINATES
+SUBSTITUTE_GRAPH_NOT_RECONSTRUCTS
+SUBSTITUTE_GRAPH_INSERT_RECONSTRUCTS
+SUBSTITUTE_GRAPH_EQ_RECONSTRUCTS
+SUBSTITUTE_GRAPH_IN_RECONSTRUCTS
+SUBSTITUTE_GRAPH_IMP_RECONSTRUCTS
+SUBSTITUTE_GRAPH_FORALL_HIT_RECONSTRUCTS
+SUBSTITUTE_GRAPH_FORALL_MISS_RECONSTRUCTS
+```
+
+Closed and moved to `hf_repr_subst.py`:
 
 ```text
 SUBSTITUTE_REC_EMPTY
 SUBSTITUTE_REC_VAR_HIT
 SUBSTITUTE_REC_VAR_MISS
+SUBSTITUTE_REC_NOT
 SUBSTITUTE_REC_INSERT
 SUBSTITUTE_REC_EQ
 SUBSTITUTE_REC_IN
-SUBSTITUTE_REC_NOT
 SUBSTITUTE_REC_IMP
 SUBSTITUTE_REC_FORALL_HIT
 SUBSTITUTE_REC_FORALL_MISS
@@ -69,39 +82,36 @@ SUBSTITUTE_REC_FORALL_MISS
 
 Purpose:
 
-These are the constructor-local object proofs for
-`substitute_internal`. They say the internal graph relation proves the
-same result as the HOL recursive function `substitute` on each syntax
-constructor.
+These are now the object-level graph-witness bridge lemmas needed by the
+constructor-local proofs for `substitute_internal`. They eliminate or
+reconstruct the internal graph certificates proving the same result as
+the HOL recursive function `substitute` on each syntax constructor.
 
 Expected path:
 
-* Unfold the filled `substitute_internal` body.
+* Unfold the filled `substitute_internal` body at the object level.
+* Split or extend graph-witness trace sets for the selected constructor.
 * Use the corresponding `SUBSTITUTE_AT_*` theorem from `hf_syntax.py`.
-* Use recursive graph hypotheses in binary/unary constructor cases.
-* Rebuild the output constructor with existing HF propositional and
-  equality rules.
+* Rebuild constructor outputs from the child graph certificates.
 
 Recommended order:
 
-1. `SUBSTITUTE_REC_EMPTY`
-2. `SUBSTITUTE_REC_VAR_HIT`
-3. `SUBSTITUTE_REC_VAR_MISS`
-4. `SUBSTITUTE_REC_NOT`
-5. `SUBSTITUTE_REC_INSERT`
-6. `SUBSTITUTE_REC_EQ`
-7. `SUBSTITUTE_REC_IN`
-8. `SUBSTITUTE_REC_IMP`
-9. `SUBSTITUTE_REC_FORALL_HIT`
-10. `SUBSTITUTE_REC_FORALL_MISS`
+1. `SUBSTITUTE_GRAPH_NOT_ELIMINATES`
+2. `SUBSTITUTE_GRAPH_NOT_RECONSTRUCTS`
+3. `SUBSTITUTE_GRAPH_INSERT_RECONSTRUCTS`
+4. `SUBSTITUTE_GRAPH_EQ_RECONSTRUCTS`
+5. `SUBSTITUTE_GRAPH_IN_RECONSTRUCTS`
+6. `SUBSTITUTE_GRAPH_IMP_RECONSTRUCTS`
+7. `SUBSTITUTE_GRAPH_FORALL_HIT_RECONSTRUCTS`
+8. `SUBSTITUTE_GRAPH_FORALL_MISS_RECONSTRUCTS`
 
 Why this order:
 
-The first three establish the shape of direct internal-graph proofs.
-`Not_f` is the smallest recursive constructor case. `Insert_t`,
-`Eq_f`, `In_a`, and `Imp_f` share the binary-constructor pattern.
-The binder cases come last because they combine constructor work with
-side conditions.
+`Not_f` is the smallest recursive constructor case and has both
+elimination and reconstruction witnesses because it was used to validate
+the bridge shape. `Insert_t`, `Eq_f`, `In_a`, and `Imp_f` share the
+binary graph-extension pattern. The binder cases come last because they
+combine constructor work with side conditions.
 
 ### A2. Syntax Recursion Package
 
