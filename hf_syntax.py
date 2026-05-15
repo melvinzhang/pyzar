@@ -60,7 +60,7 @@ and tag-numeral inequalities (``~(SUC0 (SUC0 0) = SUC0 0)`` etc.).
 
 With ``hf_ty = nat0_ty`` (no nominal subtype), every constructor
 output is already a bona fide ``nat0`` -- the encoded HF tree IS its
-own Goedel number, so no separate godelnum-of-tree wrapper is needed.
+own syntax code, so no separate code-of-tree wrapper is needed.
 """
 
 # ---------------------------------------------------------------------------
@@ -254,10 +254,9 @@ In_a = mk_const("In_a", [])
 # pattern-match on the applied head.
 
 
-# Note on Gödel-numbering: with ``hf_ty = nat0_ty`` (no nominal
-# subtype) and the Pair_ord-based encoding above, every constructor
-# output is already a bona fide nat0 -- the encoded HF tree IS its
-# own Gödel number, so no separate ``godelnum`` function is needed.
+# Note on coding: with ``hf_ty = nat0_ty`` (no nominal subtype) and the
+# Pair_ord-based encoding above, every constructor output is already a
+# bona fide nat0 syntax code; no separate coding function is needed.
 
 
 # ---------------------------------------------------------------------------

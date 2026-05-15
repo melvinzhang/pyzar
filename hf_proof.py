@@ -17,8 +17,8 @@
 #
 # Robinson arithmetic axioms Q1-Q7 were removed 2026-05-10. Pure HF is
 # the cleanest object theory for incompleteness (Świerczkowski 2003);
-# numerals encode as von Neumann ordinals and arithmetic operations are
-# HF-recursive in the meta-theory.
+# syntax and proof objects are finite HF codes, and arithmetic
+# operations stay in the meta-theory.
 #
 # Rules: modus ponens; generalization.
 #
@@ -29,7 +29,7 @@
 #
 # Stage 2B (proof system):
 #   * ``is_mp``, ``is_gen``: modus-ponens / generalisation predicates
-#     on godelnums.
+#     on HF syntax codes.
 #   * Eight logical-axiom schemas as sigma_1 predicates: ``is_K``,
 #     ``is_S``, ``is_N`` (Mendelson propositional); ``is_UI``,
 #     ``is_Vac``, ``is_FaImp`` (quantifier; ``is_Vac`` and
@@ -323,7 +323,7 @@ IS_HF_AXIOM_HOLDS = {
 #   is_gen f g       :<=>  ?x. g = Forall_f x f
 #                          ("g is the generalisation of f over some x")
 #
-# Both are simple equational predicates on godelnums; no recursion. We
+# Both are simple equational predicates on HF syntax codes; no recursion. We
 # define them as plain HOL functions and immediately derive pointwise
 # unfolds for downstream proof-checker reasoning.
 # ---------------------------------------------------------------------------
@@ -373,7 +373,7 @@ is_gen = mk_const("is_gen", [])
 #   Refl:      t = t                                  (equality reflexivity)
 #   Subst:     t1 = t2 -> F[t1/x] -> F[t2/x]          (equality substitution)
 #
-# Each schema is encoded as an existential predicate on a godelnum.
+# Each schema is encoded as an existential predicate on a syntax code.
 # All are sigma-1 (existential over wf-encoded objects + decidable
 # checks), hence decidable and representable.
 # ---------------------------------------------------------------------------

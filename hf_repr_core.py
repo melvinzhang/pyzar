@@ -5,22 +5,21 @@
 # A predicate P : nat0 -> bool is *represented* in HF by a-formula
 # F(x) -- with var_x as its sole free variable -- iff
 #
-#     |- !n. P n      ==> Prov_HF (substitute F (numeral n) var_x)
-#     |- !n. ~ P n    ==> Prov_HF (Not_f (substitute F (numeral n) var_x))
+#     |- !n. P n      ==> Prov_HF (substitute F (quote_hf n) var_x)
+#     |- !n. ~ P n    ==> Prov_HF (Not_f (substitute F (quote_hf n) var_x))
 #
 # A function f : nat0 -> nat0 is represented by a HF-formula F(x, y) iff
 #
-#     |- !n. Prov_HF (substitute_2 F (numeral n) (numeral (f n)) var_x var_y)
+#     |- !n. Prov_HF (substitute_2 F (quote_hf n) (quote_hf (f n)) var_x var_y)
 #     |- !n. Prov_HF (Forall_f var_y
-#                      (Imp_f (substitute_2 F (numeral n) y var_x var_y)
-#                             (Eq_f y (numeral (f n))))).
+#                      (Imp_f (substitute_2 F (quote_hf n) y var_x var_y)
+#                             (Eq_f y (quote_hf (f n))))).
 #
-# We need representability of three specific predicates:
+# We need representability of the proof predicate and the syntax
+# operations used by the diagonal construction:
 #
 #   (i)   ``Proof_HF_set`` (the HF-native proof-checking predicate).
-#   (ii)  ``substitute``  (primitive recursive on godelnums).
-#   (iii) ``godelnum``    (identity on encoded syntax; its numeral
-#                          image is what matters).
+#   (ii)  ``substitute``  (primitive recursive on HF syntax codes).
 #
 # The active provability route is dependency-set finite HF proof objects
 # via ``Proof_HF_set``; ``Prov_HF`` is defined from that predicate, not
@@ -31,7 +30,7 @@ from fusion import Var
 from basics import mk_const, mk_app, mk_abs, rand, rator
 from parser import add_const, define, parse, parse_type
 from axioms import mk_forall, mk_imp, mk_not, mk_and, mk_or, mk_exists
-from nat0 import nat0_ty, define_unary_0, mk_suc0, ZERO, AXIOM_3_0, AXIOM_4_0
+from nat0 import nat0_ty, mk_suc0, ZERO, AXIOM_3_0, AXIOM_4_0
 from nat0_order import define_wf_lt
 from proof import proof, define_with_at
 from tactics import (
@@ -173,50 +172,15 @@ from hf_proof import (
 
 
 # ---------------------------------------------------------------------------
-# Stage 3A (a) -- the numeral function (von Neumann ordinals).
+# Stage 3A -- basic HF term/formula constants.
 #
-#   numeral 0          =  Empty_t.
-#   numeral (SUC0 n)   =  Insert_t (numeral n) (numeral n).
-#
-# Following Świerczkowski (2003), numerals are encoded as von Neumann
-# ordinals inside HF: 0 := empty set, n+1 := n ∪ {n}, and ``n ∪ {n}``
-# is exactly ``Insert n n`` in the HF Insert-as-adjoin convention.
-#
-# ``numeral n`` is a closed HF-term; its Goedel number is itself a
-# closed nat0 numeral (a deeply nested Pair_ord tree) under hf_syntax's
-# Pair_ord-flat encoding.
+# G1 names syntax/proof codes through ``quote_hf`` at the object
+# interface. The only local term-formation facts needed here are the
+# Empty/Insert constructors for HF syntax.
 # ---------------------------------------------------------------------------
 
 
 _n_n0 = Var("n", nat0_ty)
-_a_n0 = Var("a", nat0_ty)
-
-
-# Step body: \k a. Insert_t a a.  (k unused; the new value is the von
-# Neumann successor of the recursive result.)
-_h_numeral = mk_abs(_n_n0, mk_abs(_a_n0, mk_app(Insert_t, _a_n0, _a_n0)))
-
-
-NUMERAL_BASE, NUMERAL_STEP = define_unary_0(
-    "numeral",
-    parse_type("nat0 -> nat0"),
-    Empty_t,
-    _h_numeral,
-    result_ty=nat0_ty,
-)
-numeral = mk_const("numeral", [])
-
-
-# ---------------------------------------------------------------------------
-# Stage 3A (b) -- IS_TERM_NUMERAL: every numeral is a well-formed HF term.
-#
-#   |- !n. is_term (numeral n).
-#
-# Direct induction on n. The base case ``is_term Empty_t`` follows from
-# IS_TERM_REC's leftmost disjunct ``n = Empty_t`` via REFL. The step
-# case uses IS_TERM_AT_INSERT applied to the diagonal pair
-# ``(numeral n, numeral n)`` with the inductive hypothesis used twice.
-# ---------------------------------------------------------------------------
 
 
 is_term = mk_const("is_term", [])
@@ -258,37 +222,8 @@ def IS_TERM_INSERT(p):
     p.thus("is_term (Insert_t t1 t2)").by_eq_mp(SYM(at_insert), "ih")
 
 
-@proof
-def IS_TERM_NUMERAL(p):
-    """|- !n. is_term (numeral n)."""
-    p.goal("!n. is_term (numeral n)")
-    p.fix("n")
-    with p.induction("n"):
-        with p.base():
-            p.have("eq0: numeral 0 = Empty_t").by_thm(NUMERAL_BASE)
-            p.thus("is_term (numeral 0)").by_rewrite_of(
-                IS_TERM_EMPTY, [SYM(p.fact("eq0"))]
-            )
-        with p.step("IH"):
-            p.have(
-                "eq_step: numeral (SUC0 n) = Insert_t (numeral n) (numeral n)"
-            ).by(NUMERAL_STEP, "n")
-            ih_pair = CONJ(p.fact("IH"), p.fact("IH"))
-            p.have(
-                "ins_term: is_term (Insert_t (numeral n) (numeral n))"
-            ).by(IS_TERM_INSERT, "numeral n", "numeral n", ih_pair)
-            p.thus("is_term (numeral (SUC0 n))").by_rewrite_of(
-                "ins_term", [SYM(p.fact("eq_step"))]
-            )
-
-
 # ---------------------------------------------------------------------------
-# Stage 3A (c) -- shared constants and helpers used by Stage 3B and beyond.
-#
-# ``substitute`` and ``Not_f`` are referenced by name from this point on;
-# the ``represents_pred`` scaffolding (which mentions ``Prov_HF``) lives
-# in Stage 3B (m) below, after ``Prov_HF`` has been defined as the
-# set-native Sigma_1 form ``\n. ?P. Proof_HF_set P n``.
+# Stage 3A (b) -- shared constants and helpers used by Stage 3B and beyond.
 # ---------------------------------------------------------------------------
 
 
@@ -298,14 +233,6 @@ Not_f = mk_const("Not_f", [])
 
 _F_n0 = Var("F", nat0_ty)
 _P_pred = Var("P", parse_type("nat0 -> bool"))
-
-
-def _subst_at_numeral(F_term, n_term):
-    """Build ``substitute F (numeral n) 0`` -- substitute the F-slot
-    variable (index 0, encoded ``var_x = Var_t 0``) in ``F`` with the
-    numeral encoding of n.
-    """
-    return mk_app(substitute, F_term, mk_app(numeral, n_term), ZERO)
 
 
 # ---------------------------------------------------------------------------
@@ -375,46 +302,6 @@ Prov_HF = mk_const("Prov_HF", [])
 # ---------------------------------------------------------------------------
 
 
-# Stage 3B (m) -- representability scaffolding.
-#
-# A unary predicate ``P : nat0 -> bool`` is *represented* by a
-# HF-formula ``F`` (a nat0 godelnum, taken to be a HF-formula whose only
-# free variable is ``var_x``) iff:
-#
-#   * (positive)  !n. P n      ==> Prov_HF (substitute F (numeral n) var_x).
-#   * (negative)  !n. ~ P n    ==> Prov_HF (Not_f (substitute F (numeral n) var_x)).
-#
-# We package the conjunction of the two conditions as
-# ``represents_pred F P``. Defined here, after ``Prov_HF``.
-# ---------------------------------------------------------------------------
-
-
-_pos_clause = mk_forall(
-    _n_n0,
-    mk_imp(mk_app(_P_pred, _n_n0), mk_app(Prov_HF, _subst_at_numeral(_F_n0, _n_n0))),
-)
-_neg_clause = mk_forall(
-    _n_n0,
-    mk_imp(
-        mk_not(mk_app(_P_pred, _n_n0)),
-        mk_app(Prov_HF, mk_app(Not_f, _subst_at_numeral(_F_n0, _n_n0))),
-    ),
-)
-
-_represents_pred_body = mk_and(_pos_clause, _neg_clause)
-
-# |- !F P. represents_pred F P =
-#          ((!n. P n ==> Prov_HF (substitute F (numeral n) var_x))
-#        /\ (!n. ~ P n
-#               ==> Prov_HF (Not_f (substitute F (numeral n) var_x)))).
-REPRESENTS_PRED_DEF, REPRESENTS_PRED_AT = define_with_at(
-    "represents_pred",
-    parse_type("nat0 -> (nat0 -> bool) -> bool"),
-    mk_abs(_F_n0, mk_abs(_P_pred, _represents_pred_body)),
-)
-represents_pred = mk_const("represents_pred", [])
-
-
 # ---------------------------------------------------------------------------
 # Stage 3C (a) -- representability of ``substitute``.
 #
@@ -432,7 +319,7 @@ represents_pred = mk_const("represents_pred", [])
 #
 # Why a single fixed formula (not a HOL-recursive family): the
 # diagonal lemma (Stage 3D) forms the Goedel sentence by substituting a
-# numeric godelnum into a *single fixed* internal-provability formula.
+# concrete HF syntax code into a *single fixed* internal-provability formula.
 # Without ``substitute_internal`` as one fixed HF-formula, no ``D(x, y)``
 # represents the diagonal function and the fixed-point construction
 # collapses.
@@ -448,7 +335,7 @@ represents_pred = mk_const("represents_pred", [])
 
 # ---------------------------------------------------------------------------
 # Variable-index constants ``idx_x``, ``idx_y``, ... -- the *indices*
-# (small nat0 numerals 0, 1, 2, ...) of HF-syntax variables, distinct
+# (small nat0 values 0, 1, 2, ...) of HF-syntax variables, distinct
 # from the *encodings* ``var_x = Var_t 0``, ``var_y = Var_t 1``, ... .
 #
 # Convention (matches ``hf_proof.is_UI`` and the SUBSTITUTE_AT_VAR_HIT/
@@ -461,8 +348,8 @@ represents_pred = mk_const("represents_pred", [])
 #     pass ``idx_x = 0``, not ``var_x = Var_t 0``.
 #
 # Stage 3 representability theorems thread these consistently:
-# ``substitute F (numeral n) idx_x`` substitutes the variable named x
-# in F with (numeral n).
+# ``substitute F (quote_hf n) idx_x`` substitutes the variable named x
+# in F with the HF-set code ``quote_hf n``.
 # ---------------------------------------------------------------------------
 
 
@@ -832,8 +719,8 @@ _idx_f2 = _idx_term(15)
 #
 #   Every HF-set input slot in a representability goal uses ``quote_hf``.
 #   The ``SUBSTITUTE_REPRESENTS`` headline uses ``quote_hf`` for the F /
-#   t / v / r slots. Syntax codes are already HF sets; using ``numeral``
-#   would convert the code to an ordinal and lose the constructor shape.
+#   t / v / r slots. Syntax codes are already HF sets; ordinal encodings
+#   would convert the code away from its constructor shape.
 #   The IS_*_REPRESENTS lemmas also use ``quote_hf`` throughout since
 #   their inputs are HF-shaped encoded sets and members.
 # ===========================================================================
@@ -962,6 +849,47 @@ quote_hf = mk_const("quote_hf", [])
 #        COND (n = 0) Empty_t (Insert_t (quote_hf (low_bit n))
 #                                       (quote_hf (clear_low n))).
 QUOTE_HF_REC = _unfold_rec_via_F_def(_QUOTE_HF_REC_RAW, _QUOTE_HF_F_DEF)
+
+
+# ---------------------------------------------------------------------------
+# Stage 3B (m) -- representability scaffolding.
+#
+# A unary predicate ``P : nat0 -> bool`` is represented by a HF-formula ``F``
+# exactly when HF proves the formula with the input encoded by ``quote_hf``.
+# This is the HF-native interface: syntax/proof codes are finite HF sets, so
+# the object-language term naming an external code ``n`` is ``quote_hf n``.
+# ---------------------------------------------------------------------------
+
+
+def _subst_at_quote_hf(F_term, n_term):
+    """Build ``substitute F (quote_hf n) 0`` for the F-slot variable."""
+    return mk_app(substitute, F_term, mk_app(quote_hf, n_term), ZERO)
+
+
+_pos_clause = mk_forall(
+    _n_n0,
+    mk_imp(mk_app(_P_pred, _n_n0), mk_app(Prov_HF, _subst_at_quote_hf(_F_n0, _n_n0))),
+)
+_neg_clause = mk_forall(
+    _n_n0,
+    mk_imp(
+        mk_not(mk_app(_P_pred, _n_n0)),
+        mk_app(Prov_HF, mk_app(Not_f, _subst_at_quote_hf(_F_n0, _n_n0))),
+    ),
+)
+
+_represents_pred_body = mk_and(_pos_clause, _neg_clause)
+
+# |- !F P. represents_pred F P =
+#          ((!n. P n ==> Prov_HF (substitute F (quote_hf n) idx_x))
+#        /\ (!n. ~ P n
+#               ==> Prov_HF (Not_f (substitute F (quote_hf n) idx_x)))).
+REPRESENTS_PRED_DEF, REPRESENTS_PRED_AT = define_with_at(
+    "represents_pred",
+    parse_type("nat0 -> (nat0 -> bool) -> bool"),
+    mk_abs(_F_n0, mk_abs(_P_pred, _represents_pred_body)),
+)
+represents_pred = mk_const("represents_pred", [])
 
 
 # --------------------------------------------------------------------------
@@ -2090,7 +2018,7 @@ def PROV_HF_REFL(p):
 
 # B1.0 (b) -- Pair_ord representability.
 # Needed by HF-set proof objects and by quoted Kuratowski-pair bridges:
-# HF must prove the encoded pair shape at concrete numerals.
+# HF must prove the encoded pair shape at concrete closed values.
 #
 # Body: faithful equational encoding of the Kuratowski pair shape --
 # ``var_z = {{var_x}, {var_x, var_y}}``.  The quoted-data RHS is built
@@ -2109,7 +2037,7 @@ def PROV_HF_REFL(p):
 # yields a reflexivity claim that PROV_HF_REFL closes -- but the bridge
 # requires ``nat0_lt x y`` (QUOTE_HF_AT_PAIR_ORD's precondition). The
 # theorem ``IS_PAIR_ORD_REPRESENTS`` carries the precondition
-# explicitly; downstream consumers instantiate it at concrete numerals
+# explicitly; downstream consumers instantiate it at concrete values
 # where the order is easily established.
 _PAIR_ORD_TEMPLATE = qparse("Pair_ord(var_x,var_y)", var_x=var_x, var_y=var_y)
 
@@ -4329,7 +4257,7 @@ FREE_IN_PROV_HF_INTERNAL_BODY = HF_PROV_FREE_CONDITION_PACKAGE
 
 
 # substitute_2 helper -- compose two substitutes; used by Stage 4 to
-# express "phi(x, y) with both x and y substituted by numerals".
+# express "phi(x, y) with both x and y substituted by quoted codes".
 _F_s2 = Var("F", nat0_ty)
 _a_s2 = Var("a", nat0_ty)
 _b_s2 = Var("b", nat0_ty)
@@ -4372,17 +4300,9 @@ substitute_2 = mk_const("substitute_2", [])
 if __name__ == "__main__":
     from parser import pp_thm
 
-    print("Stage 3A (a) -- numeral function.")
-    print("    NUMERAL_BASE :", pp_thm(NUMERAL_BASE))
-    print("    NUMERAL_STEP :", pp_thm(NUMERAL_STEP))
-    print()
-    print("    (Numerals encode as von Neumann ordinals: 0 := Empty_t,")
-    print("     n+1 := Insert_t n n.)")
-    print()
-    print("Stage 3A (b) -- IS_TERM_NUMERAL.")
+    print("Stage 3A -- basic HF term constructors.")
     print("    IS_TERM_EMPTY    :", pp_thm(IS_TERM_EMPTY))
     print("    IS_TERM_INSERT   :", pp_thm(IS_TERM_INSERT))
-    print("    IS_TERM_NUMERAL  :", pp_thm(IS_TERM_NUMERAL))
     print()
     print("Stage 3B (set-native target) -- dependency-set HF proof objects.")
     print("    VALID_STEP_HF_SET_DEF       :", pp_thm(VALID_STEP_HF_SET_DEF))

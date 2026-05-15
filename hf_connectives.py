@@ -1,4 +1,4 @@
-"""Derived HF-formula connectives on godelnums.
+"""Derived HF-formula connectives on HF syntax codes.
 
 HF's primitive logical apparatus is ``Imp_f`` / ``Not_f`` plus ``Forall_f``
 for the quantifier and ``Eq_f`` / ``In_a`` for the atoms. The remaining

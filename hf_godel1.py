@@ -10,8 +10,8 @@ incomplete: there is an explicit sentence ``G_HF`` such that
 
 The whole development lives over ``hf_sets.py`` plus ``nat.py``.
 Axiomatic cost: zero. HOL + HF already proves the consistency of HF
-(HF has a HOL-level model -- the von Neumann numerals inside HF) so the
-incompleteness statement is *unconditional*, not "if HF is consistent".
+(HF has a HOL-level standard model) so the incompleteness statement is
+*unconditional*, not "if HF is consistent".
 
 ------------------------------------------------------------------
 Why HF rather than PA
@@ -28,9 +28,9 @@ adjunction, with *no* induction schema:
     HF5.  !x y.     In x y -> ?z. y = Insert x z          (predecessor)
 
 HF is strong enough for arithmetisation: every primitive recursive
-predicate is representable in HF (via the von Neumann encoding of
-naturals as ordinals -- numerals are just nested Insert-towers), which
-is the sole hypothesis needed for the diagonal lemma. So HF is
+predicate is representable in HF through HF-native codes named by
+``quote_hf``, which is the sole hypothesis needed for the diagonal
+lemma. So HF is
 essentially undecidable, and the same holds for every consistent
 extension -- including PA, ZFC, and HOL itself.
 
@@ -49,12 +49,9 @@ The idea (Goedel 1931; modern presentations: Smullyan, Boolos)
 
 Three ingredients:
 
-  (1) *Arithmetization.* Encode each HF term, formula, and proof as a
-      hereditarily finite set, hence as a natural number. With ``HF``
-      this is a one-liner: terms and formulas are finite trees, which
-      are HF sets, which are nums. Goedel numbering is the Ackermann
-      encoding of ``hf_sets.py``, applied to whatever inductive grammar
-      we pick for syntax.
+  (1) *Arithmetization.* HF terms, formulas, and proofs are already
+      concrete finite HF trees, hence nat0 values in this development.
+      The object theory names an external code ``n`` with ``quote_hf n``.
 
   (2) *Representation.* Define the primitive recursive predicate
       ``Proof_HF_set(P, n)`` -- "the dependency-set HF proof object
@@ -66,26 +63,26 @@ Three ingredients:
 
   (3) *Diagonal lemma.* For every HF formula ``phi(x)`` with one free
       variable there is a sentence ``psi`` such that
-            HF |- psi <==> phi(numeral_of(godelnum psi)).
+            HF |- psi <==> phi(quote_hf psi).
       Apply with ``phi(x) := Not (Prov_HF_internal x)`` to get the
       Goedel sentence ``G_HF``:
-            HF |- G_HF <==> Not (Prov_HF_internal (numeral_of (godelnum G_HF))).
+            HF |- G_HF <==> Not (Prov_HF_internal (quote_hf G_HF)).
 
 The "internal" provability predicate ``Prov_HF_internal`` is the HF
 formula expressing what ``Prov_HF`` (the HOL predicate) computes -- the
 *representability* theorem says these two coincide on standard inputs:
 
-    |- !n. Prov_HF n  <==>  HF |- Prov_HF_internal (numeral_of n).
+    |- !n. Prov_HF n  <==>  HF |- Prov_HF_internal (quote_hf n).
 
 With those two pieces, incompleteness is short:
 
-    HF |- G_HF   ==>   Prov_HF (godelnum G_HF)              (definitions)
-              ==>    HF |- Prov_HF_internal (numeral_of ...)  (representability)
+    HF |- G_HF   ==>   Prov_HF G_HF                         (definitions)
+              ==>    HF |- Prov_HF_internal (quote_hf ...)  (representability)
               ==>    HF |- Not G_HF                       (diagonal)
               ==>    HF inconsistent                     (combine)
 
-    HF |- Not G_HF   ==>  HF |- Prov_HF_internal (numeral_of ...)  (diagonal)
-                   ==>  Prov_HF (godelnum G_HF)           (Sigma_1 soundness)
+    HF |- Not G_HF   ==>  HF |- Prov_HF_internal (quote_hf ...)  (diagonal)
+                   ==>  Prov_HF G_HF                      (Sigma_1 soundness)
                    ==>  HF |- G_HF                        (definitions)
                    ==>  HF inconsistent                  (combine)
 
@@ -97,7 +94,7 @@ The HOL encoding hurdle
 ------------------------------------------------------------------
 
 There isn't one for the data: ``hf_sets.py`` already gives us finite
-trees over ``num``, so terms and formulas have natural Goedel numbers.
+trees over ``num``, so terms and formulas are already nat0 codes.
 The work is in writing down a *concrete* proof system and a *concrete*
 provability predicate -- and in proving the diagonal lemma and the
 representability theorem against that concrete choice.
@@ -130,18 +127,18 @@ Sigma_1 soundness of HF outright, since HF *is* the standard model.)
 # Lemma (Goedel-Carnap). For every HF formula phi(x) with x as its only
 # free variable there is a sentence psi such that
 #
-#     |- Prov_HF (godelnum (Iff psi (phi (numeral (godelnum psi))))).
+#     |- Prov_HF (Iff_f psi (substitute phi (quote_hf psi) var_x)).
 #
 # Proof sketch:
 #   * Define the "diagonal substitution" function
-#         diag(n) := godelnum (substitute(x, numeral n, formula coded by n)).
-#     This is primitive recursive on godelnums; let D(x, y) represent it.
+#         diag(n) := substitute n (quote_hf n) var_x.
+#     This is primitive recursive on HF syntax codes; let D(x, y) represent it.
 #   * Let theta(x) := ?y. D(x, y) /\\ phi(y).
-#   * Let m := godelnum theta.
-#   * Take psi := substitute(x, numeral m, theta) = "?y. D(numeral m, y) /\\ phi(y)".
-#   * By representability of diag, HF proves D(numeral m, numeral k) iff
-#     k = diag(m) = godelnum psi.
-#   * Hence HF proves psi <==> phi(numeral (godelnum psi)).
+#   * Let m := theta.
+#   * Take psi := substitute(x, quote_hf m, theta) = "?y. D(quote_hf m, y) /\\ phi(y)".
+#   * By representability of diag, HF proves D(quote_hf m, quote_hf k) iff
+#     k = diag(m) = psi.
+#   * Hence HF proves psi <==> phi(quote_hf psi).
 #
 # The proof is ~80 lines once Stage 3 is in place; it is the
 # *self-application* trick written out arithmetically. Nothing in it
@@ -153,30 +150,30 @@ Sigma_1 soundness of HF outright, since HF *is* the standard model.)
 #
 # defn:  G_HF  :=  the diagonal-fixed-point of (Not (Prov_HF_internal x)).
 #
-# Equivalently:  |- Prov_HF (godelnum (Iff G_HF (Not (Prov_HF_internal (numeral (godelnum G_HF)))))).
+# Equivalently:  |- Prov_HF (Iff_f G_HF (Not_f (substitute Prov_HF_internal (quote_hf G_HF) var_x))).
 #
 # Theorem (First Incompleteness, semantic form):
 #
-#   |-  ~ Prov_HF (godelnum G_HF)  /\\  ~ Prov_HF (godelnum (Not G_HF))
+#   |-  ~ Prov_HF G_HF  /\\  ~ Prov_HF (Not_f G_HF)
 #
 # Proof:
 #
 #   First conjunct (HF does not prove G_HF):
-#     Suppose Prov_HF (godelnum G_HF).
+#     Suppose Prov_HF G_HF.
 #     By representability,
-#         Prov_HF (godelnum (Prov_HF_internal (numeral (godelnum G_HF)))).
+#         Prov_HF (substitute Prov_HF_internal (quote_hf G_HF) var_x).
 #     By the diagonal equivalence applied internally,
-#         Prov_HF (godelnum (Not G_HF)).
+#         Prov_HF (Not_f G_HF).
 #     Combined with the assumption, HF proves both G_HF and ~G_HF;
 #     therefore HF is inconsistent. But HF has a HOL-level model in HF
 #     (Stage 6), so HF is consistent -- contradiction.
 #
 #   Second conjunct (HF does not prove Not G_HF):
-#     Suppose Prov_HF (godelnum (Not G_HF)).
+#     Suppose Prov_HF (Not_f G_HF).
 #     By the diagonal equivalence,
-#         Prov_HF (godelnum (Prov_HF_internal (numeral (godelnum G_HF)))).
+#         Prov_HF (substitute Prov_HF_internal (quote_hf G_HF) var_x).
 #     The internal-provability formula is Sigma_1, and HF is Sigma_1-
-#     sound (Stage 6), so the *external* Prov_HF (godelnum G_HF) holds
+#     sound (Stage 6), so the *external* Prov_HF G_HF holds
 #     in HOL.
 #     Combined with the assumption, HF proves both G_HF and ~G_HF;
 #     contradiction with consistency.
@@ -198,7 +195,7 @@ Sigma_1 soundness of HF outright, since HF *is* the standard model.)
 #
 # Two facts are needed but never posted as axioms:
 #
-#   (A)  Consistency: ~ Prov_HF (godelnum (Eq Empty (Insert Empty Empty))).
+#   (A)  Consistency: ~ Prov_HF ((Eq_f Empty_t) ((Insert_t Empty_t) Empty_t)).
 #        Proof: HF supplies a HOL-level model. The carrier is ``hf =
 #        nat0`` with Empty/Insert/In interpreted via their HOL
 #        definitions; the five HF axioms are then HOL theorems --
@@ -242,8 +239,8 @@ Sigma_1 soundness of HF outright, since HF *is* the standard model.)
 #   * Tarski's undefinability of arithmetic truth (one corollary; ~30
 #     lines once the diagonal lemma is in place).
 #   * Rosser's strengthening (replace Prov by the Rosser predicate;
-#     the same argument yields ~ Prov_HF (godelnum R_HF) /\\
-#     ~ Prov_HF (godelnum (Not R_HF)) using only consistency rather
+#     the same argument yields ~ Prov_HF R_HF /\\
+#     ~ Prov_HF (Not_f R_HF) using only consistency rather
 #     than Sigma_1-soundness; ~120 lines on top of Stage 5).
 #
 # Not derived here:
@@ -268,12 +265,12 @@ Sigma_1 soundness of HF outright, since HF *is* the standard model.)
 # Prerequisites: ``nat.py``, ``hf_sets.py``.
 #
 #   1. ``hf_syntax.py`` -- term and formula datatypes (as HF trees);
-#      Goedel numbering; substitution; unique readability; free-
+#      HF syntax codes; substitution; unique readability; free-
 #      variable analysis. ~300 lines. (Same shape as PA's syntax
 #      module; the signature is identical.)
 #
 #   2. ``hf_proof.py`` / ``hf_repr_core.py`` -- the HF axioms and
-#      logical axioms as predicates on godelnums; set-native
+#      logical axioms as predicates on HF syntax codes; set-native
 #      ``Proof_HF_set``; ``Prov_HF``; closure rules.
 #
 #   3. ``hf_repr_core.py`` / ``hf_repr_thms.py`` -- representability of
@@ -293,7 +290,7 @@ Sigma_1 soundness of HF outright, since HF *is* the standard model.)
 # Paulson's Isabelle/HOL formalisation is ~12k LOC; Harrison's HOL
 # Light formalisation of essential undecidability of HF is ~3k LOC.
 # The pyzar estimate is shorter than all of these because (i) HF
-# gives Goedel numbering for free, (ii) we inherit ``num`` arithmetic
+# gives HF syntax codes for free, (ii) we inherit ``num`` arithmetic
 # from ``nat.py``, and (iii) we are happy with a single specific
 # Hilbert-style proof system over HF rather than a generic framework
 # parameterised by signature.
@@ -328,12 +325,12 @@ Sigma_1 soundness of HF outright, since HF *is* the standard model.)
 # Lemma (Goedel-Carnap). For every HF-formula ``phi`` with ``var_x`` as its
 # only free variable there exists an HF-sentence ``psi`` such that
 #
-#     |- Prov_HF (Iff_f psi (substitute phi (numeral psi) var_x)).
+#     |- Prov_HF (Iff_f psi (substitute phi (quote_hf psi) var_x)).
 #
 # Construction (BBJ Ch. 17, Smullyan Ch. 4):
 #
 #   diag : nat0 -> nat0
-#     diag(n) := substitute n (numeral n) var_x.
+#     diag(n) := substitute n (quote_hf n) var_x.
 #
 #   D(x, y) : HF-formula representing diag as a binary relation.
 #     D(x, y) := substitute_2 substitute_internal x x var_x var_y
@@ -345,12 +342,12 @@ Sigma_1 soundness of HF outright, since HF *is* the standard model.)
 #   theta(x) := Exists_f var_y (And_f D(x, y) phi(y))
 #                ``x's diagonal-substitute satisfies phi``.
 #
-#   m   := godelnum(theta) = theta itself (formulas ARE nat0s).
-#   psi := substitute theta (numeral m) var_x.
+#   m   := theta.
+#   psi := substitute theta (quote_hf m) var_x.
 #
-# Then godelnum(psi) = diag(m), so when we substitute psi's numeric code
+# Then psi = diag(m), so when we substitute psi's syntax code
 # back, the internal D evaluates to the right value, and HF derives
-#     psi  <=>  phi(numeral psi).
+#     psi  <=>  phi(quote_hf psi).
 #
 # AXIOMATIZED for now via ``p.sorry()``: the proof requires substantial
 # substitution-pushing in HF (~200-400 lines) and consumes the Stage 3C
@@ -377,10 +374,7 @@ from hf_syntax import (
     VAR_T_INJ,
 )
 from hf_proof import VAR_X_DEF, VAR_Y_DEF, var_x, var_y
-from hf_repr_core import (
-    numeral,
-    substitute,
-)
+from hf_repr_core import quote_hf, substitute
 from hf_connectives import (
     AND_F_DEF,
     AND_F_AT,
@@ -402,7 +396,7 @@ from hf_connectives import (
 
 
 # ---------------------------------------------------------------------------
-# Stage 4 (a) -- derived HF-formula connectives on godelnums.
+# Stage 4 (a) -- derived HF-formula connectives on syntax codes.
 #
 # Connectives ``And_f`` / ``Or_f`` / ``Iff_f`` / ``Exists_f`` and their
 # substitute-distribution lemmas live in ``hf_connectives.py`` (loaded
@@ -414,9 +408,9 @@ from hf_connectives import (
 # ---------------------------------------------------------------------------
 # Stage 4 (b) -- the diagonal substitution function.
 #
-#   diag(n) := substitute n (numeral n) var_x
+#   diag(n) := substitute n (quote_hf n) var_x
 #
-# ``diag`` is a HOL function on godelnums. Its representability inside
+# ``diag`` is a HOL function on HF syntax codes. Its representability inside
 # HF follows from ``SUBSTITUTE_REPRESENTS`` specialised with F=t=n,
 # v=var_x: each instance ``diag(n) = k`` is HF-provable via the
 # ``substitute_internal`` formula at HF-quoted syntax-code arguments.
@@ -429,7 +423,7 @@ _n_diag = Var("n", nat0_ty)
 DIAG_DEF = define(
     "diag",
     parse_type("nat0 -> nat0"),
-    mk_abs(_n_diag, mk_app(substitute, _n_diag, mk_app(numeral, _n_diag), var_x)),
+    mk_abs(_n_diag, mk_app(substitute, _n_diag, mk_app(quote_hf, _n_diag), var_x)),
 )
 diag = mk_const("diag", [])
 
@@ -442,32 +436,24 @@ diag = mk_const("diag", [])
 # ``var_y = diag(var_x)``. Three axioms (all sorry'd):
 #
 #   * ``DIAG_REPRESENTS``     : !n. Prov_HF (substitute_2 diag_internal
-#                                              (numeral n)
-#                                              (numeral (diag n))
+#                                              (quote_hf n)
+#                                              (quote_hf (diag n))
 #                                              var_x var_y).
 #   * ``IS_FORM_DIAG_INTERNAL``  : is_form diag_internal.
 #   * ``FREE_IN_DIAG_INTERNAL``  : !v. free_in diag_internal v
 #                                       <=> (v = var_x \/ v = var_y).
 #
-# Justification: ``diag(n) = substitute n (numeral n) var_x`` is the
-# composition of two primitive recursive functions (substitute and
-# numeral), each representable in HF via Sigma_1 formulas. The combined
-# representation factors through ``substitute_internal`` (Stage 3C(a))
-# and ``numeral_internal`` (deferred). We axiomatize ``diag_internal``
-# directly to bypass the intermediate ``numeral_internal`` step.
+# Justification: ``diag(n) = substitute n (quote_hf n) var_x`` is the
+# composition of substitute with the HF-code bridge. The combined
+# representation factors through ``substitute_internal`` and the
+# already-landed ``quote_hf`` constructor rules.
 #
 # TODO -- discharge via HF (preferred). The HF axioms HF1-HF5 are
 # already in place; build:
-#   * ``numeral_internal(x, y) := In y (Insert y Empty) /\ ...`` --
-#     numerals are concrete Pair_ord-tagged HF terms; the witness
-#     for ``y = numeral x`` can be an HF set of (k, numeral k) pairs
-#     for k <= x, verified by structural induction on x via foundation HF5.
-#   * ``diag_internal := substitute_internal[F:=var_x, t:=numeral_internal,
+#   * ``diag_internal := substitute_internal[F:=var_x, t:=quote_hf(var_x),
 #                                            v:=var_x, r:=var_y]``
-#     -- composition of substitute_internal with numeral_internal,
-#     both Sigma_1, expressible in HF without any further
-#     sequence-coding machinery. Under the HF-native route, the
-#     substitute side uses quote_hf slots, not ordinal numerals.
+#     -- composition of substitute_internal with the HF-native quoting
+#     bridge, expressible without sequence-coding machinery.
 #   * DIAG_REPRESENTS / DIAG_FUNCTIONAL: forward direction by
 #     exhibiting the composite HF witness; functionality from
 #     SUBSTITUTE_REPRESENTS uniqueness + HF extensionality (Q11).
@@ -486,14 +472,14 @@ diag_internal = mk_const("diag_internal", [])
 @proof
 def DIAG_REPRESENTS(p):
     """|- !n. Prov_HF (substitute_2 diag_internal
-                       (numeral n) (numeral (diag n)) var_x var_y).
+                       (quote_hf n) (quote_hf (diag n)) var_x var_y).
 
     Stage 4(b.1) representability of diag. AXIOMATIZED via
     ``p.sorry()``.
     """
     p.goal(
         "!n. Prov_HF (substitute_2 diag_internal "
-        "             (numeral n) (numeral (diag n)) var_x var_y)"
+        "             (quote_hf n) (quote_hf (diag n)) var_x var_y)"
     )
     p.sorry()
 
@@ -517,23 +503,23 @@ def FREE_IN_DIAG_INTERNAL(p):
 def DIAG_FUNCTIONAL(p):
     """|- !n. Prov_HF (Forall_f (SUC0 0)
                        (Imp_f (substitute_2 diag_internal
-                                 (numeral n) var_y var_x var_y)
-                              (Eq_f var_y (numeral (diag n))))).
+                                 (quote_hf n) var_y var_x var_y)
+                              (Eq_f var_y (quote_hf (diag n))))).
 
-    Functionality of diag's representation: ``D(numeral n, y) -> y =
-    numeral (diag n)``, universally quantified over y. This is the
+    Functionality of diag's representation: ``D(quote_hf n, y) -> y =
+    quote_hf (diag n)``, universally quantified over y. This is the
     second half of representability of a function (uniqueness); the
     first half is ``DIAG_REPRESENTS`` (existence: D holds at the
     correct y). AXIOMATIZED.
 
     Used in the diagonal lemma's forward direction to identify the
-    existential witness ``y_0`` with ``numeral psi``.
+    existential witness ``y_0`` with ``quote_hf psi``.
     """
     p.goal(
         "!n. Prov_HF (Forall_f (SUC0 0) "
         "             (Imp_f (substitute_2 diag_internal "
-        "                      (numeral n) var_y var_x var_y) "
-        "                    (Eq_f var_y (numeral (diag n)))))"
+        "                      (quote_hf n) var_y var_x var_y) "
+        "                    (Eq_f var_y (quote_hf (diag n)))))"
     )
     p.sorry()
 
@@ -553,8 +539,8 @@ def DIAG_FUNCTIONAL(p):
 # var_y free in the body, then ``Exists_f (SUC0 0) ...`` binds it.
 #
 # Reading: "there exists y such that y = diag(x) and phi(y)". When ``x``
-# is set to ``numeral m`` for ``m = theta(phi)``, the formula says
-# "phi(numeral (diag m))" -- which is "phi(numeral psi)" since
+# is set to ``quote_hf m`` for ``m = theta(phi)``, the formula says
+# "phi(quote_hf (diag m))" -- which is "phi(quote_hf psi)" since
 # ``psi = diag m``.
 # ---------------------------------------------------------------------------
 
@@ -598,7 +584,7 @@ def VAR_X_NEQ_SUC0_0(p):
     """|- ~(var_x = SUC0 0).
 
     Concrete inequality. ``var_x = Var_t 0`` is a Pair_ord-encoded
-    nat0 (tag-prefixed); ``SUC0 0 = 1`` is a small numeral. Disjoint
+    nat0 (tag-prefixed); ``SUC0 0 = 1`` is a small nat0 code. Disjoint
     by tag analysis through the Pair_ord encoding.
 
     Used as the side condition for SUBSTITUTE_AT_EXISTS_MISS when
@@ -613,7 +599,7 @@ def VAR_X_NEQ_SUC0_0(p):
 def VAR_Y_NEQ_VAR_X(p):
     """|- ~(var_y = var_x).
 
-    Concrete inequality between two HF-variable godelnums. From
+    Concrete inequality between two HF-variable syntax codes. From
     VAR_T_INJ + ~(0 = SUC0 0) (= NAT0_NEQ_SUC0_0, derivable via NAT0
     constructor disjointness).
 
@@ -661,7 +647,7 @@ def FREE_IN_SUBSTITUTE_AT_DIFFERENT_VAR(p):
     F. STUB.
 
     Used in the diagonal lemma's forward direction to discharge the
-    ``~(free_in (phi[numeral psi / var_x]) (SUC0 0))`` side condition
+    ``~(free_in (phi[quote_hf psi / var_x]) (SUC0 0))`` side condition
     of PROV_HF_EXISTS_ELIM.
     """
     p.goal(
@@ -680,18 +666,18 @@ def FREE_IN_SUBSTITUTE_AT_DIFFERENT_VAR(p):
 #         /\ (!v. free_in phi v ==> v = var_x)
 #         ==> ?psi. is_form psi
 #                 /\ Prov_HF (Iff_f psi
-#                            (substitute phi (numeral psi) var_x)).
+#                            (substitute phi (quote_hf psi) var_x)).
 #
 # Proof sketch (deferred via p.sorry()):
 #   * Build D(var_x, var_y) := substitute_2 substitute_internal var_x
 #                              var_x var_x var_y
 #     (specialising substitute_internal to F=t=var_x, output=var_y).
 #   * theta := Exists_f var_y (And_f D phi_at_y).
-#   * Set m := theta; psi := substitute theta (numeral m) var_x.
+#   * Set m := theta; psi := substitute theta (quote_hf m) var_x.
 #   * From SUBSTITUTE_REPRESENTS at F=t=m, derive HF proves the
 #     substitute-internal part of D at quote_hf m and quote_hf (diag m).
-#   * Hence HF proves theta(numeral m) <=> phi(numeral (diag m)) =
-#     phi(numeral psi). Since psi = theta(numeral m), this is the
+#   * Hence HF proves theta(quote_hf m) <=> phi(quote_hf (diag m)) =
+#     phi(quote_hf psi). Since psi = theta(quote_hf m), this is the
 #     diagonal equivalence.
 # ---------------------------------------------------------------------------
 
@@ -703,7 +689,7 @@ def DIAGONAL_LEMMA(p):
               ==> is_form (diag (theta_of_phi phi))
                 /\\ Prov_HF (Iff_f (diag (theta_of_phi phi))
                                   (substitute phi
-                                              (numeral
+                                              (quote_hf
                                                 (diag (theta_of_phi phi)))
                                               var_x)).
 
@@ -712,7 +698,7 @@ def DIAGONAL_LEMMA(p):
 
         psi := diag (theta_of_phi phi)
              = substitute (theta_of_phi phi)
-                          (numeral (theta_of_phi phi))
+                          (quote_hf (theta_of_phi phi))
                           var_x.
 
     The conjunction asserts both the well-formedness of psi and the
@@ -728,7 +714,7 @@ def DIAGONAL_LEMMA(p):
       * substitution-pushing through theta_of_phi to compute psi's
         shape (Stage 4(a.1) lemmas + a substitute-idempotence lemma);
       * DIAG_REPRESENTS at n = theta_of_phi phi to assert
-        HF proves diag_internal[var_x:=numeral m, var_y:=numeral psi];
+        HF proves diag_internal[var_x:=quote_hf m, var_y:=quote_hf psi];
       * HF-internal propositional reasoning (iff-introduction,
         existential introduction/elimination) to derive the headline
         equivalence.
@@ -741,7 +727,7 @@ def DIAGONAL_LEMMA(p):
         "is_form (diag (theta_of_phi phi)) /\\ "
         "Prov_HF (Iff_f (diag (theta_of_phi phi)) "
         "              (substitute phi "
-        "                          (numeral (diag (theta_of_phi phi))) "
+        "                          (quote_hf (diag (theta_of_phi phi))) "
         "                          var_x))"
     )
     p.sorry()

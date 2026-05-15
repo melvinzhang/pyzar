@@ -302,8 +302,9 @@ recursion equations.
 
      This is now HF-native: syntax codes are passed to the internal
      formula by `quote_hf`, preserving their HF-set constructor shape.
-     Using `numeral` here would turn the code into an ordinal numeral
-     and make qparse/constructor bodies miss the intended structure.
+     Ordinal-style encodings here would turn the code away from its
+     HF-set constructor shape and make qparse/constructor bodies miss
+     the intended structure.
      The theorem is still syntax-scoped, so downstream proof scripts
      should cite `SUBSTITUTE_REPRESENTS_FORM` or
      `SUBSTITUTE_REPRESENTS_TERM` and discharge only `is_form phi` or
@@ -330,8 +331,7 @@ recursion equations.
 
    - Done via `HF_SYNTAX_REC_PACKAGE`, `SUBSTITUTE_REPRESENTS_SYNTACTIC`,
      `SUBSTITUTE_REPRESENTS_FORM`, and `SUBSTITUTE_REPRESENTS_TERM`.
-     The public relation now uses `quote_hf` slots instead of `numeral`
-     slots.
+     The public relation now uses `quote_hf` slots throughout.
    - Direction update: do not make direct `qparse`-vs-`quote_hf`
      constructor bridges the main Phase 2 burden. They are object-level
      equality facts for finite `Insert_t` towers, and proving them
@@ -486,8 +486,8 @@ After `hf_repr_thms.py` is no-sorry, the remaining G1 work is in
 | `IS_FORM_DIAG_INTERNAL` | diagonal side condition | body of `diag_internal` |
 | `FREE_IN_DIAG_INTERNAL` | diagonal side condition | body of `diag_internal` |
 | `DIAG_FUNCTIONAL` | uniqueness/functionality | `SUBSTITUTE_REPRESENTS`, equality reasoning |
-| `VAR_X_NEQ_SUC0_0` | concrete side condition | tag/numeral disjointness |
-| `VAR_Y_NEQ_VAR_X` | concrete side condition | `VAR_T_INJ`, numeral inequality |
+| `VAR_X_NEQ_SUC0_0` | concrete side condition | tag/code disjointness |
+| `VAR_Y_NEQ_VAR_X` | concrete side condition | `VAR_T_INJ`, nat0 inequality |
 | `SUBSTITUTE_FREE_NO_OP` | substitution bookkeeping | structural induction on formulas |
 | `FREE_IN_SUBSTITUTE_AT_DIFFERENT_VAR` | substitution bookkeeping | structural induction on formulas |
 | `DIAGONAL_LEMMA` | headline fixed point | all of the above plus `PROV_HF_REPRESENTS` side conditions |
@@ -793,7 +793,7 @@ definitions.
   explode; small runs still reject it as the membership measure.
 
 * **Quoted syntax parser (retained utility).**
-  If an internal formula needs to express godelnum-shape claims like
+  If an internal formula needs to express syntax-code shape claims like
   ``a = Var_t v`` with `var_z` as a free leaf, do not write
   `Eq_f var_a (Var_t var_z)`. `substitute` treats `Var_t k` as a leaf
   (HIT/MISS on the index `k = var_z` = `Var_t (SUC0² 0)`), so it

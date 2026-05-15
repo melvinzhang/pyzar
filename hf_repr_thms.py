@@ -3928,7 +3928,7 @@ def QUOTE_HF_QPARSE_EMPTY(p):
 #
 # Headline theorem (``PROV_HF_REPRESENTS``):
 #   |- !n. Prov_HF n <=>
-#          Prov_HF (substitute Prov_HF_internal (numeral n) var_x).
+#          Prov_HF (substitute Prov_HF_internal (quote_hf n) var_x).
 #
 # ``Prov_HF_internal`` is a HF-formula with ``var_x`` as its sole free
 # variable, expressing "Prov_HF holds at var_x". The body now lives in
@@ -3944,7 +3944,7 @@ def QUOTE_HF_QPARSE_EMPTY(p):
 #   * ``FREE_IN_PROV_HF_INTERNAL``  : |- !v. free_in Prov_HF_internal v
 #                                          <=> v = var_x.
 #
-# Discharge plan -- via HF1-HF5 (no Goedel-beta sequence coding).
+# Discharge plan -- via HF1-HF5 (no beta-function sequence coding).
 # The internal proof predicate uses HF-native proof objects, not
 # ``cons_l`` lists. The shape is a dependency-set finite HF set of
 # proof-step records:
@@ -3966,9 +3966,8 @@ def QUOTE_HF_QPARSE_EMPTY(p):
 #
 # Forward direction (HOL ``Prov_HF n`` ==> HF proves the substituted
 # form): Sigma_1 completeness for HF. Extract a ``Proof_HF_set`` witness
-# via PROV_HF_AT, exhibit its HF encoding as a HF-numeral, verify each
-# conjunct term-by-term (each a closed Sigma_0 fact HF decides at
-# numerals).
+# via PROV_HF_AT, exhibit its HF encoding through ``quote_hf``, and
+# verify each conjunct term-by-term as a closed Sigma_0 fact.
 #
 # Backward direction (HF proves ==> HOL): Sigma_1 soundness, which
 # lives in Stage 6 via the HF model construction (HF |= HF1-HF5 is
@@ -4090,14 +4089,14 @@ _IS_FORM_PROV_HF_INTERNAL_THM = _prove_is_form_syntax(Prov_HF_internal)
 @proof
 def PROV_HF_REPRESENTS(p):
     """|- !n. Prov_HF n <=>
-              Prov_HF (substitute Prov_HF_internal (numeral n) var_x).
+              Prov_HF (substitute Prov_HF_internal (quote_hf n) var_x).
 
     Stage 3D(a) representability of ``Prov_HF``. AXIOMATIZED via
     ``p.sorry()``; see the Stage 3D section comment above for the
     deferred construction (Proof_HF_internal + Sigma_1
     completeness/soundness).
     """
-    p.goal("!n. Prov_HF n = Prov_HF (substitute Prov_HF_internal (numeral n) idx_x)")
+    p.goal("!n. Prov_HF n = Prov_HF (substitute Prov_HF_internal (quote_hf n) idx_x)")
     p.sorry()
 
 
