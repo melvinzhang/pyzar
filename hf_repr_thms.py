@@ -71,6 +71,8 @@ from hf_proof import (
     VAR_Z_DEF,
 )
 from hf_syntax import (
+    Empty_t,
+    EMPTY_T_DEF,
     SUBSTITUTE_AT_NOT,
     SUBSTITUTE_AT_IN,
     SUBSTITUTE_AT_EMPTY,
@@ -94,7 +96,14 @@ from hf_repr_core import (
     QUOTE_HF_AT_EMPTY,
     _QUOTE_HF_AT_NZ,
 )
-from hf_sets import EMPTY_DEF, INSERT_AT, IN_AT, IN_LT, NOT_IN_EMPTY, IN_INSERT_DIFF
+from hf_sets import (
+    EMPTY_DEF,
+    INSERT_AT,
+    IN_AT,
+    IN_LT,
+    NOT_IN_EMPTY,
+    IN_INSERT_DIFF,
+)
 from hf_sets import IN_EXT
 from hf_syntax import INSERT_T_INJ, INSERT_T_NEQ_EMPTY
 from bits import (
@@ -130,11 +139,19 @@ from hf_repr_core import (
     IS_TERM_QUOTE_HF,
     SUBSTITUTE_QUOTE_HF,
     PROV_HF_MP,
+    PROV_HF_REFL,
     HF_SYNTAX_REC_PACKAGE,
     SUBSTITUTE_REPRESENTS_SYNTACTIC,
     SUBSTITUTE_REPRESENTS_TERM,
     SUBSTITUTE_REPRESENTS_FORM,
     SUBSTITUTE_REPRESENTS,
+    TEMPLATE_FILL_EMPTY,
+    TEMPLATE_FILL_HOLE_HIT,
+    TEMPLATE_FILL_HOLE_MISS,
+    TEMPLATE_FILL_INSERT,
+    TEMPLATE_FILL_QPARSE_VAR_T,
+    TEMPLATE_FILL_REPRESENTS_TERM,
+    TEMPLATE_FILL_REPRESENTS,
 )
 from nat0_order import NAT0_LT_ASYM, NAT0_LT_NOT_REFL, NAT0_LT_SUC0, NAT0_LT_TOTAL_NEQ, NAT0_LT_TRANS
 
@@ -3818,6 +3835,40 @@ def QUOTE_HF_PROV_NEQ(p):
 
 
 # ---------------------------------------------------------------------------
+# HF-native qparse base case.
+#
+# Direct qparse-vs-quote constructor bridge axioms are intentionally not part
+# of the main G1 path.  Quoted-data templates should be handled by a separate
+# data/template substitution layer, leaving object-language ``substitute`` to
+# keep its standard variable-substitution semantics.  The empty bridge remains
+# here because it is a closed proof and is useful as a smoke test for
+# HF-native literal quoting.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def QUOTE_HF_QPARSE_EMPTY(p):
+    """|- Prov_HF (Eq_f (quote_hf Empty_t) Empty_t)."""
+    p.goal("Prov_HF (Eq_f (quote_hf Empty_t) Empty_t)")
+    p.have("h_empty: Empty_t = Empty").by_rewrite(
+        [EMPTY_T_DEF, SYM(EMPTY_DEF)]
+    )
+    p.have("h_quote_to_empty: quote_hf Empty_t = quote_hf Empty").by_cong(
+        "quote_hf", "h_empty"
+    )
+    p.have("h_quote: quote_hf Empty_t = Empty_t").by_thm(
+        TRANS(p.fact("h_quote_to_empty"), QUOTE_HF_AT_EMPTY)
+    )
+    p.have("h_term: is_term Empty_t").by_thm(IS_TERM_EMPTY)
+    p.have("h_refl: Prov_HF (Eq_f Empty_t Empty_t)").by(
+        PROV_HF_REFL, "Empty_t", "h_term"
+    )
+    p.thus("Prov_HF (Eq_f (quote_hf Empty_t) Empty_t)").by_rewrite_of(
+        "h_refl", ["h_quote"]
+    )
+
+
+# ---------------------------------------------------------------------------
 # Stage 3C -- substitute representability.
 #
 # The old operational checker route has been removed from the high-layer path.
@@ -3827,6 +3878,8 @@ def QUOTE_HF_PROV_NEQ(p):
 #   SUBSTITUTE_REPRESENTS_SYNTACTIC
 #   SUBSTITUTE_REPRESENTS_TERM
 #   SUBSTITUTE_REPRESENTS_FORM
+#   TEMPLATE_FILL_REPRESENTS_TERM
+#   TEMPLATE_FILL_QPARSE_VAR_T
 #
 # For backwards compatibility in formula-level consumers,
 # ``SUBSTITUTE_REPRESENTS`` is an alias of ``SUBSTITUTE_REPRESENTS_FORM``.
@@ -3956,6 +4009,7 @@ if __name__ == "__main__":
         "    QUOTE_HF_PROV_NEQ                      :",
         pp_thm(QUOTE_HF_PROV_NEQ),
     )
+    print("    QUOTE_HF_QPARSE_EMPTY                  :", pp_thm(QUOTE_HF_QPARSE_EMPTY))
     print("    QUOTE_HF_MEM_MEASURE_AT                :", pp_thm(QUOTE_HF_MEM_MEASURE_AT))
     print("    QUOTE_HF_NEQ_MEASURE_AT                :", pp_thm(QUOTE_HF_NEQ_MEASURE_AT))
     print(
@@ -3994,6 +4048,12 @@ if __name__ == "__main__":
     )
     print("    SUBSTITUTE_REPRESENTS_TERM             :", pp_thm(SUBSTITUTE_REPRESENTS_TERM))
     print("    SUBSTITUTE_REPRESENTS_FORM             :", pp_thm(SUBSTITUTE_REPRESENTS_FORM))
+    print("    TEMPLATE_FILL_EMPTY                    :", pp_thm(TEMPLATE_FILL_EMPTY))
+    print("    TEMPLATE_FILL_HOLE_HIT                 :", pp_thm(TEMPLATE_FILL_HOLE_HIT))
+    print("    TEMPLATE_FILL_HOLE_MISS                :", pp_thm(TEMPLATE_FILL_HOLE_MISS))
+    print("    TEMPLATE_FILL_INSERT                   :", pp_thm(TEMPLATE_FILL_INSERT))
+    print("    TEMPLATE_FILL_QPARSE_VAR_T             :", pp_thm(TEMPLATE_FILL_QPARSE_VAR_T))
+    print("    TEMPLATE_FILL_REPRESENTS_TERM          :", pp_thm(TEMPLATE_FILL_REPRESENTS_TERM))
     print(
         "    PROV_HF_REPRESENTS (SORRY)             :",
         pp_thm(PROV_HF_REPRESENTS),

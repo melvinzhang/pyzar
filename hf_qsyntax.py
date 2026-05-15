@@ -8,6 +8,10 @@ different meaning here:
 
 returns the quoted HF-set code for the syntax node ``Var_t`` with payload
 ``tm``.  It does not return the primitive HOL term ``Var_t tm``.
+
+The intended consumer is a quoted-data/template layer: object-language
+``substitute`` keeps its usual variable-substitution semantics, while
+template filling walks these emitted ``Empty_t``/``Insert_t`` data towers.
 """
 
 from __future__ import annotations
@@ -51,14 +55,25 @@ def _app(f, *args):
     return out
 
 
-def quote_nat(n: int):
-    """Closed HF numeral used in quoted syntax data."""
+def quote_hf_lit(n: int):
+    """Closed HF quote of the Python nat ``n`` used in syntax data.
+
+    This is the finite, fully expanded counterpart of ``quote_hf n``.
+    It is intentionally not the von Neumann ordinal numeral for ``n``:
+    syntax codes are HF sets, so constructor tags must be inserted as
+    their Ackermann/HF-set quotes.
+    """
     if n < 0:
         raise QParseError(f"qparse: negative numeral {n} is not allowed")
-    out = Empty_t
-    for _ in range(n):
-        out = _app(Insert_t, out, out)
-    return out
+    if n == 0:
+        return Empty_t
+    low = (n & -n).bit_length() - 1
+    clear = n & ~(1 << low)
+    return _app(Insert_t, quote_hf_lit(low), quote_hf_lit(clear))
+
+
+# Backwards-compatible name for callers that only need a closed qparse atom.
+quote_nat = quote_hf_lit
 
 
 def q_pair_ord(a, b):
@@ -69,31 +84,31 @@ def q_pair_ord(a, b):
 
 
 def q_var_t(v):
-    return q_pair_ord(quote_nat(2), v)
+    return q_pair_ord(quote_hf_lit(2), v)
 
 
 def q_eq_f(a, b):
-    return q_pair_ord(quote_nat(5), q_pair_ord(a, b))
+    return q_pair_ord(quote_hf_lit(5), q_pair_ord(a, b))
 
 
 def q_not_f(phi):
-    return q_pair_ord(quote_nat(6), phi)
+    return q_pair_ord(quote_hf_lit(6), phi)
 
 
 def q_imp_f(phi, psi):
-    return q_pair_ord(quote_nat(7), q_pair_ord(phi, psi))
+    return q_pair_ord(quote_hf_lit(7), q_pair_ord(phi, psi))
 
 
 def q_forall_f(v, phi):
-    return q_pair_ord(quote_nat(8), q_pair_ord(v, phi))
+    return q_pair_ord(quote_hf_lit(8), q_pair_ord(v, phi))
 
 
 def q_insert_t(a, b):
-    return q_pair_ord(quote_nat(9), q_pair_ord(a, b))
+    return q_pair_ord(quote_hf_lit(9), q_pair_ord(a, b))
 
 
 def q_in_a(a, b):
-    return q_pair_ord(quote_nat(10), q_pair_ord(a, b))
+    return q_pair_ord(quote_hf_lit(10), q_pair_ord(a, b))
 
 
 _CTORS = {
@@ -124,7 +139,7 @@ def _build(node, env):
                 return env[name]
             raise QParseError(f"qparse: unknown quoted-syntax leaf {name!r}")
         if node.type == "INT":
-            return quote_nat(int(str(node)))
+            return quote_hf_lit(int(str(node)))
 
     if not isinstance(node, Tree):
         raise QParseError(f"qparse: unexpected parser node {node!r}")

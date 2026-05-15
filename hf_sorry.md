@@ -17,6 +17,10 @@ are now decided:
 * The G1 development is readability-first. Phase 2 should use a scoped
   HF syntax recursion/induction definitional package for substitution,
   not the old finite-computation encoding.
+* Quoted syntax templates should use a separate data/template-filling
+  layer. Object-language `substitute` keeps its standard semantics
+  (replace variables, do not rewrite variable names); quoted data
+  templates are filled by walking `Empty_t`/`Insert_t` data.
 
 ## Inventory
 
@@ -322,11 +326,27 @@ recursion equations.
      `SUBSTITUTE_REPRESENTS_FORM`, and `SUBSTITUTE_REPRESENTS_TERM`.
      The public relation now uses `quote_hf` slots instead of `numeral`
      slots.
-   - Remaining discharge work: constructor bodies/proofs should target
-     the quoted-code interface. A `qparse` body can express constructor
-     data readably, but the proof must bridge canonical `quote_hf`
-     normal forms to those constructor-shaped towers using HF equality,
-     not by assuming syntactic definitional equality.
+   - Direction update: do not make direct `qparse`-vs-`quote_hf`
+     constructor bridges the main Phase 2 burden. They are object-level
+     equality facts for finite `Insert_t` towers, and proving them
+     directly would grow a separate finite-set algebra package.
+   - Instead, keep object-language substitution semantic and introduce a
+     separate quoted-data/template filling layer for body construction.
+     `qparse` remains the notation for readable quoted data templates;
+     template filling walks the `Empty_t`/`Insert_t` data and replaces
+     explicit hole variables. Any later bridge is localized to template
+     interpretation, not entangled with object substitution.
+   - Current bridge surface: only `QUOTE_HF_QPARSE_EMPTY` remains in
+     `hf_repr_thms.py`, and it is a real closed proof. The non-empty
+     `QUOTE_HF_QPARSE_*` bridge axioms have been removed from the main
+     theorem layer.
+   - Implemented package: `hf_repr_core.py` now exports
+     `template_fill`, `template_fill_internal`, the data-template rules
+     `TEMPLATE_FILL_EMPTY`, `TEMPLATE_FILL_HOLE_HIT`,
+     `TEMPLATE_FILL_HOLE_MISS`, `TEMPLATE_FILL_INSERT`, and
+     `TEMPLATE_FILL_QPARSE_VAR_T`, plus `TEMPLATE_FILL_REPRESENTS_TERM`.
+     This package is definitional over the existing substitution
+     machinery, so it adds a clean API without adding another axiom.
 
 5. **Old operational checker — removed**
    - Done for the main path: the step-by-step substitution checker is no
@@ -626,15 +646,17 @@ definitions.
   ``a = Var_t v`` with `var_z` as a free leaf, do not write
   `Eq_f var_a (Var_t var_z)`. `substitute` treats `Var_t k` as a leaf
   (HIT/MISS on the index `k = var_z` = `Var_t (SUC0² 0)`), so it
-  never pushes the substitute into `var_z`. The fix is to write
-  constructor data through quoted `Insert_t` / `Empty_t` towers, where
-  `substitute` reaches the leaf placeholders structurally.
+  never pushes the substitute into `var_z`. The fix is not to change
+  object-language substitution; it is to distinguish quoted-data
+  template filling from object substitution.
 
-  Implement as **a separate quoted-syntax parser** (no new HOL
-  constants, no new lemmas): `hf_qsyntax.qparse` has its own small Lark
-  grammar and emits the right Insert_t-tower term at body-construction
-  time. The low-level builders remain private implementation machinery
-  behind the parser.
+  Implement the notation as **a separate quoted-syntax parser**:
+  `hf_qsyntax.qparse` has its own small Lark grammar and emits the
+  right `Insert_t`-tower term at body-construction time. The low-level
+  builders remain private implementation machinery behind the parser.
+  The semantic layer above it is a separate data/template-filling
+  relation that walks `Empty_t`/`Insert_t` data and replaces explicit
+  hole variables.
 
   ```python
   qparse("Var_t(var_z)", var_z=var_z)
@@ -642,9 +664,10 @@ definitions.
   qparse("Forall_f(var_wq, var_f1)", var_wq=var_wq, var_f1=var_f1)
   ```
 
-  Bodies are then constructed in Python like
-  ``Q_eq(var_a, qparse("Var_t(var_z)", var_z=var_z))`` and substitute
-  walks the quoted data end-to-end via `SUBSTITUTE_AT_INSERT` alone.
+  Template bodies are then constructed in Python like
+  ``Q_eq(var_a, qparse("Var_t(var_z)", var_z=var_z))`` and template
+  filling walks the quoted data end-to-end via the `Insert_t`/`Empty_t`
+  structure.
   This keeps the notation readable without overloading the ordinary HOL
   parser. The IS_PAIR_ORD_INTERNAL precedent already does this manually
   with literal Insert_t-towers — `qparse` just packages what's already
@@ -677,8 +700,22 @@ definitions.
   because `Var_t` and binder-index positions are exactly where the
   primitive syntax becomes misleading.
 
-  This parser work remains useful, but it no longer determines the main
-  Phase 2 plan. The main plan is now the scoped syntax recursion package.
+  **Current direction:** the parser remains useful, but the direct
+  constructor bridge facts are no longer the main plan. For clean G1,
+  use scoped syntax recursion for `substitute_internal` and use a
+  separate quoted-data/template-filling layer for future internal
+  formula bodies. This prevents the proof from trading the old trace
+  machinery for a large qparse bridge algebra.
+
+  The first version of that layer is now in `hf_repr_core.py`:
+  `template_fill` is the HOL-side data operation, and
+  `template_fill_internal` is the internal formula alias. The exported
+  rules cover exactly the quoted-template structure (`Empty_t`,
+  `Var_t` hole hit/miss, and `Insert_t`) plus
+  `TEMPLATE_FILL_REPRESENTS_TERM`. The existing `is_Pair_ord_internal`
+  quoted-data body is now built through `qparse`, and
+  `TEMPLATE_FILL_QPARSE_VAR_T` proves the representative qparse fill
+  case in-repo.
 
 ## Notes per step (pitfalls to flag now)
 

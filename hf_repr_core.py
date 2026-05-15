@@ -90,6 +90,7 @@ from hf_syntax import (
     _unfold_rec_via_F_def,
     _mono_iff_value_binary_pw_step,
 )
+from hf_qsyntax import qparse
 from hf_sets import (
     In,  # noqa: F401  -- parser alias for HF proof-object predicates
     Pair_ord,  # noqa: F401  -- parser alias for HF proof-object predicates
@@ -132,7 +133,7 @@ from classical import (  # noqa: E402 -- COND machinery for quote_hf body
     EXCLUDED_MIDDLE,
 )
 from tactics import EQT_INTRO, EQF_INTRO  # noqa: E402,F401  -- used in QUOTE_HF_MONO/_AT_NZ
-from tactics import REWRITE_RULE
+from tactics import REWRITE_RULE, REWRITE_PROVE
 from fusion import vsubst, aty, new_axiom, new_constant
 from hf_proof import (
     var_x,
@@ -1931,7 +1932,7 @@ def PROV_HF_AXIOM(p):
 
 @proof
 def PROV_HF_MP(p):
-    """|- !f g. Prov_HF f /\ Prov_HF (Imp_f f g) ==> Prov_HF g."""
+    r"""|- !f g. Prov_HF f /\ Prov_HF (Imp_f f g) ==> Prov_HF g."""
     p.goal("!f g. (Prov_HF f /\\ Prov_HF (Imp_f f g)) ==> Prov_HF g")
     p.fix("f g")
     p.assume("(pf, pfg): Prov_HF f /\\ Prov_HF (Imp_f f g)")
@@ -2041,8 +2042,10 @@ def PROV_HF_REFL(p):
 # HF must prove the encoded pair shape at concrete numerals.
 #
 # Body: faithful equational encoding of the Kuratowski pair shape --
-# ``var_z = {{var_x}, {var_x, var_y}}`` written out at the HF-syntax
-# level using only ``Insert_t`` and ``Empty_t``:
+# ``var_z = {{var_x}, {var_x, var_y}}``.  The quoted-data RHS is built
+# through ``qparse`` rather than by spelling the ``Insert_t`` tower out
+# directly, which exercises the quoted-template notation used by later
+# internal bodies.
 #
 #   Eq_f var_z
 #     (Insert_t (Insert_t var_x Empty_t)        -- {var_x}
@@ -2057,14 +2060,13 @@ def PROV_HF_REFL(p):
 # theorem ``IS_PAIR_ORD_REPRESENTS`` carries the precondition
 # explicitly; downstream consumers instantiate it at concrete numerals
 # where the order is easily established.
+_PAIR_ORD_TEMPLATE = qparse("Pair_ord(var_x,var_y)", var_x=var_x, var_y=var_y)
+
+
 IS_PAIR_ORD_INTERNAL_DEF = define(
     "is_Pair_ord_internal",
     nat0_ty,
-    "Eq_f var_z "
-    "(Insert_t (Insert_t var_x Empty_t) "
-    "          (Insert_t "
-    "             (Insert_t var_x (Insert_t var_y Empty_t)) "
-    "             Empty_t))",
+    mk_app(mk_app(Eq_f, var_z), _PAIR_ORD_TEMPLATE),
 )
 is_Pair_ord_internal = mk_const("is_Pair_ord_internal", [])
 
@@ -2376,6 +2378,22 @@ substitute_internal = mk_const("substitute_internal", [])
 add_const("substitute_internal", substitute_internal)
 
 
+TEMPLATE_FILL_DEF, TEMPLATE_FILL_AT = define_with_at(
+    "template_fill",
+    parse_type("nat0 -> nat0 -> nat0 -> nat0"),
+    "\\D:nat0. \\t:nat0. \\v:nat0. substitute D t v",
+)
+template_fill = mk_const("template_fill", [])
+
+
+TEMPLATE_FILL_INTERNAL_DEF = define(
+    "template_fill_internal",
+    nat0_ty,
+    "substitute_internal",
+)
+template_fill_internal = mk_const("template_fill_internal", [])
+
+
 def _substitute_internal_rel(F, t, v, r):
     """Surface text for ``substitute_internal(F,t,v,r)`` at HF quotes."""
     return (
@@ -2389,6 +2407,21 @@ def _substitute_internal_rel(F, t, v, r):
 
 def _prov_substitute_internal_rel(F, t, v, r):
     return f"Prov_HF {_substitute_internal_rel(F, t, v, r)}"
+
+
+def _template_fill_internal_rel(D, t, v, r):
+    """Surface text for ``template_fill_internal(D,t,v,r)`` at HF quotes."""
+    return (
+        "(substitute (substitute (substitute (substitute "
+        f"template_fill_internal (quote_hf ({D})) idx_x) "
+        f"(quote_hf ({t})) idx_y) "
+        f"(quote_hf ({v})) idx_z) "
+        f"(quote_hf ({r})) idx_w)"
+    )
+
+
+def _prov_template_fill_internal_rel(D, t, v, r):
+    return f"Prov_HF {_template_fill_internal_rel(D, t, v, r)}"
 
 
 _SUBST_RULE_EMPTY = f"!t v. {_prov_substitute_internal_rel('Empty_t', 't', 'v', 'Empty_t')}"
@@ -2535,6 +2568,138 @@ SUBSTITUTE_REPRESENTS = SUBSTITUTE_REPRESENTS_FORM
 
 
 # ---------------------------------------------------------------------------
+# Stage 3C (b) -- quoted-data template filling.
+#
+# ``template_fill D t v`` is a readability layer for quoted data templates:
+# it fills holes encoded as ``Var_t v`` while walking ``Empty_t`` /
+# ``Insert_t`` data.  It is definitionally backed by ``substitute`` so the
+# existing syntax-recursion package proves its internal relation, but callers
+# can cite the template-specific name and rules instead of overloading the
+# object-language substitution story.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def TEMPLATE_FILL_EMPTY(p):
+    """|- !t v. template_fill Empty_t t v = Empty_t."""
+    p.goal("!t v. template_fill Empty_t t v = Empty_t")
+    p.fix("t v")
+    p.thus("template_fill Empty_t t v = Empty_t").by_rewrite(
+        [TEMPLATE_FILL_AT, SUBSTITUTE_AT_EMPTY]
+    )
+
+
+@proof
+def TEMPLATE_FILL_HOLE_HIT(p):
+    """|- !x t v. v = x ==> template_fill (Var_t x) t v = t."""
+    p.goal("!x t v. v = x ==> template_fill (Var_t x) t v = t")
+    p.fix("x t v")
+    p.assume("hit: v = x")
+    subst_hit = MP(
+        SPECL([p._parse("x"), p._parse("t"), p._parse("v")], SUBSTITUTE_AT_VAR_HIT),
+        p.fact("hit"),
+    )
+    p.thus("template_fill (Var_t x) t v = t").by_rewrite(
+        [TEMPLATE_FILL_AT, subst_hit]
+    )
+
+
+@proof
+def TEMPLATE_FILL_HOLE_MISS(p):
+    """|- !x t v. ~(v = x) ==> template_fill (Var_t x) t v = Var_t x."""
+    p.goal("!x t v. ~(v = x) ==> template_fill (Var_t x) t v = Var_t x")
+    p.fix("x t v")
+    p.assume("miss: ~(v = x)")
+    subst_miss = MP(
+        SPECL([p._parse("x"), p._parse("t"), p._parse("v")], SUBSTITUTE_AT_VAR_MISS),
+        p.fact("miss"),
+    )
+    p.thus("template_fill (Var_t x) t v = Var_t x").by_rewrite(
+        [TEMPLATE_FILL_AT, subst_miss]
+    )
+
+
+@proof
+def TEMPLATE_FILL_INSERT(p):
+    """|- !a b t v.
+          template_fill (Insert_t a b) t v =
+          Insert_t (template_fill a t v) (template_fill b t v)."""
+    p.goal(
+        "!a b t v. template_fill (Insert_t a b) t v "
+        "= Insert_t (template_fill a t v) (template_fill b t v)"
+    )
+    p.fix("a b t v")
+    p.thus(
+        "template_fill (Insert_t a b) t v "
+        "= Insert_t (template_fill a t v) (template_fill b t v)"
+    ).by_rewrite([TEMPLATE_FILL_AT, SUBSTITUTE_AT_INSERT])
+
+
+_qv_template = Var("qv", nat0_ty)
+_template_fill_z_hit = MP(
+    SPECL([_idx_z, _qv_template, _idx_z], TEMPLATE_FILL_HOLE_HIT),
+    REFL(_idx_z),
+)
+
+TEMPLATE_FILL_QPARSE_VAR_T = GEN(
+    _qv_template,
+    REWRITE_PROVE(
+        [
+            TEMPLATE_FILL_INSERT,
+            TEMPLATE_FILL_EMPTY,
+            _template_fill_z_hit,
+            VAR_Z_DEF,
+            IDX_Z_DEF,
+        ],
+        mk_eq(
+            mk_app(
+                mk_app(
+                    mk_app(
+                        template_fill,
+                        qparse("Var_t(var_z)", var_z=var_z),
+                    ),
+                    _qv_template,
+                ),
+                idx_z,
+            ),
+            qparse("Var_t(qv)", qv=_qv_template),
+        ),
+    ),
+)
+"""|- !qv. template_fill (qparse("Var_t(var_z)", var_z=var_z)) qv idx_z
+          = qparse("Var_t(qv)", qv=qv).
+
+Template smoke theorem for the motivating case: the placeholder is inside
+quoted data, not inside an object-language ``Var_t`` node.
+"""
+
+
+@proof
+def TEMPLATE_FILL_REPRESENTS_TERM(p):
+    """|- !D t v. is_term D ==> Prov_HF(template_fill_internal D t v ...)."""
+    p.goal(
+        f"!D t v. is_term D ==> "
+        f"{_prov_template_fill_internal_rel('D', 't', 'v', 'template_fill D t v')}"
+    )
+    p.fix("D t v")
+    p.assume("hD: is_term D")
+    p.have(
+        "h_subst: "
+        f"{_prov_substitute_internal_rel('D', 't', 'v', '((substitute D) t) v')}"
+    ).by(SUBSTITUTE_REPRESENTS_TERM, "D", "t", "v", "hD")
+    fill_at = SPECL([p._parse("D"), p._parse("t"), p._parse("v")], TEMPLATE_FILL_AT)
+    p.thus(
+        _prov_template_fill_internal_rel("D", "t", "v", "template_fill D t v")
+    ).by_rewrite_of(
+        "h_subst",
+        [SYM(TEMPLATE_FILL_INTERNAL_DEF), SYM(fill_at)],
+    )
+
+
+TEMPLATE_FILL_REPRESENTS = TEMPLATE_FILL_REPRESENTS_TERM
+
+
+# ---------------------------------------------------------------------------
 # Stage 3D (a) -- kernel symbol declarations for the provability
 # representability headline (PROV_HF_REPRESENTS) and the diagonal
 # lemma's side conditions.
@@ -2653,6 +2818,12 @@ if __name__ == "__main__":
     print("    SUBSTITUTE_REPRESENTS_SYNTACTIC       :", pp_thm(SUBSTITUTE_REPRESENTS_SYNTACTIC))
     print("    SUBSTITUTE_REPRESENTS_TERM            :", pp_thm(SUBSTITUTE_REPRESENTS_TERM))
     print("    SUBSTITUTE_REPRESENTS_FORM            :", pp_thm(SUBSTITUTE_REPRESENTS_FORM))
+    print("    TEMPLATE_FILL_EMPTY                   :", pp_thm(TEMPLATE_FILL_EMPTY))
+    print("    TEMPLATE_FILL_HOLE_HIT                :", pp_thm(TEMPLATE_FILL_HOLE_HIT))
+    print("    TEMPLATE_FILL_HOLE_MISS               :", pp_thm(TEMPLATE_FILL_HOLE_MISS))
+    print("    TEMPLATE_FILL_INSERT                  :", pp_thm(TEMPLATE_FILL_INSERT))
+    print("    TEMPLATE_FILL_QPARSE_VAR_T            :", pp_thm(TEMPLATE_FILL_QPARSE_VAR_T))
+    print("    TEMPLATE_FILL_REPRESENTS_TERM         :", pp_thm(TEMPLATE_FILL_REPRESENTS_TERM))
     print("    QUOTE_HF_AT_EMPTY                    :", pp_thm(QUOTE_HF_AT_EMPTY))
     print("    QUOTE_HF_AT_INSERT_LOW               :", pp_thm(QUOTE_HF_AT_INSERT_LOW))
     print("    QUOTE_HF_AT_SINGLETON                :", pp_thm(QUOTE_HF_AT_SINGLETON))
