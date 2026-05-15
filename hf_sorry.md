@@ -106,14 +106,19 @@ Prov_HF_internal(x) := ?P. Proof_HF_set_internal(P, x)
 where `P` is an HF-native proof object. Do **not** internalise
 `cons_l`, `mem_l`, `append_l`, or list recursion.
 
-The Phase 0 prototype has pinned the shape to ranked proof-step sets.
+The Phase 0 prototype pinned the shape to ranked proof-step sets; the
+Phase 3 spikes refined the rank field to be a dependency set rather than
+a numeric height. The implementation in `hf_repr_core.py` still needs
+that refactor, but the design decision is now settled.
 For reference, the viable HF-native designs were:
 
-1. **Ranked proof-step set.**
+1. **Dependency-set proof-step set.**
    `P` is a finite HF set of records `(rank, formula)`. A step at rank
-   `k` is valid if it is an axiom, or follows by MP/Gen from records
-   in `P` whose ranks are strictly below `k`. This keeps membership as
-   `In_a` while preserving the well-founded "earlier step" relation.
+   `k` is valid if it is an axiom, or follows by MP/Gen from records in
+   `P` whose ranks are members of `k`. Thus `k` is the finite set of
+   citeable predecessor ranks. This keeps the checker HF-native:
+   dependency checks are `In_a i k`, not an internal arithmetic
+   `<` predicate.
 
 2. **Proof tree.**
    `P` is a finite HF tree whose root formula is `x`; children are the
@@ -127,15 +132,16 @@ itself if the whole set is available at every step. The proof object
 must carry a well-founded dependency relation, either explicit ranks or
 tree structure.
 
-Chosen design: **ranked proof-step set**. It is closest to the
+Chosen design: **dependency-set proof-step set**. It is closest to the
 current Hilbert proof-sequence semantics while keeping the internal HF
-formula set-native.
+formula set-native and avoiding `lt_internal`.
 
 Exit criterion for Phase 0:
 
 * Define the external HOL predicate, e.g. `Proof_HF_set P n`. **Done:**
   `hf_repr_core.py` now has `valid_step_hf_set` and `Proof_HF_set`
-  as the ranked-set target predicates.
+  as the initial ranked-set target predicates. **Refactor pending:**
+  replace numeric rank checks with dependency-set membership checks.
 * Prove the axiom-only witness: **Done:**
   `AXIOM_HAS_PROOF_HF_SET` proves
   `is_axiom n ==> ?P. Proof_HF_set P n`.
@@ -149,9 +155,9 @@ Exit criterion for Phase 0:
 * Redirect `Prov_HF` to the set-native checker: **Done:**
   `PROV_HF_AT` is now `Prov_HF n = (?P. Proof_HF_set P n)`.
 
-Phase 0 has now settled the largest representation risk. G remains the
-deepest theorem, but the proof-object shape is no longer the main
-unknown.
+Phase 0 settled the largest representation risk, and the Phase 3 spikes
+settled the final proof-object variant. G remains the deepest theorem,
+but the proof-object shape is no longer a design unknown.
 
 ### Phase 1 — measured quote theorem and projected interfaces
 
@@ -362,12 +368,74 @@ substitute layer.
 ### Phase 3 — provability representability
 
 6. **G — `PROV_HF_REPRESENTS`** (the deepest semantic step).
-   - Define `Prov_HF_internal(x) := ?_internal y. Proof_HF_internal(y, x)`.
-     The shape of `Proof_HF_internal` follows Phase 0's HF-native
-     proof objects. There is no `cons_l` / `mem_l` internal path.
+   - **Confirmed design.** Use the dependency-set proof checker:
+     proof records remain `Pair_ord k h`, but `k` is a finite HF set of
+     citeable predecessor ranks. The external and internal checkers both
+     use membership (`In i k` / `In_a i k`) for citations. Do not build
+     `lt_internal`, trace/list proof objects, or a separate arithmetic
+     rank theory for G1.
+   - Define `Prov_HF_internal(x) := ?_internal P.
+     Proof_HF_set_internal(P, x)`. The spiked body follows Phase 0's
+     dependency-set HF proof records:
+     `Proof_HF_set_internal(P,n)` says there is a rank `k` with
+     `Pair_ord k n` in `P`, and every record `Pair_ord j h` in `P`
+     satisfies `valid_step_hf_set_internal(P,j,h)`.
+   - `spike_prov_hf_body.py` validates the constructor-level design:
+     qparse emits the `Pair_ord` record templates, the body is built
+     only from HF formula constructors, the free variables are exactly
+     `{P,k,h}`, `{P,n}`, and `{x}` for the three layers, and no
+     trace/list proof-object vocabulary appears in the compiled body.
+   - The rank-as-dependency-set spike (`spike_prov_hf_dep_body.py`)
+     keeps records as `Pair_ord k h` but interprets `k` as the finite
+     set of predecessor ranks that may be cited. Citation checks become
+     ordinary HF atoms `In_a i k`, so this route removes `lt_internal`
+     from the primitive boundary. It also validates direct bodies for
+     `is_mp_internal` (`g = Imp_f f h`) and `is_gen_internal`
+     (`?x. h = Forall_f x f`).
+   - Remaining primitive internal body for this route is
+     `is_axiom_internal`. This replaces trace/list recursion and does
+     not reintroduce proof-object bridge machinery.
+   - `spike_axiom_internal_body.py` validates the split schema-package
+     plan:
+     `is_axiom_internal = is_hf_axiom_internal \/ is_hf_ind_axiom_internal
+     \/ is_logical_axiom_internal`, with the logical package split into
+     K/S/N/UI/Vac/Refl/Subst/FaImp. Each package has exactly `{h}` free.
+     The remaining lower-layer support bodies are `is_form_internal`,
+     `is_term_internal`, `free_in_internal`, and `substitute_internal`.
+   - `spike_internal_support_bodies.py` validates finite HF bodies for
+     those support predicates. `is_term_internal` and `is_form_internal`
+     use closure-set certificates, `free_in_internal` uses a downward
+     witness-path set, and `substitute_internal` uses an evaluation graph
+     of `Pair_ord input output` records. The bodies have the expected
+     free variables and no rank/order or trace/list vocabulary.
+     Production proofs still need equivalence/functionality for these
+     certificate bodies.
+   - `spike_forward_dep_shape.py` validates the forward proof-object
+     construction for the dependency-set route. Axiom witnesses use
+     `Pair_ord Empty h`; MP adds a new root rank containing the two
+     cited root ranks; Gen adds a new root rank containing the cited
+     root rank. The intended forward targets are
+     `Proof_HF_dep_set P n ==> Prov_HF Proof_HF_dep_set_internal[P,n]`
+     and `Prov_HF n ==> Prov_HF Prov_HF_internal[n]`.
+   - `spike_external_dep_predicate.py` validates the external predicate
+     refactor shape before editing `hf_repr_core.py`: replace
+     `nat0_lt i k` premises in `valid_step_hf_set` with `In i k`.
+     Closure witnesses become `Pair_ord Empty h` for axioms, a new
+     dependency rank `Pair kf kg` for MP, and `Singleton kf` for Gen.
+     The preserve/axiom/MP/Gen closure shapes all pass in the executable
+     model and contain no rank/order or trace/list vocabulary.
+   - `spike_prov_hf_side_conditions.py` validates the final
+     `IS_FORM_PROV_HF_INTERNAL` / `FREE_IN_PROV_HF_INTERNAL` proof
+     shape. The composed bodies have free variables `{P,k,h}`,
+     `{P,n}`, and `{x}` at the valid-step/proof/provability layers;
+     no binder captures `x`, and no binder name is reused in the final
+     body. The only non-local side lemmas needed are
+     `IS_FORM_IS_AXIOM_INTERNAL` and `FREE_IN_IS_AXIOM_INTERNAL`, plus
+     reusable qparse-template term/free lemmas.
    - **Forward direction** (HOL ⇒ HF): Σ₁ completeness for HF.
-     Extract a `Proof_HF` witness via `PROV_HF_AT`, encode as
-     HF-numeral, verify each conjunct as a closed Σ₀ fact.
+     Extract a dependency-set `Proof_HF_set` witness via `PROV_HF_AT`,
+     encode it with `quote_hf`, and verify each checker conjunct using
+     the package bodies above.
    - **Backward direction** (HF ⇒ HOL): Σ₁ soundness — explicitly
      deferred to Stage 6 (HF |= HF1–HF5 via the model construction).
      If needed, split the current iff into forward/backward named
@@ -428,7 +496,8 @@ definitions.
   This unblocks the outer logical scaffolding of the
   `is_*_internal` bodies.
 
-* **HF-set proof predicate prototype (done)** — `valid_step_hf_set` and
+* **HF-set proof predicate prototype (done; superseded by confirmed
+  dependency-set refactor)** — `valid_step_hf_set` and
   `Proof_HF_set` now live in `hf_repr_core.py`. They use ranked proof
   records `Pair_ord k h` and only allow MP/Gen citations from lower
   ranks, avoiding the cyclicity problem of unordered closed formula
@@ -436,8 +505,72 @@ definitions.
   `VALID_STEP_HF_SET_PRESERVES`, `AXIOM_HAS_PROOF_HF_SET`, and
   the two closure prototypes `MP_HAS_PROOF_HF_SET` and
   `GEN_HAS_PROOF_HF_SET`. `Prov_HF` has been redirected to
-  `?P. Proof_HF_set P n`; next work is internalizing
-  `Proof_HF_set_internal`.
+  `?P. Proof_HF_set P n`. The confirmed Phase 3 design keeps these
+  names but changes the rank check from `nat0_lt i k` to `In i k`.
+
+* **Original ranked-body spike (done)** — `spike_prov_hf_body.py`
+  validates the `nat0_lt`-ranked internal body shape. The formula design
+  is viable with qparse `Pair_ord` record terms and ordinary `In_a`
+  atoms, but it leaves `lt_internal` as an extra primitive boundary.
+
+* **Rank-as-dependency-set spike (done)** —
+  `spike_prov_hf_dep_body.py` validates the cleaner HF-native variant:
+  proof records remain `Pair_ord k h`, but `k` is the finite set of
+  citeable predecessor ranks. The MP/Gen citation checks use `In_a i k`
+  instead of `nat0_lt i k`, eliminating `lt_internal`; `is_mp_internal`
+  and `is_gen_internal` are direct formula bodies. The only remaining
+  large primitive body is `is_axiom_internal`.
+
+* **Split axiom-schema spike (done)** —
+  `spike_axiom_internal_body.py` validates the `is_axiom_internal`
+  package split. Closed HF axioms are a 5-way equality package; logical
+  axioms are K/S/N/UI/Vac/Refl/Subst/FaImp packages; induction is its
+  own package. UI/Subst/Ind factor through `substitute_internal`, while
+  Vac/FaImp/Ind factor through `free_in_internal`. The spike confirms
+  every package leaves exactly `{h}` free and introduces no rank/order
+  or trace/list vocabulary.
+
+* **Support internal-body spike (done)** —
+  `spike_internal_support_bodies.py` validates finite object-formula
+  bodies for `is_term_internal`, `is_form_internal`, `free_in_internal`,
+  and `substitute_internal`. Term/form use finite closure sets; free-in
+  uses a witness-path set; substitute uses a local evaluation graph. The
+  route is coherent and HF-native, but landing it requires proving the
+  closure/path/graph bodies equivalent to the existing HOL predicates
+  and proving substitute graph functionality.
+
+* **Forward dependency-set shape spike (done)** —
+  `spike_forward_dep_shape.py` validates the proof-object witness shape
+  needed for the forward half of `PROV_HF_REPRESENTS`. Closure under
+  axioms, MP, and Gen works with dependency sets: new MP ranks contain
+  exactly the two cited root ranks, and new Gen ranks contain exactly
+  the one cited root rank. This is the external predicate refactor to
+  attempt next in `hf_repr_core.py`.
+
+* **External dependency predicate spike (done)** —
+  `spike_external_dep_predicate.py` spells the candidate external
+  definitions and validates their closure behavior. The refactor is:
+  `valid_step_hf_set` should use `In i k` / `In j k` instead of
+  `nat0_lt i k` / `nat0_lt j k`; MP should choose dependency rank
+  `Pair kf kg`; Gen should choose `Singleton kf`. The spike confirms
+  the subset-preservation, axiom, MP, and Gen proof shapes. This is now
+  the chosen Phase 3 design, not an alternative branch.
+
+* **Prov_HF side-condition spike (done)** —
+  `spike_prov_hf_side_conditions.py` validates the final
+  `IS_FORM_PROV_HF_INTERNAL` and `FREE_IN_PROV_HF_INTERNAL` proof shape.
+  The final body has exactly `{x}` free; the proof is a routine
+  constructor walk once `IS_FORM_IS_AXIOM_INTERNAL`,
+  `FREE_IN_IS_AXIOM_INTERNAL`, and qparse-template term/free lemmas are
+  available.
+
+* **Phase 3 design decision (confirmed)** — implement the
+  dependency-set proof checker in the main path. Refactor
+  `hf_repr_core.py` so `valid_step_hf_set` uses `In i k` citations,
+  then move the spiked internal bodies/packages into production modules.
+  Remaining work is proof engineering: closure lemmas for the refactored
+  external predicate, equivalence/functionality for support certificates,
+  package side lemmas, and the forward `PROV_HF_REPRESENTS` theorem.
 
 * **HF4 instantiation (done)** — `HF4_INST` is now a closed proof,
   not a `p.sorry()`. It follows the `HF3_INST` pattern: obtain
