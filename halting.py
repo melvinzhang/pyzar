@@ -130,15 +130,16 @@ from fusion import Var
 from basics import mk_const, mk_app, rand, aconv
 from parser import define, parse_type, pp
 from nat0 import nat0_ty, ZERO, mk_suc0
+from nat0_order import NAT0_LT_TRANS
 from proof import proof, register_intro_set
 from tactics import REFL, SPEC, SPECL, SYM, EQ_MP, CONJ, MP
 from tactics import TRANS, unfold_def_at
-from hf_sets import Pair_ord
+from hf_sets import Pair_ord, NAT0_LT_PAIR_ORD_L, NAT0_LT_PAIR_ORD_R
 from data_type import (
     define_constructor,
     define_nat0_binary_closure_predicate,
-    _proof_lt_binary_left,
-    _proof_lt_binary_right,
+    prove_pairord_binary_size_left,
+    prove_pairord_binary_size_right,
 )
 
 
@@ -194,11 +195,26 @@ _APP_T_TAG = "SUC0 (SUC0 0)"
 # These bound the recursion depth so ``define_wf_lt`` can take a least
 # fixed point. Identical shape to the Imp_f / Insert_t cases, now produced by
 # the shared encoded-datatype helpers.
-NAT0_LT_APP_T_L = _proof_lt_binary_left(
-    "NAT0_LT_APP_T_L", "a", "b", "App_t", APP_T_AT, _APP_T_TAG
+NAT0_LT_APP_T_L = prove_pairord_binary_size_left(
+    "NAT0_LT_APP_T_L",
+    "a",
+    "b",
+    "App_t",
+    APP_T_AT,
+    _APP_T_TAG,
+    NAT0_LT_PAIR_ORD_L,
+    NAT0_LT_PAIR_ORD_R,
+    NAT0_LT_TRANS,
 )
-NAT0_LT_APP_T_R = _proof_lt_binary_right(
-    "NAT0_LT_APP_T_R", "a", "b", "App_t", APP_T_AT, _APP_T_TAG
+NAT0_LT_APP_T_R = prove_pairord_binary_size_right(
+    "NAT0_LT_APP_T_R",
+    "a",
+    "b",
+    "App_t",
+    APP_T_AT,
+    _APP_T_TAG,
+    NAT0_LT_PAIR_ORD_R,
+    NAT0_LT_TRANS,
 )
 
 

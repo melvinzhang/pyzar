@@ -67,22 +67,14 @@ own syntax code, so no separate code-of-tree wrapper is needed.
 # Imports.
 # ---------------------------------------------------------------------------
 
-from fusion import Var, ASSUME, DEDUCT_ANTISYM_RULE, REFL, vsubst, INST_TYPE
-from basics import mk_const, mk_app, mk_eq, mk_abs, dest_eq, is_eq, rator, rand
+from fusion import Var, ASSUME, REFL
+from basics import mk_const, mk_app, mk_eq, rand
 from parser import define, parse_type
 from axioms import (
-    F,
     mk_and,
     mk_exists,
     mk_not,
     mk_or,
-    mk_select,
-    dest_conj,
-    dest_forall,
-    dest_exists,
-    dest_disj,
-    SELECT_AX,
-    aty,
 )
 from nat0 import nat0_ty
 from hf_sets import (  # noqa: F401  -- parser aliases for Pair_ord
@@ -95,11 +87,12 @@ from hf_sets import (  # noqa: F401  -- parser aliases for Pair_ord
 )
 from nat0 import AXIOM_3_0, AXIOM_4_0
 from nat0_order import NAT0_LT_TRANS, define_wf_lt
-from proof import proof, define_with_at
+from proof import proof
 from data_type import (
     _extract_nfg,  # noqa: F401  -- compatibility re-export
-    _proof_lt_binary_left,
-    _proof_lt_binary_right,
+    define_constructor,
+    prove_pairord_binary_size_left,
+    prove_pairord_binary_size_right,
     mono_iff_unary_step,
     mono_iff_binary_step,
     mono_iff_binary_right_step,
@@ -124,30 +117,11 @@ from classical import EXCLUDED_MIDDLE
 from tactics import (
     SPEC,
     SPECL,
-    GEN,
-    GENL,
     SYM,
     EQ_MP,
-    MP,
     CONJ,
-    CONJUNCT1,
-    CONJUNCT2,
-    EXISTS,
-    CHOOSE_WITNESS,
-    REWRITE_RULE,
-    REWRITE_CONV,
-    EQF_INTRO,
-    NOT_ELIM,
-    DISCH,
-    CONTR,
-    TRANS,
     AP_TERM,
-    AP_THM,
-    BETA_CONV,
-    BETA_NORM,
     DISJ1,
-    DISJ2,
-    DISJ_CASES,
     or_chain_collapse,
 )
 
@@ -170,50 +144,60 @@ _phi2_n0 = Var("phi2", nat0_ty)
 # chains so they normalise to closed numerical values.
 # ---------------------------------------------------------------------------
 
-VAR_T_DEF, VAR_T_AT = define_with_at(
+_VAR_T_CTOR = define_constructor(
     "Var_t",
     parse_type("nat0 -> nat0"),
     "\\v:nat0. Pair_ord (SUC0 (SUC0 0)) v",
 )
-Var_t = mk_const("Var_t", [])
+VAR_T_DEF = _VAR_T_CTOR.def_thm
+VAR_T_AT = _VAR_T_CTOR.at_thm
+Var_t = _VAR_T_CTOR.const
 
 
 # ---------------------------------------------------------------------------
 # Form constructors.
 # ---------------------------------------------------------------------------
 
-EQ_F_DEF, EQ_F_AT = define_with_at(
+_EQ_F_CTOR = define_constructor(
     "Eq_f",
     parse_type("nat0 -> nat0 -> nat0"),
     "\\t1:nat0. \\t2:nat0. "
     "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))) (Pair_ord t1 t2)",
 )
-Eq_f = mk_const("Eq_f", [])
+EQ_F_DEF = _EQ_F_CTOR.def_thm
+EQ_F_AT = _EQ_F_CTOR.at_thm
+Eq_f = _EQ_F_CTOR.const
 
-NOT_F_DEF, NOT_F_AT = define_with_at(
+_NOT_F_CTOR = define_constructor(
     "Not_f",
     parse_type("nat0 -> nat0"),
     "\\phi:nat0. Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))) phi",
 )
-Not_f = mk_const("Not_f", [])
+NOT_F_DEF = _NOT_F_CTOR.def_thm
+NOT_F_AT = _NOT_F_CTOR.at_thm
+Not_f = _NOT_F_CTOR.const
 
-IMP_F_DEF, IMP_F_AT = define_with_at(
+_IMP_F_CTOR = define_constructor(
     "Imp_f",
     parse_type("nat0 -> nat0 -> nat0"),
     "\\phi1:nat0. \\phi2:nat0. "
     "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))) "
     "(Pair_ord phi1 phi2)",
 )
-Imp_f = mk_const("Imp_f", [])
+IMP_F_DEF = _IMP_F_CTOR.def_thm
+IMP_F_AT = _IMP_F_CTOR.at_thm
+Imp_f = _IMP_F_CTOR.const
 
-FORALL_F_DEF, FORALL_F_AT = define_with_at(
+_FORALL_F_CTOR = define_constructor(
     "Forall_f",
     parse_type("nat0 -> nat0 -> nat0"),
     "\\n:nat0. \\phi:nat0. "
     "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))))) "
     "(Pair_ord n phi)",
 )
-Forall_f = mk_const("Forall_f", [])
+FORALL_F_DEF = _FORALL_F_CTOR.def_thm
+FORALL_F_AT = _FORALL_F_CTOR.at_thm
+Forall_f = _FORALL_F_CTOR.const
 
 
 # ---------------------------------------------------------------------------
@@ -229,16 +213,18 @@ Forall_f = mk_const("Forall_f", [])
 EMPTY_T_DEF = define("Empty_t", parse_type("nat0"), "0")
 Empty_t = mk_const("Empty_t", [])
 
-INSERT_T_DEF, INSERT_T_AT = define_with_at(
+_INSERT_T_CTOR = define_constructor(
     "Insert_t",
     parse_type("nat0 -> nat0 -> nat0"),
     "\\t1:nat0. \\t2:nat0. "
     "Pair_ord (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))))) "
     "(Pair_ord t1 t2)",
 )
-Insert_t = mk_const("Insert_t", [])
+INSERT_T_DEF = _INSERT_T_CTOR.def_thm
+INSERT_T_AT = _INSERT_T_CTOR.at_thm
+Insert_t = _INSERT_T_CTOR.const
 
-IN_A_DEF, IN_A_AT = define_with_at(
+_IN_A_CTOR = define_constructor(
     "In_a",
     parse_type("nat0 -> nat0 -> nat0"),
     "\\t1:nat0. \\t2:nat0. "
@@ -246,11 +232,13 @@ IN_A_DEF, IN_A_AT = define_with_at(
     "(SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))))))) "
     "(Pair_ord t1 t2)",
 )
-In_a = mk_const("In_a", [])
+IN_A_DEF = _IN_A_CTOR.def_thm
+IN_A_AT = _IN_A_CTOR.at_thm
+In_a = _IN_A_CTOR.const
 
 
 # Pointwise applied forms (``VAR_T_AT`` etc.) are produced alongside the
-# defining equations above via ``define_with_at``.  Downstream rewrites
+# defining equations above via ``define_constructor``.  Downstream rewrites
 # pattern-match on the applied head.
 
 
@@ -309,39 +297,114 @@ _IMP_F_TAG = "SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))"
 _FORALL_F_TAG = "SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))))"
 
 
-NAT0_LT_EQ_F_L = _proof_lt_binary_left(
-    "NAT0_LT_EQ_F_L", "t1", "t2", "Eq_f", EQ_F_AT, _EQ_F_TAG
+NAT0_LT_EQ_F_L = prove_pairord_binary_size_left(
+    "NAT0_LT_EQ_F_L",
+    "t1",
+    "t2",
+    "Eq_f",
+    EQ_F_AT,
+    _EQ_F_TAG,
+    NAT0_LT_PAIR_ORD_L,
+    NAT0_LT_PAIR_ORD_R,
+    NAT0_LT_TRANS,
 )
-NAT0_LT_EQ_F_R = _proof_lt_binary_right(
-    "NAT0_LT_EQ_F_R", "t1", "t2", "Eq_f", EQ_F_AT, _EQ_F_TAG
+NAT0_LT_EQ_F_R = prove_pairord_binary_size_right(
+    "NAT0_LT_EQ_F_R",
+    "t1",
+    "t2",
+    "Eq_f",
+    EQ_F_AT,
+    _EQ_F_TAG,
+    NAT0_LT_PAIR_ORD_R,
+    NAT0_LT_TRANS,
 )
-NAT0_LT_IMP_F_L = _proof_lt_binary_left(
-    "NAT0_LT_IMP_F_L", "phi1", "phi2", "Imp_f", IMP_F_AT, _IMP_F_TAG
+NAT0_LT_IMP_F_L = prove_pairord_binary_size_left(
+    "NAT0_LT_IMP_F_L",
+    "phi1",
+    "phi2",
+    "Imp_f",
+    IMP_F_AT,
+    _IMP_F_TAG,
+    NAT0_LT_PAIR_ORD_L,
+    NAT0_LT_PAIR_ORD_R,
+    NAT0_LT_TRANS,
 )
-NAT0_LT_IMP_F_R = _proof_lt_binary_right(
-    "NAT0_LT_IMP_F_R", "phi1", "phi2", "Imp_f", IMP_F_AT, _IMP_F_TAG
+NAT0_LT_IMP_F_R = prove_pairord_binary_size_right(
+    "NAT0_LT_IMP_F_R",
+    "phi1",
+    "phi2",
+    "Imp_f",
+    IMP_F_AT,
+    _IMP_F_TAG,
+    NAT0_LT_PAIR_ORD_R,
+    NAT0_LT_TRANS,
 )
-NAT0_LT_FORALL_F_L = _proof_lt_binary_left(
-    "NAT0_LT_FORALL_F_L", "n", "phi", "Forall_f", FORALL_F_AT, _FORALL_F_TAG
+NAT0_LT_FORALL_F_L = prove_pairord_binary_size_left(
+    "NAT0_LT_FORALL_F_L",
+    "n",
+    "phi",
+    "Forall_f",
+    FORALL_F_AT,
+    _FORALL_F_TAG,
+    NAT0_LT_PAIR_ORD_L,
+    NAT0_LT_PAIR_ORD_R,
+    NAT0_LT_TRANS,
 )
-NAT0_LT_FORALL_F_R = _proof_lt_binary_right(
-    "NAT0_LT_FORALL_F_R", "n", "phi", "Forall_f", FORALL_F_AT, _FORALL_F_TAG
+NAT0_LT_FORALL_F_R = prove_pairord_binary_size_right(
+    "NAT0_LT_FORALL_F_R",
+    "n",
+    "phi",
+    "Forall_f",
+    FORALL_F_AT,
+    _FORALL_F_TAG,
+    NAT0_LT_PAIR_ORD_R,
+    NAT0_LT_TRANS,
 )
 
 # HF size lemmas (tags 9, 10).
 _INSERT_T_TAG = "SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0))))))))"
 _IN_A_TAG = "SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 (SUC0 0)))))))))"
-NAT0_LT_INSERT_T_L = _proof_lt_binary_left(
-    "NAT0_LT_INSERT_T_L", "t1", "t2", "Insert_t", INSERT_T_AT, _INSERT_T_TAG
+NAT0_LT_INSERT_T_L = prove_pairord_binary_size_left(
+    "NAT0_LT_INSERT_T_L",
+    "t1",
+    "t2",
+    "Insert_t",
+    INSERT_T_AT,
+    _INSERT_T_TAG,
+    NAT0_LT_PAIR_ORD_L,
+    NAT0_LT_PAIR_ORD_R,
+    NAT0_LT_TRANS,
 )
-NAT0_LT_INSERT_T_R = _proof_lt_binary_right(
-    "NAT0_LT_INSERT_T_R", "t1", "t2", "Insert_t", INSERT_T_AT, _INSERT_T_TAG
+NAT0_LT_INSERT_T_R = prove_pairord_binary_size_right(
+    "NAT0_LT_INSERT_T_R",
+    "t1",
+    "t2",
+    "Insert_t",
+    INSERT_T_AT,
+    _INSERT_T_TAG,
+    NAT0_LT_PAIR_ORD_R,
+    NAT0_LT_TRANS,
 )
-NAT0_LT_IN_A_L = _proof_lt_binary_left(
-    "NAT0_LT_IN_A_L", "t1", "t2", "In_a", IN_A_AT, _IN_A_TAG
+NAT0_LT_IN_A_L = prove_pairord_binary_size_left(
+    "NAT0_LT_IN_A_L",
+    "t1",
+    "t2",
+    "In_a",
+    IN_A_AT,
+    _IN_A_TAG,
+    NAT0_LT_PAIR_ORD_L,
+    NAT0_LT_PAIR_ORD_R,
+    NAT0_LT_TRANS,
 )
-NAT0_LT_IN_A_R = _proof_lt_binary_right(
-    "NAT0_LT_IN_A_R", "t1", "t2", "In_a", IN_A_AT, _IN_A_TAG
+NAT0_LT_IN_A_R = prove_pairord_binary_size_right(
+    "NAT0_LT_IN_A_R",
+    "t1",
+    "t2",
+    "In_a",
+    IN_A_AT,
+    _IN_A_TAG,
+    NAT0_LT_PAIR_ORD_R,
+    NAT0_LT_TRANS,
 )
 
 

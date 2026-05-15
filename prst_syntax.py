@@ -90,12 +90,17 @@ from fusion import Var
 from basics import mk_const, mk_app
 from parser import define, parse_type
 from nat0 import nat0_ty
-from proof import proof, define_with_at
+from proof import proof
 from nat0_order import define_wf_lt, NAT0_LT_TRANS
 from hf_sets import PAIR_ORD_INJ, NAT0_LT_PAIR_ORD_L, NAT0_LT_PAIR_ORD_R
+from data_type import (
+    define_constructor,
+    prove_pairord_binary_size_left,
+    prove_pairord_binary_size_right,
+)
 from hf_syntax import (  # re-exported; PRST uses the same encoding for these
     Empty_t,  # noqa: F401  -- body of Empty_pt
-    Var_t,
+    Var_t,  # noqa: F401  -- body of Var_pt
     Eq_f,  # noqa: F401  -- body of Eq_pf
     Not_f,  # noqa: F401  -- body of Not_pf
     Imp_f,  # noqa: F401  -- body of Imp_pf
@@ -172,30 +177,26 @@ def suc_chain(k):
 _suc_chain = suc_chain
 
 
-_f_n0 = Var("f", nat0_ty)
-_args_n0 = Var("args", nat0_ty)
-
-
-APP_PT_DEF, APP_PT_AT = define_with_at(
+_APP_PT_CTOR = define_constructor(
     "App_pt",
     parse_type("nat0 -> nat0 -> nat0"),
     "\\f:nat0. \\args:nat0. "
     f"Pair_ord ({suc_chain(11)}) (Pair_ord f args)",
 )
-App_pt = mk_const("App_pt", [])
+APP_PT_DEF = _APP_PT_CTOR.def_thm
+APP_PT_AT = _APP_PT_CTOR.at_thm
+App_pt = _APP_PT_CTOR.const
 
 
-_a_n0 = Var("a", nat0_ty)
-_b_n0 = Var("b", nat0_ty)
-
-
-TUP_PT_DEF, TUP_PT_AT = define_with_at(
+_TUP_PT_CTOR = define_constructor(
     "Tup_pt",
     parse_type("nat0 -> nat0 -> nat0"),
     "\\a:nat0. \\b:nat0. "
     f"Pair_ord ({suc_chain(12)}) (Pair_ord a b)",
 )
-Tup_pt = mk_const("Tup_pt", [])
+TUP_PT_DEF = _TUP_PT_CTOR.def_thm
+TUP_PT_AT = _TUP_PT_CTOR.at_thm
+Tup_pt = _TUP_PT_CTOR.const
 
 
 # ---------------------------------------------------------------------------
@@ -212,64 +213,27 @@ _APP_PT_TAG = suc_chain(11)
 _TUP_PT_TAG = suc_chain(12)
 
 
-@proof
-def NAT0_LT_APP_PT_L(p):
-    """|- !f args. nat0_lt f (App_pt f args)."""
-    from tactics import SYM, SPECL
-
-    p.goal(
-        "!f args. nat0_lt f (App_pt f args)",
-        types={"f": nat0_ty, "args": nat0_ty},
-    )
-    p.fix("f args")
-    app_at = SPECL([p._parse("f"), p._parse("args")], APP_PT_AT)
-    p.have("h1: nat0_lt f (Pair_ord f args)").by(NAT0_LT_PAIR_ORD_L, "f", "args")
-    p.have(
-        f"h2: nat0_lt (Pair_ord f args) "
-        f"(Pair_ord ({_APP_PT_TAG}) (Pair_ord f args))"
-    ).by(NAT0_LT_PAIR_ORD_R, f"({_APP_PT_TAG})", "Pair_ord f args")
-    p.have(
-        f"h3: nat0_lt f (Pair_ord ({_APP_PT_TAG}) (Pair_ord f args))"
-    ).by(
-        NAT0_LT_TRANS,
-        "f",
-        "Pair_ord f args",
-        f"Pair_ord ({_APP_PT_TAG}) (Pair_ord f args)",
-        "h1",
-        "h2",
-    )
-    p.thus("nat0_lt f (App_pt f args)").by_rewrite_of("h3", [SYM(app_at)])
-
-
-@proof
-def NAT0_LT_APP_PT_R(p):
-    """|- !f args. nat0_lt args (App_pt f args)."""
-    from tactics import SYM, SPECL
-
-    p.goal(
-        "!f args. nat0_lt args (App_pt f args)",
-        types={"f": nat0_ty, "args": nat0_ty},
-    )
-    p.fix("f args")
-    app_at = SPECL([p._parse("f"), p._parse("args")], APP_PT_AT)
-    p.have("h1: nat0_lt args (Pair_ord f args)").by(
-        NAT0_LT_PAIR_ORD_R, "f", "args"
-    )
-    p.have(
-        f"h2: nat0_lt (Pair_ord f args) "
-        f"(Pair_ord ({_APP_PT_TAG}) (Pair_ord f args))"
-    ).by(NAT0_LT_PAIR_ORD_R, f"({_APP_PT_TAG})", "Pair_ord f args")
-    p.have(
-        f"h3: nat0_lt args (Pair_ord ({_APP_PT_TAG}) (Pair_ord f args))"
-    ).by(
-        NAT0_LT_TRANS,
-        "args",
-        "Pair_ord f args",
-        f"Pair_ord ({_APP_PT_TAG}) (Pair_ord f args)",
-        "h1",
-        "h2",
-    )
-    p.thus("nat0_lt args (App_pt f args)").by_rewrite_of("h3", [SYM(app_at)])
+NAT0_LT_APP_PT_L = prove_pairord_binary_size_left(
+    "NAT0_LT_APP_PT_L",
+    "f",
+    "args",
+    "App_pt",
+    APP_PT_AT,
+    _APP_PT_TAG,
+    NAT0_LT_PAIR_ORD_L,
+    NAT0_LT_PAIR_ORD_R,
+    NAT0_LT_TRANS,
+)
+NAT0_LT_APP_PT_R = prove_pairord_binary_size_right(
+    "NAT0_LT_APP_PT_R",
+    "f",
+    "args",
+    "App_pt",
+    APP_PT_AT,
+    _APP_PT_TAG,
+    NAT0_LT_PAIR_ORD_R,
+    NAT0_LT_TRANS,
+)
 
 
 @proof
@@ -475,54 +439,27 @@ def APP_PT_DISJOINT_EMPTY(p):
         p.absurd().by_conj("h_neg", "h_po")
 
 
-@proof
-def NAT0_LT_TUP_PT_L(p):
-    """|- !a b. nat0_lt a (Tup_pt a b)."""
-    from tactics import SYM, SPECL
-
-    p.goal("!a b. nat0_lt a (Tup_pt a b)", types={"a": nat0_ty, "b": nat0_ty})
-    p.fix("a b")
-    tup_at = SPECL([p._parse("a"), p._parse("b")], TUP_PT_AT)
-    p.have("h1: nat0_lt a (Pair_ord a b)").by(NAT0_LT_PAIR_ORD_L, "a", "b")
-    p.have(
-        f"h2: nat0_lt (Pair_ord a b) (Pair_ord ({_TUP_PT_TAG}) (Pair_ord a b))"
-    ).by(NAT0_LT_PAIR_ORD_R, f"({_TUP_PT_TAG})", "Pair_ord a b")
-    p.have(
-        f"h3: nat0_lt a (Pair_ord ({_TUP_PT_TAG}) (Pair_ord a b))"
-    ).by(
-        NAT0_LT_TRANS,
-        "a",
-        "Pair_ord a b",
-        f"Pair_ord ({_TUP_PT_TAG}) (Pair_ord a b)",
-        "h1",
-        "h2",
-    )
-    p.thus("nat0_lt a (Tup_pt a b)").by_rewrite_of("h3", [SYM(tup_at)])
-
-
-@proof
-def NAT0_LT_TUP_PT_R(p):
-    """|- !a b. nat0_lt b (Tup_pt a b)."""
-    from tactics import SYM, SPECL
-
-    p.goal("!a b. nat0_lt b (Tup_pt a b)", types={"a": nat0_ty, "b": nat0_ty})
-    p.fix("a b")
-    tup_at = SPECL([p._parse("a"), p._parse("b")], TUP_PT_AT)
-    p.have("h1: nat0_lt b (Pair_ord a b)").by(NAT0_LT_PAIR_ORD_R, "a", "b")
-    p.have(
-        f"h2: nat0_lt (Pair_ord a b) (Pair_ord ({_TUP_PT_TAG}) (Pair_ord a b))"
-    ).by(NAT0_LT_PAIR_ORD_R, f"({_TUP_PT_TAG})", "Pair_ord a b")
-    p.have(
-        f"h3: nat0_lt b (Pair_ord ({_TUP_PT_TAG}) (Pair_ord a b))"
-    ).by(
-        NAT0_LT_TRANS,
-        "b",
-        "Pair_ord a b",
-        f"Pair_ord ({_TUP_PT_TAG}) (Pair_ord a b)",
-        "h1",
-        "h2",
-    )
-    p.thus("nat0_lt b (Tup_pt a b)").by_rewrite_of("h3", [SYM(tup_at)])
+NAT0_LT_TUP_PT_L = prove_pairord_binary_size_left(
+    "NAT0_LT_TUP_PT_L",
+    "a",
+    "b",
+    "Tup_pt",
+    TUP_PT_AT,
+    _TUP_PT_TAG,
+    NAT0_LT_PAIR_ORD_L,
+    NAT0_LT_PAIR_ORD_R,
+    NAT0_LT_TRANS,
+)
+NAT0_LT_TUP_PT_R = prove_pairord_binary_size_right(
+    "NAT0_LT_TUP_PT_R",
+    "a",
+    "b",
+    "Tup_pt",
+    TUP_PT_AT,
+    _TUP_PT_TAG,
+    NAT0_LT_PAIR_ORD_R,
+    NAT0_LT_TRANS,
+)
 
 
 @proof
@@ -1880,9 +1817,7 @@ def SUBSTITUTE_P_PRESERVES_IS_PTERM(p):
     Var case uses ``?x. ...`` -- PRST inherited the ``v`` name from
     its F_DEF.
     """
-    from tactics import (
-        SPEC, SPECL, SYM, AP_TERM, CONJ, EQ_MP,
-    )
+    from tactics import SPEC, SPECL, SYM, AP_TERM, CONJ
     from classical import EXCLUDED_MIDDLE
 
     p.goal(
@@ -2024,15 +1959,13 @@ def SUBSTITUTE_P_PRESERVES_IS_PFORM(p):
     delegate to ``SUBSTITUTE_P_PRESERVES_IS_PTERM`` on each subterm;
     Not_pf / Imp_pf recurse on subforms via the IH.
     """
-    from tactics import SPEC, SPECL, SYM, AP_TERM, CONJ
+    from tactics import SPEC, SPECL, SYM, CONJ
 
     p.goal(
         "!phi. !t v. is_pform phi /\\ is_pterm t "
         "==> is_pform (substitute_p phi t v)",
         types={"phi": nat0_ty, "t": nat0_ty, "v": nat0_ty},
     )
-    is_pform_const = mk_const("is_pform", [])
-
     with p.strong_induction("phi", "IH"):
         p.fix("t v")
         p.assume("(h_phi, h_t): is_pform phi /\\ is_pterm t")
