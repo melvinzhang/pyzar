@@ -1212,7 +1212,7 @@ def PROOF_PRST_PR_INTERNAL_EVAL(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 2B (d.5) -- modus ponens for Prov_PRST (sorry obligation).
+# Stage 2B (d.5) -- modus ponens for Prov_PRST.
 #
 #     PROV_PRST_MP :
 #         |- !f g. Prov_PRST f /\ Prov_PRST (Imp_pf f g) ==> Prov_PRST g
@@ -1222,11 +1222,10 @@ def PROOF_PRST_PR_INTERNAL_EVAL(p):
 # earlier lines for MP witnesses. That fixes the old single-tail bug where
 # the same tail had to prove both f and Imp_pf f g.
 #
-# PROV_PRST_MP remains a sorry obligation because theorem-level closure needs
-# proof-list append/merge infrastructure: from Prov_PRST f and
-# Prov_PRST (Imp_pf f g), construct one valid list containing both proof
-# outputs, then cons g as an MP step. The checker now has the right local
-# shape; the missing part is the list-combination proof.
+# The theorem-level closure proof depends on a small PRST-list API:
+# combine two proof lists into one valid list containing both conclusions,
+# then cons g as an MP step. Those list API facts are currently the sorry
+# obligations; PROV_PRST_MP itself is just witness plumbing.
 #
 # All downstream consumers (PROV_PRST_NUMERAL_EVAL, PROV_PRST_REPRESENTS,
 # G2's D2 chain, ...) rely on MP.
@@ -1234,13 +1233,107 @@ def PROOF_PRST_PR_INTERNAL_EVAL(p):
 
 
 @proof
+def PROOF_PRST_LIST_COMBINE(p):
+    """|- !a b. (?P. Proof_PRST P a) /\\ (?Q. Proof_PRST Q b)
+              ==> ?R. ValidProof_PRST R /\\ Mem_PRST a R /\\ Mem_PRST b R.
+
+    HF-style PRST proof-list API stub. Intended implementation:
+    append/merge the two Tup_pt proof lists, prove ValidProof_PRST is preserved
+    by the merge, and prove both original conclusions become Mem_PRST members.
+    """
+    p.goal(
+        "!a b. (?P. Proof_PRST P a) /\\ (?Q. Proof_PRST Q b) "
+        "==> ?R. ValidProof_PRST R /\\ Mem_PRST a R /\\ Mem_PRST b R",
+        types={"a": nat0_ty, "b": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROOF_PRST_CONS_MP_STEP(p):
+    """|- !R f g. ValidProof_PRST R
+              /\\ Mem_PRST f R
+              /\\ Mem_PRST (Imp_pf f g) R
+              ==> Proof_PRST (Tup_pt g R) g.
+
+    HF-style PRST proof-list API stub. Intended implementation: unfold
+    ValidProof_PRST at Tup_pt g R, use the MP branch with witness f, then
+    fold through PROOF_PRST_CONS.
+    """
+    p.goal(
+        "!R f g. ValidProof_PRST R /\\ Mem_PRST f R "
+        "        /\\ Mem_PRST (Imp_pf f g) R "
+        "        ==> Proof_PRST (Tup_pt g R) g",
+        types={"R": nat0_ty, "f": nat0_ty, "g": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def MP_HAS_PROOF_PRST_LIST(p):
+    """|- !f g. (?P. Proof_PRST P f)
+              /\\ (?Q. Proof_PRST Q (Imp_pf f g))
+              ==> ?R. Proof_PRST R g."""
+    from tactics import CONJ
+
+    p.goal(
+        "!f g. (?P. Proof_PRST P f) /\\ (?Q. Proof_PRST Q (Imp_pf f g)) "
+        "==> ?R. Proof_PRST R g",
+        types={"f": nat0_ty, "g": nat0_ty},
+    )
+    p.fix("f g")
+    p.assume(
+        "(pf_ex, pfg_ex): "
+        "(?P. Proof_PRST P f) /\\ (?Q. Proof_PRST Q (Imp_pf f g))"
+    )
+    p.have(
+        "combined: ?R. ValidProof_PRST R "
+        "           /\\ Mem_PRST f R "
+        "           /\\ Mem_PRST (Imp_pf f g) R"
+    ).by(
+        PROOF_PRST_LIST_COMBINE,
+        "f",
+        "Imp_pf f g",
+        CONJ(p.fact("pf_ex"), p.fact("pfg_ex")),
+    )
+    p.choose("R", "combined", eq_label="combined_body")
+    p.split("combined_body", "(valid_R, (mem_f_R, mem_imp_R))")
+    p.have("mp_payload: ValidProof_PRST R /\\ Mem_PRST f R /\\ Mem_PRST (Imp_pf f g) R").by_thm(
+        CONJ(p.fact("valid_R"), CONJ(p.fact("mem_f_R"), p.fact("mem_imp_R")))
+    )
+    p.have("proof_g: Proof_PRST (Tup_pt g R) g").by(
+        PROOF_PRST_CONS_MP_STEP,
+        "R",
+        "f",
+        "g",
+        "mp_payload",
+    )
+    p.thus("?R. Proof_PRST R g").by_exists(["Tup_pt g R"], "proof_g")
+
+
+@proof
 def PROV_PRST_MP(p):
     """|- !f g. Prov_PRST f /\\ Prov_PRST (Imp_pf f g) ==> Prov_PRST g."""
+    from tactics import SPEC, SYM, CONJ
+
     p.goal(
         "!f g. Prov_PRST f /\\ Prov_PRST (Imp_pf f g) ==> Prov_PRST g",
         types={"f": nat0_ty, "g": nat0_ty},
     )
-    p.sorry()
+    p.fix("f g")
+    p.assume("(pf, pfg): Prov_PRST f /\\ Prov_PRST (Imp_pf f g)")
+    prov_at_f = SPEC(p._parse("f"), PROV_PRST_AT)
+    prov_at_imp = SPEC(p._parse("Imp_pf f g"), PROV_PRST_AT)
+    prov_at_g = SPEC(p._parse("g"), PROV_PRST_AT)
+    p.have("ex_f: ?P. Proof_PRST P f").by_eq_mp(prov_at_f, "pf")
+    p.have("ex_imp: ?Q. Proof_PRST Q (Imp_pf f g)").by_eq_mp(prov_at_imp, "pfg")
+    p.have("ex_g: ?R. Proof_PRST R g").by(
+        MP_HAS_PROOF_PRST_LIST,
+        "f",
+        "g",
+        CONJ(p.fact("ex_f"), p.fact("ex_imp")),
+    )
+    p.thus("Prov_PRST g").by_eq_mp(SYM(prov_at_g), "ex_g")
 
 
 # ---------------------------------------------------------------------------
