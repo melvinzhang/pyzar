@@ -69,6 +69,7 @@ from hf_syntax import (
     In_a,  # noqa: F401  -- parser alias for generated HF formulas
     IS_TERM_REC,
     IS_FORM_REC,
+    IS_TERM_AT_VAR,
     IS_TERM_AT_INSERT,
     IS_FORM_AT_EQ,
     IS_FORM_AT_NOT,
@@ -148,7 +149,7 @@ from classical import (  # noqa: E402 -- COND machinery for quote_hf body
     mk_cond,
     EXCLUDED_MIDDLE,
 )
-from tactics import EQT_INTRO, EQF_INTRO  # noqa: E402,F401  -- used in QUOTE_HF_MONO/_AT_NZ
+from tactics import EQT_INTRO, EQT_ELIM, EQF_INTRO  # noqa: E402,F401  -- used in QUOTE_HF_MONO/_AT_NZ
 from tactics import REWRITE_RULE, REWRITE_PROVE
 from fusion import vsubst, aty
 from hf_proof import (
@@ -3130,7 +3131,34 @@ def SUBSTITUTE_REC_EMPTY(p):
         against ``quote_hf Empty_t``.
     """
     p.goal(_SUBST_RULE_EMPTY)
-    p.sorry()
+    p.fix("t v")
+    p.have("hsyntax: is_term Empty_t \\/ is_form Empty_t").by_thm(
+        DISJ1(IS_TERM_EMPTY, p._parse("is_form Empty_t"))
+    )
+    equiv = SPECL(
+        [
+            p._parse("Empty_t"),
+            p._parse("t"),
+            p._parse("v"),
+            p._parse("Empty_t"),
+        ],
+        SUBSTITUTE_INTERNAL_EQUIV,
+    )
+    p.have(
+        "h_rel_eq: "
+        f"{_prov_substitute_internal_rel('Empty_t', 't', 'v', 'Empty_t')} "
+        "= (Empty_t = ((substitute Empty_t) t) v)"
+    ).by(equiv, "hsyntax")
+    p.have("h_rhs: Empty_t = ((substitute Empty_t) t) v").by_rewrite(
+        [SUBSTITUTE_AT_EMPTY]
+    )
+    # DSL friction: the direct object-level proof should construct the
+    # graph witness inside ``substitute_internal``.  The available compact
+    # route is through ``SUBSTITUTE_INTERNAL_EQUIV``, which inverts the
+    # intended A1 -> A4 dependency but keeps this constructor proof local.
+    p.thus(_prov_substitute_internal_rel("Empty_t", "t", "v", "Empty_t")).by_eq_mp(
+        "h_rel_eq", "h_rhs"
+    )
 
 
 @proof
@@ -3144,7 +3172,39 @@ def SUBSTITUTE_REC_VAR_HIT(p):
       * Close the object equality by reflexivity on the quoted new term.
     """
     p.goal(_SUBST_RULE_VAR_HIT)
-    p.sorry()
+    p.fix("x t v")
+    p.assume("hxv: x = v")
+    p.have("h_var_term: is_term (Var_t x)").by_thm(
+        EQT_ELIM(SPEC(p._parse("x"), IS_TERM_AT_VAR))
+    )
+    p.have("hsyntax: is_term (Var_t x) \\/ is_form (Var_t x)").by_thm(
+        DISJ1(p.fact("h_var_term"), p._parse("is_form (Var_t x)"))
+    )
+    equiv = SPECL(
+        [
+            p._parse("Var_t x"),
+            p._parse("t"),
+            p._parse("v"),
+            p._parse("t"),
+        ],
+        SUBSTITUTE_INTERNAL_EQUIV,
+    )
+    p.have(
+        "h_rel_eq: "
+        f"{_prov_substitute_internal_rel('Var_t x', 't', 'v', 't')} "
+        "= (t = ((substitute (Var_t x)) t) v)"
+    ).by(equiv, "hsyntax")
+    p.have("hvx: v = x").by_thm(SYM(p.fact("hxv")))
+    p.have("h_subst: ((substitute (Var_t x)) t) v = t").by(
+        SUBSTITUTE_AT_VAR_HIT, "x", "t", "v", "hvx"
+    )
+    p.have("h_rhs: t = ((substitute (Var_t x)) t) v").by_thm(SYM(p.fact("h_subst")))
+    # DSL friction: ``SUBSTITUTE_AT_VAR_HIT`` is keyed by ``v = x`` while
+    # the constructor package states the premise as ``x = v``; the DSL has
+    # no one-token symmetric premise adapter, so we name ``hvx`` explicitly.
+    p.thus(_prov_substitute_internal_rel("Var_t x", "t", "v", "t")).by_eq_mp(
+        "h_rel_eq", "h_rhs"
+    )
 
 
 @proof
@@ -3157,7 +3217,44 @@ def SUBSTITUTE_REC_VAR_MISS(p):
       * Close the object equality for ``quote_hf (Var_t x)``.
     """
     p.goal(_SUBST_RULE_VAR_MISS)
-    p.sorry()
+    p.fix("x t v")
+    p.assume("hxne: ~(x = v)")
+    p.have("h_var_term: is_term (Var_t x)").by_thm(
+        EQT_ELIM(SPEC(p._parse("x"), IS_TERM_AT_VAR))
+    )
+    p.have("hsyntax: is_term (Var_t x) \\/ is_form (Var_t x)").by_thm(
+        DISJ1(p.fact("h_var_term"), p._parse("is_form (Var_t x)"))
+    )
+    equiv = SPECL(
+        [
+            p._parse("Var_t x"),
+            p._parse("t"),
+            p._parse("v"),
+            p._parse("Var_t x"),
+        ],
+        SUBSTITUTE_INTERNAL_EQUIV,
+    )
+    p.have(
+        "h_rel_eq: "
+        f"{_prov_substitute_internal_rel('Var_t x', 't', 'v', 'Var_t x')} "
+        "= (Var_t x = ((substitute (Var_t x)) t) v)"
+    ).by(equiv, "hsyntax")
+    hvx = ASSUME(p._parse("v = x"))
+    hxv = SYM(hvx)
+    F_th = MP(NOT_ELIM(p.fact("hxne")), hxv)
+    p.have("hvne: ~(v = x)").by_thm(NOT_INTRO(DISCH(p._parse("v = x"), F_th)))
+    p.have("h_subst: ((substitute (Var_t x)) t) v = Var_t x").by(
+        SUBSTITUTE_AT_VAR_MISS, "x", "t", "v", "hvne"
+    )
+    p.have("h_rhs: Var_t x = ((substitute (Var_t x)) t) v").by_thm(
+        SYM(p.fact("h_subst"))
+    )
+    # DSL friction: deriving ``~(v = x)`` from ``~(x = v)`` still needs
+    # a low-level NOT_INTRO/DISCH block; a symmetric-negated-equality
+    # adapter would make this constructor case match the hit case.
+    p.thus(_prov_substitute_internal_rel("Var_t x", "t", "v", "Var_t x")).by_eq_mp(
+        "h_rel_eq", "h_rhs"
+    )
 
 
 @proof
