@@ -8,10 +8,16 @@ low-bit quoted-inequality route have been removed from
 additional `p.sorry()` calls in `hf_godel1.py`; those are downstream
 work, but the detailed inventory below is file-local to `hf_repr_thms.py`.
 
-The plan is ordered to settle the greatest unknown first. The switch is
-now decided: `Prov_HF_internal` must use HF-native proof objects, not
-`cons_l` lists. The HF-set proof-object shape is pinned, and `Prov_HF`
-has been redirected to the set-native checker.
+The plan is ordered to settle the greatest unknown first. Two switches
+are now decided:
+
+* `Prov_HF_internal` must use HF-native proof objects, not `cons_l`
+  lists. The HF-set proof-object shape is pinned, and `Prov_HF` has
+  been redirected to the set-native checker.
+* The G1 development is readability-first. Phase 2 should use a scoped
+  HF syntax recursion/induction definitional package for substitution,
+  not the finite-trace encoding as the main line. The trace machinery is
+  retained only as a weak-base fallback/spike.
 
 ## Inventory
 
@@ -22,10 +28,9 @@ has been redirected to the set-native checker.
 | C | `QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES` | active | small/med | — | symmetric bit top-difference layer |
 | D | `QUOTE_HF_MUTUAL_MEASURED`       | active | med/large  | B, C                      | three object-level HF1/HF2/HF3 branch bridges               |
 | E | `QUOTE_HF_MEM_DECISION`          | done   | done       | D                         | final unbounded projection from measured theorem             |
-| F | `IS_SUBSTITUTE_STEP_REPRESENTS`  | active | ~150 lines | E                         | `IS_PAIR_ORD_REPRESENTS` (✓), `QUOTE_HF_AT_PAIR_ORD` (✓), HF1–HF3 (✓); **body of `is_substitute_step_internal`** |
-| G | `IS_SUBSTITUTE_TRACE_REPRESENTS` | active |  ~80 lines | F                         | `HF_INDUCTION` (✓); **body of `is_substitute_trace_internal`** |
-| H | `SUBSTITUTE_REPRESENTS`          | active |  moderate  | G                         | `TRACE_EXISTS` (✓); **body of `substitute_internal`**       |
-| I | `PROV_HF_REPRESENTS`             | active | large      | H                         | Σ₁ completeness (forward) — Σ₁ soundness deferred to Stage 6; **body of `Prov_HF_internal`** |
+| F | `HF_SYNTAX_REC_PACKAGE`          | active | moderate   | —                         | scoped syntax recursion/induction definitional extension     |
+| G | `SUBSTITUTE_REPRESENTS`          | active | small/med  | F                         | direct recursive equations for `substitute_internal`         |
+| I | `PROV_HF_REPRESENTS`             | active | large      | G                         | Σ₁ completeness (forward) — Σ₁ soundness deferred to Stage 6; **body of `Prov_HF_internal`** |
 | J | `IS_FORM_PROV_HF_INTERNAL`       | active | small      | I's body def              | `is_form` closure under HF-formula constructors             |
 | K | `FREE_IN_PROV_HF_INTERNAL`       | active | small      | I's body def              | `free_in` recursion                                          |
 
@@ -88,8 +93,8 @@ theorem once its local branch bridges are discharged.
 
 ### Phase 0 — switch to HF-native proof objects
 
-Do this first, before investing in hundreds of lines of substitute-trace
-proof code. The target for G is:
+Do this first, before investing in downstream representability plumbing.
+The target for G is:
 
 ```text
 Prov_HF_internal(x) := ?P. Proof_HF_set_internal(P, x)
@@ -238,33 +243,71 @@ use `QUOTE_HF_PROV_NEQ` directly.
 
 With Phase 0 settled and the quote dependency concentrated in
 `QUOTE_HF_MEM_DECISION`,
-this cluster becomes mostly local proof engineering: define the three
-HF-formula bodies and walk the resulting Σ₀/Σ₁ structure.
+this cluster should now be simplified for readability. Do **not** make
+the finite-trace checker the main G1 path. Instead, add a scoped
+syntax-recursion/induction definitional package for the encoded HF
+term/form grammar and define substitution directly by its usual
+recursion equations.
 
-3. **D — `IS_SUBSTITUTE_STEP_REPRESENTS`**
-   - First define the body of `is_substitute_step_internal` in
-     `hf_repr_core.py` as a 9-disjunction `Or_f`-chain mirroring the
-     HOL `is_substitute_step` cases, with `In_a (Pair_ord_q …) var_T`
-     for trace-membership clauses.
-   - Then case-split on `IS_SUBSTITUTE_STEP_DEF`'s 9 disjuncts; each
-     case dispatches one HF-disjunct via `IS_PAIR_ORD_REPRESENTS` /
-     `QUOTE_HF_MEM_DECISION` / `QUOTE_HF_AT_PAIR_ORD` and walks HF1–HF3.
-   - **Body-shape conclusion:** build slot-bearing constructor data
-     through the separate quoted-syntax parser `qparse`, whose grammar
-     maps strings like `Var_t(var_z)` to the quoted
-     `Insert_t`/`Empty_t` tower. Do not write primitive syntax like
-     `Var_t var_z`; `substitute` treats that as a variable leaf and
-     will not reach `var_z`.
+3. **F — `HF_SYNTAX_REC_PACKAGE`**
+   - Add a narrowly scoped definitional extension principle for
+     structurally recursive functions over the existing encoded HF
+     syntax grammar:
 
-4. **E — `IS_SUBSTITUTE_TRACE_REPRESENTS`**
-   - Define `is_substitute_trace_internal` body.
-   - HF_INDUCTION on the Insert-tower of `T`; per-element step
-     discharges via D.
+     ```text
+     Empty_t
+     Var_t
+     Insert_t
+     Eq_f
+     In_a
+     Not_f
+     Imp_f
+     Forall_f
+     ```
 
-5. **F — `SUBSTITUTE_REPRESENTS`**
-   - Define `substitute_internal := ?T. is_substitute_trace T F t v r`.
-   - Existence supplied by `TRACE_EXISTS`; uniqueness supplied at
-     numerals by determinism of `is_substitute_trace`.
+   - The package should justify adding a named function/formula by
+     recursive equations when all recursive calls are on immediate
+     syntax subcomponents. It should also expose the corresponding
+     induction principle for proving universal properties of that
+     definition.
+   - Keep `HF_INDUCTION` / membership induction. The recursion package
+     introduces functions cleanly; induction still proves global
+     properties about all encoded terms/forms.
+   - Scope this to syntax recursion, not arbitrary definability. The
+     goal is readable Gödel I, not a broad new replacement/separation
+     theory.
+
+4. **G — `SUBSTITUTE_REPRESENTS`**
+   - Define `substitute_internal` directly from the syntax-recursion
+     equations for substitution:
+
+     ```text
+     substitute Empty_t t v = Empty_t
+     substitute (Var_t x) t v =
+       if x = v then t else Var_t x
+     substitute (Insert_t a b) t v =
+       Insert_t (substitute a t v) (substitute b t v)
+     substitute (Eq_f a b) t v =
+       Eq_f (substitute a t v) (substitute b t v)
+     ...
+     ```
+
+   - The representability proof should cite the generated recursion
+     equations and the syntax induction principle, rather than
+     constructing a finite computation trace.
+   - `qparse` remains the right body-construction API for quoted
+     syntax-as-data, but it is no longer the central Phase 2 mechanism.
+     It is still useful wherever the internal formula needs to mention
+     constructor codes with free slots.
+
+5. **Trace fallback — demoted**
+   - `is_substitute_step_internal`, `is_substitute_trace_internal`,
+     `TRACE_EXISTS`, and the finite-trace representability route are now
+     a weak-base fallback/spike. They are correct plumbing, but they are
+     not the readability-first path.
+   - Keep the code only if it remains useful for comparison or for a
+     future weak-foundation variant. It should not drive the main
+     `SUBSTITUTE_REPRESENTS` proof.
 
 After Phase 2, the diagonal-lemma path is unblocked end-to-end at the
 substitute layer.
@@ -294,16 +337,18 @@ substitute layer.
 
 * **Phase 0 first** because it removes the largest architectural risk:
   list theory must not be smuggled into HF just to internalise proofs.
-  Substitute-trace work still helps, but it will not close the headline
-  G1 path until the HF-native proof-object representation is viable.
+  The HF-native proof-object representation must be stable before
+  provability representability is worth attacking.
 * **Phase 1 next** because it concentrates the quote dependency into
   `QUOTE_HF_MUTUAL_MEASURED`, with `QUOTE_HF_MEM_DECISION` and
   `QUOTE_HF_PROV_NEQ` as small projected interfaces for downstream
   code.
 * **Phase 2 after that** because it is high-leverage and comparatively
-  local once `QUOTE_HF_MEM_DECISION` is closed.
+  local once `QUOTE_HF_MEM_DECISION` is closed. For readability-first
+  G1, this should be a syntax-recursion/induction definitional package,
+  not the finite-trace encoding.
 * **Phase 3 last** because G carries the deepest semantic content and
-  depends on both F and the Phase 0 design decision; H/I are cheap
+  depends on both Phase 2 and the Phase 0 design decision; H/I are cheap
   follow-ups triggered by the chosen `Prov_HF_internal` body.
 
 ## Downstream `hf_godel1.py` sorries
@@ -549,16 +594,14 @@ definitions.
   `Pair_ord` is kept behind `--include-pair-ord` because exact values
   explode; small runs still reject it as the membership measure.
 
-* **Prerequisite for D — Python builders for godelnum shapes.**
-  The body of `is_substitute_step_internal` needs to express
-  godelnum-shape claims like ``a = Var_t v`` in HF formulas with
-  `var_z` as a free leaf. Writing this as `Eq_f var_a (Var_t var_z)`
-  does **not** work: `substitute` treats `Var_t k` as a leaf
+* **Quoted syntax parser (retained utility, trace route demoted).**
+  If an internal formula needs to express godelnum-shape claims like
+  ``a = Var_t v`` with `var_z` as a free leaf, do not write
+  `Eq_f var_a (Var_t var_z)`. `substitute` treats `Var_t k` as a leaf
   (HIT/MISS on the index `k = var_z` = `Var_t (SUC0² 0)`), so it
   never pushes the substitute into `var_z`. The fix is to write
-  bodies that mention only `Insert_t` / `Empty_t` in subject-term
-  position — `substitute` already pushes through those via
-  `SUBSTITUTE_AT_INSERT` / `_EMPTY`, reaching the leaf placeholders.
+  constructor data through quoted `Insert_t` / `Empty_t` towers, where
+  `substitute` reaches the leaf placeholders structurally.
 
   Implement as **a separate quoted-syntax parser** (no new HOL
   constants, no new lemmas): `hf_qsyntax.qparse` has its own small Lark
@@ -580,13 +623,13 @@ definitions.
   with literal Insert_t-towers — `qparse` just packages what's already
   in the codebase.
 
-  Tradeoff: theorem statements print with the body fully expanded
+  Tradeoff: theorem statements print with quoted data fully expanded
   into Insert_t/Empty_t towers (verbose). Downstream consumers cite
-  `is_substitute_step_internal` as a constant and never need to see
-  the expansion, so the cost is one-time at definition.
+  named constants and should not need to see the expansion, so the cost
+  is one-time at definition.
 
-  **Spike conclusion:** `spike_substitute_step_body.py` validates this
-  body-shape choice. Under the existing `SUBSTITUTE_AT_*` rewrites,
+  **Spike conclusion:** the quoted parser validates the body-shape
+  choice. Under the existing `SUBSTITUTE_AT_*` rewrites,
   primitive `Var_t` with a slot in its index stays stuck, and primitive
   `Forall_f` with the target variable as binder correctly stops under
   the binder. The quoted builder shapes normalize as needed for
@@ -607,16 +650,19 @@ definitions.
   because `Var_t` and binder-index positions are exactly where the
   primitive syntax becomes misleading.
 
+  This parser work remains useful, but it no longer determines the main
+  Phase 2 plan. The main plan is now the scoped syntax recursion package;
+  trace bodies are fallback plumbing.
+
 ## Notes per step (pitfalls to flag now)
 
-* **D**: the choice of `Or_f`-chain order is consumed verbatim by
-  E, F, and (indirectly) G. Pick it once, document the convention
-  near the body definition. The Q-builder shape is fixed by the
-  godelnum tag table (`Var_t`=2, `Eq_f`=5, …, `In_a`=10) so no
-  design choice there.
-* **F**: `?T. is_substitute_trace …` uses Hilbert ε at the HF level.
-  Verify uniqueness of the trace at numerals (determinism of
-  `is_substitute_trace`) before relying on the ε-elim.
+* **Phase 2 recursion package**: keep the schema scoped to the encoded
+  HF syntax grammar. A broad "all definable recursive functions" axiom
+  would make the model/soundness story harder to audit.
+* **Trace fallback**: if the finite-trace route is revived, the choice
+  of `Or_f`-chain order is consumed verbatim by trace and substitute
+  proofs. `?T. is_substitute_trace …` uses Hilbert ε at the HF level, so
+  uniqueness/determinism must be verified before relying on ε-elim.
 * **G**: keep the forward/backward split explicit — only forward
   direction is in scope for this file; backward gets a parked
   Stage-6 citation, not a sorry-on-sorry.
