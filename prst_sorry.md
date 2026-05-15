@@ -135,11 +135,18 @@ The PR-side recognizer now has real bodies for the three leaves:
 - `is_logical_axiom_pr` recognizes the propositional K/S/N Hilbert schemas
   by PR-level destructuring of `Imp_pf`/`Not_pf` shapes.
 
-Remaining gap: the full `is_pr_def_instance_pr` leaf still needs bounded
-witness search for parametric PR-def axioms and nontrivial substituted
-instances. The `substitute_p zero_def_axiom t v` example is covered only when
-it reduces back to the closed `zero_def_axiom`; it is not yet evidence for the
-general substitution branch.
+Bounded witness-search spike: passed as a design spike, but it points away
+from generic bounded search. `prst_def_instance_spike.py` validates a
+schema-specific matcher for the first nontrivial substituted axiom,
+`substitute_p if_in_true_def_axiom t v`, including malformed near-misses.
+
+Conclusion: the robust PR body should not search arbitrary `F,t,v < n`.
+Substitution can shrink fixed `Var_pt` leaves, so a numeric bound on the
+pre-substitution axiom is not the natural invariant. Instead,
+`is_pr_def_instance_pr` should be a disjunction of PR-level schema matchers:
+read schema parameters and the substituted term from the candidate formula,
+then check all repeated occurrences for consistency. The remaining work is to
+mechanise those matchers for every PR-def axiom family.
 
 ### Spike 4 — `substitute_pr` External Correctness Slice
 
