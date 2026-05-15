@@ -3894,10 +3894,11 @@ def QUOTE_HF_QPARSE_EMPTY(p):
 #          Prov_HF (substitute Prov_HF_internal (numeral n) var_x).
 #
 # ``Prov_HF_internal`` is a HF-formula with ``var_x`` as its sole free
-# variable, expressing "Prov_HF holds at var_x". The kernel constant
-# is declared opaque in ``hf_repr_core.py`` (no defining body) so
-# accidental unfolding is impossible while PROV_HF_REPRESENTS is
-# still a SORRY.
+# variable, expressing "Prov_HF holds at var_x". The body now lives in
+# ``hf_repr_core.py`` as the dependency-set
+# ``?_internal P. Proof_HF_set_internal(P, var_x)`` construction; this
+# section supplies the remaining representability and side-condition
+# proofs over that body.
 #
 # Side conditions posted with the headline (consumed by the diagonal
 # lemma, which needs ``phi(x)`` to be a well-formed HF-formula whose

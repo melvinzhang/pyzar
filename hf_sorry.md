@@ -33,7 +33,7 @@ are now decided:
 | E | `QUOTE_HF_MEM_DECISION`          | done   | done       | D                         | final unbounded projection from measured theorem             |
 | F | `HF_SYNTAX_REC_PACKAGE`          | active | moderate   | —                         | scoped syntax recursion/induction definitional extension     |
 | G | `SUBSTITUTE_REPRESENTS`          | active | small/med  | F                         | direct recursive equations for `substitute_internal`         |
-| I | `PROV_HF_REPRESENTS`             | active | large      | G                         | Σ₁ completeness (forward) — Σ₁ soundness deferred to Stage 6; **body of `Prov_HF_internal`** |
+| I | `PROV_HF_REPRESENTS`             | active | large      | G                         | Σ₁ completeness (forward) — Σ₁ soundness deferred to Stage 6; internal body landed |
 | J | `IS_FORM_PROV_HF_INTERNAL`       | active | small      | I's body def              | `is_form` closure under HF-formula constructors             |
 | K | `FREE_IN_PROV_HF_INTERNAL`       | active | small      | I's body def              | `free_in` recursion                                          |
 
@@ -375,7 +375,7 @@ substitute layer.
      `lt_internal`, trace/list proof objects, or a separate arithmetic
      rank theory for G1.
    - Define `Prov_HF_internal(x) := ?_internal P.
-     Proof_HF_set_internal(P, x)`. The spiked body follows Phase 0's
+     Proof_HF_set_internal(P, x)`. The production body follows Phase 0's
      dependency-set HF proof records:
      `Proof_HF_set_internal(P,n)` says there is a rank `k` with
      `Pair_ord k n` in `P`, and every record `Pair_ord j h` in `P`
@@ -392,9 +392,12 @@ substitute layer.
      from the primitive boundary. It also validates direct bodies for
      `is_mp_internal` (`g = Imp_f f h`) and `is_gen_internal`
      (`?x. h = Forall_f x f`).
-   - Remaining primitive internal body for this route is
-     `is_axiom_internal`. This replaces trace/list recursion and does
-     not reintroduce proof-object bridge machinery.
+   - The primitive internal bodies for this route now live in
+     `hf_repr_core.py`: support recognizers, split axiom packages,
+     direct MP/Gen recognizers, `valid_step_hf_set_internal`,
+     `Proof_HF_set_internal`, and `Prov_HF_internal`. This replaces
+     trace/list recursion and does not reintroduce proof-object bridge
+     machinery.
    - `spike_axiom_internal_body.py` validates the split schema-package
      plan:
      `is_axiom_internal = is_hf_axiom_internal \/ is_hf_ind_axiom_internal
@@ -515,31 +518,33 @@ definitions.
   is viable with qparse `Pair_ord` record terms and ordinary `In_a`
   atoms, but it leaves `lt_internal` as an extra primitive boundary.
 
-* **Rank-as-dependency-set spike (done)** —
+* **Rank-as-dependency-set spike (done; moved to production bodies)** —
   `spike_prov_hf_dep_body.py` validates the cleaner HF-native variant:
   proof records remain `Pair_ord k h`, but `k` is the finite set of
   citeable predecessor ranks. The MP/Gen citation checks use `In_a i k`
-  instead of `nat0_lt i k`, eliminating `lt_internal`; `is_mp_internal`
-  and `is_gen_internal` are direct formula bodies. The only remaining
-  large primitive body is `is_axiom_internal`.
+  instead of `nat0_lt i k`, eliminating `lt_internal`; the production
+  definitions in `hf_repr_core.py` now include direct formula bodies for
+  `is_mp_internal`, `is_gen_internal`, `valid_step_hf_set_internal`,
+  `Proof_HF_set_internal`, and `Prov_HF_internal`.
 
-* **Split axiom-schema spike (done)** —
+* **Split axiom-schema spike (done; moved to production bodies)** —
   `spike_axiom_internal_body.py` validates the `is_axiom_internal`
   package split. Closed HF axioms are a 5-way equality package; logical
   axioms are K/S/N/UI/Vac/Refl/Subst/FaImp packages; induction is its
   own package. UI/Subst/Ind factor through `substitute_internal`, while
   Vac/FaImp/Ind factor through `free_in_internal`. The spike confirms
   every package leaves exactly `{h}` free and introduces no rank/order
-  or trace/list vocabulary.
+  or trace/list vocabulary. The package definitions now live in
+  `hf_repr_core.py`.
 
-* **Support internal-body spike (done)** —
+* **Support internal-body spike (done; moved to production bodies)** —
   `spike_internal_support_bodies.py` validates finite object-formula
   bodies for `is_term_internal`, `is_form_internal`, `free_in_internal`,
   and `substitute_internal`. Term/form use finite closure sets; free-in
   uses a witness-path set; substitute uses a local evaluation graph. The
-  route is coherent and HF-native, but landing it requires proving the
-  closure/path/graph bodies equivalent to the existing HOL predicates
-  and proving substitute graph functionality.
+  production definitions now live in `hf_repr_core.py`. Remaining proof
+  work is proving the closure/path/graph bodies equivalent to the
+  existing HOL predicates and proving substitute graph functionality.
 
 * **Forward dependency-set shape spike (done)** —
   `spike_forward_dep_shape.py` validates the proof-object witness shape
@@ -565,9 +570,9 @@ definitions.
   `FREE_IN_IS_AXIOM_INTERNAL`, and qparse-template term/free lemmas are
   available.
 
-* **Phase 3 design decision (confirmed and external checker landed)** —
-  the main path uses the dependency-set proof checker. Next, move the
-  spiked internal bodies/packages into production modules.
+* **Phase 3 design decision (confirmed and internal bodies landed)** —
+  the main path uses the dependency-set proof checker, and the fixed
+  internal bodies/packages now live in `hf_repr_core.py`.
   Remaining work is proof engineering: equivalence/functionality for
   support certificates, package side lemmas, and the forward
   `PROV_HF_REPRESENTS` theorem.

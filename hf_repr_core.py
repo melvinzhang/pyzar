@@ -136,7 +136,7 @@ from classical import (  # noqa: E402 -- COND machinery for quote_hf body
 )
 from tactics import EQT_INTRO, EQF_INTRO  # noqa: E402,F401  -- used in QUOTE_HF_MONO/_AT_NZ
 from tactics import REWRITE_RULE, REWRITE_PROVE
-from fusion import vsubst, aty, new_axiom, new_constant
+from fusion import vsubst, aty, new_axiom
 from hf_proof import (
     var_x,
     VAR_X_DEF,
@@ -2405,11 +2405,389 @@ is_In_internal = mk_const("is_In_internal", [])
 # rather than encoding finite computation histories.
 
 
+# Fixed internal predicate bodies.
+#
+# Each ``*_internal`` constant below is a single HF formula code.  Predicate
+# arguments are supplied by object-level substitution into the reserved free
+# slots:
+#
+#   arity 1: var_x
+#   arity 2: var_x, var_y
+#   arity 3: var_x, var_y, var_z
+#   arity 4: var_x, var_y, var_z, var_w
+#
+# Bound helper variables are deliberately allocated in high numeric bands so
+# later template substitutions do not capture package-local variables.
+
+
+def _V_idx(i):
+    return mk_app(Var_t, _idx_term(i))
+
+
+def _subst1(phi, x):
+    return mk_app(substitute, phi, x, idx_x)
+
+
+def _subst2(phi, x, y):
+    return mk_app(substitute, _subst1(phi, x), y, idx_y)
+
+
+def _subst3(phi, x, y, z):
+    return mk_app(substitute, _subst2(phi, x, y), z, idx_z)
+
+
+def _subst4(phi, x, y, z, w):
+    return mk_app(substitute, _subst3(phi, x, y, z), w, idx_w)
+
+
+def _entry_term(inp, out):
+    return qparse("Pair_ord(inp,out)", inp=inp, out=out)
+
+
+def _entry_in_graph(inp, out, graph):
+    return mk_app(In_a, _entry_term(inp, out), graph)
+
+
+def _support_code_empty():
+    return qparse("Empty_t")
+
+
+def _support_code_var(x):
+    return qparse("Var_t(x)", x=x)
+
+
+def _support_code_insert(a, b):
+    return qparse("Insert_t(a,b)", a=a, b=b)
+
+
+def _support_code_eq_f(a, b):
+    return qparse("Eq_f(a,b)", a=a, b=b)
+
+
+def _support_code_in_a(a, b):
+    return qparse("In_a(a,b)", a=a, b=b)
+
+
+def _support_code_not(p):
+    return qparse("Not_f(p)", p=p)
+
+
+def _support_code_imp(p, q):
+    return qparse("Imp_f(p,q)", p=p, q=q)
+
+
+def _support_code_forall(x, p):
+    return qparse("Forall_f(x,p)", x=x, p=p)
+
+
+def _support_term_local_body(set_var, node):
+    x = _V_idx(11)
+    a = _V_idx(12)
+    b = _V_idx(13)
+    return Q_or_chain(
+        Q_eq(node, _support_code_empty()),
+        Q_exists(_idx_term(11), Q_eq(node, _support_code_var(x))),
+        Q_exists_chain(
+            [_idx_term(12), _idx_term(13)],
+            Q_and_chain(
+                Q_eq(node, _support_code_insert(a, b)),
+                mk_app(In_a, a, set_var),
+                mk_app(In_a, b, set_var),
+            ),
+        ),
+    )
+
+
+def _support_term_closure_body(set_var):
+    u = _V_idx(9)
+    return Q_forall(
+        _idx_term(9),
+        Q_imp(mk_app(In_a, u, set_var), _support_term_local_body(set_var, u)),
+    )
+
+
+def _build_is_term_internal_body():
+    n = var_x
+    S = _V_idx(4)
+    return Q_exists(
+        _idx_term(4),
+        Q_and(mk_app(In_a, n, S), _support_term_closure_body(S)),
+    )
+
+
+IS_TERM_INTERNAL_DEF = define(
+    "is_term_internal",
+    nat0_ty,
+    _build_is_term_internal_body(),
+)
+is_term_internal = mk_const("is_term_internal", [])
+
+
+def _support_form_local_body(term_set, form_set, node):
+    a = _V_idx(12)
+    b = _V_idx(13)
+    p0 = _V_idx(16)
+    q0 = _V_idx(17)
+    x = _V_idx(11)
+    return Q_or_chain(
+        Q_exists_chain(
+            [_idx_term(12), _idx_term(13)],
+            Q_and_chain(
+                Q_eq(node, _support_code_eq_f(a, b)),
+                mk_app(In_a, a, term_set),
+                mk_app(In_a, b, term_set),
+            ),
+        ),
+        Q_exists(
+            _idx_term(16),
+            Q_and(Q_eq(node, _support_code_not(p0)), mk_app(In_a, p0, form_set)),
+        ),
+        Q_exists_chain(
+            [_idx_term(16), _idx_term(17)],
+            Q_and_chain(
+                Q_eq(node, _support_code_imp(p0, q0)),
+                mk_app(In_a, p0, form_set),
+                mk_app(In_a, q0, form_set),
+            ),
+        ),
+        Q_exists_chain(
+            [_idx_term(11), _idx_term(16)],
+            Q_and(Q_eq(node, _support_code_forall(x, p0)), mk_app(In_a, p0, form_set)),
+        ),
+        Q_exists_chain(
+            [_idx_term(12), _idx_term(13)],
+            Q_and_chain(
+                Q_eq(node, _support_code_in_a(a, b)),
+                mk_app(In_a, a, term_set),
+                mk_app(In_a, b, term_set),
+            ),
+        ),
+    )
+
+
+def _support_form_closure_body(term_set, form_set):
+    u = _V_idx(9)
+    return Q_forall(
+        _idx_term(9),
+        Q_imp(
+            mk_app(In_a, u, form_set),
+            _support_form_local_body(term_set, form_set, u),
+        ),
+    )
+
+
+def _build_is_form_internal_body():
+    n = var_x
+    T = _V_idx(5)
+    F = _V_idx(6)
+    return Q_exists_chain(
+        [_idx_term(5), _idx_term(6)],
+        Q_and_chain(
+            mk_app(In_a, n, F),
+            _support_term_closure_body(T),
+            _support_form_closure_body(T, F),
+        ),
+    )
+
+
+IS_FORM_INTERNAL_DEF = define(
+    "is_form_internal",
+    nat0_ty,
+    _build_is_form_internal_body(),
+)
+is_form_internal = mk_const("is_form_internal", [])
+
+
+def _support_free_step_body(path_set, node, needle):
+    a = _V_idx(12)
+    b = _V_idx(13)
+    p0 = _V_idx(16)
+    q0 = _V_idx(17)
+    x = _V_idx(11)
+    return Q_or_chain(
+        Q_eq(node, _support_code_var(needle)),
+        Q_exists_chain(
+            [_idx_term(12), _idx_term(13)],
+            Q_and(
+                Q_eq(node, _support_code_insert(a, b)),
+                Q_or(mk_app(In_a, a, path_set), mk_app(In_a, b, path_set)),
+            ),
+        ),
+        Q_exists_chain(
+            [_idx_term(12), _idx_term(13)],
+            Q_and(
+                Q_eq(node, _support_code_eq_f(a, b)),
+                Q_or(mk_app(In_a, a, path_set), mk_app(In_a, b, path_set)),
+            ),
+        ),
+        Q_exists_chain(
+            [_idx_term(12), _idx_term(13)],
+            Q_and(
+                Q_eq(node, _support_code_in_a(a, b)),
+                Q_or(mk_app(In_a, a, path_set), mk_app(In_a, b, path_set)),
+            ),
+        ),
+        Q_exists(
+            _idx_term(16),
+            Q_and(Q_eq(node, _support_code_not(p0)), mk_app(In_a, p0, path_set)),
+        ),
+        Q_exists_chain(
+            [_idx_term(16), _idx_term(17)],
+            Q_and(
+                Q_eq(node, _support_code_imp(p0, q0)),
+                Q_or(mk_app(In_a, p0, path_set), mk_app(In_a, q0, path_set)),
+            ),
+        ),
+        Q_exists_chain(
+            [_idx_term(11), _idx_term(16)],
+            Q_and_chain(
+                Q_eq(node, _support_code_forall(x, p0)),
+                Q_not(Q_eq(needle, x)),
+                mk_app(In_a, p0, path_set),
+            ),
+        ),
+    )
+
+
+def _build_free_in_internal_body():
+    n = var_x
+    v = var_y
+    W = _V_idx(7)
+    u = _V_idx(9)
+    return Q_exists(
+        _idx_term(7),
+        Q_and(
+            mk_app(In_a, n, W),
+            Q_forall(
+                _idx_term(9),
+                Q_imp(mk_app(In_a, u, W), _support_free_step_body(W, u, v)),
+            ),
+        ),
+    )
+
+
+FREE_IN_INTERNAL_DEF = define(
+    "free_in_internal",
+    nat0_ty,
+    _build_free_in_internal_body(),
+)
+free_in_internal = mk_const("free_in_internal", [])
+
+
+def _support_subst_binary_case(graph, node, out, ctor_code):
+    a = _V_idx(12)
+    b = _V_idx(13)
+    ar = _V_idx(14)
+    br = _V_idx(15)
+    return Q_exists_chain(
+        [_idx_term(12), _idx_term(13), _idx_term(14), _idx_term(15)],
+        Q_and_chain(
+            Q_eq(node, ctor_code(a, b)),
+            _entry_in_graph(a, ar, graph),
+            _entry_in_graph(b, br, graph),
+            Q_eq(out, ctor_code(ar, br)),
+        ),
+    )
+
+
+def _support_subst_step_body(graph, node, term, var, out):
+    x = _V_idx(11)
+    p0 = _V_idx(16)
+    q0 = _V_idx(17)
+    pr = _V_idx(18)
+    qr = _V_idx(19)
+    return Q_or_chain(
+        Q_and(Q_eq(node, _support_code_empty()), Q_eq(out, _support_code_empty())),
+        Q_exists(
+            _idx_term(11),
+            Q_and_chain(
+                Q_eq(node, _support_code_var(x)),
+                Q_eq(var, x),
+                Q_eq(out, term),
+            ),
+        ),
+        Q_exists(
+            _idx_term(11),
+            Q_and_chain(
+                Q_eq(node, _support_code_var(x)),
+                Q_not(Q_eq(var, x)),
+                Q_eq(out, _support_code_var(x)),
+            ),
+        ),
+        _support_subst_binary_case(graph, node, out, _support_code_insert),
+        _support_subst_binary_case(graph, node, out, _support_code_eq_f),
+        _support_subst_binary_case(graph, node, out, _support_code_in_a),
+        Q_exists_chain(
+            [_idx_term(16), _idx_term(18)],
+            Q_and_chain(
+                Q_eq(node, _support_code_not(p0)),
+                _entry_in_graph(p0, pr, graph),
+                Q_eq(out, _support_code_not(pr)),
+            ),
+        ),
+        Q_exists_chain(
+            [_idx_term(16), _idx_term(17), _idx_term(18), _idx_term(19)],
+            Q_and_chain(
+                Q_eq(node, _support_code_imp(p0, q0)),
+                _entry_in_graph(p0, pr, graph),
+                _entry_in_graph(q0, qr, graph),
+                Q_eq(out, _support_code_imp(pr, qr)),
+            ),
+        ),
+        Q_exists_chain(
+            [_idx_term(11), _idx_term(16)],
+            Q_and_chain(
+                Q_eq(node, _support_code_forall(x, p0)),
+                Q_eq(var, x),
+                Q_eq(out, _support_code_forall(x, p0)),
+            ),
+        ),
+        Q_exists_chain(
+            [_idx_term(11), _idx_term(16), _idx_term(18)],
+            Q_and_chain(
+                Q_eq(node, _support_code_forall(x, p0)),
+                Q_not(Q_eq(var, x)),
+                _entry_in_graph(p0, pr, graph),
+                Q_eq(out, _support_code_forall(x, pr)),
+            ),
+        ),
+    )
+
+
+def _build_substitute_internal_body():
+    n = var_x
+    t = var_y
+    v = var_z
+    r = var_w
+    G = _V_idx(8)
+    u = _V_idx(9)
+    out = _V_idx(10)
+    return Q_exists(
+        _idx_term(8),
+        Q_and(
+            _entry_in_graph(n, r, G),
+            Q_forall(
+                _idx_term(9),
+                Q_forall(
+                    _idx_term(10),
+                    Q_imp(
+                        _entry_in_graph(u, out, G),
+                        _support_subst_step_body(G, u, t, v, out),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
 # Fixed internal formula with slots:
 #   var_x = F, var_y = t, var_z = v, var_w = result.
-new_constant("substitute_internal", nat0_ty)
+SUBSTITUTE_INTERNAL_DEF = define(
+    "substitute_internal",
+    nat0_ty,
+    _build_substitute_internal_body(),
+)
 substitute_internal = mk_const("substitute_internal", [])
-add_const("substitute_internal", substitute_internal)
 
 
 TEMPLATE_FILL_DEF, TEMPLATE_FILL_AT = define_with_at(
@@ -2734,18 +3112,478 @@ TEMPLATE_FILL_REPRESENTS = TEMPLATE_FILL_REPRESENTS_TERM
 
 
 # ---------------------------------------------------------------------------
-# Stage 3D (a) -- kernel symbol declarations for the provability
-# representability headline (PROV_HF_REPRESENTS) and the diagonal
-# lemma's side conditions.
+# Stage 3D (a) -- internal provability predicate bodies.
 #
-# This file only declares the kernel constants
-# (``Prov_HF_internal``, opaque) and the HOL helper
-# (``substitute_2``). The theorems that mention them
-# (PROV_HF_REPRESENTS, IS_FORM_PROV_HF_INTERNAL,
-# FREE_IN_PROV_HF_INTERNAL), along with the construction strategy
-# and discharge sketch, live in ``hf_repr_thms.py`` (the high
-# layer, where the Prov_HF logical toolkit from ``hf_logic`` is in
-# scope).
+# ``Prov_HF_internal`` is now a real dependency-set HF formula:
+#
+#   Prov_HF_internal(x) :=
+#     ?P. Proof_HF_set_internal(P,x)
+#
+# where proof records are ``Pair_ord dependency_set formula`` and MP/Gen
+# citations use ordinary HF membership in the dependency set.  The side
+# condition and representability proofs still live in ``hf_repr_thms.py``
+# because they need the high-level Prov_HF toolkit from ``hf_logic``.
+# ---------------------------------------------------------------------------
+
+
+def _is_term_internal_at(n):
+    return _subst1(is_term_internal, n)
+
+
+def _is_form_internal_at(n):
+    return _subst1(is_form_internal, n)
+
+
+def _free_in_internal_at(formula, v):
+    return _subst2(free_in_internal, formula, v)
+
+
+def _substitute_internal_at(formula, term, v, result):
+    return _subst4(substitute_internal, formula, term, v, result)
+
+
+def _proof_record(rank, formula):
+    return qparse("Pair_ord(rank,formula)", rank=rank, formula=formula)
+
+
+def _proof_record_in(rank, formula, proof_set):
+    return mk_app(In_a, _proof_record(rank, formula), proof_set)
+
+
+def _build_is_mp_internal_body():
+    return Q_eq(
+        var_y,
+        qparse("Imp_f(premise,conclusion)", premise=var_x, conclusion=var_z),
+    )
+
+
+IS_MP_INTERNAL_DEF = define("is_mp_internal", nat0_ty, _build_is_mp_internal_body())
+is_mp_internal = mk_const("is_mp_internal", [])
+
+
+def _build_is_gen_internal_body():
+    gen_x = _V_idx(34)
+    return Q_exists(
+        _idx_term(34),
+        Q_eq(var_y, qparse("Forall_f(gen_x,premise)", gen_x=gen_x, premise=var_x)),
+    )
+
+
+IS_GEN_INTERNAL_DEF = define("is_gen_internal", nat0_ty, _build_is_gen_internal_body())
+is_gen_internal = mk_const("is_gen_internal", [])
+
+
+def _is_mp_internal_at(premise, implication, conclusion):
+    return _subst3(is_mp_internal, premise, implication, conclusion)
+
+
+def _is_gen_internal_at(premise, conclusion):
+    return _subst2(is_gen_internal, premise, conclusion)
+
+
+_AX_A = _V_idx(20)
+_AX_B = _V_idx(21)
+_AX_C = _V_idx(22)
+_AX_F = _V_idx(23)
+_AX_G = _V_idx(24)
+_AX_t = _V_idx(25)
+_AX_t1 = _V_idx(26)
+_AX_t2 = _V_idx(27)
+_AX_x = _V_idx(28)
+_AX_R = _V_idx(29)
+_AX_R1 = _V_idx(30)
+_AX_R2 = _V_idx(31)
+_AX_F0 = _V_idx(32)
+_AX_F1 = _V_idx(33)
+
+
+def _code_eq(target, code):
+    return Q_eq(target, code)
+
+
+def _build_is_hf_axiom_internal_body():
+    h = var_x
+    axiom_codes = [
+        qparse("Forall_f(0,Not_f(In_a(Var_t(0),Empty_t)))"),
+        qparse("Forall_f(0,Forall_f(1,In_a(Var_t(0),Insert_t(Var_t(0),Var_t(1)))))"),
+        qparse(
+            "Forall_f(0,Forall_f(1,Forall_f(2,"
+            "Imp_f(Not_f(Eq_f(Var_t(0),Var_t(1))),"
+            "Not_f(Imp_f("
+            "Imp_f(In_a(Var_t(1),Insert_t(Var_t(0),Var_t(2))),In_a(Var_t(1),Var_t(2))),"
+            "Not_f(Imp_f(In_a(Var_t(1),Var_t(2)),"
+            "In_a(Var_t(1),Insert_t(Var_t(0),Var_t(2)))))))))))"
+        ),
+        qparse(
+            "Forall_f(0,Forall_f(1,"
+            "Imp_f(Forall_f(2,Not_f(Imp_f("
+            "Imp_f(In_a(Var_t(2),Var_t(0)),In_a(Var_t(2),Var_t(1))),"
+            "Not_f(Imp_f(In_a(Var_t(2),Var_t(1)),In_a(Var_t(2),Var_t(0))))))),"
+            "Eq_f(Var_t(0),Var_t(1)))))"
+        ),
+        qparse(
+            "Forall_f(0,Forall_f(1,"
+            "Imp_f(In_a(Var_t(0),Var_t(1)),"
+            "Not_f(Forall_f(2,Not_f(Eq_f(Var_t(1),Insert_t(Var_t(0),Var_t(2)))))))))"
+        ),
+    ]
+    return Q_or_chain(*[_code_eq(h, code) for code in axiom_codes])
+
+
+IS_HF_AXIOM_INTERNAL_DEF = define(
+    "is_hf_axiom_internal",
+    nat0_ty,
+    _build_is_hf_axiom_internal_body(),
+)
+is_hf_axiom_internal = mk_const("is_hf_axiom_internal", [])
+
+
+def _build_is_K_internal_body():
+    h = var_x
+    return Q_exists_chain(
+        [_idx_term(20), _idx_term(21)],
+        Q_and_chain(
+            _is_form_internal_at(_AX_A),
+            _is_form_internal_at(_AX_B),
+            _code_eq(h, qparse("Imp_f(A,Imp_f(B,A))", A=_AX_A, B=_AX_B)),
+        ),
+    )
+
+
+IS_K_INTERNAL_DEF = define("is_K_internal", nat0_ty, _build_is_K_internal_body())
+is_K_internal = mk_const("is_K_internal", [])
+
+
+def _build_is_S_internal_body():
+    h = var_x
+    return Q_exists_chain(
+        [_idx_term(20), _idx_term(21), _idx_term(22)],
+        Q_and_chain(
+            _is_form_internal_at(_AX_A),
+            _is_form_internal_at(_AX_B),
+            _is_form_internal_at(_AX_C),
+            _code_eq(
+                h,
+                qparse(
+                    "Imp_f(Imp_f(A,Imp_f(B,C)),Imp_f(Imp_f(A,B),Imp_f(A,C)))",
+                    A=_AX_A,
+                    B=_AX_B,
+                    C=_AX_C,
+                ),
+            ),
+        ),
+    )
+
+
+IS_S_INTERNAL_DEF = define("is_S_internal", nat0_ty, _build_is_S_internal_body())
+is_S_internal = mk_const("is_S_internal", [])
+
+
+def _build_is_N_internal_body():
+    h = var_x
+    return Q_exists_chain(
+        [_idx_term(20), _idx_term(21)],
+        Q_and_chain(
+            _is_form_internal_at(_AX_A),
+            _is_form_internal_at(_AX_B),
+            _code_eq(
+                h,
+                qparse(
+                    "Imp_f(Imp_f(Not_f(B),Not_f(A)),Imp_f(A,B))",
+                    A=_AX_A,
+                    B=_AX_B,
+                ),
+            ),
+        ),
+    )
+
+
+IS_N_INTERNAL_DEF = define("is_N_internal", nat0_ty, _build_is_N_internal_body())
+is_N_internal = mk_const("is_N_internal", [])
+
+
+def _build_is_UI_internal_body():
+    h = var_x
+    return Q_exists_chain(
+        [_idx_term(28), _idx_term(23), _idx_term(25), _idx_term(29)],
+        Q_and_chain(
+            _is_form_internal_at(_AX_F),
+            _is_term_internal_at(_AX_t),
+            _substitute_internal_at(_AX_F, _AX_t, _AX_x, _AX_R),
+            _code_eq(
+                h,
+                qparse("Imp_f(Forall_f(x,F),R)", x=_AX_x, F=_AX_F, R=_AX_R),
+            ),
+        ),
+    )
+
+
+IS_UI_INTERNAL_DEF = define("is_UI_internal", nat0_ty, _build_is_UI_internal_body())
+is_UI_internal = mk_const("is_UI_internal", [])
+
+
+def _build_is_Vac_internal_body():
+    h = var_x
+    return Q_exists_chain(
+        [_idx_term(28), _idx_term(23)],
+        Q_and_chain(
+            _is_form_internal_at(_AX_F),
+            Q_not(_free_in_internal_at(_AX_F, _AX_x)),
+            _code_eq(h, qparse("Imp_f(F,Forall_f(x,F))", x=_AX_x, F=_AX_F)),
+        ),
+    )
+
+
+IS_VAC_INTERNAL_DEF = define("is_Vac_internal", nat0_ty, _build_is_Vac_internal_body())
+is_Vac_internal = mk_const("is_Vac_internal", [])
+
+
+def _build_is_FaImp_internal_body():
+    h = var_x
+    return Q_exists_chain(
+        [_idx_term(28), _idx_term(23), _idx_term(24)],
+        Q_and_chain(
+            _is_form_internal_at(_AX_F),
+            _is_form_internal_at(_AX_G),
+            Q_not(_free_in_internal_at(_AX_F, _AX_x)),
+            _code_eq(
+                h,
+                qparse(
+                    "Imp_f(Forall_f(x,Imp_f(F,G)),Imp_f(F,Forall_f(x,G)))",
+                    x=_AX_x,
+                    F=_AX_F,
+                    G=_AX_G,
+                ),
+            ),
+        ),
+    )
+
+
+IS_FAIMP_INTERNAL_DEF = define(
+    "is_FaImp_internal",
+    nat0_ty,
+    _build_is_FaImp_internal_body(),
+)
+is_FaImp_internal = mk_const("is_FaImp_internal", [])
+
+
+def _build_is_Refl_internal_body():
+    h = var_x
+    return Q_exists(
+        _idx_term(25),
+        Q_and(_is_term_internal_at(_AX_t), _code_eq(h, qparse("Eq_f(t,t)", t=_AX_t))),
+    )
+
+
+IS_REFL_INTERNAL_DEF = define("is_Refl_internal", nat0_ty, _build_is_Refl_internal_body())
+is_Refl_internal = mk_const("is_Refl_internal", [])
+
+
+def _build_is_Subst_internal_body():
+    h = var_x
+    return Q_exists_chain(
+        [
+            _idx_term(28),
+            _idx_term(23),
+            _idx_term(26),
+            _idx_term(27),
+            _idx_term(30),
+            _idx_term(31),
+        ],
+        Q_and_chain(
+            _is_form_internal_at(_AX_F),
+            _is_term_internal_at(_AX_t1),
+            _is_term_internal_at(_AX_t2),
+            _substitute_internal_at(_AX_F, _AX_t1, _AX_x, _AX_R1),
+            _substitute_internal_at(_AX_F, _AX_t2, _AX_x, _AX_R2),
+            _code_eq(
+                h,
+                qparse(
+                    "Imp_f(Eq_f(t1,t2),Imp_f(R1,R2))",
+                    t1=_AX_t1,
+                    t2=_AX_t2,
+                    R1=_AX_R1,
+                    R2=_AX_R2,
+                ),
+            ),
+        ),
+    )
+
+
+IS_SUBST_INTERNAL_DEF = define(
+    "is_Subst_internal",
+    nat0_ty,
+    _build_is_Subst_internal_body(),
+)
+is_Subst_internal = mk_const("is_Subst_internal", [])
+
+
+def _build_is_logical_axiom_internal_body():
+    h = var_x
+    return Q_or_chain(
+        _subst1(is_K_internal, h),
+        _subst1(is_S_internal, h),
+        _subst1(is_N_internal, h),
+        _subst1(is_UI_internal, h),
+        _subst1(is_Vac_internal, h),
+        _subst1(is_Refl_internal, h),
+        _subst1(is_Subst_internal, h),
+        _subst1(is_FaImp_internal, h),
+    )
+
+
+IS_LOGICAL_AXIOM_INTERNAL_DEF = define(
+    "is_logical_axiom_internal",
+    nat0_ty,
+    _build_is_logical_axiom_internal_body(),
+)
+is_logical_axiom_internal = mk_const("is_logical_axiom_internal", [])
+
+
+def _build_is_hf_ind_axiom_internal_body():
+    h = var_x
+    idx0 = qparse("0")
+    idx1 = qparse("1")
+    idx2 = qparse("2")
+    member_var = qparse("Var_t(0)")
+    current_var = qparse("Var_t(1)")
+    step_code = qparse(
+        "Forall_f(1,Imp_f(Forall_f(0,Imp_f(In_a(Var_t(0),Var_t(1)),F0)),F1))",
+        F0=_AX_F0,
+        F1=_AX_F1,
+    )
+    conclusion_code = qparse("Forall_f(1,F1)", F1=_AX_F1)
+    return Q_exists_chain(
+        [_idx_term(23), _idx_term(32), _idx_term(33)],
+        Q_and_chain(
+            _is_form_internal_at(_AX_F),
+            Q_not(_free_in_internal_at(_AX_F, idx0)),
+            Q_not(_free_in_internal_at(_AX_F, idx1)),
+            _substitute_internal_at(_AX_F, member_var, idx2, _AX_F0),
+            _substitute_internal_at(_AX_F, current_var, idx2, _AX_F1),
+            _code_eq(
+                h,
+                qparse("Imp_f(step,conclusion)", step=step_code, conclusion=conclusion_code),
+            ),
+        ),
+    )
+
+
+IS_HF_IND_AXIOM_INTERNAL_DEF = define(
+    "is_hf_ind_axiom_internal",
+    nat0_ty,
+    _build_is_hf_ind_axiom_internal_body(),
+)
+is_hf_ind_axiom_internal = mk_const("is_hf_ind_axiom_internal", [])
+
+
+def _build_is_axiom_internal_body():
+    h = var_x
+    return Q_or_chain(
+        _subst1(is_hf_axiom_internal, h),
+        _subst1(is_hf_ind_axiom_internal, h),
+        _subst1(is_logical_axiom_internal, h),
+    )
+
+
+IS_AXIOM_INTERNAL_DEF = define("is_axiom_internal", nat0_ty, _build_is_axiom_internal_body())
+is_axiom_internal = mk_const("is_axiom_internal", [])
+
+
+def _build_valid_step_hf_set_internal_body():
+    P = var_x
+    k = var_y
+    h = var_z
+    m_i = _V_idx(40)
+    m_f = _V_idx(41)
+    m_j = _V_idx(42)
+    m_g = _V_idx(43)
+    g_i = _V_idx(44)
+    g_f = _V_idx(45)
+    mp_case = Q_exists_chain(
+        [_idx_term(40), _idx_term(41), _idx_term(42), _idx_term(43)],
+        Q_and_chain(
+            _proof_record_in(m_i, m_f, P),
+            _proof_record_in(m_j, m_g, P),
+            mk_app(In_a, m_i, k),
+            mk_app(In_a, m_j, k),
+            _is_mp_internal_at(m_f, m_g, h),
+        ),
+    )
+    gen_case = Q_exists_chain(
+        [_idx_term(44), _idx_term(45)],
+        Q_and_chain(
+            _proof_record_in(g_i, g_f, P),
+            mk_app(In_a, g_i, k),
+            _is_gen_internal_at(g_f, h),
+        ),
+    )
+    return Q_or_chain(_subst1(is_axiom_internal, h), mp_case, gen_case)
+
+
+VALID_STEP_HF_SET_INTERNAL_DEF = define(
+    "valid_step_hf_set_internal",
+    nat0_ty,
+    _build_valid_step_hf_set_internal_body(),
+)
+valid_step_hf_set_internal = mk_const("valid_step_hf_set_internal", [])
+
+
+def _valid_step_hf_set_internal_at(P, k, h):
+    return _subst3(valid_step_hf_set_internal, P, k, h)
+
+
+def _build_proof_hf_set_internal_body():
+    P = var_x
+    n = var_y
+    k = _V_idx(46)
+    j = _V_idx(47)
+    h = _V_idx(48)
+    return Q_exists(
+        _idx_term(46),
+        Q_and(
+            _proof_record_in(k, n, P),
+            Q_forall(
+                _idx_term(47),
+                Q_forall(
+                    _idx_term(48),
+                    Q_imp(
+                        _proof_record_in(j, h, P),
+                        _valid_step_hf_set_internal_at(P, j, h),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
+PROOF_HF_SET_INTERNAL_DEF = define(
+    "Proof_HF_set_internal",
+    nat0_ty,
+    _build_proof_hf_set_internal_body(),
+)
+Proof_HF_set_internal = mk_const("Proof_HF_set_internal", [])
+
+
+def _proof_hf_set_internal_at(P, n):
+    return _subst2(Proof_HF_set_internal, P, n)
+
+
+def _build_prov_hf_internal_body():
+    P = _V_idx(49)
+    return Q_exists(_idx_term(49), _proof_hf_set_internal_at(P, var_x))
+
+
+PROV_HF_INTERNAL_DEF = define(
+    "Prov_HF_internal",
+    nat0_ty,
+    _build_prov_hf_internal_body(),
+)
+Prov_HF_internal = mk_const("Prov_HF_internal", [])
+
+
+# ---------------------------------------------------------------------------
+# Stage 3D (b) -- helper for the diagonal lemma.
 # ---------------------------------------------------------------------------
 
 
@@ -2786,14 +3624,8 @@ SUBSTITUTE_2_DEF = define(
 substitute_2 = mk_const("substitute_2", [])
 
 
-# Opaque: no defining body. Stage 3D will replace this with the
-# bottom-up construction (Proof_HF_internal then existential closure).
-new_constant("Prov_HF_internal", nat0_ty)
-Prov_HF_internal = mk_const("Prov_HF_internal", [])
-
-
 # PROV_HF_REPRESENTS, IS_FORM_PROV_HF_INTERNAL, FREE_IN_PROV_HF_INTERNAL
-# bodies all live in hf_repr_thms.py.
+# proof scripts live in hf_repr_thms.py.
 
 
 if __name__ == "__main__":
