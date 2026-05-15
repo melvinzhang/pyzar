@@ -95,7 +95,7 @@ from hf_repr_core import (
     QUOTE_HF_AT_EMPTY,
     _QUOTE_HF_AT_NZ,
 )
-from hf_sets import EMPTY_DEF, INSERT_AT
+from hf_sets import EMPTY_DEF, INSERT_AT, IN_AT, NOT_IN_EMPTY, IN_INSERT_DIFF
 from hf_sets import IN_EXT
 from hf_syntax import INSERT_T_INJ, INSERT_T_NEQ_EMPTY
 from bits import (
@@ -105,6 +105,7 @@ from bits import (
     BIT_AT_SET_BIT_SAME,
     BIT_CLEAR_LOW_LOW_BIT,
     BIT_LOW_BIT,
+    BIT_SELF_FALSE,
     BITWISE_LT_BY_TOP_DIFF,
     COND_F_NAT0,
     COND_T_NAT0,
@@ -122,9 +123,11 @@ from hf_logic import (
     PROV_HF_DT_MP,
     PROV_HF_CONTRAP,
     PROV_HF_DOUBLE_NEG_INTRO,
+    PROV_HF_AND_ELIM_LEFT,
+    PROV_HF_AND_ELIM_RIGHT,
 )
 from hf_repr_core import IS_TERM_QUOTE_HF, SUBSTITUTE_QUOTE_HF, PROV_HF_MP
-from nat0_order import NAT0_LT_SUC0
+from nat0_order import NAT0_LT_ASYM, NAT0_LT_SUC0, NAT0_LT_TOTAL_NEQ
 
 
 _t_n0 = Var("t", nat0_ty)
@@ -2523,6 +2526,115 @@ def QUOTE_HF_NEQ_MEASURE_LT_FROM_FOUR_MEM_BOUNDS(p):
 
 
 @proof
+def QUOTE_HF_NEQ_MEASURE_SYM(p):
+    """|- !s t. quote_hf_neq_measure s t = quote_hf_neq_measure t s."""
+
+    p.goal("!s t. quote_hf_neq_measure s t = quote_hf_neq_measure t s")
+    p.fix("s t")
+    with p.cases_on(EXCLUDED_MIDDLE, "nat0_lt (Insert s t) (Insert t s)"):
+        with p.case("hst: nat0_lt (Insert s t) (Insert t s)"):
+            p.have("hst_eq: nat0_lt (Insert s t) (Insert t s) = T").by_thm(
+                EQT_INTRO(p.fact("hst"))
+            )
+            p.have("hts_not: ~(nat0_lt (Insert t s) (Insert s t))").by(
+                NAT0_LT_ASYM, "Insert s t", "Insert t s", "hst"
+            )
+            p.have("hts_eq: nat0_lt (Insert t s) (Insert s t) = F").by_thm(
+                EQF_INTRO(p.fact("hts_not"))
+            )
+            p.thus("quote_hf_neq_measure s t = quote_hf_neq_measure t s").by_rewrite(
+                [QUOTE_HF_NEQ_MEASURE_AT, "hst_eq", "hts_eq", COND_T_NAT0, COND_F_NAT0]
+            )
+        with p.case("hst_not: ~(nat0_lt (Insert s t) (Insert t s))"):
+            p.have("hst_eq: nat0_lt (Insert s t) (Insert t s) = F").by_thm(
+                EQF_INTRO(p.fact("hst_not"))
+            )
+            with p.cases_on(EXCLUDED_MIDDLE, "nat0_lt (Insert t s) (Insert s t)"):
+                with p.case("hts: nat0_lt (Insert t s) (Insert s t)"):
+                    p.have("hts_eq: nat0_lt (Insert t s) (Insert s t) = T").by_thm(
+                        EQT_INTRO(p.fact("hts"))
+                    )
+                    p.thus(
+                        "quote_hf_neq_measure s t = quote_hf_neq_measure t s"
+                    ).by_rewrite(
+                        [
+                            QUOTE_HF_NEQ_MEASURE_AT,
+                            "hst_eq",
+                            "hts_eq",
+                            COND_T_NAT0,
+                            COND_F_NAT0,
+                        ]
+                    )
+                with p.case("hts_not: ~(nat0_lt (Insert t s) (Insert s t))"):
+                    p.have("hts_eq: nat0_lt (Insert t s) (Insert s t) = F").by_thm(
+                        EQF_INTRO(p.fact("hts_not"))
+                    )
+                    with p.have("h_eq: Insert s t = Insert t s").proof():
+                        with p.cases_on(EXCLUDED_MIDDLE, "Insert s t = Insert t s"):
+                            with p.case("heq: Insert s t = Insert t s"):
+                                p.thus("Insert s t = Insert t s").by_thm(
+                                    p.fact("heq")
+                                )
+                            with p.case("hne: ~(Insert s t = Insert t s)"):
+                                p.have(
+                                    "h_total: nat0_lt (Insert s t) (Insert t s) "
+                                    "\\/ nat0_lt (Insert t s) (Insert s t)"
+                                ).by(
+                                    NAT0_LT_TOTAL_NEQ,
+                                    "Insert s t",
+                                    "Insert t s",
+                                    "hne",
+                                )
+                                with p.cases_on("h_total"):
+                                    with p.case("hbad: nat0_lt (Insert s t) (Insert t s)"):
+                                        p.absurd().by_conj("hst_not", "hbad")
+                                    with p.case("hbad: nat0_lt (Insert t s) (Insert s t)"):
+                                        p.absurd().by_conj("hts_not", "hbad")
+                    p.thus(
+                        "quote_hf_neq_measure s t = quote_hf_neq_measure t s"
+                    ).by_rewrite(
+                        [
+                            QUOTE_HF_NEQ_MEASURE_AT,
+                            "hst_eq",
+                            "hts_eq",
+                            "h_eq",
+                            COND_F_NAT0,
+                        ]
+                    )
+
+
+@proof
+def NAT0_LT_SELF_INSERT_SELF(p):
+    """|- !a b. nat0_lt a (Insert a b)."""
+
+    p.goal("!a b. nat0_lt a (Insert a b)")
+    p.fix("a b")
+    with p.have(
+        "h_hi: !i. nat0_lt a i ==> bit i a ==> bit i (set_bit a b)"
+    ).proof():
+        p.fix("i")
+        p.assume("hai: nat0_lt a i", "hbit: bit i a")
+        p.have("h_i_a_F: bit i a = F").by(BIT_ABOVE_FALSE, "a", "i", "hai")
+        p.absurd().by_thm(EQ_MP(p.fact("h_i_a_F"), p.fact("hbit")))
+    p.have("h_a_a_F: bit a a = F").by(BIT_SELF_FALSE, "a")
+    p.have("h_not_a_a: ~(bit a a)").by_thm(EQF_ELIM(p.fact("h_a_a_F")))
+    p.have("h_a_rhs_T: bit a (set_bit a b) = T").by(
+        BIT_AT_SET_BIT_SAME, "a", "b"
+    )
+    p.have("h_a_rhs: bit a (set_bit a b)").by_thm(
+        EQT_ELIM(p.fact("h_a_rhs_T"))
+    )
+    p.have("h_raw: nat0_lt a (set_bit a b)").by(
+        BITWISE_LT_BY_TOP_DIFF,
+        "a",
+        "a",
+        "set_bit a b",
+        CONJ(p.fact("h_hi"), CONJ(p.fact("h_not_a_a"), p.fact("h_a_rhs"))),
+    )
+    p.thus("nat0_lt a (Insert a b)").by_rewrite_of("h_raw", [INSERT_AT])
+
+
+@proof
 def QUOTE_HF_EXT_DIFF_LEFT_MEM_DECREASES(p):
     """|- !w s t. In w s /\\ ~In w t ==>
           nat0_lt (quote_hf_mem_measure w s) (quote_hf_neq_measure s t)
@@ -2614,17 +2726,109 @@ def QUOTE_HF_MUTUAL_MEASURED(p):
 
             with p.cases_on(EXCLUDED_MIDDLE, "y = 0"):
                 with p.case("hy_zero: y = 0"):
-                    # Missing branch bridge: combine HF1_INST with
-                    # NOT_IN_EMPTY and quote_hf y = Empty_t to close both
-                    # membership-decision directions.
-                    p.sorry()
+                    p.have("h_qy_empty: quote_hf y = Empty_t").by_rewrite(
+                        ["hy_zero", SYM(EMPTY_DEF), QUOTE_HF_AT_EMPTY]
+                    )
+                    p.have("h_qx_term: is_term (quote_hf x)").by(
+                        IS_TERM_QUOTE_HF, "x"
+                    )
+                    p.have(
+                        "h_hf1: Prov_HF (Not_f (In_a (quote_hf x) Empty_t))"
+                    ).by(HF1_INST, "quote_hf x", "h_qx_term")
+                    p.have(
+                        "h_neg_pf: Prov_HF "
+                        "(Not_f (In_a (quote_hf x) (quote_hf y)))"
+                    ).by_rewrite_of("h_hf1", [SYM(p.fact("h_qy_empty"))])
+                    with p.have(
+                        "h_pos: In x y ==> "
+                        "Prov_HF (In_a (quote_hf x) (quote_hf y))"
+                    ).proof():
+                        p.assume("hxy: In x y")
+                        p.have("h_in_empty: In x Empty").by_rewrite_of(
+                            "hxy", ["hy_zero", SYM(EMPTY_DEF)]
+                        )
+                        p.have("h_not_empty: ~In x Empty").by(NOT_IN_EMPTY, "x")
+                        p.absurd().by_conj("h_not_empty", "h_in_empty")
+                    with p.have(
+                        "h_neg: ~In x y ==> "
+                        "Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y)))"
+                    ).proof():
+                        p.assume("_: ~In x y")
+                        p.thus(
+                            "Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y)))"
+                        ).by_thm(p.fact("h_neg_pf"))
+                    p.thus(
+                        "(In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
+                        "/\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) "
+                        "                                      (quote_hf y))))"
+                    ).by_thm(CONJ(p.fact("h_pos"), p.fact("h_neg")))
                 with p.case("hy_nz: ~(y = 0)"):
                     with p.cases_on(EXCLUDED_MIDDLE, "x = low_bit y"):
                         with p.case("hx_head: x = low_bit y"):
-                            # Missing branch bridge: HF2_INST proves the
-                            # positive head membership in the Insert_t quote;
-                            # the negative implication is contradictory.
-                            p.sorry()
+                            p.have(
+                                "h_qy_raw: quote_hf y = "
+                                "Insert_t (quote_hf (low_bit y)) "
+                                "         (quote_hf (clear_low y))"
+                            ).by(_QUOTE_HF_AT_NZ, "y", "hy_nz")
+                            p.have(
+                                "h_qy_split: quote_hf y = "
+                                "Insert_t (quote_hf x) (quote_hf (clear_low y))"
+                            ).by_rewrite_of("h_qy_raw", [SYM(p.fact("hx_head"))])
+                            p.have("h_qx_term: is_term (quote_hf x)").by(
+                                IS_TERM_QUOTE_HF, "x"
+                            )
+                            p.have(
+                                "h_qcl_term: is_term (quote_hf (clear_low y))"
+                            ).by(IS_TERM_QUOTE_HF, "clear_low y")
+                            p.have(
+                                "h_qx_stable: substitute (quote_hf x) "
+                                "(quote_hf (clear_low y)) (SUC0 0) = quote_hf x"
+                            ).by(SUBSTITUTE_QUOTE_HF, "x", "quote_hf (clear_low y)", "SUC0 0")
+                            p.have(
+                                "h_hf2: Prov_HF "
+                                "(In_a (quote_hf x) "
+                                "      (Insert_t (quote_hf x) (quote_hf (clear_low y))))"
+                            ).by(
+                                HF2_INST,
+                                "quote_hf x",
+                                "quote_hf (clear_low y)",
+                                CONJ(
+                                    p.fact("h_qx_term"),
+                                    CONJ(p.fact("h_qcl_term"), p.fact("h_qx_stable")),
+                                ),
+                            )
+                            p.have(
+                                "h_pos_pf: Prov_HF "
+                                "(In_a (quote_hf x) (quote_hf y))"
+                            ).by_rewrite_of("h_hf2", [SYM(p.fact("h_qy_split"))])
+                            with p.have(
+                                "h_pos: In x y ==> "
+                                "Prov_HF (In_a (quote_hf x) (quote_hf y))"
+                            ).proof():
+                                p.assume("_: In x y")
+                                p.thus(
+                                    "Prov_HF (In_a (quote_hf x) (quote_hf y))"
+                                ).by_thm(p.fact("h_pos_pf"))
+                            p.have("h_low_bit: bit (low_bit y) y = T").by(
+                                BIT_LOW_BIT, "y", "hy_nz"
+                            )
+                            p.have("h_in_head_T: In x y = T").by_rewrite(
+                                [IN_AT, "hx_head", "h_low_bit"]
+                            )
+                            p.have("h_in_head: In x y").by_thm(
+                                EQT_ELIM(p.fact("h_in_head_T"))
+                            )
+                            with p.have(
+                                "h_neg: ~In x y ==> "
+                                "Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y)))"
+                            ).proof():
+                                p.assume("hnxy: ~In x y")
+                                p.absurd().by_conj("hnxy", "h_in_head")
+                            p.thus(
+                                "(In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
+                                "/\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) "
+                                "                                      (quote_hf y))))"
+                            ).by_thm(CONJ(p.fact("h_pos"), p.fact("h_neg")))
                         with p.case("hx_ne_head: ~(x = low_bit y)"):
                             p.have(
                                 "h_tail_decr: nat0_lt "
@@ -2669,7 +2873,403 @@ def QUOTE_HF_MUTUAL_MEASURED(p):
                             # h_head_neq with HF3_INST plus the quote_hf
                             # decomposition of y to transfer membership
                             # decision from clear_low y to y.
-                            p.sorry()
+                            p.split("h_tail_dec", "(h_tail_pos,h_tail_neg)")
+                            p.have(
+                                "h_qy_split: quote_hf y = "
+                                "Insert_t (quote_hf (low_bit y)) "
+                                "         (quote_hf (clear_low y))"
+                            ).by(_QUOTE_HF_AT_NZ, "y", "hy_nz")
+                            p.have("h_qx_term: is_term (quote_hf x)").by(
+                                IS_TERM_QUOTE_HF, "x"
+                            )
+                            p.have(
+                                "h_qlb_term: is_term (quote_hf (low_bit y))"
+                            ).by(IS_TERM_QUOTE_HF, "low_bit y")
+                            p.have(
+                                "h_qcl_term: is_term (quote_hf (clear_low y))"
+                            ).by(IS_TERM_QUOTE_HF, "clear_low y")
+                            p.have(
+                                "h_qlb_stable_x: substitute (quote_hf (low_bit y)) "
+                                "(quote_hf x) (SUC0 0) = quote_hf (low_bit y)"
+                            ).by(
+                                SUBSTITUTE_QUOTE_HF,
+                                "low_bit y",
+                                "quote_hf x",
+                                "SUC0 0",
+                            )
+                            p.have(
+                                "h_qlb_stable_cl: substitute (quote_hf (low_bit y)) "
+                                "(quote_hf (clear_low y)) (SUC0 (SUC0 0)) = "
+                                "quote_hf (low_bit y)"
+                            ).by(
+                                SUBSTITUTE_QUOTE_HF,
+                                "low_bit y",
+                                "quote_hf (clear_low y)",
+                                "SUC0 (SUC0 0)",
+                            )
+                            p.have(
+                                "h_qx_stable_cl: substitute (quote_hf x) "
+                                "(quote_hf (clear_low y)) (SUC0 (SUC0 0)) = "
+                                "quote_hf x"
+                            ).by(
+                                SUBSTITUTE_QUOTE_HF,
+                                "x",
+                                "quote_hf (clear_low y)",
+                                "SUC0 (SUC0 0)",
+                            )
+                            p.have(
+                                "h_hf3: Prov_HF (Imp_f "
+                                "(Not_f (Eq_f (quote_hf (low_bit y)) (quote_hf x))) "
+                                "(Not_f (Imp_f "
+                                "  (Imp_f (In_a (quote_hf x) "
+                                "                 (Insert_t (quote_hf (low_bit y)) "
+                                "                           (quote_hf (clear_low y)))) "
+                                "         (In_a (quote_hf x) (quote_hf (clear_low y)))) "
+                                "  (Not_f (Imp_f "
+                                "         (In_a (quote_hf x) (quote_hf (clear_low y))) "
+                                "         (In_a (quote_hf x) "
+                                "                 (Insert_t (quote_hf (low_bit y)) "
+                                "                           (quote_hf (clear_low y)))))))))"
+                            ).by(
+                                HF3_INST,
+                                "quote_hf (low_bit y)",
+                                "quote_hf x",
+                                "quote_hf (clear_low y)",
+                                CONJ(
+                                    CONJ(
+                                        p.fact("h_qlb_term"),
+                                        CONJ(p.fact("h_qx_term"), p.fact("h_qcl_term")),
+                                    ),
+                                    CONJ(
+                                        p.fact("h_qlb_stable_x"),
+                                        CONJ(
+                                            p.fact("h_qlb_stable_cl"),
+                                            p.fact("h_qx_stable_cl"),
+                                        ),
+                                    ),
+                                ),
+                            )
+                            qhf_neq_sym_x_lb = SPECL(
+                                [p._parse("x"), p._parse("low_bit y")],
+                                QUOTE_HF_NEQ_MEASURE_SYM,
+                            )
+                            p.have(
+                                "h_head_neq_decr_sym: nat0_lt "
+                                "(quote_hf_neq_measure (low_bit y) x) "
+                                "(quote_hf_mem_measure x y)"
+                            ).by_rewrite_of("h_head_neq_decr", [qhf_neq_sym_x_lb])
+                            with p.have("hx_ne_head_sym: ~(low_bit y = x)").proof():
+                                with p.suppose("hlx: low_bit y = x"):
+                                    p.have("hxl: x = low_bit y").by_thm(
+                                        SYM(p.fact("hlx"))
+                                    )
+                                    p.absurd().by_conj("hx_ne_head", "hxl")
+                            p.have(
+                                "h_head_neq_sym: Prov_HF "
+                                "(Not_f (Eq_f (quote_hf (low_bit y)) (quote_hf x)))"
+                            ).by(
+                                "h_neq_smaller",
+                                "low_bit y",
+                                "x",
+                                CONJ(p.fact("hx_ne_head_sym"), p.fact("h_head_neq_decr_sym")),
+                            )
+                            p.have(
+                                "h_iff_pf: Prov_HF (Not_f (Imp_f "
+                                "  (Imp_f (In_a (quote_hf x) "
+                                "                 (Insert_t (quote_hf (low_bit y)) "
+                                "                           (quote_hf (clear_low y)))) "
+                                "         (In_a (quote_hf x) (quote_hf (clear_low y)))) "
+                                "  (Not_f (Imp_f "
+                                "         (In_a (quote_hf x) (quote_hf (clear_low y))) "
+                                "         (In_a (quote_hf x) "
+                                "                 (Insert_t (quote_hf (low_bit y)) "
+                                "                           (quote_hf (clear_low y))))))))"
+                            ).by(
+                                PROV_HF_MP,
+                                "Not_f (Eq_f (quote_hf (low_bit y)) (quote_hf x))",
+                                "Not_f (Imp_f "
+                                "  (Imp_f (In_a (quote_hf x) "
+                                "                 (Insert_t (quote_hf (low_bit y)) "
+                                "                           (quote_hf (clear_low y)))) "
+                                "         (In_a (quote_hf x) (quote_hf (clear_low y)))) "
+                                "  (Not_f (Imp_f "
+                                "         (In_a (quote_hf x) (quote_hf (clear_low y))) "
+                                "         (In_a (quote_hf x) "
+                                "                 (Insert_t (quote_hf (low_bit y)) "
+                                "                           (quote_hf (clear_low y)))))))",
+                                CONJ(p.fact("h_head_neq_sym"), p.fact("h_hf3")),
+                            )
+                            # DSL friction: formula-shape facts for encoded
+                            # conjunction projections still have to be built
+                            # manually; there is no local "is_form by syntax"
+                            # tactic for an arbitrary closed HF formula.
+                            is_form_tail = EQ_MP(
+                                SYM(SPECL(
+                                    [
+                                        p._parse("quote_hf x"),
+                                        p._parse("quote_hf (clear_low y)"),
+                                    ],
+                                    IS_FORM_AT_IN,
+                                )),
+                                CONJ(p.fact("h_qx_term"), p.fact("h_qcl_term")),
+                            )
+                            is_term_insert = MP(
+                                SPECL(
+                                    [
+                                        p._parse("quote_hf (low_bit y)"),
+                                        p._parse("quote_hf (clear_low y)"),
+                                    ],
+                                    IS_TERM_INSERT,
+                                ),
+                                CONJ(p.fact("h_qlb_term"), p.fact("h_qcl_term")),
+                            )
+                            is_form_head = EQ_MP(
+                                SYM(SPECL(
+                                    [
+                                        p._parse("quote_hf x"),
+                                        p._parse(
+                                            "Insert_t (quote_hf (low_bit y)) "
+                                            "         (quote_hf (clear_low y))"
+                                        ),
+                                    ],
+                                    IS_FORM_AT_IN,
+                                )),
+                                CONJ(p.fact("h_qx_term"), is_term_insert),
+                            )
+                            p.have(
+                                "h_form_head: is_form "
+                                "(In_a (quote_hf x) "
+                                "      (Insert_t (quote_hf (low_bit y)) "
+                                "                (quote_hf (clear_low y))))"
+                            ).by_thm(is_form_head)
+                            p.have(
+                                "h_form_tail: is_form "
+                                "(In_a (quote_hf x) (quote_hf (clear_low y)))"
+                            ).by_thm(is_form_tail)
+                            p.have(
+                                "h_head_to_tail: Prov_HF (Imp_f "
+                                "(In_a (quote_hf x) "
+                                "      (Insert_t (quote_hf (low_bit y)) "
+                                "                (quote_hf (clear_low y)))) "
+                                "(In_a (quote_hf x) (quote_hf (clear_low y))))"
+                            ).by(
+                                PROV_HF_AND_ELIM_LEFT,
+                                "Imp_f (In_a (quote_hf x) "
+                                "              (Insert_t (quote_hf (low_bit y)) "
+                                "                        (quote_hf (clear_low y)))) "
+                                "      (In_a (quote_hf x) (quote_hf (clear_low y)))",
+                                "Imp_f (In_a (quote_hf x) (quote_hf (clear_low y))) "
+                                "      (In_a (quote_hf x) "
+                                "              (Insert_t (quote_hf (low_bit y)) "
+                                "                        (quote_hf (clear_low y))))",
+                                CONJ(
+                                    EQ_MP(
+                                        SYM(SPECL(
+                                            [
+                                                p._parse(
+                                                    "In_a (quote_hf x) "
+                                                    "     (Insert_t (quote_hf (low_bit y)) "
+                                                    "               (quote_hf (clear_low y)))"
+                                                ),
+                                                p._parse(
+                                                    "In_a (quote_hf x) "
+                                                    "     (quote_hf (clear_low y))"
+                                                ),
+                                            ],
+                                            IS_FORM_AT_IMP,
+                                        )),
+                                        CONJ(p.fact("h_form_head"), p.fact("h_form_tail")),
+                                    ),
+                                    CONJ(
+                                        EQ_MP(
+                                            SYM(SPECL(
+                                                [
+                                                    p._parse(
+                                                        "In_a (quote_hf x) "
+                                                        "     (quote_hf (clear_low y))"
+                                                    ),
+                                                    p._parse(
+                                                        "In_a (quote_hf x) "
+                                                        "     (Insert_t (quote_hf (low_bit y)) "
+                                                        "               (quote_hf (clear_low y)))"
+                                                    ),
+                                                ],
+                                                IS_FORM_AT_IMP,
+                                            )),
+                                            CONJ(p.fact("h_form_tail"), p.fact("h_form_head")),
+                                        ),
+                                        p.fact("h_iff_pf"),
+                                    ),
+                                ),
+                            )
+                            p.have(
+                                "h_tail_to_head: Prov_HF (Imp_f "
+                                "(In_a (quote_hf x) (quote_hf (clear_low y))) "
+                                "(In_a (quote_hf x) "
+                                "      (Insert_t (quote_hf (low_bit y)) "
+                                "                (quote_hf (clear_low y)))))"
+                            ).by(
+                                PROV_HF_AND_ELIM_RIGHT,
+                                "Imp_f (In_a (quote_hf x) "
+                                "              (Insert_t (quote_hf (low_bit y)) "
+                                "                        (quote_hf (clear_low y)))) "
+                                "      (In_a (quote_hf x) (quote_hf (clear_low y)))",
+                                "Imp_f (In_a (quote_hf x) (quote_hf (clear_low y))) "
+                                "      (In_a (quote_hf x) "
+                                "              (Insert_t (quote_hf (low_bit y)) "
+                                "                        (quote_hf (clear_low y))))",
+                                CONJ(
+                                    EQ_MP(
+                                        SYM(SPECL(
+                                            [
+                                                p._parse(
+                                                    "In_a (quote_hf x) "
+                                                    "     (Insert_t (quote_hf (low_bit y)) "
+                                                    "               (quote_hf (clear_low y)))"
+                                                ),
+                                                p._parse(
+                                                    "In_a (quote_hf x) "
+                                                    "     (quote_hf (clear_low y))"
+                                                ),
+                                            ],
+                                            IS_FORM_AT_IMP,
+                                        )),
+                                        CONJ(p.fact("h_form_head"), p.fact("h_form_tail")),
+                                    ),
+                                    CONJ(
+                                        EQ_MP(
+                                            SYM(SPECL(
+                                                [
+                                                    p._parse(
+                                                        "In_a (quote_hf x) "
+                                                        "     (quote_hf (clear_low y))"
+                                                    ),
+                                                    p._parse(
+                                                        "In_a (quote_hf x) "
+                                                        "     (Insert_t (quote_hf (low_bit y)) "
+                                                        "               (quote_hf (clear_low y)))"
+                                                    ),
+                                                ],
+                                                IS_FORM_AT_IMP,
+                                            )),
+                                            CONJ(p.fact("h_form_tail"), p.fact("h_form_head")),
+                                        ),
+                                        p.fact("h_iff_pf"),
+                                    ),
+                                ),
+                            )
+                            p.have(
+                                "h_contrap_head_tail: Prov_HF (Imp_f "
+                                "(Not_f (In_a (quote_hf x) (quote_hf (clear_low y)))) "
+                                "(Not_f (In_a (quote_hf x) "
+                                "      (Insert_t (quote_hf (low_bit y)) "
+                                "                (quote_hf (clear_low y))))))"
+                            ).by(
+                                PROV_HF_CONTRAP,
+                                "In_a (quote_hf x) "
+                                "     (Insert_t (quote_hf (low_bit y)) "
+                                "               (quote_hf (clear_low y)))",
+                                "In_a (quote_hf x) (quote_hf (clear_low y))",
+                                CONJ(
+                                    p.fact("h_form_head"),
+                                    CONJ(p.fact("h_form_tail"), p.fact("h_head_to_tail")),
+                                ),
+                            )
+                            p.have(
+                                "h_y_recon_sb: y = "
+                                "set_bit (low_bit y) (clear_low y)"
+                            ).by(INSERT_LOW_BIT_CLEAR_LOW, "y", "hy_nz")
+                            p.have(
+                                "h_insert_sb: Insert (low_bit y) (clear_low y) = "
+                                "set_bit (low_bit y) (clear_low y)"
+                            ).by(INSERT_AT, "low_bit y", "clear_low y")
+                            p.have(
+                                "h_y_recon: y = Insert (low_bit y) (clear_low y)"
+                            ).by_trans("h_y_recon_sb", SYM(p.fact("h_insert_sb")))
+                            p.have(
+                                "h_in_tail_eq_raw: In x (Insert (low_bit y) "
+                                "(clear_low y)) = In x (clear_low y)"
+                            ).by(
+                                IN_INSERT_DIFF,
+                                "low_bit y",
+                                "x",
+                                "clear_low y",
+                                "hx_ne_head_sym",
+                            )
+                            p.have(
+                                "h_in_tail_eq: In x y = In x (clear_low y)"
+                            ).by_rewrite_of(
+                                "h_in_tail_eq_raw", [SYM(p.fact("h_y_recon"))]
+                            )
+                            with p.have(
+                                "h_pos: In x y ==> "
+                                "Prov_HF (In_a (quote_hf x) (quote_hf y))"
+                            ).proof():
+                                p.assume("hxy: In x y")
+                                p.have("h_tail: In x (clear_low y)").by_eq_mp(
+                                    "h_in_tail_eq", "hxy"
+                                )
+                                p.have(
+                                    "h_tail_pf: Prov_HF "
+                                    "(In_a (quote_hf x) (quote_hf (clear_low y)))"
+                                ).by("h_tail_pos", "h_tail")
+                                p.have(
+                                    "h_head_pf: Prov_HF "
+                                    "(In_a (quote_hf x) "
+                                    "      (Insert_t (quote_hf (low_bit y)) "
+                                    "                (quote_hf (clear_low y))))"
+                                ).by(
+                                    PROV_HF_MP,
+                                    "In_a (quote_hf x) (quote_hf (clear_low y))",
+                                    "In_a (quote_hf x) "
+                                    "     (Insert_t (quote_hf (low_bit y)) "
+                                    "               (quote_hf (clear_low y)))",
+                                    CONJ(p.fact("h_tail_pf"), p.fact("h_tail_to_head")),
+                                )
+                                p.thus(
+                                    "Prov_HF (In_a (quote_hf x) (quote_hf y))"
+                                ).by_rewrite_of("h_head_pf", [SYM(p.fact("h_qy_split"))])
+                            with p.have(
+                                "h_neg: ~In x y ==> "
+                                "Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y)))"
+                            ).proof():
+                                p.assume("hnxy: ~In x y")
+                                with p.have("hn_tail: ~In x (clear_low y)").proof():
+                                    with p.suppose("h_tail: In x (clear_low y)"):
+                                        p.have("hxy: In x y").by_eq_mp(
+                                            SYM(p.fact("h_in_tail_eq")), "h_tail"
+                                        )
+                                        p.absurd().by_conj("hnxy", "hxy")
+                                p.have(
+                                    "h_tail_neg_pf: Prov_HF "
+                                    "(Not_f (In_a (quote_hf x) (quote_hf (clear_low y))))"
+                                ).by("h_tail_neg", "hn_tail")
+                                p.have(
+                                    "h_head_neg_pf: Prov_HF "
+                                    "(Not_f (In_a (quote_hf x) "
+                                    "      (Insert_t (quote_hf (low_bit y)) "
+                                    "                (quote_hf (clear_low y)))))"
+                                ).by(
+                                    PROV_HF_MP,
+                                    "Not_f (In_a (quote_hf x) (quote_hf (clear_low y)))",
+                                    "Not_f (In_a (quote_hf x) "
+                                    "     (Insert_t (quote_hf (low_bit y)) "
+                                    "               (quote_hf (clear_low y))))",
+                                    CONJ(
+                                        p.fact("h_tail_neg_pf"),
+                                        p.fact("h_contrap_head_tail"),
+                                    ),
+                                )
+                                p.thus(
+                                    "Prov_HF (Not_f (In_a (quote_hf x) (quote_hf y)))"
+                                ).by_rewrite_of(
+                                    "h_head_neg_pf", [SYM(p.fact("h_qy_split"))]
+                                )
+                            p.thus(
+                                "(In x y ==> Prov_HF (In_a (quote_hf x) (quote_hf y))) "
+                                "/\\ (~(In x y) ==> Prov_HF (Not_f (In_a (quote_hf x) "
+                                "                                      (quote_hf y))))"
+                            ).by_thm(CONJ(p.fact("h_pos"), p.fact("h_neg")))
 
         with p.have(
             "h_neq: !s t. ~(s = t) /\\ nat0_lt (quote_hf_neq_measure s t) n ==> "
@@ -3169,7 +3769,7 @@ if __name__ == "__main__":
         "    QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES (SORRY):",
         pp_thm(QUOTE_HF_EXT_DIFF_RIGHT_MEM_DECREASES),
     )
-    print("    QUOTE_HF_MUTUAL_MEASURED (SORRY bridges):", pp_thm(QUOTE_HF_MUTUAL_MEASURED))
+    print("    QUOTE_HF_MUTUAL_MEASURED                :", pp_thm(QUOTE_HF_MUTUAL_MEASURED))
     print(
         "    IS_SUBSTITUTE_STEP_REPRESENTS (SORRY)  :",
         pp_thm(IS_SUBSTITUTE_STEP_REPRESENTS),
