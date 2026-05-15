@@ -505,7 +505,7 @@ def PR_ARITY_REC(p):
 #
 # Convention: free Var_t indices in a defining equation are *implicitly
 # universally closed*. The defining-axiom godelnum is the open
-# equation; the closure rule PROV_PRST_AXIOM combined with the
+# equation; the closure rule PROV_PRST_AX combined with the
 # generalisation rule produces the universal closure when needed; in
 # practice consumers use the substitute-into-axiom derived rule (see
 # PROV_PRST_SUBST in prst_proof) to specialise directly.
@@ -519,7 +519,7 @@ def PR_ARITY_REC(p):
 #
 # Each closed nat0 below encodes one PR defining equation. The
 # corresponding ``Prov_PRST (...)`` theorems live in prst_proof as
-# one-line specialisations of PROV_PRST_AXIOM at this nat0.
+# one-line specialisations of PROV_PRST_AX at this nat0.
 # ---------------------------------------------------------------------------
 
 
@@ -2009,4 +2009,4 @@ if __name__ == "__main__":
     print("    IS_PR_DEF_INSTANCE_SUBST  :", pp_thm(IS_PR_DEF_INSTANCE_SUBST))
     print()
     print("Prov_PRST claims about these axioms are one-line specialisations")
-    print("of PROV_PRST_AXIOM in prst_proof.")
+    print("of PROV_PRST_AX in prst_proof.")

@@ -617,17 +617,42 @@ Prov_PRST = mk_const("Prov_PRST", [])
 
 
 @proof
-def PROV_PRST_AXIOM(p):
-    """|- !n. is_pr_axiom n ==> Prov_PRST n.
+def PROOF_PRST_SINGLETON_AX(p):
+    """|- !n. is_pr_axiom n ==> Proof_PRST (Tup_pt n Empty_pt) n.
 
-    This should follow by witnessing the one-line proof list
-    ``Tup_pt n Empty_pt`` and showing it is ValidProof_PRST. The proof body is
-    still open after the checker refactor.
+    Checker API lemma: a singleton list whose sole line is a PRST axiom is a
+    valid proof of that line.
     """
-    p.goal("!n. is_pr_axiom n ==> Prov_PRST n", types={"n": nat0_ty})
+    p.goal(
+        "!n. is_pr_axiom n ==> Proof_PRST (Tup_pt n Empty_pt) n",
+        types={"n": nat0_ty},
+    )
     p.fix("n")
     p.assume("h_ax: is_pr_axiom n")
     p.sorry()
+
+
+@proof
+def PROV_PRST_AX(p):
+    """|- !n. is_pr_axiom n ==> Prov_PRST n.
+
+    Witness the singleton proof list via PROOF_PRST_SINGLETON_AX, then fold
+    through Prov_PRST.
+    """
+    from tactics import SPEC, SYM
+
+    p.goal("!n. is_pr_axiom n ==> Prov_PRST n", types={"n": nat0_ty})
+    p.fix("n")
+    p.assume("h_ax: is_pr_axiom n")
+    p.have("proof_n: Proof_PRST (Tup_pt n Empty_pt) n").by(
+        PROOF_PRST_SINGLETON_AX, "n", "h_ax"
+    )
+    p.have("ex_n: ?p. Proof_PRST p n").by_exists(
+        ["Tup_pt n Empty_pt"], "proof_n"
+    )
+    p.thus("Prov_PRST n").by_eq_mp(
+        SYM(SPEC(p._parse("n"), PROV_PRST_AT)), "ex_n"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -639,7 +664,7 @@ def PROV_PRST_AXIOM(p):
 
 # ---------------------------------------------------------------------------
 # Stage 2B (d.1) -- PR-defining-equation theorems as one-line
-# specialisations of PROV_PRST_AXIOM.
+# specialisations of PROV_PRST_AX.
 #
 # Each axiom godelnum (from prst_pr) is in is_pr_def, hence is in
 # is_pr_def_instance, hence is in
@@ -648,15 +673,15 @@ def PROV_PRST_AXIOM(p):
 #
 # Pattern (filled in -- not a sorry; falls out of MP + IS_PR_DEF_HOLDS_*
 # + IS_PR_DEF_INSTANCE_FROM_DEF + IS_PR_AXIOM_DEF unfolding
-# + PROV_PRST_AXIOM):
+# + PROV_PRST_AX):
 #
 #     PROV_PRST_ZERO_DEF :=
-#         MP PROV_PRST_AXIOM (DISJ1 IS_PR_DEF_HOLDS_ZERO)
+#         MP PROV_PRST_AX (DISJ1 IS_PR_DEF_HOLDS_ZERO)
 #     |- Prov_PRST zero_def_axiom
 #
 # Stubs below carry the headline statement; the body just notes the
 # specialisation. No new axioms posted; once IS_PR_DEF_HOLDS_* and
-# PROV_PRST_AXIOM are real theorems, these are real theorems too.
+# PROV_PRST_AX are real theorems, these are real theorems too.
 # ---------------------------------------------------------------------------
 
 
@@ -687,13 +712,13 @@ def PROV_PRST_ZERO_DEF(p):
     """|- Prov_PRST zero_def_axiom.
 
     IS_PR_DEF_HOLDS_ZERO + DISJ1 to lift into is_pr_axiom + SPEC of
-    PROV_PRST_AXIOM at zero_def_axiom.
+    PROV_PRST_AX at zero_def_axiom.
     """
     p.goal("Prov_PRST zero_def_axiom")
     p.have("h_pr_def: is_pr_def zero_def_axiom").by_thm(IS_PR_DEF_HOLDS_ZERO)
     _is_pr_axiom_from_pr_def(p, "zero_def_axiom", "h_pr_def")
     p.thus("Prov_PRST zero_def_axiom").by(
-        PROV_PRST_AXIOM, "zero_def_axiom", "h_axiom"
+        PROV_PRST_AX, "zero_def_axiom", "h_axiom"
     )
 
 
@@ -719,7 +744,7 @@ def PROV_PRST_PROJ_DEF(p):
     )
     _is_pr_axiom_from_pr_def(p, "proj_def_axiom_at i n", "h_pr_def")
     p.thus("Prov_PRST (proj_def_axiom_at i n)").by(
-        PROV_PRST_AXIOM, "proj_def_axiom_at i n", "h_axiom"
+        PROV_PRST_AX, "proj_def_axiom_at i n", "h_axiom"
     )
 
 
@@ -732,7 +757,7 @@ def PROV_PRST_IF_IN_TRUE_DEF(p):
     )
     _is_pr_axiom_from_pr_def(p, "if_in_true_def_axiom", "h_pr_def")
     p.thus("Prov_PRST if_in_true_def_axiom").by(
-        PROV_PRST_AXIOM, "if_in_true_def_axiom", "h_axiom"
+        PROV_PRST_AX, "if_in_true_def_axiom", "h_axiom"
     )
 
 
@@ -745,7 +770,7 @@ def PROV_PRST_IF_IN_FALSE_DEF(p):
     )
     _is_pr_axiom_from_pr_def(p, "if_in_false_def_axiom", "h_pr_def")
     p.thus("Prov_PRST if_in_false_def_axiom").by(
-        PROV_PRST_AXIOM, "if_in_false_def_axiom", "h_axiom"
+        PROV_PRST_AX, "if_in_false_def_axiom", "h_axiom"
     )
 
 
@@ -765,7 +790,7 @@ def PROV_PRST_REC_BASE_DEF(p):
     )
     _is_pr_axiom_from_pr_def(p, "rec_base_def_axiom_at g h", "h_pr_def")
     p.thus("Prov_PRST (rec_base_def_axiom_at g h)").by(
-        PROV_PRST_AXIOM, "rec_base_def_axiom_at g h", "h_axiom"
+        PROV_PRST_AX, "rec_base_def_axiom_at g h", "h_axiom"
     )
 
 
@@ -785,7 +810,7 @@ def PROV_PRST_REC_STEP_DEF(p):
     )
     _is_pr_axiom_from_pr_def(p, "rec_step_def_axiom_at g h", "h_pr_def")
     p.thus("Prov_PRST (rec_step_def_axiom_at g h)").by(
-        PROV_PRST_AXIOM, "rec_step_def_axiom_at g h", "h_axiom"
+        PROV_PRST_AX, "rec_step_def_axiom_at g h", "h_axiom"
     )
 
 
@@ -794,7 +819,7 @@ def PROV_PRST_CONST_DEF(p):
     """|- !c. Prov_PRST (const_def_axiom_at c).
 
     Unconditional defining-equation theorem for const_sym -- one-line
-    specialisation of PROV_PRST_AXIOM at any c, via IS_PR_DEF_HOLDS_CONST.
+    specialisation of PROV_PRST_AX at any c, via IS_PR_DEF_HOLDS_CONST.
     """
     from prst_pr import IS_PR_DEF_HOLDS_CONST, const_def_axiom_at  # noqa: F401
     p.goal(
@@ -807,7 +832,7 @@ def PROV_PRST_CONST_DEF(p):
     )
     _is_pr_axiom_from_pr_def(p, "const_def_axiom_at c", "h_pr_def")
     p.thus("Prov_PRST (const_def_axiom_at c)").by(
-        PROV_PRST_AXIOM, "const_def_axiom_at c", "h_axiom"
+        PROV_PRST_AX, "const_def_axiom_at c", "h_axiom"
     )
 
 
@@ -832,7 +857,7 @@ def PROV_PRST_COURSE_REC_BASE_DEF(p):
         p, "course_rec_base_def_axiom_at g h", "h_pr_def"
     )
     p.thus("Prov_PRST (course_rec_base_def_axiom_at g h)").by(
-        PROV_PRST_AXIOM, "course_rec_base_def_axiom_at g h", "h_axiom"
+        PROV_PRST_AX, "course_rec_base_def_axiom_at g h", "h_axiom"
     )
 
 
@@ -858,7 +883,7 @@ def PROV_PRST_COURSE_REC_STEP_DEF(p):
         p, "course_rec_step_def_axiom_at g h a b", "h_pr_def"
     )
     p.thus("Prov_PRST (course_rec_step_def_axiom_at g h a b)").by(
-        PROV_PRST_AXIOM, "course_rec_step_def_axiom_at g h a b", "h_axiom"
+        PROV_PRST_AX, "course_rec_step_def_axiom_at g h a b", "h_axiom"
     )
 
 
@@ -878,7 +903,7 @@ def PROV_PRST_PAIR_LEFT_DEF(p):
     )
     _is_pr_axiom_from_pr_def(p, "pair_left_def_axiom_at a b", "h_pr_def")
     p.thus("Prov_PRST (pair_left_def_axiom_at a b)").by(
-        PROV_PRST_AXIOM, "pair_left_def_axiom_at a b", "h_axiom"
+        PROV_PRST_AX, "pair_left_def_axiom_at a b", "h_axiom"
     )
 
 
@@ -898,7 +923,7 @@ def PROV_PRST_PAIR_RIGHT_DEF(p):
     )
     _is_pr_axiom_from_pr_def(p, "pair_right_def_axiom_at a b", "h_pr_def")
     p.thus("Prov_PRST (pair_right_def_axiom_at a b)").by(
-        PROV_PRST_AXIOM, "pair_right_def_axiom_at a b", "h_axiom"
+        PROV_PRST_AX, "pair_right_def_axiom_at a b", "h_axiom"
     )
 
 
@@ -918,7 +943,7 @@ def PROV_PRST_PAIR_ORD_DEF(p):
     )
     _is_pr_axiom_from_pr_def(p, "pair_ord_def_axiom_at a b", "h_pr_def")
     p.thus("Prov_PRST (pair_ord_def_axiom_at a b)").by(
-        PROV_PRST_AXIOM, "pair_ord_def_axiom_at a b", "h_axiom"
+        PROV_PRST_AX, "pair_ord_def_axiom_at a b", "h_axiom"
     )
 
 
@@ -960,7 +985,7 @@ def PROV_PRST_SUBST(p):
         "h_disj", IS_PR_AXIOM_DEF
     )
     p.thus("Prov_PRST (substitute_p F t v)").by(
-        PROV_PRST_AXIOM, "substitute_p F t v", "h_axiom"
+        PROV_PRST_AX, "substitute_p F t v", "h_axiom"
     )
 
 
@@ -1955,7 +1980,7 @@ if __name__ == "__main__":
     print("Stage 2B (PRST) -- the PRST proof system.")
     print("    IS_PR_AXIOM_DEF        :", pp_thm(IS_PR_AXIOM_DEF))
     print("    PROV_PRST_DEF          :", pp_thm(PROV_PRST_DEF))
-    print("    PROV_PRST_AXIOM        :", pp_thm(PROV_PRST_AXIOM))
+    print("    PROV_PRST_AX           :", pp_thm(PROV_PRST_AX))
     print("    PROV_PRST_MP           :", pp_thm(PROV_PRST_MP))
     print()
     print("Stage 2B (d.1) -- PR-defining-equation theorems (specialisations).")
