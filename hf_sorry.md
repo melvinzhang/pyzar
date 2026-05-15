@@ -22,18 +22,18 @@ using `p.sorry()`.
 
 | Group | File | Count | Role |
 |---|---|---:|---|
-| A | `hf_repr_core.py`, `hf_repr_subst.py` | 13 | support predicate and substitution packages |
+| A | `hf_repr_core.py`, `hf_repr_subst.py` | 6 | support predicate and substitution packages |
 | B | `hf_repr_thms.py` | 11 | internal proof-checker representability |
 | C | `hf_godel1.py` | 8 | diagonal-function and diagonal-lemma layer |
 
-Total live HF/G1 stubs: **32**.
+Total live HF/G1 stubs: **25**.
 
 ## Dependency Order
 
 Clear the remaining sorries in this order:
 
-1. `hf_repr_subst.py` object-level graph-witness helpers.
-2. `hf_repr_subst.py` syntax-recursion package.
+1. `hf_repr_subst.py` substitution representability package.
+2. `hf_repr_subst.py` substitution equivalence package.
 3. `hf_repr_core.py` support predicate and support equivalence packages.
 4. `hf_repr_core.py` qparse/body side-condition packages.
 5. `hf_repr_thms.py` recognizer representability.
@@ -50,95 +50,56 @@ representability path plus ordinary substitution/free-variable facts.
 
 ## Group A — `hf_repr_core.py`, `hf_repr_subst.py`
 
-### A1. Substitute Graph-Witness Rules
+### A1. Substitution Packages
 
 Live stubs:
 
 ```text
-SUBSTITUTE_GRAPH_NOT_ELIMINATES
-SUBSTITUTE_GRAPH_NOT_RECONSTRUCTS
-SUBSTITUTE_GRAPH_INSERT_RECONSTRUCTS
-SUBSTITUTE_GRAPH_EQ_RECONSTRUCTS
-SUBSTITUTE_GRAPH_IN_RECONSTRUCTS
-SUBSTITUTE_GRAPH_IMP_RECONSTRUCTS
-SUBSTITUTE_GRAPH_FORALL_HIT_RECONSTRUCTS
-SUBSTITUTE_GRAPH_FORALL_MISS_RECONSTRUCTS
+HF_SUBSTITUTE_REPRESENTS_PACKAGE
+HF_SUBSTITUTE_EQUIV_PACKAGE
 ```
 
-Closed and moved to `hf_repr_subst.py`:
+Exported from `hf_repr_subst.py`:
 
 ```text
-SUBSTITUTE_REC_EMPTY
-SUBSTITUTE_REC_VAR_HIT
-SUBSTITUTE_REC_VAR_MISS
-SUBSTITUTE_REC_NOT
-SUBSTITUTE_REC_INSERT
-SUBSTITUTE_REC_EQ
-SUBSTITUTE_REC_IN
-SUBSTITUTE_REC_IMP
-SUBSTITUTE_REC_FORALL_HIT
-SUBSTITUTE_REC_FORALL_MISS
+SUBSTITUTE_REPRESENTS_SYNTACTIC
+SUBSTITUTE_REPRESENTS_TERM
+SUBSTITUTE_REPRESENTS_FORM
+SUBSTITUTE_INTERNAL_EQUIV
+SUBSTITUTE_INTERNAL_FUNCTIONAL
 ```
 
 Purpose:
 
-These are now the object-level graph-witness bridge lemmas needed by the
-constructor-local proofs for `substitute_internal`. They eliminate or
-reconstruct the internal graph certificates proving the same result as
-the HOL recursive function `substitute` on each syntax constructor.
+These packages localize all substitution graph semantics in
+`hf_repr_subst.py`.
 
-Expected path:
-
-* Unfold the filled `substitute_internal` body at the object level.
-* Split or extend graph-witness trace sets for the selected constructor.
-* Use the corresponding `SUBSTITUTE_AT_*` theorem from `hf_syntax.py`.
-* Rebuild constructor outputs from the child graph certificates.
-
-Recommended order:
-
-1. `SUBSTITUTE_GRAPH_NOT_ELIMINATES`
-2. `SUBSTITUTE_GRAPH_NOT_RECONSTRUCTS`
-3. `SUBSTITUTE_GRAPH_INSERT_RECONSTRUCTS`
-4. `SUBSTITUTE_GRAPH_EQ_RECONSTRUCTS`
-5. `SUBSTITUTE_GRAPH_IN_RECONSTRUCTS`
-6. `SUBSTITUTE_GRAPH_IMP_RECONSTRUCTS`
-7. `SUBSTITUTE_GRAPH_FORALL_HIT_RECONSTRUCTS`
-8. `SUBSTITUTE_GRAPH_FORALL_MISS_RECONSTRUCTS`
-
-Why this order:
-
-`Not_f` is the smallest recursive constructor case and has both
-elimination and reconstruction witnesses because it was used to validate
-the bridge shape. `Insert_t`, `Eq_f`, `In_a`, and `Imp_f` share the
-binary graph-extension pattern. The binder cases come last because they
-combine constructor work with side conditions.
-
-### A2. Syntax Recursion Package
-
-Live stub:
+`HF_SUBSTITUTE_REPRESENTS_PACKAGE` proves the forward/existence theorem:
 
 ```text
-HF_SYNTAX_REC_PACKAGE
+!F t v. (is_term F \/ is_form F) ==>
+  Prov_HF substitute_internal(F,t,v,substitute F t v)
 ```
 
-Purpose:
+`HF_SUBSTITUTE_EQUIV_PACKAGE` proves the syntactic-input equivalence:
 
-This is the scoped recursion/induction eliminator used to derive
-`SUBSTITUTE_REPRESENTS_SYNTACTIC` from the ten constructor rules.
+```text
+!F t v r. (is_term F \/ is_form F) ==>
+  (Prov_HF substitute_internal(F,t,v,r) = (r = substitute F t v))
+```
 
 Expected path:
 
 * Prove by strong induction over the encoded HF syntax grammar.
-* Split on `is_term F \/ is_form F`.
-* Use `IS_TERM_REC` and `IS_FORM_REC` to expose constructors.
-* Apply the corresponding constructor rule.
-* Use induction hypotheses for strict subterms/subformulas.
+* Keep graph-witness construction and uniqueness private to these
+  packages, not exposed as raw graph reconstruction theorems.
+* The representability package should come first; the equivalence package
+  can then reuse existence plus the local graph-determinism argument.
 
-This is the main local theorem in group A. It should become much easier
-after A1 is proved because the package can be attacked structurally
-instead of carrying object-formula details.
+`HF_SYNTAX_REC_PACKAGE` is now only a compatibility alias for
+`HF_SUBSTITUTE_REPRESENTS_PACKAGE`.
 
-### A3. Support Predicate Package
+### A2. Support Predicate Package
 
 Live stub:
 
@@ -165,7 +126,7 @@ Expected path:
 
 This package should be proved before the equivalence package.
 
-### A4. Support Equivalence Package
+### A3. Support Equivalence Package
 
 Live stub:
 
@@ -181,24 +142,20 @@ Exports equivalences:
 is_term n = Prov_HF (is_term_internal[quote_hf n])
 is_form n = Prov_HF (is_form_internal[quote_hf n])
 free_in F v = Prov_HF (free_in_internal[quote_hf F, quote_hf v])
-substitute_internal(...) = graph(substitute)
 ```
 
 Expected path:
 
-* Forward recognizer/free-variable directions come from A3.
-* Reverse directions come from the negative clauses in A3.
-* Substitute graph equivalence uses:
-  * `SUBSTITUTE_REPRESENTS_SYNTACTIC`
-  * `SUBSTITUTE_INTERNAL_FUNCTIONAL`
+* Forward recognizer/free-variable directions come from A2.
+* Reverse directions come from the negative clauses in A2.
 
 Note:
 
 This theorem is a package for downstream convenience. If it becomes too
-large, split it into four named theorem stubs and repackage only after
+large, split it into three named theorem stubs and repackage only after
 the pieces are proved.
 
-### A5. Qparse and Body Side Conditions
+### A4. Qparse and Body Side Conditions
 
 Live stubs:
 
@@ -502,17 +459,12 @@ after C1 and C2.
 
 ## Practical Next Step
 
-Start with `SUBSTITUTE_REC_EMPTY`, `SUBSTITUTE_REC_VAR_HIT`, and
-`SUBSTITUTE_REC_VAR_MISS`.
+Start with `HF_SUBSTITUTE_REPRESENTS_PACKAGE`.
 
 Reasons:
 
-* They are the smallest current stubs.
-* They exercise the same internal-body unfolding needed by every other
-  `SUBSTITUTE_REC_*` theorem.
-* They reduce the largest package stub, `HF_SYNTAX_REC_PACKAGE`, from a
-  black box into a structural induction problem.
-
-After those three pass, prove `SUBSTITUTE_REC_NOT`, then one binary case
-such as `SUBSTITUTE_REC_INSERT`. Once those patterns are established,
-the remaining constructor rules should be mostly mechanical.
+* It is the constructive half needed by downstream representability.
+* It can keep graph-witness construction private instead of exposing raw
+  graph reconstruction theorem names.
+* `HF_SUBSTITUTE_EQUIV_PACKAGE` can then focus on uniqueness/determinism
+  for syntactic inputs.

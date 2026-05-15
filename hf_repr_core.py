@@ -324,13 +324,11 @@ Prov_HF = mk_const("Prov_HF", [])
 # represents the diagonal function and the fixed-point construction
 # collapses.
 #
-# Encoding strategy: ``substitute_internal`` is governed by the scoped
-# ``HF_SYNTAX_REC_PACKAGE`` definitional extension in ``hf_repr_subst``. That
-# higher-layer package gives constructor-local HF proof rules for
-# Empty/Var/Insert/Eq/In/Not/Imp/Forall and derives representability for
-# syntactic inputs. Malformed nat0 values intentionally have no fake
-# substitution semantics; consumers use the ``SUBSTITUTE_REPRESENTS_FORM`` /
-# ``_TERM`` wrappers.
+# Encoding strategy: ``substitute_internal`` is governed by substitution-
+# specific packages in ``hf_repr_subst``. Those higher-layer packages prove
+# existence/representability and equivalence for syntactic inputs. Malformed
+# nat0 values intentionally have no fake substitution semantics; consumers
+# use the ``SUBSTITUTE_REPRESENTS_FORM`` / ``_TERM`` wrappers.
 # ---------------------------------------------------------------------------
 
 
@@ -698,8 +696,9 @@ _idx_f2 = _idx_term(15)
 
 
 # ---------------------------------------------------------------------------
-# Substitute representability now uses the syntax-recursion package below.
-# The old finite-computation proof route has been removed from this module.
+# Substitute representability now uses the substitution packages in
+# ``hf_repr_subst``. The old finite-computation proof route has been removed
+# from this module.
 
 # ===========================================================================
 # HF-encoding side.
@@ -3015,15 +3014,10 @@ _SUPPORT_RULE_FREE_IN_NEG = (
 _SUPPORT_EQUIV_IS_TERM = f"!n. is_term n = {_prov_is_term_internal_rel('n')}"
 _SUPPORT_EQUIV_IS_FORM = f"!n. is_form n = {_prov_is_form_internal_rel('n')}"
 _SUPPORT_EQUIV_FREE_IN = f"!F v. free_in F v = {_prov_free_in_internal_rel('F', 'v')}"
-_SUPPORT_EQUIV_SUBSTITUTE = (
-    f"!F t v r. (is_term F \\/ is_form F) ==> "
-    f"({_prov_substitute_internal_rel('F', 't', 'v', 'r')} = "
-    f"(r = ((substitute F) t) v))"
-)
 
 
 # Support-predicate package for the finite certificate bodies above.
-# ``substitute_internal`` is handled by ``HF_SYNTAX_REC_PACKAGE`` in
+# ``substitute_internal`` is handled by the substitution packages in
 # ``hf_repr_subst``; this package supplies the remaining support predicates
 # consumed by is_axiom_internal and the final Prov_HF representability proof.
 def _right_assoc_conj_text(items):
@@ -3088,10 +3082,7 @@ def HF_SUPPORT_EQUIV_PACKAGE(p):
         ``HF_SUPPORT_PREDICATE_PACKAGE``.
       * Prove the reverse recognizer/free-variable directions by
         contraposition from the negative package clauses.
-      * Use ``SUBSTITUTE_REPRESENTS_SYNTACTIC`` plus
-        ``SUBSTITUTE_INTERNAL_FUNCTIONAL`` for the substitute graph
-        equivalence on syntactic inputs.
-      * Right-associate the four clauses for stable projections.
+      * Right-associate the three clauses for stable projections.
     """
     p.goal(
         _right_assoc_conj_text(
@@ -3099,14 +3090,13 @@ def HF_SUPPORT_EQUIV_PACKAGE(p):
                 _SUPPORT_EQUIV_IS_TERM,
                 _SUPPORT_EQUIV_IS_FORM,
                 _SUPPORT_EQUIV_FREE_IN,
-                _SUPPORT_EQUIV_SUBSTITUTE,
             ]
         )
     )
     p.sorry()
 
 
-def _support_equiv_clause(index, count=4):
+def _support_equiv_clause(index, count=3):
     th = HF_SUPPORT_EQUIV_PACKAGE
     for _ in range(index):
         th = CONJUNCT2(th)
@@ -3118,46 +3108,6 @@ def _support_equiv_clause(index, count=4):
 IS_TERM_INTERNAL_EQUIV = _support_equiv_clause(0)
 IS_FORM_INTERNAL_EQUIV = _support_equiv_clause(1)
 FREE_IN_INTERNAL_EQUIV = _support_equiv_clause(2)
-SUBSTITUTE_INTERNAL_EQUIV = _support_equiv_clause(3)
-
-@proof
-def SUBSTITUTE_INTERNAL_FUNCTIONAL(p):
-    r"""|- !F t v r1 r2. (is_term F \/ is_form F)
-          ==> substitute_internal(F,t,v,r1)
-          ==> substitute_internal(F,t,v,r2)
-          ==> r1 = r2.
-
-    Functionality is derived from ``SUBSTITUTE_INTERNAL_EQUIV``: on
-    syntactic inputs the internal relation is equivalent to the graph of
-    the HOL function ``substitute``.
-    """
-    rel_r1 = _prov_substitute_internal_rel("F", "t", "v", "r1")
-    rel_r2 = _prov_substitute_internal_rel("F", "t", "v", "r2")
-    p.goal(
-        f"!F t v r1 r2. (is_term F \\/ is_form F) ==> "
-        f"{rel_r1} ==> {rel_r2} ==> r1 = r2"
-    )
-    p.fix("F t v r1 r2")
-    p.assume("hsyntax: is_term F \\/ is_form F")
-    p.assume(f"hr1: {rel_r1}")
-    p.assume(f"hr2: {rel_r2}")
-    eq_r1 = SPECL(
-        [p._parse("F"), p._parse("t"), p._parse("v"), p._parse("r1")],
-        SUBSTITUTE_INTERNAL_EQUIV,
-    )
-    eq_r2 = SPECL(
-        [p._parse("F"), p._parse("t"), p._parse("v"), p._parse("r2")],
-        SUBSTITUTE_INTERNAL_EQUIV,
-    )
-    p.have("rel_r1_eq: " f"{rel_r1} = (r1 = ((substitute F) t) v)").by_thm(
-        MP(eq_r1, p.fact("hsyntax"))
-    )
-    p.have("rel_r2_eq: " f"{rel_r2} = (r2 = ((substitute F) t) v)").by_thm(
-        MP(eq_r2, p.fact("hsyntax"))
-    )
-    p.have("r1_eq: r1 = ((substitute F) t) v").by_eq_mp("rel_r1_eq", "hr1")
-    p.have("r2_eq: r2 = ((substitute F) t) v").by_eq_mp("rel_r2_eq", "hr2")
-    p.thus("r1 = r2").by_thm(TRANS(p.fact("r1_eq"), SYM(p.fact("r2_eq"))))
 
 
 # ---------------------------------------------------------------------------
@@ -4304,8 +4254,6 @@ if __name__ == "__main__":
     print("    IS_TERM_INTERNAL_EQUIV                :", pp_thm(IS_TERM_INTERNAL_EQUIV))
     print("    IS_FORM_INTERNAL_EQUIV                :", pp_thm(IS_FORM_INTERNAL_EQUIV))
     print("    FREE_IN_INTERNAL_EQUIV                :", pp_thm(FREE_IN_INTERNAL_EQUIV))
-    print("    SUBSTITUTE_INTERNAL_EQUIV             :", pp_thm(SUBSTITUTE_INTERNAL_EQUIV))
-    print("    SUBSTITUTE_INTERNAL_FUNCTIONAL        :", pp_thm(SUBSTITUTE_INTERNAL_FUNCTIONAL))
     print("    HF_PACKAGE_SIDE_CONDITION_PACKAGE     :", pp_thm(HF_PACKAGE_SIDE_CONDITION_PACKAGE))
     print("    IS_FORM_IS_AXIOM_INTERNAL             :", pp_thm(IS_FORM_IS_AXIOM_INTERNAL))
     print("    FREE_IN_IS_AXIOM_INTERNAL             :", pp_thm(FREE_IN_IS_AXIOM_INTERNAL))

@@ -20,7 +20,7 @@
 #   (c) Measured quote membership / inequality scaffolding.
 #   (d) Stage-3 remaining SORRY scaffolding
 #       (PROV_HF_REPRESENTS). Substitute representability is now provided
-#       by the syntax-recursion package in hf_repr_subst.
+#       by the substitution packages in hf_repr_subst.
 # ---------------------------------------------------------------------------
 
 
@@ -152,8 +152,6 @@ from hf_repr_core import (
     IS_TERM_INTERNAL_EQUIV,
     IS_FORM_INTERNAL_EQUIV,
     FREE_IN_INTERNAL_EQUIV,
-    SUBSTITUTE_INTERNAL_EQUIV,
-    SUBSTITUTE_INTERNAL_FUNCTIONAL,
     HF_PACKAGE_SIDE_CONDITION_PACKAGE,
     IS_FORM_IS_AXIOM_INTERNAL,
     FREE_IN_IS_AXIOM_INTERNAL,
@@ -184,11 +182,15 @@ from hf_repr_core import (
     TEMPLATE_FILL_PRESERVES_IS_FORM,
 )
 from hf_repr_subst import (
+    HF_SUBSTITUTE_REPRESENTS_PACKAGE,
+    HF_SUBSTITUTE_EQUIV_PACKAGE,
     HF_SYNTAX_REC_PACKAGE,
     SUBSTITUTE_REPRESENTS_SYNTACTIC,
     SUBSTITUTE_REPRESENTS_TERM,
     SUBSTITUTE_REPRESENTS_FORM,
     SUBSTITUTE_REPRESENTS,
+    SUBSTITUTE_INTERNAL_EQUIV,
+    SUBSTITUTE_INTERNAL_FUNCTIONAL,
     TEMPLATE_FILL_REPRESENTS_TERM,
     TEMPLATE_FILL_REPRESENTS,
 )
@@ -3911,12 +3913,15 @@ def QUOTE_HF_QPARSE_EMPTY(p):
 # Stage 3C -- substitute representability.
 #
 # The old operational checker route has been removed from the high-layer path.
-# ``hf_repr_subst`` now exports the readability-first syntax-recursion package:
+# ``hf_repr_subst`` now exports the substitution-specific packages:
 #
-#   HF_SYNTAX_REC_PACKAGE
+#   HF_SUBSTITUTE_REPRESENTS_PACKAGE
+#   HF_SUBSTITUTE_EQUIV_PACKAGE
 #   SUBSTITUTE_REPRESENTS_SYNTACTIC
 #   SUBSTITUTE_REPRESENTS_TERM
 #   SUBSTITUTE_REPRESENTS_FORM
+#   SUBSTITUTE_INTERNAL_EQUIV
+#   SUBSTITUTE_INTERNAL_FUNCTIONAL
 #   TEMPLATE_FILL_REPRESENTS_TERM
 #   TEMPLATE_FILL_REPRESENTS
 # while ``hf_repr_core`` still exports:
@@ -4475,6 +4480,7 @@ if __name__ == "__main__":
     print("    IS_TERM_INTERNAL_EQUIV                :", pp_thm(IS_TERM_INTERNAL_EQUIV))
     print("    IS_FORM_INTERNAL_EQUIV                :", pp_thm(IS_FORM_INTERNAL_EQUIV))
     print("    FREE_IN_INTERNAL_EQUIV                :", pp_thm(FREE_IN_INTERNAL_EQUIV))
+    print("    HF_SUBSTITUTE_EQUIV_PACKAGE          :", pp_thm(HF_SUBSTITUTE_EQUIV_PACKAGE))
     print("    SUBSTITUTE_INTERNAL_EQUIV             :", pp_thm(SUBSTITUTE_INTERNAL_EQUIV))
     print("    SUBSTITUTE_INTERNAL_FUNCTIONAL        :", pp_thm(SUBSTITUTE_INTERNAL_FUNCTIONAL))
     print("    HF_PACKAGE_SIDE_CONDITION_PACKAGE      :", pp_thm(HF_PACKAGE_SIDE_CONDITION_PACKAGE))
@@ -4488,6 +4494,7 @@ if __name__ == "__main__":
     print("    FREE_IN_QPARSE_FORALL_F                :", pp_thm(FREE_IN_QPARSE_FORALL_F))
     print("    HF_PROV_FREE_CONDITION_PACKAGE         :", pp_thm(HF_PROV_FREE_CONDITION_PACKAGE))
     print("    FREE_IN_PROV_HF_INTERNAL_BODY          :", pp_thm(FREE_IN_PROV_HF_INTERNAL_BODY))
+    print("    HF_SUBSTITUTE_REPRESENTS_PACKAGE       :", pp_thm(HF_SUBSTITUTE_REPRESENTS_PACKAGE))
     print("    HF_SYNTAX_REC_PACKAGE                  :", pp_thm(HF_SYNTAX_REC_PACKAGE))
     print(
         "    SUBSTITUTE_REPRESENTS_SYNTACTIC        :",
