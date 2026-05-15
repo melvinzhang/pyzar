@@ -89,7 +89,8 @@ class thm:
         self._concl = concl
 
     def __repr__(self):
-        return f"Sequent({self._asl!r}, {self._concl!r})"
+        asl = ", ".join(_pp_tm(a) for a in self._asl)
+        return f"Sequent([{asl}], {_pp_tm(self._concl)})"
 
     def __eq__(self, other):
         return (

@@ -553,6 +553,15 @@ class IntroSet:
 _INTRO_SETS = {}  # pred const name -> IntroSet
 
 
+def _fmt_ref(x):
+    """Pretty-print kernel objects in diagnostics, keep Python refs explicit."""
+    if isinstance(x, thm):
+        return pp(x._concl)
+    if isinstance(x, (Var, Const, Comb, Abs)):
+        return pp(x)
+    return repr(x)
+
+
 def register_intro_set(pred, *, atoms, app):
     """Register a structural-intro set for ``pred`` (a kernel ``Const``).
 
@@ -571,17 +580,22 @@ def register_intro_set(pred, *, atoms, app):
     overrides.
     """
     if not isinstance(pred, Const):
-        raise HolError(f"register_intro_set: pred must be a kernel Const, got {pred!r}")
+        raise HolError(
+            f"register_intro_set: pred must be a kernel Const, got {_fmt_ref(pred)}"
+        )
     app_const, app_thm = app
     if not isinstance(app_const, Const):
         raise HolError(
-            f"register_intro_set: app_const must be a kernel Const, got {app_const!r}"
+            "register_intro_set: app_const must be a kernel Const, "
+            f"got {_fmt_ref(app_const)}"
         )
     atom_list = []
     for entry in atoms:
         atom_t, atom_th = entry
         if not isinstance(atom_th, thm):
-            raise HolError(f"register_intro_set: atom theorem expected, got {atom_th!r}")
+            raise HolError(
+                f"register_intro_set: atom theorem expected, got {_fmt_ref(atom_th)}"
+            )
         atom_list.append((atom_t, atom_th))
     _INTRO_SETS[pred.name] = IntroSet(pred, atom_list, app_const, app_thm)
 
@@ -1058,7 +1072,7 @@ class Proof:
         if callable(justification):
             resolved = [self.coerce(a, accept_term=True) for a in args]
             return justification(*resolved)
-        raise HolError(f"{op}: not a theorem or callable: {justification!r}")
+        raise HolError(f"{op}: not a theorem or callable: {_fmt_ref(justification)}")
 
     def _close_frame(self, fr, th):
         """Discharge a frame's accumulated bindings into ``th``.
@@ -1318,7 +1332,7 @@ class Proof:
             raise HolError(f"unknown fact label: {x!r}")
         if accept_term:
             return x
-        raise HolError(f"coerce: cannot resolve reference: {x!r}")
+        raise HolError(f"coerce: cannot resolve reference: {_fmt_ref(x)}")
 
     def fact(self, ref):
         """Public accessor: returns the theorem associated with a label or index."""
@@ -2185,7 +2199,7 @@ class _Have:
         if isinstance(justification, str):
             justification = p.coerce(justification)
         if not isinstance(justification, thm):
-            raise HolError(f"by_match: not a theorem: {justification!r}")
+            raise HolError(f"by_match: not a theorem: {_fmt_ref(justification)}")
         th = p.simp_norm_fact(justification)
         vs, body = _strip_forall(th)
         vars_set = set(vs)
@@ -2246,7 +2260,7 @@ class _Have:
             if isinstance(resolved, thm):
                 if group_idx >= n_groups:
                     raise HolError(
-                        f"by_match: extra fact arg, no antecedent left: {a!r}"
+                        f"by_match: extra fact arg, no antecedent left: {_fmt_ref(a)}"
                     )
                 fact_concl = rand(p.simp_normalize(resolved._concl)._concl)
                 # If at start of a multi-atom group, also try matching
@@ -2279,7 +2293,8 @@ class _Have:
                 v = next((v for v in vs if v not in subst), None)
                 if v is None:
                     raise HolError(
-                        f"by_match: extra term arg, all forall vars bound: {a!r}"
+                        "by_match: extra term arg, all forall vars bound: "
+                        f"{_fmt_ref(a)}"
                     )
                 subst[v] = resolved
         unbound = [v.name for v in vs if v not in subst]
@@ -2615,7 +2630,8 @@ class _Have:
             resolved = p.coerce(a, accept_term=True)
             if isinstance(resolved, thm):
                 raise HolError(
-                    f"by_inst: arg {a!r} resolved to a theorem; expected a term"
+                    "by_inst: arg resolved to a theorem; expected a term: "
+                    f"{_fmt_ref(a)}"
                 )
             th = SPEC(resolved, th)
         return self._finish(th)
@@ -2636,7 +2652,8 @@ class _Have:
             resolved = p.coerce(a, accept_term=True)
             if isinstance(resolved, thm):
                 raise HolError(
-                    f"by_spec: arg {a!r} resolved to a theorem; expected a term"
+                    "by_spec: arg resolved to a theorem; expected a term: "
+                    f"{_fmt_ref(a)}"
                 )
             th = SPEC(resolved, th)
         return self._finish(EQ_MP(BETA_NORM(th._concl), th))

@@ -77,7 +77,7 @@ from axioms import (
     mk_forall,
     mk_select,
 )
-from parser import parse_type
+from parser import parse_type, pp
 
 
 _BBB = parse_type("bool -> bool -> bool")
@@ -1066,7 +1066,8 @@ def _bottom_up(rules, tm, under_binder=False, ac=None):
     else:
         raise HolError(
             f"REWRITE: root rule fired {SIMP_ROOT_FIRE_LIMIT} times — "
-            "likely non-terminating"
+            "likely non-terminating\n"
+            f"  term: {pp(cur)}"
         )
 
     return inner if inner_changed else None
@@ -1146,8 +1147,8 @@ def REWRITE_PROVE(rules_thms, target_eq, *, ac=None, ac_rules=()):
     if not triples:
         raise HolError(
             "REWRITE_PROVE: normal forms differ\n"
-            f"  LHS reduces to: {nl}\n"
-            f"  RHS reduces to: {nr}"
+            f"  LHS reduces to: {pp(nl)}\n"
+            f"  RHS reduces to: {pp(nr)}"
         )
     for op_const, assoc_thm, comm_thm in triples:
         if _is_op_app(op_const, nl) and _is_op_app(op_const, nr):
@@ -1156,8 +1157,8 @@ def REWRITE_PROVE(rules_thms, target_eq, *, ac=None, ac_rules=()):
     raise HolError(
         "REWRITE_PROVE: normal forms differ and no registered AC operator "
         "heads both sides\n"
-        f"  LHS reduces to: {nl}\n"
-        f"  RHS reduces to: {nr}"
+        f"  LHS reduces to: {pp(nl)}\n"
+        f"  RHS reduces to: {pp(nr)}"
     )
 
 
@@ -1289,8 +1290,8 @@ def AC_PROVE(op_const, assoc_thm, comm_thm, target_eq):
     if not aconv(nl, nr):
         raise HolError(
             "AC_PROVE: AC normal forms differ\n"
-            f"  LHS canonical: {nl}\n"
-            f"  RHS canonical: {nr}"
+            f"  LHS canonical: {pp(nl)}\n"
+            f"  RHS canonical: {pp(nr)}"
         )
     return TRANS(eq_l, SYM(eq_r))
 
