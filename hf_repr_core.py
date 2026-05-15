@@ -400,10 +400,10 @@ represents_pred = mk_const("represents_pred", [])
 # Headline theorem for formula consumers:
 #   |- !F t v. is_form F ==> Prov_HF (
 #         substitute (substitute (substitute (substitute
-#             substitute_internal (numeral F) var_x)
-#             (numeral t) var_y)
-#             (numeral v) var_z)
-#             (numeral (substitute F t v)) var_w).
+#             substitute_internal (quote_hf F) var_x)
+#             (quote_hf t) var_y)
+#             (quote_hf v) var_z)
+#             (quote_hf (substitute F t v)) var_w).
 #
 # ``substitute_internal`` is a HF-formula in four free variables --
 # ``var_x`` (F-slot), ``var_y`` (t-slot), ``var_z`` (v-slot), ``var_w``
@@ -810,9 +810,11 @@ _idx_f2 = _idx_term(15)
 #       quote_hf : nat0 -> nat0   -- bit-encoded HF set -> Insert_t-tower.
 #
 #   Every HF-set input slot in a representability goal uses ``quote_hf``.
-#   The ``SUBSTITUTE_REPRESENTS`` headline keeps ``numeral`` for the F /
-#   t / v / r slots; the IS_*_REPRESENTS lemmas use ``quote_hf``
-#   throughout since their inputs are HF-shaped encoded sets and members.
+#   The ``SUBSTITUTE_REPRESENTS`` headline uses ``quote_hf`` for the F /
+#   t / v / r slots. Syntax codes are already HF sets; using ``numeral``
+#   would convert the code to an ordinal and lose the constructor shape.
+#   The IS_*_REPRESENTS lemmas also use ``quote_hf`` throughout since
+#   their inputs are HF-shaped encoded sets and members.
 # ===========================================================================
 
 
@@ -2375,13 +2377,13 @@ add_const("substitute_internal", substitute_internal)
 
 
 def _substitute_internal_rel(F, t, v, r):
-    """Surface text for ``substitute_internal(F,t,v,r)`` at numerals."""
+    """Surface text for ``substitute_internal(F,t,v,r)`` at HF quotes."""
     return (
         "(substitute (substitute (substitute (substitute "
-        f"substitute_internal (numeral ({F})) idx_x) "
-        f"(numeral ({t})) idx_y) "
-        f"(numeral ({v})) idx_z) "
-        f"(numeral ({r})) idx_w)"
+        f"substitute_internal (quote_hf ({F})) idx_x) "
+        f"(quote_hf ({t})) idx_y) "
+        f"(quote_hf ({v})) idx_z) "
+        f"(quote_hf ({r})) idx_w)"
     )
 
 

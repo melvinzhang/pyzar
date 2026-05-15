@@ -418,7 +418,7 @@ from hf_connectives import (
 # ``diag`` is a HOL function on godelnums. Its representability inside
 # HF follows from ``SUBSTITUTE_REPRESENTS`` specialised with F=t=n,
 # v=var_x: each instance ``diag(n) = k`` is HF-provable via the
-# ``substitute_internal`` formula at numeral arguments.
+# ``substitute_internal`` formula at HF-quoted syntax-code arguments.
 # ---------------------------------------------------------------------------
 
 
@@ -465,7 +465,8 @@ diag = mk_const("diag", [])
 #                                            v:=var_x, r:=var_y]``
 #     -- composition of substitute_internal with numeral_internal,
 #     both Sigma_1, expressible in HF without any further
-#     sequence-coding machinery.
+#     sequence-coding machinery. Under the HF-native route, the
+#     substitute side uses quote_hf slots, not ordinal numerals.
 #   * DIAG_REPRESENTS / DIAG_FUNCTIONAL: forward direction by
 #     exhibiting the composite HF witness; functionality from
 #     SUBSTITUTE_REPRESENTS uniqueness + HF extensionality (Q11).
@@ -686,8 +687,8 @@ def FREE_IN_SUBSTITUTE_AT_DIFFERENT_VAR(p):
 #     (specialising substitute_internal to F=t=var_x, output=var_y).
 #   * theta := Exists_f var_y (And_f D phi_at_y).
 #   * Set m := theta; psi := substitute theta (numeral m) var_x.
-#   * From SUBSTITUTE_REPRESENTS at F=t=m, derive HF proves D(numeral m,
-#     numeral (diag m)).
+#   * From SUBSTITUTE_REPRESENTS at F=t=m, derive HF proves the
+#     substitute-internal part of D at quote_hf m and quote_hf (diag m).
 #   * Hence HF proves theta(numeral m) <=> phi(numeral (diag m)) =
 #     phi(numeral psi). Since psi = theta(numeral m), this is the
 #     diagonal equivalence.

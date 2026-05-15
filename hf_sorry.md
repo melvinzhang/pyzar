@@ -284,14 +284,20 @@ recursion equations.
 
      ```text
      |- !F t v. (is_term F \/ is_form F) ==>
-          Prov_HF (substitute_internal F t v (substitute F t v))
+          Prov_HF (substitute_internal (quote_hf F)
+                                       (quote_hf t)
+                                       (quote_hf v)
+                                       (quote_hf (substitute F t v)))
      ```
 
-     This closes the accidental "all nat0 values are syntax" gap. The
-     plan carries this premise through wrapper lemmas, not through a fake
-     non-syntax default branch. Downstream proof scripts should cite
-     `SUBSTITUTE_REPRESENTS_FORM` or `SUBSTITUTE_REPRESENTS_TERM` and
-     discharge only `is_form phi` or `is_term phi`.
+     This is now HF-native: syntax codes are passed to the internal
+     formula by `quote_hf`, preserving their HF-set constructor shape.
+     Using `numeral` here would turn the code into an ordinal numeral
+     and make qparse/constructor bodies miss the intended structure.
+     The theorem is still syntax-scoped, so downstream proof scripts
+     should cite `SUBSTITUTE_REPRESENTS_FORM` or
+     `SUBSTITUTE_REPRESENTS_TERM` and discharge only `is_form phi` or
+     `is_term phi`.
    - Consumer check: `hf_godel1.py`'s diagonal route already carries
      formula side conditions (`is_form phi`, `IS_FORM_DIAG_INTERNAL`).
      The main use should cite the form wrapper; no non-syntax default
@@ -314,6 +320,13 @@ recursion equations.
 
    - Done via `HF_SYNTAX_REC_PACKAGE`, `SUBSTITUTE_REPRESENTS_SYNTACTIC`,
      `SUBSTITUTE_REPRESENTS_FORM`, and `SUBSTITUTE_REPRESENTS_TERM`.
+     The public relation now uses `quote_hf` slots instead of `numeral`
+     slots.
+   - Remaining discharge work: constructor bodies/proofs should target
+     the quoted-code interface. A `qparse` body can express constructor
+     data readably, but the proof must bridge canonical `quote_hf`
+     normal forms to those constructor-shaped towers using HF equality,
+     not by assuming syntactic definitional equality.
 
 5. **Old operational checker — removed**
    - Done for the main path: the step-by-step substitution checker is no
@@ -372,7 +385,7 @@ After `hf_repr_thms.py` is no-sorry, the remaining G1 work is in
 
 | Theorem | Role | Depends on |
 |---|---|---|
-| `DIAG_REPRESENTS` | diag relation existence | `SUBSTITUTE_REPRESENTS`, numeral/internal composition |
+| `DIAG_REPRESENTS` | diag relation existence | `SUBSTITUTE_REPRESENTS`, quote/internal composition |
 | `IS_FORM_DIAG_INTERNAL` | diagonal side condition | body of `diag_internal` |
 | `FREE_IN_DIAG_INTERNAL` | diagonal side condition | body of `diag_internal` |
 | `DIAG_FUNCTIONAL` | uniqueness/functionality | `SUBSTITUTE_REPRESENTS`, equality reasoning |
