@@ -4133,14 +4133,8 @@ Prov_HF_internal = mk_const("Prov_HF_internal", [])
 def HF_PROV_FREE_CONDITION_PACKAGE(p):
     """Free-variable condition for the final internal provability body.
 
-    Proof sketch:
-      * Unfold ``Prov_HF_internal`` as an existential over
-        ``Proof_HF_set_internal``.
-      * Use the free-variable equations for ``Proof_HF_set_internal`` and
-        its qparse subterms.
-      * The bound proof-set variable is removed by the existential, and
-        the only remaining free variable is the theorem-code slot
-        ``idx_x``.
+    Conceptual hygiene theorem: all helper variables used inside the encoded
+    proof checker are bound, leaving only the theorem-code slot ``idx_x`` free.
     """
     _set_goal_term(
         p,
@@ -4150,7 +4144,6 @@ def HF_PROV_FREE_CONDITION_PACKAGE(p):
         ),
     )
     p.sorry()
-FREE_IN_PROV_HF_INTERNAL_BODY = HF_PROV_FREE_CONDITION_PACKAGE
 
 
 # ---------------------------------------------------------------------------
@@ -4264,7 +4257,6 @@ if __name__ == "__main__":
     print("    IS_TERM_QPARSE_FORALL_F               :", pp_thm(IS_TERM_QPARSE_FORALL_F))
     print("    FREE_IN_QPARSE_FORALL_F               :", pp_thm(FREE_IN_QPARSE_FORALL_F))
     print("    HF_PROV_FREE_CONDITION_PACKAGE        :", pp_thm(HF_PROV_FREE_CONDITION_PACKAGE))
-    print("    FREE_IN_PROV_HF_INTERNAL_BODY         :", pp_thm(FREE_IN_PROV_HF_INTERNAL_BODY))
     print("    TEMPLATE_FILL_EMPTY                   :", pp_thm(TEMPLATE_FILL_EMPTY))
     print("    TEMPLATE_FILL_HOLE_HIT                :", pp_thm(TEMPLATE_FILL_HOLE_HIT))
     print("    TEMPLATE_FILL_HOLE_MISS               :", pp_thm(TEMPLATE_FILL_HOLE_MISS))

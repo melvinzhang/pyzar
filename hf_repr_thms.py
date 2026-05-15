@@ -162,7 +162,6 @@ from hf_repr_core import (
     IS_TERM_QPARSE_FORALL_F,
     FREE_IN_QPARSE_FORALL_F,
     HF_PROV_FREE_CONDITION_PACKAGE,
-    FREE_IN_PROV_HF_INTERNAL_BODY,
     IS_MP_INTERNAL_DEF,
     IS_GEN_INTERNAL_DEF,
     VALID_STEP_HF_SET_INTERNAL_DEF,
@@ -4406,7 +4405,7 @@ def FREE_IN_PROV_HF_INTERNAL(p):
     """
     p.goal("!v. free_in Prov_HF_internal v = (v = idx_x)")
     p.thus("!v. free_in Prov_HF_internal v = (v = idx_x)").by_thm(
-        FREE_IN_PROV_HF_INTERNAL_BODY
+        HF_PROV_FREE_CONDITION_PACKAGE
     )
 
 
@@ -4493,7 +4492,6 @@ if __name__ == "__main__":
     print("    IS_TERM_QPARSE_FORALL_F                :", pp_thm(IS_TERM_QPARSE_FORALL_F))
     print("    FREE_IN_QPARSE_FORALL_F                :", pp_thm(FREE_IN_QPARSE_FORALL_F))
     print("    HF_PROV_FREE_CONDITION_PACKAGE         :", pp_thm(HF_PROV_FREE_CONDITION_PACKAGE))
-    print("    FREE_IN_PROV_HF_INTERNAL_BODY          :", pp_thm(FREE_IN_PROV_HF_INTERNAL_BODY))
     print("    HF_SUBSTITUTE_REPRESENTS_PACKAGE       :", pp_thm(HF_SUBSTITUTE_REPRESENTS_PACKAGE))
     print("    HF_SYNTAX_REC_PACKAGE                  :", pp_thm(HF_SYNTAX_REC_PACKAGE))
     print(

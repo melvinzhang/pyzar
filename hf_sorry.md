@@ -164,6 +164,17 @@ HF_PACKAGE_SIDE_CONDITION_PACKAGE
 HF_PROV_FREE_CONDITION_PACKAGE
 ```
 
+Hygiene classification:
+
+* `HF_PACKAGE_SIDE_CONDITION_PACKAGE` is a tedious internal-expression
+  verification package. It should not carry meta-mathematical content:
+  expand qparse bodies, prove constructor well-formedness, and compute
+  free-variable equations.
+* `HF_PROV_FREE_CONDITION_PACKAGE` is the single conceptual hygiene
+  theorem for `Prov_HF_internal`. The remaining trust here is exactly the
+  statement that the encoded proof checker binds all helper variables and
+  leaves only the theorem-code slot `idx_x` free.
+
 Purpose:
 
 These prove `is_form` and `free_in` facts for qparse-built internal
@@ -218,6 +229,16 @@ Expected path:
   * split `is_axiom` into HF, HF-induction, and logical cases;
   * use support equivalences from group A;
   * repack through `is_axiom_internal`.
+
+Hygiene classification:
+
+* `IS_MP_INTERNAL_REPRESENTS` and `IS_GEN_INTERNAL_REPRESENTS` are small
+  internal-body verification proofs: fill the slots, unfold the recognizer
+  body, reduce to quoted equality, and close by object reflexivity.
+* `IS_AXIOM_INTERNAL_REPRESENTS` is mixed. Some branches are tedious body
+  verification, but the theorem also depends on support equivalences and
+  real axiom-schema case analysis, so do not treat it as a pure hygiene
+  sorry.
 
 Recommended order:
 
@@ -274,6 +295,14 @@ Recommended order:
 3. `VALID_STEP_HF_SET_INTERNAL_GEN_CASE`
 4. `VALID_STEP_HF_SET_INTERNAL_MP_CASE`
 5. `VALID_STEP_HF_SET_INTERNAL_REPRESENTS`
+
+Hygiene classification:
+
+* `VALID_STEP_HF_SET_INTERNAL_AXIOM_CASE` is mostly internal-expression
+  assembly: project `IS_AXIOM_INTERNAL_REPRESENTS`, select the axiom
+  disjunct, and ignore the proof/dependency set slots.
+* The MP and Gen cases are not pure hygiene because they need quoted
+  proof-record membership and record-shape bridges.
 
 ### B3. Proof-Set Representability
 
@@ -370,6 +399,17 @@ IS_FORM_DIAG_INTERNAL
 FREE_IN_DIAG_INTERNAL
 DIAG_FUNCTIONAL
 ```
+
+Hygiene classification:
+
+* `IS_FORM_DIAG_INTERNAL` and `FREE_IN_DIAG_INTERNAL` should become
+  tedious internal-expression verification once `diag_internal` is
+  concretely projected from the substitution package. At the moment
+  `diag_internal` is only a fresh constant, so these facts cannot be
+  proved structurally yet.
+* `DIAG_REPRESENTS` and `DIAG_FUNCTIONAL` are not hygiene facts; they
+  are the existence and uniqueness halves of the represented diagonal
+  function.
 
 Purpose:
 
