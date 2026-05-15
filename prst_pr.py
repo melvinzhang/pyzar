@@ -1792,14 +1792,103 @@ imp_code_pr_def = define(
 imp_code_pr = mk_const("imp_code_pr", [])
 
 
-# Placeholder leaf for the axiom recogniser body.  Proof_PRST_pr now
-# calls this symbol at the right point; expanding it into
-# is_pr_def_pr \/ is_logical_axiom_pr is the next bounded recogniser
-# task.
+# PR-side axiom recogniser skeleton.  This mirrors the HOL-side
+# is_pr_axiom shape from prst_proof:
+#
+#   is_pr_axiom
+#     = is_pr_def_instance \/ is_pr_refl \/ is_logical_axiom
+#
+# The large schema-recogniser leaves are intentionally separate PR symbols so
+# Proof_PRST_pr has the right shape now, while the remaining bounded
+# recogniser work is localized.
+is_pr_def_instance_pr_def = define(
+    "is_pr_def_instance_pr",
+    parse_type("nat0"),
+    mk_app(const_sym, F_pt),
+)
+is_pr_def_instance_pr = mk_const("is_pr_def_instance_pr", [])
+
+
+is_pterm_pr_def = define(
+    "is_pterm_pr",
+    parse_type("nat0"),
+    mk_app(const_sym, F_pt),
+)
+is_pterm_pr = mk_const("is_pterm_pr", [])
+
+
+is_logical_axiom_pr_def = define(
+    "is_logical_axiom_pr",
+    parse_type("nat0"),
+    mk_app(const_sym, F_pt),
+)
+is_logical_axiom_pr = mk_const("is_logical_axiom_pr", [])
+
+
+eq_pf_payload_pr_def = define(
+    "eq_pf_payload_pr",
+    parse_type("nat0"),
+    comp(pair_right_sym, proj(0, 1)),
+)
+eq_pf_payload_pr = mk_const("eq_pf_payload_pr", [])
+
+
+eq_pf_left_pr_def = define(
+    "eq_pf_left_pr",
+    parse_type("nat0"),
+    comp(pair_left_sym, eq_pf_payload_pr),
+)
+eq_pf_left_pr = mk_const("eq_pf_left_pr", [])
+
+
+eq_pf_right_pr_def = define(
+    "eq_pf_right_pr",
+    parse_type("nat0"),
+    comp(pair_right_sym, eq_pf_payload_pr),
+)
+eq_pf_right_pr = mk_const("eq_pf_right_pr", [])
+
+
+is_eq_pf_tag_pr_def = define(
+    "is_eq_pf_tag_pr",
+    parse_type("nat0"),
+    comp(eq_nat_pr, comp(pair_left_sym, proj(0, 1)), _const_at(nat(5), 1)),
+)
+is_eq_pf_tag_pr = mk_const("is_eq_pf_tag_pr", [])
+
+
+is_eq_pf_refl_shape_pr_def = define(
+    "is_eq_pf_refl_shape_pr",
+    parse_type("nat0"),
+    comp(
+        and_bool_pr,
+        is_eq_pf_tag_pr,
+        comp(eq_nat_pr, eq_pf_left_pr, eq_pf_right_pr),
+    ),
+)
+is_eq_pf_refl_shape_pr = mk_const("is_eq_pf_refl_shape_pr", [])
+
+
+is_pr_refl_pr_def = define(
+    "is_pr_refl_pr",
+    parse_type("nat0"),
+    comp(
+        and_bool_pr,
+        is_eq_pf_refl_shape_pr,
+        comp(is_pterm_pr, eq_pf_left_pr),
+    ),
+)
+is_pr_refl_pr = mk_const("is_pr_refl_pr", [])
+
+
 is_pr_axiom_pr_def = define(
     "is_pr_axiom_pr",
     parse_type("nat0"),
-    mk_app(const_sym, F_pt),
+    comp(
+        or_bool_pr,
+        is_pr_def_instance_pr,
+        comp(or_bool_pr, is_pr_refl_pr, is_logical_axiom_pr),
+    ),
 )
 is_pr_axiom_pr = mk_const("is_pr_axiom_pr", [])
 
@@ -2008,6 +2097,12 @@ if __name__ == "__main__":
     print("    IS_PR_DEF_HOLDS_PROJ      :", pp_thm(IS_PR_DEF_HOLDS_PROJ))
     print("    IS_PR_DEF_HOLDS_REC_BASE  :", pp_thm(IS_PR_DEF_HOLDS_REC_BASE))
     print("    IS_PR_DEF_INSTANCE_SUBST  :", pp_thm(IS_PR_DEF_INSTANCE_SUBST))
+    print()
+    print("Stage 2A (h) -- PR-side axiom checker leaf.")
+    print("    is_pr_def_instance_pr_def :", pp_thm(is_pr_def_instance_pr_def))
+    print("    is_pr_refl_pr_def         :", pp_thm(is_pr_refl_pr_def))
+    print("    is_logical_axiom_pr_def   :", pp_thm(is_logical_axiom_pr_def))
+    print("    is_pr_axiom_pr_def        :", pp_thm(is_pr_axiom_pr_def))
     print()
     print("Prov_PRST claims about these axioms are one-line specialisations")
     print("of PROV_PRST_AX in prst_proof.")
