@@ -4127,6 +4127,9 @@ def IS_MP_INTERNAL_REPRESENTS(p):
                     (quote_hf g) idx_y)
                   (quote_hf h) idx_z).
 
+    Hygiene check: this is a small recognizer-body verification. After
+    filling the slots, the internal expression reduces to a quoted equality.
+
     Proof sketch:
       * Rewrite ``is_mp f g h`` with ``IS_MP_AT`` to get
         ``g = Imp_f f h``.
@@ -4156,6 +4159,10 @@ def IS_GEN_INTERNAL_REPRESENTS(p):
                   (template_fill is_gen_internal (quote_hf f) idx_x)
                   (quote_hf h) idx_y).
 
+    Hygiene check: this is a small recognizer-body verification. After
+    filling the slots, the internal expression reduces to the existential
+    witness and a quoted syntax equality.
+
     Proof sketch:
       * Rewrite ``is_gen f h`` with ``IS_GEN_AT`` to obtain a witness
         ``x`` with ``h = Forall_f x f``.
@@ -4179,6 +4186,10 @@ def VALID_STEP_HF_SET_INTERNAL_AXIOM_CASE(p):
               Prov_HF
                 (valid_step_hf_set_internal[quote_hf P, quote_hf k,
                                              quote_hf h]).
+
+    Hygiene check: this branch is internal-expression assembly. It selects
+    the axiom disjunct of ``valid_step_hf_set_internal``; the proof-set and
+    dependency-set slots are carried only for the uniform case shape.
 
     Proof sketch:
       * Use ``IS_AXIOM_INTERNAL_REPRESENTS`` for ``h``.

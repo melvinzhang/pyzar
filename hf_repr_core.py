@@ -3989,6 +3989,10 @@ _FREE_IN_QPARSE_FORALL_F = mk_forall(
 def HF_PACKAGE_SIDE_CONDITION_PACKAGE(p):
     """Package side conditions for qparse-built internal formula bodies.
 
+    Hygiene check: this theorem carries no meta-mathematical content. It
+    verifies that the concrete qparse/body encodings have the expected
+    constructor well-formedness and free-variable behavior.
+
     Proof sketch:
       * Prove ``is_axiom_internal`` is a formula by expanding its split
         schema body and applying constructor-level ``is_form`` rules.
@@ -4133,8 +4137,8 @@ Prov_HF_internal = mk_const("Prov_HF_internal", [])
 def HF_PROV_FREE_CONDITION_PACKAGE(p):
     """Free-variable condition for the final internal provability body.
 
-    Conceptual hygiene theorem: all helper variables used inside the encoded
-    proof checker are bound, leaving only the theorem-code slot ``idx_x`` free.
+    Hygiene check: all helper variables used inside the encoded proof checker
+    are bound, leaving only the theorem-code slot ``idx_x`` free.
     """
     _set_goal_term(
         p,

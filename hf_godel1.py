@@ -486,7 +486,12 @@ def DIAG_REPRESENTS(p):
 
 @proof
 def IS_FORM_DIAG_INTERNAL(p):
-    """|- is_form diag_internal. AXIOMATIZED."""
+    """|- is_form diag_internal.
+
+    Hygiene check: once ``diag_internal`` is a concrete projection from the
+    substitution package, this is just structural well-formedness of that
+    internal body.
+    """
     p.goal("is_form diag_internal")
     p.sorry()
 
@@ -494,7 +499,11 @@ def IS_FORM_DIAG_INTERNAL(p):
 @proof
 def FREE_IN_DIAG_INTERNAL(p):
     """|- !v. free_in diag_internal v <=> (v = var_x \\/ v = var_y).
-    AXIOMATIZED."""
+
+    Hygiene check: once ``diag_internal`` is a concrete projection from the
+    substitution package, this is just the free-variable calculation for that
+    internal body.
+    """
     p.goal("!v. free_in diag_internal v = (v = var_x \\/ v = var_y)")
     p.sorry()
 

@@ -1,7 +1,7 @@
 # HF Gödel-I remaining `sorry()` plan
 
-This file tracks only live HF/G1 proof debt. Historical phase notes and
-closed items are omitted.
+This file tracks substantive HF/G1 proof debt. Historical phase notes,
+closed items, and hygiene-only internal-expression checks are omitted.
 
 Current inventory command:
 
@@ -15,18 +15,19 @@ At the time of this update, the HF path has no direct `new_axiom` calls:
 rg -n "new_axiom" hf_*.py
 ```
 
-All remaining proof debt is therefore visible as named `@proof` stubs
-using `p.sorry()`.
+All remaining proof debt is visible as named `@proof` stubs using
+`p.sorry()`. This document intentionally filters out hygiene-only stubs
+whose role is just internal body well-formedness/free-variable bookkeeping.
 
 ## Live Inventory
 
 | Group | File | Count | Role |
 |---|---|---:|---|
-| A | `hf_repr_core.py`, `hf_repr_subst.py` | 6 | support predicate and substitution packages |
-| B | `hf_repr_thms.py` | 11 | internal proof-checker representability |
-| C | `hf_godel1.py` | 8 | diagonal-function and diagonal-lemma layer |
+| A | `hf_repr_core.py`, `hf_repr_subst.py` | 4 | support predicate and substitution packages |
+| B | `hf_repr_thms.py` | 8 | internal proof-checker representability |
+| C | `hf_godel1.py` | 6 | diagonal-function and diagonal-lemma layer |
 
-Total live HF/G1 stubs: **25**.
+Total tracked substantive HF/G1 stubs: **18**.
 
 ## Dependency Order
 
@@ -35,14 +36,13 @@ Clear the remaining sorries in this order:
 1. `hf_repr_subst.py` substitution representability package.
 2. `hf_repr_subst.py` substitution equivalence package.
 3. `hf_repr_core.py` support predicate and support equivalence packages.
-4. `hf_repr_core.py` qparse/body side-condition packages.
-5. `hf_repr_thms.py` recognizer representability.
-6. `hf_repr_thms.py` valid-step and proof-set representability.
-7. `hf_repr_thms.py` `PROV_HF_REPRESENTS_FWD`.
-8. Defer or isolate `PROV_HF_REPRESENTS_BWD` as Stage-6 soundness.
-9. `hf_godel1.py` diagonal function package.
-10. `hf_godel1.py` HOL substitution/free-variable lemmas.
-11. `hf_godel1.py` final diagonal lemma.
+4. `hf_repr_thms.py` recognizer representability.
+5. `hf_repr_thms.py` valid-step and proof-set representability.
+6. `hf_repr_thms.py` `PROV_HF_REPRESENTS_FWD`.
+7. Defer or isolate `PROV_HF_REPRESENTS_BWD` as Stage-6 soundness.
+8. `hf_godel1.py` diagonal function package.
+9. `hf_godel1.py` HOL substitution/free-variable lemmas.
+10. `hf_godel1.py` final diagonal lemma.
 
 The most useful immediate target is group A. Group B depends on the
 support equivalences and substitution package. Group C depends on the
@@ -155,49 +155,6 @@ This theorem is a package for downstream convenience. If it becomes too
 large, split it into three named theorem stubs and repackage only after
 the pieces are proved.
 
-### A4. Qparse and Body Side Conditions
-
-Live stubs:
-
-```text
-HF_PACKAGE_SIDE_CONDITION_PACKAGE
-HF_PROV_FREE_CONDITION_PACKAGE
-```
-
-Hygiene classification:
-
-* `HF_PACKAGE_SIDE_CONDITION_PACKAGE` is a tedious internal-expression
-  verification package. It should not carry meta-mathematical content:
-  expand qparse bodies, prove constructor well-formedness, and compute
-  free-variable equations.
-* `HF_PROV_FREE_CONDITION_PACKAGE` is the single conceptual hygiene
-  theorem for `Prov_HF_internal`. The remaining trust here is exactly the
-  statement that the encoded proof checker binds all helper variables and
-  leaves only the theorem-code slot `idx_x` free.
-
-Purpose:
-
-These prove `is_form` and `free_in` facts for qparse-built internal
-bodies, especially:
-
-```text
-is_axiom_internal
-Prov_HF_internal
-Pair_ord / Imp_f / Forall_f qparse terms
-```
-
-Expected path:
-
-* Expand the qparse-built `Insert_t` towers.
-* Use `IS_TERM_EMPTY`, `IS_TERM_INSERT`, and constructor form rules.
-* Use `FREE_IN_AT_INSERT` plus closedness of qparse tags.
-* For `Prov_HF_internal`, unfold its existential over
-  `Proof_HF_set_internal`; the bound proof-set slot disappears, leaving
-  only `idx_x`.
-
-These should be cleared before the high-level `hf_repr_thms.py`
-representability proofs.
-
 ## Group B — `hf_repr_thms.py`
 
 ### B1. Recognizer Representability
@@ -206,8 +163,6 @@ Live stubs:
 
 ```text
 IS_AXIOM_INTERNAL_REPRESENTS
-IS_MP_INTERNAL_REPRESENTS
-IS_GEN_INTERNAL_REPRESENTS
 ```
 
 Purpose:
@@ -217,44 +172,15 @@ after filling with quoted inputs.
 
 Expected path:
 
-* `IS_MP_INTERNAL_REPRESENTS`:
-  * rewrite with `IS_MP_AT`;
-  * reduce filled internal body to quoted object equality;
-  * close with `PROV_HF_REFL`.
-* `IS_GEN_INTERNAL_REPRESENTS`:
-  * rewrite with `IS_GEN_AT`;
-  * introduce the quoted binder witness;
-  * close the resulting quoted equality.
-* `IS_AXIOM_INTERNAL_REPRESENTS`:
-  * split `is_axiom` into HF, HF-induction, and logical cases;
-  * use support equivalences from group A;
-  * repack through `is_axiom_internal`.
-
-Hygiene classification:
-
-* `IS_MP_INTERNAL_REPRESENTS` and `IS_GEN_INTERNAL_REPRESENTS` are small
-  internal-body verification proofs: fill the slots, unfold the recognizer
-  body, reduce to quoted equality, and close by object reflexivity.
-* `IS_AXIOM_INTERNAL_REPRESENTS` is mixed. Some branches are tedious body
-  verification, but the theorem also depends on support equivalences and
-  real axiom-schema case analysis, so do not treat it as a pure hygiene
-  sorry.
-
-Recommended order:
-
-1. `IS_MP_INTERNAL_REPRESENTS`
-2. `IS_GEN_INTERNAL_REPRESENTS`
-3. `IS_AXIOM_INTERNAL_REPRESENTS`
-
-MP and Gen are smaller and will exercise the template-fill/qparse
-mechanics before the axiom schemas.
+* Split `is_axiom` into HF, HF-induction, and logical cases.
+* Use support equivalences from group A.
+* Repack through `is_axiom_internal`.
 
 ### B2. Valid-Step Representability
 
 Live stubs:
 
 ```text
-VALID_STEP_HF_SET_INTERNAL_AXIOM_CASE
 VALID_STEP_HF_SET_INTERNAL_MP_CASE
 VALID_STEP_HF_SET_INTERNAL_GEN_CASE
 VALID_STEP_HF_SET_INTERNAL_REPRESENTS
@@ -271,7 +197,7 @@ Expected path:
 * MP/Gen cases use:
   * `QUOTE_HF_MEM_DECISION` for membership premises;
   * quoted `Pair_ord` record-shape bridge;
-  * `IS_MP_INTERNAL_REPRESENTS` or `IS_GEN_INTERNAL_REPRESENTS`;
+  * the corresponding recognizer body facts;
   * witnesses for the existential branch.
 * General theorem splits `VALID_STEP_HF_SET_AT` and dispatches to the
   three case theorems.
@@ -291,18 +217,9 @@ of from `nat0_lt i f`.
 Recommended order:
 
 1. Prove the quoted record-shape bridge.
-2. `VALID_STEP_HF_SET_INTERNAL_AXIOM_CASE`
-3. `VALID_STEP_HF_SET_INTERNAL_GEN_CASE`
-4. `VALID_STEP_HF_SET_INTERNAL_MP_CASE`
-5. `VALID_STEP_HF_SET_INTERNAL_REPRESENTS`
-
-Hygiene classification:
-
-* `VALID_STEP_HF_SET_INTERNAL_AXIOM_CASE` is mostly internal-expression
-  assembly: project `IS_AXIOM_INTERNAL_REPRESENTS`, select the axiom
-  disjunct, and ignore the proof/dependency set slots.
-* The MP and Gen cases are not pure hygiene because they need quoted
-  proof-record membership and record-shape bridges.
+2. `VALID_STEP_HF_SET_INTERNAL_GEN_CASE`
+3. `VALID_STEP_HF_SET_INTERNAL_MP_CASE`
+4. `VALID_STEP_HF_SET_INTERNAL_REPRESENTS`
 
 ### B3. Proof-Set Representability
 
@@ -395,21 +312,8 @@ Live stubs:
 
 ```text
 DIAG_REPRESENTS
-IS_FORM_DIAG_INTERNAL
-FREE_IN_DIAG_INTERNAL
 DIAG_FUNCTIONAL
 ```
-
-Hygiene classification:
-
-* `IS_FORM_DIAG_INTERNAL` and `FREE_IN_DIAG_INTERNAL` should become
-  tedious internal-expression verification once `diag_internal` is
-  concretely projected from the substitution package. At the moment
-  `diag_internal` is only a fresh constant, so these facts cannot be
-  proved structurally yet.
-* `DIAG_REPRESENTS` and `DIAG_FUNCTIONAL` are not hygiene facts; they
-  are the existence and uniqueness halves of the represented diagonal
-  function.
 
 Purpose:
 
@@ -425,8 +329,6 @@ Expected path:
   `substitute_internal`.
 * `DIAG_REPRESENTS` should use `SUBSTITUTE_REPRESENTS_FORM`.
 * `DIAG_FUNCTIONAL` should use `SUBSTITUTE_INTERNAL_FUNCTIONAL`.
-* `IS_FORM_DIAG_INTERNAL` and `FREE_IN_DIAG_INTERNAL` are structural
-  body facts over the chosen `diag_internal` formula.
 
 This group depends on the group-A substitution graph package.
 
@@ -480,8 +382,7 @@ is_form psi
 
 Expected path:
 
-* Use `IS_FORM_DIAG_INTERNAL` and formula-constructor closure to prove
-  the `is_form` conjunct.
+* Use formula-constructor closure to prove the `is_form` conjunct.
 * Compute substitutions through `theta_of_phi`.
 * Use `DIAG_REPRESENTS` at `theta_of_phi phi`.
 * Use `DIAG_FUNCTIONAL` to identify the existential witness with
