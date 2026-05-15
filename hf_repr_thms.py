@@ -19,20 +19,21 @@
 #   (b) QUOTE_HF_INJ -- HOL-level injectivity for the quote_hf map.
 #   (c) Measured quote membership / inequality scaffolding.
 #   (d) Stage-3 remaining SORRY scaffolding
-#       (PROV_HF_REPRESENTS, IS_FORM_PROV_HF_INTERNAL,
-#       FREE_IN_PROV_HF_INTERNAL). Substitute representability is now
-#       provided by the syntax-recursion package in hf_repr_core.
+#       (PROV_HF_REPRESENTS, FREE_IN_PROV_HF_INTERNAL). Substitute
+#       representability is now provided by the syntax-recursion package
+#       in hf_repr_core.
 # ---------------------------------------------------------------------------
 
 
-from fusion import Var
-from basics import mk_app, mk_const, mk_eq
+from fusion import Comb, Const, Var
+from basics import dest_eq, mk_app, mk_const, mk_eq
 from nat0 import nat0_ty, ZERO, mk_suc0
 from parser import parse_type
 from proof import proof, define_with_at
 from tactics import (
     SPEC,
     SPECL,
+    AP_TERM,
     MP,
     SYM,
     REFL,
@@ -88,6 +89,7 @@ from hf_syntax import (
     IS_FORM_AT_EQ,
     IS_FORM_AT_FORALL,
     IS_TERM_AT_VAR,
+    SUBSTITUTE_PRESERVES_IS_FORM,
 )
 from hf_repr_core import (
     PROV_HF_AXIOM,
@@ -162,6 +164,12 @@ from hf_repr_core import (
     FREE_IN_QPARSE_IMP_F,
     IS_TERM_QPARSE_FORALL_F,
     FREE_IN_QPARSE_FORALL_F,
+    IS_MP_INTERNAL_DEF,
+    IS_GEN_INTERNAL_DEF,
+    VALID_STEP_HF_SET_INTERNAL_DEF,
+    PROOF_HF_SET_INTERNAL_DEF,
+    PROV_HF_INTERNAL_DEF,
+    Prov_HF_internal,
     HF_SYNTAX_REC_PACKAGE,
     SUBSTITUTE_REPRESENTS_SYNTACTIC,
     SUBSTITUTE_REPRESENTS_TERM,
@@ -3909,7 +3917,7 @@ def QUOTE_HF_QPARSE_EMPTY(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 3D (a) -- representability of provability (AXIOMATIZED).
+# Stage 3D (a) -- representability of provability.
 #
 # Headline theorem (``PROV_HF_REPRESENTS``):
 #   |- !n. Prov_HF n <=>
@@ -3959,11 +3967,113 @@ def QUOTE_HF_QPARSE_EMPTY(p):
 # lives in Stage 6 via the HF model construction (HF |= HF1-HF5 is
 # one HOL theorem citation per axiom).
 #
-# Side conditions IS_FORM and FREE_IN become routine once
-# Prov_HF_internal has its defining body -- both decided by the same
-# syntactic recursion that ``hf_syntax.py`` already covers (In_a via
-# IS_FORM_AT_IN, etc.).
+# IS_FORM is discharged below by a structural walk over the defining
+# body. FREE_IN should use the matching recursion walk over the same
+# dependency-set formula.
 # ---------------------------------------------------------------------------
+
+
+def _head_args(tm):
+    args = []
+    while isinstance(tm, Comb):
+        args.append(tm.arg)
+        tm = tm.fun
+    args.reverse()
+    if isinstance(tm, Const):
+        return tm.name, args
+    return None, args
+
+
+_IS_FORM_CONST = mk_const("is_form", [])
+_IS_TERM_ZERO = EQ_MP(AP_TERM(mk_const("is_term", []), EMPTY_T_DEF), IS_TERM_EMPTY)
+_IS_FORM_DEF_THEOREMS = {
+    "is_mp_internal": IS_MP_INTERNAL_DEF,
+    "is_gen_internal": IS_GEN_INTERNAL_DEF,
+    "valid_step_hf_set_internal": VALID_STEP_HF_SET_INTERNAL_DEF,
+    "Proof_HF_set_internal": PROOF_HF_SET_INTERNAL_DEF,
+    "Prov_HF_internal": PROV_HF_INTERNAL_DEF,
+}
+_IS_FORM_SIDE_THEOREMS = {
+    "is_axiom_internal": IS_FORM_IS_AXIOM_INTERNAL,
+}
+
+
+def _prove_is_term_syntax(tm, memo=None):
+    if memo is None:
+        memo = {}
+    if tm in memo:
+        return memo[tm]
+
+    head, args = _head_args(tm)
+    if head == "var_x" and not args:
+        th = IS_TERM_VAR_X
+    elif head == "var_y" and not args:
+        th = IS_TERM_VAR_Y
+    elif head == "var_z" and not args:
+        th = IS_TERM_VAR_Z
+    elif head == "Empty_t" and not args:
+        th = IS_TERM_EMPTY
+    elif head == "0" and not args:
+        th = _IS_TERM_ZERO
+    elif head == "Var_t" and len(args) == 1:
+        th = EQT_ELIM(SPEC(args[0], IS_TERM_AT_VAR))
+    elif head == "Insert_t" and len(args) == 2:
+        left = _prove_is_term_syntax(args[0], memo)
+        right = _prove_is_term_syntax(args[1], memo)
+        th = MP(SPECL(args, IS_TERM_INSERT), CONJ(left, right))
+    else:
+        raise ValueError(f"no is_term syntax proof rule for {head or tm!r}")
+
+    memo[tm] = th
+    return th
+
+
+def _prove_is_form_syntax(tm, memo=None, term_memo=None):
+    if memo is None:
+        memo = {}
+    if term_memo is None:
+        term_memo = {}
+    if tm in memo:
+        return memo[tm]
+
+    head, args = _head_args(tm)
+    if head in _IS_FORM_SIDE_THEOREMS and not args:
+        th = _IS_FORM_SIDE_THEOREMS[head]
+    elif head in _IS_FORM_DEF_THEOREMS and not args:
+        def_th = _IS_FORM_DEF_THEOREMS[head]
+        _, rhs = dest_eq(def_th._concl)
+        body_th = _prove_is_form_syntax(rhs, memo, term_memo)
+        th = EQ_MP(SYM(AP_TERM(_IS_FORM_CONST, def_th)), body_th)
+    elif head == "Not_f" and len(args) == 1:
+        body = _prove_is_form_syntax(args[0], memo, term_memo)
+        th = EQ_MP(SYM(SPEC(args[0], IS_FORM_AT_NOT)), body)
+    elif head == "Imp_f" and len(args) == 2:
+        left = _prove_is_form_syntax(args[0], memo, term_memo)
+        right = _prove_is_form_syntax(args[1], memo, term_memo)
+        th = EQ_MP(SYM(SPECL(args, IS_FORM_AT_IMP)), CONJ(left, right))
+    elif head == "Forall_f" and len(args) == 2:
+        body = _prove_is_form_syntax(args[1], memo, term_memo)
+        th = EQ_MP(SYM(SPECL(args, IS_FORM_AT_FORALL)), body)
+    elif head == "Eq_f" and len(args) == 2:
+        left = _prove_is_term_syntax(args[0], term_memo)
+        right = _prove_is_term_syntax(args[1], term_memo)
+        th = EQ_MP(SYM(SPECL(args, IS_FORM_AT_EQ)), CONJ(left, right))
+    elif head == "In_a" and len(args) == 2:
+        left = _prove_is_term_syntax(args[0], term_memo)
+        right = _prove_is_term_syntax(args[1], term_memo)
+        th = EQ_MP(SYM(SPECL(args, IS_FORM_AT_IN)), CONJ(left, right))
+    elif head == "substitute" and len(args) == 3:
+        formula = _prove_is_form_syntax(args[0], memo, term_memo)
+        term = _prove_is_term_syntax(args[1], term_memo)
+        th = MP(SPECL(args, SUBSTITUTE_PRESERVES_IS_FORM), CONJ(formula, term))
+    else:
+        raise ValueError(f"no is_form syntax proof rule for {head or tm!r}")
+
+    memo[tm] = th
+    return th
+
+
+_IS_FORM_PROV_HF_INTERNAL_THM = _prove_is_form_syntax(Prov_HF_internal)
 
 
 @proof
@@ -3984,13 +4094,11 @@ def PROV_HF_REPRESENTS(p):
 def IS_FORM_PROV_HF_INTERNAL(p):
     """|- is_form Prov_HF_internal.
 
-    Side condition for the diagonal lemma. AXIOMATIZED via
-    ``p.sorry()``; in the full construction, follows from the bottom-up
-    build of ``Prov_HF_internal`` from ``Proof_HF_internal`` and the
-    closure of ``is_form`` under the HF-formula constructors.
+    Side condition for the diagonal lemma, discharged by a structural
+    syntax walk over the dependency-set ``Prov_HF_internal`` body.
     """
     p.goal("is_form Prov_HF_internal")
-    p.sorry()
+    p.thus("is_form Prov_HF_internal").by_thm(_IS_FORM_PROV_HF_INTERNAL_THM)
 
 
 @proof
@@ -4104,7 +4212,7 @@ if __name__ == "__main__":
         pp_thm(PROV_HF_REPRESENTS),
     )
     print(
-        "    IS_FORM_PROV_HF_INTERNAL (SORRY)       :",
+        "    IS_FORM_PROV_HF_INTERNAL               :",
         pp_thm(IS_FORM_PROV_HF_INTERNAL),
     )
     print(

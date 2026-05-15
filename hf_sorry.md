@@ -34,7 +34,7 @@ are now decided:
 | F | `HF_SYNTAX_REC_PACKAGE`          | active | moderate   | —                         | scoped syntax recursion/induction definitional extension     |
 | G | `SUBSTITUTE_REPRESENTS`          | active | small/med  | F                         | direct recursive equations for `substitute_internal`         |
 | I | `PROV_HF_REPRESENTS`             | active | large      | G                         | Σ₁ completeness (forward) — Σ₁ soundness deferred to Stage 6; internal body landed |
-| J | `IS_FORM_PROV_HF_INTERNAL`       | active | small      | I's body def              | `is_form` closure under HF-formula constructors             |
+| J | `IS_FORM_PROV_HF_INTERNAL`       | done   | done       | —                         | structural syntax walk over `Prov_HF_internal`              |
 | K | `FREE_IN_PROV_HF_INTERNAL`       | active | small      | I's body def              | `free_in` recursion                                          |
 
 ✓ = already proven and exported (no sorry).
@@ -446,11 +446,14 @@ substitute layer.
      lemmas so the Stage-6 dependency is not hidden inside one giant
      theorem.
 
-7. **H — `IS_FORM_PROV_HF_INTERNAL`** and
-   **I — `FREE_IN_PROV_HF_INTERNAL`**.
-   - Both routine once `Prov_HF_internal` has a body: walk the
-     formula recursion using `IS_FORM_AT_*` and the `free_in`
-     definition. Discharge in parallel with each other.
+7. **J — `IS_FORM_PROV_HF_INTERNAL`** and
+   **K — `FREE_IN_PROV_HF_INTERNAL`**.
+   - `IS_FORM_PROV_HF_INTERNAL` is discharged by a structural syntax
+     walk over the dependency-set body, using `IS_FORM_AT_*`,
+     `SUBSTITUTE_PRESERVES_IS_FORM`, and the package side lemma for
+     `is_axiom_internal`.
+   - `FREE_IN_PROV_HF_INTERNAL` remains: use the matching `free_in`
+     recursion walk over the same body.
 
 ## Why this order
 
