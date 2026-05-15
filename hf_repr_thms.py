@@ -4087,16 +4087,293 @@ _IS_FORM_PROV_HF_INTERNAL_THM = _prove_is_form_syntax(Prov_HF_internal)
 
 
 @proof
-def PROV_HF_REPRESENTS(p):
-    """|- !n. Prov_HF n <=>
-              Prov_HF (substitute Prov_HF_internal (quote_hf n) var_x).
+def IS_AXIOM_INTERNAL_REPRESENTS(p):
+    """|- !h. is_axiom h ==>
+              Prov_HF (template_fill is_axiom_internal (quote_hf h) idx_x).
 
-    Stage 3D(a) representability of ``Prov_HF``. AXIOMATIZED via
-    ``p.sorry()``; see the Stage 3D section comment above for the
-    deferred construction (Proof_HF_internal + Sigma_1
-    completeness/soundness).
+    Proof sketch:
+      * Expand ``is_axiom`` into HF / HF-induction / logical axiom cases.
+      * For closed HF axioms, prove the five code equalities directly.
+      * For HF-induction and logical schemas, use the split internal
+        schema packages already landed in ``hf_repr_core.py``.
+      * Use support equivalences for ``is_form_internal``,
+        ``free_in_internal``, and ``substitute_internal`` in the UI,
+        Vac, FaImp, Subst, and HF-induction branches.
+      * Repack the selected branch through the definition of
+        ``is_axiom_internal``.
     """
-    p.goal("!n. Prov_HF n = Prov_HF (substitute Prov_HF_internal (quote_hf n) idx_x)")
+    p.goal(
+        "!h. is_axiom h ==> "
+        "Prov_HF (template_fill is_axiom_internal (quote_hf h) idx_x)"
+    )
+    p.sorry()
+
+
+@proof
+def IS_MP_INTERNAL_REPRESENTS(p):
+    """|- !f g h. is_mp f g h ==>
+              Prov_HF
+                (template_fill
+                  (template_fill
+                    (template_fill is_mp_internal (quote_hf f) idx_x)
+                    (quote_hf g) idx_y)
+                  (quote_hf h) idx_z).
+
+    Proof sketch:
+      * Rewrite ``is_mp f g h`` with ``IS_MP_AT`` to get
+        ``g = Imp_f f h``.
+      * Unfold ``is_mp_internal``; after the three template fills, the
+        body is the object equality
+        ``quote_hf g = quote_hf (Imp_f f h)``.
+      * Use congruence/rewrite from the HOL equality and prove the
+        resulting reflexive object equality with ``PROV_HF_REFL``.
+      * The required termhood follows from ``IS_TERM_QUOTE_HF``.
+    """
+    p.goal(
+        "!f g h. is_mp f g h ==> "
+        "Prov_HF (template_fill "
+        "           (template_fill "
+        "             (template_fill is_mp_internal (quote_hf f) idx_x) "
+        "             (quote_hf g) idx_y) "
+        "           (quote_hf h) idx_z)"
+    )
+    p.sorry()
+
+
+@proof
+def IS_GEN_INTERNAL_REPRESENTS(p):
+    """|- !f h. is_gen f h ==>
+              Prov_HF
+                (template_fill
+                  (template_fill is_gen_internal (quote_hf f) idx_x)
+                  (quote_hf h) idx_y).
+
+    Proof sketch:
+      * Rewrite ``is_gen f h`` with ``IS_GEN_AT`` to obtain a witness
+        ``x`` with ``h = Forall_f x f``.
+      * Unfold ``is_gen_internal``; after filling premise and
+        conclusion slots, introduce the same witness ``quote_hf x``.
+      * The remaining body is an equality between quoted syntax codes,
+        closed by rewriting ``h`` and then using object reflexivity.
+    """
+    p.goal(
+        "!f h. is_gen f h ==> "
+        "Prov_HF (template_fill "
+        "           (template_fill is_gen_internal (quote_hf f) idx_x) "
+        "           (quote_hf h) idx_y)"
+    )
+    p.sorry()
+
+
+@proof
+def VALID_STEP_HF_SET_INTERNAL_AXIOM_CASE(p):
+    """|- !P k h. is_axiom h ==>
+              Prov_HF
+                (valid_step_hf_set_internal[quote_hf P, quote_hf k,
+                                             quote_hf h]).
+
+    Proof sketch:
+      * Use ``IS_AXIOM_INTERNAL_REPRESENTS`` for ``h``.
+      * Unfold ``valid_step_hf_set_internal`` and select its axiom
+        disjunct.
+      * The proof-set and dependency-set slots are irrelevant in this
+        branch; they are only carried so the resulting theorem has the
+        same shape as the MP/Gen cases.
+    """
+    p.goal(
+        "!P k h. is_axiom h ==> "
+        "Prov_HF (template_fill "
+        "           (template_fill "
+        "             (template_fill valid_step_hf_set_internal "
+        "               (quote_hf P) idx_x) "
+        "             (quote_hf k) idx_y) "
+        "           (quote_hf h) idx_z)"
+    )
+    p.sorry()
+
+
+@proof
+def VALID_STEP_HF_SET_INTERNAL_MP_CASE(p):
+    """|- !P k h i f j g.
+              In (Pair_ord i f) P /\\ In (Pair_ord j g) P
+           /\\ In i k /\\ In j k /\\ is_mp f g h
+          ==> Prov_HF
+                (valid_step_hf_set_internal[quote_hf P, quote_hf k,
+                                             quote_hf h]).
+
+    Proof sketch:
+      * Use ``QUOTE_HF_MEM_DECISION`` for the two proof-record
+        memberships and two dependency-set memberships.
+      * Bridge each quoted external record
+        ``quote_hf (Pair_ord i f)`` to the qparse record term used in
+        ``valid_step_hf_set_internal``. This is the main record-shape
+        lemma still to prove; it should be closed from quoted finite-set
+        extensionality, not from an ordering side condition.
+      * Use ``IS_MP_INTERNAL_REPRESENTS`` for the recognizer conjunct.
+      * Introduce witnesses ``i, f, j, g`` in the internal MP branch and
+        assemble the conjunction with HF propositional rules.
+    """
+    p.goal(
+        "!P k h i f j g. "
+        "In (Pair_ord i f) P /\\ In (Pair_ord j g) P /\\ "
+        "In i k /\\ In j k /\\ is_mp f g h ==> "
+        "Prov_HF (template_fill "
+        "           (template_fill "
+        "             (template_fill valid_step_hf_set_internal "
+        "               (quote_hf P) idx_x) "
+        "             (quote_hf k) idx_y) "
+        "           (quote_hf h) idx_z)"
+    )
+    p.sorry()
+
+
+@proof
+def VALID_STEP_HF_SET_INTERNAL_GEN_CASE(p):
+    """|- !P k h i f.
+              In (Pair_ord i f) P /\\ In i k /\\ is_gen f h
+          ==> Prov_HF
+                (valid_step_hf_set_internal[quote_hf P, quote_hf k,
+                                             quote_hf h]).
+
+    Proof sketch:
+      * Use ``QUOTE_HF_MEM_DECISION`` for the proof-record membership
+        and the dependency-set membership.
+      * Use the same quoted ``Pair_ord`` record-shape bridge as the MP
+        case.
+      * Use ``IS_GEN_INTERNAL_REPRESENTS`` for the recognizer conjunct.
+      * Introduce witnesses ``i, f`` in the internal Gen branch and
+        select the Gen disjunct of ``valid_step_hf_set_internal``.
+    """
+    p.goal(
+        "!P k h i f. "
+        "In (Pair_ord i f) P /\\ In i k /\\ is_gen f h ==> "
+        "Prov_HF (template_fill "
+        "           (template_fill "
+        "             (template_fill valid_step_hf_set_internal "
+        "               (quote_hf P) idx_x) "
+        "             (quote_hf k) idx_y) "
+        "           (quote_hf h) idx_z)"
+    )
+    p.sorry()
+
+
+@proof
+def VALID_STEP_HF_SET_INTERNAL_REPRESENTS(p):
+    """|- !P k h. valid_step_hf_set P k h ==>
+              Prov_HF
+                (valid_step_hf_set_internal[quote_hf P, quote_hf k,
+                                             quote_hf h]).
+
+    Proof sketch:
+      * Rewrite ``valid_step_hf_set`` with ``VALID_STEP_HF_SET_AT``.
+      * Case split on the external axiom / MP / Gen disjunction.
+      * Dispatch the branches to
+        ``VALID_STEP_HF_SET_INTERNAL_AXIOM_CASE``,
+        ``VALID_STEP_HF_SET_INTERNAL_MP_CASE``, and
+        ``VALID_STEP_HF_SET_INTERNAL_GEN_CASE``.
+    """
+    p.goal(
+        "!P k h. valid_step_hf_set P k h ==> "
+        "Prov_HF (template_fill "
+        "           (template_fill "
+        "             (template_fill valid_step_hf_set_internal "
+        "               (quote_hf P) idx_x) "
+        "             (quote_hf k) idx_y) "
+        "           (quote_hf h) idx_z)"
+    )
+    p.sorry()
+
+
+@proof
+def PROOF_HF_SET_INTERNAL_REPRESENTS(p):
+    """|- !P n. Proof_HF_set P n ==>
+              Prov_HF
+                (Proof_HF_set_internal[quote_hf P, quote_hf n]).
+
+    Proof sketch:
+      * Rewrite ``Proof_HF_set P n`` with ``PROOF_HF_SET_AT`` to get a
+        root dependency set ``k`` and a universal validity condition for
+        every record in ``P``.
+      * Use ``QUOTE_HF_MEM_DECISION`` plus the quoted record-shape
+        bridge to prove the internal root-record membership conjunct.
+      * For the internal universal conjunct, instantiate the external
+        universal validity condition at each quoted record decoded from
+        the HF membership premise. This needs the finite quoted-set
+        elimination lemma for ``quote_hf P``.
+      * Apply ``VALID_STEP_HF_SET_INTERNAL_REPRESENTS`` to each decoded
+        record and reassemble the internal body, then introduce the
+        witness ``quote_hf k``.
+    """
+    p.goal(
+        "!P n. Proof_HF_set P n ==> "
+        "Prov_HF (template_fill "
+        "           (template_fill Proof_HF_set_internal (quote_hf P) idx_x) "
+        "           (quote_hf n) idx_y)"
+    )
+    p.sorry()
+
+
+@proof
+def PROV_HF_REPRESENTS_FWD(p):
+    """|- !n. Prov_HF n ==>
+              Prov_HF (substitute Prov_HF_internal (quote_hf n) idx_x).
+
+    Proof sketch:
+      * Rewrite ``Prov_HF n`` with ``PROV_HF_AT`` and pick an external
+        proof-set witness ``P``.
+      * Use ``PROOF_HF_SET_INTERNAL_REPRESENTS`` to prove the filled
+        internal proof predicate at ``quote_hf P`` and ``quote_hf n``.
+      * Unfold ``Prov_HF_internal``; introduce the existential witness
+        ``quote_hf P`` using ``PROV_HF_EXISTS_INTRO``.
+      * Rewrite template filling to the public
+        ``substitute Prov_HF_internal (quote_hf n) idx_x`` shape.
+    """
+    p.goal(
+        "!n. Prov_HF n ==> "
+        "Prov_HF (substitute Prov_HF_internal (quote_hf n) idx_x)"
+    )
+    p.sorry()
+
+
+@proof
+def PROV_HF_REPRESENTS_BWD(p):
+    """|- !n. Prov_HF (substitute Prov_HF_internal (quote_hf n) idx_x)
+              ==> Prov_HF n.
+
+    Proof sketch:
+      * This is the Stage-6 soundness half, not a syntactic
+        representability proof.
+      * Interpret the HF proof of the internal Sigma_1 formula in the
+        standard HF model.
+      * Extract a real finite proof-set witness ``P`` satisfying
+        ``Proof_HF_set P n``.
+      * Fold with ``PROV_HF_AT`` to obtain external ``Prov_HF n``.
+    """
+    p.goal(
+        "!n. Prov_HF (substitute Prov_HF_internal (quote_hf n) idx_x) "
+        "==> Prov_HF n"
+    )
+    p.sorry()
+
+
+@proof
+def PROV_HF_REPRESENTS(p):
+    """|- !n. Prov_HF n =
+              Prov_HF (substitute Prov_HF_internal (quote_hf n) idx_x).
+
+    Proof sketch:
+      * Combine ``PROV_HF_REPRESENTS_FWD`` and
+        ``PROV_HF_REPRESENTS_BWD`` by propositional extensionality for
+        booleans.
+      * The forward half is the Phase-3 finite proof-checker
+        representability proof.
+      * The backward half remains intentionally isolated as the
+        Stage-6 Sigma_1 soundness dependency.
+    """
+    p.goal(
+        "!n. Prov_HF n = "
+        "Prov_HF (substitute Prov_HF_internal (quote_hf n) idx_x)"
+    )
     p.sorry()
 
 
@@ -4221,7 +4498,47 @@ if __name__ == "__main__":
     print("    TEMPLATE_FILL_QPARSE_VAR_T             :", pp_thm(TEMPLATE_FILL_QPARSE_VAR_T))
     print("    TEMPLATE_FILL_REPRESENTS_TERM          :", pp_thm(TEMPLATE_FILL_REPRESENTS_TERM))
     print(
-        "    PROV_HF_REPRESENTS (SORRY)             :",
+        "    IS_AXIOM_INTERNAL_REPRESENTS   :",
+        pp_thm(IS_AXIOM_INTERNAL_REPRESENTS),
+    )
+    print(
+        "    IS_MP_INTERNAL_REPRESENTS      :",
+        pp_thm(IS_MP_INTERNAL_REPRESENTS),
+    )
+    print(
+        "    IS_GEN_INTERNAL_REPRESENTS     :",
+        pp_thm(IS_GEN_INTERNAL_REPRESENTS),
+    )
+    print(
+        "    VALID_STEP_HF_SET_INTERNAL_AXIOM_CASE:",
+        pp_thm(VALID_STEP_HF_SET_INTERNAL_AXIOM_CASE),
+    )
+    print(
+        "    VALID_STEP_HF_SET_INTERNAL_MP_CASE   :",
+        pp_thm(VALID_STEP_HF_SET_INTERNAL_MP_CASE),
+    )
+    print(
+        "    VALID_STEP_HF_SET_INTERNAL_GEN_CASE  :",
+        pp_thm(VALID_STEP_HF_SET_INTERNAL_GEN_CASE),
+    )
+    print(
+        "    VALID_STEP_HF_SET_INTERNAL_REPRESENTS:",
+        pp_thm(VALID_STEP_HF_SET_INTERNAL_REPRESENTS),
+    )
+    print(
+        "    PROOF_HF_SET_INTERNAL_REPRESENTS:",
+        pp_thm(PROOF_HF_SET_INTERNAL_REPRESENTS),
+    )
+    print(
+        "    PROV_HF_REPRESENTS_FWD          :",
+        pp_thm(PROV_HF_REPRESENTS_FWD),
+    )
+    print(
+        "    PROV_HF_REPRESENTS_BWD          :",
+        pp_thm(PROV_HF_REPRESENTS_BWD),
+    )
+    print(
+        "    PROV_HF_REPRESENTS             :",
         pp_thm(PROV_HF_REPRESENTS),
     )
     print(
