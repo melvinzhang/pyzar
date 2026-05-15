@@ -432,9 +432,10 @@ substitute layer.
      shape. The composed bodies have free variables `{P,k,h}`,
      `{P,n}`, and `{x}` at the valid-step/proof/provability layers;
      no binder captures `x`, and no binder name is reused in the final
-     body. The only non-local side lemmas needed are
-     `IS_FORM_IS_AXIOM_INTERNAL` and `FREE_IN_IS_AXIOM_INTERNAL`, plus
-     reusable qparse-template term/free lemmas.
+     body. The non-local side lemmas are now exported by
+     `HF_PACKAGE_SIDE_CONDITION_PACKAGE`: `IS_FORM_IS_AXIOM_INTERNAL`,
+     `FREE_IN_IS_AXIOM_INTERNAL`, and reusable qparse-template term/free
+     clauses.
    - **Forward direction** (HOL ⇒ HF): Σ₁ completeness for HF.
      Extract a dependency-set `Proof_HF_set` witness via `PROV_HF_AT`,
      encode it with `quote_hf`, and verify each checker conjunct using
@@ -570,10 +571,11 @@ definitions.
 * **Prov_HF side-condition spike (done)** —
   `spike_prov_hf_side_conditions.py` validates the final
   `IS_FORM_PROV_HF_INTERNAL` and `FREE_IN_PROV_HF_INTERNAL` proof shape.
-  The final body has exactly `{x}` free; the proof is a routine
-  constructor walk once `IS_FORM_IS_AXIOM_INTERNAL`,
-  `FREE_IN_IS_AXIOM_INTERNAL`, and qparse-template term/free lemmas are
-  available.
+  The final body has exactly `{x}` free.  The needed package side lemmas
+  are landed in `hf_repr_core.py` as `HF_PACKAGE_SIDE_CONDITION_PACKAGE`,
+  exporting `IS_FORM_IS_AXIOM_INTERNAL`, `FREE_IN_IS_AXIOM_INTERNAL`, and
+  qparse-template term/free clauses for `Pair_ord`, `Imp_f`, and
+  `Forall_f`.
 
 * **Phase 3 design decision (confirmed and internal bodies landed)** —
   the main path uses the dependency-set proof checker, and the fixed

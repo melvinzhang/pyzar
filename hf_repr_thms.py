@@ -153,6 +153,15 @@ from hf_repr_core import (
     FREE_IN_INTERNAL_EQUIV,
     SUBSTITUTE_INTERNAL_EQUIV,
     SUBSTITUTE_INTERNAL_FUNCTIONAL,
+    HF_PACKAGE_SIDE_CONDITION_PACKAGE,
+    IS_FORM_IS_AXIOM_INTERNAL,
+    FREE_IN_IS_AXIOM_INTERNAL,
+    IS_TERM_QPARSE_PAIR_ORD,
+    FREE_IN_QPARSE_PAIR_ORD,
+    IS_TERM_QPARSE_IMP_F,
+    FREE_IN_QPARSE_IMP_F,
+    IS_TERM_QPARSE_FORALL_F,
+    FREE_IN_QPARSE_FORALL_F,
     HF_SYNTAX_REC_PACKAGE,
     SUBSTITUTE_REPRESENTS_SYNTACTIC,
     SUBSTITUTE_REPRESENTS_TERM,
@@ -4068,6 +4077,15 @@ if __name__ == "__main__":
     print("    FREE_IN_INTERNAL_EQUIV                :", pp_thm(FREE_IN_INTERNAL_EQUIV))
     print("    SUBSTITUTE_INTERNAL_EQUIV             :", pp_thm(SUBSTITUTE_INTERNAL_EQUIV))
     print("    SUBSTITUTE_INTERNAL_FUNCTIONAL        :", pp_thm(SUBSTITUTE_INTERNAL_FUNCTIONAL))
+    print("    HF_PACKAGE_SIDE_CONDITION_PACKAGE      :", pp_thm(HF_PACKAGE_SIDE_CONDITION_PACKAGE))
+    print("    IS_FORM_IS_AXIOM_INTERNAL              :", pp_thm(IS_FORM_IS_AXIOM_INTERNAL))
+    print("    FREE_IN_IS_AXIOM_INTERNAL              :", pp_thm(FREE_IN_IS_AXIOM_INTERNAL))
+    print("    IS_TERM_QPARSE_PAIR_ORD                :", pp_thm(IS_TERM_QPARSE_PAIR_ORD))
+    print("    FREE_IN_QPARSE_PAIR_ORD                :", pp_thm(FREE_IN_QPARSE_PAIR_ORD))
+    print("    IS_TERM_QPARSE_IMP_F                   :", pp_thm(IS_TERM_QPARSE_IMP_F))
+    print("    FREE_IN_QPARSE_IMP_F                   :", pp_thm(FREE_IN_QPARSE_IMP_F))
+    print("    IS_TERM_QPARSE_FORALL_F                :", pp_thm(IS_TERM_QPARSE_FORALL_F))
+    print("    FREE_IN_QPARSE_FORALL_F                :", pp_thm(FREE_IN_QPARSE_FORALL_F))
     print("    HF_SYNTAX_REC_PACKAGE                  :", pp_thm(HF_SYNTAX_REC_PACKAGE))
     print(
         "    SUBSTITUTE_REPRESENTS_SYNTACTIC        :",
