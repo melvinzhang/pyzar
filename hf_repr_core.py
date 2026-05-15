@@ -71,6 +71,12 @@ from hf_syntax import (
     IS_TERM_REC,
     IS_FORM_REC,
     IS_TERM_AT_INSERT,
+    IS_FORM_AT_EQ,
+    IS_FORM_AT_NOT,
+    IS_FORM_AT_IMP,
+    IS_FORM_AT_FORALL,
+    IS_FORM_AT_IN,
+    SUBSTITUTE_PRESERVES_IS_TERM,
     SUBSTITUTE_AT_EMPTY,
     SUBSTITUTE_AT_VAR_HIT,
     SUBSTITUTE_AT_VAR_MISS,
@@ -3391,20 +3397,319 @@ quoted data, not inside an object-language ``Var_t`` node.
 """
 
 
-TEMPLATE_FILL_REPRESENTS_TERM = new_axiom(
-    parse(
+@proof
+def TEMPLATE_FILL_EQ_SUBSTITUTE_TERM(p):
+    """|- !D t v. is_term D ==> template_fill D t v = substitute D t v.
+
+    On well-formed terms the template operation and object substitution
+    have the same constructor behavior: Empty/Var/Insert are the only
+    possible term constructors.
+    """
+    p.goal(
+        "!D. !t v. is_term D ==> template_fill D t v = substitute D t v",
+        types={"D": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    with p.strong_induction("D", "IH"):
+        p.fix("t v")
+        p.assume("hD: is_term D")
+
+        rec_at_D = SPEC(p._parse("D"), IS_TERM_REC)
+        p.have(
+            "h_disj: D = Empty_t \\/ (?x. D = Var_t x) "
+            "\\/ (?a b. D = Insert_t a b /\\ is_term a /\\ is_term b)"
+        ).by_eq_mp(rec_at_D, "hD")
+
+        with p.cases_on("h_disj"):
+            with p.case("c_empty: D = Empty_t"):
+                with p.calc("template_fill D t v", thus=True) as c:
+                    c.step("= template_fill Empty_t t v").by_rewrite(["c_empty"])
+                    c.step("= Empty_t").by(TEMPLATE_FILL_EMPTY, "t", "v")
+                    c.step("= substitute Empty_t t v").by_thm(
+                        SYM(SPECL([p._parse("t"), p._parse("v")], SUBSTITUTE_AT_EMPTY))
+                    )
+                    c.step("= substitute D t v").by_rewrite([SYM(p.fact("c_empty"))])
+
+            with p.case("c_var: ?x. D = Var_t x"):
+                with p.cases_on(EXCLUDED_MIDDLE, "v = x"):
+                    with p.case("hit: v = x"):
+                        with p.calc("template_fill D t v", thus=True) as c:
+                            c.step("= template_fill (Var_t x) t v").by_rewrite(
+                                ["x_eq"]
+                            )
+                            c.step("= t").by(TEMPLATE_FILL_HOLE_HIT, "x", "t", "v", "hit")
+                            c.step("= substitute (Var_t x) t v").by_thm(
+                                SYM(
+                                    MP(
+                                        SPECL(
+                                            [p._parse("x"), p._parse("t"), p._parse("v")],
+                                            SUBSTITUTE_AT_VAR_HIT,
+                                        ),
+                                        p.fact("hit"),
+                                    )
+                                )
+                            )
+                            c.step("= substitute D t v").by_rewrite(
+                                [SYM(p.fact("x_eq"))]
+                            )
+                    with p.case("miss: ~(v = x)"):
+                        with p.calc("template_fill D t v", thus=True) as c:
+                            c.step("= template_fill (Var_t x) t v").by_rewrite(
+                                ["x_eq"]
+                            )
+                            c.step("= Var_t x").by(
+                                TEMPLATE_FILL_HOLE_MISS, "x", "t", "v", "miss"
+                            )
+                            c.step("= substitute (Var_t x) t v").by_thm(
+                                SYM(
+                                    MP(
+                                        SPECL(
+                                            [p._parse("x"), p._parse("t"), p._parse("v")],
+                                            SUBSTITUTE_AT_VAR_MISS,
+                                        ),
+                                        p.fact("miss"),
+                                    )
+                                )
+                            )
+                            c.step("= substitute D t v").by_rewrite(
+                                [SYM(p.fact("x_eq"))]
+                            )
+
+            with p.case(
+                "c_ins: ?a b. D = Insert_t a b /\\ is_term a /\\ is_term b"
+            ):
+                p.split("b_eq", "(D_eq, h_a, h_b)")
+                p.have("lt_a: nat0_lt a D").by_rewrite_of(
+                    SPECL([p._parse("a"), p._parse("b")], NAT0_LT_INSERT_T_L),
+                    ["D_eq"],
+                )
+                p.have("lt_b: nat0_lt b D").by_rewrite_of(
+                    SPECL([p._parse("a"), p._parse("b")], NAT0_LT_INSERT_T_R),
+                    ["D_eq"],
+                )
+                p.have("ih_a: template_fill a t v = substitute a t v").by(
+                    "IH", "a", "lt_a", "t", "v", "h_a",
+                )
+                p.have("ih_b: template_fill b t v = substitute b t v").by(
+                    "IH", "b", "lt_b", "t", "v", "h_b",
+                )
+                with p.calc("template_fill D t v", thus=True) as c:
+                    c.step("= template_fill (Insert_t a b) t v").by_rewrite(
+                        ["D_eq"]
+                    )
+                    c.step(
+                        "= Insert_t (template_fill a t v) (template_fill b t v)"
+                    ).by(TEMPLATE_FILL_INSERT, "a", "b", "t", "v")
+                    c.step(
+                        "= Insert_t (substitute a t v) (substitute b t v)"
+                    ).by_cong("Insert_t", "ih_a", "ih_b")
+                    c.step("= substitute (Insert_t a b) t v").by_thm(
+                        SYM(
+                            SPECL(
+                                [p._parse("a"), p._parse("b"), p._parse("t"), p._parse("v")],
+                                SUBSTITUTE_AT_INSERT,
+                            )
+                        )
+                    )
+                    c.step("= substitute D t v").by_rewrite([SYM(p.fact("D_eq"))])
+
+
+@proof
+def TEMPLATE_FILL_PRESERVES_IS_TERM(p):
+    r"""|- !D t v. is_term D /\ is_term t ==> is_term (template_fill D t v)."""
+    p.goal(
+        "!D t v. is_term D /\\ is_term t ==> is_term (template_fill D t v)",
+        types={"D": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    p.fix("D t v")
+    p.assume("(hD, ht): is_term D /\\ is_term t")
+    p.have("h_subst: is_term (substitute D t v)").by(
+        SUBSTITUTE_PRESERVES_IS_TERM, "D", "t", "v", CONJ(p.fact("hD"), p.fact("ht")),
+    )
+    p.have("h_eq: template_fill D t v = substitute D t v").by(
+        TEMPLATE_FILL_EQ_SUBSTITUTE_TERM, "D", "t", "v", "hD",
+    )
+    p.thus("is_term (template_fill D t v)").by_eq_mp(
+        SYM(AP_TERM(is_term, p.fact("h_eq"))), "h_subst"
+    )
+
+
+@proof
+def TEMPLATE_FILL_PRESERVES_IS_FORM(p):
+    """|- !D t v. is_form D ==> is_term t ==> is_form (template_fill D t v)."""
+    p.goal(
+        "!D. !t v. is_form D ==> is_term t ==> is_form (template_fill D t v)",
+        types={"D": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    with p.strong_induction("D", "IH"):
+        p.fix("t v")
+        p.assume("hD: is_form D")
+        p.assume("ht: is_term t")
+
+        rec_at_D = SPEC(p._parse("D"), IS_FORM_REC)
+        p.have(
+            "h_disj: (?a b. D = Eq_f a b /\\ is_term a /\\ is_term b) "
+            "\\/ (?x. D = Not_f x /\\ is_form x) "
+            "\\/ (?a b. D = Imp_f a b /\\ is_form a /\\ is_form b) "
+            "\\/ (?a b. D = Forall_f a b /\\ is_form b) "
+            "\\/ (?a b. D = In_a a b /\\ is_term a /\\ is_term b)"
+        ).by_eq_mp(rec_at_D, "hD")
+
+        with p.cases_on("h_disj"):
+            with p.case("c_eq: ?a b. D = Eq_f a b /\\ is_term a /\\ is_term b"):
+                p.split("b_eq", "(D_eq, h_a, h_b)")
+                p.have("hfill_a: is_term (template_fill a t v)").by(
+                    TEMPLATE_FILL_PRESERVES_IS_TERM,
+                    "a", "t", "v",
+                    CONJ(p.fact("h_a"), p.fact("ht")),
+                )
+                p.have("hfill_b: is_term (template_fill b t v)").by(
+                    TEMPLATE_FILL_PRESERVES_IS_TERM,
+                    "b", "t", "v",
+                    CONJ(p.fact("h_b"), p.fact("ht")),
+                )
+                p.have(
+                    "h_fill: template_fill D t v "
+                    "= Eq_f (template_fill a t v) (template_fill b t v)"
+                ).by_rewrite(["D_eq", TEMPLATE_FILL_EQ])
+                at_eq = SPECL(
+                    [p._parse("template_fill a t v"), p._parse("template_fill b t v")],
+                    IS_FORM_AT_EQ,
+                )
+                p.have(
+                    "h_eq_form: is_form "
+                    "(Eq_f (template_fill a t v) (template_fill b t v))"
+                ).by_eq_mp(SYM(at_eq), CONJ(p.fact("hfill_a"), p.fact("hfill_b")))
+                p.thus("is_form (template_fill D t v)").by_rewrite_of(
+                    "h_eq_form", [SYM(p.fact("h_fill"))]
+                )
+
+            with p.case("c_not: ?x. D = Not_f x /\\ is_form x"):
+                p.split("x_eq", "(D_eq, h_x)")
+                p.have("lt_x: nat0_lt x D").by_rewrite_of(
+                    SPEC(p._parse("x"), NAT0_LT_NOT_F), ["D_eq"]
+                )
+                p.have("hfill_x: is_form (template_fill x t v)").by(
+                    "IH", "x", "lt_x", "t", "v", "h_x", "ht",
+                )
+                p.have(
+                    "h_fill: template_fill D t v = Not_f (template_fill x t v)"
+                ).by_rewrite(["D_eq", TEMPLATE_FILL_NOT])
+                at_not = SPEC(p._parse("template_fill x t v"), IS_FORM_AT_NOT)
+                p.have("h_not_form: is_form (Not_f (template_fill x t v))").by_eq_mp(
+                    SYM(at_not), "hfill_x"
+                )
+                p.thus("is_form (template_fill D t v)").by_rewrite_of(
+                    "h_not_form", [SYM(p.fact("h_fill"))]
+                )
+
+            with p.case("c_imp: ?a b. D = Imp_f a b /\\ is_form a /\\ is_form b"):
+                p.split("b_eq", "(D_eq, h_a, h_b)")
+                p.have("lt_a: nat0_lt a D").by_rewrite_of(
+                    SPECL([p._parse("a"), p._parse("b")], NAT0_LT_IMP_F_L),
+                    ["D_eq"],
+                )
+                p.have("lt_b: nat0_lt b D").by_rewrite_of(
+                    SPECL([p._parse("a"), p._parse("b")], NAT0_LT_IMP_F_R),
+                    ["D_eq"],
+                )
+                p.have("hfill_a: is_form (template_fill a t v)").by(
+                    "IH", "a", "lt_a", "t", "v", "h_a", "ht",
+                )
+                p.have("hfill_b: is_form (template_fill b t v)").by(
+                    "IH", "b", "lt_b", "t", "v", "h_b", "ht",
+                )
+                p.have(
+                    "h_fill: template_fill D t v "
+                    "= Imp_f (template_fill a t v) (template_fill b t v)"
+                ).by_rewrite(["D_eq", TEMPLATE_FILL_IMP])
+                at_imp = SPECL(
+                    [p._parse("template_fill a t v"), p._parse("template_fill b t v")],
+                    IS_FORM_AT_IMP,
+                )
+                p.have(
+                    "h_imp_form: is_form "
+                    "(Imp_f (template_fill a t v) (template_fill b t v))"
+                ).by_eq_mp(SYM(at_imp), CONJ(p.fact("hfill_a"), p.fact("hfill_b")))
+                p.thus("is_form (template_fill D t v)").by_rewrite_of(
+                    "h_imp_form", [SYM(p.fact("h_fill"))]
+                )
+
+            with p.case("c_fa: ?a b. D = Forall_f a b /\\ is_form b"):
+                p.split("b_eq", "(D_eq, h_b)")
+                p.have("lt_b: nat0_lt b D").by_rewrite_of(
+                    SPECL([p._parse("a"), p._parse("b")], NAT0_LT_FORALL_F_R),
+                    ["D_eq"],
+                )
+                p.have("hfill_b: is_form (template_fill b t v)").by(
+                    "IH", "b", "lt_b", "t", "v", "h_b", "ht",
+                )
+                p.have(
+                    "h_fill: template_fill D t v = Forall_f a (template_fill b t v)"
+                ).by_rewrite(["D_eq", TEMPLATE_FILL_FORALL])
+                at_fa = SPECL(
+                    [p._parse("a"), p._parse("template_fill b t v")],
+                    IS_FORM_AT_FORALL,
+                )
+                p.have("h_fa_form: is_form (Forall_f a (template_fill b t v))").by_eq_mp(
+                    SYM(at_fa), "hfill_b"
+                )
+                p.thus("is_form (template_fill D t v)").by_rewrite_of(
+                    "h_fa_form", [SYM(p.fact("h_fill"))]
+                )
+
+            with p.case("c_in: ?a b. D = In_a a b /\\ is_term a /\\ is_term b"):
+                p.split("b_eq", "(D_eq, h_a, h_b)")
+                p.have("hfill_a: is_term (template_fill a t v)").by(
+                    TEMPLATE_FILL_PRESERVES_IS_TERM,
+                    "a", "t", "v",
+                    CONJ(p.fact("h_a"), p.fact("ht")),
+                )
+                p.have("hfill_b: is_term (template_fill b t v)").by(
+                    TEMPLATE_FILL_PRESERVES_IS_TERM,
+                    "b", "t", "v",
+                    CONJ(p.fact("h_b"), p.fact("ht")),
+                )
+                p.have(
+                    "h_fill: template_fill D t v "
+                    "= In_a (template_fill a t v) (template_fill b t v)"
+                ).by_rewrite(["D_eq", TEMPLATE_FILL_IN])
+                at_in = SPECL(
+                    [p._parse("template_fill a t v"), p._parse("template_fill b t v")],
+                    IS_FORM_AT_IN,
+                )
+                p.have(
+                    "h_in_form: is_form "
+                    "(In_a (template_fill a t v) (template_fill b t v))"
+                ).by_eq_mp(SYM(at_in), CONJ(p.fact("hfill_a"), p.fact("hfill_b")))
+                p.thus("is_form (template_fill D t v)").by_rewrite_of(
+                    "h_in_form", [SYM(p.fact("h_fill"))]
+                )
+
+@proof
+def TEMPLATE_FILL_REPRESENTS_TERM(p):
+    """|- !D t v. is_term D ==> Prov_HF(template_fill_internal D t v ...)."""
+    p.goal(
         f"!D t v. is_term D ==> "
         f"{_prov_template_fill_internal_rel('D', 't', 'v', 'template_fill D t v')}"
     )
-)
+    p.fix("D t v")
+    p.assume("hD: is_term D")
+    p.have(
+        "h_subst: "
+        f"{_prov_substitute_internal_rel('D', 't', 'v', '((substitute D) t) v')}"
+    ).by(SUBSTITUTE_REPRESENTS_TERM, "D", "t", "v", "hD")
+    p.have("h_eq: template_fill D t v = substitute D t v").by(
+        TEMPLATE_FILL_EQ_SUBSTITUTE_TERM, "D", "t", "v", "hD",
+    )
+    p.thus(
+        _prov_template_fill_internal_rel("D", "t", "v", "template_fill D t v")
+    ).by_rewrite_of(
+        "h_subst",
+        [SYM(TEMPLATE_FILL_INTERNAL_DEF), SYM(p.fact("h_eq"))],
+    )
 
 
 TEMPLATE_FILL_REPRESENTS = TEMPLATE_FILL_REPRESENTS_TERM
-
-
-TEMPLATE_FILL_PRESERVES_IS_FORM = new_axiom(
-    parse("!D t v. is_form D ==> is_term t ==> is_form (template_fill D t v)")
-)
 
 
 # ---------------------------------------------------------------------------
