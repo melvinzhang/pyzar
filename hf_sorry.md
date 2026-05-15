@@ -546,9 +546,10 @@ definitions.
   support package `HF_SUPPORT_PREDICATE_PACKAGE` exports positive and
   negative representability clauses for `is_term_internal`,
   `is_form_internal`, and `free_in_internal`; `substitute_internal`
-  remains governed by `HF_SYNTAX_REC_PACKAGE`. Remaining proof work is
-  proving the closure/path/graph bodies equivalent to the existing HOL
-  predicates and proving substitute graph functionality.
+  remains governed by `HF_SYNTAX_REC_PACKAGE`. The companion
+  `HF_SUPPORT_EQUIV_PACKAGE` exports the iff-style support equivalences,
+  and `SUBSTITUTE_INTERNAL_FUNCTIONAL` derives graph functionality from
+  `SUBSTITUTE_INTERNAL_EQUIV`.
 
 * **Forward dependency-set shape spike (done)** —
   `spike_forward_dep_shape.py` validates the proof-object witness shape
