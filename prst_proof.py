@@ -1390,12 +1390,10 @@ def MU_CORRECTNESS(p):
 # MU_CORRECTNESS).
 #
 # Proof_PRST_pr is the PR-symbol mirror of the HOL-level Proof_PRST proof
-# checker. A *constructive* body would be ~600 lines of PR composition
-# (10-way is_pr_def_pr + 8 logical-axiom recognisers + bounded
-# nth_pr/exists_pair_pr/len_pr scaffolding for the MP step) plus
-# correctness lemmas. Per the design fork documented in prst_sorry.md,
-# the body is left as a sentinel ``proj 1 2`` and the symbol's
-# correctness is committed via two axioms:
+# checker. Its top-level body now has the intended proof-list shape:
+# head check + valid-proof-list recursion + membership-based MP search.
+# The remaining constructive work is expanding the is_pr_axiom_pr leaf
+# and proving the correctness lemmas below instead of positing them:
 #
 #   PROOF_PRST_PR_CORRECT       -- HOL-level semantic correctness:
 #                                  Proof_PRST p n <=> the PR symbol
@@ -1651,7 +1649,7 @@ def IS_PFORM_PROV_PRST_INTERNAL(p):
         Proof_PRST_pr_def,
         FIND_PROOF_PR_DEF,
         IS_PR_SYM_ADJ,
-        IS_PR_SYM_PROJ,
+        IS_PR_SYM_PROOF_PRST_PR,
         IS_PARTIAL_PR_SYM_MU,
     )
     from tactics import SPECL, CONJ, SYM, AP_TERM
@@ -1665,20 +1663,9 @@ def IS_PFORM_PROV_PRST_INTERNAL(p):
     p.have("h_pp_adj: is_partial_pr_sym adj_sym").by(
         IS_PR_SYM_IMP_PARTIAL, "adj_sym", "h_pr_adj"
     )
-    # Proof_PRST_pr = proj_sym 1 2; needs nat0_lt 1 2.
-    # nat0_lt 1 2 holds: 1 = SUC0 0, 2 = SUC0 (SUC0 0), and 0 < SUC0 0
-    # < SUC0 (SUC0 0). The cleanest discharge is via NAT0_LT_SUC.
-    from nat0_order import NAT0_LT_SUC0
-    p.have(
-        "h_lt_1_2: nat0_lt (SUC0 0) (SUC0 (SUC0 0))"
-    ).by(NAT0_LT_SUC0, "SUC0 0")
-    p.have(
-        "h_pr_proof_inner: is_pr_sym (proj_sym (SUC0 0) (SUC0 (SUC0 0)))"
-    ).by(IS_PR_SYM_PROJ, "SUC0 0", "SUC0 (SUC0 0)", "h_lt_1_2")
-    # Proof_PRST_pr = proj_sym 1 2, so is_pr_sym Proof_PRST_pr.
-    p.have(
-        "h_pr_proof: is_pr_sym Proof_PRST_pr"
-    ).by_rewrite_of("h_pr_proof_inner", [SYM(Proof_PRST_pr_def)])
+    p.have("h_pr_proof: is_pr_sym Proof_PRST_pr").by_thm(
+        IS_PR_SYM_PROOF_PRST_PR
+    )
     p.have(
         "h_pp_proof: is_partial_pr_sym Proof_PRST_pr"
     ).by(IS_PR_SYM_IMP_PARTIAL, "Proof_PRST_pr", "h_pr_proof")

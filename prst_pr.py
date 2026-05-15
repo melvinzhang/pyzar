@@ -1257,6 +1257,32 @@ comp_sym = mk_const("comp_sym", [])
 # prst_proof to avoid the forward reference.
 
 
+@proof
+def IS_PR_SYM_COMP(p):
+    """|- !g hs. is_pr_sym (comp_sym g hs).
+
+    `comp_sym g hs = Pair_ord 5 (Pair_ord g hs)`, which falls under the
+    broad tag-5 branch already used by const_sym.  Closure/arity checks
+    for g and hs are proof-system obligations, not syntactic registry
+    obligations.
+    """
+    p.goal("!g hs. is_pr_sym (comp_sym g hs)", types={"g": nat0_ty, "hs": nat0_ty})
+    p.fix("g hs")
+    comp_eq_th = p.unfold(comp_sym_def, "g", "hs")
+    p.have(
+        f"comp_eq: comp_sym g hs = Pair_ord ({suc_chain(5)}) (Pair_ord g hs)"
+    ).by_thm(comp_eq_th)
+    p.have(
+        f"h_ex: ?c. comp_sym g hs = Pair_ord ({suc_chain(5)}) c"
+    ).by_exists(["Pair_ord g hs"], "comp_eq")
+    p.have(
+        "h_body: " + _IS_PR_SYM_BODY.format(sym="comp_sym g hs").replace(
+            "?g h.", "?gg hh."
+        ).replace("Pair_ord g h", "Pair_ord gg hh")
+    ).by_disj("h_ex")
+    p.thus("is_pr_sym (comp_sym g hs)").by_unfold("h_body", IS_PR_SYM_DEF)
+
+
 # ---------------------------------------------------------------------------
 # Stage 2A (f') -- Kleene minimisation as an operator on PR symbols.
 #
@@ -1575,27 +1601,307 @@ diag_pr = mk_const("diag_pr", [])
 
 # Proof_PRST_pr -- the list-of-formulas proof checker as a PR symbol.
 #
-# A constructive body would be ~600 lines of PR composition (10-way
-# is_pr_def_pr + 8 logical-axiom recognisers + bounded
-# nth_pr/exists_pair_pr/len_pr scaffolding for the MP step) plus
-# correctness lemmas. Per the design fork documented in prst_sorry.md,
-# the body is left as a sentinel ``proj 1 2`` and the symbol's
-# correctness is *axiomatised* in prst_proof.py via
-#   PROOF_PRST_PR_CORRECT        (HOL-level: Proof_PRST p n <=>
-#                                 PR-evaluation returns T_pt)
-#   PROOF_PRST_PR_INTERNAL_EVAL  (PRST-internal: T_pt evaluation is
-#                                 internally provable in Prov_PRST)
-# This mirrors the MU_CORRECTNESS precedent: the bounded-search PR
-# infrastructure has no other consumer in the chain, so the
-# cost/benefit of mechanising it is poor relative to G2's mp_combine_pr
-# and reflect_pr, which reuse existing infra. See prst_sorry.md, "G1 +
-# G2 commitment surface" section.
+# This is the actual checker shape, replacing the old sentinel
+# ``proj 1 2``.  The definition is deliberately decomposed into named
+# helper symbols so the later correctness proof can unfold one layer at
+# a time:
+#
+#   Proof_PRST_pr(p, n)
+#     = is_tup(p) /\ head(p) = n /\ valid_proof_list(p)
+#
+#   valid_proof_list(Empty_pt) = T
+#   valid_proof_list(Tup_pt h t)
+#     = valid_proof_list(t) /\ valid_step(h, t)
+#
+#   valid_step(h, t)
+#     = is_pr_axiom_pr(h)
+#       \/ exists f in t. mem_t(Imp_pf f h, t)
+#
+# The critical MP point is membership search in the earlier list t.  We
+# never ask the single-conclusion predicate for "tail proves f" and
+# "tail proves f -> h"; that was the broken shape in _Proof_PRST_F.
+#
+# The only leaf intentionally left as a separate recogniser symbol is
+# ``is_pr_axiom_pr``.  Expanding that symbol into
+# is_pr_def_pr \/ is_logical_axiom_pr is the next schema-recogniser
+# task, not part of the proof-list recursion itself.
+
+
+def _const_at(value_term, arity):
+    """PR symbol that ignores an ``arity``-tuple and returns value_term."""
+    return comp(mk_app(const_sym, value_term), proj(0, arity))
+
+
+def _singleton_at(value_pr, arity):
+    """PR symbol returning the singleton set ``{value_pr(args)}``."""
+    return comp(adj_sym, value_pr, _const_at(Empty_pt, arity))
+
+
+def _if_eq_literal_at(tag_val, arity, test_pr, then_pr, else_pr):
+    """Branch on ``test_pr(args) = tag_val`` using if_in over a singleton."""
+    return comp(
+        if_in_sym,
+        test_pr,
+        _singleton_at(_const_at(nat(tag_val), arity), arity),
+        then_pr,
+        else_pr,
+    )
+
+
+eq_nat_pr_def = define(
+    "eq_nat_pr",
+    parse_type("nat0"),
+    comp(
+        if_in_sym,
+        proj(0, 2),
+        _singleton_at(proj(1, 2), 2),
+        _const_at(T_pt, 2),
+        _const_at(F_pt, 2),
+    ),
+)
+eq_nat_pr = mk_const("eq_nat_pr", [])
+
+
+or_bool_pr_def = define(
+    "or_bool_pr",
+    parse_type("nat0"),
+    comp(
+        if_in_sym,
+        proj(0, 2),
+        _singleton_at(_const_at(T_pt, 2), 2),
+        _const_at(T_pt, 2),
+        proj(1, 2),
+    ),
+)
+or_bool_pr = mk_const("or_bool_pr", [])
+
+
+and_bool_pr_def = define(
+    "and_bool_pr",
+    parse_type("nat0"),
+    comp(
+        if_in_sym,
+        proj(0, 2),
+        _singleton_at(_const_at(T_pt, 2), 2),
+        proj(1, 2),
+        _const_at(F_pt, 2),
+    ),
+)
+and_bool_pr = mk_const("and_bool_pr", [])
+
+
+# Tup_pt p = Pair_ord 12 (Pair_ord h t).  The destructors below assume
+# the Tup_pt shape; callers guard with is_tup_pr when that matters.
+tup_payload_pr_def = define(
+    "tup_payload_pr",
+    parse_type("nat0"),
+    comp(pair_right_sym, proj(0, 1)),
+)
+tup_payload_pr = mk_const("tup_payload_pr", [])
+
+
+tup_head_pr_def = define(
+    "tup_head_pr",
+    parse_type("nat0"),
+    comp(pair_left_sym, tup_payload_pr),
+)
+tup_head_pr = mk_const("tup_head_pr", [])
+
+
+tup_tail_pr_def = define(
+    "tup_tail_pr",
+    parse_type("nat0"),
+    comp(pair_right_sym, tup_payload_pr),
+)
+tup_tail_pr = mk_const("tup_tail_pr", [])
+
+
+is_tup_pr_def = define(
+    "is_tup_pr",
+    parse_type("nat0"),
+    comp(eq_nat_pr, comp(pair_left_sym, proj(0, 1)), _const_at(nat(12), 1)),
+)
+is_tup_pr = mk_const("is_tup_pr", [])
+
+
+# Build the encoded PRST implication formula Imp_pf f h =
+# Pair_ord 7 (Pair_ord f h).
+imp_code_pr_def = define(
+    "imp_code_pr",
+    parse_type("nat0"),
+    comp(
+        pair_ord_sym,
+        _const_at(nat(7), 2),
+        comp(pair_ord_sym, proj(0, 2), proj(1, 2)),
+    ),
+)
+imp_code_pr = mk_const("imp_code_pr", [])
+
+
+# Placeholder leaf for the axiom recogniser body.  Proof_PRST_pr now
+# calls this symbol at the right point; expanding it into
+# is_pr_def_pr \/ is_logical_axiom_pr is the next bounded recogniser
+# task.
+is_pr_axiom_pr_def = define(
+    "is_pr_axiom_pr",
+    parse_type("nat0"),
+    mk_app(const_sym, F_pt),
+)
+is_pr_axiom_pr = mk_const("is_pr_axiom_pr", [])
+
+
+# mem_t_pr(x, p): search a Tup_pt proof-list p for line x.
+#
+# Implemented by course_rec over raw Pair_ord.  At a real Tup_pt node
+# Pair_ord 12 (Pair_ord h t), rec_right is the recursive result at the
+# payload Pair_ord h t.  Non-Tup payload pairs forward their right
+# recursion result, so rec_right at the Tup node is exactly mem_t(x,t).
+g_mem_t_pr_def = define("g_mem_t_pr", parse_type("nat0"), mk_app(const_sym, F_pt))
+g_mem_t_pr = mk_const("g_mem_t_pr", [])
+
+_h_mem_t_then = comp(
+    or_bool_pr,
+    comp(eq_nat_pr, proj(4, 5), comp(pair_left_sym, proj(1, 5))),
+    proj(3, 5),
+)
+h_mem_t_pr_def = define(
+    "h_mem_t_pr",
+    parse_type("nat0"),
+    _if_eq_literal_at(12, 5, proj(0, 5), _h_mem_t_then, proj(3, 5)),
+)
+h_mem_t_pr = mk_const("h_mem_t_pr", [])
+
+mem_t_pr_def = define(
+    "mem_t_pr",
+    parse_type("nat0"),
+    comp(
+        mk_app(mk_app(course_rec_sym, g_mem_t_pr), h_mem_t_pr),
+        proj(1, 2),  # proof list p
+        proj(0, 2),  # searched line x
+    ),
+)
+mem_t_pr = mk_const("mem_t_pr", [])
+
+
+# exists_mp_witness_pr(h, t): bounded MP search over earlier lines f in t.
+# y_vec is Pair_ord h t, so every recursive step can test membership in
+# the original earlier-list t, not merely the current rest.
+g_exists_mp_pr_def = define(
+    "g_exists_mp_pr",
+    parse_type("nat0"),
+    mk_app(const_sym, F_pt),
+)
+g_exists_mp_pr = mk_const("g_exists_mp_pr", [])
+
+_exists_mp_candidate = comp(
+    mem_t_pr,
+    comp(
+        imp_code_pr,
+        comp(pair_left_sym, proj(1, 5)),   # f = head(payload)
+        comp(pair_left_sym, proj(4, 5)),   # h = pair_left y_vec
+    ),
+    comp(pair_right_sym, proj(4, 5)),      # original t = pair_right y_vec
+)
+_h_exists_mp_then = comp(or_bool_pr, _exists_mp_candidate, proj(3, 5))
+h_exists_mp_pr_def = define(
+    "h_exists_mp_pr",
+    parse_type("nat0"),
+    _if_eq_literal_at(12, 5, proj(0, 5), _h_exists_mp_then, proj(3, 5)),
+)
+h_exists_mp_pr = mk_const("h_exists_mp_pr", [])
+
+exists_mp_witness_pr_def = define(
+    "exists_mp_witness_pr",
+    parse_type("nat0"),
+    comp(
+        mk_app(mk_app(course_rec_sym, g_exists_mp_pr), h_exists_mp_pr),
+        proj(1, 2),                                      # t
+        comp(pair_ord_sym, proj(0, 2), proj(1, 2)),      # Pair_ord h t
+    ),
+)
+exists_mp_witness_pr = mk_const("exists_mp_witness_pr", [])
+
+
+valid_step_pr_def = define(
+    "valid_step_pr",
+    parse_type("nat0"),
+    comp(
+        or_bool_pr,
+        comp(is_pr_axiom_pr, proj(0, 2)),
+        comp(exists_mp_witness_pr, proj(0, 2), proj(1, 2)),
+    ),
+)
+valid_step_pr = mk_const("valid_step_pr", [])
+
+
+# valid_proof_list_pr(p): every line in the Tup_pt list is valid from
+# its tail.
+g_valid_proof_list_pr_def = define(
+    "g_valid_proof_list_pr",
+    parse_type("nat0"),
+    mk_app(const_sym, T_pt),
+)
+g_valid_proof_list_pr = mk_const("g_valid_proof_list_pr", [])
+
+_valid_step_at_payload = comp(
+    valid_step_pr,
+    comp(pair_left_sym, proj(1, 5)),    # h
+    comp(pair_right_sym, proj(1, 5)),   # t
+)
+_h_valid_proof_list_then = comp(and_bool_pr, proj(3, 5), _valid_step_at_payload)
+h_valid_proof_list_pr_def = define(
+    "h_valid_proof_list_pr",
+    parse_type("nat0"),
+    _if_eq_literal_at(12, 5, proj(0, 5), _h_valid_proof_list_then, proj(3, 5)),
+)
+h_valid_proof_list_pr = mk_const("h_valid_proof_list_pr", [])
+
+valid_proof_list_pr_def = define(
+    "valid_proof_list_pr",
+    parse_type("nat0"),
+    comp(
+        mk_app(mk_app(course_rec_sym, g_valid_proof_list_pr), h_valid_proof_list_pr),
+        proj(0, 1),
+        _const_at(nat(0), 1),
+    ),
+)
+valid_proof_list_pr = mk_const("valid_proof_list_pr", [])
+
+
+_proof_prst_head_matches = comp(eq_nat_pr, comp(tup_head_pr, proj(0, 2)), proj(1, 2))
+_proof_prst_valid_tail = comp(
+    and_bool_pr,
+    _proof_prst_head_matches,
+    comp(valid_proof_list_pr, proj(0, 2)),
+)
+_proof_prst_body = comp(
+    and_bool_pr,
+    comp(is_tup_pr, proj(0, 2)),
+    _proof_prst_valid_tail,
+)
 Proof_PRST_pr_def = define(
     "Proof_PRST_pr",
     parse_type("nat0"),
-    proj(1, 2),
+    _proof_prst_body,
 )
 Proof_PRST_pr = mk_const("Proof_PRST_pr", [])
+
+
+@proof
+def IS_PR_SYM_PROOF_PRST_PR(p):
+    """|- is_pr_sym Proof_PRST_pr."""
+    from fusion import EQ_MP
+    from tactics import AP_TERM, SPECL, SYM
+    from basics import rand, rator
+
+    p.goal("is_pr_sym Proof_PRST_pr")
+    # _proof_prst_body is `comp_sym g hs`; peel g/hs from the kernel term
+    # and specialise IS_PR_SYM_COMP at exactly that body.
+    g_term = rand(rator(_proof_prst_body))
+    hs_term = rand(_proof_prst_body)
+    h_body = SPECL([g_term, hs_term], IS_PR_SYM_COMP)
+    lift = AP_TERM(is_pr_sym, SYM(Proof_PRST_pr_def))
+    p.thus("is_pr_sym Proof_PRST_pr").by_thm(EQ_MP(lift, h_body))
 
 
 # find_proof_pr is the mu-closure of Proof_PRST_pr: applied to a formula
