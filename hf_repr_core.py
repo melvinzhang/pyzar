@@ -90,6 +90,7 @@ from hf_syntax import (
     _unfold_rec_via_F_def,
     _mono_iff_value_binary_pw_step,
 )
+from hf_qsyntax import qparse
 from hf_sets import (
     In,  # noqa: F401  -- parser alias for is_substitute_step
     Pair_ord,  # noqa: F401  -- parser alias for is_substitute_step
@@ -3474,12 +3475,145 @@ is_In_internal = mk_const("is_In_internal", [])
 # regardless of load order.
 
 
+def _q(src, **env):
+    """Quoted HF syntax data: parse with the separate qparse grammar."""
+    return qparse(src, **env)
+
+
+def _q_in_pair(left, right, container):
+    return mk_app(In_a, _q("Pair_ord(left, right)", left=left, right=right), container)
+
+
+def _is_substitute_step_internal_body():
+    """HF formula for the Sigma_0 step predicate.
+
+    All constructor data in equality RHSs is built through ``qparse`` so
+    slot variables remain exposed under Insert_t/Empty_t, not hidden as
+    primitive-constructor payloads.
+    """
+    empty_clause = Q_and(
+        Q_eq(var_a, _q("Empty_t")),
+        Q_eq(var_b, _q("Empty_t")),
+    )
+    var_hit_clause = Q_and(
+        Q_eq(var_a, _q("Var_t(var_z)", var_z=var_z)),
+        Q_eq(var_b, var_y),
+    )
+    var_miss_clause = Q_exists(
+        _idx_wq,
+        Q_and_chain(
+            Q_eq(var_a, _q("Var_t(var_wq)", var_wq=var_wq)),
+            Q_neq(var_wq, var_z),
+            Q_eq(var_b, _q("Var_t(var_wq)", var_wq=var_wq)),
+        ),
+    )
+    eq_clause = Q_exists_chain(
+        [_idx_a1, _idx_a2, _idx_b1, _idx_b2],
+        Q_and_chain(
+            Q_eq(var_a, _q("Eq_f(var_a1, var_a2)", var_a1=var_a1, var_a2=var_a2)),
+            Q_eq(var_b, _q("Eq_f(var_b1, var_b2)", var_b1=var_b1, var_b2=var_b2)),
+            _q_in_pair(var_a1, var_b1, var_T),
+            _q_in_pair(var_a2, var_b2, var_T),
+        ),
+    )
+    not_clause = Q_exists_chain(
+        [_idx_s1, _idx_s2],
+        Q_and_chain(
+            Q_eq(var_a, _q("Not_f(var_s1)", var_s1=var_s1)),
+            Q_eq(var_b, _q("Not_f(var_s2)", var_s2=var_s2)),
+            _q_in_pair(var_s1, var_s2, var_T),
+        ),
+    )
+    imp_clause = Q_exists_chain(
+        [_idx_a1, _idx_a2, _idx_b1, _idx_b2],
+        Q_and_chain(
+            Q_eq(var_a, _q("Imp_f(var_a1, var_a2)", var_a1=var_a1, var_a2=var_a2)),
+            Q_eq(var_b, _q("Imp_f(var_b1, var_b2)", var_b1=var_b1, var_b2=var_b2)),
+            _q_in_pair(var_a1, var_b1, var_T),
+            _q_in_pair(var_a2, var_b2, var_T),
+        ),
+    )
+    forall_hit_clause = Q_exists_chain(
+        [_idx_wq, _idx_f1],
+        Q_and_chain(
+            Q_eq(var_a, _q("Forall_f(var_wq, var_f1)", var_wq=var_wq, var_f1=var_f1)),
+            Q_eq(var_wq, var_z),
+            Q_eq(var_b, _q("Forall_f(var_wq, var_f1)", var_wq=var_wq, var_f1=var_f1)),
+        ),
+    )
+    forall_miss_clause = Q_exists_chain(
+        [_idx_wq, _idx_f1, _idx_f2],
+        Q_and_chain(
+            Q_eq(var_a, _q("Forall_f(var_wq, var_f1)", var_wq=var_wq, var_f1=var_f1)),
+            Q_neq(var_wq, var_z),
+            Q_eq(var_b, _q("Forall_f(var_wq, var_f2)", var_wq=var_wq, var_f2=var_f2)),
+            _q_in_pair(var_f1, var_f2, var_T),
+        ),
+    )
+    insert_clause = Q_exists_chain(
+        [_idx_a1, _idx_a2, _idx_b1, _idx_b2],
+        Q_and_chain(
+            Q_eq(
+                var_a,
+                _q("Insert_t(var_a1, var_a2)", var_a1=var_a1, var_a2=var_a2),
+            ),
+            Q_eq(
+                var_b,
+                _q("Insert_t(var_b1, var_b2)", var_b1=var_b1, var_b2=var_b2),
+            ),
+            _q_in_pair(var_a1, var_b1, var_T),
+            _q_in_pair(var_a2, var_b2, var_T),
+        ),
+    )
+    in_clause = Q_exists_chain(
+        [_idx_a1, _idx_a2, _idx_b1, _idx_b2],
+        Q_and_chain(
+            Q_eq(var_a, _q("In_a(var_a1, var_a2)", var_a1=var_a1, var_a2=var_a2)),
+            Q_eq(var_b, _q("In_a(var_b1, var_b2)", var_b1=var_b1, var_b2=var_b2)),
+            _q_in_pair(var_a1, var_b1, var_T),
+            _q_in_pair(var_a2, var_b2, var_T),
+        ),
+    )
+    return Q_or_chain(
+        empty_clause,
+        var_hit_clause,
+        var_miss_clause,
+        eq_clause,
+        not_clause,
+        imp_clause,
+        forall_hit_clause,
+        forall_miss_clause,
+        insert_clause,
+        in_clause,
+    )
+
+
+def _is_substitute_trace_internal_body():
+    return Q_and(
+        _q_in_pair(var_x, var_w, var_T),
+        Q_forall(
+            _idx_a,
+            Q_forall(
+                _idx_b,
+                Q_imp(
+                    _q_in_pair(var_a, var_b, var_T),
+                    is_substitute_step_internal,
+                ),
+            ),
+        ),
+    )
+
+
 # B1.1 -- HF-encoding of is_substitute_step.
-# 9-disjunct HF-formula matching the HOL ``is_substitute_step``. Free
-# vars: var_T (trace), var_y (t), var_z (v), var_a (a), var_b (b).
-# Composes IS_PAIR_ORD_REPRESENTS + QUOTE_HF_MEM_DECISION for the In-checks
-# inside each recursive disjunct.
-new_constant("is_substitute_step_internal", nat0_ty)
+# 10-disjunct HF-formula matching the HOL ``is_substitute_step`` clauses.
+# Free vars: var_T (trace), var_y (t), var_z (v), var_a (a), var_b (b).
+# Constructor data is built through qparse, so substitution reaches slots
+# under Insert_t/Empty_t instead of getting stuck under primitive Var_t.
+IS_SUBSTITUTE_STEP_INTERNAL_DEF = define(
+    "is_substitute_step_internal",
+    nat0_ty,
+    _is_substitute_step_internal_body(),
+)
 is_substitute_step_internal = mk_const("is_substitute_step_internal", [])
 
 
@@ -3488,23 +3622,30 @@ is_substitute_step_internal = mk_const("is_substitute_step_internal", [])
 
 # B1.2 -- HF-encoding of is_substitute_trace.
 # Free vars: var_T (trace), var_x (F), var_y (t), var_z (v), var_w (r).
-# Body: the conjunction
-#   In (Pair_ord var_x var_w) var_T
-#   /\ (Forall_f var_a (Forall_f var_b
-#         (In (Pair_ord var_a var_b) var_T ==>
-#          is_substitute_step_internal[var_T, var_y, var_z, var_a, var_b])))
-# at the HF level. The single bound-variable forall is over (var_a, var_b),
-# matching the HOL definition's ``!a b. ...``.
-new_constant("is_substitute_trace_internal", nat0_ty)
+# Body:
+#   In_a (Pair_ord_q var_x var_w) var_T
+#   /\ Forall_f idx_a (Forall_f idx_b
+#        (In_a (Pair_ord_q var_a var_b) var_T
+#         ==> is_substitute_step_internal))
+IS_SUBSTITUTE_TRACE_INTERNAL_DEF = define(
+    "is_substitute_trace_internal",
+    nat0_ty,
+    _is_substitute_trace_internal_body(),
+)
 is_substitute_trace_internal = mk_const("is_substitute_trace_internal", [])
 
 
 # IS_SUBSTITUTE_TRACE_REPRESENTS body lives in hf_repr_thms.py.
 
 
-# Opaque: no defining body. Defined elsewhere as the Sigma_1
-# substitute-trace formula ``?T. is_substitute_trace_internal T F t v r``.
-new_constant("substitute_internal", nat0_ty)
+# B1.3 -- Sigma_1 substitute relation:
+#   ?T. is_substitute_trace_internal T F t v r
+# The trace variable uses the dedicated var_T slot.
+SUBSTITUTE_INTERNAL_DEF = define(
+    "substitute_internal",
+    nat0_ty,
+    Q_exists(_idx_T, is_substitute_trace_internal),
+)
 substitute_internal = mk_const("substitute_internal", [])
 
 
