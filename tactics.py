@@ -856,14 +856,66 @@ def _strip_forall(th):
     return vs, th
 
 
+class _OneShotRule:
+    """Marker wrapper for one-shot rules. Created by ``OneShot``.
+
+    Carries a mutable ``fired`` flag so that the "fire at most once"
+    discipline holds across the entire ``by_rewrite`` call (both the LHS
+    and RHS rewrites under ``REWRITE_PROVE``, and across all outer
+    ``REWRITE_CONV`` passes within each). Each call to ``OneShot(...)``
+    creates a fresh wrapper, so reusing the same underlying theorem in
+    multiple ``by_rewrite`` calls is safe.
+    """
+    __slots__ = ("rule", "fired")
+
+    def __init__(self, rule):
+        self.rule = rule
+        self.fired = False
+
+
+def OneShot(rule):
+    """Wrap a rewrite rule so it fires at most once per ``by_rewrite`` call.
+
+    The rewriter's normal mode is to fire every applicable rule at every
+    matching subterm until fixpoint. That is fine for confluent rule sets,
+    but it over-eagerly unfolds when a rule's LHS matches at multiple
+    syntactic positions and only one of them is the intended target.
+
+    A canonical example: ``TUP_PT_AT`` (``Tup_pt a b = Pair_ord 12
+    (Pair_ord a b)``) matches every ``Tup_pt`` in sight, including the PR
+    args-list wrappers that downstream destructor lemmas (e.g.
+    ``APP_PT_PAIR_RIGHT_EVAL``) need to consume as-is. With
+    ``OneShot(TUP_PT_AT)``, the rule fires on the deepest first-encountered
+    match (bottom-up walk visits the innermost match first) and is then
+    inert for the rest of the rewrite, letting downstream destructor
+    rules peel the wrappers without TUP_PT_AT re-firing on them in a
+    later pass.
+
+    Each call to ``OneShot(...)`` produces a fresh wrapper, so the same
+    underlying theorem can be used as one-shot in multiple ``by_rewrite``
+    calls without state leakage.
+    """
+    return _OneShotRule(rule)
+
+
 def _prepare_rule(th):
-    """Strip foralls, extract LHS/RHS.  Returns (vars, lhs, rhs, eq_th) or None."""
+    """Strip foralls, extract LHS/RHS.
+
+    Returns ``(vars, lhs, rhs, eq_th, one_shot_ref)`` or ``None``. When the
+    input is a ``_OneShotRule`` wrapper, ``one_shot_ref`` is the wrapper
+    instance (its ``.fired`` flag controls per-call one-shot semantics);
+    otherwise ``one_shot_ref`` is None.
+    """
+    one_shot_ref = None
+    if isinstance(th, _OneShotRule):
+        one_shot_ref = th
+        th = th.rule
     vs, body = _strip_forall(th)
     try:
         lhs, rhs = dest_eq(body._concl)
     except HolError:
         return None
-    return vs, lhs, rhs, body
+    return vs, lhs, rhs, body, one_shot_ref
 
 
 def _term_match(pat, tgt, vars_set, subst):
@@ -902,11 +954,19 @@ def _term_match(pat, tgt, vars_set, subst):
 
 
 def _try_rules_at(rules, tm):
-    """Try each rule at the root of tm.  Returns |- tm = tm' or None."""
-    for vs, lhs, rhs, body in rules:
+    """Try each rule at the root of tm. Returns |- tm = tm' or None.
+
+    OneShot-wrapped rules carry their own ``fired`` flag; when set, the
+    rule is skipped, and on a successful match the flag is raised.
+    """
+    for vs, lhs, rhs, body, one_shot_ref in rules:
+        if one_shot_ref is not None and one_shot_ref.fired:
+            continue
         subst = _term_match(lhs, tm, set(vs), {})
         if subst is None:
             continue
+        if one_shot_ref is not None:
+            one_shot_ref.fired = True
         pairs = [(subst[v], v) for v in vs if v in subst]
         return INST(pairs, body) if pairs else body
     return None
@@ -935,11 +995,17 @@ def _try_rules_ac_at(rules, tm, triples):
     of ``tm``'s leaves (under any registered AC op). On success, build the
     kernel proof |- tm = (rule.rhs) * (residual) by AC-bridging ``tm`` to
     ``op(lhs, residual)``, applying the rule under congruence, and chaining.
-    Returns the rewrite step or None."""
+    Returns the rewrite step or None.
+
+    OneShot-wrapped rules honour the same fire-once discipline as in
+    ``_try_rules_at``.
+    """
     if not triples:
         return None
-    for vs, lhs, rhs, body in rules:
+    for vs, lhs, rhs, body, one_shot_ref in rules:
         if vs:
+            continue
+        if one_shot_ref is not None and one_shot_ref.fired:
             continue
         for op_const, assoc_thm, comm_thm in triples:
             if not (_is_op_app(op_const, lhs) and _is_op_app(op_const, tm)):
@@ -953,15 +1019,17 @@ def _try_rules_ac_at(rules, tm, triples):
             residual = list(tm_leaves)
             ok = True
             for leaf in lhs_leaves:
-                for i, r in enumerate(residual):
+                for j, r in enumerate(residual):
                     if aconv(r, leaf):
-                        residual.pop(i)
+                        residual.pop(j)
                         break
                 else:
                     ok = False
                     break
             if not ok:
                 continue
+            if one_shot_ref is not None:
+                one_shot_ref.fired = True
             if not residual:
                 # Same multiset: rebracket tm to lhs, apply rule.
                 bridge = AC_PROVE(op_const, assoc_thm, comm_thm, mk_eq(tm, lhs))
@@ -993,7 +1061,13 @@ def _bottom_up(rules, tm, under_binder=False, ac=None):
     ``SATZ_30: x*(y+z) = x*y+x*z`` fires under ``ac=(*, ...)`` even when
     the source shape is ``(y+z)*x``; with multiple triples the same
     descent simultaneously canonicalizes ``radd``- and ``rmul``-headed
-    nodes."""
+    nodes.
+
+    One-shot rules (``OneShot(...)`` wrappers) carry their own per-call
+    ``fired`` flag; once raised, the rule is skipped for the remainder of
+    this and every subsequent ``_bottom_up`` call until the wrapper is
+    re-created (which happens on the next ``by_rewrite`` invocation).
+    """
     triples = _normalize_ac(ac)
     active = [r for r in rules if not r[3]._asl] if under_binder else rules
 

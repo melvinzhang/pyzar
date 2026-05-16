@@ -2102,8 +2102,21 @@ class _Have:
     # ----- builder protocol: resolve refs then finish -----
 
     def _resolved(self, refs):
-        """List form of ``Proof.coerce``: each ref → ``thm``."""
-        return [self.p.coerce(r) for r in refs]
+        """List form of ``Proof.coerce``: each ref → ``thm``.
+
+        ``OneShot``-wrapped refs are passed through with their inner ref
+        coerced -- the rewriter consumes the wrapper directly to mark the
+        rule as one-shot.
+        """
+        from tactics import _OneShotRule, OneShot
+
+        out = []
+        for r in refs:
+            if isinstance(r, _OneShotRule):
+                out.append(OneShot(self.p.coerce(r.rule)))
+            else:
+                out.append(self.p.coerce(r))
+        return out
 
     def _via(self, builder, *args):
         """Resolve each arg as a fact and feed positional results into
