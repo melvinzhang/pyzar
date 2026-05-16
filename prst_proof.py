@@ -80,9 +80,19 @@ from prst_pr import (
     numeral_pr,  # noqa: F401  -- parser alias
     substitute_pr,  # noqa: F401  -- parser alias
     diag_pr,  # noqa: F401  -- parser alias
+    eq_nat_pr,  # noqa: F401  -- parser alias for checker correctness stubs
+    or_bool_pr,  # noqa: F401  -- parser alias for checker correctness stubs
+    and_bool_pr,  # noqa: F401  -- parser alias for checker correctness stubs
+    is_tup_pr,  # noqa: F401  -- parser alias for checker correctness stubs
+    tup_head_pr,  # noqa: F401  -- parser alias for checker correctness stubs
+    mem_t_pr,  # noqa: F401  -- parser alias for checker correctness stubs
+    exists_mp_witness_pr,  # noqa: F401  -- parser alias for checker correctness stubs
+    valid_step_pr,  # noqa: F401  -- parser alias for checker correctness stubs
+    valid_proof_list_pr,  # noqa: F401  -- parser alias for checker correctness stubs
     Proof_PRST_pr,  # noqa: F401  -- parser alias
     find_proof_pr,  # noqa: F401  -- parser alias for Prov_PRST_internal
     T_pt,  # noqa: F401  -- parser alias for MU_CORRECTNESS
+    F_pt,  # noqa: F401  -- parser alias for false PR-evaluation internalisation
     is_partial_pr_sym,  # noqa: F401  -- parser alias for MU_CORRECTNESS
     zero_def_axiom,  # noqa: F401  -- parser alias for PROV_PRST_ZERO_DEF
     Adj_pt,  # noqa: F401  -- parser alias for PROV_PRST_ADJ_DEF_AT
@@ -1591,13 +1601,12 @@ def FIND_PROOF_PR_MU_CORRECT(p):
 # The remaining constructive work is isolated in the checker API view and the
 # generic PR-evaluation internalisation theorem below:
 #
-#   PROOF_PRST_PR_CORRECT       -- HOL-level semantic correctness:
-#                                  Proof_PRST p n <=> the PR symbol
-#                                  evaluates to T_pt on (p, n).
-#   PROOF_PRST_PR_INTERNAL_EVAL -- PRST-internal evaluation: whenever
-#                                  the symbol evaluates to T_pt at
-#                                  concrete (p, n), Prov_PRST internally
-#                                  proves the corresponding Eq_pf form.
+#   PROOF_PRST_PR_BODY_CORRECT  -- HOL-level checker-body correctness:
+#                                  Proof_PRST_pr evaluates to T_pt exactly
+#                                  for a proof-list shape with a valid proof.
+#   PRST_INTERNALIZES_TRUE_PR_EVAL / PRST_INTERNALIZES_FALSE_PR_EVAL
+#                                -- generic PRST-internal evaluation for PR
+#                                   computations returning the booleans.
 #
 # Soundness: the PR functions are complete, so a *concrete* Proof_PRST_pr
 # meeting both conditions exists. The checker API lemma is the semantic
@@ -1608,16 +1617,252 @@ def FIND_PROOF_PR_MU_CORRECT(p):
 
 
 @proof
-def PROOF_PRST_PR_VALID_VIEW(p):
+def EQ_NAT_PR_CORRECT_TRUE(p):
+    """|- !x y. x = y ==> App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = T_pt."""
+    p.goal(
+        "!x y. x = y ==> "
+        "App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = T_pt",
+        types={"x": nat0_ty, "y": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def EQ_NAT_PR_CORRECT_FALSE(p):
+    """|- !x y. ~(x = y) ==> App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = F_pt."""
+    p.goal(
+        "!x y. ~(x = y) ==> "
+        "App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = F_pt",
+        types={"x": nat0_ty, "y": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def EQ_NAT_PR_TRUE_VIEW(p):
+    """|- !x y. (App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = T_pt) =
+            (x = y)."""
+    p.goal(
+        "!x y. "
+        "(App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = T_pt) = "
+        "(x = y)",
+        types={"x": nat0_ty, "y": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def OR_BOOL_PR_CORRECT(p):
+    r"""|- !x y. boolean inputs make or_bool_pr agree with HOL disjunction."""
+    p.goal(
+        "!x y. "
+        "((x = T_pt \\/ x = F_pt) /\\ (y = T_pt \\/ y = F_pt)) "
+        "==> ((App_pt or_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = T_pt) = "
+        "     (x = T_pt \\/ y = T_pt))",
+        types={"x": nat0_ty, "y": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def AND_BOOL_PR_CORRECT(p):
+    r"""|- !x y. boolean inputs make and_bool_pr agree with HOL conjunction."""
+    p.goal(
+        "!x y. "
+        "((x = T_pt \\/ x = F_pt) /\\ (y = T_pt \\/ y = F_pt)) "
+        "==> ((App_pt and_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = T_pt) = "
+        "     (x = T_pt /\\ y = T_pt))",
+        types={"x": nat0_ty, "y": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def IS_TUP_PR_CORRECT(p):
+    """|- !p. (App_pt is_tup_pr (Tup_pt p Empty_pt) = T_pt) =
+            (?h t. p = Tup_pt h t)."""
+    p.goal(
+        "!p. (App_pt is_tup_pr (Tup_pt p Empty_pt) = T_pt) = "
+        "(?h t. p = Tup_pt h t)",
+        types={"p": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def TUP_HEAD_PR_CORRECT(p):
+    """|- !h t. App_pt tup_head_pr (Tup_pt (Tup_pt h t) Empty_pt) = h."""
+    p.goal(
+        "!h t. App_pt tup_head_pr (Tup_pt (Tup_pt h t) Empty_pt) = h",
+        types={"h": nat0_ty, "t": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def MEM_T_PR_CORRECT(p):
+    """|- !x P. (App_pt mem_t_pr (Tup_pt x (Tup_pt P Empty_pt)) = T_pt) =
+            Mem_PRST x P."""
+    p.goal(
+        "!x P. (App_pt mem_t_pr (Tup_pt x (Tup_pt P Empty_pt)) = T_pt) = "
+        "Mem_PRST x P",
+        types={"x": nat0_ty, "P": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def EXISTS_MP_WITNESS_PR_CORRECT(p):
+    r"""|- !h t. (App_pt exists_mp_witness_pr (Tup_pt h (Tup_pt t Empty_pt)) = T_pt) =
+            (?f. Mem_PRST f t /\ Mem_PRST (Imp_pf f h) t)."""
+    p.goal(
+        "!h t. "
+        "(App_pt exists_mp_witness_pr (Tup_pt h (Tup_pt t Empty_pt)) = T_pt) = "
+        "(?f. Mem_PRST f t /\\ Mem_PRST (Imp_pf f h) t)",
+        types={"h": nat0_ty, "t": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def VALID_STEP_PR_CORRECT(p):
+    r"""|- !h t. (App_pt valid_step_pr (Tup_pt h (Tup_pt t Empty_pt)) = T_pt) =
+            (is_pr_axiom h \/ (?f. Mem_PRST f t /\ Mem_PRST (Imp_pf f h) t))."""
+    p.goal(
+        "!h t. "
+        "(App_pt valid_step_pr (Tup_pt h (Tup_pt t Empty_pt)) = T_pt) = "
+        "(is_pr_axiom h \\/ (?f. Mem_PRST f t /\\ Mem_PRST (Imp_pf f h) t))",
+        types={"h": nat0_ty, "t": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def VALID_PROOF_LIST_PR_CORRECT(p):
+    """|- !P. (App_pt valid_proof_list_pr (Tup_pt P Empty_pt) = T_pt) =
+            ValidProof_PRST P."""
+    p.goal(
+        "!P. (App_pt valid_proof_list_pr (Tup_pt P Empty_pt) = T_pt) = "
+        "ValidProof_PRST P",
+        types={"P": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROOF_PRST_PR_BOOL_VIEW(p):
     r"""|- !p n. (App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt) =
-            (?h t. p = Tup_pt h t /\ n = h /\ ValidProof_PRST p)."""
+            ((App_pt is_tup_pr (Tup_pt p Empty_pt) = T_pt) /\
+             (App_pt eq_nat_pr
+                (Tup_pt (App_pt tup_head_pr (Tup_pt p Empty_pt))
+                  (Tup_pt n Empty_pt)) = T_pt) /\
+             (App_pt valid_proof_list_pr (Tup_pt p Empty_pt) = T_pt)).
+
+    DSL/proof friction: this is the raw composition/evaluation view of the
+    checker body. The leaf correctness stubs reason about the named helper
+    symbols; this stub is the remaining bridge from `Proof_PRST_pr`'s comp_sym
+    definition to those helper applications.
+    """
+    p.goal(
+        "!p n. "
+        "(App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt) = "
+        "((App_pt is_tup_pr (Tup_pt p Empty_pt) = T_pt) /\\ "
+        " ((App_pt eq_nat_pr "
+        "    (Tup_pt (App_pt tup_head_pr (Tup_pt p Empty_pt)) "
+        "      (Tup_pt n Empty_pt)) = T_pt) /\\ "
+        "  (App_pt valid_proof_list_pr (Tup_pt p Empty_pt) = T_pt)))",
+        types={"p": nat0_ty, "n": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROOF_PRST_PR_BODY_CORRECT(p):
+    r"""|- !p n. (App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt) =
+            (?h t. p = Tup_pt h t /\ n = h /\ ValidProof_PRST p).
+
+    DSL/proof friction: this is the focused body-composition obligation. It
+    should compose IS_TUP_PR_CORRECT, TUP_HEAD_PR_CORRECT,
+    VALID_PROOF_LIST_PR_CORRECT, EQ_NAT_PR_CORRECT_TRUE/FALSE, and the boolean
+    helper correctness lemmas. This theorem is the checker-body view used
+    directly by callers that need the checker-body view.
+    """
     p.goal(
         "!p n. "
         "(App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt) = "
         "(?h t. p = Tup_pt h t /\\ n = h /\\ ValidProof_PRST p)",
         types={"p": nat0_ty, "n": nat0_ty},
     )
-    p.sorry()
+    from tactics import CONJ, SPEC, SPECL, SYM
+
+    p.fix("p n")
+    body_view = SPECL([p._parse("p"), p._parse("n")], PROOF_PRST_PR_BOOL_VIEW)
+    is_tup_at = SPEC(p._parse("p"), IS_TUP_PR_CORRECT)
+    valid_at = SPEC(p._parse("p"), VALID_PROOF_LIST_PR_CORRECT)
+
+    lhs = (
+        "App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt"
+    )
+    rhs = "?h t. p = Tup_pt h t /\\ n = h /\\ ValidProof_PRST p"
+    parts = (
+        "(App_pt is_tup_pr (Tup_pt p Empty_pt) = T_pt) /\\ "
+        "((App_pt eq_nat_pr "
+        "  (Tup_pt (App_pt tup_head_pr (Tup_pt p Empty_pt)) "
+        "    (Tup_pt n Empty_pt)) = T_pt) /\\ "
+        " (App_pt valid_proof_list_pr (Tup_pt p Empty_pt) = T_pt))"
+    )
+
+    with p.have(f"fwd: {lhs} ==> {rhs}").proof():
+        p.assume(f"h_lhs: {lhs}")
+        p.have(f"parts: {parts}").by_eq_mp(body_view, "h_lhs")
+        p.split("parts", "(is_tup_ok, (head_ok, valid_ok))")
+        p.have("tup_ex: ?h t. p = Tup_pt h t").by_eq_mp(
+            is_tup_at, "is_tup_ok"
+        )
+        p.choose("h t", "tup_ex", eq_label="p_shape")
+        head_at = SPECL([p._parse("h"), p._parse("t")], TUP_HEAD_PR_CORRECT)
+        p.have(
+            "head_ok_ht: "
+            "App_pt eq_nat_pr (Tup_pt h (Tup_pt n Empty_pt)) = T_pt"
+        ).by_rewrite_of("head_ok", ["p_shape", head_at])
+        eq_nat_at = SPECL([p._parse("h"), p._parse("n")], EQ_NAT_PR_TRUE_VIEW)
+        p.have("h_eq_n: h = n").by_eq_mp(eq_nat_at, "head_ok_ht")
+        p.have("n_eq_h: n = h").by_thm(SYM(p.fact("h_eq_n")))
+        p.have("valid_p: ValidProof_PRST p").by_eq_mp(valid_at, "valid_ok")
+        p.thus(rhs).by_exists(["h", "t"], "p_shape", "n_eq_h", "valid_p")
+
+    with p.have(f"rev: ({rhs}) ==> {lhs}").proof():
+        p.assume(f"rhs_ex: {rhs}")
+        p.choose("h t", "rhs_ex", eq_label="rhs_body")
+        p.split("rhs_body", "(p_shape, (n_eq_h, valid_p))")
+        p.have("tup_ex: ?h0 t0. p = Tup_pt h0 t0").by_exists(
+            ["h", "t"], "p_shape"
+        )
+        p.have("is_tup_ok: App_pt is_tup_pr (Tup_pt p Empty_pt) = T_pt").by_eq_mp(
+            SYM(is_tup_at), "tup_ex"
+        )
+        p.have("h_eq_n: h = n").by_thm(SYM(p.fact("n_eq_h")))
+        p.have(
+            "head_ok_ht: "
+            "App_pt eq_nat_pr (Tup_pt h (Tup_pt n Empty_pt)) = T_pt"
+        ).by(EQ_NAT_PR_CORRECT_TRUE, "h", "n", "h_eq_n")
+        head_at = SPECL([p._parse("h"), p._parse("t")], TUP_HEAD_PR_CORRECT)
+        p.have(
+            "head_ok: "
+            "App_pt eq_nat_pr "
+            "  (Tup_pt (App_pt tup_head_pr (Tup_pt p Empty_pt)) "
+            "    (Tup_pt n Empty_pt)) = T_pt"
+        ).by_rewrite_of("head_ok_ht", ["p_shape", head_at])
+        p.have(
+            "valid_ok: App_pt valid_proof_list_pr (Tup_pt p Empty_pt) = T_pt"
+        ).by_eq_mp(SYM(valid_at), "valid_p")
+        p.have("tail_parts:").by_thm(CONJ(p.fact("head_ok"), p.fact("valid_ok")))
+        p.have(f"parts: {parts}").by_thm(
+            CONJ(p.fact("is_tup_ok"), p.fact("tail_parts"))
+        )
+        p.thus(lhs).by_eq_mp(SYM(body_view), "parts")
+
+    p.thus(f"({lhs}) = ({rhs})").by_iff("fwd", "rev")
 
 
 @proof
@@ -1633,68 +1878,20 @@ def PRST_INTERNALIZES_TRUE_PR_EVAL(p):
 
 
 @proof
-def PROOF_PRST_PR_CORRECT(p):
-    """|- !p n. Proof_PRST p n =
-            (App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt)."""
-    from tactics import SPECL, SYM, TRANS
+def PRST_INTERNALIZES_FALSE_PR_EVAL(p):
+    r"""|- !f args. is_partial_pr_sym f /\ App_pt f args = F_pt
+            ==> Prov_PRST (Eq_pf (App_pt f args) F_pt).
 
+    DSL/proof friction: this should be the same evaluator package as the true
+    branch, specialised to the false boolean. Keeping it separate avoids a
+    too-strong Proof_PRST_pr-specific false-evaluation axiom.
+    """
     p.goal(
-        "!p n. Proof_PRST p n = "
-        "(App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt)",
-        types={"p": nat0_ty, "n": nat0_ty},
+        "!f args. is_partial_pr_sym f /\\ App_pt f args = F_pt "
+        "==> Prov_PRST (Eq_pf (App_pt f args) F_pt)",
+        types={"f": nat0_ty, "args": nat0_ty},
     )
-    p.fix("p n")
-    proof_at = SPECL([p._parse("p"), p._parse("n")], PROOF_PRST_AT)
-    checker_at = SPECL(
-        [p._parse("p"), p._parse("n")], PROOF_PRST_PR_VALID_VIEW
-    )
-    p.thus(
-        "Proof_PRST p n = "
-        "(App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt)"
-    ).by_thm(TRANS(proof_at, SYM(checker_at)))
-
-
-@proof
-def PROOF_PRST_PR_INTERNAL_EVAL(p):
-    """|- !p n. App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt
-            ==> Prov_PRST (Eq_pf
-                  (App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)))
-                  T_pt)."""
-    from prst_syntax import IS_PR_SYM_IMP_PARTIAL
-    from tactics import CONJ
-
-    p.goal(
-        "!p n. "
-        "App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt "
-        "==> Prov_PRST (Eq_pf "
-        "        (App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt))) "
-        "        T_pt)",
-        types={"p": nat0_ty, "n": nat0_ty},
-    )
-    p.fix("p n")
-    p.assume(
-        "h_eval: App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt"
-    )
-    p.have("h_pr_proof: is_pr_sym Proof_PRST_pr").by_thm(
-        IS_PR_SYM_PROOF_PRST_PR
-    )
-    p.have(
-        "h_pp_proof: is_partial_pr_sym Proof_PRST_pr"
-    ).by(IS_PR_SYM_IMP_PARTIAL, "Proof_PRST_pr", "h_pr_proof")
-    p.have(
-        "h_payload: is_partial_pr_sym Proof_PRST_pr /\\ "
-        "App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt"
-    ).by_thm(CONJ(p.fact("h_pp_proof"), p.fact("h_eval")))
-    p.thus(
-        "Prov_PRST (Eq_pf "
-        "        (App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt))) "
-        "        T_pt)"
-    ).by(
-        PRST_INTERNALIZES_TRUE_PR_EVAL,
-        "Proof_PRST_pr",
-        "Tup_pt p (Tup_pt n Empty_pt)",
-        "h_payload",
-    )
+    p.sorry()
 
 
 # ---------------------------------------------------------------------------
@@ -2937,8 +3134,9 @@ if __name__ == "__main__":
     print("    FIND_PROOF_PR_MU_CORRECT   :", pp_thm(FIND_PROOF_PR_MU_CORRECT))
     print()
     print("Stage 2B (d.4) -- Proof_PRST_pr correctness.")
-    print("    PROOF_PRST_PR_CORRECT       :", pp_thm(PROOF_PRST_PR_CORRECT))
-    print("    PROOF_PRST_PR_INTERNAL_EVAL :", pp_thm(PROOF_PRST_PR_INTERNAL_EVAL))
+    print("    PROOF_PRST_PR_BODY_CORRECT  :", pp_thm(PROOF_PRST_PR_BODY_CORRECT))
+    print("    PRST_INTERNALIZES_TRUE_PR_EVAL :", pp_thm(PRST_INTERNALIZES_TRUE_PR_EVAL))
+    print("    PRST_INTERNALIZES_FALSE_PR_EVAL :", pp_thm(PRST_INTERNALIZES_FALSE_PR_EVAL))
     print()
     print("Stage 2B (e) -- free evaluation of PR symbols.")
     print("    PROV_PRST_SUBSTITUTE_EVAL :", pp_thm(PROV_PRST_SUBSTITUTE_EVAL))

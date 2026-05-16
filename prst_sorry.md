@@ -8,21 +8,41 @@ The sole explicit PRST axiom outside this ledger is `MU_CORRECTNESS`.
 ## Order of Attack
 
 This ledger is ordered by dependency and expected discharge path, not by file.
-Public theorems already reduced to lower-level obligations are omitted from the
-open list.
+Pure forwarding theorems are deleted instead of tracked.
+
+### 0. `Proof_PRST_pr` Checker Body Components
+
+These are the focused lower-level stubs behind
+`PROOF_PRST_PR_BODY_CORRECT`.
+
+- `EQ_NAT_PR_CORRECT_TRUE`
+- `EQ_NAT_PR_CORRECT_FALSE`
+- `EQ_NAT_PR_TRUE_VIEW`
+- `OR_BOOL_PR_CORRECT`
+- `AND_BOOL_PR_CORRECT`
+- `IS_TUP_PR_CORRECT`
+- `TUP_HEAD_PR_CORRECT`
+- `MEM_T_PR_CORRECT`
+- `EXISTS_MP_WITNESS_PR_CORRECT`
+- `VALID_STEP_PR_CORRECT`
+- `VALID_PROOF_LIST_PR_CORRECT`
+- `PROOF_PRST_PR_BOOL_VIEW`
 
 ### 1. `Proof_PRST_pr` Checker API Boundary
 
-These are the immediate checker targets. `PROOF_PRST_PR_CORRECT` and
-`PROOF_PRST_PR_INTERNAL_EVAL` are no longer open; they now compose these
-lower-level facts.
+These are the immediate checker targets that are not pure forwarding theorems.
 
-- `PROOF_PRST_PR_VALID_VIEW`
 - `PRST_INTERNALIZES_TRUE_PR_EVAL`
+- `PRST_INTERNALIZES_FALSE_PR_EVAL`
+- `PROOF_PRST_PR_BOOLEAN_VALUE`
 - `PROOF_PRST_PR_SEMANTIC_NEG`
-- `PROOF_PRST_PR_QUOTE_INPUT_TRUE`
-- `PROOF_PRST_PR_QUOTE_INPUT_FALSE`
-- `PROOF_PRST_PR_INTERNAL_FALSE_EVAL`
+- `PROOF_PRST_PR_QUOTED_TRUE_EVAL`
+- `PROOF_PRST_PR_QUOTED_FALSE_EVAL`
+
+The quoted-input obligations intentionally do not assert raw-to-`quote_hf`
+checker-value preservation. `quote_hf` is the object-language numeral
+interface; the proof route should use `numeral_pr`/`quote_hf` evaluation plus
+internalisation of the resulting PR computation.
 
 ### 2. Proof-List Combination API
 
@@ -56,11 +76,9 @@ theorems for `substitute_pr`, `numeral_pr`, and `diag_pr`.
 
 ### 4. Representation Bridges
 
-These are downstream of the evaluator and checker API. They should not
-reintroduce a global HF-style representability package.
+These are downstream of the evaluator and checker API. Keep this layer to the
+concrete bridge obligations used downstream.
 
-- `REPRESENTABILITY_POSITIVE`
-- `REPRESENTABILITY_NEGATIVE`
 - `SUBSTITUTE_REPRESENTS_PRST`
 - `DIAG_REPRESENTS_PRST`
 - `PROV_PRST_REPRESENTS`
@@ -92,7 +110,7 @@ proof depends on the checker/list-combine API, not on Loeb.
 
 ## Counts
 
-- Remaining `p.sorry()` sites: 42
+- Remaining `p.sorry()` sites: 52
 
 ## PR Symbol Evaluator Spikes
 
@@ -285,9 +303,7 @@ via `valid_proof_list_pr`, membership via `mem_t_pr`, and MP search via
 Production proof obligations: prove the local evaluator API for boolean helper
 correctness, Tup destructors, `mem_t_pr`, `exists_mp_witness_pr`,
 `valid_step_pr`, `valid_proof_list_pr`, and branch correctness for
-`is_pr_axiom_pr`; package those facts as `PROOF_PRST_PR_VALID_VIEW`.
-`PROOF_PRST_PR_CORRECT` is already a thin composition of that view with
-`PROOF_PRST_AT`, so it should not be reopened.
+`is_pr_axiom_pr`; package those facts as `PROOF_PRST_PR_BODY_CORRECT`.
 
 One separate G2-only blocker remains for the D2/proof-combinator path:
 `mp_combine_pr` in `prst_godel2.py` is still the constant-0 stub, so the

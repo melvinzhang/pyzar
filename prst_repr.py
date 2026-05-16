@@ -2,40 +2,12 @@
 # Stage 3 (PRST) -- representability is (almost) free.
 # ---------------------------------------------------------------------------
 #
-# Representability of a PR predicate P : nat0 -> bool in PRST means
-# exhibiting a PRST formula F(x) and proving
-#
-#     |- !n. P n      ==> Prov_PRST (substitute_p F (quote_hf n) var_x).
-#     |- !n. ~ P n    ==> Prov_PRST (Not_pf (substitute_p F (quote_hf n) var_x)).
-#
-# Every decidable PR predicate P comes with a PR function symbol p_sym
-# whose application returns a boolean value (encoded as Empty_pt for
-# false, Adj_pt Empty_pt Empty_pt for true). The representing formula
-# is:
-#
-#     F_P(x) := Eq_pf (App_pt p_sym (Tup_pt x Empty_pt)) (encoded_true).
-#
-# The representability theorem reduces to a single defining-equation
-# lookup plus equality reasoning:
-#
-#     |- !n. P n   ==> Prov_PRST (substitute_p F_P (quote_hf n) var_x).
-#
-# Proof: substitute_p computes F_P(quote_hf n) = Eq_pf (App_pt p_sym
-# (Tup_pt (quote_hf n) Empty_pt)) encoded_true. The defining equation of
-# p_sym (an axiom) gives App_pt p_sym (Tup_pt (quote_hf n) Empty_pt) =
-# encoded_true (when P n holds at the meta level). Equality and modus
-# ponens close the goal.
-#
-# Making PR symbols first-class terms collapses representability to
-# a defining-equation lookup -- no trace sets, no functionality proofs.
+# This file keeps only the concrete representation bridges used downstream.
 # ---------------------------------------------------------------------------
 
 
-from fusion import Var
-from basics import mk_const, mk_app
-from parser import define, parse_type
 from nat0 import nat0_ty
-from proof import proof, define_with_at
+from proof import proof
 from prst_syntax import (
     Eq_pf,  # noqa: F401  -- parser alias
     Not_pf,  # noqa: F401  -- parser alias
@@ -45,19 +17,14 @@ from prst_syntax import (
 )
 from prst_pr import (
     substitute_pr,
-    numeral_pr,
     diag_pr,
     Proof_PRST_pr,
-    Adj_pt,  # noqa: F401  -- "encoded true" sentinel = Adj_pt Empty_pt Empty_pt
     T_pt,  # noqa: F401  -- parser alias
     F_pt,  # noqa: F401  -- parser alias
-    is_pr_sym,  # noqa: F401
 )
 from prst_proof import (
     Prov_PRST,  # noqa: F401  -- parser alias
-    Proof_PRST,  # noqa: F401  -- parser alias for PROOF_PRST_REPRESENTS_*
-    PROOF_PRST_PR_CORRECT,
-    PROOF_PRST_PR_INTERNAL_EVAL,
+    Proof_PRST,  # noqa: F401  -- parser alias
 )
 from hf_repr_core import quote_hf  # noqa: F401  -- parser alias
 
@@ -89,87 +56,7 @@ def T_PT_NEQ_F_PT(p):
 
 
 # ---------------------------------------------------------------------------
-# Stage 3 (b) -- representability of an arbitrary PR predicate.
-#
-# Given any HOL predicate P : nat0 -> bool *that is realised by a PR
-# function symbol p_sym* (meaning: HOL proves P n = Prov_PRST (Eq_pf
-# (App_pt p_sym (Tup_pt n Empty_pt)) T_pt)), the predicate is represented
-# by F_P(x) := Eq_pf (App_pt p_sym (Tup_pt x Empty_pt)) T_pt.
-#
-# We expose a *parametric* theorem schema: the user supplies p_sym
-# (a closed PR symbol) and the realisation hypothesis, and gets the
-# representability conclusion.
-# ---------------------------------------------------------------------------
-
-
-# represents_pred_prst p_sym P  iff for every n, P n is reflected by p_sym at n.
-represents_pred_prst_def = define(
-    "represents_pred_prst",
-    parse_type("nat0 -> (nat0 -> bool) -> bool"),
-    "\\p_sym:nat0. \\P:nat0->bool. "
-    "!n:nat0. (P n = Prov_PRST (Eq_pf (App_pt p_sym (Tup_pt n Empty_pt)) T_pt)) "
-    "      /\\ (~P n = Prov_PRST (Eq_pf (App_pt p_sym (Tup_pt n Empty_pt)) F_pt))",
-)
-represents_pred_prst = mk_const("represents_pred_prst", [])
-
-
-@proof
-def REPRESENTABILITY_POSITIVE(p):
-    """|- !p_sym P n.
-            represents_pred_prst p_sym P /\\ P n
-            ==> Prov_PRST (substitute_p
-                            (Eq_pf (App_pt p_sym (Tup_pt var_x Empty_pt)) T_pt)
-                            (quote_hf n)
-                            var_x).
-
-    Proof (~5 lines once filled in):
-      * Unfold substitute_p via SUBSTITUTE_P_AT_APP / _AT_VAR_HIT to
-        reduce to Eq_pf (App_pt p_sym (Tup_pt (quote_hf n) Empty_pt)) T_pt.
-      * From represents_pred_prst's positive branch + P n, this is exactly
-        what Prov_PRST entails.
-
-    STUB.
-    """
-    p.goal(
-        "!p_sym P n. (represents_pred_prst p_sym P /\\ P n) ==> "
-        "Prov_PRST (substitute_p "
-        "  (Eq_pf (App_pt p_sym (Tup_pt var_x Empty_pt)) T_pt) "
-        "  (quote_hf n) var_x)",
-        types={"p_sym": nat0_ty, "P": parse_type("nat0 -> bool"), "n": nat0_ty},
-    )
-    p.sorry()
-
-
-@proof
-def REPRESENTABILITY_NEGATIVE(p):
-    """|- !p_sym P n.
-            represents_pred_prst p_sym P /\\ ~P n
-            ==> Prov_PRST (Not_pf
-                  (substitute_p
-                    (Eq_pf (App_pt p_sym (Tup_pt var_x Empty_pt)) T_pt)
-                    (quote_hf n)
-                    var_x)).
-
-    Proof: similar to POSITIVE but uses F_pt branch + T_PT_NEQ_F_PT
-    plus PRST equality reasoning. STUB.
-    """
-    p.goal(
-        "!p_sym P n. (represents_pred_prst p_sym P /\\ ~P n) ==> "
-        "Prov_PRST (Not_pf (substitute_p "
-        "  (Eq_pf (App_pt p_sym (Tup_pt var_x Empty_pt)) T_pt) "
-        "  (quote_hf n) var_x))",
-        types={"p_sym": nat0_ty, "P": parse_type("nat0 -> bool"), "n": nat0_ty},
-    )
-    p.sorry()
-
-
-# ---------------------------------------------------------------------------
-# Stage 3 (c) -- the four headline representations.
-#
-# Each of substitute, quote_hf, diag, Proof_PRST gets its
-# representability theorem as an instance of REPRESENTABILITY_POSITIVE
-# / _NEGATIVE applied to the corresponding PR symbol and the realisation
-# lemma (PROV_PRST_SUBSTITUTE_EVAL / PROV_PRST_NUMERAL_EVAL / ...).
+# Stage 3 (b) -- concrete representation bridges.
 # ---------------------------------------------------------------------------
 
 
@@ -214,29 +101,33 @@ def DIAG_REPRESENTS_PRST(p):
 
 
 @proof
-def PROOF_PRST_PR_SEMANTIC_POS(p):
-    """|- !pf n. Proof_PRST pf n ==>
-            App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt."""
-    from tactics import SPECL
+def PROOF_PRST_PR_BOOLEAN_VALUE(p):
+    r"""|- !pf n. App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt
+            \/ App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt.
 
+    DSL/proof friction: `PROOF_PRST_PR_BODY_CORRECT` plus `PROOF_PRST_AT`
+    characterises the true branch. The negative semantic branch also needs the
+    checker's boolean range theorem, proved from the PR boolean helpers and the
+    checker body.
+    """
     p.goal(
-        "!pf n. Proof_PRST pf n ==> "
-        "App_pt Proof_PRST_pr "
-        "  (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt",
+        "!pf n. "
+        "App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt "
+        "\\/ App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt",
         types={"pf": nat0_ty, "n": nat0_ty},
     )
-    p.fix("pf n")
-    p.assume("h_proof: Proof_PRST pf n")
-    correct_at = SPECL([p._parse("pf"), p._parse("n")], PROOF_PRST_PR_CORRECT)
-    p.thus(
-        "App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt"
-    ).by_eq_mp(correct_at, "h_proof")
+    p.sorry()
 
 
 @proof
 def PROOF_PRST_PR_SEMANTIC_NEG(p):
     """|- !pf n. ~Proof_PRST pf n ==>
-            App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt."""
+            App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt.
+
+    DSL/proof friction: this should be a short boolean case split using
+    PROOF_PRST_PR_BOOLEAN_VALUE, PROOF_PRST_PR_BODY_CORRECT/PROOF_PRST_AT,
+    and T_PT_NEQ_F_PT.
+    """
     p.goal(
         "!pf n. ~Proof_PRST pf n ==> "
         "App_pt Proof_PRST_pr "
@@ -247,121 +138,50 @@ def PROOF_PRST_PR_SEMANTIC_NEG(p):
 
 
 @proof
-def PROOF_PRST_PR_QUOTE_INPUT_TRUE(p):
-    """|- !pf n. App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt
-            ==> App_pt Proof_PRST_pr
-                  (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt)) = T_pt."""
-    p.goal(
-        "!pf n. "
-        "App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt "
-        "==> App_pt Proof_PRST_pr "
-        "      (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt)) = T_pt",
-        types={"pf": nat0_ty, "n": nat0_ty},
-    )
-    p.sorry()
+def PROOF_PRST_PR_QUOTED_TRUE_EVAL(p):
+    """|- !pf n. Proof_PRST pf n ==>
+            Prov_PRST (Eq_pf
+              (App_pt Proof_PRST_pr
+                (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt)))
+              T_pt).
 
-
-@proof
-def PROOF_PRST_PR_QUOTE_INPUT_FALSE(p):
-    """|- !pf n. App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt
-            ==> App_pt Proof_PRST_pr
-                  (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt)) = F_pt."""
-    p.goal(
-        "!pf n. "
-        "App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt "
-        "==> App_pt Proof_PRST_pr "
-        "      (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt)) = F_pt",
-        types={"pf": nat0_ty, "n": nat0_ty},
-    )
-    p.sorry()
-
-
-@proof
-def PROOF_PRST_PR_INTERNAL_FALSE_EVAL(p):
-    """|- !p n. App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = F_pt
-            ==> Prov_PRST (Eq_pf
-                  (App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)))
-                  F_pt)."""
-    p.goal(
-        "!p n. "
-        "App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = F_pt "
-        "==> Prov_PRST (Eq_pf "
-        "      (App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt))) "
-        "      F_pt)",
-        types={"p": nat0_ty, "n": nat0_ty},
-    )
-    p.sorry()
-
-
-@proof
-def PROOF_PRST_REPRESENTS_POS(p):
-    """|- !p n. Proof_PRST p n ==>
-              Prov_PRST (Eq_pf
-                (App_pt Proof_PRST_pr (Tup_pt (quote_hf p) (Tup_pt (quote_hf n) Empty_pt)))
-                T_pt).
-
-    Positive branch of representability of the decidable Proof_PRST
-    predicate.
+    DSL/proof friction: this intentionally does not claim that raw checker
+    inputs and quote_hf inputs have the same HOL value. The proof should run
+    through numeral_pr/quote_hf evaluation for the two arguments, then
+    internalise the Proof_PRST_pr computation at those quoted object numerals.
     """
     p.goal(
         "!pf n. Proof_PRST pf n ==> "
         "Prov_PRST (Eq_pf "
-        "  (App_pt Proof_PRST_pr (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt))) "
+        "  (App_pt Proof_PRST_pr "
+        "    (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt))) "
         "  T_pt)",
         types={"pf": nat0_ty, "n": nat0_ty},
     )
-    p.fix("pf n")
-    p.assume("h_proof: Proof_PRST pf n")
-    p.have(
-        "h_raw_eval: App_pt Proof_PRST_pr "
-        "  (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt"
-    ).by(PROOF_PRST_PR_SEMANTIC_POS, "pf", "n", "h_proof")
-    p.have(
-        "h_eval: App_pt Proof_PRST_pr "
-        "  (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt)) = T_pt"
-    ).by(PROOF_PRST_PR_QUOTE_INPUT_TRUE, "pf", "n", "h_raw_eval")
-    p.thus(
-        "Prov_PRST (Eq_pf "
-        "  (App_pt Proof_PRST_pr "
-        "    (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt))) "
-        "  T_pt)"
-    ).by(PROOF_PRST_PR_INTERNAL_EVAL, "quote_hf pf", "quote_hf n", "h_eval")
+    p.sorry()
 
 
 @proof
-def PROOF_PRST_REPRESENTS_NEG(p):
-    """|- !p n. ~Proof_PRST p n ==>
-              Prov_PRST (Eq_pf
-                (App_pt Proof_PRST_pr (Tup_pt (quote_hf p) (Tup_pt (quote_hf n) Empty_pt)))
-                F_pt)."""
+def PROOF_PRST_PR_QUOTED_FALSE_EVAL(p):
+    """|- !pf n. ~Proof_PRST pf n ==>
+            Prov_PRST (Eq_pf
+              (App_pt Proof_PRST_pr
+                (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt)))
+              F_pt).
+
+    DSL/proof friction: same shape as the true branch, but it also needs the
+    checker boolean-valuedness theorem to turn `~Proof_PRST pf n` into the
+    false checker result before internalising the quoted computation.
+    """
     p.goal(
         "!pf n. ~Proof_PRST pf n ==> "
         "Prov_PRST (Eq_pf "
-        "  (App_pt Proof_PRST_pr (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt))) "
+        "  (App_pt Proof_PRST_pr "
+        "    (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt))) "
         "  F_pt)",
         types={"pf": nat0_ty, "n": nat0_ty},
     )
-    p.fix("pf n")
-    p.assume("h_not_proof: ~Proof_PRST pf n")
-    p.have(
-        "h_raw_eval: App_pt Proof_PRST_pr "
-        "  (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt"
-    ).by(PROOF_PRST_PR_SEMANTIC_NEG, "pf", "n", "h_not_proof")
-    p.have(
-        "h_eval: App_pt Proof_PRST_pr "
-        "  (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt)) = F_pt"
-    ).by(PROOF_PRST_PR_QUOTE_INPUT_FALSE, "pf", "n", "h_raw_eval")
-    p.thus(
-        "Prov_PRST (Eq_pf "
-        "  (App_pt Proof_PRST_pr "
-        "    (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt))) "
-        "  F_pt)"
-    ).by(
-        PROOF_PRST_PR_INTERNAL_FALSE_EVAL,
-        "quote_hf pf",
-        "quote_hf n",
-        "h_eval",
-    )
+    p.sorry()
 
 
 if __name__ == "__main__":
@@ -370,15 +190,9 @@ if __name__ == "__main__":
     print("Stage 3 (PRST) -- representability is (almost) free.")
     print("    T_PT_NEQ_F_PT                  :", pp_thm(T_PT_NEQ_F_PT))
     print()
-    print("    REPRESENTABILITY_POSITIVE      :", pp_thm(REPRESENTABILITY_POSITIVE))
-    print("    REPRESENTABILITY_NEGATIVE      :", pp_thm(REPRESENTABILITY_NEGATIVE))
-    print()
     print("    SUBSTITUTE_REPRESENTS_PRST     :", pp_thm(SUBSTITUTE_REPRESENTS_PRST))
     print("    DIAG_REPRESENTS_PRST           :", pp_thm(DIAG_REPRESENTS_PRST))
-    print("    PROOF_PRST_PR_SEMANTIC_POS       :", pp_thm(PROOF_PRST_PR_SEMANTIC_POS))
+    print("    PROOF_PRST_PR_BOOLEAN_VALUE      :", pp_thm(PROOF_PRST_PR_BOOLEAN_VALUE))
     print("    PROOF_PRST_PR_SEMANTIC_NEG       :", pp_thm(PROOF_PRST_PR_SEMANTIC_NEG))
-    print("    PROOF_PRST_PR_QUOTE_INPUT_TRUE   :", pp_thm(PROOF_PRST_PR_QUOTE_INPUT_TRUE))
-    print("    PROOF_PRST_PR_QUOTE_INPUT_FALSE  :", pp_thm(PROOF_PRST_PR_QUOTE_INPUT_FALSE))
-    print("    PROOF_PRST_PR_INTERNAL_FALSE_EVAL :", pp_thm(PROOF_PRST_PR_INTERNAL_FALSE_EVAL))
-    print("    PROOF_PRST_REPRESENTS_POS      :", pp_thm(PROOF_PRST_REPRESENTS_POS))
-    print("    PROOF_PRST_REPRESENTS_NEG      :", pp_thm(PROOF_PRST_REPRESENTS_NEG))
+    print("    PROOF_PRST_PR_QUOTED_TRUE_EVAL   :", pp_thm(PROOF_PRST_PR_QUOTED_TRUE_EVAL))
+    print("    PROOF_PRST_PR_QUOTED_FALSE_EVAL  :", pp_thm(PROOF_PRST_PR_QUOTED_FALSE_EVAL))
