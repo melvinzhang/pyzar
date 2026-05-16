@@ -90,9 +90,26 @@ def PROOF_PRST_PR_BOOLEAN_VALUE(p):
     r"""|- !pf n. App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt
             \/ App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt.
 
-    DSL/proof friction: the checker's boolean range theorem, proved from the
-    PR boolean helpers and the checker body. Discharge directly against the
-    `Proof_PRST_pr` body — no HOL↔PR structural bridge.
+    G1 role: dichotomy that drives every case-split routing a HOL fact
+    about ``Proof_PRST`` to the PR side. Direct prerequisite of
+    PROOF_PRST_PR_SEMANTIC_NEG and PROOF_PRST_PR_QUOTED_FALSE_EVAL, and
+    therefore on the critical path for both the irrefutability conjunct
+    and the consistency proof.
+
+    Proof sketch:
+      * Unfold the checker body via ``PROOF_PRST_PR_BOOL_VIEW``: the
+        body is an ``and_bool_pr`` chain over
+            ``is_tup_pr (Tup_pt pf (Tup_pt n Empty_pt))``,
+            ``eq_nat_pr (tup_head_pr ...) ...``,
+            ``valid_proof_list_pr pf n``.
+      * Each leaf returns ``T_pt`` or ``F_pt`` by its own evaluator
+        spec (``is_tup_pr`` shape spec, ``eq_nat_pr`` from Design 1,
+        ``valid_proof_list_pr`` by structural induction on ``pf``).
+      * Conclude with the ``and_bool_pr`` boolean-input identity:
+        under boolean inputs the connective is itself
+        ``{T_pt,F_pt}``-valued.
+
+    No HOL <-> PR structural bridge: every step is a PR-side equation.
     """
     p.goal(
         "!pf n. "
@@ -108,10 +125,24 @@ def PROOF_PRST_PR_SEMANTIC_NEG(p):
     """|- !pf n. ~Proof_PRST pf n ==>
             App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt.
 
-    DSL/proof friction: short boolean case split using
-    PROOF_PRST_PR_BOOLEAN_VALUE and T_PT_NEQ_F_PT. Lift the HOL hypothesis
-    `~ Proof_PRST pf n` to the PR side directly through Proof_PRST/Prov_PRST
-    soundness (no structural body bridge).
+    G1 role: the negative bridge that turns external HOL
+    ``~ Proof_PRST pf n`` into the PR-side ``F_pt`` value. Consumed
+    by ``PROOF_PRST_PR_QUOTED_FALSE_EVAL`` (irrefutability conjunct
+    of ``GODEL_FIRST_PRST``) and by the ``PRST_CONSISTENT`` chain.
+
+    Proof sketch:
+      * By ``PROOF_PRST_PR_BOOLEAN_VALUE``, the App_pt value is
+        either ``T_pt`` or ``F_pt``.
+      * Suppose ``= T_pt``. By ``PRST_INTERNALIZES_TRUE_PR_EVAL``,
+        PRST internally proves ``Eq_pf (App_pt ...) T_pt``, hence
+        the internal ``Proof_PRST_internal[pf, n]`` proposition is
+        Prov_PRST. By ``PRST_SIGMA1_SOUND`` applied to that Sigma_1
+        formula, ``Proof_PRST pf n`` holds externally. Contradicts
+        the hypothesis.
+      * Therefore the result must be ``F_pt``.
+
+    No structural HOL <-> PR body bridge: the ``T_pt`` branch is
+    closed via PRST soundness, not by inspecting the checker body.
     """
     p.goal(
         "!pf n. ~Proof_PRST pf n ==> "
@@ -130,10 +161,30 @@ def PROOF_PRST_PR_QUOTED_TRUE_EVAL(p):
                 (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt)))
               T_pt).
 
-    DSL/proof friction: this intentionally does not claim that raw checker
-    inputs and quote_hf inputs have the same HOL value. The proof should run
-    through numeral_pr/quote_hf evaluation for the two arguments, then
-    internalise the Proof_PRST_pr computation at those quoted object numerals.
+    G1 role: D1 quoted-input lift. The forward direction of
+    ``PROV_PRST_REPRESENTS`` reaches the diagonal-lemma payload through
+    this evaluator at quoted ``pf``, ``n``. Without it the forward
+    representability path -- and therefore the unprovability conjunct of
+    ``GODEL_FIRST_PRST`` -- cannot close.
+
+    Intentional non-claim: this does *not* assert that raw checker
+    inputs and ``quote_hf`` images coincide as HOL values. The bridge
+    runs through PR-level numeral evaluation.
+
+    Proof sketch:
+      * From ``Proof_PRST pf n`` and the PR checker's specification,
+        compute ``App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt))
+        = T_pt`` at the raw inputs.
+      * Apply ``PRST_INTERNALIZES_TRUE_PR_EVAL`` to obtain
+        ``Prov_PRST (Eq_pf (App_pt ... raw inputs) T_pt)``.
+      * Substitute raw inputs by their quote_hf images via
+        ``PROV_PRST_NUMERAL_EVAL`` and equality congruence inside
+        Prov_PRST. This re-targets the equality to the quoted-input
+        application without depending on a raw-vs-quoted value
+        identity.
+
+    Dependencies: ``PRST_INTERNALIZES_TRUE_PR_EVAL``,
+    ``PROV_PRST_NUMERAL_EVAL``, PRST equality congruence.
     """
     p.goal(
         "!pf n. Proof_PRST pf n ==> "
@@ -154,9 +205,26 @@ def PROOF_PRST_PR_QUOTED_FALSE_EVAL(p):
                 (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt)))
               F_pt).
 
-    DSL/proof friction: same shape as the true branch, but it also needs the
-    checker boolean-valuedness theorem to turn `~Proof_PRST pf n` into the
-    false checker result before internalising the quoted computation.
+    G1 role: quoted-input form of the negative bridge. The
+    irrefutability conjunct of ``GODEL_FIRST_PRST`` reasons under
+    consistency that no quoted-proof-list certifies ``G_PRST``;
+    this stub is what packages that fact as a Prov_PRST equality.
+
+    Proof sketch:
+      * Apply ``PROOF_PRST_PR_SEMANTIC_NEG`` to ``~ Proof_PRST pf n``
+        to obtain ``App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n
+        Empty_pt)) = F_pt`` at raw inputs (this is where the
+        boolean-valuedness theorem and PRST soundness do their work).
+      * Apply ``PRST_INTERNALIZES_FALSE_PR_EVAL`` to lift the raw-
+        input equation into ``Prov_PRST (Eq_pf (App_pt ... raw) F_pt)``.
+      * Substitute raw inputs by their ``quote_hf`` images via
+        ``PROV_PRST_NUMERAL_EVAL`` and equality congruence inside
+        Prov_PRST. As in the TRUE branch, no raw-vs-quoted value
+        identity is required.
+
+    Dependencies: ``PROOF_PRST_PR_SEMANTIC_NEG``,
+    ``PRST_INTERNALIZES_FALSE_PR_EVAL``, ``PROV_PRST_NUMERAL_EVAL``,
+    PRST equality congruence.
     """
     p.goal(
         "!pf n. ~Proof_PRST pf n ==> "

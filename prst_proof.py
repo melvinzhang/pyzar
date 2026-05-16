@@ -1596,7 +1596,36 @@ def FIND_PROOF_PR_MU_CORRECT(p):
 @proof
 def PRST_INTERNALIZES_TRUE_PR_EVAL(p):
     r"""|- !f args. is_partial_pr_sym f /\ App_pt f args = T_pt
-            ==> Prov_PRST (Eq_pf (App_pt f args) T_pt)."""
+            ==> Prov_PRST (Eq_pf (App_pt f args) T_pt).
+
+    G1 role: D1 backing for evaluator-driven representability. Every
+    constructor-clause evaluator (``substitute_p``, ``numeral_pr``,
+    ``diag_pr``, ``Proof_PRST_pr``) routes its external truth into
+    a Prov_PRST equality through this lemma. The forward direction
+    of ``PROV_PRST_REPRESENTS`` -- the unprovability conjunct of
+    ``GODEL_FIRST_PRST`` -- consumes it at the diagonal-lemma site.
+
+    Proof sketch:
+      * Strong induction on the depth of the PR-computation tree of
+        ``App_pt f args``, with the head symbol partial-recursive.
+      * Base case: ``f`` is ``zero_sym``, a projection ``proj_sym i n``,
+        or a recursor base/step at constants. The defining axiom
+        (``zero_def_axiom``, ``proj_def_axiom_at i n``, etc.) is
+        provable by ``PROV_PRST_AX``; specialise it to the actual
+        arguments via ``PROV_PRST_SUBST`` and chain through
+        ``PROV_PRST_MP`` against the external evaluation step.
+      * Step case: ``f`` is composition / primitive recursion /
+        course recursion / pair_*. Recursive calls evaluate their
+        sub-trees by the inductive hypothesis, then the defining
+        axiom for ``f`` is instantiated with the sub-results and
+        chained through equality congruence inside Prov_PRST.
+      * No HOL <-> PR structural body bridge: each step is a PR-def
+        axiom application mirrored by ``PROV_PRST_AX`` + substitution.
+
+    This is the generic evaluator-internalisation kernel; the FALSE
+    branch is a deliberate sibling stub kept separate to avoid baking
+    in a Proof_PRST_pr-specific false-evaluation rule.
+    """
     p.goal(
         "!f args. is_partial_pr_sym f /\\ App_pt f args = T_pt "
         "==> Prov_PRST (Eq_pf (App_pt f args) T_pt)",
@@ -1610,9 +1639,25 @@ def PRST_INTERNALIZES_FALSE_PR_EVAL(p):
     r"""|- !f args. is_partial_pr_sym f /\ App_pt f args = F_pt
             ==> Prov_PRST (Eq_pf (App_pt f args) F_pt).
 
-    DSL/proof friction: this should be the same evaluator package as the true
-    branch, specialised to the false boolean. Keeping it separate avoids a
-    too-strong Proof_PRST_pr-specific false-evaluation axiom.
+    G1 role: the negative twin of
+    ``PRST_INTERNALIZES_TRUE_PR_EVAL``. Used by
+    ``PROOF_PRST_PR_QUOTED_FALSE_EVAL`` (irrefutability conjunct of
+    ``GODEL_FIRST_PRST``) and by ``PRST_CONSISTENT``.
+
+    Proof sketch: same evaluator-induction structure as the TRUE
+    branch, with ``F_pt`` taking the role of the boolean target.
+    Each PR-def axiom (``zero_def_axiom``, ``proj_def_axiom_at``,
+    recursor and pair clauses) is provable by ``PROV_PRST_AX`` and
+    instantiated to the actual arguments through ``PROV_PRST_SUBST``
+    and ``PROV_PRST_MP``. The discriminating step is the conditional
+    branch in ``if_in_*`` / boolean-helper PR clauses, where the
+    actual external value ``F_pt`` selects the false PR-def axiom.
+
+    Kept distinct from the TRUE branch to avoid committing to a
+    ``Proof_PRST_pr``-specific false-evaluation axiom: any caller
+    that wants ``F_pt`` at the checker must route through
+    ``PROOF_PRST_PR_BOOLEAN_VALUE`` + ``PROOF_PRST_PR_SEMANTIC_NEG``
+    first.
     """
     p.goal(
         "!f args. is_partial_pr_sym f /\\ App_pt f args = F_pt "
@@ -1645,7 +1690,25 @@ def PRST_INTERNALIZES_FALSE_PR_EVAL(p):
 
 @proof
 def PROOF_PRST_VALID_MEM_SELF(p):
-    """|- !P a. Proof_PRST P a ==> ValidProof_PRST P /\\ Mem_PRST a P."""
+    """|- !P a. Proof_PRST P a ==> ValidProof_PRST P /\\ Mem_PRST a P.
+
+    G1 role: structural projection from the HOL ``Proof_PRST``
+    relation. Consumed by ``PROV_PRST_MP`` (this file, ~1687) to
+    extract the two list-validity / membership facts that feed
+    ``PROOF_PRST_LIST_MERGE``. Since every Prov_PRST-flavored
+    downstream theorem (representability, diagonal lemma, G1 itself)
+    routes through MP, this is on the G1 critical path.
+
+    Proof sketch:
+      * Unfold ``Proof_PRST P a`` to its defining shape
+        ``is_tup_p P /\\ tup_head_p P = a /\\ ValidProof_PRST P
+          /\\ Mem_PRST a P``
+        (or the current equivalent in ``prst_syntax``).
+      * Project the third and fourth conjuncts directly.
+
+    No recursion or list reasoning required -- this is pure
+    definition-unfolding plus conjunction projection.
+    """
     p.goal(
         "!P a. Proof_PRST P a ==> ValidProof_PRST P /\\ Mem_PRST a P",
         types={"P": nat0_ty, "a": nat0_ty},
@@ -1657,7 +1720,34 @@ def PROOF_PRST_VALID_MEM_SELF(p):
 def PROOF_PRST_LIST_MERGE(p):
     """|- !P Q a b. ValidProof_PRST P /\\ Mem_PRST a P
               /\\ ValidProof_PRST Q /\\ Mem_PRST b Q
-              ==> ?R. ValidProof_PRST R /\\ Mem_PRST a R /\\ Mem_PRST b R."""
+              ==> ?R. ValidProof_PRST R /\\ Mem_PRST a R /\\ Mem_PRST b R.
+
+    G1 role: combinator behind ``PROV_PRST_MP`` (this file, ~1705).
+    Given proofs of ``f`` and ``Imp_pf f g`` carried by two
+    separate valid proof lists, fuse them into a single valid list
+    that witnesses both -- the precondition before consing the MP
+    step that yields ``g``. Every Prov_PRST-flavored downstream
+    theorem flows through MP, so this is on the G1 critical path.
+
+    Proof sketch:
+      * Witness: ``R = list_concat P Q`` (or the analogous PR-side
+        concat over the ``Tup_pt``-encoded proof lists).
+      * ``ValidProof_PRST R``: induction on ``Q``. Base ``Q = ...
+        singleton``: appending a single valid line to ``P`` keeps
+        each line's axiom-or-MP-witness justification, since
+        membership in the prefix ``P`` is preserved under append.
+        Step: a longer ``Q`` keeps its MP witnesses among earlier
+        lines, which still appear at the same positions in the
+        appended list.
+      * ``Mem_PRST a R``: monotonicity of membership under list
+        prefix.
+      * ``Mem_PRST b R``: monotonicity under list suffix.
+
+    Dependencies: ``Mem_PRST`` monotonicity under append; ValidProof
+    closure under append. Both are pure list/structural facts on
+    the ``ValidProof_PRST`` / ``Mem_PRST`` definitions in
+    ``prst_syntax``.
+    """
     p.goal(
         "!P Q a b. "
         "ValidProof_PRST P /\\ Mem_PRST a P "
@@ -2806,9 +2896,12 @@ def PROV_PRST_REPRESENTS(p):
     predicate. Reduces to:
       * Forward: from a Prov_PRST witness, exhibit the existential
         witness inside Prov_PRST_internal via PROV_PRST_DIAG_EVAL +
-        equality-of-PR-terms reasoning.
-      * Backward: from the existential witness, recover the Proof_PRST
-        list and apply soundness.
+        equality-of-PR-terms reasoning. This direction is the D1
+        backing used by DERIV_D1.
+      * Backward: PRST_SIGMA1_SOUND applied to the Sigma_1 formula
+        Prov_PRST_internal[quote_hf n]. The internal existential
+        witness is discharged by Sigma_1-soundness of PRST rather than
+        by independent Proof_PRST proof-list extraction.
 
     Estimate ~80 lines once filled in. STUB.
     """
