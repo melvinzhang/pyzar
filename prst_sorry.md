@@ -222,40 +222,45 @@ single course-recursion induction over the encoded formula/term, with
 constructor-specific rewrite lemmas for the Var hit/miss case, the default
 payload-pair case, and the App non-uniform function-id case.
 
-### Spike 5 — `Proof_PRST_pr` List Checker Slice
+### Design 5 — `Proof_PRST_pr` List Checker Slice
 
-Goal: validate the checker on the smallest proof lists before proving full
-correctness.
+Purpose: pin the proof-list checker recursion before proving full correctness.
 
-Target facts:
+Design facts:
 
 - Singleton axiom list: `Proof_PRST_pr (Tup_pt a Empty_pt, a) = T_pt` when
   `is_pr_axiom_pr a = T_pt`.
 - Two-line MP list: from lines `f` and `Imp_pf f g`, appending `g` validates.
 - Negative empty-list case: `Proof_PRST_pr (Empty_pt, n) = F_pt`.
 
-Success criterion: the remaining `PROOF_PRST_PR_CORRECT` proof decomposes into
-`Mem_PRST`/`mem_t_pr`, `ValidProof_PRST`/`valid_proof_pr`, and the
-`is_pr_axiom_pr` leaf, rather than needing a different proof representation.
+Settled shape:
 
-Status: structurally passed. `prst_checker_spike.py` now validates the three
-small cases against an executable reference model with the same final-line
-first `Tup_pt` orientation as `Proof_PRST_pr`:
-
+- Proof lists use the same final-line-first `Tup_pt` orientation as
+  `Proof_PRST`.
 - singleton axiom proof lists validate from the `is_pr_axiom_pr` leaf;
 - `Empty_pt` never validates as a proof list;
 - a new head `g` validates by MP when the tail already contains both `f` and
   `Imp_pf f g`.
+- negative cases cover non-`Tup_pt` proof inputs, malformed list tails, invalid
+  axiom singletons, wrong targets, MP missing the antecedent, MP missing the
+  implication, and nearby nonmatching implications;
+- ordering and duplicate-line cases validate because MP uses membership in the
+  full earlier-list tail.
+
+The executable reference design is `prst_checker_spike.py`.
 
 The current `Proof_PRST_pr` body in `prst_pr.py` matches this decomposition:
 top-level `is_tup_pr`, head equality via `tup_head_pr`, full-list validation
 via `valid_proof_list_pr`, membership via `mem_t_pr`, and MP search via
-`exists_mp_witness_pr`. The remaining proof work is local evaluator API:
-boolean helper correctness, Tup destructors, `mem_t_pr` correctness,
-`valid_proof_list_pr` correctness, and branch correctness for
-`is_pr_axiom_pr`.
+`exists_mp_witness_pr`.
 
-One separate blocker remains for the D2/proof-combinator path:
+Production proof obligations: prove the local evaluator API for boolean helper
+correctness, Tup destructors, `mem_t_pr`, `exists_mp_witness_pr`,
+`valid_step_pr`, `valid_proof_list_pr`, and branch correctness for
+`is_pr_axiom_pr`; then assemble `PROOF_PRST_PR_CORRECT` from those pieces
+without changing the proof representation.
+
+One separate G2-only blocker remains for the D2/proof-combinator path:
 `mp_combine_pr` in `prst_godel2.py` is still the constant-0 stub, so the
 two-line checker shape is validated only for an explicit proof list, not yet
 for `App_pt mp_combine_pr ...`.
