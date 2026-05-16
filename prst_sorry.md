@@ -11,18 +11,7 @@ This ledger is ordered by dependency and expected discharge path, not by file.
 Public theorems already reduced to lower-level obligations are omitted from the
 open list.
 
-### 1. Base PR Symbol Registry
-
-These are local registry facts. They are prerequisites for evaluator
-internalisation but do not depend on the proof checker.
-
-- `PR_ARITY_ZERO`
-- `PR_ARITY_ADJ`
-- `PR_ARITY_PROJ`
-- `PR_ARITY_IF_IN`
-- `PR_ARITY_REC`
-
-### 2. `Proof_PRST_pr` Checker API Boundary
+### 1. `Proof_PRST_pr` Checker API Boundary
 
 These are the immediate checker targets. `PROOF_PRST_PR_CORRECT` and
 `PROOF_PRST_PR_INTERNAL_EVAL` are no longer open; they now compose these
@@ -35,7 +24,7 @@ lower-level facts.
 - `PROOF_PRST_PR_QUOTE_INPUT_FALSE`
 - `PROOF_PRST_PR_INTERNAL_FALSE_EVAL`
 
-### 3. Proof-List Combination API
+### 2. Proof-List Combination API
 
 These discharge the remaining list plumbing used by PRST modus ponens and the
 G2 proof-combinator path.
@@ -44,7 +33,7 @@ G2 proof-combinator path.
 - `PROOF_PRST_LIST_MERGE`
 - `MP_COMBINE_PR_CORRECT`
 
-### 4. Internal PRST Evaluator Clauses
+### 3. Internal PRST Evaluator Clauses
 
 These are the constructor and composition clauses behind the public evaluator
 theorems for `substitute_pr`, `numeral_pr`, and `diag_pr`.
@@ -65,7 +54,7 @@ theorems for `substitute_pr`, `numeral_pr`, and `diag_pr`.
 - `PROV_PRST_DIAG_DEFINING_EVAL`
 - `PROV_PRST_DIAG_EVAL_BY_COMPONENTS`
 
-### 5. Representation Bridges
+### 4. Representation Bridges
 
 These are downstream of the evaluator and checker API. They should not
 reintroduce a global HF-style representability package.
@@ -76,7 +65,7 @@ reintroduce a global HF-style representability package.
 - `DIAG_REPRESENTS_PRST`
 - `PROV_PRST_REPRESENTS`
 
-### 6. G1 Stack
+### 5. G1 Stack
 
 These are the first-incompleteness targets after the checker, evaluator, and
 representation bridges are in place.
@@ -88,7 +77,7 @@ representation bridges are in place.
 - `GODEL_FIRST_PRST`
 - `PRST_ESSENTIALLY_UNDECIDABLE`
 
-### 7. G2 Stack
+### 6. G2 Stack
 
 These remain after G1. `MP_COMBINE_PR_CORRECT` is listed earlier because its
 proof depends on the checker/list-combine API, not on Loeb.
@@ -103,7 +92,7 @@ proof depends on the checker/list-combine API, not on Loeb.
 
 ## Counts
 
-- Remaining `p.sorry()` sites: 47
+- Remaining `p.sorry()` sites: 42
 
 ## PR Symbol Evaluator Spikes
 

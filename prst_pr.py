@@ -5,8 +5,7 @@
 # Every primitive recursive function in PRST gets:
 #
 #   (i)   a closed nat0 ``f_sym`` -- its function-symbol id;
-#   (ii)  a declared arity ``pr_arity f_sym : nat0``;
-#   (iii) one or more *defining equation* axioms, each of shape
+#   (ii)  one or more *defining equation* axioms, each of shape
 #             |- Prov_PRST (Eq_pf (App_pt f_sym args)
 #                                 <body in terms of args and previously
 #                                  introduced symbols>).
@@ -57,7 +56,6 @@ from fusion import Var
 from basics import mk_const, mk_app, mk_abs
 from parser import define, parse_type
 from nat0 import nat0_ty, define_unary_0
-from nat0_order import define_wf_lt
 from proof import proof, define_with_at
 from tactics import SYM
 from hf_syntax import (
@@ -89,26 +87,23 @@ from prst_pr_builders import (  # tier-1 readable-body helpers
 # Stage 2A (a) -- the function-symbol registry.
 #
 #   * ``is_pr_sym f`` :  ``f`` is a registered PR-function symbol id.
-#   * ``pr_arity  f`` :  the declared arity of ``f`` (nat0).
-#
-# Both are HOL predicates / functions on nat0. They are *defined* (not
+# ``is_pr_sym`` is a HOL predicate on nat0. It is *defined* (not
 # axiomatized) so that the introduction of new PR symbols is a kernel
 # extension, not a fresh axiom. In practice each new symbol bumps a
 # fresh value of ``is_pr_sym`` via constructor disjointness.
 # ---------------------------------------------------------------------------
 
 
-# is_pr_sym / pr_arity are stub-defined in prst_syntax (forward ref
-# from IS_PTERM_AT_APP). We re-import the constants here.
-from prst_syntax import is_pr_sym, pr_arity  # noqa: F401, E402
+# is_pr_sym is defined in prst_syntax because IS_PTERM_AT_APP needs a
+# forward reference before the concrete symbol constants are introduced.
+from prst_syntax import is_pr_sym  # noqa: F401, E402
 
 
 # ---------------------------------------------------------------------------
 # Stage 2A (b) -- the base layer of PR symbols.
 #
 # Each symbol is a fresh closed nat0 id. The choice of id is irrelevant
-# for downstream reasoning; ``IS_PR_SYM_*`` and ``PR_ARITY_*`` pin the
-# registry entry.
+# for downstream reasoning; ``IS_PR_SYM_*`` pins the registry entry.
 # ---------------------------------------------------------------------------
 
 
@@ -455,50 +450,6 @@ def IS_PR_SYM_PAIR_ORD(p):
     p.thus("is_pr_sym pair_ord_sym").by_unfold("h_body", IS_PR_SYM_DEF)
 
 
-@proof
-def PR_ARITY_ZERO(p):
-    """|- pr_arity zero_sym = 0. STUB."""
-    p.goal("pr_arity zero_sym = 0")
-    p.sorry()
-
-
-@proof
-def PR_ARITY_ADJ(p):
-    """|- pr_arity adj_sym = SUC0 (SUC0 0). STUB."""
-    p.goal(f"pr_arity adj_sym = {suc_chain(2)}")
-    p.sorry()
-
-
-@proof
-def PR_ARITY_PROJ(p):
-    """|- !i n. pr_arity (proj_sym i n) = n. STUB."""
-    p.goal(
-        "!i n. pr_arity (proj_sym i n) = n",
-        types={"i": nat0_ty, "n": nat0_ty},
-    )
-    p.sorry()
-
-
-@proof
-def PR_ARITY_IF_IN(p):
-    """|- pr_arity if_in_sym = SUC0 (SUC0 (SUC0 (SUC0 0))). STUB."""
-    p.goal(f"pr_arity if_in_sym = {suc_chain(4)}")
-    p.sorry()
-
-
-@proof
-def PR_ARITY_REC(p):
-    """|- !g h. pr_arity (rec_sym g h) = SUC0 (pr_arity g). STUB.
-
-    (n+1)-ary rec on n-ary g; the +1 accounts for the recursion target.
-    """
-    p.goal(
-        "!g h. pr_arity (rec_sym g h) = SUC0 (pr_arity g)",
-        types={"g": nat0_ty, "h": nat0_ty},
-    )
-    p.sorry()
-
-
 # ---------------------------------------------------------------------------
 # Stage 2A (d) -- the *defining equations* of the base layer as closed
 # nat0 godelnums.
@@ -657,8 +608,7 @@ if_in_false_def_axiom = mk_const("if_in_false_def_axiom", [])
 # Variable slot convention (within these axioms):
 #     Var_t 0           : y_vec (the carried argument; a single slot
 #                         stands in for the n-tuple of carried args
-#                         when g/h have higher arity -- the arity
-#                         correctness obligation lives at Layer 4)
+#                         when g/h consume tuple payloads)
 #     Var_t (SUC0 0)    : i (the head of the recursion target's
 #                         Adj decomposition)
 #     Var_t (SUC0^2 0)  : s (the tail of the recursion target's
@@ -1315,9 +1265,8 @@ def IS_PR_SYM_COMP(p):
     """|- !g hs. is_pr_sym (comp_sym g hs).
 
     `comp_sym g hs = Pair_ord 5 (Pair_ord g hs)`, which falls under the
-    broad tag-5 branch already used by const_sym.  Closure/arity checks
-    for g and hs are proof-system obligations, not syntactic registry
-    obligations.
+    broad tag-5 branch already used by const_sym. Closure checks for g
+    and hs are proof-system obligations, not syntactic registry obligations.
     """
     p.goal("!g hs. is_pr_sym (comp_sym g hs)", types={"g": nat0_ty, "hs": nat0_ty})
     p.fix("g hs")
@@ -2014,7 +1963,7 @@ is_pr_def_instance_pr = mk_const("is_pr_def_instance_pr", [])
 # PR-symbol-shape recogniser used by is_pterm_pr's App_pt branch.  This is
 # intentionally syntactic: it accepts the registered literal symbols and the
 # parametric PR-symbol tag families, including the mu tag used by partial PR
-# symbols.  Closure/arity correctness remains with the HOL-side registry.
+# symbols. Closure correctness remains with the HOL-side registry.
 is_partial_pr_sym_pr_def = define(
     "is_partial_pr_sym_pr",
     parse_type("nat0"),
@@ -2434,11 +2383,6 @@ if __name__ == "__main__":
     print("    IS_PR_SYM_PROJ   :", pp_thm(IS_PR_SYM_PROJ))
     print("    IS_PR_SYM_IF_IN  :", pp_thm(IS_PR_SYM_IF_IN))
     print("    IS_PR_SYM_REC    :", pp_thm(IS_PR_SYM_REC))
-    print()
-    print("    PR_ARITY_ZERO    :", pp_thm(PR_ARITY_ZERO))
-    print("    PR_ARITY_ADJ     :", pp_thm(PR_ARITY_ADJ))
-    print("    PR_ARITY_PROJ    :", pp_thm(PR_ARITY_PROJ))
-    print()
     print()
     print("Stage 2A (d) -- defining-equation godelnums (closed nat0s).")
     print("    ZERO_DEF_AXIOM_DEF        :", pp_thm(ZERO_DEF_AXIOM_DEF))

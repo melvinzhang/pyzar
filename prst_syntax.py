@@ -57,9 +57,9 @@
 #
 # Per-function-symbol intro (in ``prst_pr``): each PR function symbol
 # ``f`` is a closed nat0 (an id), and ``App_pt f (Tup_pt t1 ... Empty_pt)``
-# is its application term. The arity and recursion shape of ``f`` is
-# pinned by a *defining equation* axiom; ``prst_pr`` introduces a
-# uniform recogniser ``is_pr_def`` for those axioms.
+# is its application term. The recursion shape of ``f`` is pinned by
+# a *defining equation* axiom; ``prst_pr`` introduces a uniform
+# recogniser ``is_pr_def`` for those axioms.
 #
 # The structural recognisers (``is_pterm``, ``is_pform``, ``free_in_p``,
 # ``substitute_p``) extend ``hf_syntax``'s analogues with App_pt /
@@ -616,12 +616,8 @@ def TUP_PT_DISJOINT_APP_PT(p):
 #
 # ``is_pr_sym`` semantically belongs in ``prst_pr.py``, but
 # ``_IS_PTERM_F`` below names it in the App_pt branch, so the parser
-# needs it to exist at this point. Stubbed; Layer 4 in
-# ``prst_sorry.md`` replaces with the real registry body.
-#
-# (``pr_arity`` is no longer referenced from ``_IS_PTERM_F`` -- the
-# arity check moved out of the syntactic recogniser. It is still
-# declared here so downstream modules can name it.)
+# needs it to exist at this point. The body is inlined here because
+# ``prst_pr.py`` defines the symbolic constants later.
 # ---------------------------------------------------------------------------
 
 
@@ -668,25 +664,6 @@ IS_PR_SYM_DEF = define(
     f"f = {suc_chain(10)}",
 )
 is_pr_sym = mk_const("is_pr_sym", [])
-
-# `pr_arity` returns a literal arity for the four non-recursive base
-# symbols. The rec-sym branch's intended arity is ``SUC0 (pr_arity g)``,
-# but mechanising that here would require a wf-recursive pr_arity plus
-# a substantial MONO proof (~150 lines, see SUBSTITUTE_P_MONO for the
-# pattern). For now `pr_arity (rec_sym g h)` collapses to the SUC0 0
-# fallback below (rec branch not encoded) and the corresponding
-# PR_ARITY_REC lemma in prst_pr.py remains sorry'd as Layer 4 follow-up
-# work. No downstream code consumes pr_arity, so the placeholder is safe.
-PR_ARITY_DEF = define(
-    "pr_arity",
-    parse_type("nat0 -> nat0"),
-    "\\f:nat0. @r:nat0. "
-    "(f = 0 /\\ r = 0) \\/ "
-    f"(f = {suc_chain(1)} /\\ r = {suc_chain(2)}) \\/ "
-    f"(?i n. f = Pair_ord ({suc_chain(2)}) (Pair_ord i n) /\\ r = n) \\/ "
-    f"(f = {suc_chain(3)} /\\ r = {suc_chain(4)})",
-)
-pr_arity = mk_const("pr_arity", [])
 
 
 # ---------------------------------------------------------------------------
@@ -818,12 +795,10 @@ def IS_PR_SYM_IMP_PARTIAL(p):
 # class. PR-defining-axiom-shape terms still satisfy is_pterm via the
 # DISJ1 lift `is_pr_sym fn ==> is_partial_pr_sym fn`.
 #
-# The arity check (pr_arity fn = length of args) is intentionally NOT
-# part of is_pterm -- it would require walking the Tup_pt chain to
-# compute a length, which is exactly the walker recursion the Tup_pt
-# encoding was chosen to avoid. Arity correctness is enforced at the
-# proof-system level (defining-equation axioms only fire for
-# correctly-shaped args), not at the syntactic-recogniser level.
+# An arity check is intentionally NOT part of is_pterm: PRST syntax
+# only checks that the head is a registered PR/partial-PR symbol and
+# that the argument payload is a PRST term. Defining-equation
+# recognisers enforce the concrete tuple shapes where they matter.
 # ---------------------------------------------------------------------------
 
 
