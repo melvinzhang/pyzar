@@ -677,6 +677,65 @@ def MEM_PRST_HEAD(p):
     p.thus("Mem_PRST (Tup_pt h t) h").by_eq_mp(SYM(mem_at), "body")
 
 
+@proof
+def MEM_PRST_EMPTY_FALSE(p):
+    """|- !x. ~Mem_PRST Empty_pt x.
+
+    Empty list has no members. Same pattern as ``PROOF_PRST_NIL``:
+    unfold via ``MEM_PRST_AT``, extract the existential, derive
+    ``Tup_pt h t = Empty_pt`` from the body's equation, contradict
+    with ``TUP_PT_NEQ_EMPTY_PT``.
+    """
+    from tactics import SPECL, SYM
+    from prst_syntax import TUP_PT_NEQ_EMPTY_PT
+
+    p.goal("!x. ~Mem_PRST Empty_pt x", types={"x": nat0_ty})
+    p.fix("x")
+    mem_at = SPECL([p._parse("Empty_pt"), p._parse("x")], MEM_PRST_AT)
+    with p.suppose("h_mem: Mem_PRST Empty_pt x"):
+        p.have(
+            "h_body: ?h t. Empty_pt = Tup_pt h t /\\ (x = h \\/ Mem_PRST t x)"
+        ).by_eq_mp(mem_at, "h_mem")
+        p.choose("hd tl", "h_body", eq_label="body")
+        p.split("body", "(e_eq, _)")
+        p.have("e_sym: Tup_pt hd tl = Empty_pt").by_thm(SYM(p.fact("e_eq")))
+        p.have("e_neq: ~(Tup_pt hd tl = Empty_pt)").by(
+            TUP_PT_NEQ_EMPTY_PT, "hd", "tl"
+        )
+        p.absurd().by_conj("e_neq", "e_sym")
+
+
+@proof
+def MEM_PRST_TUP_TAIL(p):
+    """|- !h t x. Mem_PRST t x ==> Mem_PRST (Tup_pt h t) x.
+
+    Tail membership lifts through ``Tup_pt`` (list-first
+    convention). Sister lemma to ``MEM_PRST_HEAD``: same
+    ``MEM_PRST_AT`` unfold, but the disjunction discharge picks
+    the right disjunct (``Mem_PRST t x``) instead of the left
+    (``x = h``).
+    """
+    from tactics import SPECL, REFL, SYM
+
+    p.goal(
+        "!h t x. Mem_PRST t x ==> Mem_PRST (Tup_pt h t) x",
+        types={"h": nat0_ty, "t": nat0_ty, "x": nat0_ty},
+    )
+    p.fix("h t x")
+    p.assume("mem_t: Mem_PRST t x")
+    mem_at = SPECL([p._parse("Tup_pt h t"), p._parse("x")], MEM_PRST_AT)
+    p.have("p_refl: Tup_pt h t = Tup_pt h t").by_thm(
+        REFL(p._parse("Tup_pt h t"))
+    )
+    # DISJ2 from mem_t into the right leaf of the disjunction.
+    p.have("disj: x = h \\/ Mem_PRST t x").by_disj("mem_t")
+    p.have(
+        "body: ?h0 t0. Tup_pt h t = Tup_pt h0 t0 "
+        "/\\ (x = h0 \\/ Mem_PRST t0 x)"
+    ).by_exists(["h", "t"], "p_refl", "disj")
+    p.thus("Mem_PRST (Tup_pt h t) x").by_eq_mp(SYM(mem_at), "body")
+
+
 _VALID_PROOF_PRST_F_DEF = define(
     "_ValidProof_PRST_F",
     parse_type("(nat0 -> bool) -> nat0 -> bool"),
@@ -1825,6 +1884,274 @@ def PROOF_PRST_VALID_MEM_SELF(p):
 
 
 @proof
+def VALID_PROOF_PRST_MERGE_EXISTS(p):
+    """|- !P Q. ValidProof_PRST P /\\ ValidProof_PRST Q
+              ==> ?R. ValidProof_PRST R
+                   /\\ (!x. Mem_PRST P x ==> Mem_PRST R x)
+                   /\\ (!x. Mem_PRST Q x ==> Mem_PRST R x).
+
+    Direct strong induction on ``P``. The witness is built
+    incrementally inside the induction; no separate ``concat_prst``
+    definition is needed.
+
+    Base (``P = Empty_pt``): witness ``R := Q``. Validity is
+    ``valid_Q``; left-monotonicity is vacuous via
+    ``MEM_PRST_EMPTY_FALSE``; right-monotonicity is trivial.
+
+    Cons (``P = Tup_pt h t``): apply IH at ``t`` (which is
+    ``< P`` via ``NAT0_LT_TUP_PT_R``) and ``Q``, obtaining
+    ``R_p`` that contains every element of ``t`` and of ``Q``.
+    Witness ``R := Tup_pt h R_p``. Validity of ``Tup_pt h R_p``
+    folds via ``_VALID_PROOF_PRST_REC``: ``R_p`` is valid (from
+    IH), and the head ``h`` keeps its axiom-or-MP-witness
+    justification because each MP witness in ``t`` survives into
+    ``R_p`` by the IH's left-monotonicity. Left-monotonicity for
+    ``P``: any ``x`` in ``Tup_pt h t`` is either the head (in via
+    ``MEM_PRST_HEAD``) or in ``t`` (lifted to ``R_p`` then to
+    ``Tup_pt h R_p`` via ``MEM_PRST_TUP_TAIL``). Right-monotonicity
+    for ``Q``: lift from ``R_p`` via ``MEM_PRST_TUP_TAIL``.
+
+    Convention: ``Mem_PRST list element`` -- see the
+    ``_MEM_PRST_F_DEF`` note.
+    """
+    from tactics import SPEC, SPECL, SYM, CONJ
+    from prst_syntax import (
+        _unfold_prst_rec as _unfold,
+        NAT0_LT_TUP_PT_R,
+        TUP_PT_INJ,
+    )
+
+    p.goal(
+        "!P Q. ValidProof_PRST P /\\ ValidProof_PRST Q "
+        "      ==> ?R. ValidProof_PRST R "
+        "            /\\ (!x. Mem_PRST P x ==> Mem_PRST R x) "
+        "            /\\ (!x. Mem_PRST Q x ==> Mem_PRST R x)",
+        types={"P": nat0_ty, "Q": nat0_ty, "x": nat0_ty},
+    )
+
+    valid_rec = _unfold(_VALID_PROOF_PRST_REC, _VALID_PROOF_PRST_F_DEF)
+
+    with p.strong_induction("P", "IH"):
+        # Goal: !Q. ValidProof_PRST P /\ ValidProof_PRST Q
+        #       ==> ?R. <body[P, Q]>.
+        # IH:   !k. nat0_lt k P ==> !Q'. ValidProof_PRST k /\
+        #          ValidProof_PRST Q' ==> ?R'. <body[k, Q']>.
+        p.fix("Q")
+        p.assume(
+            "(valid_P, valid_Q): ValidProof_PRST P /\\ ValidProof_PRST Q"
+        )
+
+        # Unfold ValidProof_PRST P to expose the Empty_pt / cons
+        # disjunction that we case-split on.
+        valid_at_P = SPEC(p._parse("P"), valid_rec)
+        p.have(
+            "valid_body: P = Empty_pt \\/ "
+            "(?h t. P = Tup_pt h t /\\ ValidProof_PRST t "
+            "       /\\ (is_pr_axiom h "
+            "            \\/ (?f. Mem_PRST t f /\\ Mem_PRST t (Imp_pf f h))))"
+        ).by_eq_mp(valid_at_P, "valid_P")
+
+        with p.cases_on("valid_body"):
+            with p.case("p_empty: P = Empty_pt"):
+                # Base case. Witness R := Q.
+                # Left-mono is vacuous through MEM_PRST_EMPTY_FALSE.
+                with p.have(
+                    "mono_left: !x. Mem_PRST P x ==> Mem_PRST Q x"
+                ).proof():
+                    p.fix("x")
+                    p.assume("h_mem_P: Mem_PRST P x")
+                    # P = Empty_pt rewrites the hypothesis.
+                    p.have("h_mem_E: Mem_PRST Empty_pt x").by_rewrite_of(
+                        "h_mem_P", ["p_empty"]
+                    )
+                    p.have("not_mem_E: ~Mem_PRST Empty_pt x").by(
+                        MEM_PRST_EMPTY_FALSE, "x"
+                    )
+                    # Ex falso quodlibet -- absurd discharges the
+                    # current goal via CONTR.
+                    p.absurd().by_conj("not_mem_E", "h_mem_E")
+
+                # Right-mono is the trivial identity implication.
+                with p.have(
+                    "mono_right: !x. Mem_PRST Q x ==> Mem_PRST Q x"
+                ).proof():
+                    p.fix("x")
+                    p.assume("h_mem_Q: Mem_PRST Q x")
+                    p.thus("Mem_PRST Q x").by_thm(p.fact("h_mem_Q"))
+
+                p.thus(
+                    "?R. ValidProof_PRST R "
+                    "/\\ (!x. Mem_PRST P x ==> Mem_PRST R x) "
+                    "/\\ (!x. Mem_PRST Q x ==> Mem_PRST R x)"
+                ).by_exists(
+                    ["Q"], "valid_Q", "mono_left", "mono_right"
+                )
+
+            with p.case(
+                "p_cons: ?h t. P = Tup_pt h t /\\ ValidProof_PRST t "
+                "       /\\ (is_pr_axiom h "
+                "            \\/ (?f. Mem_PRST t f /\\ Mem_PRST t (Imp_pf f h)))"
+            ):
+                # h, t in scope; eq label is "t_eq" (last witness).
+                # Body splits right-associated.
+                p.split("t_eq", "(p_eq, (valid_t, step))")
+
+                # Apply IH at t. nat0_lt t P comes from
+                # NAT0_LT_TUP_PT_R + rewrite by p_eq.
+                p.have("lt_t_Tup: nat0_lt t (Tup_pt h t)").by(
+                    NAT0_LT_TUP_PT_R, "h", "t"
+                )
+                p.have("lt_t_P: nat0_lt t P").by_rewrite_of(
+                    "lt_t_Tup", ["p_eq"]
+                )
+                p.have("valid_t_Q: ValidProof_PRST t /\\ ValidProof_PRST Q").by(
+                    CONJ, "valid_t", "valid_Q"
+                )
+                p.have(
+                    "ih_R: ?R0. ValidProof_PRST R0 "
+                    "/\\ (!x. Mem_PRST t x ==> Mem_PRST R0 x) "
+                    "/\\ (!x. Mem_PRST Q x ==> Mem_PRST R0 x)"
+                ).by("IH", "t", "lt_t_P", "Q", "valid_t_Q")
+                p.choose("R_p", "ih_R", eq_label="Rp_body")
+                p.split("Rp_body", "(valid_Rp, (mono_t, mono_Q))")
+
+                # Step disjunction lifted from t to R_p via mono_t.
+                with p.have(
+                    "step_R: is_pr_axiom h "
+                    "\\/ (?f. Mem_PRST R_p f /\\ Mem_PRST R_p (Imp_pf f h))"
+                ).proof():
+                    with p.cases_on("step"):
+                        with p.case("h_ax: is_pr_axiom h"):
+                            p.thus(
+                                "is_pr_axiom h "
+                                "\\/ (?f. Mem_PRST R_p f "
+                                "        /\\ Mem_PRST R_p (Imp_pf f h))"
+                            ).by_disj("h_ax")
+                        with p.case(
+                            "h_mp: ?f. Mem_PRST t f /\\ Mem_PRST t (Imp_pf f h)"
+                        ):
+                            # f in scope; eq label "f_eq".
+                            p.split("f_eq", "(mem_t_f, mem_t_imp)")
+                            p.have("mem_R_f: Mem_PRST R_p f").by(
+                                "mono_t", "f", "mem_t_f"
+                            )
+                            p.have(
+                                "mem_R_imp: Mem_PRST R_p (Imp_pf f h)"
+                            ).by("mono_t", "Imp_pf f h", "mem_t_imp")
+                            p.have(
+                                "ex_f_R: ?f. Mem_PRST R_p f "
+                                "/\\ Mem_PRST R_p (Imp_pf f h)"
+                            ).by_exists(
+                                ["f"], "mem_R_f", "mem_R_imp"
+                            )
+                            p.thus(
+                                "is_pr_axiom h "
+                                "\\/ (?f. Mem_PRST R_p f "
+                                "        /\\ Mem_PRST R_p (Imp_pf f h))"
+                            ).by_disj("ex_f_R")
+
+                # Fold ValidProof_PRST (Tup_pt h R_p) via the cons
+                # branch of the unfold equation.
+                valid_at_HRp = SPEC(
+                    p._parse("Tup_pt h R_p"), valid_rec
+                )
+                p.have(
+                    "ex_cons: ?h0 t0. Tup_pt h R_p = Tup_pt h0 t0 "
+                    "/\\ ValidProof_PRST t0 "
+                    "/\\ (is_pr_axiom h0 "
+                    "     \\/ (?f. Mem_PRST t0 f "
+                    "             /\\ Mem_PRST t0 (Imp_pf f h0)))"
+                ).by_exists(
+                    ["h", "R_p"], "valid_Rp", "step_R"
+                )
+                p.have(
+                    "valid_R_body: Tup_pt h R_p = Empty_pt \\/ "
+                    "(?h0 t0. Tup_pt h R_p = Tup_pt h0 t0 "
+                    "/\\ ValidProof_PRST t0 "
+                    "/\\ (is_pr_axiom h0 "
+                    "     \\/ (?f. Mem_PRST t0 f "
+                    "             /\\ Mem_PRST t0 (Imp_pf f h0))))"
+                ).by_disj("ex_cons")
+                p.have(
+                    "valid_R: ValidProof_PRST (Tup_pt h R_p)"
+                ).by_eq_mp(SYM(valid_at_HRp), "valid_R_body")
+
+                # Left-monotonicity for P = Tup_pt h t.
+                with p.have(
+                    "mono_left: !x. Mem_PRST P x "
+                    "==> Mem_PRST (Tup_pt h R_p) x"
+                ).proof():
+                    p.fix("x")
+                    p.assume("h_mem_P: Mem_PRST P x")
+                    p.have(
+                        "h_mem_Tht: Mem_PRST (Tup_pt h t) x"
+                    ).by_rewrite_of("h_mem_P", ["p_eq"])
+                    # Unfold via MEM_PRST_AT.
+                    mem_at_Tht = SPECL(
+                        [p._parse("Tup_pt h t"), p._parse("x")], MEM_PRST_AT
+                    )
+                    p.have(
+                        "mem_body: ?h0 t0. Tup_pt h t = Tup_pt h0 t0 "
+                        "/\\ (x = h0 \\/ Mem_PRST t0 x)"
+                    ).by_eq_mp(mem_at_Tht, "h_mem_Tht")
+                    p.choose("h0 t0", "mem_body", eq_label="mem_eq")
+                    p.split("mem_eq", "(tup_eq, disj)")
+                    # Injectivity gives h = h0, t = t0.
+                    p.have("inj: h = h0 /\\ t = t0").by(
+                        TUP_PT_INJ, "h", "t", "h0", "t0", "tup_eq"
+                    )
+                    p.split("inj", "(h_inj, t_inj)")
+                    # Rewrite the disjunction in terms of h, t.
+                    p.have("disj_ht: x = h \\/ Mem_PRST t x").by_rewrite_of(
+                        "disj", ["h_inj", "t_inj"]
+                    )
+                    with p.cases_on("disj_ht"):
+                        with p.case("x_is_h: x = h"):
+                            p.have(
+                                "head: Mem_PRST (Tup_pt h R_p) h"
+                            ).by(MEM_PRST_HEAD, "h", "R_p")
+                            p.thus(
+                                "Mem_PRST (Tup_pt h R_p) x"
+                            ).by_rewrite_of("head", ["x_is_h"])
+                        with p.case("x_in_t: Mem_PRST t x"):
+                            p.have("x_in_Rp: Mem_PRST R_p x").by(
+                                "mono_t", "x", "x_in_t"
+                            )
+                            p.thus(
+                                "Mem_PRST (Tup_pt h R_p) x"
+                            ).by(
+                                MEM_PRST_TUP_TAIL,
+                                "h", "R_p", "x", "x_in_Rp",
+                            )
+
+                # Right-monotonicity for Q: lift via mono_Q then
+                # MEM_PRST_TUP_TAIL.
+                with p.have(
+                    "mono_right: !x. Mem_PRST Q x "
+                    "==> Mem_PRST (Tup_pt h R_p) x"
+                ).proof():
+                    p.fix("x")
+                    p.assume("h_mem_Q: Mem_PRST Q x")
+                    p.have("x_in_Rp: Mem_PRST R_p x").by(
+                        "mono_Q", "x", "h_mem_Q"
+                    )
+                    p.thus(
+                        "Mem_PRST (Tup_pt h R_p) x"
+                    ).by(
+                        MEM_PRST_TUP_TAIL, "h", "R_p", "x", "x_in_Rp"
+                    )
+
+                # Witness Tup_pt h R_p and discharge the three conjuncts.
+                p.thus(
+                    "?R. ValidProof_PRST R "
+                    "/\\ (!x. Mem_PRST P x ==> Mem_PRST R x) "
+                    "/\\ (!x. Mem_PRST Q x ==> Mem_PRST R x)"
+                ).by_exists(
+                    ["Tup_pt h R_p"], "valid_R", "mono_left", "mono_right"
+                )
+
+
+@proof
 def PROOF_PRST_LIST_MERGE(p):
     """|- !P Q a b. ValidProof_PRST P /\\ Mem_PRST P a
               /\\ ValidProof_PRST Q /\\ Mem_PRST Q b
@@ -1837,26 +2164,18 @@ def PROOF_PRST_LIST_MERGE(p):
     Every Prov_PRST-flavored downstream theorem flows through MP,
     so this is on the G1 critical path.
 
-    Proof sketch:
-      * Witness: ``R = list_concat P Q`` (or the analogous PR-side
-        concat over the ``Tup_pt``-encoded proof lists).
-      * ``ValidProof_PRST R``: induction on ``Q``. Base ``Q = ...
-        singleton``: appending a single valid line to ``P`` keeps
-        each line's axiom-or-MP-witness justification, since
-        membership in the prefix ``P`` is preserved under append.
-        Step: a longer ``Q`` keeps its MP witnesses among earlier
-        lines, which still appear at the same positions in the
-        appended list.
-      * ``Mem_PRST R a``: monotonicity of membership under list
-        prefix.
-      * ``Mem_PRST R b``: monotonicity under list suffix.
+    Proof: pure DSL plumbing over the localised helper
+    ``VALID_PROOF_PRST_MERGE_EXISTS``. Eliminate the merged-list
+    existential, instantiate the two membership monotonicities at
+    ``a`` and ``b``, and re-introduce the existential with that
+    same ``R``. The substantive concat / append induction is
+    inside the helper stub.
 
     Convention: ``Mem_PRST list element`` -- see the
-    ``_MEM_PRST_F_DEF`` note. Dependencies: ``Mem_PRST``
-    monotonicity under append; ``ValidProof_PRST`` closure under
-    append. Both are pure list/structural facts on the
-    definitions in ``prst_syntax``.
+    ``_MEM_PRST_F_DEF`` note.
     """
+    from tactics import CONJ
+
     p.goal(
         "!P Q a b. "
         "ValidProof_PRST P /\\ Mem_PRST P a "
@@ -1864,7 +2183,50 @@ def PROOF_PRST_LIST_MERGE(p):
         "==> ?R. ValidProof_PRST R /\\ Mem_PRST R a /\\ Mem_PRST R b",
         types={"P": nat0_ty, "Q": nat0_ty, "a": nat0_ty, "b": nat0_ty},
     )
-    p.sorry()
+    p.fix("P Q a b")
+    # Right-associated 4-way conjunction: A /\ (B /\ (C /\ D)).
+    # Nested pattern destructures all four atomic conjuncts.
+    p.assume(
+        "(valid_P, (mem_P_a, (valid_Q, mem_Q_b))): "
+        "ValidProof_PRST P /\\ Mem_PRST P a "
+        "/\\ ValidProof_PRST Q /\\ Mem_PRST Q b"
+    )
+
+    # Existence of a merged valid list covering both P and Q.
+    # DSL friction: the helper's antecedent is the conjunction
+    # ``ValidProof_PRST P /\ ValidProof_PRST Q`` -- assemble it
+    # on the fly with kernel CONJ, matching the idiom already used
+    # in PROOF_PRST_LIST_COMBINE.
+    p.have(
+        "merge_ex: ?R. ValidProof_PRST R "
+        "/\\ (!x. Mem_PRST P x ==> Mem_PRST R x) "
+        "/\\ (!x. Mem_PRST Q x ==> Mem_PRST R x)"
+    ).by(
+        VALID_PROOF_PRST_MERGE_EXISTS,
+        "P", "Q",
+        CONJ(p.fact("valid_P"), p.fact("valid_Q")),
+    )
+    p.choose("R", "merge_ex", eq_label="merge_body")
+    p.split("merge_body", "(valid_R, (mono_P, mono_Q))")
+
+    # Instantiate each monotonicity at the relevant element.
+    # DSL friction: by_match treats ``!x. P x ==> Q x``'s antecedent
+    # rather than its conclusion as the goal-matching shape, so it
+    # cannot infer ``x := a`` from the goal ``Mem_PRST R a``. Use
+    # the explicit SPEC/MP chain via ``by`` -- term arg ``a`` triggers
+    # SPEC, fact arg ``mem_P_a`` triggers MP.
+    p.have("mem_R_a: Mem_PRST R a").by("mono_P", "a", "mem_P_a")
+    p.have("mem_R_b: Mem_PRST R b").by("mono_Q", "b", "mem_Q_b")
+
+    # Assemble the right-associated existential body and witness it.
+    p.have(
+        "body: ValidProof_PRST R /\\ Mem_PRST R a /\\ Mem_PRST R b"
+    ).by(
+        CONJ, "valid_R", CONJ(p.fact("mem_R_a"), p.fact("mem_R_b"))
+    )
+    p.thus(
+        "?R. ValidProof_PRST R /\\ Mem_PRST R a /\\ Mem_PRST R b"
+    ).by_witness("R", "body")
 
 
 @proof
