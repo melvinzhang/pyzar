@@ -1631,8 +1631,162 @@ def PROV_PRST_ADJ_DEF_AT(p):
     ).by_eq_mp(prov_eq, "h_refl")
 
 
-# PROV_PRST_REC_BASE_DEF_AT, PROV_PRST_REC_STEP_DEF_AT, PROV_PRST_IF_IN_*_AT
-# follow the same shape; omitted from this sketch.
+# ---------------------------------------------------------------------------
+# Stage 2B (d.2bis) -- single-step PR-def AT-lifting schema and
+# singleton-membership Prov_PRST facts.
+#
+# ``PROV_PRST_PR_DEF_AT_LIFT`` is the sole named API for applied
+# (`_AT`) forms of the PR-def axiom schemas. Per-symbol AT
+# specialisations (projection / rec / course_rec / if_in / const /
+# pair_* / comp at concrete argument shapes) are not stubbed
+# individually; downstream consumers SPEC the schema at the specific
+# PR symbol, discharge the HOL antecedent ``App_pt F args = body`` by
+# ``REFL`` or by the symbol's defining HOL equation, and use the
+# resulting ``Prov_PRST (Eq_pf (App_pt F args) body)``.
+#
+# For conditional axioms (if_in_*), the antecedent membership facts
+# below (PROV_PRST_IN_PA_SINGLETON_SELF / _NEG) feed the if_in
+# dispatch in h_subst's Var-branch.
+#
+# See prst_sorry.md ("Missing PRST infrastructure blocking §3") for
+# the rationale and dependency layering.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def PROV_PRST_PR_DEF_AT_LIFT(p):
+    r"""|- !F args body.
+              is_pr_sym F /\ App_pt F args = body
+              ==> Prov_PRST (Eq_pf (App_pt F args) body).
+
+    Single-step PR-def AT-lifting schema and the sole named API for
+    applied PR-def axiom equations. Downstream consumers SPEC this
+    schema at a specific PR symbol ``F``, fixed argument tuple, and
+    meta-level reduced ``body``; per-symbol AT specialisations
+    (projection / rec / course_rec / if_in / const / pair_* / comp)
+    are not stubbed individually.
+
+    Discharge route (single proof, then re-used by every consumer):
+
+      1. ``is_pr_sym F`` implies ``F`` has a defining PR-def axiom
+         (`zero_def_axiom`, `proj_def_axiom_at`, `rec_*_def_axiom_at`,
+         etc.) — case-split by ``IS_PR_SYM_REC`` / the PR-def families.
+      2. For each family, ``PROV_PRST_AX`` plus ``IS_PR_DEF_HOLDS_*``
+         gives ``Prov_PRST (axiom_at_schema_vars)`` with free Var_t
+         slots.
+      3. ``PROV_PRST_SUBST`` specialises the schema variables to the
+         actual ``args`` components; the substitution residue is
+         exactly ``App_pt F args = body`` modulo HOL ``=``.
+      4. Conclude ``Prov_PRST (Eq_pf (App_pt F args) body)`` by
+         rewriting through the HOL antecedent.
+
+    Scope: this schema covers single-axiom unfolds only
+    (``is_pr_sym F`` rules out ``mu_sym`` and composite unfolds that
+    chain through multiple PR-def steps). For multi-step
+    computations, see ``PROV_PRST_PR_EVAL`` below, which is proved by
+    induction over the µ-closure structure using this schema as its
+    base case.
+    """
+    p.goal(
+        "!F args body. "
+        "is_pr_sym F /\\ App_pt F args = body "
+        "==> Prov_PRST (Eq_pf (App_pt F args) body)",
+        types={"F": nat0_ty, "args": nat0_ty, "body": nat0_ty},
+    )
+    p.sorry()
+
+
+# ---------------------------------------------------------------------------
+# PRST equality congruence (SYM / TRANS / CONG).
+#
+# Prov_PRST is closed under propositional MP + axioms; equality
+# reasoning at the *PRST* level (chaining Eq_pf's, swapping sides,
+# pushing rewrites under App_pt / Tup_pt / Pair_ord) requires these as
+# separate primitives. The HOL-side AP_TERM / SYM / TRANS act on HOL
+# equations, not on Prov_PRST claims, so they cannot bridge the gap
+# directly.
+#
+# Unifying schema: `PROV_PRST_EQ_LEIBNIZ` is the Paulson-form
+# substitution-of-equals lemma and is the only named API for PRST
+# equality reasoning. SYM, TRANS, and the three constructor
+# congruences (CONG_APP_PT_ARG / CONG_TUP_PT / CONG_PAIR_ORD) all
+# derive from it via standard Leibniz tricks (substitute one side in a
+# context built from `Var_pt v`, combine with `PROV_PRST_REFL`); they
+# are not stubbed as named theorems and are expected to be inlined at
+# the call site (~3-5 lines each). If a downstream caller invokes the
+# same pattern often enough that a named lemma earns its keep,
+# introduce it then as a real (non-sorry) theorem.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def PROV_PRST_EQ_LEIBNIZ(p):
+    r"""|- !F v a b.
+              Prov_PRST (Eq_pf a b)
+              ==> Prov_PRST (substitute_p F v a)
+              ==> Prov_PRST (substitute_p F v b).
+
+    Paulson-form Leibniz substitution-of-equals: PRST equality
+    transports any provable formula along its proof. The "function
+    context" is the formula ``F`` viewed as a function of the variable
+    ``v``, with ``substitute_p F v _`` filling the hole.
+
+    G1 role: single master lemma backing the five §3a equality stubs
+    (`PROV_PRST_EQ_SYM`, `_EQ_TRANS`, `_EQ_CONG_APP_PT_ARG`,
+    `_EQ_CONG_TUP_PT`, `_EQ_CONG_PAIR_ORD`). Discharging each via
+    Leibniz:
+
+      * SYM: take ``F := Eq_pf (Var_pt v) a``. Then
+        ``substitute_p F v a = Eq_pf a a`` (provable by
+        ``PROV_PRST_REFL``) and ``substitute_p F v b = Eq_pf b a``.
+      * TRANS: chain SYM with another Leibniz at
+        ``F := Eq_pf (Var_pt v) c``.
+      * CONG_APP_PT_ARG: take ``F := Eq_pf (App_pt f a) (App_pt f
+        (Var_pt v))`` and seed with refl at ``a``.
+      * CONG_TUP_PT, CONG_PAIR_ORD: two single-slot Leibniz steps
+        (one per side) plus TRANS.
+
+    Discharge route for the schema itself:
+      1. Hilbert-style equality axiom schema in PRST: the propositional
+         logical axioms (`is_logical_axiom`) plus the
+         `is_pr_refl` reflexivity layer plus `PROV_PRST_SUBST` give
+         exactly the Leibniz schema in finitely many steps. This is
+         the standard derivation in Świerczkowski / Paulson HF
+         treatments.
+      2. ``PROV_PRST_AX`` lifts `is_pr_axiom` to `Prov_PRST`, and the
+         existing PRST proof-checker accepts ``is_pr_refl`` heads as
+         axioms, so all base ingredients are in place.
+
+    Replaces the granular five-stub congruence layer with one
+    obligation; the five named endpoints below become one-line
+    corollaries.
+    """
+    p.goal(
+        "!F v a b. "
+        "Prov_PRST (Eq_pf a b) "
+        "==> Prov_PRST (substitute_p F v a) "
+        "==> Prov_PRST (substitute_p F v b)",
+        types={"F": nat0_ty, "v": nat0_ty,
+               "a": nat0_ty, "b": nat0_ty},
+    )
+    p.sorry()
+
+
+# SYM / TRANS / CONG_APP_PT_ARG / CONG_TUP_PT / CONG_PAIR_ORD are not
+# stubbed as named theorems. They are one- to five-line Leibniz
+# instantiations of ``PROV_PRST_EQ_LEIBNIZ`` (see docstring above for
+# the explicit context/seed for each) and should be inlined at the
+# call site. If a downstream caller invokes the same pattern often
+# enough that a named lemma earns its keep, introduce it then as a
+# real (non-sorry) theorem proved from ``PROV_PRST_EQ_LEIBNIZ``.
+
+
+# PROV_PRST_IN_PA_SINGLETON_SELF / _NOT_IN_PA_SINGLETON were
+# previously listed here as antecedents for the deleted
+# PROV_PRST_IF_IN_TRUE/FALSE_DEF_AT stubs. They have no remaining
+# consumers and have been removed; downstream uses of PR-level
+# singleton membership should derive directly through
+# PROV_PRST_PR_EVAL or PROV_PRST_PR_DEF_AT_LIFT at the call site.
 
 
 # ---------------------------------------------------------------------------
@@ -1721,89 +1875,155 @@ def FIND_PROOF_PR_MU_CORRECT(p):
 # ---------------------------------------------------------------------------
 # Stage 2B (d.4) -- Proof_PRST_pr internalisation.
 #
-# Proof_PRST_pr is the PR-symbol proof checker. Downstream code reasons about
-# it directly via `App_pt Proof_PRST_pr ... = T_pt`; there is intentionally no
-# structural HOL↔PR correctness bridge to the HOL `Proof_PRST` relation. The
-# only PR-evaluation glue lives in:
+# Proof_PRST_pr is the PR-symbol proof checker. The Paulson-grade
+# structural bridge between the HOL relation `Proof_PRST` and the PR
+# checker is `PROOF_PRST_PR_REPRESENTS`: it states that the checker
+# returns T_pt exactly on HOL-witnessed proofs and F_pt on every
+# other input. Boolean-view consumers (LEM on `Proof_PRST pf n` for
+# `=T_pt \/ =F_pt` claims, the semantic-negation step, and the
+# `quote_hf`-lifted quoted-input obligations) instantiate the bridge
+# at the call site rather than going through named corollary stubs.
 #
-#   PRST_INTERNALIZES_TRUE_PR_EVAL / PRST_INTERNALIZES_FALSE_PR_EVAL
-#                                -- generic PRST-internal evaluation for PR
-#                                   computations returning the booleans.
+# Generic PR-evaluator glue lives in `PROV_PRST_PR_EVAL` (below);
+# boolean-target specialisations are call-site instantiations at
+# `r := T_pt` / `r := F_pt`.
 # ---------------------------------------------------------------------------
 
 
 @proof
-def PRST_INTERNALIZES_TRUE_PR_EVAL(p):
-    r"""|- !f args. is_partial_pr_sym f /\ App_pt f args = T_pt
-            ==> Prov_PRST (Eq_pf (App_pt f args) T_pt).
+def PROOF_PRST_PR_REPRESENTS(p):
+    r"""|- !pf n.
+              (Proof_PRST pf n
+                 ==> App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt)
+           /\ (~Proof_PRST pf n
+                 ==> App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt).
 
-    G1 role: D1 backing for evaluator-driven representability. Every
-    constructor-clause evaluator (``substitute_p``, ``numeral_pr``,
-    ``diag_pr``, ``Proof_PRST_pr``) routes its external truth into
-    a Prov_PRST equality through this lemma. The forward direction
-    of ``PROV_PRST_REPRESENTS`` -- the unprovability conjunct of
-    ``GODEL_FIRST_PRST`` -- consumes it at the diagonal-lemma site.
+    Paulson-grade structural bridge: the PR checker ``Proof_PRST_pr``
+    faithfully represents the HOL relation ``Proof_PRST``. Stated as a
+    paired implication so the same theorem supplies both the positive
+    (witness) and negative (boolean-view F_pt) directions used by the
+    §1 corollaries.
 
-    Proof sketch:
-      * Strong induction on the depth of the PR-computation tree of
-        ``App_pt f args``, with the head symbol partial-recursive.
-      * Base case: ``f`` is ``zero_sym``, a projection ``proj_sym i n``,
-        or a recursor base/step at constants. The defining axiom
-        (``zero_def_axiom``, ``proj_def_axiom_at i n``, etc.) is
-        provable by ``PROV_PRST_AX``; specialise it to the actual
-        arguments via ``PROV_PRST_SUBST`` and chain through
-        ``PROV_PRST_MP`` against the external evaluation step.
-      * Step case: ``f`` is composition / primitive recursion /
-        course recursion / pair_*. Recursive calls evaluate their
-        sub-trees by the inductive hypothesis, then the defining
-        axiom for ``f`` is instantiated with the sub-results and
-        chained through equality congruence inside Prov_PRST.
-      * No HOL <-> PR structural body bridge: each step is a PR-def
-        axiom application mirrored by ``PROV_PRST_AX`` + substitution.
+    G1 role: this is the single bridge that backs every checker-
+    boundary obligation. Once proved, downstream consumers instantiate
+    it inline at the call site for the patterns that would otherwise
+    have been named corollaries:
 
-    This is the generic evaluator-internalisation kernel; the FALSE
-    branch is a deliberate sibling stub kept separate to avoid baking
-    in a Proof_PRST_pr-specific false-evaluation rule.
+      * Boolean-view ("App_pt = T_pt or = F_pt"): LEM on
+        ``Proof_PRST pf n`` applied to the two conjuncts of the
+        bridge.
+      * Semantic-negation lift: the negative conjunct directly.
+      * Quoted-input evaluation (``quote_hf n`` form): compose the
+        appropriate conjunct of the bridge with ``PROV_PRST_PR_EVAL``
+        at ``r := T_pt`` / ``r := F_pt`` plus the ``quote_hf``
+        numeral interface.
+
+    Proof sketch (Paulson induction):
+      * Forward direction (``Proof_PRST pf n ==> ... = T_pt``): induct
+        on ``Proof_PRST pf n`` via ``PROOF_PRST_AT`` decomposition.
+        Singleton axiom case: ``is_pr_axiom_pr`` accepts ``pf`` because
+        ``Proof_PRST`` only admits ``is_pr_axiom``-justified heads;
+        ``valid_proof_list_pr`` validates the singleton via the leaf
+        clause; ``tup_head_pr`` extracts the head. MP cons case: IH
+        on the tail gives a valid tail-list result; ``mem_t_pr``
+        retrieves the antecedent ``f`` and the implication
+        ``Imp_pf f g`` from the validated tail;
+        ``exists_mp_witness_pr`` finds them in the earlier-line scan;
+        the head-equality check on ``g`` closes the cons step.
+      * Backward direction (``~Proof_PRST pf n ==> ... = F_pt``):
+        contrapositive of the forward direction plus the
+        ``and_bool_pr`` boolean-input invariant -- every internal
+        boolean in the checker is one of ``T_pt`` / ``F_pt`` because
+        each leaf (``is_tup_pr``, ``is_pr_axiom_pr``,
+        ``valid_proof_list_pr``, etc.) returns one of the two. Under
+        ``~Proof_PRST pf n`` at least one leaf returns ``F_pt``, and
+        ``and_bool_pr`` propagates ``F_pt`` to the top.
+
+    This replaces the previously-cut granular §0/§0a structural stubs
+    (``IS_TUP_PR_CORRECT``, ``MEM_T_PR_CORRECT``,
+    ``EXISTS_MP_WITNESS_PR_CORRECT``, ``VALID_STEP_PR_CORRECT``,
+    ``VALID_PROOF_LIST_PR_CORRECT``, ``PROOF_PRST_PR_BODY_CORRECT``,
+    and the ``APP_PT_*`` evaluator stack) with one bridge theorem
+    whose proof factors *through* those lemmas internally rather than
+    exposing them as separate API. They re-emerge as sub-lemmas during
+    discharge but are not part of the stub ledger.
     """
     p.goal(
-        "!f args. is_partial_pr_sym f /\\ App_pt f args = T_pt "
-        "==> Prov_PRST (Eq_pf (App_pt f args) T_pt)",
-        types={"f": nat0_ty, "args": nat0_ty},
+        "!pf n. "
+        "(Proof_PRST pf n "
+        "  ==> App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt) "
+        "/\\ "
+        "(~Proof_PRST pf n "
+        "  ==> App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt)",
+        types={"pf": nat0_ty, "n": nat0_ty},
     )
     p.sorry()
 
 
 @proof
-def PRST_INTERNALIZES_FALSE_PR_EVAL(p):
-    r"""|- !f args. is_partial_pr_sym f /\ App_pt f args = F_pt
-            ==> Prov_PRST (Eq_pf (App_pt f args) F_pt).
+def PROV_PRST_PR_EVAL(p):
+    r"""|- !f args r.
+              is_partial_pr_sym f /\ App_pt f args = r
+              ==> Prov_PRST (Eq_pf (App_pt f args) r).
 
-    G1 role: the negative twin of
-    ``PRST_INTERNALIZES_TRUE_PR_EVAL``. Used by
-    ``PROOF_PRST_PR_QUOTED_FALSE_EVAL`` (irrefutability conjunct of
-    ``GODEL_FIRST_PRST``) and by ``PRST_CONSISTENT``.
+    Generic PR-eval bridge: every meta-level partial-recursive
+    evaluation lifts to a ``Prov_PRST`` equation. Paulson-grade
+    unifying form that subsumes the boolean specialisations
+    (instantiate ``r`` to ``T_pt`` / ``F_pt``) as well as every
+    per-symbol ``_EVAL_CLAUSE`` in §3 (instantiate ``f`` to
+    ``substitute_pr`` / ``numeral_pr`` / ``diag_pr`` and ``r`` to the
+    meta-computed result).
 
-    Proof sketch: same evaluator-induction structure as the TRUE
-    branch, with ``F_pt`` taking the role of the boolean target.
-    Each PR-def axiom (``zero_def_axiom``, ``proj_def_axiom_at``,
-    recursor and pair clauses) is provable by ``PROV_PRST_AX`` and
-    instantiated to the actual arguments through ``PROV_PRST_SUBST``
-    and ``PROV_PRST_MP``. The discriminating step is the conditional
-    branch in ``if_in_*`` / boolean-helper PR clauses, where the
-    actual external value ``F_pt`` selects the false PR-def axiom.
+    G1 role: the load-bearing internalisation theorem. Every
+    constructor-clause evaluator routes its external evaluation into
+    a ``Prov_PRST`` equality through this bridge. The forward
+    direction of ``PROV_PRST_REPRESENTS`` — the unprovability
+    conjunct of ``GODEL_FIRST_PRST`` — consumes it at the diagonal
+    lemma. The negative branch of ``PROOF_PRST_PR_REPRESENTS``
+    composes with this bridge to give the §1 quoted-input
+    obligations.
 
-    Kept distinct from the TRUE branch to avoid committing to a
-    ``Proof_PRST_pr``-specific false-evaluation axiom: any caller
-    that wants ``F_pt`` at the checker must route through
-    ``PROOF_PRST_PR_BOOLEAN_VALUE`` + ``PROOF_PRST_PR_SEMANTIC_NEG``
-    first.
+    Discharge route (Paulson induction on the µ-closure structure of
+    ``is_partial_pr_sym f``):
+
+      * Base case — ``is_pr_sym f``: ``f`` is a defining PR symbol.
+        Apply ``PROV_PRST_PR_DEF_AT_LIFT`` to the HOL antecedent
+        ``App_pt f args = r`` directly.
+
+      * µ-closure step — ``f = mu_sym g`` with
+        ``is_partial_pr_sym g``: the HOL antecedent
+        ``App_pt (mu_sym g) args = r`` factors through
+        ``MU_CORRECTNESS`` plus the IH on ``g``; close by equality
+        congruence inside ``Prov_PRST``.
+
+      * Composition: ``f`` built from comp/rec/course_rec/pair_*
+        applied to partial-recursive sub-symbols. The HOL-side
+        meta-reduction decomposes into a sequence of single-axiom
+        unfolds applied to recursively-evaluated sub-terms; each
+        single-axiom unfold lifts via
+        ``PROV_PRST_PR_DEF_AT_LIFT``; chain through PRST equality
+        transitivity / congruence.
+
+    The previous granular §3 + §3a stubs (the 15 constructor
+    ``_EVAL_CLAUSE`` proofs and the 25 infrastructure primitives
+    under §3a) become *proof-internal* lemmas of this single
+    induction rather than ledger entries.
     """
     p.goal(
-        "!f args. is_partial_pr_sym f /\\ App_pt f args = F_pt "
-        "==> Prov_PRST (Eq_pf (App_pt f args) F_pt)",
-        types={"f": nat0_ty, "args": nat0_ty},
+        "!f args r. "
+        "is_partial_pr_sym f /\\ App_pt f args = r "
+        "==> Prov_PRST (Eq_pf (App_pt f args) r)",
+        types={"f": nat0_ty, "args": nat0_ty, "r": nat0_ty},
     )
     p.sorry()
+
+
+# PRST_INTERNALIZES_TRUE_PR_EVAL / _FALSE_PR_EVAL are not stubbed as
+# named theorems. They are one-line specialisations of
+# ``PROV_PRST_PR_EVAL`` at ``r := T_pt`` / ``r := F_pt`` and should be
+# inlined at the call site. If a downstream caller invokes the same
+# specialisation often enough that a named lemma earns its keep,
+# introduce it then as a real (non-sorry) theorem.
 
 
 # ---------------------------------------------------------------------------
@@ -2397,633 +2617,67 @@ def PROV_PRST_MP(p):
 # ---------------------------------------------------------------------------
 # Stage 2B (e) -- internal arithmetic via PR symbols.
 #
-# The public evaluator schemas below are now proof targets, not primitive
-# obligations. Their remaining obligations sit at the actual decomposition
-# boundaries:
+# The public PRST-side evaluators for substitute_pr / numeral_pr /
+# diag_pr are each a single specialisation of `PROV_PRST_PR_EVAL`
+# (the Paulson-form PR-eval bridge) at the relevant PR symbol with
+# the HOL-side App_pt equation as antecedent. The 15 previously-
+# stubbed §3 constructor / combinator clauses (10 substitute
+# constructor cases, 1 substitute structural-clauses combinator,
+# 2 numeral, 2 diag) have been consolidated: each public evaluator
+# stays as one bundled obligation capturing both the HOL-side
+# structural correctness of the PR symbol (is_partial_pr_sym +
+# universal App_pt equation) and its PR_EVAL lift to a Prov_PRST
+# equation.
 #
-#   * numeral_pr: recursion base/step.
-#   * substitute_pr: one structural clause for each PRST syntax family, plus
-#     the course-recursion completeness bridge.
-#   * diag_pr: defining composition and PRST equality chaining from the
-#     numeral/substitute component evaluations.
+# Discharge route (for each evaluator below):
+#   1. Prove `is_partial_pr_sym <symbol>` by structural argument
+#      over the symbol's comp / rec / course_rec definition.
+#   2. Prove the universal HOL equation
+#      `!args. App_pt <symbol> args = <meta-result args>` by
+#      induction matching the symbol's defining recursion.
+#   3. Apply `PROV_PRST_PR_EVAL` to lift to a Prov_PRST equation.
 # ---------------------------------------------------------------------------
-
-
-_SUBSTITUTE_EVAL_FULL = (
-    "!F t v. Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute F t v))"
-)
-
-_SUBSTITUTE_EVAL_EMPTY_CLAUSE = (
-    "!t v. Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr "
-    "    (Tup_pt Empty_pt (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute Empty_pt t v))"
-)
-
-_SUBSTITUTE_EVAL_VAR_HIT_CLAUSE = (
-    "!t v. Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr "
-    "    (Tup_pt (Var_pt v) (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute (Var_pt v) t v))"
-)
-
-_SUBSTITUTE_EVAL_VAR_MISS_CLAUSE = (
-    "!x t v. ~(x = v) ==> Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr "
-    "    (Tup_pt (Var_pt x) (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute (Var_pt x) t v))"
-)
-
-_SUBSTITUTE_EVAL_TUP_CLAUSE = (
-    "!a b t v. "
-    "Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr (Tup_pt a (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute a t v)) "
-    "==> Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr (Tup_pt b (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute b t v)) "
-    "==> Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr "
-    "    (Tup_pt (Tup_pt a b) (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute (Tup_pt a b) t v))"
-)
-
-_SUBSTITUTE_EVAL_APP_CLAUSE = (
-    "!f args t v. "
-    "Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr "
-    "    (Tup_pt args (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute args t v)) "
-    "==> Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr "
-    "    (Tup_pt (App_pt f args) (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute (App_pt f args) t v))"
-)
-
-_SUBSTITUTE_EVAL_EQ_CLAUSE = (
-    "!a b t v. "
-    "Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr (Tup_pt a (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute a t v)) "
-    "==> Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr (Tup_pt b (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute b t v)) "
-    "==> Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr "
-    "    (Tup_pt (Eq_pf a b) (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute (Eq_pf a b) t v))"
-)
-
-_SUBSTITUTE_EVAL_IN_CLAUSE = (
-    "!a b t v. "
-    "Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr (Tup_pt a (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute a t v)) "
-    "==> Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr (Tup_pt b (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute b t v)) "
-    "==> Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr "
-    "    (Tup_pt (In_pa a b) (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute (In_pa a b) t v))"
-)
-
-_SUBSTITUTE_EVAL_NOT_CLAUSE = (
-    "!F t v. "
-    "Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute F t v)) "
-    "==> Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr "
-    "    (Tup_pt (Not_pf F) (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute (Not_pf F) t v))"
-)
-
-_SUBSTITUTE_EVAL_IMP_CLAUSE = (
-    "!F G t v. "
-    "Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute F t v)) "
-    "==> Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr (Tup_pt G (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute G t v)) "
-    "==> Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr "
-    "    (Tup_pt (Imp_pf F G) (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute (Imp_pf F G) t v))"
-)
-
-_SUBSTITUTE_EVAL_OPAQUE_CLAUSE = (
-    "!F t v. ~(is_pterm F) /\\ ~(is_pform F) ==> "
-    "Prov_PRST (Eq_pf "
-    "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
-    "  (substitute F t v))"
-)
-
-_SUBSTITUTE_EVAL_STRUCTURAL_GOAL = (
-    " ==> ".join(
-        f"({clause})"
-        for clause in [
-            _SUBSTITUTE_EVAL_EMPTY_CLAUSE,
-            _SUBSTITUTE_EVAL_VAR_HIT_CLAUSE,
-            _SUBSTITUTE_EVAL_VAR_MISS_CLAUSE,
-            _SUBSTITUTE_EVAL_TUP_CLAUSE,
-            _SUBSTITUTE_EVAL_APP_CLAUSE,
-            _SUBSTITUTE_EVAL_EQ_CLAUSE,
-            _SUBSTITUTE_EVAL_IN_CLAUSE,
-            _SUBSTITUTE_EVAL_NOT_CLAUSE,
-            _SUBSTITUTE_EVAL_IMP_CLAUSE,
-            _SUBSTITUTE_EVAL_OPAQUE_CLAUSE,
-        ]
-    )
-    + " ==> "
-    + _SUBSTITUTE_EVAL_FULL
-)
-
-
-@proof
-def PROV_PRST_SUBSTITUTE_EMPTY_EVAL_CLAUSE(p):
-    """|- !t v. Prov_PRST (Eq_pf
-          (App_pt substitute_pr (Tup_pt Empty_pt (Tup_pt t (Tup_pt v Empty_pt))))
-          (substitute Empty_pt t v)).
-
-    Proof sketch. substitute_pr is the outer comp_sym wrapper around
-    course_rec g_subst h_subst with input Empty_pt (= 0). The course_rec
-    base axiom (PROV_PRST_COURSE_REC_BASE_DEF at g_subst, h_subst,
-    instantiated via PROV_PRST_SUBST) reduces the call to App_pt g_subst .,
-    then g_subst's defining equation (const_sym 0 wrapped through proj 0 1,
-    via PROV_PRST_CONST_DEF) yields Empty_pt. The HOL-side
-    substitute Empty_pt t v also reduces to Empty_pt by its AT-equation, so
-    the Eq_pf closes by PRST reflexivity (PROV_PRST_REFL) and
-    PROV_PRST_MP."""
-    p.goal(
-        "!t v. Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr "
-        "    (Tup_pt Empty_pt (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute Empty_pt t v))",
-        types={"t": nat0_ty, "v": nat0_ty},
-    )
-    p.sorry()
-
-
-@proof
-def PROV_PRST_SUBSTITUTE_VAR_HIT_EVAL_CLAUSE(p):
-    """|- !t v. Prov_PRST (Eq_pf
-          (App_pt substitute_pr (Tup_pt (Var_pt v) (Tup_pt t (Tup_pt v Empty_pt))))
-          (substitute (Var_pt v) t v)).
-
-    Proof sketch. Var_pt v unfolds to Pair_ord 2 v, so the course_rec step
-    fires (PROV_PRST_COURSE_REC_STEP_DEF at g_subst, h_subst, a := 2,
-    b := v, instantiated via PROV_PRST_SUBST). h_subst's nested if_in
-    dispatch hits the tag-2 branch on the first comparison via
-    PROV_PRST_IF_IN_TRUE_DEF, then enters _h_subst_var. y_vec carries
-    Pair_ord t v, so pair_right_def_axiom_at gives v as the singleton
-    element and the inner if_in tests v ∈ {v} -- true again by
-    PROV_PRST_IF_IN_TRUE_DEF. That branch returns pair_left_def_axiom_at on
-    Pair_ord t v, i.e. t. The HOL side substitute (Var_pt v) t v also
-    reduces to t by its AT-equation, so the Eq_pf closes via
-    PROV_PRST_REFL plus PROV_PRST_MP equality chaining."""
-    p.goal(
-        "!t v. Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr "
-        "    (Tup_pt (Var_pt v) (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute (Var_pt v) t v))",
-        types={"t": nat0_ty, "v": nat0_ty},
-    )
-    p.sorry()
-
-
-@proof
-def PROV_PRST_SUBSTITUTE_VAR_MISS_EVAL_CLAUSE(p):
-    """|- !x t v. ~(x = v) ==> Prov_PRST (Eq_pf
-          (App_pt substitute_pr (Tup_pt (Var_pt x) (Tup_pt t (Tup_pt v Empty_pt))))
-          (substitute (Var_pt x) t v)).
-
-    Proof sketch. Same dispatch as the Var-hit clause through to
-    _h_subst_var: outer course_rec_step + tag-2 if_in branch via
-    PROV_PRST_COURSE_REC_STEP_DEF and PROV_PRST_IF_IN_TRUE_DEF. Inside
-    _h_subst_var the inner if_in tests b ∈ {pair_right y_vec} = {v}. Under
-    ~(x = v) the test is false, so PROV_PRST_IF_IN_FALSE_DEF selects the
-    else branch, which returns Pair_ord 2 x = Var_pt x via
-    PROV_PRST_PAIR_ORD_DEF. The HOL side substitute (Var_pt x) t v also
-    returns Var_pt x by its miss AT-equation, closing the Eq_pf by
-    PROV_PRST_REFL + PROV_PRST_MP. The ~(x = v) hypothesis enters only at
-    the inner if_in_false dispatch."""
-    p.goal(
-        "!x t v. ~(x = v) ==> Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr "
-        "    (Tup_pt (Var_pt x) (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute (Var_pt x) t v))",
-        types={"x": nat0_ty, "t": nat0_ty, "v": nat0_ty},
-    )
-    p.sorry()
-
-
-@proof
-def PROV_PRST_SUBSTITUTE_TUP_EVAL_CLAUSE(p):
-    """|- !a b t v. eval a ==> eval b ==> eval (Tup_pt a b).
-
-    Proof sketch. Tup_pt a b = Pair_ord 12 (Pair_ord a b) and
-    substitute_pr's course_rec descends into the encoded pair tree, so the
-    two IH equations on a and b are pre-computed at the recursive payload
-    level (the default Pair_ord branch _h_subst_default returns
-    Pair_ord rec_left rec_right, which is exactly the recursively
-    substituted child pair). PROV_PRST_COURSE_REC_STEP_DEF at the outer
-    Pair_ord 12 step fires the tag-12 branch via repeated
-    PROV_PRST_IF_IN_FALSE_DEF/IF_IN_TRUE_DEF through the nested dispatch.
-    _h_subst_tup returns Pair_ord 12 rec_right via PROV_PRST_PAIR_ORD_DEF;
-    rec_right is the substituted inner pair Pair_ord (substitute a t v)
-    (substitute b t v) reassembled from the two IHs through
-    PROV_PRST_PAIR_ORD_DEF, matching the HOL Tup_pt AT-equation. Close
-    via PROV_PRST_REFL + PROV_PRST_MP."""
-    p.goal(
-        "!a b t v. "
-        "Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr (Tup_pt a (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute a t v)) "
-        "==> Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr (Tup_pt b (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute b t v)) "
-        "==> Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr "
-        "    (Tup_pt (Tup_pt a b) (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute (Tup_pt a b) t v))",
-        types={"a": nat0_ty, "b": nat0_ty, "t": nat0_ty, "v": nat0_ty},
-    )
-    p.sorry()
-
-
-@proof
-def PROV_PRST_SUBSTITUTE_APP_EVAL_CLAUSE(p):
-    """|- !f args t v. eval args ==> eval (App_pt f args).
-
-    Proof sketch. App_pt f args = Pair_ord 11 (Pair_ord f args). The outer
-    course_rec_step at this Pair_ord fires _h_subst_app via the tag-11
-    if_in branch (PROV_PRST_COURSE_REC_STEP_DEF +
-    PROV_PRST_IF_IN_TRUE_DEF chain). _h_subst_app builds
-    Pair_ord 11 (Pair_ord (pair_left b) (pair_right rec_right)) using
-    PROV_PRST_PAIR_LEFT_DEF (preserves f from the original encoded pair),
-    PROV_PRST_PAIR_RIGHT_DEF (selects the substituted args from rec_right),
-    and PROV_PRST_PAIR_ORD_DEF for reassembly. The args IH supplies
-    rec_right = Pair_ord _ (substitute args t v); the f slot is unchanged,
-    matching the non-uniform HOL AT-equation
-    substitute (App_pt f args) t v = App_pt f (substitute args t v). Close
-    via PROV_PRST_REFL + PROV_PRST_MP."""
-    p.goal(
-        "!f args t v. "
-        "Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr "
-        "    (Tup_pt args (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute args t v)) "
-        "==> Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr "
-        "    (Tup_pt (App_pt f args) (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute (App_pt f args) t v))",
-        types={"f": nat0_ty, "args": nat0_ty, "t": nat0_ty, "v": nat0_ty},
-    )
-    p.sorry()
-
-
-@proof
-def PROV_PRST_SUBSTITUTE_EQ_EVAL_CLAUSE(p):
-    """|- !a b t v. eval a ==> eval b ==> eval (Eq_pf a b).
-
-    Proof sketch. Eq_pf a b = Pair_ord 5 (Pair_ord a b). Outer course_rec
-    step at Pair_ord 5 hits _h_subst_eq via the tag-5 if_in branch
-    (PROV_PRST_COURSE_REC_STEP_DEF + PROV_PRST_IF_IN_TRUE_DEF reaching
-    branch 5). _h_subst_eq returns Pair_ord 5 rec_right via
-    PROV_PRST_PAIR_ORD_DEF, where rec_right = Pair_ord (substitute a t v)
-    (substitute b t v) is reconstructed at the inner Pair_ord layer from
-    the two IH equations through PROV_PRST_PAIR_ORD_DEF. The HOL
-    AT-equation gives the same Eq_pf payload, closing via PROV_PRST_REFL +
-    PROV_PRST_MP."""
-    p.goal(
-        "!a b t v. "
-        "Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr (Tup_pt a (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute a t v)) "
-        "==> Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr (Tup_pt b (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute b t v)) "
-        "==> Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr "
-        "    (Tup_pt (Eq_pf a b) (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute (Eq_pf a b) t v))",
-        types={"a": nat0_ty, "b": nat0_ty, "t": nat0_ty, "v": nat0_ty},
-    )
-    p.sorry()
-
-
-@proof
-def PROV_PRST_SUBSTITUTE_IN_EVAL_CLAUSE(p):
-    """|- !a b t v. eval a ==> eval b ==> eval (In_pa a b).
-
-    Proof sketch. Identical shape to the Eq_pf clause with tag 10 in place
-    of 5: In_pa a b = Pair_ord 10 (Pair_ord a b). The dispatch chain
-    PROV_PRST_IF_IN_FALSE_DEF (tags 2, 5, 6, 7) then
-    PROV_PRST_IF_IN_TRUE_DEF (tag 10) lands in _h_subst_in, which returns
-    Pair_ord 10 rec_right via PROV_PRST_PAIR_ORD_DEF. rec_right is the
-    pair of substituted children supplied by the two IHs through the
-    default-branch payload reconstruction. Close by PROV_PRST_REFL +
-    PROV_PRST_MP against the HOL In_pa AT-equation."""
-    p.goal(
-        "!a b t v. "
-        "Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr (Tup_pt a (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute a t v)) "
-        "==> Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr (Tup_pt b (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute b t v)) "
-        "==> Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr "
-        "    (Tup_pt (In_pa a b) (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute (In_pa a b) t v))",
-        types={"a": nat0_ty, "b": nat0_ty, "t": nat0_ty, "v": nat0_ty},
-    )
-    p.sorry()
-
-
-@proof
-def PROV_PRST_SUBSTITUTE_NOT_EVAL_CLAUSE(p):
-    """|- !F t v. eval F ==> eval (Not_pf F).
-
-    Proof sketch. Not_pf F = Pair_ord 6 F. Outer course_rec_step at
-    Pair_ord 6 dispatches through PROV_PRST_IF_IN_FALSE_DEF (tags 2, 5)
-    then PROV_PRST_IF_IN_TRUE_DEF (tag 6) into _h_subst_not, which returns
-    Pair_ord 6 rec_right via PROV_PRST_PAIR_ORD_DEF. rec_right = substitute
-    F t v from the single IH equation. Matches the HOL Not_pf AT-equation;
-    close via PROV_PRST_REFL + PROV_PRST_MP."""
-    p.goal(
-        "!F t v. "
-        "Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute F t v)) "
-        "==> Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr "
-        "    (Tup_pt (Not_pf F) (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute (Not_pf F) t v))",
-        types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
-    )
-    p.sorry()
-
-
-@proof
-def PROV_PRST_SUBSTITUTE_IMP_EVAL_CLAUSE(p):
-    """|- !F G t v. eval F ==> eval G ==> eval (Imp_pf F G).
-
-    Proof sketch. Imp_pf F G = Pair_ord 7 (Pair_ord F G). Dispatch via
-    PROV_PRST_IF_IN_FALSE_DEF (tags 2, 5, 6) then
-    PROV_PRST_IF_IN_TRUE_DEF (tag 7) into _h_subst_imp, which returns
-    Pair_ord 7 rec_right via PROV_PRST_PAIR_ORD_DEF. rec_right is the
-    Pair_ord (substitute F t v) (substitute G t v) reconstructed at the
-    inner pair from the two IHs through PROV_PRST_PAIR_ORD_DEF. Matches
-    the HOL Imp_pf AT-equation; close via PROV_PRST_REFL +
-    PROV_PRST_MP."""
-    p.goal(
-        "!F G t v. "
-        "Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute F t v)) "
-        "==> Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr (Tup_pt G (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute G t v)) "
-        "==> Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr "
-        "    (Tup_pt (Imp_pf F G) (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute (Imp_pf F G) t v))",
-        types={"F": nat0_ty, "G": nat0_ty, "t": nat0_ty, "v": nat0_ty},
-    )
-    p.sorry()
-
-
-@proof
-def PROV_PRST_SUBSTITUTE_OPAQUE_EVAL_CLAUSE(p):
-    """|- !F t v. ~(is_pterm F) /\\ ~(is_pform F) ==> eval F.
-
-    Proof sketch. Under ~(is_pterm F) /\\ ~(is_pform F), F is not one of
-    the tagged Pair_ord encodings the h_subst nested if_in chain
-    discriminates on; either F = 0 (caught by the course_rec base,
-    g_subst = const 0 via PROV_PRST_COURSE_REC_BASE_DEF +
-    PROV_PRST_CONST_DEF) or F = Pair_ord a b with a not in
-    {2, 5, 6, 7, 10, 11, 12}, where every if_in test fails via
-    PROV_PRST_IF_IN_FALSE_DEF and h_subst falls through to
-    _h_subst_default = Pair_ord rec_left rec_right. The HOL substitute
-    AT-equation for the opaque/default case mirrors this -- it returns the
-    encoded payload with both children recursively substituted -- so the
-    two sides agree by PROV_PRST_PAIR_ORD_DEF. The not-pterm /\\ not-pform
-    antecedent is exactly what excludes the tagged constructor cases. Close
-    via PROV_PRST_REFL + PROV_PRST_MP."""
-    p.goal(
-        "!F t v. ~(is_pterm F) /\\ ~(is_pform F) ==> "
-        "Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute F t v))",
-        types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
-    )
-    p.sorry()
-
-
-@proof
-def PROV_PRST_SUBSTITUTE_EVAL_BY_STRUCTURAL_CLAUSES(p):
-    """Close substitute_pr evaluation from the per-constructor clauses.
-
-    Proof sketch. HOL-side structural induction over the encoded
-    formula/term F (Empty_pt, Var_pt at v and miss x != v, Tup_pt, App_pt,
-    Eq_pf, In_pa, Not_pf, Imp_pf, opaque default). Each inductive case
-    discharges by applying the corresponding clause hypothesis to the IH
-    equations on the immediate children, threading the existing Prov_PRST
-    equations through PROV_PRST_MP. The opaque clause covers all encoded
-    values that do not match any tagged-constructor predicate, which is
-    why the structural induction is exhaustive without needing a
-    representability axiom or a separate well-formedness assumption."""
-    p.goal(
-        _SUBSTITUTE_EVAL_STRUCTURAL_GOAL,
-        types={"F": nat0_ty, "G": nat0_ty, "a": nat0_ty, "b": nat0_ty,
-               "f": nat0_ty, "args": nat0_ty, "t": nat0_ty, "v": nat0_ty,
-               "x": nat0_ty},
-    )
-    p.sorry()
 
 
 @proof
 def PROV_PRST_SUBSTITUTE_EVAL(p):
-    """|- !F t v. Prov_PRST (Eq_pf (App_pt substitute_pr
-                                    (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt))))
-                                  (substitute F t v))."""
+    r"""|- !F t v. Prov_PRST (Eq_pf
+                                (App_pt substitute_pr
+                                  (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt))))
+                                (substitute F t v)).
+
+    Bundled obligation: HOL-side structural correctness of
+    substitute_pr (is_partial_pr_sym + course-recursion induction on
+    F across Empty_pt / Var_pt hit & miss / Tup_pt / App_pt / Eq_pf /
+    In_pa / Not_pf / Imp_pf / opaque cases) plus the PR_EVAL lift.
+    Replaces the previously-stubbed 10 constructor clauses + 1
+    structural-clauses combinator with one direct specialisation of
+    `PROV_PRST_PR_EVAL` at f := substitute_pr.
+    """
     p.goal(
         "!F t v. Prov_PRST (Eq_pf "
         "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
         "  (substitute F t v))",
         types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
-    )
-    p.have("empty_clause:").by_thm(PROV_PRST_SUBSTITUTE_EMPTY_EVAL_CLAUSE)
-    p.have("var_hit_clause:").by_thm(PROV_PRST_SUBSTITUTE_VAR_HIT_EVAL_CLAUSE)
-    p.have("var_miss_clause:").by_thm(PROV_PRST_SUBSTITUTE_VAR_MISS_EVAL_CLAUSE)
-    p.have("tup_clause:").by_thm(PROV_PRST_SUBSTITUTE_TUP_EVAL_CLAUSE)
-    p.have("app_clause:").by_thm(PROV_PRST_SUBSTITUTE_APP_EVAL_CLAUSE)
-    p.have("eq_clause:").by_thm(PROV_PRST_SUBSTITUTE_EQ_EVAL_CLAUSE)
-    p.have("in_clause:").by_thm(PROV_PRST_SUBSTITUTE_IN_EVAL_CLAUSE)
-    p.have("not_clause:").by_thm(PROV_PRST_SUBSTITUTE_NOT_EVAL_CLAUSE)
-    p.have("imp_clause:").by_thm(PROV_PRST_SUBSTITUTE_IMP_EVAL_CLAUSE)
-    p.have("opaque_clause:").by_thm(PROV_PRST_SUBSTITUTE_OPAQUE_EVAL_CLAUSE)
-    p.thus(
-        "!F t v. Prov_PRST (Eq_pf "
-        "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
-        "  (substitute F t v))"
-    ).by(
-        PROV_PRST_SUBSTITUTE_EVAL_BY_STRUCTURAL_CLAUSES,
-        "empty_clause",
-        "var_hit_clause",
-        "var_miss_clause",
-        "tup_clause",
-        "app_clause",
-        "eq_clause",
-        "in_clause",
-        "not_clause",
-        "imp_clause",
-        "opaque_clause",
-    )
-
-
-@proof
-def PROV_PRST_NUMERAL_ZERO_EVAL_CLAUSE(p):
-    """|- Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt 0 Empty_pt)) (quote_hf 0)).
-
-    Proof sketch. numeral_pr = rec zero_sym (comp adj_sym (proj 2 4)
-    (proj 2 4)). PROV_PRST_REC_BASE_DEF at g := zero_sym,
-    h := comp adj_sym (proj 2 4) (proj 2 4) (after the is_pr_sym side
-    conditions, which are immediate for these primitive symbols) rewrites
-    App_pt numeral_pr (Tup_pt 0 Empty_pt) to App_pt zero_sym ., then
-    PROV_PRST_ZERO_DEF reduces that to Empty_pt. quote_hf 0 unfolds to
-    Empty_pt by its definition on the HOL side, so the Eq_pf closes via
-    PROV_PRST_REFL + PROV_PRST_MP."""
-    p.goal(
-        "Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt 0 Empty_pt)) (quote_hf 0))"
-    )
-    p.sorry()
-
-
-@proof
-def PROV_PRST_NUMERAL_SUC_EVAL_CLAUSE(p):
-    """|- !n. eval n ==> eval (SUC0 n).
-
-    Proof sketch. SUC0 n = Adj_pt n n (von-Neumann successor encoding).
-    PROV_PRST_REC_STEP_DEF at g := zero_sym,
-    h := comp adj_sym (proj 2 4) (proj 2 4) rewrites
-    App_pt numeral_pr (Tup_pt (Adj_pt n n) Empty_pt) to App_pt h applied
-    to the 4-tuple (i, s, r, _vec) where r = App_pt numeral_pr (Tup_pt n
-    Empty_pt). The step body is comp adj_sym (proj 2 4) (proj 2 4): two
-    PROV_PRST_PROJ_DEF instances pick out r in both slots, then
-    adj_sym's defining equation (Adj_pt unfolds as App_pt adj_sym
-    [r; r], reflexive at PROV_PRST_REFL) yields Adj_pt r r. The IH gives
-    r = quote_hf n inside Prov_PRST, so Adj_pt r r = Adj_pt (quote_hf n)
-    (quote_hf n) = quote_hf (SUC0 n) by the HOL quote_hf successor
-    AT-equation. Close via PROV_PRST_MP equality chaining."""
-    p.goal(
-        "!n. Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt n Empty_pt)) (quote_hf n)) "
-        "==> Prov_PRST (Eq_pf "
-        "      (App_pt numeral_pr (Tup_pt (SUC0 n) Empty_pt)) "
-        "      (quote_hf (SUC0 n)))",
-        types={"n": nat0_ty},
     )
     p.sorry()
 
 
 @proof
 def PROV_PRST_NUMERAL_EVAL(p):
-    """|- !n. Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt n Empty_pt))
-                               (quote_hf n))."""
-    p.goal(
-        "!n. Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt n Empty_pt)) (quote_hf n))",
-        types={"n": nat0_ty},
-    )
-    p.fix("n")
-    with p.induction("n"):
-        with p.base():
-            p.thus(
-                "Prov_PRST (Eq_pf "
-                "  (App_pt numeral_pr (Tup_pt 0 Empty_pt)) "
-                "  (quote_hf 0))"
-            ).by_thm(PROV_PRST_NUMERAL_ZERO_EVAL_CLAUSE)
-        with p.step("IH"):
-            p.thus(
-                "Prov_PRST (Eq_pf "
-                "  (App_pt numeral_pr (Tup_pt (SUC0 n) Empty_pt)) "
-                "  (quote_hf (SUC0 n)))"
-            ).by(PROV_PRST_NUMERAL_SUC_EVAL_CLAUSE, "n", "IH")
+    r"""|- !n. Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt n Empty_pt))
+                                (quote_hf n)).
 
-
-@proof
-def PROV_PRST_DIAG_DEFINING_EVAL(p):
-    """|- !n. Prov_PRST (Eq_pf (App_pt diag_pr (Tup_pt n Empty_pt))
-               (App_pt substitute_pr
-                 (Tup_pt n
-                   (Tup_pt (App_pt numeral_pr (Tup_pt n Empty_pt))
-                     (Tup_pt var_x Empty_pt))))).
-
-    Proof sketch. diag_pr := comp substitute_pr [proj 0 1,
-    comp numeral_pr (proj 0 1), const_sym var_x] (see diag_pr_def). The
-    1-arg comp axiom (via PROV_PRST_AX on the comp_def schema; the
-    standard composition reduction packaged for callers) rewrites
-    App_pt diag_pr (Tup_pt n Empty_pt) to App_pt substitute_pr applied to
-    the 3-tuple built from its argument shapers at input n:
-      * proj 0 1 on Tup_pt n Empty_pt = n, via PROV_PRST_PROJ_DEF;
-      * comp numeral_pr (proj 0 1) at the same input = App_pt numeral_pr
-        (Tup_pt n Empty_pt), via comp_def + PROV_PRST_PROJ_DEF;
-      * const_sym var_x at any 1-arg input = var_x, via
-        PROV_PRST_CONST_DEF.
-    Reassemble into Tup_pt n (Tup_pt (App_pt numeral_pr ...) (Tup_pt var_x
-    Empty_pt)) and close the Eq_pf by PROV_PRST_REFL +
-    PROV_PRST_MP. No substitute or numeral evaluation yet."""
+    Bundled obligation: HOL-side structural correctness of numeral_pr
+    (is_partial_pr_sym + nat0 induction unfolding rec/comp/zero/adj to
+    quote_hf's successor equation) plus the PR_EVAL lift. Replaces
+    the previously-stubbed zero / suc constructor clauses with one
+    direct specialisation of `PROV_PRST_PR_EVAL` at f := numeral_pr.
+    """
     p.goal(
         "!n. Prov_PRST (Eq_pf "
-        "  (App_pt diag_pr (Tup_pt n Empty_pt)) "
-        "  (App_pt substitute_pr "
-        "    (Tup_pt n "
-        "      (Tup_pt (App_pt numeral_pr (Tup_pt n Empty_pt)) "
-        "        (Tup_pt var_x Empty_pt)))))",
-        types={"n": nat0_ty},
-    )
-    p.sorry()
-
-
-@proof
-def PROV_PRST_DIAG_EVAL_BY_COMPONENTS(p):
-    """Close diag_pr evaluation from definition, numeral, substitute, and equality.
-
-    Proof sketch. Three equality hypotheses are chained inside Prov_PRST:
-      (1) PROV_PRST_DIAG_DEFINING_EVAL rewrites App_pt diag_pr ... to
-          App_pt substitute_pr (Tup_pt n (Tup_pt (App_pt numeral_pr ...)
-          (Tup_pt var_x Empty_pt)));
-      (2) the numeral hypothesis rewrites the inner
-          App_pt numeral_pr (Tup_pt n Empty_pt) to quote_hf n -- congruence
-          of Eq_pf/Tup_pt under PROV_PRST equality reasoning pushes this
-          rewrite under the substitute_pr argument tuple via
-          PROV_PRST_PAIR_ORD_DEF/Tup_pt congruence;
-      (3) the substitute hypothesis rewrites App_pt substitute_pr (Tup_pt
-          n (Tup_pt (quote_hf n) (Tup_pt var_x Empty_pt))) to substitute n
-          (quote_hf n) var_x, which is diag n by the HOL diag
-          AT-equation.
-    Each rewrite is a PROV_PRST_MP step against PRST transitivity of
-    equality; no global representability axiom is used."""
-    p.goal(
-        "!n. "
-        "Prov_PRST (Eq_pf "
-        "  (App_pt diag_pr (Tup_pt n Empty_pt)) "
-        "  (App_pt substitute_pr "
-        "    (Tup_pt n "
-        "      (Tup_pt (App_pt numeral_pr (Tup_pt n Empty_pt)) "
-        "        (Tup_pt var_x Empty_pt))))) "
-        "==> Prov_PRST (Eq_pf "
-        "      (App_pt numeral_pr (Tup_pt n Empty_pt)) "
-        "      (quote_hf n)) "
-        "==> Prov_PRST (Eq_pf "
-        "      (App_pt substitute_pr "
-        "        (Tup_pt n (Tup_pt (quote_hf n) (Tup_pt var_x Empty_pt)))) "
-        "      (substitute n (quote_hf n) var_x)) "
-        "==> Prov_PRST (Eq_pf (App_pt diag_pr (Tup_pt n Empty_pt)) (diag n))",
+        "  (App_pt numeral_pr (Tup_pt n Empty_pt)) "
+        "  (quote_hf n))",
         types={"n": nat0_ty},
     )
     p.sorry()
@@ -3031,26 +2685,23 @@ def PROV_PRST_DIAG_EVAL_BY_COMPONENTS(p):
 
 @proof
 def PROV_PRST_DIAG_EVAL(p):
-    """|- !n. Prov_PRST (Eq_pf (App_pt diag_pr (Tup_pt n Empty_pt)) (diag n))."""
+    r"""|- !n. Prov_PRST (Eq_pf (App_pt diag_pr (Tup_pt n Empty_pt))
+                                (diag n)).
+
+    Bundled obligation: HOL-side structural correctness of diag_pr
+    (is_partial_pr_sym + composition reduction unfolding diag_pr's
+    comp of substitute_pr / numeral_pr / const_sym) plus the PR_EVAL
+    lift. Replaces the previously-stubbed DEFINING_EVAL +
+    EVAL_BY_COMPONENTS pair with one direct specialisation of
+    `PROV_PRST_PR_EVAL` at f := diag_pr.
+    """
     p.goal(
-        "!n. Prov_PRST (Eq_pf (App_pt diag_pr (Tup_pt n Empty_pt)) (diag n))",
+        "!n. Prov_PRST (Eq_pf "
+        "  (App_pt diag_pr (Tup_pt n Empty_pt)) "
+        "  (diag n))",
         types={"n": nat0_ty},
     )
-    p.fix("n")
-    p.have("diag_def:").by(PROV_PRST_DIAG_DEFINING_EVAL, "n")
-    p.have("numeral_eval:").by(PROV_PRST_NUMERAL_EVAL, "n")
-    p.have("subst_eval:").by(
-        PROV_PRST_SUBSTITUTE_EVAL, "n", "quote_hf n", "var_x"
-    )
-    p.thus(
-        "Prov_PRST (Eq_pf (App_pt diag_pr (Tup_pt n Empty_pt)) (diag n))"
-    ).by(
-        PROV_PRST_DIAG_EVAL_BY_COMPONENTS,
-        "n",
-        "diag_def",
-        "numeral_eval",
-        "subst_eval",
-    )
+    p.sorry()
 
 
 # ---------------------------------------------------------------------------
@@ -3598,8 +3249,8 @@ if __name__ == "__main__":
     print("    FIND_PROOF_PR_MU_CORRECT   :", pp_thm(FIND_PROOF_PR_MU_CORRECT))
     print()
     print("Stage 2B (d.4) -- Proof_PRST_pr correctness.")
-    print("    PRST_INTERNALIZES_TRUE_PR_EVAL :", pp_thm(PRST_INTERNALIZES_TRUE_PR_EVAL))
-    print("    PRST_INTERNALIZES_FALSE_PR_EVAL :", pp_thm(PRST_INTERNALIZES_FALSE_PR_EVAL))
+    print("    PROOF_PRST_PR_REPRESENTS :", pp_thm(PROOF_PRST_PR_REPRESENTS))
+    print("    PROV_PRST_PR_EVAL        :", pp_thm(PROV_PRST_PR_EVAL))
     print()
     print("Stage 2B (e) -- free evaluation of PR symbols.")
     print("    PROV_PRST_SUBSTITUTE_EVAL :", pp_thm(PROV_PRST_SUBSTITUTE_EVAL))

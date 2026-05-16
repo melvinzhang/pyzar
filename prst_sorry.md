@@ -10,41 +10,74 @@ The sole explicit PRST axiom outside this ledger is `MU_CORRECTNESS`.
 This ledger is ordered by dependency and expected discharge path, not by file.
 Pure forwarding theorems are deleted instead of tracked.
 
-### Architectural note: no structural HOL↔PR bridge
+### Architectural note: Paulson-form structural bridge
 
 `Mem_PRST`, `ValidProof_PRST`, and `Proof_PRST` remain as HOL relations
 for stating top-level theorems (Gödel statements mention `Prov_PRST`,
-which is defined via `Proof_PRST`). The internal checker functions
-(`mem_t_pr`, `exists_mp_witness_pr`, `valid_step_pr`, `valid_proof_list_pr`,
-`is_tup_pr`, `is_pterm_pr`, `is_pr_axiom_pr`, `substitute_pr` recursion)
-are reasoned about *directly* via `App_pt ... = T_pt`. There is no
-structural correctness theorem bridging the two sides — that bridge layer
-was deleted as scaffolding-only churn. Downstream stubs that need to
-connect HOL `Proof_PRST` to PR `Proof_PRST_pr` go through the standard
-PRST evaluator package (`PRST_INTERNALIZES_TRUE_PR_EVAL` /
-`PRST_INTERNALIZES_FALSE_PR_EVAL`) rather than a body-correctness theorem.
+which is defined via `Proof_PRST`). The bridge to the PR checker
+`Proof_PRST_pr` is the single theorem `PROOF_PRST_PR_REPRESENTS`:
+
+```
+|- !pf n.
+     (Proof_PRST pf n
+       ==> App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt)
+  /\ (~Proof_PRST pf n
+       ==> App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt).
+```
+
+Internal checker sub-lemmas (`mem_t_pr`, `exists_mp_witness_pr`,
+`valid_step_pr`, `valid_proof_list_pr`, `is_tup_pr`, `is_pterm_pr`,
+`is_pr_axiom_pr`) are proof-internal to `PROOF_PRST_PR_REPRESENTS` and
+do not appear as separate stubs; they re-emerge as sub-lemmas during
+its discharge. This replaces the previously-cut granular section 0 +
+0a stack (`IS_TUP_PR_CORRECT`, `MEM_T_PR_CORRECT`,
+`EXISTS_MP_WITNESS_PR_CORRECT`, `VALID_STEP_PR_CORRECT`,
+`VALID_PROOF_LIST_PR_CORRECT`, `PROOF_PRST_PR_BODY_CORRECT`, and the
+`APP_PT_*` evaluator stack) with one Paulson-form bridge.
+
+Boolean-view consumers (`= T_pt \/ = F_pt` dichotomy, semantic
+negation, quoted-input lifts) instantiate the bridge inline at the
+call site rather than going through named corollary stubs. The
+Prov_PRST-flavoured ones compose the bridge with `PROV_PRST_PR_EVAL`
+at `r := T_pt` / `r := F_pt`.
 
 ### 1. `Proof_PRST_pr` Checker API Boundary
 
-These are the immediate checker targets. All stated purely in PR terms
-(`App_pt Proof_PRST_pr ... = T_pt` / `= F_pt`) plus, on the `~ Proof_PRST`
-side, the HOL provability relation as antecedent only.
+Two unifying Paulson-form stubs cover the checker API. Per-pattern
+corollaries (boolean-value dichotomy, semantic negation, quoted-input
+forms, T_pt/F_pt specialisations) are not stubbed as named theorems;
+downstream consumers instantiate the unifiers inline at the call
+site. If a pattern recurs enough that a named lemma earns its keep,
+introduce it then as a real (non-sorry) theorem.
 
-- `PRST_INTERNALIZES_TRUE_PR_EVAL`
-- `PRST_INTERNALIZES_FALSE_PR_EVAL`
-- `PROOF_PRST_PR_BOOLEAN_VALUE`
-- `PROOF_PRST_PR_SEMANTIC_NEG`
-- `PROOF_PRST_PR_QUOTED_TRUE_EVAL`
-- `PROOF_PRST_PR_QUOTED_FALSE_EVAL`
+Structural bridge:
 
-The quoted-input obligations intentionally do not assert raw-to-`quote_hf`
-checker-value preservation. `quote_hf` is the object-language numeral
-interface; the proof route should use `numeral_pr`/`quote_hf` evaluation plus
-internalisation of the resulting PR computation.
+- `PROOF_PRST_PR_REPRESENTS` — `Proof_PRST pf n` iff
+  `App_pt Proof_PRST_pr ... = T_pt` (with the negative direction
+  giving `F_pt`). Stated as a paired implication so the same theorem
+  supplies both directions used by downstream consumers (boolean
+  dichotomy by LEM on `Proof_PRST pf n`; semantic negation directly;
+  quoted-input forms by composing with `PROV_PRST_PR_EVAL` plus
+  `quote_hf`).
 
-The `~ Proof_PRST pf n` antecedent in the semantic-neg / quoted-false stubs
-is lifted to the PR side by case-splitting on `PROOF_PRST_PR_BOOLEAN_VALUE`
-plus PRST soundness — *not* via a structural body-correctness theorem.
+Generic PR-eval bridge:
+
+- `PROV_PRST_PR_EVAL` —
+  `is_partial_pr_sym f /\ App_pt f args = r
+   ==> Prov_PRST (Eq_pf (App_pt f args) r)`.
+  Paulson-form bridge proved by induction over the µ-closure
+  structure of `is_partial_pr_sym`, using
+  `PROV_PRST_PR_DEF_AT_LIFT` (§3a) at the base case and
+  `MU_CORRECTNESS` for the µ-closure step. Boolean-target uses
+  instantiate `r := T_pt` / `r := F_pt` at the call site. Per-symbol
+  uses (substitute_pr / numeral_pr / diag_pr) instantiate `f` and `r`
+  similarly; see §3 evaluator clauses.
+
+The quoted-input obligations downstream intentionally do not assert
+raw-to-`quote_hf` checker-value preservation. `quote_hf` is the
+object-language numeral interface; the proof route uses
+`numeral_pr`/`quote_hf` evaluation plus internalisation of the
+resulting PR computation.
 
 ### 2. Proof-List Combination API
 
@@ -53,26 +86,81 @@ G2 proof-combinator path.
 
 - `MP_COMBINE_PR_CORRECT`
 
-### 3. Internal PRST Evaluator Clauses
+### 3. Public PR-Symbol Evaluators
 
-These are the constructor and composition clauses behind the public evaluator
-theorems for `substitute_pr`, `numeral_pr`, and `diag_pr`.
+The public evaluators are each a one-statement bundled obligation
+specialising `PROV_PRST_PR_EVAL` (§1) at a specific PR symbol. The
+previously-stubbed 15-clause decomposition (10 substitute
+constructor clauses + 1 substitute combinator + 2 numeral + 2 diag)
+has been consolidated: each evaluator captures both its HOL-side
+structural correctness (is_partial_pr_sym + universal App_pt
+equation) and the PR_EVAL lift in a single sorry.
 
-- `PROV_PRST_SUBSTITUTE_EMPTY_EVAL_CLAUSE`
-- `PROV_PRST_SUBSTITUTE_VAR_HIT_EVAL_CLAUSE`
-- `PROV_PRST_SUBSTITUTE_VAR_MISS_EVAL_CLAUSE`
-- `PROV_PRST_SUBSTITUTE_TUP_EVAL_CLAUSE`
-- `PROV_PRST_SUBSTITUTE_APP_EVAL_CLAUSE`
-- `PROV_PRST_SUBSTITUTE_EQ_EVAL_CLAUSE`
-- `PROV_PRST_SUBSTITUTE_IN_EVAL_CLAUSE`
-- `PROV_PRST_SUBSTITUTE_NOT_EVAL_CLAUSE`
-- `PROV_PRST_SUBSTITUTE_IMP_EVAL_CLAUSE`
-- `PROV_PRST_SUBSTITUTE_OPAQUE_EVAL_CLAUSE`
-- `PROV_PRST_SUBSTITUTE_EVAL_BY_STRUCTURAL_CLAUSES`
-- `PROV_PRST_NUMERAL_ZERO_EVAL_CLAUSE`
-- `PROV_PRST_NUMERAL_SUC_EVAL_CLAUSE`
-- `PROV_PRST_DIAG_DEFINING_EVAL`
-- `PROV_PRST_DIAG_EVAL_BY_COMPONENTS`
+- `PROV_PRST_SUBSTITUTE_EVAL` — substitute_pr at any (F, t, v).
+- `PROV_PRST_NUMERAL_EVAL` — numeral_pr equals quote_hf.
+- `PROV_PRST_DIAG_EVAL` — diag_pr equals the meta-level diag.
+
+Discharge route for each: (1) is_partial_pr_sym <symbol> by
+structural argument over the symbol's comp / rec / course_rec
+definition, (2) universal HOL equation by induction matching the
+symbol's defining recursion, (3) `PROV_PRST_PR_EVAL` to lift.
+
+#### §3a. Missing PRST infrastructure blocking §3
+
+The substitute / numeral / diag clauses in §3 are not blocked by the DSL
+itself (see `doc/dsl_spec.md`); they are blocked by missing PRST-domain
+primitives. These have now been landed as `p.sorry()` stubs in
+`prst_proof.py` (between `PROV_PRST_ADJ_DEF_AT` and the mu-correctness
+axiom block) so that consumers can import them and proofs can be
+written assuming the signatures. The schemas at the parent level
+(`PROV_PRST_REC_BASE_DEF`, etc.) are *not* sorried — only their applied
+forms.
+
+Sole stub (Paulson-form unifier):
+
+- `PROV_PRST_PR_DEF_AT_LIFT` —
+  `is_pr_sym F /\ App_pt F args = body
+   ==> Prov_PRST (Eq_pf (App_pt F args) body)`.
+  Single-step PR-def AT-lifting schema. Per-symbol AT specialisations
+  (proj 1 / proj 3_0/1/2 / proj 4_2 / rec_base/step /
+  course_rec_base/step / if_in_true/false / const /
+  pair_left/right/ord / comp 1/2/3) are not stubbed as named
+  theorems. Downstream consumers SPEC the schema at the specific PR
+  symbol, discharge the HOL antecedent `App_pt F args = body` by
+  `REFL` or the symbol's defining HOL equation, and use the
+  resulting `Prov_PRST (Eq_pf (App_pt F args) body)`. If a downstream
+  caller invokes a specific specialisation often enough that a named
+  lemma earns its keep, introduce it then as a real (non-sorry)
+  theorem.
+
+PRST equality congruence layer.
+
+Sole stub (Paulson-form unifier):
+
+- `PROV_PRST_EQ_LEIBNIZ` —
+  `Prov_PRST (Eq_pf a b) /\ Prov_PRST (substitute_p F v a)
+   ==> Prov_PRST (substitute_p F v b)`.
+  The substitution-of-equals (function-context equality) schema.
+  Derives from the propositional logical axioms +
+  `PROV_PRST_REFL` + `PROV_PRST_SUBST` in the standard
+  Świerczkowski / Paulson HF derivation.
+
+`PROV_PRST_EQ_SYM`, `_EQ_TRANS`, `_EQ_CONG_APP_PT_ARG`,
+`_EQ_CONG_TUP_PT`, and `_EQ_CONG_PAIR_ORD` are not stubbed as named
+theorems. They are 3-5 line Leibniz instantiations of
+`PROV_PRST_EQ_LEIBNIZ` (see its docstring for the explicit
+context/seed for each) and are inlined at the call site. If a
+downstream caller invokes the same pattern often enough that a
+named lemma earns its keep, introduce it then as a real (non-sorry)
+theorem.
+
+Singleton-membership Prov_PRST facts
+(`PROV_PRST_IN_PA_SINGLETON_SELF`, `PROV_PRST_NOT_IN_PA_SINGLETON`)
+were previously stubbed as antecedents for the deleted
+`PROV_PRST_IF_IN_TRUE/FALSE_DEF_AT` stubs. With no remaining
+consumers they have been removed; downstream uses of PR-level
+singleton membership derive directly through `PROV_PRST_PR_EVAL` or
+`PROV_PRST_PR_DEF_AT_LIFT` at the call site.
 
 ### 4. Representation Bridges
 
@@ -110,25 +198,39 @@ proof depends on the checker/list-combine API, not on Loeb.
 
 ## Counts
 
-- Remaining `p.sorry()` sites: 40
-  - prst_proof.py: 20
-  - prst_repr.py:  6
+- Remaining `p.sorry()` sites: 24
+  - prst_proof.py: 8
+    - 4 unifying Paulson-form stubs:
+      `PROOF_PRST_PR_REPRESENTS` (HOL↔PR structural bridge),
+      `PROV_PRST_PR_EVAL` (generic PR-eval bridge),
+      `PROV_PRST_PR_DEF_AT_LIFT` (single-step PR-def AT-lifting
+      schema), `PROV_PRST_EQ_LEIBNIZ` (substitution-of-equals).
+    - 3 public PR-symbol evaluators (each a bundled
+      HOL-correctness + PR_EVAL specialisation):
+      `PROV_PRST_SUBSTITUTE_EVAL`, `PROV_PRST_NUMERAL_EVAL`,
+      `PROV_PRST_DIAG_EVAL`.
+    - 1 G1 representability core: `PROV_PRST_REPRESENTS`.
+  - prst_repr.py:  2 (`SUBSTITUTE_REPRESENTS_PRST`,
+    `DIAG_REPRESENTS_PRST`.)
   - prst_godel1.py: 6
   - prst_godel2.py: 8
 
-  *(Down from 65: two scaffolding cuts. (1) Section 0 + 0b structural bridge
-  (`IS_TUP_PR_CORRECT`, `MEM_T_PR_CORRECT`, `EXISTS_MP_WITNESS_PR_CORRECT`,
-  `VALID_STEP_PR_CORRECT`, `VALID_PROOF_LIST_PR_CORRECT`, the five course_rec
-  sub-stubs, and `PROOF_PRST_PR_BODY_CORRECT`). (2) Section 0a App_pt
-  evaluator stack (`APP_PT_PROJ_AT_*`, `APP_PT_COMP_EVAL_*`,
-  `APP_PT_CONST_EVAL`, `APP_PT_IF_IN_*_EVAL`, `APP_PT_PAIR_*_EVAL`,
-  `APP_PT_PAIR_ORD_EVAL`, `APP_PT_REC_*_EVAL`, `APP_PT_COURSE_REC_*_EVAL`)
-  plus the boolean/eq_nat helper proofs that consumed them
-  (`AND/OR_BOOL_PR_CORRECT`/`REDUCE`/`TRUE_VIEW`, `EQ_NAT_PR_SAME`/`CORRECT_*`/
-  `TRUE_VIEW`, `F_PT_NEQ_T_PT`, `TUP_HEAD_PR_CORRECT`,
-  `PROOF_PRST_PR_BOOL_VIEW`). The boolean stack was orphaned by cut (1); no
-  remaining stub consumes any of it. See the "no structural HOL↔PR bridge"
-  note above.)*
+  *(Consolidation history:
+  (1) Section 0 + 0b structural bridge and Section 0a App_pt
+  evaluator stack were cut as scaffolding, then restored as one
+  Paulson-form bridge (`PROOF_PRST_PR_REPRESENTS`).
+  (2) The 12+ `PROV_PRST_*_DEF_AT_*` per-symbol AT specialisations,
+  the 5-stub equality congruence layer
+  (`PROV_PRST_EQ_SYM/_TRANS/_CONG_*`), the boolean PR-eval
+  specialisations (`PRST_INTERNALIZES_TRUE/FALSE_PR_EVAL`), the
+  four §1 quoted-input / boolean-view corollaries
+  (`PROOF_PRST_PR_BOOLEAN_VALUE/_SEMANTIC_NEG/_QUOTED_*_EVAL`),
+  the 2 singleton-membership facts
+  (`PROV_PRST_IN_PA_SINGLETON_SELF`, `_NOT_IN_PA_SINGLETON`), and
+  the 15-clause §3 substitute / numeral / diag decomposition (10
+  substitute constructor clauses + 1 substitute combinator + 2
+  numeral + 2 diag) are not stubbed as named theorems. The
+  unifiers / public evaluators are the sole API.)*
 
 ## PR Symbol Evaluator Spikes
 
