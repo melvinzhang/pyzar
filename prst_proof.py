@@ -106,6 +106,8 @@ from hf_proof import (
 from prst_syntax import (
     Imp_pf,  # noqa: F401  -- parser alias for is_pr_axiom
     Eq_pf,  # noqa: F401  -- parser alias for Prov_PRST_internal
+    Not_pf,  # noqa: F401  -- parser alias for substitute_pr clauses
+    In_pa,  # noqa: F401  -- parser alias for substitute_pr clauses
     is_pterm,  # noqa: F401  -- parser alias for is_pr_refl
     Var_pt,  # noqa: F401  -- parser alias for Prov_PRST_internal
     App_pt,  # noqa: F401  -- parser alias for Prov_PRST_internal
@@ -1848,67 +1850,318 @@ def PROV_PRST_MP(p):
 # ---------------------------------------------------------------------------
 # Stage 2B (e) -- internal arithmetic via PR symbols.
 #
-# Both ``substitute`` and ``numeral`` are PR symbols, so the
-# corresponding term is *already* the result. The Prov_PRST version of
-# ``substitute(F, numeral n, v) = result`` is one defining-equation
-# lookup:
+# The public evaluator schemas below are now proof targets, not primitive
+# obligations. Their remaining obligations sit at the actual decomposition
+# boundaries:
 #
-#   |- !F v. Prov_PRST (Eq_pf (App_pt substitute_pr
-#                                  (Tup_pt F (Tup_pt (App_pt numeral_pr
-#                                                       (Tup_pt n Empty_pt))
-#                                                    (Tup_pt v Empty_pt))))
-#                             <result computed at HOL level>).
-#
-# Free evaluation of PR-symbol applications inside Prov_PRST.
+#   * numeral_pr: recursion base/step.
+#   * substitute_pr: one structural clause for each PRST syntax family, plus
+#     the course-recursion completeness bridge.
+#   * diag_pr: defining composition and PRST equality chaining from the
+#     numeral/substitute component evaluations.
 # ---------------------------------------------------------------------------
 
 
+_SUBSTITUTE_EVAL_FULL = (
+    "!F t v. Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute F t v))"
+)
+
+_SUBSTITUTE_EVAL_EMPTY_CLAUSE = (
+    "!t v. Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr "
+    "    (Tup_pt Empty_pt (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute Empty_pt t v))"
+)
+
+_SUBSTITUTE_EVAL_VAR_HIT_CLAUSE = (
+    "!t v. Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr "
+    "    (Tup_pt (Var_pt v) (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute (Var_pt v) t v))"
+)
+
+_SUBSTITUTE_EVAL_VAR_MISS_CLAUSE = (
+    "!x t v. ~(x = v) ==> Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr "
+    "    (Tup_pt (Var_pt x) (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute (Var_pt x) t v))"
+)
+
+_SUBSTITUTE_EVAL_TUP_CLAUSE = (
+    "!a b t v. "
+    "Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr (Tup_pt a (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute a t v)) "
+    "==> Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr (Tup_pt b (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute b t v)) "
+    "==> Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr "
+    "    (Tup_pt (Tup_pt a b) (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute (Tup_pt a b) t v))"
+)
+
+_SUBSTITUTE_EVAL_APP_CLAUSE = (
+    "!f args t v. "
+    "Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr "
+    "    (Tup_pt args (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute args t v)) "
+    "==> Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr "
+    "    (Tup_pt (App_pt f args) (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute (App_pt f args) t v))"
+)
+
+_SUBSTITUTE_EVAL_EQ_CLAUSE = (
+    "!a b t v. "
+    "Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr (Tup_pt a (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute a t v)) "
+    "==> Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr (Tup_pt b (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute b t v)) "
+    "==> Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr "
+    "    (Tup_pt (Eq_pf a b) (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute (Eq_pf a b) t v))"
+)
+
+_SUBSTITUTE_EVAL_IN_CLAUSE = (
+    "!a b t v. "
+    "Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr (Tup_pt a (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute a t v)) "
+    "==> Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr (Tup_pt b (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute b t v)) "
+    "==> Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr "
+    "    (Tup_pt (In_pa a b) (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute (In_pa a b) t v))"
+)
+
+_SUBSTITUTE_EVAL_NOT_CLAUSE = (
+    "!F t v. "
+    "Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute F t v)) "
+    "==> Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr "
+    "    (Tup_pt (Not_pf F) (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute (Not_pf F) t v))"
+)
+
+_SUBSTITUTE_EVAL_IMP_CLAUSE = (
+    "!F G t v. "
+    "Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute F t v)) "
+    "==> Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr (Tup_pt G (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute G t v)) "
+    "==> Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr "
+    "    (Tup_pt (Imp_pf F G) (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute (Imp_pf F G) t v))"
+)
+
+_SUBSTITUTE_EVAL_OPAQUE_CLAUSE = (
+    "!F t v. ~(is_pterm F) /\\ ~(is_pform F) ==> "
+    "Prov_PRST (Eq_pf "
+    "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
+    "  (substitute F t v))"
+)
+
+_SUBSTITUTE_EVAL_STRUCTURAL_GOAL = (
+    " ==> ".join(
+        f"({clause})"
+        for clause in [
+            _SUBSTITUTE_EVAL_EMPTY_CLAUSE,
+            _SUBSTITUTE_EVAL_VAR_HIT_CLAUSE,
+            _SUBSTITUTE_EVAL_VAR_MISS_CLAUSE,
+            _SUBSTITUTE_EVAL_TUP_CLAUSE,
+            _SUBSTITUTE_EVAL_APP_CLAUSE,
+            _SUBSTITUTE_EVAL_EQ_CLAUSE,
+            _SUBSTITUTE_EVAL_IN_CLAUSE,
+            _SUBSTITUTE_EVAL_NOT_CLAUSE,
+            _SUBSTITUTE_EVAL_IMP_CLAUSE,
+            _SUBSTITUTE_EVAL_OPAQUE_CLAUSE,
+        ]
+    )
+    + " ==> "
+    + _SUBSTITUTE_EVAL_FULL
+)
+
+
 @proof
-def PROV_PRST_SUBSTITUTE_EVAL(p):
-    """|- !F t v. Prov_PRST (Eq_pf (App_pt substitute_pr
-                                    (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt))))
-                                  (substitute F t v)).
-
-    Where ``substitute`` on the RHS is HOL's substitute function (from
-    hf_syntax). substitute_pr now has a REAL body (course_rec + h_subst
-    dispatch) so the equation is no longer Layer-0-blocked. The proof
-    structure is strong structural induction on F with per-constructor
-    case analysis.
-
-    Dependency chain (what's needed for a real proof):
-
-    1. PROV_PRST_SUBST. Required to substitute
-       formal Var_t slots in the parametric defining axioms (PROV_PRST_
-       COURSE_REC_STEP_DEF, PROV_PRST_PROJ_DEF, etc.) at the concrete
-       (F, t, v) values for each reduction step. This now follows from
-       is_pr_def_instance.
-
-    2. PROV_PRST_MP. Required to chain conditional
-       axioms like IF_IN_TRUE/FALSE_DEF_AXIOM (which carry an In_pa /
-       ~In_pa antecedent) into the dispatch reduction at each formula-
-       tag case in h_subst. This is now proved over PRST-list API stubs.
-
-    3. PRST equality reasoning (reflexivity, transitivity, congruence).
-       Possibly derivable from the existing axiom infrastructure, but
-       no PROV_PRST_EQ_* helpers exist in prst_proof yet.
-
-    Once 1-3 land, the proof becomes ~80 lines:
-      - Strong induction on F via IS_PFORM_REC / IS_PTERM_REC.
-      - Base case (F = Empty_pt = 0): reduce
-        App_pt substitute_pr (Tup_pt 0 (Tup_pt t (Tup_pt v Empty_pt)))
-        via outer comp_sym → App_pt (course_rec g_subst h_subst)
-        (Tup_pt 0 (Tup_pt (Pair_ord t v) Empty_pt)) → App_pt g_subst
-        (Tup_pt (Pair_ord t v) Empty_pt) = 0 (by const_sym axiom).
-        Bridge to HOL: substitute Empty_pt t v = Empty_pt = 0 via the
-        SUBSTITUTE_P_AT_EMPTY equation.
-      - Step cases (F = Pair_ord a b for each formula-constructor tag a):
-        course_rec step axiom + h_subst dispatch at tag a + IH for
-        subterms. Each case ~10 lines.
-
-    STUB until prerequisites 1-3 land.
-    """
+def PROV_PRST_SUBSTITUTE_EMPTY_EVAL_CLAUSE(p):
+    """|- !t v. Prov_PRST (Eq_pf
+          (App_pt substitute_pr (Tup_pt Empty_pt (Tup_pt t (Tup_pt v Empty_pt))))
+          (substitute Empty_pt t v))."""
     p.goal(
-        "!F t v. Prov_PRST (Eq_pf "
+        "!t v. Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr "
+        "    (Tup_pt Empty_pt (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute Empty_pt t v))",
+        types={"t": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROV_PRST_SUBSTITUTE_VAR_HIT_EVAL_CLAUSE(p):
+    """|- !t v. Prov_PRST (Eq_pf
+          (App_pt substitute_pr (Tup_pt (Var_pt v) (Tup_pt t (Tup_pt v Empty_pt))))
+          (substitute (Var_pt v) t v))."""
+    p.goal(
+        "!t v. Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr "
+        "    (Tup_pt (Var_pt v) (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute (Var_pt v) t v))",
+        types={"t": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROV_PRST_SUBSTITUTE_VAR_MISS_EVAL_CLAUSE(p):
+    """|- !x t v. ~(x = v) ==> Prov_PRST (Eq_pf
+          (App_pt substitute_pr (Tup_pt (Var_pt x) (Tup_pt t (Tup_pt v Empty_pt))))
+          (substitute (Var_pt x) t v))."""
+    p.goal(
+        "!x t v. ~(x = v) ==> Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr "
+        "    (Tup_pt (Var_pt x) (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute (Var_pt x) t v))",
+        types={"x": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROV_PRST_SUBSTITUTE_TUP_EVAL_CLAUSE(p):
+    """|- !a b t v. eval a ==> eval b ==> eval (Tup_pt a b)."""
+    p.goal(
+        "!a b t v. "
+        "Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr (Tup_pt a (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute a t v)) "
+        "==> Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr (Tup_pt b (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute b t v)) "
+        "==> Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr "
+        "    (Tup_pt (Tup_pt a b) (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute (Tup_pt a b) t v))",
+        types={"a": nat0_ty, "b": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROV_PRST_SUBSTITUTE_APP_EVAL_CLAUSE(p):
+    """|- !f args t v. eval args ==> eval (App_pt f args)."""
+    p.goal(
+        "!f args t v. "
+        "Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr "
+        "    (Tup_pt args (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute args t v)) "
+        "==> Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr "
+        "    (Tup_pt (App_pt f args) (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute (App_pt f args) t v))",
+        types={"f": nat0_ty, "args": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROV_PRST_SUBSTITUTE_EQ_EVAL_CLAUSE(p):
+    """|- !a b t v. eval a ==> eval b ==> eval (Eq_pf a b)."""
+    p.goal(
+        "!a b t v. "
+        "Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr (Tup_pt a (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute a t v)) "
+        "==> Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr (Tup_pt b (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute b t v)) "
+        "==> Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr "
+        "    (Tup_pt (Eq_pf a b) (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute (Eq_pf a b) t v))",
+        types={"a": nat0_ty, "b": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROV_PRST_SUBSTITUTE_IN_EVAL_CLAUSE(p):
+    """|- !a b t v. eval a ==> eval b ==> eval (In_pa a b)."""
+    p.goal(
+        "!a b t v. "
+        "Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr (Tup_pt a (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute a t v)) "
+        "==> Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr (Tup_pt b (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute b t v)) "
+        "==> Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr "
+        "    (Tup_pt (In_pa a b) (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute (In_pa a b) t v))",
+        types={"a": nat0_ty, "b": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROV_PRST_SUBSTITUTE_NOT_EVAL_CLAUSE(p):
+    """|- !F t v. eval F ==> eval (Not_pf F)."""
+    p.goal(
+        "!F t v. "
+        "Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute F t v)) "
+        "==> Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr "
+        "    (Tup_pt (Not_pf F) (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute (Not_pf F) t v))",
+        types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROV_PRST_SUBSTITUTE_IMP_EVAL_CLAUSE(p):
+    """|- !F G t v. eval F ==> eval G ==> eval (Imp_pf F G)."""
+    p.goal(
+        "!F G t v. "
+        "Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute F t v)) "
+        "==> Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr (Tup_pt G (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute G t v)) "
+        "==> Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr "
+        "    (Tup_pt (Imp_pf F G) (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute (Imp_pf F G) t v))",
+        types={"F": nat0_ty, "G": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROV_PRST_SUBSTITUTE_OPAQUE_EVAL_CLAUSE(p):
+    """|- !F t v. ~(is_pterm F) /\\ ~(is_pform F) ==> eval F."""
+    p.goal(
+        "!F t v. ~(is_pterm F) /\\ ~(is_pform F) ==> "
+        "Prov_PRST (Eq_pf "
         "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
         "  (substitute F t v))",
         types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
@@ -1917,14 +2170,141 @@ def PROV_PRST_SUBSTITUTE_EVAL(p):
 
 
 @proof
+def PROV_PRST_SUBSTITUTE_EVAL_BY_STRUCTURAL_CLAUSES(p):
+    """Close substitute_pr evaluation from the per-constructor clauses."""
+    p.goal(
+        _SUBSTITUTE_EVAL_STRUCTURAL_GOAL,
+        types={"F": nat0_ty, "G": nat0_ty, "a": nat0_ty, "b": nat0_ty,
+               "f": nat0_ty, "args": nat0_ty, "t": nat0_ty, "v": nat0_ty,
+               "x": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROV_PRST_SUBSTITUTE_EVAL(p):
+    """|- !F t v. Prov_PRST (Eq_pf (App_pt substitute_pr
+                                    (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt))))
+                                  (substitute F t v))."""
+    p.goal(
+        "!F t v. Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute F t v))",
+        types={"F": nat0_ty, "t": nat0_ty, "v": nat0_ty},
+    )
+    p.have("empty_clause:").by_thm(PROV_PRST_SUBSTITUTE_EMPTY_EVAL_CLAUSE)
+    p.have("var_hit_clause:").by_thm(PROV_PRST_SUBSTITUTE_VAR_HIT_EVAL_CLAUSE)
+    p.have("var_miss_clause:").by_thm(PROV_PRST_SUBSTITUTE_VAR_MISS_EVAL_CLAUSE)
+    p.have("tup_clause:").by_thm(PROV_PRST_SUBSTITUTE_TUP_EVAL_CLAUSE)
+    p.have("app_clause:").by_thm(PROV_PRST_SUBSTITUTE_APP_EVAL_CLAUSE)
+    p.have("eq_clause:").by_thm(PROV_PRST_SUBSTITUTE_EQ_EVAL_CLAUSE)
+    p.have("in_clause:").by_thm(PROV_PRST_SUBSTITUTE_IN_EVAL_CLAUSE)
+    p.have("not_clause:").by_thm(PROV_PRST_SUBSTITUTE_NOT_EVAL_CLAUSE)
+    p.have("imp_clause:").by_thm(PROV_PRST_SUBSTITUTE_IMP_EVAL_CLAUSE)
+    p.have("opaque_clause:").by_thm(PROV_PRST_SUBSTITUTE_OPAQUE_EVAL_CLAUSE)
+    p.thus(
+        "!F t v. Prov_PRST (Eq_pf "
+        "  (App_pt substitute_pr (Tup_pt F (Tup_pt t (Tup_pt v Empty_pt)))) "
+        "  (substitute F t v))"
+    ).by(
+        PROV_PRST_SUBSTITUTE_EVAL_BY_STRUCTURAL_CLAUSES,
+        "empty_clause",
+        "var_hit_clause",
+        "var_miss_clause",
+        "tup_clause",
+        "app_clause",
+        "eq_clause",
+        "in_clause",
+        "not_clause",
+        "imp_clause",
+        "opaque_clause",
+    )
+
+
+@proof
+def PROV_PRST_NUMERAL_ZERO_EVAL_CLAUSE(p):
+    """|- Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt 0 Empty_pt)) (quote_hf 0))."""
+    p.goal(
+        "Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt 0 Empty_pt)) (quote_hf 0))"
+    )
+    p.sorry()
+
+
+@proof
+def PROV_PRST_NUMERAL_SUC_EVAL_CLAUSE(p):
+    """|- !n. eval n ==> eval (SUC0 n)."""
+    p.goal(
+        "!n. Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt n Empty_pt)) (quote_hf n)) "
+        "==> Prov_PRST (Eq_pf "
+        "      (App_pt numeral_pr (Tup_pt (SUC0 n) Empty_pt)) "
+        "      (quote_hf (SUC0 n)))",
+        types={"n": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
 def PROV_PRST_NUMERAL_EVAL(p):
     """|- !n. Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt n Empty_pt))
-                               (quote_hf n)).
-
-    Similar to PROV_PRST_SUBSTITUTE_EVAL, for numeral. STUB.
-    """
+                               (quote_hf n))."""
     p.goal(
         "!n. Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt n Empty_pt)) (quote_hf n))",
+        types={"n": nat0_ty},
+    )
+    p.fix("n")
+    with p.induction("n"):
+        with p.base():
+            p.thus(
+                "Prov_PRST (Eq_pf "
+                "  (App_pt numeral_pr (Tup_pt 0 Empty_pt)) "
+                "  (quote_hf 0))"
+            ).by_thm(PROV_PRST_NUMERAL_ZERO_EVAL_CLAUSE)
+        with p.step("IH"):
+            p.thus(
+                "Prov_PRST (Eq_pf "
+                "  (App_pt numeral_pr (Tup_pt (SUC0 n) Empty_pt)) "
+                "  (quote_hf (SUC0 n)))"
+            ).by(PROV_PRST_NUMERAL_SUC_EVAL_CLAUSE, "n", "IH")
+
+
+@proof
+def PROV_PRST_DIAG_DEFINING_EVAL(p):
+    """|- !n. Prov_PRST (Eq_pf (App_pt diag_pr (Tup_pt n Empty_pt))
+               (App_pt substitute_pr
+                 (Tup_pt n
+                   (Tup_pt (App_pt numeral_pr (Tup_pt n Empty_pt))
+                     (Tup_pt var_x Empty_pt)))))."""
+    p.goal(
+        "!n. Prov_PRST (Eq_pf "
+        "  (App_pt diag_pr (Tup_pt n Empty_pt)) "
+        "  (App_pt substitute_pr "
+        "    (Tup_pt n "
+        "      (Tup_pt (App_pt numeral_pr (Tup_pt n Empty_pt)) "
+        "        (Tup_pt var_x Empty_pt)))))",
+        types={"n": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROV_PRST_DIAG_EVAL_BY_COMPONENTS(p):
+    """Close diag_pr evaluation from definition, numeral, substitute, and equality."""
+    p.goal(
+        "!n. "
+        "Prov_PRST (Eq_pf "
+        "  (App_pt diag_pr (Tup_pt n Empty_pt)) "
+        "  (App_pt substitute_pr "
+        "    (Tup_pt n "
+        "      (Tup_pt (App_pt numeral_pr (Tup_pt n Empty_pt)) "
+        "        (Tup_pt var_x Empty_pt))))) "
+        "==> Prov_PRST (Eq_pf "
+        "      (App_pt numeral_pr (Tup_pt n Empty_pt)) "
+        "      (quote_hf n)) "
+        "==> Prov_PRST (Eq_pf "
+        "      (App_pt substitute_pr "
+        "        (Tup_pt n (Tup_pt (quote_hf n) (Tup_pt var_x Empty_pt)))) "
+        "      (substitute n (quote_hf n) var_x)) "
+        "==> Prov_PRST (Eq_pf (App_pt diag_pr (Tup_pt n Empty_pt)) (diag n))",
         types={"n": nat0_ty},
     )
     p.sorry()
@@ -1932,16 +2312,26 @@ def PROV_PRST_NUMERAL_EVAL(p):
 
 @proof
 def PROV_PRST_DIAG_EVAL(p):
-    """|- !n. Prov_PRST (Eq_pf (App_pt diag_pr (Tup_pt n Empty_pt)) (diag n)).
-
-    From DIAG_PR_DEFINING + PROV_PRST_SUBSTITUTE_EVAL + PROV_PRST_NUMERAL_EVAL,
-    chained via PRST equality reasoning (PROV_PRST_EQ_TRANS). STUB.
-    """
+    """|- !n. Prov_PRST (Eq_pf (App_pt diag_pr (Tup_pt n Empty_pt)) (diag n))."""
     p.goal(
         "!n. Prov_PRST (Eq_pf (App_pt diag_pr (Tup_pt n Empty_pt)) (diag n))",
         types={"n": nat0_ty},
     )
-    p.sorry()
+    p.fix("n")
+    p.have("diag_def:").by(PROV_PRST_DIAG_DEFINING_EVAL, "n")
+    p.have("numeral_eval:").by(PROV_PRST_NUMERAL_EVAL, "n")
+    p.have("subst_eval:").by(
+        PROV_PRST_SUBSTITUTE_EVAL, "n", "quote_hf n", "var_x"
+    )
+    p.thus(
+        "Prov_PRST (Eq_pf (App_pt diag_pr (Tup_pt n Empty_pt)) (diag n))"
+    ).by(
+        PROV_PRST_DIAG_EVAL_BY_COMPONENTS,
+        "n",
+        "diag_def",
+        "numeral_eval",
+        "subst_eval",
+    )
 
 
 # ---------------------------------------------------------------------------
