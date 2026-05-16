@@ -190,21 +190,37 @@ Production requirements: mechanise the reference design at PR level with tuple
 walkers, PR-level guards such as `nat0_lt`/`is_pr_sym`, and reusable
 substitution-instance checker components for schema parameters.
 
-### Spike 4 — `substitute_pr` External Correctness Slice
+### Design 4 — `substitute_pr` External Correctness Slice
 
-Goal: prove correctness for the easy constructor cases before attempting the
-full course-recursive theorem.
+Purpose: pin the external correctness proof shape for `substitute_pr`.
 
-Target facts:
+Design facts:
 
 - `substitute_pr Empty_pt t v` evaluates to `Empty_pt`.
 - `substitute_pr (Eq_pf a b) t v` evaluates to
   `Eq_pf (substitute_p a t v) (substitute_p b t v)`.
-- One `App_pt`/`Tup_pt` example with nested arguments.
+- `App_pt`/`Tup_pt` nested examples evaluate by the same constructor-recursive
+  equation as HOL-side `substitute_p`.
 
-Success criterion: the full `PROV_PRST_SUBSTITUTE_EVAL` proof can be reduced
-to a uniform course-recursion induction plus constructor cases, with no new
-object-theory axiom.
+Settled shape:
+
+- The Pair_ord course-recursive `substitute_pr` model agrees with direct
+  `substitute_p` syntax recursion on `Empty_pt`, `Var_pt`, `Tup_pt`, `Eq_pf`,
+  `In_pa`, `Not_pf`, `Imp_pf`, and nested examples.
+- The `App_pt` branch is non-uniform in the intended way: it preserves the
+  function id exactly and recurses only into the argument tuple.
+- The raw default Pair_ord branch is enough to make constructor payload pairs
+  carry the recursively substituted child values, which is what the `Eq_pf`,
+  `Tup_pt`, and `App_pt` cases consume.
+- If the target variable is absent from a well-formed example, the result is
+  unchanged.
+
+The executable reference design is `prst_substitute_spike.py`.
+
+Production proof obligations: prove the external correctness theorem by a
+single course-recursion induction over the encoded formula/term, with
+constructor-specific rewrite lemmas for the Var hit/miss case, the default
+payload-pair case, and the App non-uniform function-id case.
 
 ### Spike 5 — `Proof_PRST_pr` List Checker Slice
 
