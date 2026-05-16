@@ -75,7 +75,7 @@ Stubs throughout. Estimate filled in: ~350 lines total
 """
 
 
-from basics import mk_const
+from basics import mk_const, mk_app
 from parser import define, parse_type
 from nat0 import nat0_ty
 from proof import proof
@@ -93,7 +93,16 @@ from prst_pr import (
     Proof_PRST_pr,  # noqa: F401  -- parser alias
     find_proof_pr,  # noqa: F401  -- parser alias
     T_pt,  # noqa: F401  -- parser alias
+    adj_sym,
+    const_sym,
+    if_in_sym,
+    course_rec_sym,
+    pair_left_sym,
+    pair_right_sym,
+    pair_ord_sym,
+    tup_head_pr,
 )
+from prst_pr_builders import nat, comp, proj
 from prst_proof import (
     Prov_PRST,  # noqa: F401  -- parser alias
     Prov_PRST_internal,
@@ -180,12 +189,102 @@ def DERIV_D1(p):
 
 # Π_1 PR-side lemma: combining two proof witnesses for (phi -> psi)
 # and (phi) into one for (psi). Provable in PRST by definitional
-# unfolding of mp_combine_pr (a PR symbol defined in prst_pr).
-# Stub placeholder.
+# unfolding of mp_combine_pr + structural case analysis on
+# Proof_PRST_pr's Tup_pt recursion.
+#
+# Construction:
+#
+#   mp_combine_pr(p1, p2) := Tup_pt psi (concat_lists_pr p1 p2)
+#   psi                   := pair_right (pair_right (tup_head_pr p1))
+#                            -- consequent of `Imp_pf phi psi`, which
+#                            decomposes as Pair_ord 7 (Pair_ord phi psi).
+#   concat_lists_pr       := course_rec on p1's Pair_ord-decomposition
+#                            with p2 in the y_vec slot. The tag-12
+#                            branch outputs Tup_pt (pair_left b) rec_b,
+#                            the else branch forwards rec_b -- so the
+#                            recursion threads down the right spine of
+#                            p1 and lands on Empty_pt = 0, at which
+#                            point the base case returns p2.
+#
+# The Tup_pt-cons constructor at PR level is `Pair_ord 12 (Pair_ord h
+# t)`, assembled by pair_ord_sym + tag literal 12.
+
+
+# Local copies of prst_pr's private comp builders (kept private to that
+# module). _const_at / _singleton_at / _if_eq_literal_at have the same
+# semantics; we replicate them here so prst_pr need not export them.
+def _const_at(value_term, arity):
+    """PR symbol that ignores an arity-tuple and returns value_term."""
+    return comp(mk_app(const_sym, value_term), proj(0, arity))
+
+
+def _singleton_at(value_pr, arity):
+    return comp(adj_sym, value_pr, _const_at(Empty_pt, arity))
+
+
+def _if_eq_literal_at(tag_val, arity, test_pr, then_pr, else_pr):
+    return comp(
+        if_in_sym,
+        test_pr,
+        _singleton_at(_const_at(nat(tag_val), arity), arity),
+        then_pr,
+        else_pr,
+    )
+
+
+# concat_lists_pr course-recursion base/step.
+G_CONCAT_LISTS_PR_DEF = define(
+    "g_concat_lists_pr",
+    parse_type("nat0"),
+    proj(0, 1),                                       # return y_vec = p2
+)
+g_concat_lists_pr = mk_const("g_concat_lists_pr", [])
+
+# Step: [a, b, rec_a, rec_b, y_vec].
+# tag-12 branch builds Tup_pt = Pair_ord 12 (Pair_ord (pair_left b) rec_b).
+_h_concat_then = comp(
+    pair_ord_sym,
+    _const_at(nat(12), 5),
+    comp(
+        pair_ord_sym,
+        comp(pair_left_sym, proj(1, 5)),              # h = pair_left b
+        proj(3, 5),                                   # tail = rec_b
+    ),
+)
+H_CONCAT_LISTS_PR_DEF = define(
+    "h_concat_lists_pr",
+    parse_type("nat0"),
+    _if_eq_literal_at(12, 5, proj(0, 5), _h_concat_then, proj(3, 5)),
+)
+h_concat_lists_pr = mk_const("h_concat_lists_pr", [])
+
+CONCAT_LISTS_PR_DEF = define(
+    "concat_lists_pr",
+    parse_type("nat0"),
+    comp(
+        mk_app(mk_app(course_rec_sym, g_concat_lists_pr), h_concat_lists_pr),
+        proj(0, 2),                                   # course_rec input = p1
+        proj(1, 2),                                   # y_vec carries p2
+    ),
+)
+concat_lists_pr = mk_const("concat_lists_pr", [])
+
+
 MP_COMBINE_PR_DEF = define(
     "mp_combine_pr",
     parse_type("nat0"),
-    "0",  # stub; real body composes the two proof-list witnesses
+    comp(
+        pair_ord_sym,                                  # Tup_pt tag
+        _const_at(nat(12), 2),
+        comp(
+            pair_ord_sym,
+            comp(                                       # psi
+                pair_right_sym,
+                comp(pair_right_sym, comp(tup_head_pr, proj(0, 2))),
+            ),
+            comp(concat_lists_pr, proj(0, 2), proj(1, 2)),
+        ),
+    ),
 )
 mp_combine_pr = mk_const("mp_combine_pr", [])
 
@@ -266,6 +365,27 @@ def DERIV_D2(p):
         types={"phi": nat0_ty, "psi": nat0_ty},
     )
     p.sorry()
+
+
+# reflect_pr -- the Buss/Boolos "BProof" reflection PR symbol used by
+# the D3 structural induction.
+#
+# Reading: reflect_pr(phi, w) returns a proof witness for
+# `Prov_internal(quote_hf phi)` given a proof witness `w` for `phi`.
+# The intended body is a primitive recursion on phi's PRST syntax,
+# with one constructor case per Eq_pf / In_pa / Not_pf / Imp_pf /
+# App_pt branch. For the skeleton we expose the symbol with a uniform
+# comp body that defers to find_proof_pr (= mu_sym Proof_PRST_pr) on
+# the input formula: by MU_CORRECTNESS the mu-witness suffices
+# whenever a proof exists, and the D3 antecedent supplies one. The
+# structural-recursion body replaces this with constructor-specific
+# PR composition once the per-case encodings land.
+REFLECT_PR_DEF = define(
+    "reflect_pr",
+    parse_type("nat0"),
+    comp(find_proof_pr, proj(0, 2)),
+)
+reflect_pr = mk_const("reflect_pr", [])
 
 
 @proof

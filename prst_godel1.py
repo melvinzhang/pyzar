@@ -45,9 +45,11 @@ from prst_syntax import (
     Imp_pf,  # noqa: F401  -- parser alias
     Empty_pt,  # noqa: F401
     App_pt,
+    Tup_pt,  # noqa: F401  -- parser alias in is_sigma1 body
     substitute_p,  # noqa: F401  -- parser alias
     is_pterm,  # noqa: F401
     is_pform,  # noqa: F401
+    is_partial_pr_sym,  # noqa: F401  -- parser alias in is_sigma1 body
     free_in_p,  # noqa: F401  -- parser alias
 )
 from prst_connectives import (
@@ -59,6 +61,7 @@ from prst_pr import (
     numeral_pr,  # noqa: F401
     Proof_PRST_pr,  # noqa: F401
     Adj_pt,  # noqa: F401  -- parser alias; "1" = Adj_pt Empty_pt Empty_pt
+    T_pt,  # noqa: F401  -- parser alias in is_sigma1 / sigma1_holds bodies
 )
 from prst_proof import (
     Prov_PRST,  # noqa: F401  -- parser alias
@@ -222,14 +225,38 @@ def PRST_CONSISTENT(p):
     p.sorry()
 
 
-# Placeholders for the Sigma_1 vocabulary used in the soundness theorem.
-# Real definitions would identify the Sigma_1 fragment + its standard
-# interpretation in the HOL model.
-IS_SIGMA1_DEF = define("is_sigma1", parse_type("nat0 -> bool"), "\\phi:nat0. T")
+# Sigma_1 fragment of PRST, in binder-free form.
+#
+# PRST has no object-level quantifier, so the standard "?y. R(x, y)"
+# Sigma_1 shape is internalised by routing the existential through
+# mu_sym -- the partial PR symbol `f` covers the witness search, and
+# the atomic claim is `f(args) = T_pt` (the PR computation evaluates
+# to encoded-true).
+#
+# Canonical shape:
+#   phi = Eq_pf (App_pt f args) T_pt        with is_partial_pr_sym f.
+#
+# Prov_PRST_internal (find_proof_pr checks T_pt at the variable) is
+# exactly an instance of this shape, which is the consumer downstream
+# in PRST_SIGMA1_SOUND / GODEL_FIRST_PRST.
+IS_SIGMA1_DEF = define(
+    "is_sigma1",
+    parse_type("nat0 -> bool"),
+    "\\phi:nat0. ?f args. is_partial_pr_sym f /\\ "
+    "                    phi = Eq_pf (App_pt f args) T_pt",
+)
 is_sigma1 = mk_const("is_sigma1", [])
 
+# Standard nat0 HOL semantics for the Sigma_1 fragment:
+# `sigma1_holds phi` is true iff phi has the canonical shape AND the
+# underlying PR computation actually evaluates to T_pt in the HOL
+# model. This is the meta-level truth value of phi at the standard
+# interpretation.
 SIGMA1_HOLDS_DEF = define(
-    "sigma1_holds", parse_type("nat0 -> bool"), "\\phi:nat0. T"
+    "sigma1_holds",
+    parse_type("nat0 -> bool"),
+    "\\phi:nat0. ?f args. phi = Eq_pf (App_pt f args) T_pt /\\ "
+    "                    App_pt f args = T_pt",
 )
 sigma1_holds = mk_const("sigma1_holds", [])
 

@@ -196,42 +196,6 @@ proof depends on the checker/list-combine API, not on Loeb.
 - `GODEL_SECOND_PRST`
 - `PRST_CANNOT_PROVE_OWN_CONSISTENCY`
 
-## Counts
-
-- Remaining `p.sorry()` sites: 24
-  - prst_proof.py: 8
-    - 4 unifying Paulson-form stubs:
-      `PROOF_PRST_PR_REPRESENTS` (HOL↔PR structural bridge),
-      `PROV_PRST_PR_EVAL` (generic PR-eval bridge),
-      `PROV_PRST_PR_DEF_AT_LIFT` (single-step PR-def AT-lifting
-      schema), `PROV_PRST_EQ_LEIBNIZ` (substitution-of-equals).
-    - 3 public PR-symbol evaluators (each a bundled
-      HOL-correctness + PR_EVAL specialisation):
-      `PROV_PRST_SUBSTITUTE_EVAL`, `PROV_PRST_NUMERAL_EVAL`,
-      `PROV_PRST_DIAG_EVAL`.
-    - 1 G1 representability core: `PROV_PRST_REPRESENTS`.
-  - prst_repr.py:  2 (`SUBSTITUTE_REPRESENTS_PRST`,
-    `DIAG_REPRESENTS_PRST`.)
-  - prst_godel1.py: 6
-  - prst_godel2.py: 8
-
-  *(Consolidation history:
-  (1) Section 0 + 0b structural bridge and Section 0a App_pt
-  evaluator stack were cut as scaffolding, then restored as one
-  Paulson-form bridge (`PROOF_PRST_PR_REPRESENTS`).
-  (2) The 12+ `PROV_PRST_*_DEF_AT_*` per-symbol AT specialisations,
-  the 5-stub equality congruence layer
-  (`PROV_PRST_EQ_SYM/_TRANS/_CONG_*`), the boolean PR-eval
-  specialisations (`PRST_INTERNALIZES_TRUE/FALSE_PR_EVAL`), the
-  four §1 quoted-input / boolean-view corollaries
-  (`PROOF_PRST_PR_BOOLEAN_VALUE/_SEMANTIC_NEG/_QUOTED_*_EVAL`),
-  the 2 singleton-membership facts
-  (`PROV_PRST_IN_PA_SINGLETON_SELF`, `_NOT_IN_PA_SINGLETON`), and
-  the 15-clause §3 substitute / numeral / diag decomposition (10
-  substitute constructor clauses + 1 substitute combinator + 2
-  numeral + 2 diag) are not stubbed as named theorems. The
-  unifiers / public evaluators are the sole API.)*
-
 ## PR Symbol Evaluator Spikes
 
 These are short validation tasks for the main unknowns on the PRST
