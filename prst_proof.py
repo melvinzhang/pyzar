@@ -1656,20 +1656,66 @@ def PROOF_PRST_PR_INTERNAL_EVAL(p):
 
 
 @proof
+def PROOF_PRST_VALID_MEM_SELF(p):
+    """|- !P a. Proof_PRST P a ==> ValidProof_PRST P /\\ Mem_PRST a P."""
+    p.goal(
+        "!P a. Proof_PRST P a ==> ValidProof_PRST P /\\ Mem_PRST a P",
+        types={"P": nat0_ty, "a": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROOF_PRST_LIST_MERGE(p):
+    """|- !P Q a b. ValidProof_PRST P /\\ Mem_PRST a P
+              /\\ ValidProof_PRST Q /\\ Mem_PRST b Q
+              ==> ?R. ValidProof_PRST R /\\ Mem_PRST a R /\\ Mem_PRST b R."""
+    p.goal(
+        "!P Q a b. "
+        "ValidProof_PRST P /\\ Mem_PRST a P "
+        "/\\ ValidProof_PRST Q /\\ Mem_PRST b Q "
+        "==> ?R. ValidProof_PRST R /\\ Mem_PRST a R /\\ Mem_PRST b R",
+        types={"P": nat0_ty, "Q": nat0_ty, "a": nat0_ty, "b": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
 def PROOF_PRST_LIST_COMBINE(p):
     """|- !a b. (?P. Proof_PRST P a) /\\ (?Q. Proof_PRST Q b)
-              ==> ?R. ValidProof_PRST R /\\ Mem_PRST a R /\\ Mem_PRST b R.
+              ==> ?R. ValidProof_PRST R /\\ Mem_PRST a R /\\ Mem_PRST b R."""
+    from tactics import CONJ
 
-    HF-style PRST proof-list API stub. Intended implementation:
-    append/merge the two Tup_pt proof lists, prove ValidProof_PRST is preserved
-    by the merge, and prove both original conclusions become Mem_PRST members.
-    """
     p.goal(
         "!a b. (?P. Proof_PRST P a) /\\ (?Q. Proof_PRST Q b) "
         "==> ?R. ValidProof_PRST R /\\ Mem_PRST a R /\\ Mem_PRST b R",
         types={"a": nat0_ty, "b": nat0_ty},
     )
-    p.sorry()
+    p.fix("a b")
+    p.assume("(ex_P, ex_Q): (?P. Proof_PRST P a) /\\ (?Q. Proof_PRST Q b)")
+    p.choose("P", "ex_P", eq_label="proof_P")
+    p.choose("Q", "ex_Q", eq_label="proof_Q")
+    p.have("P_props: ValidProof_PRST P /\\ Mem_PRST a P").by(
+        PROOF_PRST_VALID_MEM_SELF, "P", "a", "proof_P"
+    )
+    p.have("Q_props: ValidProof_PRST Q /\\ Mem_PRST b Q").by(
+        PROOF_PRST_VALID_MEM_SELF, "Q", "b", "proof_Q"
+    )
+    p.split("P_props", "(valid_P, mem_a_P)")
+    p.split("Q_props", "(valid_Q, mem_b_Q)")
+    p.have("Q_payload: ValidProof_PRST Q /\\ Mem_PRST b Q").by(
+        CONJ, "valid_Q", "mem_b_Q"
+    )
+    p.have(
+        "merge_tail: Mem_PRST a P /\\ ValidProof_PRST Q /\\ Mem_PRST b Q"
+    ).by(CONJ, "mem_a_P", "Q_payload")
+    p.have(
+        "merge_payload: ValidProof_PRST P /\\ Mem_PRST a P "
+        "/\\ ValidProof_PRST Q /\\ Mem_PRST b Q"
+    ).by(CONJ, "valid_P", "merge_tail")
+    p.thus("?R. ValidProof_PRST R /\\ Mem_PRST a R /\\ Mem_PRST b R").by(
+        PROOF_PRST_LIST_MERGE, "P", "Q", "a", "b", "merge_payload"
+    )
 
 
 @proof
