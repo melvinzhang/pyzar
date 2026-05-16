@@ -700,18 +700,65 @@ Prov_PRST = mk_const("Prov_PRST", [])
 
 @proof
 def PROOF_PRST_SINGLETON_AX(p):
-    """|- !n. is_pr_axiom n ==> Proof_PRST (Tup_pt n Empty_pt) n.
+    """|- !n. is_pr_axiom n ==> Proof_PRST (Tup_pt n Empty_pt) n."""
+    from tactics import SPEC, SPECL, SYM, CONJ
+    from prst_syntax import _unfold_prst_rec as _unfold
 
-    Checker API lemma: a singleton list whose sole line is a PRST axiom is a
-    valid proof of that line.
-    """
     p.goal(
         "!n. is_pr_axiom n ==> Proof_PRST (Tup_pt n Empty_pt) n",
         types={"n": nat0_ty},
     )
     p.fix("n")
     p.assume("h_ax: is_pr_axiom n")
-    p.sorry()
+
+    valid_rec = _unfold(_VALID_PROOF_PRST_REC, _VALID_PROOF_PRST_F_DEF)
+
+    empty_body = (
+        "Empty_pt = Empty_pt \\/ "
+        "(?h t. Empty_pt = Tup_pt h t /\\ ValidProof_PRST t /\\ "
+        "       (is_pr_axiom h \\/ "
+        "        (?f. Mem_PRST f t /\\ Mem_PRST (Imp_pf f h) t)))"
+    )
+    valid_empty_at = SPEC(p._parse("Empty_pt"), valid_rec)
+    p.have("empty_refl: Empty_pt = Empty_pt").by_rewrite([])
+    p.have(f"valid_empty_body: {empty_body}").by_disj("empty_refl")
+    p.have("valid_empty: ValidProof_PRST Empty_pt").by_eq_mp(
+        SYM(valid_empty_at), "valid_empty_body"
+    )
+
+    p.have(
+        "step_ok: is_pr_axiom n \\/ "
+        "(?f. Mem_PRST f Empty_pt /\\ Mem_PRST (Imp_pf f n) Empty_pt)"
+    ).by_disj("h_ax")
+    p.have(
+        "single_ex: ?h t. "
+        "Tup_pt n Empty_pt = Tup_pt h t /\\ ValidProof_PRST t /\\ "
+        "(is_pr_axiom h \\/ "
+        " (?f. Mem_PRST f t /\\ Mem_PRST (Imp_pf f h) t))"
+    ).by_exists(["n", "Empty_pt"], "valid_empty", "step_ok")
+
+    single_body = (
+        "Tup_pt n Empty_pt = Empty_pt \\/ "
+        "(?h t. Tup_pt n Empty_pt = Tup_pt h t /\\ ValidProof_PRST t /\\ "
+        "       (is_pr_axiom h \\/ "
+        "        (?f. Mem_PRST f t /\\ Mem_PRST (Imp_pf f h) t)))"
+    )
+    valid_single_at = SPEC(p._parse("Tup_pt n Empty_pt"), valid_rec)
+    p.have(f"valid_single_body: {single_body}").by_disj("single_ex")
+    p.have("valid_single: ValidProof_PRST (Tup_pt n Empty_pt)").by_eq_mp(
+        SYM(valid_single_at), "valid_single_body"
+    )
+
+    p.have("n_refl: n = n").by_rewrite([])
+    p.have("proof_view: n = n /\\ ValidProof_PRST (Tup_pt n Empty_pt)").by(
+        CONJ, "n_refl", "valid_single"
+    )
+    proof_cons = SPECL(
+        [p._parse("n"), p._parse("Empty_pt"), p._parse("n")], PROOF_PRST_CONS
+    )
+    p.thus("Proof_PRST (Tup_pt n Empty_pt) n").by_eq_mp(
+        SYM(proof_cons), "proof_view"
+    )
 
 
 @proof
