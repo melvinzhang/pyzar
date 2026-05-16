@@ -73,19 +73,36 @@ evaluator path. They are not additional `p.sorry()` sites; they are meant to
 decide whether the remaining proof debt stays local or expands into larger
 representability work.
 
-### Spike 1 — Boolean Helper Correctness
+### Design 1 — Boolean Helper Correctness
 
-Goal: prove the small PR boolean helper facts once, then reuse them everywhere.
+Purpose: prove the small PR boolean helper facts once, then reuse them
+everywhere.
 
-Target facts:
+Design facts:
 
 - `eq_nat_pr` returns `T_pt` exactly on equal nat0 inputs.
 - `or_bool_pr` and `and_bool_pr` agree with the `T_pt`/`F_pt` convention.
 - `T_PT_NEQ_F_PT` is available before evaluator correctness proofs consume it.
 
-Success criterion: `is_pr_refl_pr` and `mem_t_pr` proofs can treat boolean
-combinators as ordinary boolean algebra instead of expanding `if_in_sym` every
-time.
+Settled shape:
+
+- `T_pt` and `F_pt` are distinct.
+- `eq_nat_pr x y` returns `T_pt` exactly when `x = y`, and `F_pt` otherwise.
+- `or_bool_pr` and `and_bool_pr` are ordinary boolean connectives under the
+  boolean-input invariant `x,y in {T_pt,F_pt}`.
+- Outside that invariant, the helpers intentionally branch on exactly
+  `x = T_pt`: `or_bool_pr x y` returns `y` when `x != T_pt`, and
+  `and_bool_pr x y` returns `F_pt` when `x != T_pt`.
+- Under boolean inputs, the reusable algebra includes identity, annihilator,
+  associativity, and distributivity facts needed by `is_pr_refl_pr`,
+  `mem_t_pr`, and proof-list checker correctness.
+
+The executable reference design is `prst_bool_spike.py`.
+
+Production proof obligations: prove these helper evaluation lemmas once from
+the `if_in_sym` defining equations and `T_PT_NEQ_F_PT`, then require downstream
+checker proofs to establish the boolean-input invariant before using boolean
+algebra rewrites.
 
 ### Design 2 — `is_pterm_pr` Correctness Slice
 
