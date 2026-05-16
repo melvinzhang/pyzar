@@ -600,6 +600,83 @@ MEM_PRST_DEF, _MEM_PRST_REC = define_wf_lt(
 Mem_PRST = mk_const("Mem_PRST", [])
 
 
+# ---------------------------------------------------------------------------
+# Mem_PRST binary at-form + head-membership helper.
+#
+# CONVENTION: ``Mem_PRST list element``. This is forced by
+# ``define_wf_lt`` (``nat0_order.py:1221``), which builds the
+# recursion on the FIRST nat0 argument of ``fn_ty``. So the
+# decomposed argument (the list, shape-matched against ``Tup_pt h t``)
+# must be in position 1. The validproof body in
+# ``_VALID_PROOF_PRST_F_DEF`` and every downstream consumer
+# (``PROOF_PRST_VALID_MEM_SELF``, ``PROOF_PRST_LIST_MERGE``,
+# ``PROOF_PRST_CONS_MP_STEP``, ``MP_HAS_PROOF_PRST_LIST``) follow
+# this order; the helpers below use it as well.
+# ---------------------------------------------------------------------------
+
+
+def _mem_prst_at():
+    """Build ``|- !p x. Mem_PRST p x = ?h t. p = Tup_pt h t
+                                            /\\ (x = h \\/ Mem_PRST t x)``.
+
+    Mirrors ``_proof_prst_at`` above: take the unfolded recurrence,
+    SPEC at ``p``, AP_THM at ``x``, BETA on the resulting application.
+    """
+    from tactics import SPEC, GEN, AP_THM, BETA_CONV, TRANS
+    from basics import rand
+    from prst_syntax import _unfold_prst_rec as _unfold
+
+    eq_fun = _unfold(_MEM_PRST_REC, _MEM_PRST_F_DEF)
+    from fusion import Var
+
+    p_var = Var("p", nat0_ty)
+    x_var = Var("x", nat0_ty)
+    eq_p = SPEC(p_var, eq_fun)
+    eq_px = AP_THM(eq_p, x_var)
+    rhs_beta = BETA_CONV(rand(eq_px._concl))
+    return GEN(p_var, GEN(x_var, TRANS(eq_px, rhs_beta)))
+
+
+MEM_PRST_AT = _mem_prst_at()
+
+
+@proof
+def MEM_PRST_HEAD(p):
+    """|- !h t. Mem_PRST (Tup_pt h t) h.
+
+    Head is a member of its own list. ``Mem_PRST list element``
+    convention -- see the file-level note above.
+
+    Proof: specialise ``MEM_PRST_AT`` at ``(Tup_pt h t, h)``,
+    witness ``h0 := h`` and ``t0 := t``, dispatch the equation
+    conjunct by ``REFL`` and the disjunction conjunct by the
+    left disjunct ``h = h``.
+    """
+    from tactics import SPECL, REFL, SYM
+
+    p.goal("!h t. Mem_PRST (Tup_pt h t) h", types={"h": nat0_ty, "t": nat0_ty})
+    p.fix("h t")
+    # DSL friction: by_eq_mp cannot auto-instantiate the foralls of
+    # MEM_PRST_AT to the goal's head shape, so we SPECL it manually.
+    mem_at = SPECL(
+        [p._parse("Tup_pt h t"), p._parse("h")], MEM_PRST_AT
+    )
+    p.have("p_refl: Tup_pt h t = Tup_pt h t").by_thm(
+        REFL(p._parse("Tup_pt h t"))
+    )
+    p.have("h_refl: h = h").by_thm(REFL(p._parse("h")))
+    # by_disj DISJ1's h_refl into the left leaf of the disjunction.
+    p.have("disj: h = h \\/ Mem_PRST t h").by_disj("h_refl")
+    # by_exists splits the substituted body by /\; the first conjunct
+    # (equation) matches `p_refl`, the second (disjunction) matches
+    # `disj` verbatim via the non-equation alpha-match branch.
+    p.have(
+        "body: ?h0 t0. Tup_pt h t = Tup_pt h0 t0 "
+        "/\\ (h = h0 \\/ Mem_PRST t0 h)"
+    ).by_exists(["h", "t"], "p_refl", "disj")
+    p.thus("Mem_PRST (Tup_pt h t) h").by_eq_mp(SYM(mem_at), "body")
+
+
 _VALID_PROOF_PRST_F_DEF = define(
     "_ValidProof_PRST_F",
     parse_type("(nat0 -> bool) -> nat0 -> bool"),
@@ -607,7 +684,7 @@ _VALID_PROOF_PRST_F_DEF = define(
     "p = Empty_pt \\/ "
     "(?h t. p = Tup_pt h t /\\ rec t /\\ "
     "       (is_pr_axiom h \\/ "
-    "        (?f. Mem_PRST f t /\\ Mem_PRST (Imp_pf f h) t)))",
+    "        (?f. Mem_PRST t f /\\ Mem_PRST t (Imp_pf f h))))",
 )
 _VALID_PROOF_PRST_F = mk_const("_ValidProof_PRST_F", [])
 
@@ -668,11 +745,14 @@ def VALID_PROOF_PRST_MONO(p):
     nat0_lt_c = mk_const("nat0_lt", [])
 
     def mp_witness_body():
+        # Mem_PRST is (list, element) -- the recursion arg (list) is
+        # in position 1. mp_witness reads "tail contains both f and
+        # f -> h" i.e. ``Mem_PRST t f /\ Mem_PRST t (Imp_pf f h)``.
         return mk_and(
-            mk_app(mk_app(Mem_PRST_c, z_var), t_var),
+            mk_app(mk_app(Mem_PRST_c, t_var), z_var),
             mk_app(
-                mk_app(Mem_PRST_c, mk_app(mk_app(Imp_pf_c, z_var), h_var)),
-                t_var,
+                mk_app(Mem_PRST_c, t_var),
+                mk_app(mk_app(Imp_pf_c, z_var), h_var),
             ),
         )
 
@@ -926,7 +1006,7 @@ def PROOF_PRST_SINGLETON_AX(p):
         "Empty_pt = Empty_pt \\/ "
         "(?h t. Empty_pt = Tup_pt h t /\\ ValidProof_PRST t /\\ "
         "       (is_pr_axiom h \\/ "
-        "        (?f. Mem_PRST f t /\\ Mem_PRST (Imp_pf f h) t)))"
+        "        (?f. Mem_PRST t f /\\ Mem_PRST t (Imp_pf f h))))"
     )
     valid_empty_at = SPEC(p._parse("Empty_pt"), valid_rec)
     p.have("empty_refl: Empty_pt = Empty_pt").by_rewrite([])
@@ -937,20 +1017,20 @@ def PROOF_PRST_SINGLETON_AX(p):
 
     p.have(
         "step_ok: is_pr_axiom n \\/ "
-        "(?f. Mem_PRST f Empty_pt /\\ Mem_PRST (Imp_pf f n) Empty_pt)"
+        "(?f. Mem_PRST Empty_pt f /\\ Mem_PRST Empty_pt (Imp_pf f n))"
     ).by_disj("h_ax")
     p.have(
         "single_ex: ?h t. "
         "Tup_pt n Empty_pt = Tup_pt h t /\\ ValidProof_PRST t /\\ "
         "(is_pr_axiom h \\/ "
-        " (?f. Mem_PRST f t /\\ Mem_PRST (Imp_pf f h) t))"
+        " (?f. Mem_PRST t f /\\ Mem_PRST t (Imp_pf f h)))"
     ).by_exists(["n", "Empty_pt"], "valid_empty", "step_ok")
 
     single_body = (
         "Tup_pt n Empty_pt = Empty_pt \\/ "
         "(?h t. Tup_pt n Empty_pt = Tup_pt h t /\\ ValidProof_PRST t /\\ "
         "       (is_pr_axiom h \\/ "
-        "        (?f. Mem_PRST f t /\\ Mem_PRST (Imp_pf f h) t)))"
+        "        (?f. Mem_PRST t f /\\ Mem_PRST t (Imp_pf f h))))"
     )
     valid_single_at = SPEC(p._parse("Tup_pt n Empty_pt"), valid_rec)
     p.have(f"valid_single_body: {single_body}").by_disj("single_ex")
@@ -1690,44 +1770,72 @@ def PRST_INTERNALIZES_FALSE_PR_EVAL(p):
 
 @proof
 def PROOF_PRST_VALID_MEM_SELF(p):
-    """|- !P a. Proof_PRST P a ==> ValidProof_PRST P /\\ Mem_PRST a P.
+    """|- !P a. Proof_PRST P a ==> ValidProof_PRST P /\\ Mem_PRST P a.
 
     G1 role: structural projection from the HOL ``Proof_PRST``
-    relation. Consumed by ``PROV_PRST_MP`` (this file, ~1687) to
-    extract the two list-validity / membership facts that feed
-    ``PROOF_PRST_LIST_MERGE``. Since every Prov_PRST-flavored
-    downstream theorem (representability, diagonal lemma, G1 itself)
-    routes through MP, this is on the G1 critical path.
+    relation. Consumed by ``PROV_PRST_MP`` to extract list-validity
+    plus head-membership facts that feed ``PROOF_PRST_LIST_MERGE``.
+    Since every Prov_PRST-flavored downstream theorem routes through
+    MP, this is on the G1 critical path.
 
-    Proof sketch:
-      * Unfold ``Proof_PRST P a`` to its defining shape
-        ``is_tup_p P /\\ tup_head_p P = a /\\ ValidProof_PRST P
-          /\\ Mem_PRST a P``
-        (or the current equivalent in ``prst_syntax``).
-      * Project the third and fourth conjuncts directly.
+    Proof:
+      * Unfold ``Proof_PRST P a`` via ``PROOF_PRST_AT`` to expose
+        witnesses ``h``, ``t`` with
+        ``P = Tup_pt h t /\\ a = h /\\ ValidProof_PRST P``.
+      * ``valid_P`` is the third conjunct -- direct projection.
+      * For ``Mem_PRST P a``: ``MEM_PRST_HEAD`` gives
+        ``Mem_PRST (Tup_pt h t) h``. Rewrite ``Tup_pt h t -> P``
+        via ``p_eq`` and ``h -> a`` via ``a_eq``.
 
-    No recursion or list reasoning required -- this is pure
-    definition-unfolding plus conjunction projection.
+    Convention: ``Mem_PRST list element`` -- the recursion arg
+    (the list) is in position 1; see the ``_MEM_PRST_F_DEF`` note.
     """
+    from tactics import SPECL, CONJ
+
     p.goal(
-        "!P a. Proof_PRST P a ==> ValidProof_PRST P /\\ Mem_PRST a P",
+        "!P a. Proof_PRST P a ==> ValidProof_PRST P /\\ Mem_PRST P a",
         types={"P": nat0_ty, "a": nat0_ty},
     )
-    p.sorry()
+    p.fix("P a")
+    p.assume("h_proof: Proof_PRST P a")
+    # DSL friction: by_eq_mp cannot auto-instantiate the foralls of an
+    # at-theorem, so SPECL the at-theorem manually at (P, a).
+    proof_at = SPECL([p._parse("P"), p._parse("a")], PROOF_PRST_AT)
+    p.have(
+        "h_body: ?h t. P = Tup_pt h t /\\ a = h /\\ ValidProof_PRST P"
+    ).by_eq_mp(proof_at, "h_proof")
+    p.choose("h t", "h_body", eq_label="body")
+    # Right-associated split: body = p_eq /\ (a_eq /\ valid_P).
+    p.split("body", "(p_eq, (a_eq, valid_P))")
+
+    # Head membership at the Tup_pt shape, then rewrite back to (P, a)
+    # using the two equations from the body. by_rewrite_of normalises
+    # ``mem_head``'s conclusion against the rules so the target shape
+    # ``Mem_PRST P a`` is reached.
+    p.have("mem_head: Mem_PRST (Tup_pt h t) h").by(
+        MEM_PRST_HEAD, "h", "t"
+    )
+    p.have("mem_P_a: Mem_PRST P a").by_rewrite_of(
+        "mem_head", ["p_eq", "a_eq"]
+    )
+
+    p.thus("ValidProof_PRST P /\\ Mem_PRST P a").by(
+        CONJ, "valid_P", "mem_P_a"
+    )
 
 
 @proof
 def PROOF_PRST_LIST_MERGE(p):
-    """|- !P Q a b. ValidProof_PRST P /\\ Mem_PRST a P
-              /\\ ValidProof_PRST Q /\\ Mem_PRST b Q
-              ==> ?R. ValidProof_PRST R /\\ Mem_PRST a R /\\ Mem_PRST b R.
+    """|- !P Q a b. ValidProof_PRST P /\\ Mem_PRST P a
+              /\\ ValidProof_PRST Q /\\ Mem_PRST Q b
+              ==> ?R. ValidProof_PRST R /\\ Mem_PRST R a /\\ Mem_PRST R b.
 
-    G1 role: combinator behind ``PROV_PRST_MP`` (this file, ~1705).
-    Given proofs of ``f`` and ``Imp_pf f g`` carried by two
-    separate valid proof lists, fuse them into a single valid list
-    that witnesses both -- the precondition before consing the MP
-    step that yields ``g``. Every Prov_PRST-flavored downstream
-    theorem flows through MP, so this is on the G1 critical path.
+    G1 role: combinator behind ``PROV_PRST_MP``. Given proofs of
+    ``f`` and ``Imp_pf f g`` carried by two separate valid proof
+    lists, fuse them into a single valid list that witnesses both --
+    the precondition before consing the MP step that yields ``g``.
+    Every Prov_PRST-flavored downstream theorem flows through MP,
+    so this is on the G1 critical path.
 
     Proof sketch:
       * Witness: ``R = list_concat P Q`` (or the analogous PR-side
@@ -1739,20 +1847,21 @@ def PROOF_PRST_LIST_MERGE(p):
         Step: a longer ``Q`` keeps its MP witnesses among earlier
         lines, which still appear at the same positions in the
         appended list.
-      * ``Mem_PRST a R``: monotonicity of membership under list
+      * ``Mem_PRST R a``: monotonicity of membership under list
         prefix.
-      * ``Mem_PRST b R``: monotonicity under list suffix.
+      * ``Mem_PRST R b``: monotonicity under list suffix.
 
-    Dependencies: ``Mem_PRST`` monotonicity under append; ValidProof
-    closure under append. Both are pure list/structural facts on
-    the ``ValidProof_PRST`` / ``Mem_PRST`` definitions in
-    ``prst_syntax``.
+    Convention: ``Mem_PRST list element`` -- see the
+    ``_MEM_PRST_F_DEF`` note. Dependencies: ``Mem_PRST``
+    monotonicity under append; ``ValidProof_PRST`` closure under
+    append. Both are pure list/structural facts on the
+    definitions in ``prst_syntax``.
     """
     p.goal(
         "!P Q a b. "
-        "ValidProof_PRST P /\\ Mem_PRST a P "
-        "/\\ ValidProof_PRST Q /\\ Mem_PRST b Q "
-        "==> ?R. ValidProof_PRST R /\\ Mem_PRST a R /\\ Mem_PRST b R",
+        "ValidProof_PRST P /\\ Mem_PRST P a "
+        "/\\ ValidProof_PRST Q /\\ Mem_PRST Q b "
+        "==> ?R. ValidProof_PRST R /\\ Mem_PRST R a /\\ Mem_PRST R b",
         types={"P": nat0_ty, "Q": nat0_ty, "a": nat0_ty, "b": nat0_ty},
     )
     p.sorry()
@@ -1761,37 +1870,37 @@ def PROOF_PRST_LIST_MERGE(p):
 @proof
 def PROOF_PRST_LIST_COMBINE(p):
     """|- !a b. (?P. Proof_PRST P a) /\\ (?Q. Proof_PRST Q b)
-              ==> ?R. ValidProof_PRST R /\\ Mem_PRST a R /\\ Mem_PRST b R."""
+              ==> ?R. ValidProof_PRST R /\\ Mem_PRST R a /\\ Mem_PRST R b."""
     from tactics import CONJ
 
     p.goal(
         "!a b. (?P. Proof_PRST P a) /\\ (?Q. Proof_PRST Q b) "
-        "==> ?R. ValidProof_PRST R /\\ Mem_PRST a R /\\ Mem_PRST b R",
+        "==> ?R. ValidProof_PRST R /\\ Mem_PRST R a /\\ Mem_PRST R b",
         types={"a": nat0_ty, "b": nat0_ty},
     )
     p.fix("a b")
     p.assume("(ex_P, ex_Q): (?P. Proof_PRST P a) /\\ (?Q. Proof_PRST Q b)")
     p.choose("P", "ex_P", eq_label="proof_P")
     p.choose("Q", "ex_Q", eq_label="proof_Q")
-    p.have("P_props: ValidProof_PRST P /\\ Mem_PRST a P").by(
+    p.have("P_props: ValidProof_PRST P /\\ Mem_PRST P a").by(
         PROOF_PRST_VALID_MEM_SELF, "P", "a", "proof_P"
     )
-    p.have("Q_props: ValidProof_PRST Q /\\ Mem_PRST b Q").by(
+    p.have("Q_props: ValidProof_PRST Q /\\ Mem_PRST Q b").by(
         PROOF_PRST_VALID_MEM_SELF, "Q", "b", "proof_Q"
     )
-    p.split("P_props", "(valid_P, mem_a_P)")
-    p.split("Q_props", "(valid_Q, mem_b_Q)")
-    p.have("Q_payload: ValidProof_PRST Q /\\ Mem_PRST b Q").by(
-        CONJ, "valid_Q", "mem_b_Q"
+    p.split("P_props", "(valid_P, mem_P_a)")
+    p.split("Q_props", "(valid_Q, mem_Q_b)")
+    p.have("Q_payload: ValidProof_PRST Q /\\ Mem_PRST Q b").by(
+        CONJ, "valid_Q", "mem_Q_b"
     )
     p.have(
-        "merge_tail: Mem_PRST a P /\\ ValidProof_PRST Q /\\ Mem_PRST b Q"
-    ).by(CONJ, "mem_a_P", "Q_payload")
+        "merge_tail: Mem_PRST P a /\\ ValidProof_PRST Q /\\ Mem_PRST Q b"
+    ).by(CONJ, "mem_P_a", "Q_payload")
     p.have(
-        "merge_payload: ValidProof_PRST P /\\ Mem_PRST a P "
-        "/\\ ValidProof_PRST Q /\\ Mem_PRST b Q"
+        "merge_payload: ValidProof_PRST P /\\ Mem_PRST P a "
+        "/\\ ValidProof_PRST Q /\\ Mem_PRST Q b"
     ).by(CONJ, "valid_P", "merge_tail")
-    p.thus("?R. ValidProof_PRST R /\\ Mem_PRST a R /\\ Mem_PRST b R").by(
+    p.thus("?R. ValidProof_PRST R /\\ Mem_PRST R a /\\ Mem_PRST R b").by(
         PROOF_PRST_LIST_MERGE, "P", "Q", "a", "b", "merge_payload"
     )
 
@@ -1799,43 +1908,43 @@ def PROOF_PRST_LIST_COMBINE(p):
 @proof
 def PROOF_PRST_CONS_MP_STEP(p):
     """|- !R f g. ValidProof_PRST R
-              /\\ Mem_PRST f R
-              /\\ Mem_PRST (Imp_pf f g) R
+              /\\ Mem_PRST R f
+              /\\ Mem_PRST R (Imp_pf f g)
               ==> Proof_PRST (Tup_pt g R) g."""
     from tactics import SPEC, SPECL, SYM, CONJ
     from prst_syntax import _unfold_prst_rec as _unfold
 
     p.goal(
-        "!R f g. ValidProof_PRST R /\\ Mem_PRST f R "
-        "        /\\ Mem_PRST (Imp_pf f g) R "
+        "!R f g. ValidProof_PRST R /\\ Mem_PRST R f "
+        "        /\\ Mem_PRST R (Imp_pf f g) "
         "        ==> Proof_PRST (Tup_pt g R) g",
         types={"R": nat0_ty, "f": nat0_ty, "g": nat0_ty},
     )
     p.fix("R f g")
     p.assume(
         "(valid_R, (mem_f, mem_imp)): "
-        "ValidProof_PRST R /\\ Mem_PRST f R /\\ Mem_PRST (Imp_pf f g) R"
+        "ValidProof_PRST R /\\ Mem_PRST R f /\\ Mem_PRST R (Imp_pf f g)"
     )
 
     p.have(
-        "mp_step: ?w. Mem_PRST w R /\\ Mem_PRST (Imp_pf w g) R"
+        "mp_step: ?w. Mem_PRST R w /\\ Mem_PRST R (Imp_pf w g)"
     ).by_exists(["f"], "mem_f", "mem_imp")
     p.have(
         "step_ok: is_pr_axiom g \\/ "
-        "(?w. Mem_PRST w R /\\ Mem_PRST (Imp_pf w g) R)"
+        "(?w. Mem_PRST R w /\\ Mem_PRST R (Imp_pf w g))"
     ).by_disj("mp_step")
     p.have(
         "valid_cons_ex: ?h t. "
         "Tup_pt g R = Tup_pt h t /\\ ValidProof_PRST t /\\ "
         "(is_pr_axiom h \\/ "
-        " (?w. Mem_PRST w t /\\ Mem_PRST (Imp_pf w h) t))"
+        " (?w. Mem_PRST t w /\\ Mem_PRST t (Imp_pf w h)))"
     ).by_exists(["g", "R"], "valid_R", "step_ok")
 
     valid_body = (
         "Tup_pt g R = Empty_pt \\/ "
         "(?h t. Tup_pt g R = Tup_pt h t /\\ ValidProof_PRST t /\\ "
         "       (is_pr_axiom h \\/ "
-        "        (?w. Mem_PRST w t /\\ Mem_PRST (Imp_pf w h) t)))"
+        "        (?w. Mem_PRST t w /\\ Mem_PRST t (Imp_pf w h))))"
     )
     valid_rec = _unfold(_VALID_PROOF_PRST_REC, _VALID_PROOF_PRST_F_DEF)
     valid_cons_at = SPEC(p._parse("Tup_pt g R"), valid_rec)
@@ -1875,8 +1984,8 @@ def MP_HAS_PROOF_PRST_LIST(p):
     )
     p.have(
         "combined: ?R. ValidProof_PRST R "
-        "           /\\ Mem_PRST f R "
-        "           /\\ Mem_PRST (Imp_pf f g) R"
+        "           /\\ Mem_PRST R f "
+        "           /\\ Mem_PRST R (Imp_pf f g)"
     ).by(
         PROOF_PRST_LIST_COMBINE,
         "f",
@@ -1884,9 +1993,9 @@ def MP_HAS_PROOF_PRST_LIST(p):
         CONJ(p.fact("pf_ex"), p.fact("pfg_ex")),
     )
     p.choose("R", "combined", eq_label="combined_body")
-    p.split("combined_body", "(valid_R, (mem_f_R, mem_imp_R))")
-    p.have("mp_payload: ValidProof_PRST R /\\ Mem_PRST f R /\\ Mem_PRST (Imp_pf f g) R").by_thm(
-        CONJ(p.fact("valid_R"), CONJ(p.fact("mem_f_R"), p.fact("mem_imp_R")))
+    p.split("combined_body", "(valid_R, (mem_R_f, mem_R_imp))")
+    p.have("mp_payload: ValidProof_PRST R /\\ Mem_PRST R f /\\ Mem_PRST R (Imp_pf f g)").by_thm(
+        CONJ(p.fact("valid_R"), CONJ(p.fact("mem_R_f"), p.fact("mem_R_imp")))
     )
     p.have("proof_g: Proof_PRST (Tup_pt g R) g").by(
         PROOF_PRST_CONS_MP_STEP,
