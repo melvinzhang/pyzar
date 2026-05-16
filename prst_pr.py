@@ -1837,29 +1837,175 @@ def _pair_right_at(term_pr):
     return comp(pair_right_sym, term_pr)
 
 
-def _imp_left_at(term_pr):
+def _binary_left_at(term_pr):
     return _pair_left_at(_payload_at(term_pr))
 
 
-def _imp_right_at(term_pr):
+def _binary_right_at(term_pr):
     return _pair_right_at(_payload_at(term_pr))
+
+
+def _imp_left_at(term_pr):
+    return _binary_left_at(term_pr)
+
+
+def _imp_right_at(term_pr):
+    return _binary_right_at(term_pr)
 
 
 def _not_payload_at(term_pr):
     return _payload_at(term_pr)
 
 
-# Direct closed PR-def recogniser slice.  This is a real PR body for the
-# closed defining axioms used by the checker examples.  The full
-# is_pr_def_instance branch still needs bounded witness search for
-# parametric definitions and substituted instances.
+def _eq_pf_left_at(term_pr):
+    return _binary_left_at(term_pr)
+
+
+def _eq_pf_right_at(term_pr):
+    return _binary_right_at(term_pr)
+
+
+def _in_pa_left_at(term_pr):
+    return _binary_left_at(term_pr)
+
+
+def _in_pa_right_at(term_pr):
+    return _binary_right_at(term_pr)
+
+
+def _app_fn_at(term_pr):
+    return _binary_left_at(term_pr)
+
+
+def _app_args_at(term_pr):
+    return _binary_right_at(term_pr)
+
+
+def _tup_head_at(term_pr):
+    return _binary_left_at(term_pr)
+
+
+def _tup_tail_at(term_pr):
+    return _binary_right_at(term_pr)
+
+
+def _eq_at(left_pr, right_pr):
+    return comp(eq_nat_pr, left_pr, right_pr)
+
+
+def _is_empty_at(term_pr):
+    return _eq_at(term_pr, _const_at(Empty_pt, 1))
+
+
+def _slot_const_at(slot, arity=1):
+    return _const_at(var_t(slot), arity)
+
+
+def _slot_expected_at(formal_slot, replaced_slot, replacement_pr):
+    if formal_slot == replaced_slot:
+        return replacement_pr
+    return _slot_const_at(formal_slot)
+
+
+def _slot_consistency_checks(candidates, formal_slots, replaced_slot):
+    replacement = next(
+        candidate
+        for candidate, slot in zip(candidates, formal_slots)
+        if slot == replaced_slot
+    )
+    return [
+        _eq_at(
+            candidate,
+            _slot_expected_at(slot, replaced_slot, replacement),
+        )
+        for candidate, slot in zip(candidates, formal_slots)
+    ]
+
+
+def _if_in_schema_instance_matcher(negated_antecedent=False, rhs_slot=2):
+    """Recognizer for one substituted ``if_in`` defining-equation schema."""
+    n_pr = proj(0, 1)
+    antecedent_pr = _imp_left_at(n_pr)
+    in_pr = _not_payload_at(antecedent_pr) if negated_antecedent else antecedent_pr
+    eq_pr = _imp_right_at(n_pr)
+    app_pr = _eq_pf_left_at(eq_pr)
+    args0_pr = _app_args_at(app_pr)
+    args1_pr = _tup_tail_at(args0_pr)
+    args2_pr = _tup_tail_at(args1_pr)
+    args3_pr = _tup_tail_at(args2_pr)
+    args4_pr = _tup_tail_at(args3_pr)
+
+    candidates = [
+        _in_pa_left_at(in_pr),
+        _in_pa_right_at(in_pr),
+        _tup_head_at(args0_pr),
+        _tup_head_at(args1_pr),
+        _tup_head_at(args2_pr),
+        _tup_head_at(args3_pr),
+        _eq_pf_right_at(eq_pr),
+    ]
+    formal_slots = [0, 1, 0, 1, 2, 3, rhs_slot]
+
+    shape_checks = [
+        _tag_eq_at(7, 1, n_pr),
+        _tag_eq_at(10, 1, in_pr),
+        _tag_eq_at(5, 1, eq_pr),
+        _tag_eq_at(11, 1, app_pr),
+        _eq_at(_app_fn_at(app_pr), _const_at(if_in_sym, 1)),
+        _tag_eq_at(12, 1, args0_pr),
+        _tag_eq_at(12, 1, args1_pr),
+        _tag_eq_at(12, 1, args2_pr),
+        _tag_eq_at(12, 1, args3_pr),
+        _is_empty_at(args4_pr),
+    ]
+    if negated_antecedent:
+        shape_checks.insert(1, _tag_eq_at(6, 1, antecedent_pr))
+    return _or_many_pr(
+        [
+            _and_many_pr(
+                shape_checks
+                + _slot_consistency_checks(candidates, formal_slots, replaced_slot)
+            )
+            for replaced_slot in range(4)
+        ]
+    )
+
+
+is_zero_def_instance_pr_def = define(
+    "is_zero_def_instance_pr",
+    parse_type("nat0"),
+    _eq_const_at(zero_def_axiom, 1),
+)
+is_zero_def_instance_pr = mk_const("is_zero_def_instance_pr", [])
+
+
+is_if_in_true_def_instance_pr_def = define(
+    "is_if_in_true_def_instance_pr",
+    parse_type("nat0"),
+    _if_in_schema_instance_matcher(negated_antecedent=False, rhs_slot=2),
+)
+is_if_in_true_def_instance_pr = mk_const("is_if_in_true_def_instance_pr", [])
+
+
+is_if_in_false_def_instance_pr_def = define(
+    "is_if_in_false_def_instance_pr",
+    parse_type("nat0"),
+    _if_in_schema_instance_matcher(negated_antecedent=True, rhs_slot=3),
+)
+is_if_in_false_def_instance_pr = mk_const("is_if_in_false_def_instance_pr", [])
+
+
+# PR-def-instance recogniser slice.  Substituted instances are matched by
+# schema-specific PR predicates: each matcher reads the replaced formal slot
+# from the candidate and checks every repeated occurrence for consistency.
+# The remaining PR-def axiom families still need corresponding matcher leaves.
 is_pr_def_instance_pr_def = define(
     "is_pr_def_instance_pr",
     parse_type("nat0"),
     _or_many_pr([
-        _eq_const_at(zero_def_axiom, 1),
-        _eq_const_at(if_in_true_def_axiom, 1),
-        _eq_const_at(if_in_false_def_axiom, 1),
+        is_zero_def_instance_pr,
+        is_if_in_true_def_instance_pr,
+        is_if_in_false_def_instance_pr,
     ]),
 )
 is_pr_def_instance_pr = mk_const("is_pr_def_instance_pr", [])
