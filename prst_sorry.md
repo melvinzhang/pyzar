@@ -5,9 +5,16 @@ This file intentionally lists only open `p.sorry()` obligations in
 
 The sole explicit PRST axiom outside this ledger is `MU_CORRECTNESS`.
 
-## `p.sorry()` Sites
+## Order of Attack
 
-### `prst_pr.py` — 5
+This ledger is ordered by dependency and expected discharge path, not by file.
+Public theorems already reduced to lower-level obligations are omitted from the
+open list.
+
+### 1. Base PR Symbol Registry
+
+These are local registry facts. They are prerequisites for evaluator
+internalisation but do not depend on the proof checker.
 
 - `PR_ARITY_ZERO`
 - `PR_ARITY_ADJ`
@@ -15,34 +22,64 @@ The sole explicit PRST axiom outside this ledger is `MU_CORRECTNESS`.
 - `PR_ARITY_IF_IN`
 - `PR_ARITY_REC`
 
-### `prst_proof.py` — 14
+### 2. `Proof_PRST_pr` Checker API Boundary
 
-- `MEM_PRST_MONO`
-- `VALID_PROOF_PRST_MONO`
-- `PROOF_PRST_VALID_MONO`
-- `PROOF_PRST_NIL`
-- `PROOF_PRST_CONS`
-- `PROOF_PRST_SINGLETON_AX`
-- `PROOF_PRST_PR_CORRECT`
-- `PROOF_PRST_PR_INTERNAL_EVAL`
-- `PROOF_PRST_LIST_COMBINE`
-- `PROOF_PRST_CONS_MP_STEP`
-- `PROV_PRST_SUBSTITUTE_EVAL`
-- `PROV_PRST_NUMERAL_EVAL`
-- `PROV_PRST_DIAG_EVAL`
-- `PROV_PRST_REPRESENTS`
+These are the immediate checker targets. `PROOF_PRST_PR_CORRECT` and
+`PROOF_PRST_PR_INTERNAL_EVAL` are no longer open; they now compose these
+lower-level facts.
 
-### `prst_repr.py` — 7
+- `PROOF_PRST_PR_VALID_VIEW`
+- `PRST_INTERNALIZES_TRUE_PR_EVAL`
+- `PROOF_PRST_PR_SEMANTIC_NEG`
+- `PROOF_PRST_PR_QUOTE_INPUT_TRUE`
+- `PROOF_PRST_PR_QUOTE_INPUT_FALSE`
+- `PROOF_PRST_PR_INTERNAL_FALSE_EVAL`
 
-- `T_PT_NEQ_F_PT`
+### 3. Proof-List Combination API
+
+These discharge the remaining list plumbing used by PRST modus ponens and the
+G2 proof-combinator path.
+
+- `PROOF_PRST_VALID_MEM_SELF`
+- `PROOF_PRST_LIST_MERGE`
+- `MP_COMBINE_PR_CORRECT`
+
+### 4. Internal PRST Evaluator Clauses
+
+These are the constructor and composition clauses behind the public evaluator
+theorems for `substitute_pr`, `numeral_pr`, and `diag_pr`.
+
+- `PROV_PRST_SUBSTITUTE_EMPTY_EVAL_CLAUSE`
+- `PROV_PRST_SUBSTITUTE_VAR_HIT_EVAL_CLAUSE`
+- `PROV_PRST_SUBSTITUTE_VAR_MISS_EVAL_CLAUSE`
+- `PROV_PRST_SUBSTITUTE_TUP_EVAL_CLAUSE`
+- `PROV_PRST_SUBSTITUTE_APP_EVAL_CLAUSE`
+- `PROV_PRST_SUBSTITUTE_EQ_EVAL_CLAUSE`
+- `PROV_PRST_SUBSTITUTE_IN_EVAL_CLAUSE`
+- `PROV_PRST_SUBSTITUTE_NOT_EVAL_CLAUSE`
+- `PROV_PRST_SUBSTITUTE_IMP_EVAL_CLAUSE`
+- `PROV_PRST_SUBSTITUTE_OPAQUE_EVAL_CLAUSE`
+- `PROV_PRST_SUBSTITUTE_EVAL_BY_STRUCTURAL_CLAUSES`
+- `PROV_PRST_NUMERAL_ZERO_EVAL_CLAUSE`
+- `PROV_PRST_NUMERAL_SUC_EVAL_CLAUSE`
+- `PROV_PRST_DIAG_DEFINING_EVAL`
+- `PROV_PRST_DIAG_EVAL_BY_COMPONENTS`
+
+### 5. Representation Bridges
+
+These are downstream of the evaluator and checker API. They should not
+reintroduce a global HF-style representability package.
+
 - `REPRESENTABILITY_POSITIVE`
 - `REPRESENTABILITY_NEGATIVE`
 - `SUBSTITUTE_REPRESENTS_PRST`
 - `DIAG_REPRESENTS_PRST`
-- `PROOF_PRST_REPRESENTS_POS`
-- `PROOF_PRST_REPRESENTS_NEG`
+- `PROV_PRST_REPRESENTS`
 
-### `prst_godel1.py` — 6
+### 6. G1 Stack
+
+These are the first-incompleteness targets after the checker, evaluator, and
+representation bridges are in place.
 
 - `DIAGONAL_LEMMA_PRST`
 - `G_PRST_DIAGONAL_EQ`
@@ -51,11 +88,13 @@ The sole explicit PRST axiom outside this ledger is `MU_CORRECTNESS`.
 - `GODEL_FIRST_PRST`
 - `PRST_ESSENTIALLY_UNDECIDABLE`
 
-### `prst_godel2.py` — 8
+### 7. G2 Stack
+
+These remain after G1. `MP_COMBINE_PR_CORRECT` is listed earlier because its
+proof depends on the checker/list-combine API, not on Loeb.
 
 - `IS_PFORM_CON_PRST`
 - `DERIV_D1`
-- `MP_COMBINE_PR_CORRECT`
 - `DERIV_D2`
 - `DERIV_D3`
 - `LOEB_PRST`
@@ -64,7 +103,7 @@ The sole explicit PRST axiom outside this ledger is `MU_CORRECTNESS`.
 
 ## Counts
 
-- Remaining `p.sorry()` sites: 40
+- Remaining `p.sorry()` sites: 47
 
 ## PR Symbol Evaluator Spikes
 
@@ -257,8 +296,9 @@ via `valid_proof_list_pr`, membership via `mem_t_pr`, and MP search via
 Production proof obligations: prove the local evaluator API for boolean helper
 correctness, Tup destructors, `mem_t_pr`, `exists_mp_witness_pr`,
 `valid_step_pr`, `valid_proof_list_pr`, and branch correctness for
-`is_pr_axiom_pr`; then assemble `PROOF_PRST_PR_CORRECT` from those pieces
-without changing the proof representation.
+`is_pr_axiom_pr`; package those facts as `PROOF_PRST_PR_VALID_VIEW`.
+`PROOF_PRST_PR_CORRECT` is already a thin composition of that view with
+`PROOF_PRST_AT`, so it should not be reopened.
 
 One separate G2-only blocker remains for the D2/proof-combinator path:
 `mp_combine_pr` in `prst_godel2.py` is still the constant-0 stub, so the
@@ -301,10 +341,11 @@ Settled shape:
 The executable reference design is `prst_internal_eval_spike.py`.
 
 Production proof obligations: expose the local PRST equality API needed for
-reflexivity, symmetry, transitivity, and congruence; then mechanise the
-numeral induction, substitute constructor recursion, and diag composition
-recorded by the reference. No global representability axiom is part of the G1
-internal-evaluation bridge.
+reflexivity, symmetry, transitivity, and congruence; mechanise the generic
+`PRST_INTERNALIZES_TRUE_PR_EVAL` boundary for true PR computations; then
+mechanise the numeral induction, substitute constructor recursion, and diag
+composition recorded by the reference. No global representability axiom is
+part of the G1 internal-evaluation bridge.
 
 ### Spike 7 — `mu` Strength Check
 
