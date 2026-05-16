@@ -51,8 +51,6 @@ plus PRST soundness — *not* via a structural body-correctness theorem.
 These discharge the remaining list plumbing used by PRST modus ponens and the
 G2 proof-combinator path.
 
-- `PROOF_PRST_VALID_MEM_SELF`
-- `PROOF_PRST_LIST_MERGE`
 - `MP_COMBINE_PR_CORRECT`
 
 ### 3. Internal PRST Evaluator Clauses

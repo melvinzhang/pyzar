@@ -2547,7 +2547,17 @@ _SUBSTITUTE_EVAL_STRUCTURAL_GOAL = (
 def PROV_PRST_SUBSTITUTE_EMPTY_EVAL_CLAUSE(p):
     """|- !t v. Prov_PRST (Eq_pf
           (App_pt substitute_pr (Tup_pt Empty_pt (Tup_pt t (Tup_pt v Empty_pt))))
-          (substitute Empty_pt t v))."""
+          (substitute Empty_pt t v)).
+
+    Proof sketch. substitute_pr is the outer comp_sym wrapper around
+    course_rec g_subst h_subst with input Empty_pt (= 0). The course_rec
+    base axiom (PROV_PRST_COURSE_REC_BASE_DEF at g_subst, h_subst,
+    instantiated via PROV_PRST_SUBST) reduces the call to App_pt g_subst .,
+    then g_subst's defining equation (const_sym 0 wrapped through proj 0 1,
+    via PROV_PRST_CONST_DEF) yields Empty_pt. The HOL-side
+    substitute Empty_pt t v also reduces to Empty_pt by its AT-equation, so
+    the Eq_pf closes by PRST reflexivity (PROV_PRST_REFL) and
+    PROV_PRST_MP."""
     p.goal(
         "!t v. Prov_PRST (Eq_pf "
         "  (App_pt substitute_pr "
@@ -2562,7 +2572,19 @@ def PROV_PRST_SUBSTITUTE_EMPTY_EVAL_CLAUSE(p):
 def PROV_PRST_SUBSTITUTE_VAR_HIT_EVAL_CLAUSE(p):
     """|- !t v. Prov_PRST (Eq_pf
           (App_pt substitute_pr (Tup_pt (Var_pt v) (Tup_pt t (Tup_pt v Empty_pt))))
-          (substitute (Var_pt v) t v))."""
+          (substitute (Var_pt v) t v)).
+
+    Proof sketch. Var_pt v unfolds to Pair_ord 2 v, so the course_rec step
+    fires (PROV_PRST_COURSE_REC_STEP_DEF at g_subst, h_subst, a := 2,
+    b := v, instantiated via PROV_PRST_SUBST). h_subst's nested if_in
+    dispatch hits the tag-2 branch on the first comparison via
+    PROV_PRST_IF_IN_TRUE_DEF, then enters _h_subst_var. y_vec carries
+    Pair_ord t v, so pair_right_def_axiom_at gives v as the singleton
+    element and the inner if_in tests v ∈ {v} -- true again by
+    PROV_PRST_IF_IN_TRUE_DEF. That branch returns pair_left_def_axiom_at on
+    Pair_ord t v, i.e. t. The HOL side substitute (Var_pt v) t v also
+    reduces to t by its AT-equation, so the Eq_pf closes via
+    PROV_PRST_REFL plus PROV_PRST_MP equality chaining."""
     p.goal(
         "!t v. Prov_PRST (Eq_pf "
         "  (App_pt substitute_pr "
@@ -2577,7 +2599,18 @@ def PROV_PRST_SUBSTITUTE_VAR_HIT_EVAL_CLAUSE(p):
 def PROV_PRST_SUBSTITUTE_VAR_MISS_EVAL_CLAUSE(p):
     """|- !x t v. ~(x = v) ==> Prov_PRST (Eq_pf
           (App_pt substitute_pr (Tup_pt (Var_pt x) (Tup_pt t (Tup_pt v Empty_pt))))
-          (substitute (Var_pt x) t v))."""
+          (substitute (Var_pt x) t v)).
+
+    Proof sketch. Same dispatch as the Var-hit clause through to
+    _h_subst_var: outer course_rec_step + tag-2 if_in branch via
+    PROV_PRST_COURSE_REC_STEP_DEF and PROV_PRST_IF_IN_TRUE_DEF. Inside
+    _h_subst_var the inner if_in tests b ∈ {pair_right y_vec} = {v}. Under
+    ~(x = v) the test is false, so PROV_PRST_IF_IN_FALSE_DEF selects the
+    else branch, which returns Pair_ord 2 x = Var_pt x via
+    PROV_PRST_PAIR_ORD_DEF. The HOL side substitute (Var_pt x) t v also
+    returns Var_pt x by its miss AT-equation, closing the Eq_pf by
+    PROV_PRST_REFL + PROV_PRST_MP. The ~(x = v) hypothesis enters only at
+    the inner if_in_false dispatch."""
     p.goal(
         "!x t v. ~(x = v) ==> Prov_PRST (Eq_pf "
         "  (App_pt substitute_pr "
@@ -2590,7 +2623,21 @@ def PROV_PRST_SUBSTITUTE_VAR_MISS_EVAL_CLAUSE(p):
 
 @proof
 def PROV_PRST_SUBSTITUTE_TUP_EVAL_CLAUSE(p):
-    """|- !a b t v. eval a ==> eval b ==> eval (Tup_pt a b)."""
+    """|- !a b t v. eval a ==> eval b ==> eval (Tup_pt a b).
+
+    Proof sketch. Tup_pt a b = Pair_ord 12 (Pair_ord a b) and
+    substitute_pr's course_rec descends into the encoded pair tree, so the
+    two IH equations on a and b are pre-computed at the recursive payload
+    level (the default Pair_ord branch _h_subst_default returns
+    Pair_ord rec_left rec_right, which is exactly the recursively
+    substituted child pair). PROV_PRST_COURSE_REC_STEP_DEF at the outer
+    Pair_ord 12 step fires the tag-12 branch via repeated
+    PROV_PRST_IF_IN_FALSE_DEF/IF_IN_TRUE_DEF through the nested dispatch.
+    _h_subst_tup returns Pair_ord 12 rec_right via PROV_PRST_PAIR_ORD_DEF;
+    rec_right is the substituted inner pair Pair_ord (substitute a t v)
+    (substitute b t v) reassembled from the two IHs through
+    PROV_PRST_PAIR_ORD_DEF, matching the HOL Tup_pt AT-equation. Close
+    via PROV_PRST_REFL + PROV_PRST_MP."""
     p.goal(
         "!a b t v. "
         "Prov_PRST (Eq_pf "
@@ -2610,7 +2657,20 @@ def PROV_PRST_SUBSTITUTE_TUP_EVAL_CLAUSE(p):
 
 @proof
 def PROV_PRST_SUBSTITUTE_APP_EVAL_CLAUSE(p):
-    """|- !f args t v. eval args ==> eval (App_pt f args)."""
+    """|- !f args t v. eval args ==> eval (App_pt f args).
+
+    Proof sketch. App_pt f args = Pair_ord 11 (Pair_ord f args). The outer
+    course_rec_step at this Pair_ord fires _h_subst_app via the tag-11
+    if_in branch (PROV_PRST_COURSE_REC_STEP_DEF +
+    PROV_PRST_IF_IN_TRUE_DEF chain). _h_subst_app builds
+    Pair_ord 11 (Pair_ord (pair_left b) (pair_right rec_right)) using
+    PROV_PRST_PAIR_LEFT_DEF (preserves f from the original encoded pair),
+    PROV_PRST_PAIR_RIGHT_DEF (selects the substituted args from rec_right),
+    and PROV_PRST_PAIR_ORD_DEF for reassembly. The args IH supplies
+    rec_right = Pair_ord _ (substitute args t v); the f slot is unchanged,
+    matching the non-uniform HOL AT-equation
+    substitute (App_pt f args) t v = App_pt f (substitute args t v). Close
+    via PROV_PRST_REFL + PROV_PRST_MP."""
     p.goal(
         "!f args t v. "
         "Prov_PRST (Eq_pf "
@@ -2628,7 +2688,17 @@ def PROV_PRST_SUBSTITUTE_APP_EVAL_CLAUSE(p):
 
 @proof
 def PROV_PRST_SUBSTITUTE_EQ_EVAL_CLAUSE(p):
-    """|- !a b t v. eval a ==> eval b ==> eval (Eq_pf a b)."""
+    """|- !a b t v. eval a ==> eval b ==> eval (Eq_pf a b).
+
+    Proof sketch. Eq_pf a b = Pair_ord 5 (Pair_ord a b). Outer course_rec
+    step at Pair_ord 5 hits _h_subst_eq via the tag-5 if_in branch
+    (PROV_PRST_COURSE_REC_STEP_DEF + PROV_PRST_IF_IN_TRUE_DEF reaching
+    branch 5). _h_subst_eq returns Pair_ord 5 rec_right via
+    PROV_PRST_PAIR_ORD_DEF, where rec_right = Pair_ord (substitute a t v)
+    (substitute b t v) is reconstructed at the inner Pair_ord layer from
+    the two IH equations through PROV_PRST_PAIR_ORD_DEF. The HOL
+    AT-equation gives the same Eq_pf payload, closing via PROV_PRST_REFL +
+    PROV_PRST_MP."""
     p.goal(
         "!a b t v. "
         "Prov_PRST (Eq_pf "
@@ -2648,7 +2718,16 @@ def PROV_PRST_SUBSTITUTE_EQ_EVAL_CLAUSE(p):
 
 @proof
 def PROV_PRST_SUBSTITUTE_IN_EVAL_CLAUSE(p):
-    """|- !a b t v. eval a ==> eval b ==> eval (In_pa a b)."""
+    """|- !a b t v. eval a ==> eval b ==> eval (In_pa a b).
+
+    Proof sketch. Identical shape to the Eq_pf clause with tag 10 in place
+    of 5: In_pa a b = Pair_ord 10 (Pair_ord a b). The dispatch chain
+    PROV_PRST_IF_IN_FALSE_DEF (tags 2, 5, 6, 7) then
+    PROV_PRST_IF_IN_TRUE_DEF (tag 10) lands in _h_subst_in, which returns
+    Pair_ord 10 rec_right via PROV_PRST_PAIR_ORD_DEF. rec_right is the
+    pair of substituted children supplied by the two IHs through the
+    default-branch payload reconstruction. Close by PROV_PRST_REFL +
+    PROV_PRST_MP against the HOL In_pa AT-equation."""
     p.goal(
         "!a b t v. "
         "Prov_PRST (Eq_pf "
@@ -2668,7 +2747,14 @@ def PROV_PRST_SUBSTITUTE_IN_EVAL_CLAUSE(p):
 
 @proof
 def PROV_PRST_SUBSTITUTE_NOT_EVAL_CLAUSE(p):
-    """|- !F t v. eval F ==> eval (Not_pf F)."""
+    """|- !F t v. eval F ==> eval (Not_pf F).
+
+    Proof sketch. Not_pf F = Pair_ord 6 F. Outer course_rec_step at
+    Pair_ord 6 dispatches through PROV_PRST_IF_IN_FALSE_DEF (tags 2, 5)
+    then PROV_PRST_IF_IN_TRUE_DEF (tag 6) into _h_subst_not, which returns
+    Pair_ord 6 rec_right via PROV_PRST_PAIR_ORD_DEF. rec_right = substitute
+    F t v from the single IH equation. Matches the HOL Not_pf AT-equation;
+    close via PROV_PRST_REFL + PROV_PRST_MP."""
     p.goal(
         "!F t v. "
         "Prov_PRST (Eq_pf "
@@ -2685,7 +2771,16 @@ def PROV_PRST_SUBSTITUTE_NOT_EVAL_CLAUSE(p):
 
 @proof
 def PROV_PRST_SUBSTITUTE_IMP_EVAL_CLAUSE(p):
-    """|- !F G t v. eval F ==> eval G ==> eval (Imp_pf F G)."""
+    """|- !F G t v. eval F ==> eval G ==> eval (Imp_pf F G).
+
+    Proof sketch. Imp_pf F G = Pair_ord 7 (Pair_ord F G). Dispatch via
+    PROV_PRST_IF_IN_FALSE_DEF (tags 2, 5, 6) then
+    PROV_PRST_IF_IN_TRUE_DEF (tag 7) into _h_subst_imp, which returns
+    Pair_ord 7 rec_right via PROV_PRST_PAIR_ORD_DEF. rec_right is the
+    Pair_ord (substitute F t v) (substitute G t v) reconstructed at the
+    inner pair from the two IHs through PROV_PRST_PAIR_ORD_DEF. Matches
+    the HOL Imp_pf AT-equation; close via PROV_PRST_REFL +
+    PROV_PRST_MP."""
     p.goal(
         "!F G t v. "
         "Prov_PRST (Eq_pf "
@@ -2705,7 +2800,21 @@ def PROV_PRST_SUBSTITUTE_IMP_EVAL_CLAUSE(p):
 
 @proof
 def PROV_PRST_SUBSTITUTE_OPAQUE_EVAL_CLAUSE(p):
-    """|- !F t v. ~(is_pterm F) /\\ ~(is_pform F) ==> eval F."""
+    """|- !F t v. ~(is_pterm F) /\\ ~(is_pform F) ==> eval F.
+
+    Proof sketch. Under ~(is_pterm F) /\\ ~(is_pform F), F is not one of
+    the tagged Pair_ord encodings the h_subst nested if_in chain
+    discriminates on; either F = 0 (caught by the course_rec base,
+    g_subst = const 0 via PROV_PRST_COURSE_REC_BASE_DEF +
+    PROV_PRST_CONST_DEF) or F = Pair_ord a b with a not in
+    {2, 5, 6, 7, 10, 11, 12}, where every if_in test fails via
+    PROV_PRST_IF_IN_FALSE_DEF and h_subst falls through to
+    _h_subst_default = Pair_ord rec_left rec_right. The HOL substitute
+    AT-equation for the opaque/default case mirrors this -- it returns the
+    encoded payload with both children recursively substituted -- so the
+    two sides agree by PROV_PRST_PAIR_ORD_DEF. The not-pterm /\\ not-pform
+    antecedent is exactly what excludes the tagged constructor cases. Close
+    via PROV_PRST_REFL + PROV_PRST_MP."""
     p.goal(
         "!F t v. ~(is_pterm F) /\\ ~(is_pform F) ==> "
         "Prov_PRST (Eq_pf "
@@ -2718,7 +2827,17 @@ def PROV_PRST_SUBSTITUTE_OPAQUE_EVAL_CLAUSE(p):
 
 @proof
 def PROV_PRST_SUBSTITUTE_EVAL_BY_STRUCTURAL_CLAUSES(p):
-    """Close substitute_pr evaluation from the per-constructor clauses."""
+    """Close substitute_pr evaluation from the per-constructor clauses.
+
+    Proof sketch. HOL-side structural induction over the encoded
+    formula/term F (Empty_pt, Var_pt at v and miss x != v, Tup_pt, App_pt,
+    Eq_pf, In_pa, Not_pf, Imp_pf, opaque default). Each inductive case
+    discharges by applying the corresponding clause hypothesis to the IH
+    equations on the immediate children, threading the existing Prov_PRST
+    equations through PROV_PRST_MP. The opaque clause covers all encoded
+    values that do not match any tagged-constructor predicate, which is
+    why the structural induction is exhaustive without needing a
+    representability axiom or a separate well-formedness assumption."""
     p.goal(
         _SUBSTITUTE_EVAL_STRUCTURAL_GOAL,
         types={"F": nat0_ty, "G": nat0_ty, "a": nat0_ty, "b": nat0_ty,
@@ -2770,7 +2889,16 @@ def PROV_PRST_SUBSTITUTE_EVAL(p):
 
 @proof
 def PROV_PRST_NUMERAL_ZERO_EVAL_CLAUSE(p):
-    """|- Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt 0 Empty_pt)) (quote_hf 0))."""
+    """|- Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt 0 Empty_pt)) (quote_hf 0)).
+
+    Proof sketch. numeral_pr = rec zero_sym (comp adj_sym (proj 2 4)
+    (proj 2 4)). PROV_PRST_REC_BASE_DEF at g := zero_sym,
+    h := comp adj_sym (proj 2 4) (proj 2 4) (after the is_pr_sym side
+    conditions, which are immediate for these primitive symbols) rewrites
+    App_pt numeral_pr (Tup_pt 0 Empty_pt) to App_pt zero_sym ., then
+    PROV_PRST_ZERO_DEF reduces that to Empty_pt. quote_hf 0 unfolds to
+    Empty_pt by its definition on the HOL side, so the Eq_pf closes via
+    PROV_PRST_REFL + PROV_PRST_MP."""
     p.goal(
         "Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt 0 Empty_pt)) (quote_hf 0))"
     )
@@ -2779,7 +2907,20 @@ def PROV_PRST_NUMERAL_ZERO_EVAL_CLAUSE(p):
 
 @proof
 def PROV_PRST_NUMERAL_SUC_EVAL_CLAUSE(p):
-    """|- !n. eval n ==> eval (SUC0 n)."""
+    """|- !n. eval n ==> eval (SUC0 n).
+
+    Proof sketch. SUC0 n = Adj_pt n n (von-Neumann successor encoding).
+    PROV_PRST_REC_STEP_DEF at g := zero_sym,
+    h := comp adj_sym (proj 2 4) (proj 2 4) rewrites
+    App_pt numeral_pr (Tup_pt (Adj_pt n n) Empty_pt) to App_pt h applied
+    to the 4-tuple (i, s, r, _vec) where r = App_pt numeral_pr (Tup_pt n
+    Empty_pt). The step body is comp adj_sym (proj 2 4) (proj 2 4): two
+    PROV_PRST_PROJ_DEF instances pick out r in both slots, then
+    adj_sym's defining equation (Adj_pt unfolds as App_pt adj_sym
+    [r; r], reflexive at PROV_PRST_REFL) yields Adj_pt r r. The IH gives
+    r = quote_hf n inside Prov_PRST, so Adj_pt r r = Adj_pt (quote_hf n)
+    (quote_hf n) = quote_hf (SUC0 n) by the HOL quote_hf successor
+    AT-equation. Close via PROV_PRST_MP equality chaining."""
     p.goal(
         "!n. Prov_PRST (Eq_pf (App_pt numeral_pr (Tup_pt n Empty_pt)) (quote_hf n)) "
         "==> Prov_PRST (Eq_pf "
@@ -2820,7 +2961,22 @@ def PROV_PRST_DIAG_DEFINING_EVAL(p):
                (App_pt substitute_pr
                  (Tup_pt n
                    (Tup_pt (App_pt numeral_pr (Tup_pt n Empty_pt))
-                     (Tup_pt var_x Empty_pt)))))."""
+                     (Tup_pt var_x Empty_pt))))).
+
+    Proof sketch. diag_pr := comp substitute_pr [proj 0 1,
+    comp numeral_pr (proj 0 1), const_sym var_x] (see diag_pr_def). The
+    1-arg comp axiom (via PROV_PRST_AX on the comp_def schema; the
+    standard composition reduction packaged for callers) rewrites
+    App_pt diag_pr (Tup_pt n Empty_pt) to App_pt substitute_pr applied to
+    the 3-tuple built from its argument shapers at input n:
+      * proj 0 1 on Tup_pt n Empty_pt = n, via PROV_PRST_PROJ_DEF;
+      * comp numeral_pr (proj 0 1) at the same input = App_pt numeral_pr
+        (Tup_pt n Empty_pt), via comp_def + PROV_PRST_PROJ_DEF;
+      * const_sym var_x at any 1-arg input = var_x, via
+        PROV_PRST_CONST_DEF.
+    Reassemble into Tup_pt n (Tup_pt (App_pt numeral_pr ...) (Tup_pt var_x
+    Empty_pt)) and close the Eq_pf by PROV_PRST_REFL +
+    PROV_PRST_MP. No substitute or numeral evaluation yet."""
     p.goal(
         "!n. Prov_PRST (Eq_pf "
         "  (App_pt diag_pr (Tup_pt n Empty_pt)) "
@@ -2835,7 +2991,23 @@ def PROV_PRST_DIAG_DEFINING_EVAL(p):
 
 @proof
 def PROV_PRST_DIAG_EVAL_BY_COMPONENTS(p):
-    """Close diag_pr evaluation from definition, numeral, substitute, and equality."""
+    """Close diag_pr evaluation from definition, numeral, substitute, and equality.
+
+    Proof sketch. Three equality hypotheses are chained inside Prov_PRST:
+      (1) PROV_PRST_DIAG_DEFINING_EVAL rewrites App_pt diag_pr ... to
+          App_pt substitute_pr (Tup_pt n (Tup_pt (App_pt numeral_pr ...)
+          (Tup_pt var_x Empty_pt)));
+      (2) the numeral hypothesis rewrites the inner
+          App_pt numeral_pr (Tup_pt n Empty_pt) to quote_hf n -- congruence
+          of Eq_pf/Tup_pt under PROV_PRST equality reasoning pushes this
+          rewrite under the substitute_pr argument tuple via
+          PROV_PRST_PAIR_ORD_DEF/Tup_pt congruence;
+      (3) the substitute hypothesis rewrites App_pt substitute_pr (Tup_pt
+          n (Tup_pt (quote_hf n) (Tup_pt var_x Empty_pt))) to substitute n
+          (quote_hf n) var_x, which is diag n by the HOL diag
+          AT-equation.
+    Each rewrite is a PROV_PRST_MP step against PRST transitivity of
+    equality; no global representability axiom is used."""
     p.goal(
         "!n. "
         "Prov_PRST (Eq_pf "
