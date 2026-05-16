@@ -149,6 +149,22 @@ class TestSurface(unittest.TestCase):
             )
         )
 
+    def test_primed_variable_names(self):
+        a, a1, a2 = (mk_var(n, num_ty) for n in ("a", "a'", "a''"))
+        self.assertTrue(aconv(parse("a + a' = a''"), mk_eq(_add(a, a1), a2)))
+        self.assertTrue(
+            aconv(
+                parse("!x'. x' + 1 = x' + 1"),
+                mk_forall(
+                    mk_var("x'", num_ty),
+                    mk_eq(
+                        _add(mk_var("x'", num_ty), ONE),
+                        _add(mk_var("x'", num_ty), ONE),
+                    ),
+                ),
+            )
+        )
+
     def test_non_associative_eq_rejected(self):
         with self.assertRaises(ParseError):
             parse("x = y = z")

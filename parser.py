@@ -349,7 +349,7 @@ var_decl: NAME (":" var_type)?
 ?var_type: atom_type OP var_type           -> arrow_
          | atom_type
 
-NAME: /[A-Za-z_][A-Za-z0-9_]*/
+NAME: /[A-Za-z_][A-Za-z0-9_']*/
 NUM:  /[0-9]+/
 OP:   /[+\-*=<>^&|\/\\]+|~/
 

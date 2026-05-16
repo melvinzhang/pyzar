@@ -600,6 +600,12 @@ excluded — it is a parser hint, not a separate kernel value, so
 Auto-generated labels are `_h{n}` (anonymous have/assume) and
 `{name}_eq` (choose default).
 
+Identifier syntax (parser `NAME` token): a leading letter or underscore
+followed by letters/digits/underscores and optional trailing apostrophes,
+e.g. `x`, `x'`, `x''`, `step_1'`. Primed names are ordinary identifiers
+everywhere a name is accepted — `fix("x'")`, `!x'. ...`, `p.have("h: x' =
+x")`, antiquotes resolve them as bare-name references.
+
 Fact references resolve via `coerce`:
 
 * `thm` → returned unchanged
