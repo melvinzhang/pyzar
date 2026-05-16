@@ -4355,18 +4355,93 @@ def PROV_HF_REPRESENTS_FWD(p):
 
 
 @proof
-def PROV_HF_REPRESENTS_BWD(p):
+def PROV_HF_INTERNAL_D2(p):
+    """|- !F G. is_form F /\\ is_form G ==>
+              Prov_HF (Imp_f
+                        (substitute Prov_HF_internal
+                                    (quote_hf (Imp_f F G)) idx_x)
+                        (Imp_f
+                          (substitute Prov_HF_internal (quote_hf F) idx_x)
+                          (substitute Prov_HF_internal (quote_hf G) idx_x))).
+
+    Hilbert-Bernays-Loeb derivability condition D2 -- internal modus
+    ponens for ``Prov_HF_internal``. Needed for the G2 chain and for
+    formalizing the unprovability argument inside HF.
+
+    Proof sketch:
+      * Use ``PROV_HF_REPRESENTS_FWD`` together with the HF axiom HF1
+        on internalized formulas (or directly the internal axiom-case
+        clauses) to package the implication.
+      * Combine with ``PROV_HF_EXISTS_INTRO`` to lift the proof-set
+        witness through the implication.
+    """
+    p.goal(
+        "!F G. is_form F /\\ is_form G ==> "
+        "Prov_HF (Imp_f "
+        "          (substitute Prov_HF_internal "
+        "                      (quote_hf (Imp_f F G)) idx_x) "
+        "          (Imp_f "
+        "            (substitute Prov_HF_internal (quote_hf F) idx_x) "
+        "            (substitute Prov_HF_internal (quote_hf G) idx_x)))"
+    )
+    p.sorry()
+
+
+@proof
+def PROV_HF_INTERNAL_D3(p):
+    """|- !F. is_form F ==>
+              Prov_HF (Imp_f
+                        (substitute Prov_HF_internal (quote_hf F) idx_x)
+                        (substitute Prov_HF_internal
+                                    (quote_hf
+                                      (substitute Prov_HF_internal
+                                                  (quote_hf F) idx_x))
+                                    idx_x)).
+
+    Hilbert-Bernays-Loeb derivability condition D3 -- provable
+    Sigma_1-completeness for ``Prov_HF_internal``. This is the
+    expensive condition: HF can internally verify that if it proves
+    ``F`` then it proves the internal ``Prov(F)`` statement.
+
+    Proof sketch:
+      * Formalize the proof of ``PROV_HF_REPRESENTS_FWD`` inside HF.
+      * Use ``PROOF_HF_SET_INTERNAL_REPRESENTS`` lifted under
+        internal existential introduction.
+      * This is the load-bearing input to G2.
+    """
+    p.goal(
+        "!F. is_form F ==> "
+        "Prov_HF (Imp_f "
+        "          (substitute Prov_HF_internal (quote_hf F) idx_x) "
+        "          (substitute Prov_HF_internal "
+        "                      (quote_hf "
+        "                        (substitute Prov_HF_internal "
+        "                                    (quote_hf F) idx_x)) "
+        "                      idx_x))"
+    )
+    p.sorry()
+
+
+@proof
+def SIGMA1_SOUNDNESS_PROV_HF_INTERNAL(p):
     """|- !n. Prov_HF (substitute Prov_HF_internal (quote_hf n) idx_x)
               ==> Prov_HF n.
 
+    Sigma_1-soundness instantiated at the Sigma_1 formula
+    ``Prov_HF_internal[quote_hf n]``: if HF proves the internal
+    provability statement for ``n``, then ``n`` really is HF-provable.
+
+    This is the irrefutability lever for G1 -- combined with
+    ``PROV_HF_REPRESENTS_FWD`` and consistency it shows ``Prov_HF (Not_f
+    G) ==> _|_`` for the Goedel sentence ``G``. Replaces the previous
+    BWD stub: the source of soundness is Sigma_1-soundness of HF rather
+    than ad hoc proof-set extraction.
+
     Proof sketch:
-      * This is the Stage-6 soundness half, not a syntactic
-        representability proof.
-      * Interpret the HF proof of the internal Sigma_1 formula in the
-        standard HF model.
-      * Extract a real finite proof-set witness ``P`` satisfying
-        ``Proof_HF_set P n``.
-      * Fold with ``PROV_HF_AT`` to obtain external ``Prov_HF n``.
+      * Treat as a derived rule: external Sigma_1-soundness of HF
+        applied to the Sigma_1 formula ``Prov_HF_internal[quote_hf n]``.
+      * Discharges the existential ``?P. Proof_HF_set P n`` and folds
+        with ``PROV_HF_AT`` to obtain external ``Prov_HF n``.
     """
     p.goal(
         "!n. Prov_HF (substitute Prov_HF_internal (quote_hf n) idx_x) "
@@ -4382,12 +4457,12 @@ def PROV_HF_REPRESENTS(p):
 
     Proof sketch:
       * Combine ``PROV_HF_REPRESENTS_FWD`` and
-        ``PROV_HF_REPRESENTS_BWD`` by propositional extensionality for
-        booleans.
-      * The forward half is the Phase-3 finite proof-checker
-        representability proof.
-      * The backward half remains intentionally isolated as the
-        Stage-6 Sigma_1 soundness dependency.
+        ``SIGMA1_SOUNDNESS_PROV_HF_INTERNAL`` by propositional
+        extensionality for booleans.
+      * The forward half is the finite proof-checker representability
+        proof.
+      * The backward half is Sigma_1-soundness of HF applied to
+        ``Prov_HF_internal[quote_hf n]``.
     """
     p.goal(
         "!n. Prov_HF n = "
@@ -4554,8 +4629,16 @@ if __name__ == "__main__":
         pp_thm(PROV_HF_REPRESENTS_FWD),
     )
     print(
-        "    PROV_HF_REPRESENTS_BWD          :",
-        pp_thm(PROV_HF_REPRESENTS_BWD),
+        "    PROV_HF_INTERNAL_D2             :",
+        pp_thm(PROV_HF_INTERNAL_D2),
+    )
+    print(
+        "    PROV_HF_INTERNAL_D3             :",
+        pp_thm(PROV_HF_INTERNAL_D3),
+    )
+    print(
+        "    SIGMA1_SOUNDNESS_PROV_HF_INTERNAL:",
+        pp_thm(SIGMA1_SOUNDNESS_PROV_HF_INTERNAL),
     )
     print(
         "    PROV_HF_REPRESENTS             :",

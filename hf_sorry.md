@@ -27,7 +27,14 @@ whose role is just internal body well-formedness/free-variable bookkeeping.
 | B | `hf_repr_thms.py` | 8 | internal proof-checker representability |
 | C | `hf_godel1.py` | 6 | diagonal-function and diagonal-lemma layer |
 
-Total tracked substantive HF/G1 stubs: **18**.
+Total tracked substantive HF/G1 stubs: **20**.
+
+The Group B count rose by two relative to the older inventory: the
+former `PROV_HF_REPRESENTS_BWD` stub was retired in favor of the
+Sigma_1-soundness instantiation `SIGMA1_SOUNDNESS_PROV_HF_INTERNAL`,
+and two new Hilbert-Bernays-Loeb derivability-condition stubs
+(`PROV_HF_INTERNAL_D2`, `PROV_HF_INTERNAL_D3`) were added because the
+target now covers both halves of G1 plus G2.
 
 ## Dependency Order
 
@@ -38,11 +45,14 @@ Clear the remaining sorries in this order:
 3. `hf_repr_core.py` support predicate and support equivalence packages.
 4. `hf_repr_thms.py` recognizer representability.
 5. `hf_repr_thms.py` valid-step and proof-set representability.
-6. `hf_repr_thms.py` `PROV_HF_REPRESENTS_FWD`.
-7. Defer or isolate `PROV_HF_REPRESENTS_BWD` as Stage-6 soundness.
-8. `hf_godel1.py` diagonal function package.
-9. `hf_godel1.py` HOL substitution/free-variable lemmas.
-10. `hf_godel1.py` final diagonal lemma.
+6. `hf_repr_thms.py` `PROV_HF_REPRESENTS_FWD` (= derivability condition D1).
+7. `hf_repr_thms.py` `PROV_HF_INTERNAL_D2` and `PROV_HF_INTERNAL_D3`
+   (Hilbert-Bernays-Loeb conditions for G2).
+8. `hf_repr_thms.py` `SIGMA1_SOUNDNESS_PROV_HF_INTERNAL` (irrefutability
+   lever for G1, replaces BWD).
+9. `hf_godel1.py` diagonal function package.
+10. `hf_godel1.py` HOL substitution/free-variable lemmas.
+11. `hf_godel1.py` final diagonal lemma.
 
 The most useful immediate target is group A. Group B depends on the
 support equivalences and substitution package. Group C depends on the
@@ -254,17 +264,33 @@ membership in quote_hf P as a proof-record term
 This is the finite quoted-set elimination lemma. It is the second
 important bridge after the quoted `Pair_ord` record-shape bridge.
 
-### B4. Provability Representability
+### B4. Provability Representability and Derivability Conditions
 
 Live stubs:
 
 ```text
-PROV_HF_REPRESENTS_FWD
-PROV_HF_REPRESENTS_BWD
+PROV_HF_REPRESENTS_FWD                  (D1)
+PROV_HF_INTERNAL_D2                     (D2)
+PROV_HF_INTERNAL_D3                     (D3)
+SIGMA1_SOUNDNESS_PROV_HF_INTERNAL       (Sigma_1-soundness)
 PROV_HF_REPRESENTS
 ```
 
-Forward direction:
+Target coverage:
+
+* G1 unprovability half (Con ==> ~Prov_HF G):
+  needs `PROV_HF_REPRESENTS_FWD` only.
+* G1 irrefutability half (Con ==> ~Prov_HF (Not_f G)):
+  needs `SIGMA1_SOUNDNESS_PROV_HF_INTERNAL` (which replaces the old
+  BWD stub).
+* G2 (Con ==> ~Prov_HF Con_HF):
+  needs the full Hilbert-Bernays-Loeb chain
+  D1 = `PROV_HF_REPRESENTS_FWD`,
+  D2 = `PROV_HF_INTERNAL_D2`,
+  D3 = `PROV_HF_INTERNAL_D3`.
+  D3 is the load-bearing piece: it internalizes the proof of D1.
+
+D1 -- forward direction:
 
 ```text
 Prov_HF n
@@ -279,7 +305,41 @@ Expected path:
 * Unfold `Prov_HF_internal` and introduce witness `quote_hf P`.
 * Rewrite template filling to public substitution form.
 
-Backward direction:
+D2 -- internal modus ponens for `Prov_HF_internal`:
+
+```text
+is_form F /\ is_form G ==>
+Prov_HF (Imp_f (substitute Prov_HF_internal (quote_hf (Imp_f F G)) idx_x)
+               (Imp_f (substitute Prov_HF_internal (quote_hf F) idx_x)
+                      (substitute Prov_HF_internal (quote_hf G) idx_x)))
+```
+
+Expected path:
+
+* Internalize the external MP rule on proof records.
+* Combine `IS_MP_INTERNAL_REPRESENTS` with internal existential
+  introduction lifted across the implication.
+
+D3 -- provable Sigma_1-completeness for `Prov_HF_internal`:
+
+```text
+is_form F ==>
+Prov_HF (Imp_f (substitute Prov_HF_internal (quote_hf F) idx_x)
+               (substitute Prov_HF_internal
+                           (quote_hf (substitute Prov_HF_internal
+                                                 (quote_hf F) idx_x))
+                           idx_x))
+```
+
+Expected path:
+
+* Formalize the proof of `PROV_HF_REPRESENTS_FWD` inside HF.
+* This is the analogue of the metatheoretic Sigma_1-completeness for
+  the specific predicate `Prov_HF_internal`.
+* This stub is the largest single piece on the road to G2 and should
+  only be undertaken once D1, D2 and the support packages are stable.
+
+Sigma_1-soundness instantiation (replacement for BWD):
 
 ```text
 Prov_HF (substitute Prov_HF_internal (quote_hf n) idx_x)
@@ -288,21 +348,18 @@ Prov_HF (substitute Prov_HF_internal (quote_hf n) idx_x)
 
 Status:
 
-This is not part of the finite proof-checker representability
-construction. It is the soundness/reflection direction: from an HF proof
-of the internal Sigma-style predicate, extract a real finite proof set.
-
-Recommended handling:
-
-* Do not let this block G1 forward representability.
-* Keep it isolated as Stage-6 soundness unless the target theorem
-  strictly requires biconditional representability now.
-* If G1 only needs the diagonal sentence plus unprovability from
-  consistency, prefer using `PROV_HF_REPRESENTS_FWD` where possible.
+* Treated as a derived rule justified by Sigma_1-soundness of HF
+  applied to the specific Sigma_1 formula `Prov_HF_internal[quote_hf n]`.
+* This replaces the earlier `PROV_HF_REPRESENTS_BWD` stub, which
+  framed the same statement as a model-theoretic / proof-extraction
+  obligation. The new framing makes the dependency on Sigma_1-soundness
+  explicit and avoids committing to a Stage-6 semantic interpretation
+  layer.
 
 Final wrapper:
 
-`PROV_HF_REPRESENTS` is immediate once both directions exist.
+`PROV_HF_REPRESENTS` is immediate from D1 plus
+`SIGMA1_SOUNDNESS_PROV_HF_INTERNAL`.
 
 ## Group C — `hf_godel1.py`
 
