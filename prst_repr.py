@@ -67,9 +67,23 @@ from hf_repr_core import quote_hf  # noqa: F401  -- parser alias
 
 @proof
 def T_PT_NEQ_F_PT(p):
-    """|- ~(T_pt = F_pt). STUB (tag disjointness through Pair_ord)."""
+    """|- ~(T_pt = F_pt)."""
+    from tactics import TRANS
+    from prst_pr import T_PT_DEF, F_PT_DEF, ADJ_PT_DEF
+    from prst_syntax import APP_PT_NEQ_EMPTY_PT
+
     p.goal("~(T_pt = F_pt)")
-    p.sorry()
+    adj_at = p.unfold(ADJ_PT_DEF, "Empty_pt", "Empty_pt")
+    t_at = TRANS(T_PT_DEF, adj_at)
+    p.have(
+        "h_app_neq: "
+        "~(App_pt adj_sym (Tup_pt Empty_pt (Tup_pt Empty_pt Empty_pt)) = Empty_pt)"
+    ).by(
+        APP_PT_NEQ_EMPTY_PT,
+        "adj_sym",
+        "Tup_pt Empty_pt (Tup_pt Empty_pt Empty_pt)",
+    )
+    p.thus("~(T_pt = F_pt)").by_rewrite_of("h_app_neq", [t_at, F_PT_DEF])
 
 
 # ---------------------------------------------------------------------------
