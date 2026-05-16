@@ -18,37 +18,35 @@ These are the focused lower-level stubs behind
 Remaining sorries:
 
 - `IS_TUP_PR_CORRECT`            — needs Pair_ord tag biconditional
-- `MEM_T_PR_CORRECT`             — course_rec induction
+- `MEM_T_PR_CORRECT`             — course_rec induction (worked-example skeleton in place; sub-stubs below)
 - `EXISTS_MP_WITNESS_PR_CORRECT` — course_rec induction
 - `VALID_STEP_PR_CORRECT`        — composition of MEM_T + IS_PR_AXIOM_PR
 - `VALID_PROOF_LIST_PR_CORRECT`  — course_rec induction
 
-Discharged:
+### 0b. Course_rec induction stubs
 
-- `EQ_NAT_PR_CORRECT_TRUE` — from `EQ_NAT_PR_SAME` by second-slot AP_TERM
-  congruence under `x = y`.
-- `EQ_NAT_PR_TRUE_VIEW` — `EXCLUDED_MIDDLE` case split using
-  `EQ_NAT_PR_CORRECT_TRUE` (rev), `EQ_NAT_PR_CORRECT_FALSE` (fwd
-  false-branch), and `T_PT_NEQ_F_PT`.
-- `EQ_NAT_PR_SAME` — `by_rewrite` chain using the App_pt evaluators +
-  `APP_PT_IF_IN_SAME_EVAL`.
-- `EQ_NAT_PR_CORRECT_FALSE` — `by_rewrite` reduction to if_in shape +
-  `APP_PT_IF_IN_DIFF_EVAL` under `~(x = y)`.
-- `OR_BOOL_PR_CORRECT` — `OR_BOOL_PR_REDUCE` + case-split on
-  `x = T_pt \/ x = F_pt`, then `APP_PT_IF_IN_SAME/DIFF_EVAL`.
-- `AND_BOOL_PR_CORRECT` — analogous to OR.
-- `TUP_HEAD_PR_CORRECT` — manual TRANS chain through tup_head_pr_def,
-  tup_payload_pr_def, APP_PT_COMP_EVAL_1 ×2, APP_PT_PROJ_AT_HEAD,
-  TUP_PT_AT, APP_PT_PAIR_RIGHT_EVAL, APP_PT_PAIR_LEFT_EVAL.
-- `PROOF_PRST_PR_BOOL_VIEW` — `by_rewrite` reduction to nested
-  `and_bool_pr` form, then `AND_BOOL_PR_TRUE_VIEW` to peel both layers.
+Added to support `MEM_T_PR_CORRECT`-shaped proofs (the worked-example
+skeleton is in `prst_proof.py:MEM_T_PR_CORRECT`):
 
-New supporting lemmas introduced and proved this pass:
+- `NAT0_CASES_PAIR_ORD` — `!p. p = Empty_pt \/ ?a b. p = Pair_ord a b`.
+  Case-split that feeds the course_rec base/step branches.
+- `OR_BOOL_PR_TRUE_VIEW` — discharged. Unconditional `(or_bool_pr = T_pt)
+  iff (x = T_pt \/ y = T_pt)`. Mirror of `AND_BOOL_PR_TRUE_VIEW`.
+- `MEM_T_PR_REDUCE_EMPTY` — discharged. `App_pt mem_t_pr (Tup_pt x (Tup_pt
+  Empty_pt Empty_pt)) = F_pt`. Pure App_pt-evaluator chain.
+- `MEM_T_PR_STEP_TUP` — sub-stub. PR-side step rewrite at `Tup_pt h t`.
+- `MEM_PRST_AT_EMPTY` — sub-stub. `Mem_PRST Empty_pt x = F`.
+- `MEM_PRST_AT_TUP`   — sub-stub. `Mem_PRST (Tup_pt h t) x = (x = h \/
+  Mem_PRST t x)`.
+- `MEM_T_PR_NON_TUP_FALSE` — sub-stub. mem_t_pr on a non-Tup_pt Pair_ord
+  returns F_pt.
 
-- `AND_BOOL_PR_TRUE_VIEW` — unconditional `(and_bool_pr = T_pt) iff (x = T_pt /\ y = T_pt)`
-- `AND_BOOL_PR_REDUCE`    — pure comp/proj reduction of and_bool_pr to if_in shape
-- `OR_BOOL_PR_REDUCE`     — same for or_bool_pr
-- `F_PT_NEQ_T_PT`         — boolean helper: `x = F_pt ==> ~(x = T_pt)`
+Mem_PRST argument-order note: the worked example uses `Mem_PRST P x` (P
+= list, x = element) to match `_MEM_PRST_F_DEF`'s first-arg destructuring.
+Several other goals (e.g., `PROOF_PRST_VALID_MEM_SELF`) use the opposite
+`Mem_PRST element list` convention and are mathematically backwards
+relative to the body -- separate convention-cleanup task.
+
 
 ### 0a. HOL-Level `App_pt` Evaluators for PR Primitives
 
@@ -70,6 +68,8 @@ axiom + a Prov_PRST → HOL `=` soundness bridge.
 - `APP_PT_ADJ_EVAL`               — `adj_sym` builds an Adj_pt (definitional, **discharged** via SYM(ADJ_PT_DEF))
 - `APP_PT_PAIR_LEFT_EVAL`         — pair_left of a Pair_ord
 - `APP_PT_PAIR_RIGHT_EVAL`        — pair_right of a Pair_ord
+- `APP_PT_PAIR_LEFT_TUP`          — pair_left of a `Tup_pt _ _` (**discharged** from PAIR_LEFT_EVAL + TUP_PT_AT)
+- `APP_PT_PAIR_RIGHT_TUP`         — pair_right of a `Tup_pt _ _` (**discharged** from PAIR_RIGHT_EVAL + TUP_PT_AT)
 - `APP_PT_PAIR_ORD_EVAL`          — PR-level Pair_ord constructor
 - `APP_PT_REC_BASE_EVAL`          — primitive recursion base
 - `APP_PT_REC_STEP_EVAL`          — primitive recursion step
@@ -158,7 +158,7 @@ proof depends on the checker/list-combine API, not on Loeb.
 
 ## Counts
 
-- Remaining `p.sorry()` sites: 60  *(52 baseline → +16 App_pt evaluators → -8 section-0 discharges = 60)*
+- Remaining `p.sorry()` sites: 65  *(60 prior + 5 new sub-stubs for the course_rec worked example: NAT0_CASES_PAIR_ORD, MEM_T_PR_STEP_TUP, MEM_PRST_AT_EMPTY, MEM_PRST_AT_TUP, MEM_T_PR_NON_TUP_FALSE -- MEM_T_PR_REDUCE_EMPTY and OR_BOOL_PR_TRUE_VIEW were proved.)*
 
 ## PR Symbol Evaluator Spikes
 
