@@ -24,34 +24,6 @@ connect HOL `Proof_PRST` to PR `Proof_PRST_pr` go through the standard
 PRST evaluator package (`PRST_INTERNALIZES_TRUE_PR_EVAL` /
 `PRST_INTERNALIZES_FALSE_PR_EVAL`) rather than a body-correctness theorem.
 
-### 0a. HOL-Level `App_pt` Evaluators for PR Primitives
-
-These are the infrastructure stubs flagged by the section-0 friction comments.
-Each is the HOL `=` lift of a PR primitive's defining axiom — the same content
-as the corresponding `Prov_PRST (Eq_pf ...)` claim, but committed to HOL
-equality so that section-0 checker stubs can chain through them. Eventual
-discharge route: each evaluator follows from the corresponding `is_pr_def`
-axiom + a Prov_PRST → HOL `=` soundness bridge.
-
-- `APP_PT_PROJ_AT_HEAD`           — `proj_sym 0 (SUC0 n)` returns the Tup_pt head
-- `APP_PT_PROJ_AT_TAIL`           — `proj_sym (SUC0 i) (SUC0 n)` shifts the cursor
-- `APP_PT_COMP_EVAL_1`            — 1-ary composition unfold
-- `APP_PT_COMP_EVAL_2`            — 2-ary composition unfold (and_bool_pr layers)
-- `APP_PT_COMP_EVAL_4`            — 4-ary composition unfold (if_in_sym layer)
-- `APP_PT_CONST_EVAL`             — `const_sym v` is the constant-`v` function
-- `APP_PT_IF_IN_SAME_EVAL`        — if_in on singleton `Adj_pt t Empty_pt`, same elem
-- `APP_PT_IF_IN_DIFF_EVAL`        — if_in on singleton `Adj_pt u Empty_pt`, different elem
-- `APP_PT_ADJ_EVAL`               — `adj_sym` builds an Adj_pt (definitional, **discharged** via SYM(ADJ_PT_DEF))
-- `APP_PT_PAIR_LEFT_EVAL`         — pair_left of a Pair_ord
-- `APP_PT_PAIR_RIGHT_EVAL`        — pair_right of a Pair_ord
-- `APP_PT_PAIR_LEFT_TUP`          — pair_left of a `Tup_pt _ _` (**discharged** from PAIR_LEFT_EVAL + TUP_PT_AT)
-- `APP_PT_PAIR_RIGHT_TUP`         — pair_right of a `Tup_pt _ _` (**discharged** from PAIR_RIGHT_EVAL + TUP_PT_AT)
-- `APP_PT_PAIR_ORD_EVAL`          — PR-level Pair_ord constructor
-- `APP_PT_REC_BASE_EVAL`          — primitive recursion base
-- `APP_PT_REC_STEP_EVAL`          — primitive recursion step
-- `APP_PT_COURSE_REC_BASE_EVAL`   — course-of-values recursion base
-- `APP_PT_COURSE_REC_STEP_EVAL`   — course-of-values recursion step
-
 ### 1. `Proof_PRST_pr` Checker API Boundary
 
 These are the immediate checker targets. All stated purely in PR terms
@@ -140,17 +112,25 @@ proof depends on the checker/list-combine API, not on Loeb.
 
 ## Counts
 
-- Remaining `p.sorry()` sites: 55
-  - prst_proof.py: 35
+- Remaining `p.sorry()` sites: 40
+  - prst_proof.py: 20
   - prst_repr.py:  6
   - prst_godel1.py: 6
   - prst_godel2.py: 8
 
-  *(Down from 65: the section 0 + 0b stack -- `IS_TUP_PR_CORRECT`,
-  `MEM_T_PR_CORRECT`, `EXISTS_MP_WITNESS_PR_CORRECT`, `VALID_STEP_PR_CORRECT`,
-  `VALID_PROOF_LIST_PR_CORRECT`, the five course_rec sub-stubs, and
-  `PROOF_PRST_PR_BODY_CORRECT` -- was deleted as scaffolding-only churn.
-  See the "no structural HOL↔PR bridge" note above.)*
+  *(Down from 65: two scaffolding cuts. (1) Section 0 + 0b structural bridge
+  (`IS_TUP_PR_CORRECT`, `MEM_T_PR_CORRECT`, `EXISTS_MP_WITNESS_PR_CORRECT`,
+  `VALID_STEP_PR_CORRECT`, `VALID_PROOF_LIST_PR_CORRECT`, the five course_rec
+  sub-stubs, and `PROOF_PRST_PR_BODY_CORRECT`). (2) Section 0a App_pt
+  evaluator stack (`APP_PT_PROJ_AT_*`, `APP_PT_COMP_EVAL_*`,
+  `APP_PT_CONST_EVAL`, `APP_PT_IF_IN_*_EVAL`, `APP_PT_PAIR_*_EVAL`,
+  `APP_PT_PAIR_ORD_EVAL`, `APP_PT_REC_*_EVAL`, `APP_PT_COURSE_REC_*_EVAL`)
+  plus the boolean/eq_nat helper proofs that consumed them
+  (`AND/OR_BOOL_PR_CORRECT`/`REDUCE`/`TRUE_VIEW`, `EQ_NAT_PR_SAME`/`CORRECT_*`/
+  `TRUE_VIEW`, `F_PT_NEQ_T_PT`, `TUP_HEAD_PR_CORRECT`,
+  `PROOF_PRST_PR_BOOL_VIEW`). The boolean stack was orphaned by cut (1); no
+  remaining stub consumes any of it. See the "no structural HOL↔PR bridge"
+  note above.)*
 
 ## PR Symbol Evaluator Spikes
 
