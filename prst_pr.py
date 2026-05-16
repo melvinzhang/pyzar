@@ -513,6 +513,33 @@ F_PT_DEF = define("F_pt", parse_type("nat0"), "Empty_pt")
 F_pt = mk_const("F_pt", [])
 
 
+@proof
+def T_PT_NEQ_F_PT(p):
+    """|- ~(T_pt = F_pt).
+
+    T_pt unfolds to `App_pt adj_sym (Tup_pt Empty_pt (Tup_pt Empty_pt Empty_pt))`
+    via T_PT_DEF then ADJ_PT_DEF; F_pt unfolds to Empty_pt; the App_pt /
+    Empty_pt disjointness comes from APP_PT_NEQ_EMPTY_PT. Lives here so
+    downstream modules (prst_proof, prst_repr) can reuse it without an
+    inline rebuild.
+    """
+    from tactics import TRANS
+    from prst_syntax import APP_PT_NEQ_EMPTY_PT
+
+    p.goal("~(T_pt = F_pt)")
+    adj_at = p.unfold(ADJ_PT_DEF, "Empty_pt", "Empty_pt")
+    t_at = TRANS(T_PT_DEF, adj_at)
+    p.have(
+        "h_app_neq: "
+        "~(App_pt adj_sym (Tup_pt Empty_pt (Tup_pt Empty_pt Empty_pt)) = Empty_pt)"
+    ).by(
+        APP_PT_NEQ_EMPTY_PT,
+        "adj_sym",
+        "Tup_pt Empty_pt (Tup_pt Empty_pt Empty_pt)",
+    )
+    p.thus("~(T_pt = F_pt)").by_rewrite_of("h_app_neq", [t_at, F_PT_DEF])
+
+
 # Helper: n-fold Var_t tuple used by proj_def_axiom_at's argument list.
 # Built by primitive recursion on nat0:
 #     var_t_args_rev 0           = Empty_pt

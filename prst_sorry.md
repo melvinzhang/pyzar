@@ -15,18 +15,66 @@ Pure forwarding theorems are deleted instead of tracked.
 These are the focused lower-level stubs behind
 `PROOF_PRST_PR_BODY_CORRECT`.
 
-- `EQ_NAT_PR_CORRECT_TRUE`
-- `EQ_NAT_PR_CORRECT_FALSE`
-- `EQ_NAT_PR_TRUE_VIEW`
-- `OR_BOOL_PR_CORRECT`
-- `AND_BOOL_PR_CORRECT`
-- `IS_TUP_PR_CORRECT`
-- `TUP_HEAD_PR_CORRECT`
-- `MEM_T_PR_CORRECT`
-- `EXISTS_MP_WITNESS_PR_CORRECT`
-- `VALID_STEP_PR_CORRECT`
-- `VALID_PROOF_LIST_PR_CORRECT`
-- `PROOF_PRST_PR_BOOL_VIEW`
+Remaining sorries:
+
+- `IS_TUP_PR_CORRECT`            — needs Pair_ord tag biconditional
+- `MEM_T_PR_CORRECT`             — course_rec induction
+- `EXISTS_MP_WITNESS_PR_CORRECT` — course_rec induction
+- `VALID_STEP_PR_CORRECT`        — composition of MEM_T + IS_PR_AXIOM_PR
+- `VALID_PROOF_LIST_PR_CORRECT`  — course_rec induction
+
+Discharged:
+
+- `EQ_NAT_PR_CORRECT_TRUE` — from `EQ_NAT_PR_SAME` by second-slot AP_TERM
+  congruence under `x = y`.
+- `EQ_NAT_PR_TRUE_VIEW` — `EXCLUDED_MIDDLE` case split using
+  `EQ_NAT_PR_CORRECT_TRUE` (rev), `EQ_NAT_PR_CORRECT_FALSE` (fwd
+  false-branch), and `T_PT_NEQ_F_PT`.
+- `EQ_NAT_PR_SAME` — `by_rewrite` chain using the App_pt evaluators +
+  `APP_PT_IF_IN_SAME_EVAL`.
+- `EQ_NAT_PR_CORRECT_FALSE` — `by_rewrite` reduction to if_in shape +
+  `APP_PT_IF_IN_DIFF_EVAL` under `~(x = y)`.
+- `OR_BOOL_PR_CORRECT` — `OR_BOOL_PR_REDUCE` + case-split on
+  `x = T_pt \/ x = F_pt`, then `APP_PT_IF_IN_SAME/DIFF_EVAL`.
+- `AND_BOOL_PR_CORRECT` — analogous to OR.
+- `TUP_HEAD_PR_CORRECT` — manual TRANS chain through tup_head_pr_def,
+  tup_payload_pr_def, APP_PT_COMP_EVAL_1 ×2, APP_PT_PROJ_AT_HEAD,
+  TUP_PT_AT, APP_PT_PAIR_RIGHT_EVAL, APP_PT_PAIR_LEFT_EVAL.
+- `PROOF_PRST_PR_BOOL_VIEW` — `by_rewrite` reduction to nested
+  `and_bool_pr` form, then `AND_BOOL_PR_TRUE_VIEW` to peel both layers.
+
+New supporting lemmas introduced and proved this pass:
+
+- `AND_BOOL_PR_TRUE_VIEW` — unconditional `(and_bool_pr = T_pt) iff (x = T_pt /\ y = T_pt)`
+- `AND_BOOL_PR_REDUCE`    — pure comp/proj reduction of and_bool_pr to if_in shape
+- `OR_BOOL_PR_REDUCE`     — same for or_bool_pr
+- `F_PT_NEQ_T_PT`         — boolean helper: `x = F_pt ==> ~(x = T_pt)`
+
+### 0a. HOL-Level `App_pt` Evaluators for PR Primitives
+
+These are the infrastructure stubs flagged by the section-0 friction comments.
+Each is the HOL `=` lift of a PR primitive's defining axiom — the same content
+as the corresponding `Prov_PRST (Eq_pf ...)` claim, but committed to HOL
+equality so that section-0 checker stubs can chain through them. Eventual
+discharge route: each evaluator follows from the corresponding `is_pr_def`
+axiom + a Prov_PRST → HOL `=` soundness bridge.
+
+- `APP_PT_PROJ_AT_HEAD`           — `proj_sym 0 (SUC0 n)` returns the Tup_pt head
+- `APP_PT_PROJ_AT_TAIL`           — `proj_sym (SUC0 i) (SUC0 n)` shifts the cursor
+- `APP_PT_COMP_EVAL_1`            — 1-ary composition unfold
+- `APP_PT_COMP_EVAL_2`            — 2-ary composition unfold (and_bool_pr layers)
+- `APP_PT_COMP_EVAL_4`            — 4-ary composition unfold (if_in_sym layer)
+- `APP_PT_CONST_EVAL`             — `const_sym v` is the constant-`v` function
+- `APP_PT_IF_IN_SAME_EVAL`        — if_in on singleton `Adj_pt t Empty_pt`, same elem
+- `APP_PT_IF_IN_DIFF_EVAL`        — if_in on singleton `Adj_pt u Empty_pt`, different elem
+- `APP_PT_ADJ_EVAL`               — `adj_sym` builds an Adj_pt (definitional, **discharged** via SYM(ADJ_PT_DEF))
+- `APP_PT_PAIR_LEFT_EVAL`         — pair_left of a Pair_ord
+- `APP_PT_PAIR_RIGHT_EVAL`        — pair_right of a Pair_ord
+- `APP_PT_PAIR_ORD_EVAL`          — PR-level Pair_ord constructor
+- `APP_PT_REC_BASE_EVAL`          — primitive recursion base
+- `APP_PT_REC_STEP_EVAL`          — primitive recursion step
+- `APP_PT_COURSE_REC_BASE_EVAL`   — course-of-values recursion base
+- `APP_PT_COURSE_REC_STEP_EVAL`   — course-of-values recursion step
 
 ### 1. `Proof_PRST_pr` Checker API Boundary
 
@@ -110,7 +158,7 @@ proof depends on the checker/list-combine API, not on Loeb.
 
 ## Counts
 
-- Remaining `p.sorry()` sites: 52
+- Remaining `p.sorry()` sites: 60  *(52 baseline → +16 App_pt evaluators → -8 section-0 discharges = 60)*
 
 ## PR Symbol Evaluator Spikes
 

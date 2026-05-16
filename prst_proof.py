@@ -1616,44 +1616,620 @@ def FIND_PROOF_PR_MU_CORRECT(p):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Stage 2B (d.4a) -- HOL-level App_pt evaluators for the PR primitives.
+#
+# These lift each primitive PR-symbol's defining equation from the PRST
+# proof system (Prov_PRST) to a HOL equation `App_pt sym args = result`.
+# They are the missing infrastructure flagged in the section-0 friction
+# comments: every checker-body component that bottoms out at `App_pt
+# (comp_sym ...) ... = T_pt` needs these to unfold the composition chain.
+#
+# Discharge route (eventually): each is the "true" branch of the standard
+# PRST evaluator package -- the same `PRST_INTERNALIZES_TRUE_PR_EVAL`
+# pattern, but committed to HOL `=` instead of `Prov_PRST (Eq_pf ...)` via
+# a soundness bridge. STUB. Listed here so downstream proofs can name and
+# import them.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def APP_PT_PROJ_AT_HEAD(p):
+    """|- !n x rest. App_pt (proj_sym 0 (SUC0 n)) (Tup_pt x rest) = x.
+
+    Head-projection evaluator: `proj_sym 0 (n+1)` on a Tup_pt-cons returns
+    the head. The general `proj_sym i n` for arbitrary i is obtained by
+    induction on i using APP_PT_PROJ_AT_TAIL (below) to shift the cursor.
+    """
+    p.goal(
+        "!n x rest. "
+        "App_pt (proj_sym 0 (SUC0 n)) (Tup_pt x rest) = x",
+        types={"n": nat0_ty, "x": nat0_ty, "rest": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def APP_PT_PROJ_AT_TAIL(p):
+    """|- !i n x rest.
+            App_pt (proj_sym (SUC0 i) (SUC0 n)) (Tup_pt x rest)
+              = App_pt (proj_sym i n) rest.
+
+    Tail-projection evaluator: shifts the index/arity down by one and
+    drops the head from the args tuple. Together with
+    APP_PT_PROJ_AT_HEAD this characterises proj_sym at every index.
+    """
+    p.goal(
+        "!i n x rest. "
+        "App_pt (proj_sym (SUC0 i) (SUC0 n)) (Tup_pt x rest) = "
+        "App_pt (proj_sym i n) rest",
+        types={"i": nat0_ty, "n": nat0_ty, "x": nat0_ty, "rest": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def APP_PT_COMP_EVAL_1(p):
+    """|- !g h1 args.
+            App_pt (comp_sym g (Tup_pt h1 Empty_pt)) args
+              = App_pt g (Tup_pt (App_pt h1 args) Empty_pt).
+
+    1-ary composition evaluator. Consumed by:
+      - is_tup_pr unfolding `comp(eq_nat_pr, comp(pair_left_sym, proj 0 1), ...)`
+      - _const_at-style 1-ary `comp(const_sym v, proj 0 1)` chains.
+    """
+    p.goal(
+        "!g h1 args. "
+        "App_pt (comp_sym g (Tup_pt h1 Empty_pt)) args = "
+        "App_pt g (Tup_pt (App_pt h1 args) Empty_pt)",
+        types={"g": nat0_ty, "h1": nat0_ty, "args": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def APP_PT_COMP_EVAL_2(p):
+    """|- !g h1 h2 args.
+            App_pt (comp_sym g (Tup_pt h1 (Tup_pt h2 Empty_pt))) args
+              = App_pt g (Tup_pt (App_pt h1 args)
+                            (Tup_pt (App_pt h2 args) Empty_pt)).
+
+    2-ary composition evaluator. Consumed by:
+      - Proof_PRST_pr's outer `comp(and_bool_pr, ..., ...)` layers
+      - eq_nat_pr's outer `comp(if_in_sym, ...)` after the singleton/branch
+        args are projected.
+    """
+    p.goal(
+        "!g h1 h2 args. "
+        "App_pt (comp_sym g (Tup_pt h1 (Tup_pt h2 Empty_pt))) args = "
+        "App_pt g (Tup_pt (App_pt h1 args) "
+        "                 (Tup_pt (App_pt h2 args) Empty_pt))",
+        types={"g": nat0_ty, "h1": nat0_ty, "h2": nat0_ty, "args": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def APP_PT_COMP_EVAL_4(p):
+    """|- !g h1 h2 h3 h4 args.
+            App_pt (comp_sym g (Tup_pt h1 (Tup_pt h2 (Tup_pt h3
+                                (Tup_pt h4 Empty_pt))))) args
+              = App_pt g (Tup_pt (App_pt h1 args)
+                            (Tup_pt (App_pt h2 args)
+                              (Tup_pt (App_pt h3 args)
+                                (Tup_pt (App_pt h4 args) Empty_pt)))).
+
+    4-ary composition evaluator. Consumed by:
+      - eq_nat_pr's `comp(if_in_sym, t_pr, s_pr, x_pr, y_pr)` shape
+      - any other if_in_sym-rooted composition with branch args.
+    """
+    p.goal(
+        "!g h1 h2 h3 h4 args. "
+        "App_pt (comp_sym g "
+        "  (Tup_pt h1 (Tup_pt h2 (Tup_pt h3 (Tup_pt h4 Empty_pt))))) args = "
+        "App_pt g (Tup_pt (App_pt h1 args) "
+        "          (Tup_pt (App_pt h2 args) "
+        "            (Tup_pt (App_pt h3 args) "
+        "              (Tup_pt (App_pt h4 args) Empty_pt))))",
+        types={
+            "g": nat0_ty, "h1": nat0_ty, "h2": nat0_ty,
+            "h3": nat0_ty, "h4": nat0_ty, "args": nat0_ty,
+        },
+    )
+    p.sorry()
+
+
+@proof
+def APP_PT_CONST_EVAL(p):
+    """|- !v args. App_pt (const_sym v) args = v.
+
+    HOL-level lift of CONST_SYM_DEF's spec: `const_sym v` is the 1-ary
+    PR symbol "always return v"; on any argument tuple it evaluates to v.
+    Consumed by `_const_at(v, n) := comp(const_sym v, proj(0, n))` chains
+    after APP_PT_COMP_EVAL_1 has reduced the outer comp.
+    """
+    p.goal(
+        "!v args. App_pt (const_sym v) args = v",
+        types={"v": nat0_ty, "args": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def APP_PT_IF_IN_SAME_EVAL(p):
+    """|- !t xv yv.
+            App_pt if_in_sym (Tup_pt t (Tup_pt (Adj_pt t Empty_pt)
+                          (Tup_pt xv (Tup_pt yv Empty_pt)))) = xv.
+
+    Singleton-specialised if_in evaluator: when the set is `Adj_pt t Empty_pt`
+    (i.e., the PRST singleton {t}) and the test value is t itself, if_in_sym
+    returns the then-branch xv. This is the form actually used by eq_nat_pr,
+    or_bool_pr, and_bool_pr, where the discriminating set is always a
+    singleton.
+
+    Avoids the HOL-level `In t s` predicate, which does not align with PRST
+    set semantics (PRST sets are encoded as nested Adj_pt's, not as
+    bit-encoded HF sets).
+    """
+    p.goal(
+        "!t xv yv. "
+        "App_pt if_in_sym "
+        "  (Tup_pt t (Tup_pt (Adj_pt t Empty_pt) "
+        "    (Tup_pt xv (Tup_pt yv Empty_pt)))) = xv",
+        types={"t": nat0_ty, "xv": nat0_ty, "yv": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def APP_PT_IF_IN_DIFF_EVAL(p):
+    """|- !t u xv yv. ~(t = u) ==>
+            App_pt if_in_sym (Tup_pt t (Tup_pt (Adj_pt u Empty_pt)
+                          (Tup_pt xv (Tup_pt yv Empty_pt)))) = yv.
+
+    Singleton-specialised counterpart of APP_PT_IF_IN_SAME_EVAL: when the
+    test value `t` is not equal to the singleton's element `u`, if_in_sym
+    returns the else-branch yv.
+    """
+    p.goal(
+        "!t u xv yv. ~(t = u) ==> "
+        "App_pt if_in_sym "
+        "  (Tup_pt t (Tup_pt (Adj_pt u Empty_pt) "
+        "    (Tup_pt xv (Tup_pt yv Empty_pt)))) = yv",
+        types={"t": nat0_ty, "u": nat0_ty, "xv": nat0_ty, "yv": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def APP_PT_ADJ_EVAL(p):
+    """|- !x s. App_pt adj_sym (Tup_pt x (Tup_pt s Empty_pt)) = Adj_pt x s.
+
+    Definitional: Adj_pt is defined as exactly this App_pt form, so this
+    is just SYM(ADJ_PT_DEF unfolded at x, s).
+    """
+    from prst_pr import ADJ_PT_DEF
+    from tactics import SYM
+
+    p.goal(
+        "!x s. App_pt adj_sym (Tup_pt x (Tup_pt s Empty_pt)) = Adj_pt x s",
+        types={"x": nat0_ty, "s": nat0_ty},
+    )
+    p.fix("x s")
+    adj_at = p.unfold(ADJ_PT_DEF, "x", "s")
+    # adj_at: Adj_pt x s = App_pt adj_sym (Tup_pt x (Tup_pt s Empty_pt))
+    p.thus(
+        "App_pt adj_sym (Tup_pt x (Tup_pt s Empty_pt)) = Adj_pt x s"
+    ).by_thm(SYM(adj_at))
+
+
+@proof
+def APP_PT_PAIR_LEFT_EVAL(p):
+    """|- !a b. App_pt pair_left_sym (Tup_pt (Pair_ord a b) Empty_pt) = a.
+
+    HOL-level lift of the `pair_left` defining axiom (left projection of a
+    Pair_ord). Consumed wherever PR composition uses `pair_left_sym` to
+    inspect a Pair_ord-encoded payload (is_tup_pr's tag check, the Tup_pt
+    head/tail destructors).
+    """
+    p.goal(
+        "!a b. App_pt pair_left_sym (Tup_pt (Pair_ord a b) Empty_pt) = a",
+        types={"a": nat0_ty, "b": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def APP_PT_PAIR_RIGHT_EVAL(p):
+    """|- !a b. App_pt pair_right_sym (Tup_pt (Pair_ord a b) Empty_pt) = b.
+
+    Right-component counterpart of APP_PT_PAIR_LEFT_EVAL.
+    """
+    p.goal(
+        "!a b. App_pt pair_right_sym (Tup_pt (Pair_ord a b) Empty_pt) = b",
+        types={"a": nat0_ty, "b": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def APP_PT_PAIR_ORD_EVAL(p):
+    """|- !a b. App_pt pair_ord_sym (Tup_pt a (Tup_pt b Empty_pt)) = Pair_ord a b.
+
+    PR-level Pair_ord constructor evaluator. Consumed wherever a PR
+    composition has to *build* a Pair_ord (e.g. substitute_pr packaging
+    (t, v) into y_vec).
+    """
+    p.goal(
+        "!a b. App_pt pair_ord_sym (Tup_pt a (Tup_pt b Empty_pt)) = Pair_ord a b",
+        types={"a": nat0_ty, "b": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def APP_PT_REC_BASE_EVAL(p):
+    """|- !g h args. App_pt (rec_sym g h) (Tup_pt zero_sym args) = App_pt g args.
+
+    HOL-level lift of `rec_base_def_axiom_at g h`. Consumed by any PR
+    symbol built with `rec(g, h)` that recurses over its first argument
+    (numeral_pr-style).
+    """
+    p.goal(
+        "!g h args. "
+        "App_pt (rec_sym g h) (Tup_pt zero_sym args) = App_pt g args",
+        types={"g": nat0_ty, "h": nat0_ty, "args": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def APP_PT_REC_STEP_EVAL(p):
+    """|- !g h i s args.
+            App_pt (rec_sym g h) (Tup_pt (Adj_pt i s) args)
+              = App_pt h (Tup_pt i (Tup_pt s
+                            (Tup_pt (App_pt (rec_sym g h) (Tup_pt s args))
+                              args))).
+
+    HOL-level lift of `rec_step_def_axiom_at g h`.
+    """
+    p.goal(
+        "!g h i s args. "
+        "App_pt (rec_sym g h) (Tup_pt (Adj_pt i s) args) = "
+        "App_pt h (Tup_pt i "
+        "  (Tup_pt s "
+        "    (Tup_pt (App_pt (rec_sym g h) (Tup_pt s args)) "
+        "            args)))",
+        types={
+            "g": nat0_ty, "h": nat0_ty,
+            "i": nat0_ty, "s": nat0_ty, "args": nat0_ty,
+        },
+    )
+    p.sorry()
+
+
+@proof
+def APP_PT_COURSE_REC_BASE_EVAL(p):
+    """|- !g h y. App_pt (course_rec_sym g h) (Tup_pt Empty_pt (Tup_pt y Empty_pt))
+            = App_pt g (Tup_pt y Empty_pt).
+
+    HOL-level lift of `course_rec_base_def_axiom`. Consumed by mem_t_pr,
+    valid_proof_list_pr, exists_mp_witness_pr (all course_rec instances).
+    """
+    p.goal(
+        "!g h y. "
+        "App_pt (course_rec_sym g h) (Tup_pt Empty_pt (Tup_pt y Empty_pt)) = "
+        "App_pt g (Tup_pt y Empty_pt)",
+        types={"g": nat0_ty, "h": nat0_ty, "y": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def APP_PT_COURSE_REC_STEP_EVAL(p):
+    """|- !g h a b y.
+            App_pt (course_rec_sym g h) (Tup_pt (Pair_ord a b) (Tup_pt y Empty_pt))
+              = App_pt h (Tup_pt a (Tup_pt b
+                  (Tup_pt (App_pt (course_rec_sym g h) (Tup_pt a (Tup_pt y Empty_pt)))
+                    (Tup_pt (App_pt (course_rec_sym g h) (Tup_pt b (Tup_pt y Empty_pt)))
+                      (Tup_pt y Empty_pt))))).
+
+    HOL-level lift of `course_rec_step_def_axiom`. The step `h` is 5-ary:
+    receives (a, b, rec a y, rec b y, y).
+    """
+    p.goal(
+        "!g h a b y. "
+        "App_pt (course_rec_sym g h) (Tup_pt (Pair_ord a b) (Tup_pt y Empty_pt)) = "
+        "App_pt h (Tup_pt a "
+        "  (Tup_pt b "
+        "    (Tup_pt (App_pt (course_rec_sym g h) (Tup_pt a (Tup_pt y Empty_pt))) "
+        "      (Tup_pt (App_pt (course_rec_sym g h) (Tup_pt b (Tup_pt y Empty_pt))) "
+        "              (Tup_pt y Empty_pt)))))",
+        types={
+            "g": nat0_ty, "h": nat0_ty,
+            "a": nat0_ty, "b": nat0_ty, "y": nat0_ty,
+        },
+    )
+    p.sorry()
+
+
+# ---------------------------------------------------------------------------
+# Section-0 checker body components.
+# ---------------------------------------------------------------------------
+
+
+@proof
+def EQ_NAT_PR_SAME(p):
+    """|- !x. App_pt eq_nat_pr (Tup_pt x (Tup_pt x Empty_pt)) = T_pt.
+
+    Discharge chain: unfold eq_nat_pr to its 4-ary comp_sym body, reduce
+    the four argument-position comp/proj/const chains, then close via
+    APP_PT_IF_IN_SAME_EVAL with t = x.
+    """
+    from prst_pr import eq_nat_pr_def
+
+    p.goal(
+        "!x. App_pt eq_nat_pr (Tup_pt x (Tup_pt x Empty_pt)) = T_pt",
+        types={"x": nat0_ty},
+    )
+    p.fix("x")
+    p.thus(
+        "App_pt eq_nat_pr (Tup_pt x (Tup_pt x Empty_pt)) = T_pt"
+    ).by_rewrite([
+        eq_nat_pr_def,
+        APP_PT_COMP_EVAL_4,
+        APP_PT_COMP_EVAL_2,
+        APP_PT_COMP_EVAL_1,
+        APP_PT_PROJ_AT_HEAD,
+        APP_PT_PROJ_AT_TAIL,
+        APP_PT_CONST_EVAL,
+        APP_PT_ADJ_EVAL,
+        APP_PT_IF_IN_SAME_EVAL,
+    ])
+
+
 @proof
 def EQ_NAT_PR_CORRECT_TRUE(p):
-    """|- !x y. x = y ==> App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = T_pt."""
+    """|- !x y. x = y ==> App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = T_pt.
+
+    Decomposition: under `x = y`, this reduces to the reflexive evaluator fact
+    EQ_NAT_PR_SAME at x via a single congruence rewrite of the second slot.
+    """
+    from tactics import AP_TERM, SPEC, SYM, TRANS
+    from basics import mk_app, mk_const
+
     p.goal(
         "!x y. x = y ==> "
         "App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = T_pt",
         types={"x": nat0_ty, "y": nat0_ty},
     )
-    p.sorry()
+    p.fix("x y")
+    p.assume("h_xy: x = y")
+    same_at_x = SPEC(p._parse("x"), EQ_NAT_PR_SAME)
+    # DSL friction: we want to substitute h_xy: x = y into ONLY the second
+    # slot of `App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt))`. `by_rewrite_of`
+    # / `by_rewrite` would replace both occurrences of x, so we hand-build
+    # the targeted congruence:
+    #   AP_TERM(App_pt eq_nat_pr o (Tup_pt x), AP_THM(AP_TERM(Tup_pt, h_xy), Empty_pt))
+    from tactics import AP_THM
+    App_pt_c = mk_const("App_pt", [])
+    Tup_pt_c = mk_const("Tup_pt", [])
+    Empty_pt_c = mk_const("Empty_pt", [])
+    eq_nat_pr_c = mk_const("eq_nat_pr", [])
+    x_c = p._parse("x")
+    Tup_pt_h_xy = AP_TERM(Tup_pt_c, p.fact("h_xy"))                # Tup_pt x = Tup_pt y
+    inner_tail_eq = AP_THM(Tup_pt_h_xy, Empty_pt_c)                # Tup_pt x Empty_pt = Tup_pt y Empty_pt
+    outer_arg_eq = AP_TERM(mk_app(Tup_pt_c, x_c), inner_tail_eq)   # 2nd-slot-only
+    full_arg_eq = AP_TERM(mk_app(App_pt_c, eq_nat_pr_c), outer_arg_eq)
+    p.thus(
+        "App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = T_pt"
+    ).by_thm(TRANS(SYM(full_arg_eq), same_at_x))
 
 
 @proof
 def EQ_NAT_PR_CORRECT_FALSE(p):
-    """|- !x y. ~(x = y) ==> App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = F_pt."""
+    """|- !x y. ~(x = y) ==> App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = F_pt.
+
+    Discharge chain: reduce eq_nat_pr to its if_in_sym body via the same
+    comp/proj/const/adj rewrite set as EQ_NAT_PR_SAME (the comp body is
+    identical; only the singleton's element is `y` instead of `x`). After
+    reduction, the result is
+        App_pt if_in_sym (Tup_pt x (Tup_pt (Adj_pt y Empty_pt)
+                          (Tup_pt T_pt (Tup_pt F_pt Empty_pt))))
+    which collapses to F_pt under `~(x = y)` via APP_PT_IF_IN_DIFF_EVAL.
+    """
+    from prst_pr import eq_nat_pr_def
+
     p.goal(
         "!x y. ~(x = y) ==> "
         "App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = F_pt",
         types={"x": nat0_ty, "y": nat0_ty},
     )
-    p.sorry()
+    p.fix("x y")
+    p.assume("h_neq: ~(x = y)")
+    # Reduce the comp/proj/adj/const chain via by_rewrite. We deliberately
+    # exclude APP_PT_IF_IN_SAME/DIFF_EVAL here -- by_rewrite would try the
+    # SAME variant which requires `t = u` syntactically, and we want the
+    # DIFF variant whose hypothesis is `h_neq`.
+    p.have(
+        "h_reduced: "
+        "App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = "
+        "App_pt if_in_sym "
+        "  (Tup_pt x (Tup_pt (Adj_pt y Empty_pt) "
+        "    (Tup_pt T_pt (Tup_pt F_pt Empty_pt))))"
+    ).by_rewrite([
+        eq_nat_pr_def,
+        APP_PT_COMP_EVAL_4,
+        APP_PT_COMP_EVAL_2,
+        APP_PT_COMP_EVAL_1,
+        APP_PT_PROJ_AT_HEAD,
+        APP_PT_PROJ_AT_TAIL,
+        APP_PT_CONST_EVAL,
+        APP_PT_ADJ_EVAL,
+    ])
+    p.have(
+        "h_if_diff: "
+        "App_pt if_in_sym "
+        "  (Tup_pt x (Tup_pt (Adj_pt y Empty_pt) "
+        "    (Tup_pt T_pt (Tup_pt F_pt Empty_pt)))) = F_pt"
+    ).by(APP_PT_IF_IN_DIFF_EVAL, "x", "y", "T_pt", "F_pt", "h_neq")
+    p.thus(
+        "App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = F_pt"
+    ).by_trans("h_reduced", "h_if_diff")
 
 
 @proof
 def EQ_NAT_PR_TRUE_VIEW(p):
     """|- !x y. (App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = T_pt) =
-            (x = y)."""
+            (x = y).
+
+    Decomposition: this view follows from the two atomic correctness lemmas
+    via EXCLUDED_MIDDLE on `x = y`. The case split keeps the App_pt
+    evaluator obligation inside EQ_NAT_PR_CORRECT_TRUE/FALSE; this proof is
+    pure plumbing.
+    """
+    from classical import EXCLUDED_MIDDLE
+    from tactics import SYM, TRANS
+    from prst_pr import T_PT_NEQ_F_PT
+
     p.goal(
         "!x y. "
         "(App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = T_pt) = "
         "(x = y)",
         types={"x": nat0_ty, "y": nat0_ty},
     )
-    p.sorry()
+
+    p.fix("x y")
+    lhs = "App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = T_pt"
+
+    with p.have(f"fwd: ({lhs}) ==> (x = y)").proof():
+        p.assume(f"h_eq_T: {lhs}")
+        with p.cases_on(EXCLUDED_MIDDLE, "x = y"):
+            with p.case("hit: x = y"):
+                p.thus("x = y").by_thm(p.fact("hit"))
+            with p.case("miss: ~(x = y)"):
+                p.have(
+                    "h_eq_F: "
+                    "App_pt eq_nat_pr (Tup_pt x (Tup_pt y Empty_pt)) = F_pt"
+                ).by(EQ_NAT_PR_CORRECT_FALSE, "x", "y", "miss")
+                p.have("h_TF: T_pt = F_pt").by_thm(
+                    TRANS(SYM(p.fact("h_eq_T")), p.fact("h_eq_F"))
+                )
+                p.absurd().by_conj(T_PT_NEQ_F_PT, "h_TF")
+
+    with p.have(f"rev: (x = y) ==> ({lhs})").proof():
+        p.assume("h_xy: x = y")
+        p.thus(lhs).by(EQ_NAT_PR_CORRECT_TRUE, "x", "y", "h_xy")
+
+    p.thus(f"({lhs}) = (x = y)").by_iff("fwd", "rev")
+
+
+@proof
+def F_PT_NEQ_T_PT(p):
+    """|- !x. x = F_pt ==> ~(x = T_pt).
+
+    Tiny boolean-cases helper used by OR/AND_BOOL_PR_CORRECT to flip
+    `x = F_pt` into the `~(x = T_pt)` form that APP_PT_IF_IN_DIFF_EVAL
+    consumes.
+    """
+    from prst_pr import T_PT_NEQ_F_PT
+    from tactics import SYM, TRANS
+
+    p.goal("!x. x = F_pt ==> ~(x = T_pt)", types={"x": nat0_ty})
+    p.fix("x")
+    p.assume("h_xF: x = F_pt")
+    with p.suppose("h_xT: x = T_pt"):
+        # x = F_pt and x = T_pt give T_pt = F_pt; contradicts T_PT_NEQ_F_PT.
+        h_tf = TRANS(SYM(p.fact("h_xT")), p.fact("h_xF"))
+        p.have("h_tf: T_pt = F_pt").by_thm(h_tf)
+        p.absurd().by_conj(T_PT_NEQ_F_PT, "h_tf")
+
+
+@proof
+def OR_BOOL_PR_REDUCE(p):
+    """|- !x y. App_pt or_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) =
+            App_pt if_in_sym (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt)
+                                          (Tup_pt T_pt (Tup_pt y Empty_pt)))).
+
+    Pure comp/proj/const/adj reduction of or_bool_pr's body. Splits off the
+    "reduce to if_in_sym shape" step so OR_BOOL_PR_CORRECT can focus on the
+    boolean reasoning.
+    """
+    from prst_pr import or_bool_pr_def
+
+    p.goal(
+        "!x y. App_pt or_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = "
+        "App_pt if_in_sym "
+        "  (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt) "
+        "    (Tup_pt T_pt (Tup_pt y Empty_pt))))",
+        types={"x": nat0_ty, "y": nat0_ty},
+    )
+    p.fix("x y")
+    p.thus(
+        "App_pt or_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = "
+        "App_pt if_in_sym "
+        "  (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt) "
+        "    (Tup_pt T_pt (Tup_pt y Empty_pt))))"
+    ).by_rewrite([
+        or_bool_pr_def,
+        APP_PT_COMP_EVAL_4,
+        APP_PT_COMP_EVAL_2,
+        APP_PT_COMP_EVAL_1,
+        APP_PT_PROJ_AT_HEAD,
+        APP_PT_PROJ_AT_TAIL,
+        APP_PT_CONST_EVAL,
+        APP_PT_ADJ_EVAL,
+    ])
+
+
+@proof
+def AND_BOOL_PR_REDUCE(p):
+    """|- !x y. App_pt and_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) =
+            App_pt if_in_sym (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt)
+                                          (Tup_pt y (Tup_pt F_pt Empty_pt)))).
+
+    Pure reduction analogue of OR_BOOL_PR_REDUCE; and_bool_pr differs only
+    in the then/else branches (`y` vs `T_pt`, `F_pt` vs `y`).
+    """
+    from prst_pr import and_bool_pr_def
+
+    p.goal(
+        "!x y. App_pt and_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = "
+        "App_pt if_in_sym "
+        "  (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt) "
+        "    (Tup_pt y (Tup_pt F_pt Empty_pt))))",
+        types={"x": nat0_ty, "y": nat0_ty},
+    )
+    p.fix("x y")
+    p.thus(
+        "App_pt and_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = "
+        "App_pt if_in_sym "
+        "  (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt) "
+        "    (Tup_pt y (Tup_pt F_pt Empty_pt))))"
+    ).by_rewrite([
+        and_bool_pr_def,
+        APP_PT_COMP_EVAL_4,
+        APP_PT_COMP_EVAL_2,
+        APP_PT_COMP_EVAL_1,
+        APP_PT_PROJ_AT_HEAD,
+        APP_PT_PROJ_AT_TAIL,
+        APP_PT_CONST_EVAL,
+        APP_PT_ADJ_EVAL,
+    ])
 
 
 @proof
 def OR_BOOL_PR_CORRECT(p):
-    r"""|- !x y. boolean inputs make or_bool_pr agree with HOL disjunction."""
+    r"""|- !x y. boolean inputs make or_bool_pr agree with HOL disjunction.
+
+    Discharge: reduce or_bool_pr to an if_in_sym applied to {T_pt} (via
+    OR_BOOL_PR_REDUCE), then case-split on `x = T_pt` vs `x = F_pt`. The
+    T_pt-branch closes via APP_PT_IF_IN_SAME_EVAL; the F_pt-branch reduces
+    or_bool_pr's value to `y` via APP_PT_IF_IN_DIFF_EVAL + T_PT_NEQ_F_PT.
+    """
+    from tactics import SPECL, SYM
+    from prst_pr import T_PT_NEQ_F_PT
+
     p.goal(
         "!x y. "
         "((x = T_pt \\/ x = F_pt) /\\ (y = T_pt \\/ y = F_pt)) "
@@ -1661,12 +2237,116 @@ def OR_BOOL_PR_CORRECT(p):
         "     (x = T_pt \\/ y = T_pt))",
         types={"x": nat0_ty, "y": nat0_ty},
     )
-    p.sorry()
+    p.fix("x y")
+    p.assume("(h_x_bool, h_y_bool): "
+             "(x = T_pt \\/ x = F_pt) /\\ (y = T_pt \\/ y = F_pt)")
+    reduce_at = SPECL([p._parse("x"), p._parse("y")], OR_BOOL_PR_REDUCE)
+    p.have(
+        "h_reduce: "
+        "App_pt or_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = "
+        "App_pt if_in_sym "
+        "  (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt) "
+        "    (Tup_pt T_pt (Tup_pt y Empty_pt))))"
+    ).by_thm(reduce_at)
+
+    lhs = "App_pt or_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = T_pt"
+    rhs = "x = T_pt \\/ y = T_pt"
+
+    with p.have(f"fwd: ({lhs}) ==> ({rhs})").proof():
+        p.assume(f"h_lhs: {lhs}")
+        with p.cases_on("h_x_bool"):
+            with p.case("hx_t: x = T_pt"):
+                p.thus(rhs).by_disj("hx_t")
+            with p.case("hx_f: x = F_pt"):
+                p.have("h_neq_xy: ~(x = T_pt)").by(
+                    F_PT_NEQ_T_PT, "x", "hx_f",
+                )
+                # Reduce if_in via DIFF: hx_f : x = F_pt, so ~(x = T_pt).
+                p.have(
+                    "h_if_diff: "
+                    "App_pt if_in_sym "
+                    "  (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt) "
+                    "    (Tup_pt T_pt (Tup_pt y Empty_pt)))) = y"
+                ).by(APP_PT_IF_IN_DIFF_EVAL, "x", "T_pt", "T_pt", "y", "h_neq_xy")
+                p.have("h_or_y: "
+                       "App_pt or_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = y"
+                ).by_trans("h_reduce", "h_if_diff")
+                # h_lhs : ... = T_pt; h_or_y : ... = y. So y = T_pt.
+                from tactics import TRANS
+                hy_t_th = TRANS(SYM(p.fact("h_or_y")), p.fact("h_lhs"))
+                p.have("hy_t: y = T_pt").by_thm(hy_t_th)
+                p.thus(rhs).by_disj("hy_t")
+
+    with p.have(f"rev: ({rhs}) ==> ({lhs})").proof():
+        p.assume(f"h_rhs: {rhs}")
+        with p.cases_on("h_rhs"):
+            with p.case("hx_t: x = T_pt"):
+                # Substitute x = T_pt; if_in evaluates via SAME.
+                p.have(
+                    "h_if_same: "
+                    "App_pt if_in_sym "
+                    "  (Tup_pt T_pt (Tup_pt (Adj_pt T_pt Empty_pt) "
+                    "    (Tup_pt T_pt (Tup_pt y Empty_pt)))) = T_pt"
+                ).by(APP_PT_IF_IN_SAME_EVAL, "T_pt", "T_pt", "y")
+                # Lift to x: rewrite by SYM(hx_t).
+                p.have(
+                    "h_if_same_x: "
+                    "App_pt if_in_sym "
+                    "  (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt) "
+                    "    (Tup_pt T_pt (Tup_pt y Empty_pt)))) = T_pt"
+                ).by_rewrite_of("h_if_same", [SYM(p.fact("hx_t"))])
+                p.thus(lhs).by_trans("h_reduce", "h_if_same_x")
+            with p.case("hy_t: y = T_pt"):
+                # y = T_pt; need or_bool_pr ... = T_pt. Case on x:
+                with p.cases_on("h_x_bool"):
+                    with p.case("hx_t: x = T_pt"):
+                        # Same as left branch above: if_in collapses via SAME.
+                        p.have(
+                            "h_if_same: "
+                            "App_pt if_in_sym "
+                            "  (Tup_pt T_pt (Tup_pt (Adj_pt T_pt Empty_pt) "
+                            "    (Tup_pt T_pt (Tup_pt y Empty_pt)))) = T_pt"
+                        ).by(APP_PT_IF_IN_SAME_EVAL, "T_pt", "T_pt", "y")
+                        p.have(
+                            "h_if_same_x: "
+                            "App_pt if_in_sym "
+                            "  (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt) "
+                            "    (Tup_pt T_pt (Tup_pt y Empty_pt)))) = T_pt"
+                        ).by_rewrite_of("h_if_same", [SYM(p.fact("hx_t"))])
+                        p.thus(lhs).by_trans("h_reduce", "h_if_same_x")
+                    with p.case("hx_f: x = F_pt"):
+                        # x = F_pt; if_in collapses to y via DIFF.
+                        p.have("h_neq_xy: ~(x = T_pt)").by(
+                            F_PT_NEQ_T_PT, "x", "hx_f",
+                        )
+                        p.have(
+                            "h_if_diff: "
+                            "App_pt if_in_sym "
+                            "  (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt) "
+                            "    (Tup_pt T_pt (Tup_pt y Empty_pt)))) = y"
+                        ).by(APP_PT_IF_IN_DIFF_EVAL, "x", "T_pt", "T_pt", "y", "h_neq_xy")
+                        # Chain: or_bool = if_in = y = T_pt.
+                        from tactics import TRANS
+                        chain = TRANS(
+                            TRANS(p.fact("h_reduce"), p.fact("h_if_diff")),
+                            p.fact("hy_t"),
+                        )
+                        p.thus(lhs).by_thm(chain)
+
+    p.thus(f"({lhs}) = ({rhs})").by_iff("fwd", "rev")
 
 
 @proof
 def AND_BOOL_PR_CORRECT(p):
-    r"""|- !x y. boolean inputs make and_bool_pr agree with HOL conjunction."""
+    r"""|- !x y. boolean inputs make and_bool_pr agree with HOL conjunction.
+
+    Mirror of OR_BOOL_PR_CORRECT: reduce via AND_BOOL_PR_REDUCE, then on
+    `x = T_pt` the if_in collapses to `y` (then-branch), and on `x = F_pt`
+    the if_in collapses to `F_pt` (else-branch).
+    """
+    from tactics import SPECL, SYM, TRANS
+    from prst_pr import T_PT_NEQ_F_PT
+
     p.goal(
         "!x y. "
         "((x = T_pt \\/ x = F_pt) /\\ (y = T_pt \\/ y = F_pt)) "
@@ -1674,13 +2354,103 @@ def AND_BOOL_PR_CORRECT(p):
         "     (x = T_pt /\\ y = T_pt))",
         types={"x": nat0_ty, "y": nat0_ty},
     )
-    p.sorry()
+    p.fix("x y")
+    p.assume("(h_x_bool, h_y_bool): "
+             "(x = T_pt \\/ x = F_pt) /\\ (y = T_pt \\/ y = F_pt)")
+    reduce_at = SPECL([p._parse("x"), p._parse("y")], AND_BOOL_PR_REDUCE)
+    p.have(
+        "h_reduce: "
+        "App_pt and_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = "
+        "App_pt if_in_sym "
+        "  (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt) "
+        "    (Tup_pt y (Tup_pt F_pt Empty_pt))))"
+    ).by_thm(reduce_at)
+
+    lhs = "App_pt and_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = T_pt"
+    rhs = "x = T_pt /\\ y = T_pt"
+
+    with p.have(f"fwd: ({lhs}) ==> ({rhs})").proof():
+        p.assume(f"h_lhs: {lhs}")
+        with p.cases_on("h_x_bool"):
+            with p.case("hx_t: x = T_pt"):
+                # if_in collapses to y; combined with h_lhs (= T_pt), we get y = T_pt.
+                p.have(
+                    "h_if_same: "
+                    "App_pt if_in_sym "
+                    "  (Tup_pt T_pt (Tup_pt (Adj_pt T_pt Empty_pt) "
+                    "    (Tup_pt y (Tup_pt F_pt Empty_pt)))) = y"
+                ).by(APP_PT_IF_IN_SAME_EVAL, "T_pt", "y", "F_pt")
+                p.have(
+                    "h_if_same_x: "
+                    "App_pt if_in_sym "
+                    "  (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt) "
+                    "    (Tup_pt y (Tup_pt F_pt Empty_pt)))) = y"
+                ).by_rewrite_of("h_if_same", [SYM(p.fact("hx_t"))])
+                p.have("h_and_y: "
+                       "App_pt and_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = y"
+                ).by_trans("h_reduce", "h_if_same_x")
+                hy_t = TRANS(SYM(p.fact("h_and_y")), p.fact("h_lhs"))
+                p.have("hy_t: y = T_pt").by_thm(hy_t)
+                p.thus(rhs).by_thm(
+                    __import__("tactics").CONJ(p.fact("hx_t"), p.fact("hy_t"))
+                )
+            with p.case("hx_f: x = F_pt"):
+                # if_in collapses to F_pt; h_lhs says LHS = T_pt; contradiction.
+                p.have("h_neq_xy: ~(x = T_pt)").by(
+                    F_PT_NEQ_T_PT, "x", "hx_f",
+                )
+                p.have(
+                    "h_if_diff: "
+                    "App_pt if_in_sym "
+                    "  (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt) "
+                    "    (Tup_pt y (Tup_pt F_pt Empty_pt)))) = F_pt"
+                ).by(APP_PT_IF_IN_DIFF_EVAL, "x", "T_pt", "y", "F_pt", "h_neq_xy")
+                p.have(
+                    "h_and_f: "
+                    "App_pt and_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = F_pt"
+                ).by_trans("h_reduce", "h_if_diff")
+                h_tf = TRANS(SYM(p.fact("h_lhs")), p.fact("h_and_f"))
+                p.have("h_tf: T_pt = F_pt").by_thm(h_tf)
+                p.absurd().by_conj(T_PT_NEQ_F_PT, "h_tf")
+
+    with p.have(f"rev: ({rhs}) ==> ({lhs})").proof():
+        p.assume("(hx_t, hy_t): x = T_pt /\\ y = T_pt")
+        # Substitute x = T_pt, evaluate if_in (SAME), result = y = T_pt.
+        p.have(
+            "h_if_same: "
+            "App_pt if_in_sym "
+            "  (Tup_pt T_pt (Tup_pt (Adj_pt T_pt Empty_pt) "
+            "    (Tup_pt y (Tup_pt F_pt Empty_pt)))) = y"
+        ).by(APP_PT_IF_IN_SAME_EVAL, "T_pt", "y", "F_pt")
+        p.have(
+            "h_if_same_x: "
+            "App_pt if_in_sym "
+            "  (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt) "
+            "    (Tup_pt y (Tup_pt F_pt Empty_pt)))) = y"
+        ).by_rewrite_of("h_if_same", [SYM(p.fact("hx_t"))])
+        chain = TRANS(
+            TRANS(p.fact("h_reduce"), p.fact("h_if_same_x")),
+            p.fact("hy_t"),
+        )
+        p.thus(lhs).by_thm(chain)
+
+    p.thus(f"({lhs}) = ({rhs})").by_iff("fwd", "rev")
 
 
 @proof
 def IS_TUP_PR_CORRECT(p):
     """|- !p. (App_pt is_tup_pr (Tup_pt p Empty_pt) = T_pt) =
-            (?h t. p = Tup_pt h t)."""
+            (?h t. p = Tup_pt h t).
+
+    DSL/proof friction: is_tup_pr := `comp(eq_nat_pr, comp(pair_left_sym,
+    proj(0,1)), _const_at(nat(12),1))`. The two natural sub-stubs are:
+      (a) `App_pt is_tup_pr (Tup_pt p Empty_pt) = eq_nat_pr (pair_left p) 12`
+          -- a comp-of-pair-left evaluation chain at HOL level (missing).
+      (b) `(pair_left p = 12) = (?h t. p = Tup_pt h t)` -- the HF
+          characterisation of the Tup_pt tag (provable from Tup_pt's encoding
+          + pair injectivity).
+    Without (a), decomposing buys nothing.
+    """
     p.goal(
         "!p. (App_pt is_tup_pr (Tup_pt p Empty_pt) = T_pt) = "
         "(?h t. p = Tup_pt h t)",
@@ -1691,18 +2461,156 @@ def IS_TUP_PR_CORRECT(p):
 
 @proof
 def TUP_HEAD_PR_CORRECT(p):
-    """|- !h t. App_pt tup_head_pr (Tup_pt (Tup_pt h t) Empty_pt) = h."""
+    """|- !h t. App_pt tup_head_pr (Tup_pt (Tup_pt h t) Empty_pt) = h.
+
+    Discharge chain (each link is one of the stage-2B-d.4a App_pt evaluators):
+        tup_head_pr_def    -> comp(pair_left_sym, tup_payload_pr)
+        APP_PT_COMP_EVAL_1 -> App_pt pair_left_sym (Tup_pt (App_pt tup_payload_pr ...) Empty_pt)
+        tup_payload_pr_def -> comp(pair_right_sym, proj 0 1)
+        APP_PT_COMP_EVAL_1 -> ... (App_pt (proj 0 1) (Tup_pt (Tup_pt h t) Empty_pt)) ...
+        APP_PT_PROJ_AT_HEAD-> drops the outer Tup_pt: yields Tup_pt h t
+        TUP_PT_AT          -> Tup_pt h t = Pair_ord 12 (Pair_ord h t)
+        APP_PT_PAIR_RIGHT  -> pair_right of Pair_ord 12 _ = Pair_ord h t
+        APP_PT_PAIR_LEFT   -> pair_left of Pair_ord h t = h
+    """
+    from prst_pr import tup_head_pr_def, tup_payload_pr_def
+    from prst_syntax import TUP_PT_AT, suc_chain
+    from tactics import AP_TERM, SPECL, SYM, TRANS
+    from basics import mk_app, mk_const
+
     p.goal(
         "!h t. App_pt tup_head_pr (Tup_pt (Tup_pt h t) Empty_pt) = h",
         types={"h": nat0_ty, "t": nat0_ty},
     )
-    p.sorry()
+    p.fix("h t")
+    App_pt_c = mk_const("App_pt", [])
+    args_outer = p._parse("Tup_pt (Tup_pt h t) Empty_pt")
+
+    # Step 1: rewrite tup_head_pr.
+    #   App_pt tup_head_pr args = App_pt (comp_sym pair_left_sym (Tup_pt tup_payload_pr Empty_pt)) args
+    step1 = AP_TERM(mk_app(App_pt_c, args_outer.__class__.__bases__[0] if False else None) if False else App_pt_c, tup_head_pr_def)
+    # cleaner: AP_THM (AP_TERM App_pt tup_head_pr_def) args
+    from tactics import AP_THM
+    step1 = AP_THM(AP_TERM(App_pt_c, tup_head_pr_def), args_outer)
+
+    # Step 2: APP_PT_COMP_EVAL_1 at (pair_left_sym, tup_payload_pr, args_outer).
+    step2 = SPECL(
+        [p._parse("pair_left_sym"),
+         p._parse("tup_payload_pr"),
+         args_outer],
+        APP_PT_COMP_EVAL_1,
+    )
+
+    # Step 3: rewrite tup_payload_pr inside the inner App_pt.
+    # We need: App_pt tup_payload_pr args_outer
+    #        = App_pt (comp_sym pair_right_sym (Tup_pt (proj_sym 0 (SUC0 0)) Empty_pt)) args_outer.
+    step3 = AP_THM(AP_TERM(App_pt_c, tup_payload_pr_def), args_outer)
+
+    # Step 4: APP_PT_COMP_EVAL_1 at (pair_right_sym, proj_sym 0 (SUC0 0), args_outer).
+    step4 = SPECL(
+        [p._parse("pair_right_sym"),
+         p._parse("proj_sym 0 (SUC0 0)"),
+         args_outer],
+        APP_PT_COMP_EVAL_1,
+    )
+
+    # Step 5: APP_PT_PROJ_AT_HEAD at (n=0, x=Tup_pt h t, rest=Empty_pt).
+    step5 = SPECL(
+        [p._parse("0"), p._parse("Tup_pt h t"), p._parse("Empty_pt")],
+        APP_PT_PROJ_AT_HEAD,
+    )
+
+    # Step 6: TUP_PT_AT at (h, t): Tup_pt h t = Pair_ord 12 (Pair_ord h t).
+    step6 = SPECL([p._parse("h"), p._parse("t")], TUP_PT_AT)
+
+    # Step 7: APP_PT_PAIR_RIGHT_EVAL at (a = 12, b = Pair_ord h t).
+    step7 = SPECL(
+        [p._parse(suc_chain(12)), p._parse("Pair_ord h t")],
+        APP_PT_PAIR_RIGHT_EVAL,
+    )
+
+    # Step 8: APP_PT_PAIR_LEFT_EVAL at (a = h, b = t).
+    step8 = SPECL([p._parse("h"), p._parse("t")], APP_PT_PAIR_LEFT_EVAL)
+
+    # Chain the inner-position rewrites for the App_pt arg.
+    # After step 5 we have an equation
+    #   App_pt (proj_sym 0 (SUC0 0)) (Tup_pt (Tup_pt h t) Empty_pt) = Tup_pt h t.
+    # Then step6 lets us replace the resulting Tup_pt h t by Pair_ord ...
+    # The outer congruence path:
+    #   pair_right_arg_eq : App_pt pair_right_sym (Tup_pt (App_pt proj ...) Empty_pt)
+    #                     = App_pt pair_right_sym (Tup_pt (Tup_pt h t) Empty_pt)
+    #                     = App_pt pair_right_sym (Tup_pt (Pair_ord 12 (Pair_ord h t)) Empty_pt)
+    #                     = Pair_ord h t  (by step7)
+    pair_right_sym_c = p._parse("pair_right_sym")
+    Tup_pt_c = mk_const("Tup_pt", [])
+    Empty_pt_c = mk_const("Empty_pt", [])
+
+    def wrap_tup_then_pair_right(eq):
+        # eq : a = b ; build: App_pt pair_right_sym (Tup_pt a Empty_pt)
+        #                   = App_pt pair_right_sym (Tup_pt b Empty_pt).
+        tup_eq = AP_THM(AP_TERM(Tup_pt_c, eq), Empty_pt_c)
+        return AP_TERM(mk_app(App_pt_c, pair_right_sym_c), tup_eq)
+
+    # eq_proj_to_tup: App_pt pair_right_sym (Tup_pt (App_pt proj ...) Empty_pt)
+    #               = App_pt pair_right_sym (Tup_pt (Tup_pt h t) Empty_pt).
+    eq_proj_to_tup = wrap_tup_then_pair_right(step5)
+    # eq_tup_to_pair: App_pt pair_right_sym (Tup_pt (Tup_pt h t) Empty_pt)
+    #               = App_pt pair_right_sym (Tup_pt (Pair_ord 12 (Pair_ord h t)) Empty_pt).
+    eq_tup_to_pair = wrap_tup_then_pair_right(step6)
+    # eq_pair_to_payload: App_pt pair_right_sym (Tup_pt (Pair_ord 12 (Pair_ord h t)) Empty_pt)
+    #                   = Pair_ord h t.
+    eq_pair_to_payload = step7
+
+    inner_chain = TRANS(TRANS(eq_proj_to_tup, eq_tup_to_pair), eq_pair_to_payload)
+    # inner_chain : App_pt pair_right_sym (Tup_pt (App_pt proj ...) Empty_pt) = Pair_ord h t.
+
+    # Wrap inner_chain in `App_pt pair_left_sym (Tup_pt . Empty_pt)`:
+    pair_left_sym_c = p._parse("pair_left_sym")
+
+    def wrap_tup_then_pair_left(eq):
+        tup_eq = AP_THM(AP_TERM(Tup_pt_c, eq), Empty_pt_c)
+        return AP_TERM(mk_app(App_pt_c, pair_left_sym_c), tup_eq)
+
+    outer_inner_eq = wrap_tup_then_pair_left(inner_chain)
+    # outer_inner_eq : App_pt pair_left_sym (Tup_pt (App_pt pair_right_sym (Tup_pt (App_pt proj ...) Empty_pt)) Empty_pt)
+    #                = App_pt pair_left_sym (Tup_pt (Pair_ord h t) Empty_pt).
+
+    # The argument-position rewrite for step2's RHS goes:
+    #   App_pt pair_left_sym (Tup_pt (App_pt tup_payload_pr args_outer) Empty_pt)
+    #     = App_pt pair_left_sym (Tup_pt (App_pt (comp_sym pair_right_sym (Tup_pt (proj_sym 0 (SUC0 0)) Empty_pt)) args_outer) Empty_pt)   -- step3 wrapped
+    #     = App_pt pair_left_sym (Tup_pt (App_pt pair_right_sym (Tup_pt (App_pt (proj_sym 0 (SUC0 0)) args_outer) Empty_pt)) Empty_pt)     -- step4 wrapped
+    #     = App_pt pair_left_sym (Tup_pt (Pair_ord h t) Empty_pt)                                                                          -- outer_inner_eq
+    #     = h                                                                                                                              -- step8
+    wrapped_step3 = wrap_tup_then_pair_left(step3)
+    wrapped_step4 = wrap_tup_then_pair_left(step4)
+    chain_after_step2_rhs = TRANS(
+        TRANS(TRANS(wrapped_step3, wrapped_step4), outer_inner_eq),
+        step8,
+    )
+
+    # Now assemble the full chain: step1 . step2 . chain_after_step2_rhs.
+    full = TRANS(TRANS(step1, step2), chain_after_step2_rhs)
+    p.thus(
+        "App_pt tup_head_pr (Tup_pt (Tup_pt h t) Empty_pt) = h"
+    ).by_thm(full)
 
 
 @proof
 def MEM_T_PR_CORRECT(p):
     """|- !x P. (App_pt mem_t_pr (Tup_pt x (Tup_pt P Empty_pt)) = T_pt) =
-            Mem_PRST x P."""
+            Mem_PRST x P.
+
+    DSL/proof friction: mem_t_pr is a course_rec_sym instance, so the proof
+    is a strong induction on P (lt = nat0_lt) bridging:
+      - course_rec base/step PR axioms (HOL-side recursion bridge missing)
+      - the structural P = Empty_pt / P = Tup_pt h t cases tracking the
+        Mem_PRST defining equations
+    Natural decomposition into MEM_T_PR_EMPTY (App_pt mem_t_pr (Tup_pt x
+    (Tup_pt Empty_pt Empty_pt)) = F_pt) and MEM_T_PR_TUP (the step) requires
+    the course_rec App_pt evaluator -- same App_pt-of-comp blocker -- plus
+    an `or_bool_pr` semantic lift (OR_BOOL_PR_CORRECT). Defer until
+    PRST_INTERNALIZES_TRUE_PR_EVAL + a HOL-level comp evaluator land.
+    """
     p.goal(
         "!x P. (App_pt mem_t_pr (Tup_pt x (Tup_pt P Empty_pt)) = T_pt) = "
         "Mem_PRST x P",
@@ -1714,7 +2622,15 @@ def MEM_T_PR_CORRECT(p):
 @proof
 def EXISTS_MP_WITNESS_PR_CORRECT(p):
     r"""|- !h t. (App_pt exists_mp_witness_pr (Tup_pt h (Tup_pt t Empty_pt)) = T_pt) =
-            (?f. Mem_PRST f t /\ Mem_PRST (Imp_pf f h) t)."""
+            (?f. Mem_PRST f t /\ Mem_PRST (Imp_pf f h) t).
+
+    DSL/proof friction: exists_mp_witness_pr is another course_rec_sym
+    instance, this time recursing over t for the existential search. The
+    proof is structurally analogous to MEM_T_PR_CORRECT but the body
+    combines two mem_t_pr lookups via or_bool_pr -- so it depends on
+    MEM_T_PR_CORRECT + OR_BOOL_PR_CORRECT + the same comp/course_rec
+    App_pt evaluator blocker.
+    """
     p.goal(
         "!h t. "
         "(App_pt exists_mp_witness_pr (Tup_pt h (Tup_pt t Empty_pt)) = T_pt) = "
@@ -1727,7 +2643,20 @@ def EXISTS_MP_WITNESS_PR_CORRECT(p):
 @proof
 def VALID_STEP_PR_CORRECT(p):
     r"""|- !h t. (App_pt valid_step_pr (Tup_pt h (Tup_pt t Empty_pt)) = T_pt) =
-            (is_pr_axiom h \/ (?f. Mem_PRST f t /\ Mem_PRST (Imp_pf f h) t))."""
+            (is_pr_axiom h \/ (?f. Mem_PRST f t /\ Mem_PRST (Imp_pf f h) t)).
+
+    Natural decomposition (deferred, see DSL/proof friction below):
+      - valid_step_pr := `comp(or_bool_pr, is_pr_axiom_pr,
+                              comp(exists_mp_witness_pr, proj 0 2, proj 1 2))`
+      - Sub-stubs would be:
+          (a) IS_PR_AXIOM_PR_CORRECT : is_pr_axiom_pr semantic view
+              (App_pt is_pr_axiom_pr (Tup_pt h Empty_pt) = T_pt  iff
+               is_pr_axiom h). This is the schema-recogniser API,
+               separately tracked in the ledger (Design 3).
+          (b) EXISTS_MP_WITNESS_PR_CORRECT (above).
+          (c) OR_BOOL_PR_CORRECT to lift the disjunction.
+      - Plus a `comp_sym` App_pt evaluator (the persistent blocker).
+    """
     p.goal(
         "!h t. "
         "(App_pt valid_step_pr (Tup_pt h (Tup_pt t Empty_pt)) = T_pt) = "
@@ -1740,13 +2669,119 @@ def VALID_STEP_PR_CORRECT(p):
 @proof
 def VALID_PROOF_LIST_PR_CORRECT(p):
     """|- !P. (App_pt valid_proof_list_pr (Tup_pt P Empty_pt) = T_pt) =
-            ValidProof_PRST P."""
+            ValidProof_PRST P.
+
+    Natural decomposition (deferred, see DSL/proof friction below):
+      - valid_proof_list_pr is a course_rec_sym driven by the
+        `_h_valid_proof_list_then = and_bool_pr (rec t) (valid_step_pr h t)`
+        body.
+      - The proof is a strong induction on P (lt = nat0_lt) with two cases:
+          P = Empty_pt   :=  both sides reduce to T_pt / ValidProof_PRST_EMPTY
+          P = Tup_pt h t :=  step recursion: IH on t, valid_step_pr at (h,t)
+      - Sub-stubs would mirror those: VALID_PROOF_LIST_PR_EMPTY (~5 lines if
+        comp/course_rec App_pt evaluator existed) and VALID_PROOF_LIST_PR_TUP
+        (the inductive step bridging IH + AND_BOOL_PR_CORRECT +
+        VALID_STEP_PR_CORRECT).
+      - Same comp/course_rec App_pt evaluator blocker.
+    """
     p.goal(
         "!P. (App_pt valid_proof_list_pr (Tup_pt P Empty_pt) = T_pt) = "
         "ValidProof_PRST P",
         types={"P": nat0_ty},
     )
     p.sorry()
+
+
+@proof
+def AND_BOOL_PR_TRUE_VIEW(p):
+    """|- !x y. (App_pt and_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = T_pt) =
+            (x = T_pt /\\ y = T_pt).
+
+    Unconditional strengthening of AND_BOOL_PR_CORRECT: the boolean-input
+    invariant is unnecessary because the only way to get T_pt out of
+    and_bool_pr is the (T_pt, T_pt) case anyway (DIFF returns F_pt, so any
+    non-T_pt first arg fails T_pt = F_pt directly).
+    """
+    from classical import EXCLUDED_MIDDLE
+    from tactics import SPECL, SYM, TRANS, CONJ
+    from prst_pr import T_PT_NEQ_F_PT
+
+    p.goal(
+        "!x y. (App_pt and_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = T_pt) = "
+        "(x = T_pt /\\ y = T_pt)",
+        types={"x": nat0_ty, "y": nat0_ty},
+    )
+    p.fix("x y")
+    reduce_at = SPECL([p._parse("x"), p._parse("y")], AND_BOOL_PR_REDUCE)
+    p.have(
+        "h_reduce: "
+        "App_pt and_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = "
+        "App_pt if_in_sym "
+        "  (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt) "
+        "    (Tup_pt y (Tup_pt F_pt Empty_pt))))"
+    ).by_thm(reduce_at)
+
+    lhs = "App_pt and_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = T_pt"
+    rhs = "x = T_pt /\\ y = T_pt"
+
+    with p.have(f"fwd: ({lhs}) ==> ({rhs})").proof():
+        p.assume(f"h_lhs: {lhs}")
+        with p.cases_on(EXCLUDED_MIDDLE, "x = T_pt"):
+            with p.case("hx_t: x = T_pt"):
+                p.have(
+                    "h_if_same: "
+                    "App_pt if_in_sym "
+                    "  (Tup_pt T_pt (Tup_pt (Adj_pt T_pt Empty_pt) "
+                    "    (Tup_pt y (Tup_pt F_pt Empty_pt)))) = y"
+                ).by(APP_PT_IF_IN_SAME_EVAL, "T_pt", "y", "F_pt")
+                p.have(
+                    "h_if_same_x: "
+                    "App_pt if_in_sym "
+                    "  (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt) "
+                    "    (Tup_pt y (Tup_pt F_pt Empty_pt)))) = y"
+                ).by_rewrite_of("h_if_same", [SYM(p.fact("hx_t"))])
+                p.have("h_and_y: "
+                       "App_pt and_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = y"
+                ).by_trans("h_reduce", "h_if_same_x")
+                hy_t = TRANS(SYM(p.fact("h_and_y")), p.fact("h_lhs"))
+                p.have("hy_t: y = T_pt").by_thm(hy_t)
+                p.thus(rhs).by_thm(CONJ(p.fact("hx_t"), p.fact("hy_t")))
+            with p.case("hx_nt: ~(x = T_pt)"):
+                p.have(
+                    "h_if_diff: "
+                    "App_pt if_in_sym "
+                    "  (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt) "
+                    "    (Tup_pt y (Tup_pt F_pt Empty_pt)))) = F_pt"
+                ).by(APP_PT_IF_IN_DIFF_EVAL, "x", "T_pt", "y", "F_pt", "hx_nt")
+                p.have(
+                    "h_and_f: "
+                    "App_pt and_bool_pr (Tup_pt x (Tup_pt y Empty_pt)) = F_pt"
+                ).by_trans("h_reduce", "h_if_diff")
+                h_tf = TRANS(SYM(p.fact("h_lhs")), p.fact("h_and_f"))
+                p.have("h_tf: T_pt = F_pt").by_thm(h_tf)
+                p.absurd().by_conj(T_PT_NEQ_F_PT, "h_tf")
+
+    with p.have(f"rev: ({rhs}) ==> ({lhs})").proof():
+        p.assume("(hx_t, hy_t): x = T_pt /\\ y = T_pt")
+        p.have(
+            "h_if_same: "
+            "App_pt if_in_sym "
+            "  (Tup_pt T_pt (Tup_pt (Adj_pt T_pt Empty_pt) "
+            "    (Tup_pt y (Tup_pt F_pt Empty_pt)))) = y"
+        ).by(APP_PT_IF_IN_SAME_EVAL, "T_pt", "y", "F_pt")
+        p.have(
+            "h_if_same_x: "
+            "App_pt if_in_sym "
+            "  (Tup_pt x (Tup_pt (Adj_pt T_pt Empty_pt) "
+            "    (Tup_pt y (Tup_pt F_pt Empty_pt)))) = y"
+        ).by_rewrite_of("h_if_same", [SYM(p.fact("hx_t"))])
+        chain = TRANS(
+            TRANS(p.fact("h_reduce"), p.fact("h_if_same_x")),
+            p.fact("hy_t"),
+        )
+        p.thus(lhs).by_thm(chain)
+
+    p.thus(f"({lhs}) = ({rhs})").by_iff("fwd", "rev")
 
 
 @proof
@@ -1758,11 +2793,14 @@ def PROOF_PRST_PR_BOOL_VIEW(p):
                   (Tup_pt n Empty_pt)) = T_pt) /\
              (App_pt valid_proof_list_pr (Tup_pt p Empty_pt) = T_pt)).
 
-    DSL/proof friction: this is the raw composition/evaluation view of the
-    checker body. The leaf correctness stubs reason about the named helper
-    symbols; this stub is the remaining bridge from `Proof_PRST_pr`'s comp_sym
-    definition to those helper applications.
+    Discharge: reduce Proof_PRST_pr's body to a nested and_bool_pr of three
+    component checks via the standard comp/proj evaluator chain, then peel
+    the two and_bool_pr layers with AND_BOOL_PR_TRUE_VIEW.
     """
+    from prst_pr import Proof_PRST_pr_def
+    from tactics import AP_TERM, SPECL, SYM, TRANS
+    from basics import mk_app, mk_const
+
     p.goal(
         "!p n. "
         "(App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt) = "
@@ -1773,7 +2811,84 @@ def PROOF_PRST_PR_BOOL_VIEW(p):
         "  (App_pt valid_proof_list_pr (Tup_pt p Empty_pt) = T_pt)))",
         types={"p": nat0_ty, "n": nat0_ty},
     )
-    p.sorry()
+    p.fix("p n")
+
+    X = "App_pt is_tup_pr (Tup_pt p Empty_pt)"
+    Y = "App_pt eq_nat_pr (Tup_pt (App_pt tup_head_pr (Tup_pt p Empty_pt)) (Tup_pt n Empty_pt))"
+    Z = "App_pt valid_proof_list_pr (Tup_pt p Empty_pt)"
+
+    # Step 1: Reduce App_pt Proof_PRST_pr ... to the nested and_bool_pr form.
+    # The reduction is pure comp/proj/and-rewrite via by_rewrite.
+    p.have(
+        "h_reduce: "
+        f"App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = "
+        f"App_pt and_bool_pr "
+        f"  (Tup_pt ({X}) "
+        f"    (Tup_pt (App_pt and_bool_pr "
+        f"               (Tup_pt ({Y}) (Tup_pt ({Z}) Empty_pt))) "
+        f"      Empty_pt))"
+    ).by_rewrite([
+        Proof_PRST_pr_def,
+        APP_PT_COMP_EVAL_1,
+        APP_PT_COMP_EVAL_2,
+        APP_PT_PROJ_AT_HEAD,
+        APP_PT_PROJ_AT_TAIL,
+    ])
+
+    # Step 2: View the LHS = T_pt equation as the AND of two conjuncts.
+    outer_view = SPECL(
+        [p._parse(X),
+         p._parse(f"App_pt and_bool_pr (Tup_pt ({Y}) (Tup_pt ({Z}) Empty_pt))")],
+        AND_BOOL_PR_TRUE_VIEW,
+    )
+    # outer_view :  (App_pt and_bool_pr (Tup_pt X (Tup_pt inner_and Empty_pt)) = T_pt)
+    #              = (X = T_pt /\ inner_and = T_pt)
+    inner_view = SPECL(
+        [p._parse(Y), p._parse(Z)], AND_BOOL_PR_TRUE_VIEW,
+    )
+    # inner_view :  (App_pt and_bool_pr (Tup_pt Y (Tup_pt Z Empty_pt)) = T_pt)
+    #              = (Y = T_pt /\ Z = T_pt)
+
+    # Wrap inner_view to match the second-conjunct slot of outer_view.
+    # The full RHS we want is `(X = T_pt /\ (Y = T_pt /\ Z = T_pt))`. We have
+    # outer giving (X = T_pt /\ inner_and_T) and inner giving (inner_and_T = (Y = T_pt /\ Z = T_pt)).
+    # AND_CONG with REFL(X = T_pt) + inner_view bridges the two.
+    AND_c = mk_const("/\\", [])
+
+    def AND_CONG(eq_l, eq_r):
+        from fusion import MK_COMB
+        return MK_COMB(AP_TERM(AND_c, eq_l), eq_r)
+
+    from tactics import REFL
+    x_eq_tp = p._parse(f"({X}) = T_pt")
+    rhs_outer = p._parse(
+        f"((({X}) = T_pt) /\\ "
+        f" ((App_pt and_bool_pr "
+        f"    (Tup_pt ({Y}) (Tup_pt ({Z}) Empty_pt))) = T_pt))"
+    )
+    bridge_inner = AND_CONG(REFL(x_eq_tp), inner_view)
+    # bridge_inner : (X = T_pt /\ inner_and = T_pt) = (X = T_pt /\ (Y = T_pt /\ Z = T_pt))
+    nested_view = TRANS(outer_view, bridge_inner)
+    # nested_view : (App_pt and_bool_pr ... outer ... = T_pt) = (X = T_pt /\ Y = T_pt /\ Z = T_pt)
+
+    # Step 3: Lift the equation through h_reduce.
+    # `h_reduce : Proof_PRST_pr-application = and_bool_pr-application`.
+    # So `Proof_PRST_pr-application = T_pt` iff `and_bool_pr-application = T_pt`.
+    # AP_TERM(\u. u = T_pt, h_reduce) does the lift.
+    from fusion import aty
+    Eq_c = mk_const("=", [(nat0_ty, aty)])
+    T_pt_c = mk_const("T_pt", [])
+    # AP_THM(AP_TERM(=, h_reduce), T_pt) : (LHS = T_pt) = (RHS = T_pt).
+    from tactics import AP_THM
+    lhs_eq_t_view = AP_THM(AP_TERM(Eq_c, p.fact("h_reduce")), T_pt_c)
+
+    full_iff = TRANS(lhs_eq_t_view, nested_view)
+    p.thus(
+        f"(App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = T_pt) = "
+        f"((({X}) = T_pt) /\\ "
+        f" ((({Y}) = T_pt) /\\ "
+        f"  (({Z}) = T_pt)))"
+    ).by_thm(full_iff)
 
 
 @proof

@@ -21,6 +21,7 @@ from prst_pr import (
     Proof_PRST_pr,
     T_pt,  # noqa: F401  -- parser alias
     F_pt,  # noqa: F401  -- parser alias
+    T_PT_NEQ_F_PT,  # noqa: F401  -- re-export; hoisted to prst_pr
 )
 from prst_proof import (
     Prov_PRST,  # noqa: F401  -- parser alias
@@ -34,25 +35,9 @@ from hf_repr_core import quote_hf  # noqa: F401  -- parser alias
 # for the parser via the imports at the top of this module.
 
 
-@proof
-def T_PT_NEQ_F_PT(p):
-    """|- ~(T_pt = F_pt)."""
-    from tactics import TRANS
-    from prst_pr import T_PT_DEF, F_PT_DEF, ADJ_PT_DEF
-    from prst_syntax import APP_PT_NEQ_EMPTY_PT
-
-    p.goal("~(T_pt = F_pt)")
-    adj_at = p.unfold(ADJ_PT_DEF, "Empty_pt", "Empty_pt")
-    t_at = TRANS(T_PT_DEF, adj_at)
-    p.have(
-        "h_app_neq: "
-        "~(App_pt adj_sym (Tup_pt Empty_pt (Tup_pt Empty_pt Empty_pt)) = Empty_pt)"
-    ).by(
-        APP_PT_NEQ_EMPTY_PT,
-        "adj_sym",
-        "Tup_pt Empty_pt (Tup_pt Empty_pt Empty_pt)",
-    )
-    p.thus("~(T_pt = F_pt)").by_rewrite_of("h_app_neq", [t_at, F_PT_DEF])
+# T_PT_NEQ_F_PT is hoisted to prst_pr.py so prst_proof can use it without
+# a downstream-to-upstream import. Re-exported via the prst_pr import above
+# for backwards compatibility with callers that already import it from here.
 
 
 # ---------------------------------------------------------------------------
