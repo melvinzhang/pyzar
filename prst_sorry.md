@@ -87,20 +87,39 @@ Success criterion: `is_pr_refl_pr` and `mem_t_pr` proofs can treat boolean
 combinators as ordinary boolean algebra instead of expanding `if_in_sym` every
 time.
 
-### Spike 2 — `is_pterm_pr` Correctness Slice
+### Design 2 — `is_pterm_pr` Correctness Slice
 
-Goal: implement/prove a narrow recognizer slice for the constructors used by
-reflexivity and proof-checker examples.
+Purpose: pin the PR-level term recognizer used by reflexivity and proof-checker
+examples.
 
-Target facts:
+Design facts:
 
 - `is_pterm_pr Empty_pt = T_pt`.
 - `is_pterm_pr (Tup_pt a b) = T_pt` from recursive `a`/`b` truth.
 - `is_pterm_pr (App_pt f args) = T_pt` from `is_partial_pr_sym f` and args.
+- `is_pr_refl_pr (Eq_pf t t) = T_pt` when the Eq shape is reflexive and
+  `is_pterm_pr t = T_pt`.
 
-Success criterion: prove `is_pr_refl_pr (Eq_pf t t) = T_pt` from
-`is_pterm t` for a representative nontrivial term such as an `App_pt` over a
-`Tup_pt` tuple.
+Settled shape:
+
+- `is_pterm_pr` is modeled as a Pair_ord course recursion returning
+  `Pair_ord(is_term_bool, child_bool_pair)`, not as a direct syntax recursion.
+- `Empty_pt`, `Var_pt`, `Tup_pt`, and `App_pt` have the expected boolean
+  behavior. The `Tup_pt` branch consumes the two child booleans carried by the
+  intermediate payload pair.
+- The `App_pt` branch checks the function id with the syntactic
+  `is_partial_pr_sym_pr` predicate and checks only the argument tuple through
+  the payload's right child boolean.
+- Representative reflexivity formulas such as `Eq_pf t t` with nontrivial
+  `App_pt`/`Tup_pt` terms are accepted by `is_pr_refl_pr`; malformed non-term
+  payloads and invalid App heads are rejected.
+
+The executable reference design is `prst_pterm_spike.py`.
+
+Production proof obligations: prove the corresponding PR evaluation lemmas for
+the auxiliary course recursion, then use them to derive
+`is_pr_refl_pr (Eq_pf t t) = T_pt` from the HOL-side `is_pterm t` theorem for
+the representative constructor cases.
 
 ### Design 3 — `is_pr_axiom_pr` Leaf Alignment
 
