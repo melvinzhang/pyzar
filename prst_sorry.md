@@ -102,51 +102,57 @@ Success criterion: prove `is_pr_refl_pr (Eq_pf t t) = T_pt` from
 `is_pterm t` for a representative nontrivial term such as an `App_pt` over a
 `Tup_pt` tuple.
 
-### Spike 3 — `is_pr_axiom_pr` Leaf Alignment
+### Design 3 — `is_pr_axiom_pr` Leaf Alignment
 
-Goal: test the PR checker leaf against the HOL recognizer branch-by-branch.
+Purpose: keep the PR checker leaf aligned with the HOL recognizer
+branch-by-branch.
 
-Target examples:
+Branch contract:
 
-- A direct PR-def axiom, such as `zero_def_axiom`.
-- A substituted PR-def instance, such as `substitute_p zero_def_axiom t v`.
-- A PRST reflexivity formula, such as `Eq_pf (App_pt adj_sym args) (App_pt adj_sym args)`.
+- Direct and substituted PR-def axioms are accepted through
+  `is_pr_def_instance_pr`.
+- PRST reflexivity formulas such as
+  `Eq_pf (App_pt adj_sym args) (App_pt adj_sym args)` are accepted through
+  `is_pr_refl_pr`, guarded by `is_pterm_pr`.
+- Propositional Hilbert schemas are accepted through `is_logical_axiom_pr`.
 
-Success criterion: each example satisfies both the HOL recognizer
-`is_pr_axiom` and the PR symbol recognizer `is_pr_axiom_pr`, with the same
-branch responsible for success.
+The PR-side recognizer has real bodies for the three leaves:
 
-Status: partially unblocked. The HOL-side branch alignment is already in
-place:
-
-- `zero_def_axiom` reaches `is_pr_axiom` through
-  `is_pr_def_instance`/`is_pr_def`;
-- `substitute_p zero_def_axiom t v` reaches `is_pr_axiom` through
-  `is_pr_def_instance`/substitution;
-- `Eq_pf t t` reaches `is_pr_axiom` through `is_pr_refl` when `is_pterm t`.
-
-The PR-side recognizer now has real bodies for the three leaves:
-
-- `is_pr_def_instance_pr` recognizes the closed direct PR-def axioms
-  `zero_def_axiom`, `if_in_true_def_axiom`, and `if_in_false_def_axiom`;
+- `is_pr_def_instance_pr` is a disjunction of PR-level schema matchers.
+  Each matcher reads schema parameters from the candidate formula, reconstructs
+  the relevant PR-def template, and checks that the candidate is either the
+  direct template or a one-variable `substitute_p` instance of that template.
 - `is_pterm_pr` uses a Pair_ord course recursion for `Empty_pt`, `Var_pt`,
   `Tup_pt`, and `App_pt`, with App heads checked by a syntactic
-  `is_partial_pr_sym_pr` shape recognizer;
-- `is_logical_axiom_pr` recognizes the propositional K/S/N Hilbert schemas
-  by PR-level destructuring of `Imp_pf`/`Not_pf` shapes.
+  `is_partial_pr_sym_pr` shape recognizer.
+- `is_logical_axiom_pr` recognizes the propositional K/S/N Hilbert schemas by
+  PR-level destructuring of `Imp_pf`/`Not_pf` shapes.
 
-Bounded witness-search spike: passed as a design spike, but it points away
-from generic bounded search. `prst_def_instance_spike.py` validates a
-schema-specific matcher for the first nontrivial substituted axiom,
-`substitute_p if_in_true_def_axiom t v`, including malformed near-misses.
+`is_pr_def_instance_pr` must not search arbitrary `F,t,v < n`. Substitution can
+shrink fixed `Var_pt` leaves, so a numeric bound on the pre-substitution axiom
+is not a stable invariant. The settled design is schema-specific matching:
 
-Conclusion: the robust PR body should not search arbitrary `F,t,v < n`.
-Substitution can shrink fixed `Var_pt` leaves, so a numeric bound on the
-pre-substitution axiom is not the natural invariant. Instead,
-`is_pr_def_instance_pr` should be a disjunction of PR-level schema matchers:
-read schema parameters and the substituted term from the candidate formula,
-then check all repeated occurrences for consistency. The remaining work is to
-mechanise those matchers for every PR-def axiom family.
+- For closed templates with no free `Var_pt` slots, accept the direct template.
+- For fixed-arity schemas, destructure the candidate formula and verify each
+  repeated formal slot against the extracted replacement term.
+- For variable-arity schemas such as `proj_def_axiom_at i n`, read the schema
+  parameters from the candidate symbol payload, check the HOL-side guard
+  (`i < n`), walk the argument tuple, and verify one consistent substituted
+  formal slot.
+- For parametric schemas such as `rec`, `const`, `course_rec`, and `pair_*`,
+  read the parameters from the candidate shape and use the same one-variable
+  substitution-instance check, including nested parameter occurrences such as
+  the RHS of `const_def_axiom_at c`.
+
+The executable reference design is `prst_def_instance_spike.py`. It covers every
+current `is_pr_def` axiom family: `zero`, `proj`, `if_in_true`,
+`if_in_false`, `rec_base`, `rec_step`, `const`, `course_rec_base`,
+`course_rec_step`, `pair_left`, `pair_right`, and `pair_ord`, including
+malformed near-misses.
+
+Production requirements: mechanise the reference design at PR level with tuple
+walkers, PR-level guards such as `nat0_lt`/`is_pr_sym`, and reusable
+substitution-instance checker components for schema parameters.
 
 ### Spike 4 — `substitute_pr` External Correctness Slice
 
