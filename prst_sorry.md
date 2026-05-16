@@ -10,43 +10,19 @@ The sole explicit PRST axiom outside this ledger is `MU_CORRECTNESS`.
 This ledger is ordered by dependency and expected discharge path, not by file.
 Pure forwarding theorems are deleted instead of tracked.
 
-### 0. `Proof_PRST_pr` Checker Body Components
+### Architectural note: no structural HOL↔PR bridge
 
-These are the focused lower-level stubs behind
-`PROOF_PRST_PR_BODY_CORRECT`.
-
-Remaining sorries:
-
-- `IS_TUP_PR_CORRECT`            — needs Pair_ord tag biconditional
-- `MEM_T_PR_CORRECT`             — course_rec induction (worked-example skeleton in place; sub-stubs below)
-- `EXISTS_MP_WITNESS_PR_CORRECT` — course_rec induction
-- `VALID_STEP_PR_CORRECT`        — composition of MEM_T + IS_PR_AXIOM_PR
-- `VALID_PROOF_LIST_PR_CORRECT`  — course_rec induction
-
-### 0b. Course_rec induction stubs
-
-Added to support `MEM_T_PR_CORRECT`-shaped proofs (the worked-example
-skeleton is in `prst_proof.py:MEM_T_PR_CORRECT`):
-
-- `NAT0_CASES_PAIR_ORD` — `!p. p = Empty_pt \/ ?a b. p = Pair_ord a b`.
-  Case-split that feeds the course_rec base/step branches.
-- `OR_BOOL_PR_TRUE_VIEW` — discharged. Unconditional `(or_bool_pr = T_pt)
-  iff (x = T_pt \/ y = T_pt)`. Mirror of `AND_BOOL_PR_TRUE_VIEW`.
-- `MEM_T_PR_REDUCE_EMPTY` — discharged. `App_pt mem_t_pr (Tup_pt x (Tup_pt
-  Empty_pt Empty_pt)) = F_pt`. Pure App_pt-evaluator chain.
-- `MEM_T_PR_STEP_TUP` — sub-stub. PR-side step rewrite at `Tup_pt h t`.
-- `MEM_PRST_AT_EMPTY` — sub-stub. `Mem_PRST Empty_pt x = F`.
-- `MEM_PRST_AT_TUP`   — sub-stub. `Mem_PRST (Tup_pt h t) x = (x = h \/
-  Mem_PRST t x)`.
-- `MEM_T_PR_NON_TUP_FALSE` — sub-stub. mem_t_pr on a non-Tup_pt Pair_ord
-  returns F_pt.
-
-Mem_PRST argument-order note: the worked example uses `Mem_PRST P x` (P
-= list, x = element) to match `_MEM_PRST_F_DEF`'s first-arg destructuring.
-Several other goals (e.g., `PROOF_PRST_VALID_MEM_SELF`) use the opposite
-`Mem_PRST element list` convention and are mathematically backwards
-relative to the body -- separate convention-cleanup task.
-
+`Mem_PRST`, `ValidProof_PRST`, and `Proof_PRST` remain as HOL relations
+for stating top-level theorems (Gödel statements mention `Prov_PRST`,
+which is defined via `Proof_PRST`). The internal checker functions
+(`mem_t_pr`, `exists_mp_witness_pr`, `valid_step_pr`, `valid_proof_list_pr`,
+`is_tup_pr`, `is_pterm_pr`, `is_pr_axiom_pr`, `substitute_pr` recursion)
+are reasoned about *directly* via `App_pt ... = T_pt`. There is no
+structural correctness theorem bridging the two sides — that bridge layer
+was deleted as scaffolding-only churn. Downstream stubs that need to
+connect HOL `Proof_PRST` to PR `Proof_PRST_pr` go through the standard
+PRST evaluator package (`PRST_INTERNALIZES_TRUE_PR_EVAL` /
+`PRST_INTERNALIZES_FALSE_PR_EVAL`) rather than a body-correctness theorem.
 
 ### 0a. HOL-Level `App_pt` Evaluators for PR Primitives
 
@@ -78,7 +54,9 @@ axiom + a Prov_PRST → HOL `=` soundness bridge.
 
 ### 1. `Proof_PRST_pr` Checker API Boundary
 
-These are the immediate checker targets that are not pure forwarding theorems.
+These are the immediate checker targets. All stated purely in PR terms
+(`App_pt Proof_PRST_pr ... = T_pt` / `= F_pt`) plus, on the `~ Proof_PRST`
+side, the HOL provability relation as antecedent only.
 
 - `PRST_INTERNALIZES_TRUE_PR_EVAL`
 - `PRST_INTERNALIZES_FALSE_PR_EVAL`
@@ -91,6 +69,10 @@ The quoted-input obligations intentionally do not assert raw-to-`quote_hf`
 checker-value preservation. `quote_hf` is the object-language numeral
 interface; the proof route should use `numeral_pr`/`quote_hf` evaluation plus
 internalisation of the resulting PR computation.
+
+The `~ Proof_PRST pf n` antecedent in the semantic-neg / quoted-false stubs
+is lifted to the PR side by case-splitting on `PROOF_PRST_PR_BOOLEAN_VALUE`
+plus PRST soundness — *not* via a structural body-correctness theorem.
 
 ### 2. Proof-List Combination API
 
@@ -158,7 +140,17 @@ proof depends on the checker/list-combine API, not on Loeb.
 
 ## Counts
 
-- Remaining `p.sorry()` sites: 65  *(60 prior + 5 new sub-stubs for the course_rec worked example: NAT0_CASES_PAIR_ORD, MEM_T_PR_STEP_TUP, MEM_PRST_AT_EMPTY, MEM_PRST_AT_TUP, MEM_T_PR_NON_TUP_FALSE -- MEM_T_PR_REDUCE_EMPTY and OR_BOOL_PR_TRUE_VIEW were proved.)*
+- Remaining `p.sorry()` sites: 55
+  - prst_proof.py: 35
+  - prst_repr.py:  6
+  - prst_godel1.py: 6
+  - prst_godel2.py: 8
+
+  *(Down from 65: the section 0 + 0b stack -- `IS_TUP_PR_CORRECT`,
+  `MEM_T_PR_CORRECT`, `EXISTS_MP_WITNESS_PR_CORRECT`, `VALID_STEP_PR_CORRECT`,
+  `VALID_PROOF_LIST_PR_CORRECT`, the five course_rec sub-stubs, and
+  `PROOF_PRST_PR_BODY_CORRECT` -- was deleted as scaffolding-only churn.
+  See the "no structural HOL↔PR bridge" note above.)*
 
 ## PR Symbol Evaluator Spikes
 
@@ -348,10 +340,11 @@ top-level `is_tup_pr`, head equality via `tup_head_pr`, full-list validation
 via `valid_proof_list_pr`, membership via `mem_t_pr`, and MP search via
 `exists_mp_witness_pr`.
 
-Production proof obligations: prove the local evaluator API for boolean helper
-correctness, Tup destructors, `mem_t_pr`, `exists_mp_witness_pr`,
-`valid_step_pr`, `valid_proof_list_pr`, and branch correctness for
-`is_pr_axiom_pr`; package those facts as `PROOF_PRST_PR_BODY_CORRECT`.
+Production proof obligations (PR-native; no HOL twin chain): callers needing
+a structured view of `App_pt Proof_PRST_pr ... = T_pt` reduce through the
+existing `PROOF_PRST_PR_BOOL_VIEW` (which expresses the body as an
+`and_bool_pr` chain of `is_tup_pr`, head-eq, and `valid_proof_list_pr`
+checks) and reason about the underlying PR predicates directly.
 
 One separate G2-only blocker remains for the D2/proof-combinator path:
 `mp_combine_pr` in `prst_godel2.py` is still the constant-0 stub, so the

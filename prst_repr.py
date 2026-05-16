@@ -90,10 +90,9 @@ def PROOF_PRST_PR_BOOLEAN_VALUE(p):
     r"""|- !pf n. App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt
             \/ App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt.
 
-    DSL/proof friction: `PROOF_PRST_PR_BODY_CORRECT` plus `PROOF_PRST_AT`
-    characterises the true branch. The negative semantic branch also needs the
-    checker's boolean range theorem, proved from the PR boolean helpers and the
-    checker body.
+    DSL/proof friction: the checker's boolean range theorem, proved from the
+    PR boolean helpers and the checker body. Discharge directly against the
+    `Proof_PRST_pr` body — no HOL↔PR structural bridge.
     """
     p.goal(
         "!pf n. "
@@ -109,9 +108,10 @@ def PROOF_PRST_PR_SEMANTIC_NEG(p):
     """|- !pf n. ~Proof_PRST pf n ==>
             App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt.
 
-    DSL/proof friction: this should be a short boolean case split using
-    PROOF_PRST_PR_BOOLEAN_VALUE, PROOF_PRST_PR_BODY_CORRECT/PROOF_PRST_AT,
-    and T_PT_NEQ_F_PT.
+    DSL/proof friction: short boolean case split using
+    PROOF_PRST_PR_BOOLEAN_VALUE and T_PT_NEQ_F_PT. Lift the HOL hypothesis
+    `~ Proof_PRST pf n` to the PR side directly through Proof_PRST/Prov_PRST
+    soundness (no structural body bridge).
     """
     p.goal(
         "!pf n. ~Proof_PRST pf n ==> "
