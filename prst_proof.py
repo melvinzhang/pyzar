@@ -496,13 +496,99 @@ _MEM_PRST_F = mk_const("_Mem_PRST_F", [])
 def MEM_PRST_MONO(p):
     """|- !f g p. (!k. nat0_lt k p ==> f k = g k)
               ==> _Mem_PRST_F f p = _Mem_PRST_F g p."""
+    from axioms import mk_and, mk_exists, mk_or
+    from basics import mk_app, mk_const, mk_eq, rand
+    from fusion import ASSUME, DEDUCT_ANTISYM_RULE, MK_COMB, ABS, aty
+    from tactics import (
+        AP_TERM,
+        AP_THM,
+        BETA_CONV,
+        CONJUNCT1,
+        CONJUNCT2,
+        EQ_MP,
+        MP,
+        OR_CONG,
+        REFL,
+        SPEC,
+        SPECL,
+        SYM,
+        TRANS,
+    )
+    from prst_syntax import NAT0_LT_TUP_PT_R
+
     rec_ty = parse_type("nat0 -> nat0 -> bool")
     p.goal(
         "!f g p. (!k. nat0_lt k p ==> f k = g k) ==> "
         "_Mem_PRST_F f p = _Mem_PRST_F g p",
         types={"f": rec_ty, "g": rec_ty, "p": nat0_ty, "k": nat0_ty},
     )
-    p.sorry()
+    p.fix("f g p")
+    p.assume("h_hyp: !k. nat0_lt k p ==> f k = g k")
+
+    def MK_EXISTS_CONG(v_var, eq_th):
+        exists_c = mk_const("?", [(v_var.ty, aty)])
+        return AP_TERM(exists_c, ABS(v_var, eq_th))
+
+    AND_c = mk_const("/\\", [])
+
+    def AND_CONG(eq_l, eq_r):
+        return MK_COMB(AP_TERM(AND_c, eq_l), eq_r)
+
+    f_const = p._parse("f")
+    g_const = p._parse("g")
+    p_const = p._parse("p")
+    x_var = Var("x", nat0_ty)
+    h_var = Var("h", nat0_ty)
+    t_var = Var("t", nat0_ty)
+    Tup_pt_c = mk_const("Tup_pt", [])
+    nat0_lt_c = mk_const("nat0_lt", [])
+
+    def full_body(rec_const):
+        rec_t = mk_app(rec_const, t_var)
+        return mk_and(
+            mk_eq(p_const, mk_app(mk_app(Tup_pt_c, h_var), t_var)),
+            mk_or(mk_eq(x_var, h_var), mk_app(rec_t, x_var)),
+        )
+
+    def build_body_eq(src_rec, tgt_rec):
+        body_src = full_body(src_rec)
+        h_body_src = ASSUME(body_src)
+        p_eq_th = CONJUNCT1(h_body_src)
+
+        lt_tup = SPECL([h_var, t_var], NAT0_LT_TUP_PT_R)
+        eq_lt = AP_TERM(mk_app(nat0_lt_c, t_var), SYM(p_eq_th))
+        lt_t_p = EQ_MP(eq_lt, lt_tup)
+        ft_eq_gt = MP(SPEC(t_var, p.fact("h_hyp")), lt_t_p)
+        if src_rec == g_const and tgt_rec == f_const:
+            ft_eq_gt = SYM(ft_eq_gt)
+
+        rec_x_eq = AP_THM(ft_eq_gt, x_var)
+        rest_eq = OR_CONG(REFL(mk_eq(x_var, h_var)), rec_x_eq)
+        full_eq = AND_CONG(
+            REFL(mk_eq(p_const, mk_app(mk_app(Tup_pt_c, h_var), t_var))),
+            rest_eq,
+        )
+        return EQ_MP(full_eq, h_body_src)
+
+    body_f_to_g = build_body_eq(f_const, g_const)
+    body_g_to_f = build_body_eq(g_const, f_const)
+    body_iff = DEDUCT_ANTISYM_RULE(body_g_to_f, body_f_to_g)
+
+    eq_ex_t = MK_EXISTS_CONG(t_var, body_iff)
+    eq_ex_h = MK_EXISTS_CONG(h_var, eq_ex_t)
+    eq_abs_x = ABS(x_var, eq_ex_h)
+
+    def unfold_at(rec_const):
+        eq0 = AP_THM(_MEM_PRST_F_DEF, rec_const)
+        eq1 = TRANS(eq0, BETA_CONV(rand(eq0._concl)))
+        eq2 = AP_THM(eq1, p_const)
+        return TRANS(eq2, BETA_CONV(rand(eq2._concl)))
+
+    unfold_f = unfold_at(f_const)
+    unfold_g = unfold_at(g_const)
+    p.thus("_Mem_PRST_F f p = _Mem_PRST_F g p").by_thm(
+        TRANS(TRANS(unfold_f, eq_abs_x), SYM(unfold_g))
+    )
 
 
 MEM_PRST_DEF, _MEM_PRST_REC = define_wf_lt(
@@ -530,13 +616,120 @@ _VALID_PROOF_PRST_F = mk_const("_ValidProof_PRST_F", [])
 def VALID_PROOF_PRST_MONO(p):
     """|- !f g p. (!k. nat0_lt k p ==> f k = g k)
               ==> _ValidProof_PRST_F f p = _ValidProof_PRST_F g p."""
+    from axioms import mk_and, mk_exists, mk_or
+    from basics import mk_app, mk_const, mk_eq, rand
+    from fusion import ASSUME, DEDUCT_ANTISYM_RULE, MK_COMB, ABS, aty
+    from tactics import (
+        AP_TERM,
+        AP_THM,
+        BETA_CONV,
+        CONJUNCT1,
+        CONJUNCT2,
+        EQ_MP,
+        MP,
+        OR_CONG,
+        REFL,
+        SPEC,
+        SPECL,
+        SYM,
+        TRANS,
+    )
+    from prst_syntax import NAT0_LT_TUP_PT_R
+
     rec_ty = parse_type("nat0 -> bool")
     p.goal(
         "!f g p. (!k. nat0_lt k p ==> f k = g k) ==> "
         "_ValidProof_PRST_F f p = _ValidProof_PRST_F g p",
         types={"f": rec_ty, "g": rec_ty, "p": nat0_ty, "k": nat0_ty},
     )
-    p.sorry()
+    p.fix("f g p")
+    p.assume("h_hyp: !k. nat0_lt k p ==> f k = g k")
+
+    def MK_EXISTS_CONG(v_var, eq_th):
+        exists_c = mk_const("?", [(v_var.ty, aty)])
+        return AP_TERM(exists_c, ABS(v_var, eq_th))
+
+    AND_c = mk_const("/\\", [])
+
+    def AND_CONG(eq_l, eq_r):
+        return MK_COMB(AP_TERM(AND_c, eq_l), eq_r)
+
+    f_const = p._parse("f")
+    g_const = p._parse("g")
+    p_const = p._parse("p")
+    h_var = Var("h", nat0_ty)
+    t_var = Var("t", nat0_ty)
+    z_var = Var("f", nat0_ty)
+    Tup_pt_c = mk_const("Tup_pt", [])
+    Empty_pt_c = mk_const("Empty_pt", [])
+    Imp_pf_c = mk_const("Imp_pf", [])
+    Mem_PRST_c = mk_const("Mem_PRST", [])
+    is_pr_axiom_c = mk_const("is_pr_axiom", [])
+    nat0_lt_c = mk_const("nat0_lt", [])
+
+    def mp_witness_body():
+        return mk_and(
+            mk_app(mk_app(Mem_PRST_c, z_var), t_var),
+            mk_app(
+                mk_app(Mem_PRST_c, mk_app(mk_app(Imp_pf_c, z_var), h_var)),
+                t_var,
+            ),
+        )
+
+    step_term = mk_or(
+        mk_app(is_pr_axiom_c, h_var),
+        mk_exists(z_var, mp_witness_body()),
+    )
+
+    def cons_body(rec_const):
+        return mk_and(
+            mk_eq(p_const, mk_app(mk_app(Tup_pt_c, h_var), t_var)),
+            mk_and(mk_app(rec_const, t_var), step_term),
+        )
+
+    def full_body(rec_const):
+        return mk_or(
+            mk_eq(p_const, Empty_pt_c),
+            mk_exists(h_var, mk_exists(t_var, cons_body(rec_const))),
+        )
+
+    def build_body_eq(src_rec, tgt_rec):
+        body_src = cons_body(src_rec)
+        h_body_src = ASSUME(body_src)
+        p_eq_th = CONJUNCT1(h_body_src)
+
+        lt_tup = SPECL([h_var, t_var], NAT0_LT_TUP_PT_R)
+        eq_lt = AP_TERM(mk_app(nat0_lt_c, t_var), SYM(p_eq_th))
+        lt_t_p = EQ_MP(eq_lt, lt_tup)
+        ft_eq_gt = MP(SPEC(t_var, p.fact("h_hyp")), lt_t_p)
+        if src_rec == g_const and tgt_rec == f_const:
+            ft_eq_gt = SYM(ft_eq_gt)
+
+        rest_eq = AND_CONG(ft_eq_gt, REFL(step_term))
+        full_eq = AND_CONG(
+            REFL(mk_eq(p_const, mk_app(mk_app(Tup_pt_c, h_var), t_var))),
+            rest_eq,
+        )
+        return EQ_MP(full_eq, h_body_src)
+
+    body_f_to_g = build_body_eq(f_const, g_const)
+    body_g_to_f = build_body_eq(g_const, f_const)
+    body_iff = DEDUCT_ANTISYM_RULE(body_g_to_f, body_f_to_g)
+    eq_ex_t = MK_EXISTS_CONG(t_var, body_iff)
+    eq_ex_h = MK_EXISTS_CONG(h_var, eq_ex_t)
+    full_eq = OR_CONG(REFL(mk_eq(p_const, Empty_pt_c)), eq_ex_h)
+
+    def unfold_at(rec_const):
+        eq0 = AP_THM(_VALID_PROOF_PRST_F_DEF, rec_const)
+        eq1 = TRANS(eq0, BETA_CONV(rand(eq0._concl)))
+        eq2 = AP_THM(eq1, p_const)
+        return TRANS(eq2, BETA_CONV(rand(eq2._concl)))
+
+    unfold_f = unfold_at(f_const)
+    unfold_g = unfold_at(g_const)
+    p.thus("_ValidProof_PRST_F f p = _ValidProof_PRST_F g p").by_thm(
+        TRANS(TRANS(unfold_f, full_eq), SYM(unfold_g))
+    )
 
 
 VALID_PROOF_PRST_DEF, _VALID_PROOF_PRST_REC = define_wf_lt(
@@ -561,13 +754,29 @@ _PROOF_PRST_VALID_F = mk_const("_Proof_PRST_valid_F", [])
 def PROOF_PRST_VALID_MONO(p):
     """|- !f g p. (!k. nat0_lt k p ==> f k = g k)
               ==> _Proof_PRST_valid_F f p = _Proof_PRST_valid_F g p."""
+    from basics import rand
+    from tactics import AP_THM, BETA_CONV, SYM, TRANS
+
     rec_ty = parse_type("nat0 -> nat0 -> bool")
     p.goal(
         "!f g p. (!k. nat0_lt k p ==> f k = g k) ==> "
         "_Proof_PRST_valid_F f p = _Proof_PRST_valid_F g p",
         types={"f": rec_ty, "g": rec_ty, "p": nat0_ty, "k": nat0_ty},
     )
-    p.sorry()
+    p.fix("f g p")
+    p.assume("h_hyp: !k. nat0_lt k p ==> f k = g k")
+
+    def unfold_at(rec_const):
+        eq0 = AP_THM(_PROOF_PRST_VALID_F_DEF, rec_const)
+        eq1 = TRANS(eq0, BETA_CONV(rand(eq0._concl)))
+        eq2 = AP_THM(eq1, p._parse("p"))
+        return TRANS(eq2, BETA_CONV(rand(eq2._concl)))
+
+    unfold_f = unfold_at(p._parse("f"))
+    unfold_g = unfold_at(p._parse("g"))
+    p.thus("_Proof_PRST_valid_F f p = _Proof_PRST_valid_F g p").by_thm(
+        TRANS(unfold_f, SYM(unfold_g))
+    )
 
 
 Proof_PRST_def, _PROOF_PRST_REC = define_wf_lt(
@@ -1468,19 +1677,59 @@ def PROOF_PRST_CONS_MP_STEP(p):
     """|- !R f g. ValidProof_PRST R
               /\\ Mem_PRST f R
               /\\ Mem_PRST (Imp_pf f g) R
-              ==> Proof_PRST (Tup_pt g R) g.
+              ==> Proof_PRST (Tup_pt g R) g."""
+    from tactics import SPEC, SPECL, SYM, CONJ
+    from prst_syntax import _unfold_prst_rec as _unfold
 
-    HF-style PRST proof-list API stub. Intended implementation: unfold
-    ValidProof_PRST at Tup_pt g R, use the MP branch with witness f, then
-    fold through PROOF_PRST_CONS.
-    """
     p.goal(
         "!R f g. ValidProof_PRST R /\\ Mem_PRST f R "
         "        /\\ Mem_PRST (Imp_pf f g) R "
         "        ==> Proof_PRST (Tup_pt g R) g",
         types={"R": nat0_ty, "f": nat0_ty, "g": nat0_ty},
     )
-    p.sorry()
+    p.fix("R f g")
+    p.assume(
+        "(valid_R, (mem_f, mem_imp)): "
+        "ValidProof_PRST R /\\ Mem_PRST f R /\\ Mem_PRST (Imp_pf f g) R"
+    )
+
+    p.have(
+        "mp_step: ?w. Mem_PRST w R /\\ Mem_PRST (Imp_pf w g) R"
+    ).by_exists(["f"], "mem_f", "mem_imp")
+    p.have(
+        "step_ok: is_pr_axiom g \\/ "
+        "(?w. Mem_PRST w R /\\ Mem_PRST (Imp_pf w g) R)"
+    ).by_disj("mp_step")
+    p.have(
+        "valid_cons_ex: ?h t. "
+        "Tup_pt g R = Tup_pt h t /\\ ValidProof_PRST t /\\ "
+        "(is_pr_axiom h \\/ "
+        " (?w. Mem_PRST w t /\\ Mem_PRST (Imp_pf w h) t))"
+    ).by_exists(["g", "R"], "valid_R", "step_ok")
+
+    valid_body = (
+        "Tup_pt g R = Empty_pt \\/ "
+        "(?h t. Tup_pt g R = Tup_pt h t /\\ ValidProof_PRST t /\\ "
+        "       (is_pr_axiom h \\/ "
+        "        (?w. Mem_PRST w t /\\ Mem_PRST (Imp_pf w h) t)))"
+    )
+    valid_rec = _unfold(_VALID_PROOF_PRST_REC, _VALID_PROOF_PRST_F_DEF)
+    valid_cons_at = SPEC(p._parse("Tup_pt g R"), valid_rec)
+    p.have(f"valid_cons_body: {valid_body}").by_disj("valid_cons_ex")
+    p.have("valid_cons: ValidProof_PRST (Tup_pt g R)").by_eq_mp(
+        SYM(valid_cons_at), "valid_cons_body"
+    )
+
+    p.have("g_refl: g = g").by_rewrite([])
+    p.have("proof_view: g = g /\\ ValidProof_PRST (Tup_pt g R)").by(
+        CONJ, "g_refl", "valid_cons"
+    )
+    proof_cons = SPECL(
+        [p._parse("g"), p._parse("R"), p._parse("g")], PROOF_PRST_CONS
+    )
+    p.thus("Proof_PRST (Tup_pt g R) g").by_eq_mp(
+        SYM(proof_cons), "proof_view"
+    )
 
 
 @proof
