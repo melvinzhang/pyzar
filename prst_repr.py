@@ -56,6 +56,8 @@ from prst_pr import (
 from prst_proof import (
     Prov_PRST,  # noqa: F401  -- parser alias
     Proof_PRST,  # noqa: F401  -- parser alias for PROOF_PRST_REPRESENTS_*
+    PROOF_PRST_PR_CORRECT,
+    PROOF_PRST_PR_INTERNAL_EVAL,
 )
 from hf_repr_core import quote_hf  # noqa: F401  -- parser alias
 
@@ -212,17 +214,94 @@ def DIAG_REPRESENTS_PRST(p):
 
 
 @proof
+def PROOF_PRST_PR_SEMANTIC_POS(p):
+    """|- !pf n. Proof_PRST pf n ==>
+            App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt."""
+    from tactics import SPECL
+
+    p.goal(
+        "!pf n. Proof_PRST pf n ==> "
+        "App_pt Proof_PRST_pr "
+        "  (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt",
+        types={"pf": nat0_ty, "n": nat0_ty},
+    )
+    p.fix("pf n")
+    p.assume("h_proof: Proof_PRST pf n")
+    correct_at = SPECL([p._parse("pf"), p._parse("n")], PROOF_PRST_PR_CORRECT)
+    p.thus(
+        "App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt"
+    ).by_eq_mp(correct_at, "h_proof")
+
+
+@proof
+def PROOF_PRST_PR_SEMANTIC_NEG(p):
+    """|- !pf n. ~Proof_PRST pf n ==>
+            App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt."""
+    p.goal(
+        "!pf n. ~Proof_PRST pf n ==> "
+        "App_pt Proof_PRST_pr "
+        "  (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt",
+        types={"pf": nat0_ty, "n": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROOF_PRST_PR_QUOTE_INPUT_TRUE(p):
+    """|- !pf n. App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt
+            ==> App_pt Proof_PRST_pr
+                  (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt)) = T_pt."""
+    p.goal(
+        "!pf n. "
+        "App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt "
+        "==> App_pt Proof_PRST_pr "
+        "      (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt)) = T_pt",
+        types={"pf": nat0_ty, "n": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROOF_PRST_PR_QUOTE_INPUT_FALSE(p):
+    """|- !pf n. App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt
+            ==> App_pt Proof_PRST_pr
+                  (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt)) = F_pt."""
+    p.goal(
+        "!pf n. "
+        "App_pt Proof_PRST_pr (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt "
+        "==> App_pt Proof_PRST_pr "
+        "      (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt)) = F_pt",
+        types={"pf": nat0_ty, "n": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
+def PROOF_PRST_PR_INTERNAL_FALSE_EVAL(p):
+    """|- !p n. App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = F_pt
+            ==> Prov_PRST (Eq_pf
+                  (App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)))
+                  F_pt)."""
+    p.goal(
+        "!p n. "
+        "App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt)) = F_pt "
+        "==> Prov_PRST (Eq_pf "
+        "      (App_pt Proof_PRST_pr (Tup_pt p (Tup_pt n Empty_pt))) "
+        "      F_pt)",
+        types={"p": nat0_ty, "n": nat0_ty},
+    )
+    p.sorry()
+
+
+@proof
 def PROOF_PRST_REPRESENTS_POS(p):
     """|- !p n. Proof_PRST p n ==>
               Prov_PRST (Eq_pf
                 (App_pt Proof_PRST_pr (Tup_pt (quote_hf p) (Tup_pt (quote_hf n) Empty_pt)))
                 T_pt).
 
-    Positive branch of representability of the (decidable) Proof_PRST
-    predicate. STUB.
-
-    Here: one PROOF_PRST_PR_DEFINING specialisation per branch.
-    Estimate: ~20 lines for both branches combined.
+    Positive branch of representability of the decidable Proof_PRST
+    predicate.
     """
     p.goal(
         "!pf n. Proof_PRST pf n ==> "
@@ -231,7 +310,22 @@ def PROOF_PRST_REPRESENTS_POS(p):
         "  T_pt)",
         types={"pf": nat0_ty, "n": nat0_ty},
     )
-    p.sorry()
+    p.fix("pf n")
+    p.assume("h_proof: Proof_PRST pf n")
+    p.have(
+        "h_raw_eval: App_pt Proof_PRST_pr "
+        "  (Tup_pt pf (Tup_pt n Empty_pt)) = T_pt"
+    ).by(PROOF_PRST_PR_SEMANTIC_POS, "pf", "n", "h_proof")
+    p.have(
+        "h_eval: App_pt Proof_PRST_pr "
+        "  (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt)) = T_pt"
+    ).by(PROOF_PRST_PR_QUOTE_INPUT_TRUE, "pf", "n", "h_raw_eval")
+    p.thus(
+        "Prov_PRST (Eq_pf "
+        "  (App_pt Proof_PRST_pr "
+        "    (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt))) "
+        "  T_pt)"
+    ).by(PROOF_PRST_PR_INTERNAL_EVAL, "quote_hf pf", "quote_hf n", "h_eval")
 
 
 @proof
@@ -239,7 +333,7 @@ def PROOF_PRST_REPRESENTS_NEG(p):
     """|- !p n. ~Proof_PRST p n ==>
               Prov_PRST (Eq_pf
                 (App_pt Proof_PRST_pr (Tup_pt (quote_hf p) (Tup_pt (quote_hf n) Empty_pt)))
-                F_pt). STUB."""
+                F_pt)."""
     p.goal(
         "!pf n. ~Proof_PRST pf n ==> "
         "Prov_PRST (Eq_pf "
@@ -247,7 +341,27 @@ def PROOF_PRST_REPRESENTS_NEG(p):
         "  F_pt)",
         types={"pf": nat0_ty, "n": nat0_ty},
     )
-    p.sorry()
+    p.fix("pf n")
+    p.assume("h_not_proof: ~Proof_PRST pf n")
+    p.have(
+        "h_raw_eval: App_pt Proof_PRST_pr "
+        "  (Tup_pt pf (Tup_pt n Empty_pt)) = F_pt"
+    ).by(PROOF_PRST_PR_SEMANTIC_NEG, "pf", "n", "h_not_proof")
+    p.have(
+        "h_eval: App_pt Proof_PRST_pr "
+        "  (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt)) = F_pt"
+    ).by(PROOF_PRST_PR_QUOTE_INPUT_FALSE, "pf", "n", "h_raw_eval")
+    p.thus(
+        "Prov_PRST (Eq_pf "
+        "  (App_pt Proof_PRST_pr "
+        "    (Tup_pt (quote_hf pf) (Tup_pt (quote_hf n) Empty_pt))) "
+        "  F_pt)"
+    ).by(
+        PROOF_PRST_PR_INTERNAL_FALSE_EVAL,
+        "quote_hf pf",
+        "quote_hf n",
+        "h_eval",
+    )
 
 
 if __name__ == "__main__":
@@ -261,5 +375,10 @@ if __name__ == "__main__":
     print()
     print("    SUBSTITUTE_REPRESENTS_PRST     :", pp_thm(SUBSTITUTE_REPRESENTS_PRST))
     print("    DIAG_REPRESENTS_PRST           :", pp_thm(DIAG_REPRESENTS_PRST))
+    print("    PROOF_PRST_PR_SEMANTIC_POS       :", pp_thm(PROOF_PRST_PR_SEMANTIC_POS))
+    print("    PROOF_PRST_PR_SEMANTIC_NEG       :", pp_thm(PROOF_PRST_PR_SEMANTIC_NEG))
+    print("    PROOF_PRST_PR_QUOTE_INPUT_TRUE   :", pp_thm(PROOF_PRST_PR_QUOTE_INPUT_TRUE))
+    print("    PROOF_PRST_PR_QUOTE_INPUT_FALSE  :", pp_thm(PROOF_PRST_PR_QUOTE_INPUT_FALSE))
+    print("    PROOF_PRST_PR_INTERNAL_FALSE_EVAL :", pp_thm(PROOF_PRST_PR_INTERNAL_FALSE_EVAL))
     print("    PROOF_PRST_REPRESENTS_POS      :", pp_thm(PROOF_PRST_REPRESENTS_POS))
     print("    PROOF_PRST_REPRESENTS_NEG      :", pp_thm(PROOF_PRST_REPRESENTS_NEG))
