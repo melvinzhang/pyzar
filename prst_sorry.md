@@ -265,20 +265,46 @@ One separate G2-only blocker remains for the D2/proof-combinator path:
 two-line checker shape is validated only for an explicit proof list, not yet
 for `App_pt mp_combine_pr ...`.
 
-### Spike 6 — Internal Evaluation Chain
+### Design 6 — Internal Evaluation Chain
 
-Goal: check that external PR-symbol correctness can be lifted into PRST
+Purpose: ensure that external PR-symbol correctness can be lifted into PRST
 provability without recreating HF-style representability packages.
 
-Target examples:
+Reference coverage:
 
-- `PROV_PRST_NUMERAL_EVAL` for `0` and `SUC0 0`.
-- `PROV_PRST_DIAG_EVAL` for a simple formula code.
-- `PROV_PRST_SUBSTITUTE_EVAL` for a closed formula where substitution is a no-op.
+- `PROV_PRST_NUMERAL_EVAL` by induction on arbitrary `n`.
+- `PROV_PRST_SUBSTITUTE_EVAL` by constructor recursion over all PRST syntax
+  families.
+- `PROV_PRST_DIAG_EVAL` by composition of `diag_pr`, numeral evaluation, and
+  substitute evaluation.
 
-Success criterion: each example follows from PR-def instances plus
+Design criterion: each evaluation theorem follows from PR-def instances plus
 `PROV_PRST_AX`, `PROV_PRST_SUBST`, `PROV_PRST_MP`, and equality reasoning,
 not from a new global representability axiom.
+
+Settled shape:
+
+- `PROV_PRST_NUMERAL_EVAL` is modeled by induction on `n`: base uses the
+  recursor base equation plus `zero_def_axiom`; successor uses the recursor
+  step equation, the predecessor evaluation, and the `adj`/`Adj_pt` equation.
+- `PROV_PRST_SUBSTITUTE_EVAL` is modeled by constructor recursion over every
+  PRST syntax family: `Empty_pt`, `Var_pt` hit/miss, `Tup_pt`, `App_pt`,
+  `Eq_pf`, `In_pa`, `Not_pf`, `Imp_pf`, and opaque atom/default cases.
+- The `App_pt` substitution case records the non-uniform obligation that the
+  function id is preserved exactly while only the argument tuple recurses.
+- `PROV_PRST_DIAG_EVAL` is modeled as composition of the `diag_pr` definition,
+  numeral evaluation, substitute evaluation, and equality reasoning.
+- The proof-plan checker rejects any use of a global representability axiom;
+  all leaves are PR-def instances, `PROV_PRST_AX`, `PROV_PRST_SUBST`,
+  `PROV_PRST_MP`, or PRST equality reasoning.
+
+The executable reference design is `prst_internal_eval_spike.py`.
+
+Production proof obligations: expose the local PRST equality API needed for
+reflexivity, symmetry, transitivity, and congruence; then mechanise the
+numeral induction, substitute constructor recursion, and diag composition
+recorded by the reference. No global representability axiom is part of the G1
+internal-evaluation bridge.
 
 ### Spike 7 — `mu` Strength Check
 
