@@ -603,32 +603,79 @@ PROOF_PRST_AT = _proof_prst_at()
 
 @proof
 def PROOF_PRST_NIL(p):
-    """|- !n. ~ Proof_PRST Empty_pt n.
+    """|- !n. ~ Proof_PRST Empty_pt n."""
+    from tactics import SPECL, SYM
+    from prst_syntax import TUP_PT_NEQ_EMPTY_PT
 
-    Empty proof proves nothing. This remains an open proof obligation after
-    the checker refactor to the ValidProof_PRST/Mem_PRST shape.
-    """
     p.goal("!n. ~ Proof_PRST Empty_pt n", types={"n": nat0_ty})
     p.fix("n")
-    p.sorry()
+    proof_at = SPECL([p._parse("Empty_pt"), p._parse("n")], PROOF_PRST_AT)
+    with p.suppose("h_proof: Proof_PRST Empty_pt n"):
+        p.have(
+            "h_body: "
+            "?h t. Empty_pt = Tup_pt h t /\\ n = h /\\ ValidProof_PRST Empty_pt"
+        ).by_eq_mp(proof_at, "h_proof")
+        p.choose("hd tl", "h_body", eq_label="body")
+        p.split("body", "(p_eq, _)")
+        p.have("p_eq_sym: Tup_pt hd tl = Empty_pt").by_thm(SYM(p.fact("p_eq")))
+        p.have("p_neq: ~(Tup_pt hd tl = Empty_pt)").by(
+            TUP_PT_NEQ_EMPTY_PT, "hd", "tl"
+        )
+        p.absurd().by_conj("p_neq", "p_eq_sym")
 
 
 @proof
 def PROOF_PRST_CONS(p):
     """|- !h t n. Proof_PRST (Tup_pt h t) n =
-            (n = h /\\ ValidProof_PRST (Tup_pt h t)).
+            (n = h /\\ ValidProof_PRST (Tup_pt h t))."""
+    from tactics import SPECL, SYM, CONJ
+    from prst_syntax import TUP_PT_INJ
 
-    This is the external view of the refactored checker: Proof_PRST only
-    asserts that p is a non-empty proof list whose head is n and whose whole
-    list is ValidProof_PRST.
-    """
     p.goal(
         "!h t n. Proof_PRST (Tup_pt h t) n = "
         "(n = h /\\ ValidProof_PRST (Tup_pt h t))",
         types={"h": nat0_ty, "t": nat0_ty, "n": nat0_ty},
     )
     p.fix("h t n")
-    p.sorry()
+    proof_at = SPECL([p._parse("Tup_pt h t"), p._parse("n")], PROOF_PRST_AT)
+
+    with p.have(
+        "fwd: Proof_PRST (Tup_pt h t) n ==> "
+        "(n = h /\\ ValidProof_PRST (Tup_pt h t))"
+    ).proof():
+        p.assume("h_proof: Proof_PRST (Tup_pt h t) n")
+        p.have(
+            "h_body: ?h0 t0. "
+            "Tup_pt h t = Tup_pt h0 t0 /\\ "
+            "n = h0 /\\ ValidProof_PRST (Tup_pt h t)"
+        ).by_eq_mp(proof_at, "h_proof")
+        p.choose("h0 t0", "h_body", eq_label="body")
+        p.split("body", "(p_eq, (n_eq0, h_valid))")
+        p.have("inj: h = h0 /\\ t = t0").by(
+            TUP_PT_INJ, "h", "t", "h0", "t0", "p_eq"
+        )
+        p.split("inj", "(h_eq0, _)")
+        p.have("n_eq: n = h").by_rewrite_of("n_eq0", [SYM(p.fact("h_eq0"))])
+        p.thus("n = h /\\ ValidProof_PRST (Tup_pt h t)").by(
+            CONJ, "n_eq", "h_valid"
+        )
+
+    with p.have(
+        "rev: (n = h /\\ ValidProof_PRST (Tup_pt h t)) ==> "
+        "Proof_PRST (Tup_pt h t) n"
+    ).proof():
+        p.assume("(n_eq, h_valid): n = h /\\ ValidProof_PRST (Tup_pt h t)")
+        p.have(
+            "body: ?h0 t0. "
+            "Tup_pt h t = Tup_pt h0 t0 /\\ "
+            "n = h0 /\\ ValidProof_PRST (Tup_pt h t)"
+        ).by_exists(["h", "t"], "n_eq", "h_valid")
+        p.thus("Proof_PRST (Tup_pt h t) n").by_eq_mp(SYM(proof_at), "body")
+
+    p.thus(
+        "Proof_PRST (Tup_pt h t) n = "
+        "(n = h /\\ ValidProof_PRST (Tup_pt h t))"
+    ).by_iff("fwd", "rev")
 
 
 # ---------------------------------------------------------------------------
