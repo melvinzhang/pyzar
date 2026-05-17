@@ -1,6 +1,6 @@
 # DHOL kernel: what's still missing
 
-Audit of `fusion_dhol.py` vs. Rothgang/Rabe/Benzmüller's DHOL.
+Audit of `fusion_dhol.py` vs. Rothgang/Rabe/Benzmüller's DHOL (TOCL 2025, `arXiv:2305.15382`) plus Rabe's 2026 follow-up `rabe_dholmodels_26.pdf` ("Semantics for Dependently-Typed HOL"), which extends the base calculus with rank-1 polymorphism and function preconditions.
 
 ## Shipped since the last audit
 
@@ -18,7 +18,7 @@ Audit of `fusion_dhol.py` vs. Rothgang/Rabe/Benzmüller's DHOL.
 
 ## Typing-rule gaps
 
-2. **No dependent implication typing.** The paper's `⇒type'` rule lets you assume `F` while type-checking `G` in `F ⇒ G`. Example 3 in the paper (`x = y ⇒ id_x = id_y`) literally can't be type-checked without it — and we'd hit the same wall. We don't have `⇒`/`∀`/`∃` as primitives with their own typing rules; if they're defined via β-reducible constants downstream, the dependency is lost.
+2. **No dependent implication typing.** The 2026 paper makes `⇒` primitive (Rule D, Fig. 4): `Γ ⊢ F : bool   Γ, ▷F ⊢ G : bool  ⟹  Γ ⊢ F ⇒ G : bool` — the well-formedness of `G` may depend on the truth of `F` (Example: `x = y ⇒ f x =B[y] f y` for dependent `f : Πx:A. B`, which needs the assumption to even type-check the RHS). DHOL has exactly two primitive connectives: `=` and `⇒`; everything else (`∧`, `∨`, `¬`, `∀`, `∃`, `true`, `false`) is defined. Currently `fusion_dhol` has neither `⇒` nor a notion of boolean assumptions in `typing_thm._asl` propagating into typing of subterms — `typing_thm._asl` exists but no rule consumes assumptions for typing purposes.
 
 ## Conversion / definitional equality
 
@@ -52,12 +52,33 @@ Direct construction of certificate dataclasses, or of raw term/type values inten
 11. **No translation to HOL** (paper §3.2, the PER `A*`, definitions PT1–PT21). The paper's main contribution is the sound+complete embedding; we have nothing analogous, so we can't farm DHOL goals out to LEO-III / cvc5.
 12. **No refinement / quotient types** (the follow-up work, arXiv:2507.02855).
 
+## Gaps surfaced by the 2026 model-theory paper
+
+The 2026 paper (Rabe, "Semantics for Dependently-Typed HOL") is the reference definition of the language going forward. It subsumes the 2025 RRB calculus and adds two language extensions plus a model theory. The kernel doesn't yet track either extension.
+
+13. **No function preconditions** (Fig. 1, the paper's headline feature). The 2026 grammar reads `Πx : A|F. B` and `λx : A|F. t` — every binder may carry a boolean precondition `F` (defaulting to `true` when omitted). Effects on the kernel:
+    - `Pi` and `Abs` dataclasses gain a third field `precondition: term` (or `None` ≡ `true`).
+    - `LAMBDA` (paper's `P_2`): the body is type-checked under `Γ, x:A, ▷F` — i.e., `typing_thm`'s `_asl` must thread boolean assumptions, and `LAMBDA` adds `F` to that context before recursing.
+    - `APP` (paper's `P_3`): `f : Πx:A|F. B` applied to `s : A` requires a `thm` discharging `F[s/x]`; result type stays `B[s/x]`. Currently `APP` takes no such proof.
+    - **Precondition-subtyping** (paper's `P_4`): if `⊢_T G ⇒ F`, then anything of type `Πx:A|F. B` also has type `Πx:A|G. B`. The paper calls this "almost but not quite derivable from η" and handles it via type-driven type-checking. We'd need a dedicated rule or admissible derivation.
+    - All non-precondition Pi types in the paper are the special case `F = true`. So this extension is backwards-compatible — existing rules just thread an extra defaults-to-true field.
+14. **No `Φ`-contexts on declarations / rank-1 polymorphism in declarations.** The paper allows `a(Φ) : Type` and `c(Φ) : A` where `Φ` is itself a context (type variables, term variables, and assumptions). We have partial polymorphism: `Tyvar` plus `CONST(name, tyin)` instantiates the constant's type variables, and `INST_TYPE` substitutes them in theorems. What's missing:
+    - Type symbols can't take type-variable parameters. `new_type` accepts only `type_arity` (a count of unnamed `Tyapp.type_args` slots, filled at use-site with any `hol_type`) and `term_params` (a flat tuple of term-arg types). The paper's `PVec(u:Type, n:N) : Type` has both, in one ordered context.
+    - Constants can't take dependent parameter contexts. The paper writes `c(Φ) : A`; at use we instantiate `c φ` and the result is `A[φ]`. We collapse this into "the constant's declared type is just `A`, polymorphism is via Tyvar substitution on `A` only" — equivalent expressivity for many cases, but loses the staged-declaration story.
+    - Polymorphic axioms (`(Φ) ▷ F` with `Φ` non-empty in the type-variable component) aren't directly representable; we'd need a Tyvar-quantified `thm`.
+15. **No dependent implication ⇒ as primitive.** Sibling of item 2. The 2026 Rule D and the proof rules in Fig. 5 (modus ponens, deduction, propositional extensionality `(PE)`, congruence, `(TND)`) are the canonical formulation. Our `DEDUCT_ANTISYM_RULE` corresponds to `(PE)` and is in place. The other ⇒-driven rules (`(I_3)`-style axiom instantiation, `(MP)`-style modus ponens, the implication-introduction discharging `▷F`) need ⇒ to even state.
+16. **No tertium non datur (TND)** as a primitive proof rule (`Γ ⊢ F : bool   Γ ⊢ A ≡ A'   ⟹ Γ ⊢ F ∨ ¬F`-flavoured rule; paper Fig. 5, Rule (TND)). Once ⇒, ¬, ∨ are present, this is a classicality axiom — we have nothing equivalent yet.
+17. **Empty types disallowed by construction (deliberate divergence).** The paper allows empty types and explicitly notes that `∀x:A. F ⇒ ∃x:A. F` is *not* a theorem; the choice/Hilbert axioms would be needed to recover that. Our atomic `new_type` requires an inhabitation witness, which makes every declared type non-empty and silently re-enables `∀⇒∃`. Worth flagging as a known deviation rather than a bug.
+18. **No model-theoretic harness.** Sections 3-5 (strict models, lax models, term model, Theorems 1-6 — soundness, well-definedness, completeness). These are meta-theorems about the calculus, not implementation gaps in the kernel itself, but they give us the *reference* semantics: any future kernel rule should be discharge-able as preserving lax-model interpretation. There's no infrastructure in `fusion_dhol` for stating model preservation, building counter-models, or running consistency arguments.
+
 ## Priorities if you keep going
 
 Highest-leverage next steps, roughly increasing effort:
 
 - **Item 4 (β in `type_eq`)** — fold a head-β step into `_ty_eq` for term-args, so substitution products are recognized definitionally. Five lines. Removes a whole class of bridging boilerplate that's currently needed.
+- **Item 2 / 15 (primitive ⇒ with Rule D)** — add `F ⇒ G` as a primitive term former plus the Fig. 5 proof rules; thread boolean assumptions through `typing_thm._asl` so the body of `F ⇒ G` can be typed under `▷F`. Unblocks Example 3 of the 2025 paper and the bulk of the dependent-implication uses in 2026.
 - **Item 6 (`new_basic_type_definition`)** — the only way to get new dependent type families backed by real models.
+- **Item 13 (function preconditions)** — extend `Pi` / `Abs` with an optional `precondition` field defaulting to `true`. Threading this through `LAMBDA` / `APP` / `P_4` is moderate; the payoff is that the 2026 calculus becomes the kernel's native syntax instead of a sublanguage, and refinement/quotient types (item 12) become reachable.
 - **Item 11 (translation to HOL)** — the paper's main artifact. PER predicates, axiom translation, ATP wiring. Worth its own milestone — recovers the paper's automation story.
 
-Items 2, 5 are deeper restructurings. Items 7–8 are housekeeping. Items 9, 10, 12 are extensions beyond the base paper.
+Items 5, 14 are deeper restructurings (dependent kinds; staged `Φ`-contexts on declarations). Items 7–8 are housekeeping. Items 9, 10, 12, 16, 18 are extensions beyond the base kernel. Item 17 is a known deliberate deviation.
