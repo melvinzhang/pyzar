@@ -84,6 +84,7 @@ class Tyapp:
 class Pi:
     bvar: "Var"
     body: "hol_type"
+    precondition: "term | None" = None  # None == true; otherwise a bool term
 
 
 hol_type = Tyvar | Tyapp | Pi
@@ -116,9 +117,20 @@ class Comb:
 class Abs:
     bvar: Var
     body: "term"
+    precondition: "term | None" = None  # None == true; otherwise a bool term
 
 
 term = Var | Const | Comb | Abs
+
+
+@dataclass(frozen=True, slots=True)
+class Assume:
+    """Assumption-entry binder in a type-symbol declaration context
+    (paper's `▷F` in a `Φ`-context). Carries a boolean term schema
+    that the user must discharge at every mk_type / TY_CONG_BASE call
+    site. Unlike Tyvar / Var entries, it does not bind a name in scope
+    for later entries -- it is a pure obligation."""
+    formula: term
 
 
 # ---------------------------------------------------------------------------
@@ -258,12 +270,13 @@ def new_type(
     if any(n == name for n, _ in the_type_constants):
         raise HolError(f"new_type: type {name} has already been declared")
     for entry in context:
-        if not isinstance(entry, (Tyvar, Var)):
+        if not isinstance(entry, (Tyvar, Var, Assume)):
             raise HolError(
-                f"new_type: context entries must be Tyvar or Var (got {entry!r})"
+                f"new_type: context entries must be Tyvar, Var, or Assume "
+                f"(got {entry!r})"
             )
     witness_name, witness_ty = witness
-    if any(n == witness_name for n, _ in the_term_constants):
+    if any(n == witness_name for n, _, _ in the_term_constants):
         raise HolError(
             f"new_type: witness constant {witness_name} already declared"
         )
@@ -275,15 +288,18 @@ def new_type(
         )
     # All checks passed -- commit atomically.
     the_type_constants.insert(0, (name, tuple(context)))
-    the_term_constants.insert(0, (witness_name, witness_ty))
+    the_term_constants.insert(0, (witness_name, witness_ty, ()))
 
 
 bool_ty: hol_type = Tyapp("bool", (), ())
 aty: hol_type = Tyvar("A")
 
+# Each entry is (name, ty, preconds) where preconds is a tuple of bool
+# term schemas that must be discharged at every use site. Preconditions
+# may reference the constant's Tyvars (substituted via `tyin`).
 the_term_constants: list = [
-    ("=", Pi(Var("_", aty), Pi(Var("_", aty), bool_ty))),
-    ("==>", Pi(Var("_", bool_ty), Pi(Var("_", bool_ty), bool_ty))),
+    ("=", Pi(Var("_", aty), Pi(Var("_", aty), bool_ty)), ()),
+    ("==>", Pi(Var("_", bool_ty), Pi(Var("_", bool_ty), bool_ty)), ()),
 ]
 
 
@@ -292,16 +308,27 @@ def constants() -> list:
 
 
 def get_const_type(s: str) -> hol_type:
-    for name, ty in the_term_constants:
+    for name, ty, _ in the_term_constants:
         if name == s:
             return ty
     raise KeyError(s)
 
 
-def new_constant(name: str, ty: hol_type) -> None:
-    if any(n == name for n, _ in the_term_constants):
+def get_const_preconds(s: str) -> tuple:
+    for name, _, preconds in the_term_constants:
+        if name == s:
+            return preconds
+    raise KeyError(s)
+
+
+def new_constant(name: str, ty: hol_type, preconds: tuple = ()) -> None:
+    """Declare a constant `name : ty` with optional `preconds`, a tuple
+    of bool term schemas that the user must discharge at every use site
+    (see CONST). Preconditions may reference free Tyvars in `ty`, which
+    are substituted by `tyin` at use time."""
+    if any(n == name for n, _, _ in the_term_constants):
         raise HolError(f"new_constant: constant {name} has already been declared")
-    the_term_constants.insert(0, (name, ty))
+    the_term_constants.insert(0, (name, ty, tuple(preconds)))
 
 
 def mk_arrow(a: hol_type, b: hol_type) -> hol_type:
@@ -361,6 +388,24 @@ def mk_type(tyop: str, args: list) -> hol_type:
                 )
             term_args.append(arg._tm)
             theta_tm.append((arg._tm, binder))
+        elif isinstance(binder, Assume):
+            if not isinstance(arg, thm):
+                raise HolError(
+                    "mk_type: argument for Assume binder must be a thm"
+                )
+            if arg._asl:
+                raise HolError(
+                    "mk_type: Assume proof must be unconditional (empty asl); "
+                    "mk_type returns a hol_type with no asl tracking"
+                )
+            needed = _inst_in_term(
+                [], theta_ty, _vsubst(theta_tm, binder.formula)
+            )
+            if not _tm_alpha([], arg._concl, needed):
+                raise HolError(
+                    f"mk_type: Assume proof concludes {_pp_tm(arg._concl)} "
+                    f"but required (after earlier args) is {_pp_tm(needed)}"
+                )
         else:
             raise HolError("mk_type: ill-formed context binder")
     return Tyapp(tyop, tuple(type_args), tuple(term_args))
@@ -377,7 +422,12 @@ def frees(tm: term) -> list:
     if isinstance(tm, Const):
         return []
     if isinstance(tm, Abs):
-        return [v for v in frees(tm.body) if v != tm.bvar]
+        seen = [v for v in frees(tm.body) if v != tm.bvar]
+        if tm.precondition is not None:
+            for v in frees(tm.precondition):
+                if v != tm.bvar and v not in seen:
+                    seen.append(v)
+        return seen
     if isinstance(tm, Comb):
         seen = list(frees(tm.fun))
         for v in frees(tm.arg):
@@ -393,7 +443,12 @@ def freesin(acc: list, tm: term) -> bool:
     if isinstance(tm, Const):
         return True
     if isinstance(tm, Abs):
-        return freesin([tm.bvar, *acc], tm.body)
+        body_ok = freesin([tm.bvar, *acc], tm.body)
+        if not body_ok:
+            return False
+        if tm.precondition is None:
+            return True
+        return freesin([tm.bvar, *acc], tm.precondition)
     if isinstance(tm, Comb):
         return freesin(acc, tm.fun) and freesin(acc, tm.arg)
     raise HolError("freesin: ill-formed term")
@@ -401,7 +456,11 @@ def freesin(acc: list, tm: term) -> bool:
 
 def vfree_in(v: term, tm: term) -> bool:
     if isinstance(tm, Abs):
-        return v != tm.bvar and vfree_in(v, tm.body)
+        if v == tm.bvar:
+            return False
+        if vfree_in(v, tm.body):
+            return True
+        return tm.precondition is not None and vfree_in(v, tm.precondition)
     if isinstance(tm, Comb):
         return vfree_in(v, tm.fun) or vfree_in(v, tm.arg)
     return tm == v
@@ -426,6 +485,10 @@ def tyvars(ty: hol_type) -> list:
         for tv in tyvars(ty.body):
             if tv not in seen:
                 seen.append(tv)
+        if ty.precondition is not None:
+            for tv in type_vars_in_term(ty.precondition):
+                if tv not in seen:
+                    seen.append(tv)
         return seen
     raise HolError("tyvars: ill-formed type")
 
@@ -444,6 +507,10 @@ def type_vars_in_term(tm: term) -> list:
         for tv in type_vars_in_term(tm.body):
             if tv not in seen:
                 seen.append(tv)
+        if tm.precondition is not None:
+            for tv in type_vars_in_term(tm.precondition):
+                if tv not in seen:
+                    seen.append(tv)
         return seen
     raise HolError("type_vars_in_term: ill-formed term")
 
@@ -481,8 +548,21 @@ def _ty_eq(env: list, t1: hol_type, t2: hol_type) -> bool:
     if isinstance(t1, Pi) and isinstance(t2, Pi):
         if not _ty_eq(env, t1.bvar.ty, t2.bvar.ty):
             return False
-        return _ty_eq([(t1.bvar, t2.bvar), *env], t1.body, t2.body)
+        env2 = [(t1.bvar, t2.bvar), *env]
+        if not _prec_eq(env2, t1.precondition, t2.precondition):
+            return False
+        return _ty_eq(env2, t1.body, t2.body)
     return False
+
+
+def _prec_eq(env: list, p1, p2) -> bool:
+    """Compare two preconditions for alpha-equivalence under `env`.
+    None means `true`; two Nones are equal."""
+    if p1 is None and p2 is None:
+        return True
+    if p1 is None or p2 is None:
+        return False
+    return _tm_alpha(env, p1, p2)
 
 
 def _tm_alpha(env: list, a: term, b: term) -> bool:
@@ -500,7 +580,10 @@ def _tm_alpha(env: list, a: term, b: term) -> bool:
     if isinstance(a, Abs) and isinstance(b, Abs):
         if not _ty_eq(env, a.bvar.ty, b.bvar.ty):
             return False
-        return _tm_alpha([(a.bvar, b.bvar), *env], a.body, b.body)
+        env2 = [(a.bvar, b.bvar), *env]
+        if not _prec_eq(env2, a.precondition, b.precondition):
+            return False
+        return _tm_alpha(env2, a.body, b.body)
     return False
 
 
@@ -522,18 +605,32 @@ def subst_in_type(theta: list, ty: hol_type) -> hol_type:
         theta2 = [(t, x) for t, x in theta if x != ty.bvar]
         new_bvar_ty = subst_in_type(theta2, ty.bvar.ty)
         if not theta2:
-            return Pi(Var(ty.bvar.name, new_bvar_ty), ty.body)
-        if any(
-            vfree_in(ty.bvar, t) and _occurs_in_type(x, ty.body)
+            return Pi(Var(ty.bvar.name, new_bvar_ty), ty.body, ty.precondition)
+        clash = any(
+            vfree_in(ty.bvar, t) and (
+                _occurs_in_type(x, ty.body)
+                or (ty.precondition is not None and vfree_in(x, ty.precondition))
+            )
             for t, x in theta2
-        ):
+        )
+        if clash:
             avoid = [t for t, _ in theta2]
             fresh = variant(avoid, ty.bvar)
             fresh_var = Var(fresh.name, new_bvar_ty)
             body2 = subst_in_type([(fresh_var, ty.bvar)], ty.body)
-            return Pi(fresh_var, subst_in_type(theta2, body2))
+            prec2 = (
+                None if ty.precondition is None
+                else _vsubst([(fresh_var, ty.bvar)], ty.precondition)
+            )
+            new_body = subst_in_type(theta2, body2)
+            new_prec = None if prec2 is None else _vsubst(theta2, prec2)
+            return Pi(fresh_var, new_body, new_prec)
         new_body = subst_in_type(theta2, ty.body)
-        return Pi(Var(ty.bvar.name, new_bvar_ty), new_body)
+        new_prec = (
+            None if ty.precondition is None
+            else _vsubst(theta2, ty.precondition)
+        )
+        return Pi(Var(ty.bvar.name, new_bvar_ty), new_body, new_prec)
     raise HolError("subst_in_type: ill-formed type")
 
 
@@ -547,7 +644,12 @@ def _occurs_in_type(v: Var, ty: hol_type) -> bool:
     if isinstance(ty, Pi):
         if ty.bvar == v:
             return _occurs_in_type(v, ty.bvar.ty)
-        return _occurs_in_type(v, ty.bvar.ty) or _occurs_in_type(v, ty.body)
+        in_prec = ty.precondition is not None and vfree_in(v, ty.precondition)
+        return (
+            _occurs_in_type(v, ty.bvar.ty)
+            or in_prec
+            or _occurs_in_type(v, ty.body)
+        )
     return False
 
 
@@ -574,6 +676,8 @@ def type_subst(i: list, ty: hol_type) -> hol_type:
         return Pi(
             Var(ty.bvar.name, type_subst(i, ty.bvar.ty)),
             type_subst(i, ty.body),
+            None if ty.precondition is None
+            else _inst_in_term([], i, ty.precondition),
         )
     raise HolError("type_subst: ill-formed type")
 
@@ -607,17 +711,30 @@ def _inst_in_term(env: list, tyin: list, tm: term) -> term:
         env2 = [(tm.bvar, bvar2), *env]
         try:
             body2 = _inst_in_term(env2, tyin, tm.body)
-            if bvar2 is tm.bvar and body2 is tm.body:
+            prec2 = (
+                None if tm.precondition is None
+                else _inst_in_term(env2, tyin, tm.precondition)
+            )
+            if (
+                bvar2 is tm.bvar
+                and body2 is tm.body
+                and prec2 is tm.precondition
+            ):
                 return tm
-            return Abs(bvar2, body2)
+            return Abs(bvar2, body2, prec2)
         except Clash as ex:
             if ex.tm != bvar2:
                 raise
             ifrees = [_inst_in_term([], tyin, v) for v in frees(tm.body)]
             bvar3 = variant(ifrees, bvar2)
             z = Var(bvar3.name, tm.bvar.ty)
+            renamed = _vsubst([(z, tm.bvar)], tm.body)
+            renamed_prec = (
+                None if tm.precondition is None
+                else _vsubst([(z, tm.bvar)], tm.precondition)
+            )
             return _inst_in_term(
-                env, tyin, Abs(z, _vsubst([(z, tm.bvar)], tm.body))
+                env, tyin, Abs(z, renamed, renamed_prec)
             )
     raise HolError("_inst_in_term: ill-formed term")
 
@@ -649,12 +766,27 @@ def _vsubst(ilist: list, tm: term) -> term:
             tm.bvar if new_bvar_ty is tm.bvar.ty
             else Var(tm.bvar.name, new_bvar_ty)
         )
+        prec = tm.precondition
         if not ilist2:
-            return tm if new_bvar is tm.bvar else Abs(new_bvar, tm.body)
-        if any(vfree_in(new_bvar, t) and vfree_in(x, tm.body) for t, x in ilist2):
-            v2 = variant([_vsubst(ilist2, tm.body)], new_bvar)
-            return Abs(v2, _vsubst([(v2, tm.bvar), *ilist2], tm.body))
-        return Abs(new_bvar, _vsubst(ilist2, tm.body))
+            if new_bvar is tm.bvar:
+                return tm
+            return Abs(new_bvar, tm.body, prec)
+        body_or_prec_uses = lambda x: (
+            vfree_in(x, tm.body)
+            or (prec is not None and vfree_in(x, prec))
+        )
+        if any(vfree_in(new_bvar, t) and body_or_prec_uses(x) for t, x in ilist2):
+            avoid_basis = [_vsubst(ilist2, tm.body)]
+            if prec is not None:
+                avoid_basis.append(_vsubst(ilist2, prec))
+            v2 = variant(avoid_basis, new_bvar)
+            rename = [(v2, tm.bvar), *ilist2]
+            new_body = _vsubst(rename, tm.body)
+            new_prec = None if prec is None else _vsubst(rename, prec)
+            return Abs(v2, new_body, new_prec)
+        new_body = _vsubst(ilist2, tm.body)
+        new_prec = None if prec is None else _vsubst(ilist2, prec)
+        return Abs(new_bvar, new_body, new_prec)
     raise HolError("vsubst: ill-formed term")
 
 
@@ -681,9 +813,16 @@ def _pp_ty_raw(ty):
             return ty.tyop
         return f"{ty.tyop}({'; '.join(parts)})"
     if isinstance(ty, Pi):
-        if not _occurs_in_type(ty.bvar, ty.body):
+        prec = (
+            "" if ty.precondition is None
+            else f"|{_pp_tm_raw(ty.precondition)}"
+        )
+        if not _occurs_in_type(ty.bvar, ty.body) and ty.precondition is None:
             return f"({_pp_ty_raw(ty.bvar.ty)} -> {_pp_ty_raw(ty.body)})"
-        return f"(Pi {ty.bvar.name}:{_pp_ty_raw(ty.bvar.ty)}. {_pp_ty_raw(ty.body)})"
+        return (
+            f"(Pi {ty.bvar.name}:{_pp_ty_raw(ty.bvar.ty)}{prec}. "
+            f"{_pp_ty_raw(ty.body)})"
+        )
     return repr(ty)
 
 
@@ -696,7 +835,14 @@ def _pp_tm_raw(tm):
     if isinstance(tm, (Var, Const)):
         return tm.name
     if isinstance(tm, Abs):
-        return f"(\\{tm.bvar.name}:{_pp_ty_raw(tm.bvar.ty)}. {_pp_tm_raw(tm.body)})"
+        prec = (
+            "" if tm.precondition is None
+            else f"|{_pp_tm_raw(tm.precondition)}"
+        )
+        return (
+            f"(\\{tm.bvar.name}:{_pp_ty_raw(tm.bvar.ty)}{prec}. "
+            f"{_pp_tm_raw(tm.body)})"
+        )
     if isinstance(tm, Comb):
         return f"({_pp_tm_raw(tm.fun)} {_pp_tm_raw(tm.arg)})"
     return repr(tm)
@@ -837,20 +983,45 @@ def VAR(v: Var) -> typing_thm:
     return typing_thm([], v, v.ty)
 
 
-def CONST(name: str, tyin: list = ()) -> typing_thm:
-    """const-intro: |- c : tyin(A) where c:A is in the theory."""
+def CONST(name: str, tyin: list = (),
+          prec_proofs: tuple = ()) -> typing_thm:
+    """const-intro: |- c : tyin(A) where c(▷F_1, ..., ▷F_k) : A in the
+    theory. `prec_proofs` is a tuple of `thm`s, one per declared
+    precondition, in declaration order. Each proof's conclusion must
+    alpha-match `F_i[tyin]`; their asls are absorbed into the result."""
     decl_ty = get_const_type(name)
+    preconds = get_const_preconds(name)
     inst_ty = type_subst(tyin, decl_ty)
-    return typing_thm([], Const(name, inst_ty), inst_ty)
+    if len(prec_proofs) != len(preconds):
+        raise HolError(
+            f"CONST: constant {name} requires {len(preconds)} precondition "
+            f"proof(s), got {len(prec_proofs)}"
+        )
+    asl: list = []
+    for F, proof in zip(preconds, prec_proofs):
+        if not isinstance(proof, thm):
+            raise HolError("CONST: each prec_proofs entry must be a thm")
+        needed = _inst_in_term([], tyin, F)
+        if not _tm_alpha([], proof._concl, needed):
+            raise HolError(
+                f"CONST: precondition proof concludes {_pp_tm(proof._concl)} "
+                f"but required (after tyin) is {_pp_tm(needed)}"
+            )
+        asl = term_union(asl, proof._asl)
+    return typing_thm(asl, Const(name, inst_ty), inst_ty)
 
 
 def APP(f_th: typing_thm, a_th: typing_thm,
-        eq: type_eq_thm | None = None) -> typing_thm:
-    """appl':  Gamma |- f : Pi(x:A). B   Gamma |- a : A
-              ------------------------------------------
-                        Gamma |- f a : B[x/a]
+        eq: type_eq_thm | None = None,
+        prec: "thm | None" = None) -> typing_thm:
+    """appl' (paper P3):  Gamma |- f : Pi(x:A|F). B   Gamma |- a : A
+                          Gamma |- F[a/x]
+                          --------------------------------------------
+                                  Gamma |- f a : B[a/x]
 
-    If a_th._ty doesn't match A definitionally, eq must witness A == A'."""
+    `eq` (optional) bridges A == A' when a_th._ty differs from f's domain.
+    `prec` (required when f's Pi has a non-None precondition) is a `thm`
+    whose conclusion is alpha-eq to F[a/x]; its asl is absorbed."""
     f_ty = f_th._ty
     if not isinstance(f_ty, Pi):
         raise HolError(f"APP: head not a Pi -- got {_pp_ty(f_ty)}")
@@ -870,17 +1041,48 @@ def APP(f_th: typing_thm, a_th: typing_thm,
                 f"does not connect {_pp_ty(expected)} and {_pp_ty(got)}"
             )
         asl = term_union(asl, eq._asl)
+    if f_ty.precondition is not None:
+        if prec is None:
+            raise HolError(
+                f"APP: f's Pi has precondition {_pp_tm(f_ty.precondition)}; "
+                f"supply prec= a thm proving its substitution at the arg"
+            )
+        if not isinstance(prec, thm):
+            raise HolError("APP: prec must be a thm")
+        needed = _vsubst([(a_th._tm, f_ty.bvar)], f_ty.precondition)
+        if not _tm_alpha([], prec._concl, needed):
+            raise HolError(
+                f"APP: prec proof concludes {_pp_tm(prec._concl)} but "
+                f"required precondition (after substitution) is "
+                f"{_pp_tm(needed)}"
+            )
+        asl = term_union(asl, prec._asl)
+    elif prec is not None:
+        raise HolError("APP: f has no precondition; do not supply prec")
     result_ty = subst_in_type([(a_th._tm, f_ty.bvar)], f_ty.body)
     return typing_thm(asl, Comb(f_th._tm, a_th._tm), result_ty)
 
 
-def LAMBDA(v: Var, body_th: typing_thm) -> typing_thm:
-    """lambda':  Gamma, x:A |- t : B
-                ----------------------------
-                Gamma |- (\\x:A. t) : Pi(x:A). B
-    Any assumption mentioning v is discharged (it's no longer in scope)."""
-    asl = [a for a in body_th._asl if not vfree_in(v, a)]
-    return typing_thm(asl, Abs(v, body_th._tm), Pi(v, body_th._ty))
+def LAMBDA(v: Var, body_th: typing_thm,
+           precondition: "term | None" = None) -> typing_thm:
+    """lambda' (paper P2):  Gamma, x:A, ▷F |- t : B
+                           ------------------------------------
+                           Gamma |- (\\x:A|F. t) : Pi(x:A|F). B
+
+    The body's certificate must have been built under `▷F` (i.e. F may
+    appear in body_th._asl). LAMBDA captures F as the precondition on
+    the resulting Pi/Abs and discharges F (and any assumption mentioning
+    v) from the asl. `precondition=None` is the unconditional case
+    (F = true) and behaves exactly like the original rule."""
+    asl = body_th._asl
+    if precondition is not None:
+        asl = term_remove(precondition, asl)
+    asl = [a for a in asl if not vfree_in(v, a)]
+    return typing_thm(
+        asl,
+        Abs(v, body_th._tm, precondition),
+        Pi(v, body_th._ty, precondition),
+    )
 
 
 def CONV(t_th: typing_thm, eq: type_eq_thm) -> typing_thm:
@@ -975,6 +1177,8 @@ def TY_CONG_BASE(tyop: str, args: list) -> type_eq_thm:
     lhs_term_args: list = []
     rhs_type_args: list = []
     rhs_term_args: list = []
+    theta_ty_r: list = []
+    theta_tm_r: list = []
     for binder, arg in zip(ctx, args):
         if isinstance(binder, Tyvar):
             if not isinstance(arg, type_eq_thm):
@@ -985,6 +1189,7 @@ def TY_CONG_BASE(tyop: str, args: list) -> type_eq_thm:
             lhs_type_args.append(arg._lhs)
             rhs_type_args.append(arg._rhs)
             theta_ty_l.append((arg._lhs, binder))
+            theta_ty_r.append((arg._rhs, binder))
             asl = term_union(asl, arg._asl)
         elif isinstance(binder, Var):
             if not isinstance(arg, thm) or not _is_eq(arg._concl):
@@ -1006,6 +1211,31 @@ def TY_CONG_BASE(tyop: str, args: list) -> type_eq_thm:
             lhs_term_args.append(lhs_tm)
             rhs_term_args.append(rhs_tm)
             theta_tm_l.append((lhs_tm, binder))
+            theta_tm_r.append((rhs_tm, binder))
+            asl = term_union(asl, arg._asl)
+        elif isinstance(binder, Assume):
+            if not isinstance(arg, thm):
+                raise HolError(
+                    "TY_CONG_BASE: argument for Assume binder must be a thm"
+                )
+            needed_l = _inst_in_term(
+                [], theta_ty_l, _vsubst(theta_tm_l, binder.formula)
+            )
+            needed_r = _inst_in_term(
+                [], theta_ty_r, _vsubst(theta_tm_r, binder.formula)
+            )
+            if not _tm_alpha([], needed_l, needed_r):
+                raise HolError(
+                    "TY_CONG_BASE: Assume formula's LHS and RHS "
+                    "substitutions differ; this kernel ships the rule only "
+                    "for the case where the obligation is symmetric across "
+                    "the two sides of the congruence"
+                )
+            if not _tm_alpha([], arg._concl, needed_l):
+                raise HolError(
+                    f"TY_CONG_BASE: Assume proof concludes "
+                    f"{_pp_tm(arg._concl)} but required is {_pp_tm(needed_l)}"
+                )
             asl = term_union(asl, arg._asl)
         else:
             raise HolError("TY_CONG_BASE: ill-formed context binder")
@@ -1057,6 +1287,11 @@ def BETA(redex_th: typing_thm) -> thm:
         and tm.arg == tm.fun.bvar
     ):
         raise HolError("BETA: not a trivial beta-redex")
+    if tm.fun.precondition is not None:
+        raise HolError(
+            "BETA: redex's abstraction has a precondition; reducing "
+            "would require discharging it, which BETA does not do"
+        )
     return thm(redex_th._asl, safe_mk_eq(redex_th._ty, tm, tm.fun.body))
 
 
@@ -1065,10 +1300,18 @@ def ETA(t_th: typing_thm) -> thm:
               -----------------------------
               Gamma |- t = (\\x:A. t x)
 
-    The bound variable name is chosen fresh to avoid capture in t."""
+    The bound variable name is chosen fresh to avoid capture in t.
+    Preconditioned Pi types are rejected: eta-expanding through a
+    precondition F would require the RHS abstraction to thread F, and
+    type-checking `t x` inside it would require discharging F."""
     f_ty = t_th._ty
     if not isinstance(f_ty, Pi):
         raise HolError(f"ETA: term type is not a Pi (got {_pp_ty(f_ty)})")
+    if f_ty.precondition is not None:
+        raise HolError(
+            "ETA: Pi has a precondition; preconditioned eta is not "
+            "supported by this rule"
+        )
     fresh_v = variant(frees(t_th._tm), f_ty.bvar)
     eta_form = Abs(fresh_v, Comb(t_th._tm, fresh_v))
     return thm(t_th._asl, safe_mk_eq(t_th._ty, t_th._tm, eta_form))
@@ -1144,6 +1387,12 @@ def MK_COMB(th1: thm, th2: thm,
         raise HolError(
             f"MK_COMB: function-side equation type is not Pi "
             f"(got {_pp_ty(f_ty)})"
+        )
+    if f_ty.precondition is not None:
+        raise HolError(
+            "MK_COMB: function's Pi has a precondition; preconditioned "
+            "congruence is not supported (would require discharging "
+            "F[l2/x] and F[r2/x] and a precondition-equality bridge)"
         )
     expected = f_ty.bvar.ty
     asl = term_union(th1._asl, th2._asl)
@@ -1790,4 +2039,128 @@ if __name__ == "__main__":
         TY_CONG_BASE("tagged", [bool_refl_again, add_0_0_eq_0])
     except HolError as e:
         print("cross-dep cong  ::", str(e).splitlines()[0])
+
+    # ----------------------------------------------------------------
+    # Item 13: function preconditions on Pi / lambda.
+    #
+    # Build a λ with precondition F = (add 0 0 = 0): under ▷F the body
+    # type-checks as 0:nat, so LAMBDA captures F as the binder's
+    # precondition. APP to zero_th then requires a thm discharging
+    # F[0/n] -- here add_0_0_eq_0 already discharges it (F doesn't
+    # mention n, so F[0/n] = F).
+    # ----------------------------------------------------------------
+    print()
+    F = add_0_0_eq_0._concl  # the bool term add 0 0 = 0
+    # The body's typing has F in its asl (it does not actually need
+    # F to type zero, but we add it to simulate "type-checked under ▷F").
+    body_th_under_F = typing_thm([F], zero_th._tm, nat_ty)
+    n_for_lam = Var("n", nat_ty)
+    lam_with_prec = LAMBDA(n_for_lam, body_th_under_F, precondition=F)
+    print("λ with precondition F ::", lam_with_prec)
+    # APP without prec: rejected.
+    try:
+        APP(lam_with_prec, zero_th)
+    except HolError as e:
+        print("APP no-prec       ::", str(e).splitlines()[0])
+    # APP with the wrong proof: rejected.
+    try:
+        APP(lam_with_prec, zero_th, prec=REFL(zero_th))
+    except HolError as e:
+        print("APP wrong-prec    ::", str(e).splitlines()[0])
+    # APP with the right proof: succeeds, absorbs nothing extra (the
+    # axiom add_0_0_eq_0 has empty asl).
+    app_with_prec = APP(lam_with_prec, zero_th, prec=add_0_0_eq_0)
+    print("APP with prec     ::", app_with_prec)
+
+    # BETA on a preconditioned redex is rejected (no machinery to
+    # discharge F).
+    try:
+        BETA(typing_thm([F], Comb(lam_with_prec._tm, n_for_lam), nat_ty))
+    except HolError as e:
+        print("BETA refuses prec ::", str(e).splitlines()[0])
+
+    # ----------------------------------------------------------------
+    # Item 14b.1: constants with declaration-time preconditions.
+    #
+    # Declare a constant `gated : nat` whose use is gated on F. Without
+    # the proof, CONST refuses; with it, CONST emits a typing_thm that
+    # absorbs the proof's asl (here empty, since add_0_0_eq_0 is an axiom).
+    # ----------------------------------------------------------------
+    print()
+    new_constant("gated", nat_ty, preconds=(F,))
+    try:
+        CONST("gated")
+    except HolError as e:
+        print("CONST no-prec     ::", str(e).splitlines()[0])
+    gated_th = CONST("gated", prec_proofs=(add_0_0_eq_0,))
+    print("CONST with prec   ::", gated_th)
+
+    # The constant's asl tracks the proof's. If we use an assumed
+    # version of F (via ASSUME), the asl picks it up.
+    F_assumed = ASSUME(typing_thm([], F, bool_ty))
+    gated_under_F = CONST("gated", prec_proofs=(F_assumed,))
+    print("CONST under ▷F    ::", gated_under_F)
+
+    # ----------------------------------------------------------------
+    # Item 14b.2: type families with `▷F` in their Φ-context.
+    #
+    # Declare `pos_vec : (n:nat | n = n) -> tp` -- the obligation
+    # `n = n` is trivially provable by REFL, but the kernel still
+    # demands the proof at every mk_type call site.
+    # ----------------------------------------------------------------
+    print()
+    n_ctx = Var("n", nat_ty)
+    n_self_eq = safe_mk_eq(nat_ty, n_ctx, n_ctx)
+    new_type(
+        "pos_vec",
+        context=(n_ctx, Assume(n_self_eq)),
+        witness=("pos_nil", Tyapp("pos_vec", (), (Const("0", nat_ty),))),
+    )
+
+    # mk_type without the Assume proof is rejected.
+    try:
+        mk_type("pos_vec", [zero_th])
+    except HolError as e:
+        print("pos_vec missing   ::", str(e).splitlines()[0])
+
+    # With the proof: pos_vec(0) is well-formed.
+    proof_0_eq_0 = REFL(zero_th)  # |- 0 = 0 at nat
+    pos_vec_0 = mk_type("pos_vec", [zero_th, proof_0_eq_0])
+    print("pos_vec(0)        ::", _pp_ty(pos_vec_0))
+
+    # Wrong proof (a different equation) is rejected.
+    one_one_eq = REFL(one_th)  # |- (S 0) = (S 0)
+    try:
+        mk_type("pos_vec", [zero_th, one_one_eq])
+    except HolError as e:
+        print("pos_vec wrong     ::", str(e).splitlines()[0])
+
+    # TY_CONG_BASE on pos_vec where n varies: the Assume formula
+    # `n = n` substitutes differently on the LHS (where n := add 0 0)
+    # vs the RHS (where n := 0), and the kernel correctly refuses --
+    # this case requires a per-side discharge that the rule doesn't
+    # support yet.
+    try:
+        TY_CONG_BASE("pos_vec", [add_0_0_eq_0, REFL(add00_th)])
+    except HolError as e:
+        print("pos_vec cong (varying n) ::", str(e).splitlines()[0])
+
+    # Now declare a second family with an *n-independent* Assume
+    # obligation. Then LHS and RHS substitutions coincide and
+    # TY_CONG_BASE proceeds normally.
+    pos_vec2_witness = Tyapp("pos_vec2", (), (Const("0", nat_ty),))
+    new_type(
+        "pos_vec2",
+        context=(Var("n", nat_ty), Assume(F)),  # F = (add 0 0 = 0)
+        witness=("pos_nil2", pos_vec2_witness),
+    )
+    # mk_type at pos_vec2(0) discharges F via add_0_0_eq_0.
+    pv2_zero = mk_type("pos_vec2", [zero_th, add_0_0_eq_0])
+    print("pos_vec2(0)              ::", _pp_ty(pv2_zero))
+    # Congruence: pos_vec2(add 0 0) == pos_vec2(0), with the same
+    # n-free Assume discharge on both sides.
+    pos_vec2_cong = TY_CONG_BASE(
+        "pos_vec2", [add_0_0_eq_0, add_0_0_eq_0]
+    )
+    print("pos_vec2 bridge          ::", pos_vec2_cong)
 
