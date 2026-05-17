@@ -105,6 +105,11 @@ class Var:
 class Const:
     name: str
     ty: hol_type
+    term_args: tuple = ()  # chosen σ-values for Var entries in the declared Φ
+
+    def __post_init__(self):
+        if not isinstance(self.term_args, tuple):
+            object.__setattr__(self, "term_args", tuple(self.term_args))
 
 
 @dataclass(frozen=True, slots=True)
@@ -288,18 +293,27 @@ def new_type(
         )
     # All checks passed -- commit atomically.
     the_type_constants.insert(0, (name, tuple(context)))
-    the_term_constants.insert(0, (witness_name, witness_ty, ()))
+    witness_phi = tuple(Tyvar(tv.name) for tv in tyvars(witness_ty))
+    the_term_constants.insert(0, (witness_name, witness_phi, witness_ty))
 
 
 bool_ty: hol_type = Tyapp("bool", (), ())
 aty: hol_type = Tyvar("A")
 
-# Each entry is (name, ty, preconds) where preconds is a tuple of bool
-# term schemas that must be discharged at every use site. Preconditions
-# may reference the constant's Tyvars (substituted via `tyin`).
+# Each entry is (name, phi, ty) where:
+#   * phi  is a Φ-telescope (tuple of Tyvar | Var | Assume binders) that
+#          stages the constant's parameters: rank-1 polymorphism (Tyvar),
+#          dependent term parameters (Var), and declaration-time
+#          preconditions (Assume).
+#   * ty   is the body type, well-formed under phi. Free Tyvars of ty
+#          must be bound by Tyvar entries in phi.
 the_term_constants: list = [
-    ("=", Pi(Var("_", aty), Pi(Var("_", aty), bool_ty)), ()),
-    ("==>", Pi(Var("_", bool_ty), Pi(Var("_", bool_ty), bool_ty)), ()),
+    ("=",
+     (Tyvar("A"),),
+     Pi(Var("_", aty), Pi(Var("_", aty), bool_ty))),
+    ("==>",
+     (),
+     Pi(Var("_", bool_ty), Pi(Var("_", bool_ty), bool_ty))),
 ]
 
 
@@ -307,28 +321,47 @@ def constants() -> list:
     return list(the_term_constants)
 
 
+def get_const_phi(s: str) -> tuple:
+    """Return the declared Φ-telescope of a term constant."""
+    for name, phi, _ in the_term_constants:
+        if name == s:
+            return phi
+    raise KeyError(s)
+
+
 def get_const_type(s: str) -> hol_type:
-    for name, ty, _ in the_term_constants:
+    """Return the constant's declared body type (well-formed under Φ)."""
+    for name, _, ty in the_term_constants:
         if name == s:
             return ty
     raise KeyError(s)
 
 
-def get_const_preconds(s: str) -> tuple:
-    for name, _, preconds in the_term_constants:
-        if name == s:
-            return preconds
-    raise KeyError(s)
+def new_constant(name: str, ty: hol_type,
+                 phi: tuple | None = None) -> None:
+    """Declare a staged constant `name(Φ) : ty`.
 
+    Φ is a telescope of binders that may interleave:
+      * Tyvar(α)   -- rank-1 polymorphism
+      * Var(x, A)  -- dependent term parameter
+      * Assume(F)  -- declaration-time precondition
 
-def new_constant(name: str, ty: hol_type, preconds: tuple = ()) -> None:
-    """Declare a constant `name : ty` with optional `preconds`, a tuple
-    of bool term schemas that the user must discharge at every use site
-    (see CONST). Preconditions may reference free Tyvars in `ty`, which
-    are substituted by `tyin` at use time."""
+    `ty` may reference any Tyvar/Var bound in Φ; Assume entries are pure
+    obligations that don't bind a name in scope.
+
+    When `phi` is None, Φ defaults to the free Tyvars of `ty` (in
+    first-appearance order) as Tyvar entries. Pass `phi` explicitly to
+    add Var/Assume entries or to control the order of the Tyvar slots."""
     if any(n == name for n, _, _ in the_term_constants):
-        raise HolError(f"new_constant: constant {name} has already been declared")
-    the_term_constants.insert(0, (name, ty, tuple(preconds)))
+        raise HolError(
+            f"new_constant: constant {name} has already been declared"
+        )
+    if phi is None:
+        phi = tuple(Tyvar(tv.name) for tv in tyvars(ty))
+    else:
+        _check_phi(phi, f"new_constant({name})")
+        phi = tuple(phi)
+    the_term_constants.insert(0, (name, phi, ty))
 
 
 def mk_arrow(a: hol_type, b: hol_type) -> hol_type:
@@ -352,70 +385,138 @@ def _check_assume_proof(arg, formula: term, theta_ty: list,
     return needed
 
 
-def mk_type(tyop: str, args: list) -> hol_type:
-    """Build a Tyapp from a type-constant name and an ordered list of
-    arguments matching the declared context shape.
+# ---------------------------------------------------------------------------
+# Φ-telescopes and Φ-substitutions
+#
+# A Φ-telescope is an ordered tuple of binders:
+#
+#   Phi      = tuple[Tyvar | Var | Assume, ...]
+#
+#   * Tyvar(α) binds a type variable α in scope for later entries.
+#   * Var(x, A) binds a term variable x:A; A may reference earlier
+#     Tyvar/Var binders.
+#   * Assume(F) is a pure obligation (boolean term schema) that must be
+#     discharged at every use site; F may reference earlier binders.
+#
+# A Φ-substitution σ provides one replacement per Φ entry, in order:
+#
+#   PhiSubst = tuple[hol_type | typing_thm | thm, ...]
+#
+#   * Tyvar entry  -> hol_type
+#   * Var entry    -> typing_thm certifying the chosen term's type
+#   * Assume entry -> thm discharging the obligation
+#
+# Both telescopes and substitutions are interpreted sequentially:
+# each entry/replacement is checked under the substitution accumulated
+# from earlier ones.  `_apply_phi_subst` is the shared validator that
+# `mk_type`, the staged `CONST`, and (per-side) `TY_CONG_BASE` use to
+# walk the two structures in parallel.
+# ---------------------------------------------------------------------------
 
-    Each `args[i]` corresponds to context entry `i`:
-      * Tyvar binder -> args[i] is a `hol_type`.
-      * Var binder   -> args[i] is a `typing_thm` whose `_ty` matches
-        the binder's declared type with all earlier args substituted in.
-        The typing must be unconditional (empty asl).
 
-    The result Tyapp stores Tyvar-slot choices in `type_args` (in
-    declaration order) and Var-slot terms in `term_args` (in declaration
-    order); the declared context recovers the original interleaving."""
-    try:
-        ctx = get_type_kind(tyop)
-    except KeyError:
-        raise HolError(f"mk_type: type {tyop} has not been defined")
-    if len(ctx) != len(args):
+Phi = tuple                 # tuple[Tyvar | Var | Assume, ...]
+PhiSubst = tuple            # tuple[hol_type | typing_thm | thm, ...]
+
+
+def _check_phi(phi, ctx: str) -> None:
+    """Light syntactic check: every entry is a Tyvar, Var, or Assume.
+    Well-formedness of binder annotations under earlier entries is the
+    caller's responsibility (honest-caller perimeter, mirroring how
+    `new_type` accepts raw `Var(x, A)` without re-checking A)."""
+    for entry in phi:
+        if not isinstance(entry, (Tyvar, Var, Assume)):
+            raise HolError(
+                f"{ctx}: context entries must be Tyvar, Var, or Assume "
+                f"(got {entry!r})"
+            )
+
+
+def _apply_phi_subst(phi, sigma, ctx: str):
+    """Walk Φ and σ in parallel, validating each replacement against
+    the corresponding binder species (under the running substitution
+    from earlier entries). Returns:
+
+      theta_ty:  list of (chosen_hol_type, Tyvar) -- type substitution
+      theta_tm:  list of (chosen_term, Var)        -- term substitution
+      term_args: list of chosen terms for Var entries (in declaration order)
+      asl_extra: list of assumptions absorbed from Var-typings and
+                 Assume-proofs (alpha-ordered union)
+
+    The caller decides how to consume the result (e.g. mk_type rejects
+    any non-empty asl_extra; CONST absorbs it into the result's asl)."""
+    if len(phi) != len(sigma):
         raise HolError(
-            f"mk_type: wrong number of arguments to {tyop} "
-            f"(expected {len(ctx)}, got {len(args)})"
+            f"{ctx}: wrong number of arguments "
+            f"(expected {len(phi)}, got {len(sigma)})"
         )
-    theta_ty: list = []   # (chosen_hol_type, Tyvar binder)
-    theta_tm: list = []   # (chosen_term, Var binder)
-    type_args: list = []
+    theta_ty: list = []
+    theta_tm: list = []
     term_args: list = []
-    for binder, arg in zip(ctx, args):
+    asl_extra: list = []
+    for binder, arg in zip(phi, sigma):
         if isinstance(binder, Tyvar):
             if not isinstance(arg, (Tyvar, Tyapp, Pi)):
                 raise HolError(
-                    f"mk_type: argument for Tyvar binder {binder.name} "
+                    f"{ctx}: argument for Tyvar binder {binder.name} "
                     f"must be a hol_type"
                 )
-            type_args.append(arg)
             theta_ty.append((arg, binder))
         elif isinstance(binder, Var):
             if not isinstance(arg, typing_thm):
                 raise HolError(
-                    f"mk_type: argument for Var binder {binder.name} "
+                    f"{ctx}: argument for Var binder {binder.name} "
                     f"must be a typing_thm"
                 )
-            if arg._asl:
-                raise HolError(
-                    "mk_type: term-argument typing must be unconditional"
-                )
-            expected = type_subst(theta_ty, subst_in_type(theta_tm, binder.ty))
+            expected = type_subst(
+                theta_ty, subst_in_type(theta_tm, binder.ty)
+            )
             if not type_eq(expected, arg._ty):
                 raise HolError(
-                    f"mk_type: term argument has wrong type "
-                    f"(expected {_pp_ty(expected)}, got {_pp_ty(arg._ty)})"
+                    f"{ctx}: term argument for {binder.name} has wrong "
+                    f"type (expected {_pp_ty(expected)}, "
+                    f"got {_pp_ty(arg._ty)})"
                 )
-            term_args.append(arg._tm)
             theta_tm.append((arg._tm, binder))
+            term_args.append(arg._tm)
+            asl_extra = term_union(asl_extra, arg._asl)
         elif isinstance(binder, Assume):
             _check_assume_proof(
-                arg, binder.formula, theta_ty, theta_tm, "mk_type"
+                arg, binder.formula, theta_ty, theta_tm, ctx
             )
-            if arg._asl:
-                raise HolError(
-                    "mk_type: Assume proof must be unconditional (empty asl); "
-                    "mk_type returns a hol_type with no asl tracking"
-                )
+            asl_extra = term_union(asl_extra, arg._asl)
         else:
-            raise HolError("mk_type: ill-formed context binder")
+            raise HolError(f"{ctx}: ill-formed context binder")
+    return theta_ty, theta_tm, term_args, asl_extra
+
+
+def mk_type(tyop: str, args: list) -> hol_type:
+    """Build a Tyapp from a type-constant name and an ordered list of
+    arguments matching the declared Φ-telescope shape.
+
+    Each `args[i]` corresponds to Φ entry `i`:
+      * Tyvar binder  -> args[i] is a `hol_type`.
+      * Var binder    -> args[i] is a `typing_thm` whose `_ty` matches
+        the binder's declared type with all earlier args substituted in;
+        must be unconditional (empty asl).
+      * Assume binder -> args[i] is a `thm` discharging the formula
+        substituted with all earlier args; must be unconditional.
+
+    The result Tyapp stores Tyvar-slot choices in `type_args` (in
+    declaration order) and Var-slot terms in `term_args` (in declaration
+    order); the declared Φ recovers the original interleaving."""
+    try:
+        phi = get_type_kind(tyop)
+    except KeyError:
+        raise HolError(f"mk_type: type {tyop} has not been defined")
+    theta_ty, theta_tm, term_args, asl_extra = _apply_phi_subst(
+        phi, tuple(args), f"mk_type({tyop})"
+    )
+    if asl_extra:
+        raise HolError(
+            "mk_type: Φ arguments must be unconditional (empty asl); "
+            "mk_type returns a hol_type with no asl tracking"
+        )
+    type_args = [t for t, _ in theta_ty]
     return Tyapp(tyop, tuple(type_args), tuple(term_args))
 
 
@@ -437,7 +538,10 @@ def frees(tm: term) -> list:
     if isinstance(tm, Var):
         return [tm]
     if isinstance(tm, Const):
-        return []
+        seen: list = []
+        for a in tm.term_args:
+            _uniq_extend(seen, frees(a))
+        return seen
     if isinstance(tm, Abs):
         seen = [v for v in frees(tm.body) if v != tm.bvar]
         if tm.precondition is not None:
@@ -452,7 +556,7 @@ def freesin(acc: list, tm: term) -> bool:
     if isinstance(tm, Var):
         return tm in acc
     if isinstance(tm, Const):
-        return True
+        return all(freesin(acc, a) for a in tm.term_args)
     if isinstance(tm, Abs):
         body_ok = freesin([tm.bvar, *acc], tm.body)
         if not body_ok:
@@ -474,6 +578,8 @@ def vfree_in(v: term, tm: term) -> bool:
         return tm.precondition is not None and vfree_in(v, tm.precondition)
     if isinstance(tm, Comb):
         return vfree_in(v, tm.fun) or vfree_in(v, tm.arg)
+    if isinstance(tm, Const):
+        return any(vfree_in(v, a) for a in tm.term_args)
     return tm == v
 
 
@@ -496,8 +602,13 @@ def tyvars(ty: hol_type) -> list:
 
 
 def type_vars_in_term(tm: term) -> list:
-    if isinstance(tm, Var) or isinstance(tm, Const):
+    if isinstance(tm, Var):
         return tyvars(tm.ty)
+    if isinstance(tm, Const):
+        seen = list(tyvars(tm.ty))
+        for a in tm.term_args:
+            _uniq_extend(seen, type_vars_in_term(a))
+        return seen
     if isinstance(tm, Comb):
         return _uniq_extend(
             list(type_vars_in_term(tm.fun)),
@@ -572,7 +683,13 @@ def _tm_alpha(env: list, a: term, b: term) -> bool:
                 return False
         return a == b
     if isinstance(a, Const) and isinstance(b, Const):
-        return a.name == b.name and _ty_eq(env, a.ty, b.ty)
+        if a.name != b.name or not _ty_eq(env, a.ty, b.ty):
+            return False
+        if len(a.term_args) != len(b.term_args):
+            return False
+        return all(
+            _tm_alpha(env, x, y) for x, y in zip(a.term_args, b.term_args)
+        )
     if isinstance(a, Comb) and isinstance(b, Comb):
         return _tm_alpha(env, a.fun, b.fun) and _tm_alpha(env, a.arg, b.arg)
     if isinstance(a, Abs) and isinstance(b, Abs):
@@ -714,7 +831,12 @@ def _inst_in_term(env: list, tyin: list, tm: term) -> term:
         return tm2
     if isinstance(tm, Const):
         ty2 = type_subst(tyin, tm.ty)
-        return tm if ty2 is tm.ty else Const(tm.name, ty2)
+        new_args = tuple(_inst_in_term(env, tyin, a) for a in tm.term_args)
+        if ty2 is tm.ty and all(
+            n is o for n, o in zip(new_args, tm.term_args)
+        ):
+            return tm
+        return Const(tm.name, ty2, new_args)
     if isinstance(tm, Comb):
         f2 = _inst_in_term(env, tyin, tm.fun)
         a2 = _inst_in_term(env, tyin, tm.arg)
@@ -765,7 +887,12 @@ def _vsubst(ilist: list, tm: term) -> term:
         return tm if new_ty is tm.ty else Var(tm.name, new_ty)
     if isinstance(tm, Const):
         new_ty = subst_in_type(ilist, tm.ty)
-        return tm if new_ty is tm.ty else Const(tm.name, new_ty)
+        new_args = tuple(_vsubst(ilist, a) for a in tm.term_args)
+        if new_ty is tm.ty and all(
+            n is o for n, o in zip(new_args, tm.term_args)
+        ):
+            return tm
+        return Const(tm.name, new_ty, new_args)
     if isinstance(tm, Comb):
         return Comb(_vsubst(ilist, tm.fun), _vsubst(ilist, tm.arg))
     if isinstance(tm, Abs):
@@ -818,7 +945,12 @@ def _pp_tm(tm, _max=220):
 
 
 def _pp_tm_raw(tm):
-    if isinstance(tm, (Var, Const)):
+    if isinstance(tm, Var):
+        return tm.name
+    if isinstance(tm, Const):
+        if tm.term_args:
+            inner = ", ".join(_pp_tm_raw(a) for a in tm.term_args)
+            return f"{tm.name}({inner})"
         return tm.name
     if isinstance(tm, Abs):
         prec = (
@@ -969,32 +1101,34 @@ def VAR(v: Var) -> typing_thm:
     return typing_thm([], v, v.ty)
 
 
-def CONST(name: str, tyin: list = (),
-          prec_proofs: tuple = ()) -> typing_thm:
-    """const-intro: |- c : tyin(A) where c(▷F_1, ..., ▷F_k) : A in the
-    theory. `prec_proofs` is a tuple of `thm`s, one per declared
-    precondition, in declaration order. Each proof's conclusion must
-    alpha-match `F_i[tyin]`; their asls are absorbed into the result."""
-    decl_ty = get_const_type(name)
-    preconds = get_const_preconds(name)
-    inst_ty = type_subst(tyin, decl_ty)
-    if len(prec_proofs) != len(preconds):
-        raise HolError(
-            f"CONST: constant {name} requires {len(preconds)} precondition "
-            f"proof(s), got {len(prec_proofs)}"
-        )
-    asl: list = []
-    for F, proof in zip(preconds, prec_proofs):
-        if not isinstance(proof, thm):
-            raise HolError("CONST: each prec_proofs entry must be a thm")
-        needed = _inst_in_term([], tyin, F)
-        if not _tm_alpha([], proof._concl, needed):
-            raise HolError(
-                f"CONST: precondition proof concludes {_pp_tm(proof._concl)} "
-                f"but required (after tyin) is {_pp_tm(needed)}"
-            )
-        asl = term_union(asl, proof._asl)
-    return typing_thm(asl, Const(name, inst_ty), inst_ty)
+def CONST(name: str, sigma: tuple = ()) -> typing_thm:
+    """const-intro (staged):
+            c(Φ) : A   in the theory     σ matching Φ
+            ------------------------------------------
+                       |- c(σ) : A[σ]
+
+    σ is a Φ-substitution matching the declared telescope in order:
+      * Tyvar entry  -> hol_type
+      * Var entry    -> typing_thm certifying the term's type at the
+                        Φ-prefix-substituted binder type
+      * Assume entry -> thm discharging the formula at the same prefix
+
+    Each Var/Assume σ-entry's `_asl` is absorbed into the result; the
+    chosen Var-arg terms appear in the resulting `Const.term_args`."""
+    try:
+        phi = get_const_phi(name)
+        decl_ty = get_const_type(name)
+    except KeyError:
+        raise HolError(f"CONST: constant {name} is not declared")
+    theta_ty, theta_tm, term_args, asl_extra = _apply_phi_subst(
+        phi, tuple(sigma), f"CONST({name})"
+    )
+    inst_ty = type_subst(theta_ty, subst_in_type(theta_tm, decl_ty))
+    return typing_thm(
+        asl_extra,
+        Const(name, inst_ty, tuple(term_args)),
+        inst_ty,
+    )
 
 
 def APP(f_th: typing_thm, a_th: typing_thm,
@@ -1563,22 +1697,68 @@ def definitions() -> list:
     return list(the_definitions)
 
 
-def new_basic_definition(lhs: Var, rhs_th: typing_thm) -> thm:
-    if rhs_th._asl:
-        raise HolError("new_basic_definition: rhs must be unconditional")
-    if not freesin([], rhs_th._tm):
-        fv = [v.name for v in frees(rhs_th._tm)]
-        raise HolError("new_basic_definition: rhs not closed: " + ", ".join(fv))
+def new_basic_definition(lhs: Var, rhs_th: typing_thm,
+                         phi: tuple | None = None) -> thm:
+    """Define a new staged constant `lhs(Φ) := rhs_th`.
+
+    Φ is a telescope of binders (Tyvar | Var | Assume). When `phi` is
+    None, Φ defaults to the free Tyvars of `lhs.ty` (in first-appearance
+    order); pass `phi` explicitly to add Var/Assume entries or to order
+    Tyvar slots.
+
+    The rhs's free Vars must all be bound by Var entries in Φ, and its
+    `_asl` entries must alpha-match Assume formulas in Φ. Type-variables
+    of rhs must be reflected in Φ or in `lhs.ty`.
+
+    The emitted defining equation is `[asl] |- lhs(σ_Φ) = rhs_th._tm`
+    where σ_Φ applies Φ to its own binders -- i.e. the constant is
+    introduced at its declaration-site Φ-application."""
     if not type_eq(lhs.ty, rhs_th._ty):
         raise HolError("new_basic_definition: declared type does not match rhs")
-    allowed = tyvars(lhs.ty)
-    if not all(tv in allowed for tv in type_vars_in_term(rhs_th._tm)):
-        raise HolError(
-            "new_basic_definition: type variables not reflected in constant"
-        )
-    new_constant(lhs.name, lhs.ty)
-    c = Const(lhs.name, lhs.ty)
-    dth = thm([], safe_mk_eq(rhs_th._ty, c, rhs_th._tm))
+    if phi is None:
+        phi = tuple(Tyvar(tv.name) for tv in tyvars(lhs.ty))
+    else:
+        _check_phi(phi, f"new_basic_definition({lhs.name})")
+        phi = tuple(phi)
+    bound_vars = [b for b in phi if isinstance(b, Var)]
+    expected_asl: list = []
+    for b in phi:
+        if isinstance(b, Assume):
+            expected_asl = term_union(expected_asl, [b.formula])
+    for a in rhs_th._asl:
+        if not any(_tm_alpha([], a, f) for f in expected_asl):
+            raise HolError(
+                "new_basic_definition: rhs asl entry "
+                f"{_pp_tm(a)} is not declared by any Assume entry in Φ"
+            )
+    for fv in frees(rhs_th._tm):
+        if fv not in bound_vars:
+            raise HolError(
+                f"new_basic_definition: rhs free var {fv.name} is not "
+                f"bound by any Var entry in Φ"
+            )
+    allowed_tvs = list(tyvars(lhs.ty))
+    for b in phi:
+        if isinstance(b, Tyvar) and b not in allowed_tvs:
+            allowed_tvs.append(b)
+    for tv in type_vars_in_term(rhs_th._tm):
+        if tv not in allowed_tvs:
+            raise HolError(
+                f"new_basic_definition: rhs type-var {tv.name} is not "
+                f"reflected in Φ or in lhs type"
+            )
+    new_constant(lhs.name, lhs.ty, phi=phi)
+    # Apply Φ to itself: σ replaces each binder with itself.
+    self_sigma: list = []
+    for b in phi:
+        if isinstance(b, Tyvar):
+            self_sigma.append(b)
+        elif isinstance(b, Var):
+            self_sigma.append(typing_thm([], b, b.ty))
+        elif isinstance(b, Assume):
+            self_sigma.append(thm([b.formula], b.formula))
+    c_th = CONST(lhs.name, sigma=tuple(self_sigma))
+    dth = thm(c_th._asl, safe_mk_eq(rhs_th._ty, c_th._tm, rhs_th._tm))
     the_definitions.append(dth)
     return dth
 
@@ -1653,7 +1833,7 @@ if __name__ == "__main__":
 
     print()
     add_0_n = APP(APP(add_th, zero_th), VAR(n_var))
-    eq_form = APP(APP(CONST("=", [(nat_ty, aty)]), add_0_n), VAR(n_var))
+    eq_form = APP(APP(CONST("=", (nat_ty,)), add_0_n), VAR(n_var))
     print("axiom term ::", _pp_tm(eq_form._tm), ":", _pp_ty(eq_form._ty))
     add_zero = new_axiom(eq_form)  # |- add 0 n = n
     print("axiom      ::", add_zero)
@@ -1783,7 +1963,7 @@ if __name__ == "__main__":
     assumed_eq = ASSUME(eq_form)  # not quite -- eq_form is the universally
                                   # quantified form. Let's specialise:
     # Build an assumption form with n bound to 0:
-    n0_eq = APP(APP(CONST("=", [(nat_ty, aty)]),
+    n0_eq = APP(APP(CONST("=", (nat_ty,)),
                     APP(APP(add_th, zero_th), zero_th)),
                 zero_th)
     print("assumption term ::", _pp_tm(n0_eq._tm))
@@ -1862,7 +2042,7 @@ if __name__ == "__main__":
     # ----------------------------------------------------------------
     print()
     # Antecedent: add 0 0 = 0  (as a bool typing_thm)
-    ant_typing = APP(APP(CONST("=", [(nat_ty, aty)]), add00_th), zero_th)
+    ant_typing = APP(APP(CONST("=", (nat_ty,)), add00_th), zero_th)
     print("antecedent F ::", _pp_tm(ant_typing._tm), ":", _pp_ty(ant_typing._ty))
 
     # Consequent G typed under ▷F: build nil =vec(0) (nil viewed via bridge).
@@ -1876,7 +2056,7 @@ if __name__ == "__main__":
 
     # Consequent term: nil =vec(add 0 0) nil  (well-typed under ▷F).
     cons_eq_term = APP(
-        APP(CONST("=", [(nil_under_F._ty, aty)]), nil_under_F),
+        APP(CONST("=", (nil_under_F._ty,)), nil_under_F),
         nil_under_F,
     )
     print("consequent G typing ::", cons_eq_term)
@@ -2051,18 +2231,18 @@ if __name__ == "__main__":
     # absorbs the proof's asl (here empty, since add_0_0_eq_0 is an axiom).
     # ----------------------------------------------------------------
     print()
-    new_constant("gated", nat_ty, preconds=(F,))
+    new_constant("gated", nat_ty, phi=(Assume(F),))
     try:
         CONST("gated")
     except HolError as e:
         print("CONST no-prec     ::", str(e).splitlines()[0])
-    gated_th = CONST("gated", prec_proofs=(add_0_0_eq_0,))
+    gated_th = CONST("gated", (add_0_0_eq_0,))
     print("CONST with prec   ::", gated_th)
 
     # The constant's asl tracks the proof's. If we use an assumed
     # version of F (via ASSUME), the asl picks it up.
     F_assumed = ASSUME(typing_thm([], F, bool_ty))
-    gated_under_F = CONST("gated", prec_proofs=(F_assumed,))
+    gated_under_F = CONST("gated", (F_assumed,))
     print("CONST under ▷F    ::", gated_under_F)
 
     # ----------------------------------------------------------------
@@ -2127,4 +2307,50 @@ if __name__ == "__main__":
         "pos_vec2", [add_0_0_eq_0, add_0_0_eq_0]
     )
     print("pos_vec2 bridge          ::", pos_vec2_cong)
+
+    # ----------------------------------------------------------------
+    # Staged term-side declarations: a constant whose Φ includes a Var
+    # entry. `inc(n:nat) : nat` carries its term parameter in the Φ
+    # rather than being curried via Pi(n:nat). nat. Calling sites use
+    # CONST(name, sigma=(...)) to fill in the parameter in one step.
+    # ----------------------------------------------------------------
+    print()
+    n_inc = Var("n", nat_ty)
+    new_constant("inc", nat_ty, phi=(n_inc,))
+    inc_at_0 = CONST("inc", sigma=(zero_th,))
+    print("inc(0) (staged)   ::", inc_at_0)
+    inc_at_n = CONST("inc", sigma=(VAR(n_inc),))
+    print("inc(n) (free var) ::", inc_at_n)
+
+    # Differ-by-Var-arg: two `inc` constants with different σ-Var-arg
+    # are NOT alpha-equal, even though they share name + instantiated ty.
+    print("inc(0) tm == inc(n) tm ::",
+          _tm_alpha([], inc_at_0._tm, inc_at_n._tm))
+
+    # Φ-staged definition. `dbl(n:nat) := add n n` -- the body mentions
+    # the Var-bound n freely; the emitted defining equation is tagged at
+    # the Var-binder Φ-application.
+    print()
+    dbl_body = APP(APP(add_th, VAR(n_inc)), VAR(n_inc))  # |- add n n : nat
+    dbl_def = new_basic_definition(
+        Var("dbl", nat_ty), dbl_body, phi=(n_inc,)
+    )
+    print("dbl(n) := add n n ::", dbl_def)
+
+    # Use the staged constant: CONST("dbl", sigma=(zero_th,)) builds
+    # `dbl(0) : nat` with term_args=(0,).
+    dbl_at_0 = CONST("dbl", sigma=(zero_th,))
+    print("dbl(0) (staged)   ::", dbl_at_0)
+
+    # Φ with an Assume entry on a term constant: `gated_inc(n:nat |
+    # add 0 0 = 0) : nat`. Discharging the Assume at use site flows
+    # through `sigma=(...)`.
+    print()
+    new_constant(
+        "gated_inc", nat_ty, phi=(n_inc, Assume(F))
+    )
+    gated_inc_at_0 = CONST(
+        "gated_inc", sigma=(zero_th, add_0_0_eq_0)
+    )
+    print("gated_inc(0)      ::", gated_inc_at_0)
 
