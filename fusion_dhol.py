@@ -138,6 +138,20 @@ class Assume:
     formula: term
 
 
+# A Φ-slot is a binder at one of the three DHOL judgment levels:
+#
+#   Tyvar(α)   -- binds at tp        (`Γ ⊢ α : tp`)
+#   Var(x, A)  -- binds at term      (`Γ ⊢ x : A`)
+#   Assume(F)  -- binds at validity  (`Γ ⊢ F`)
+#
+# The PhiSubst evidence for each slot is the corresponding J-witness:
+# hol_type for Tyvar (carrying the tp-level fact implicitly), typing_thm
+# for Var (the term-level witness), and thm for Assume (the validity
+# witness). This pointwise mapping is what makes `_apply_phi_subst`
+# and `_apply_phi_dual` J-agnostic walkers.
+Slot = Tyvar | Var | Assume
+
+
 # ---------------------------------------------------------------------------
 # Certificates
 # ---------------------------------------------------------------------------
@@ -200,25 +214,47 @@ class thm:
 class StagedThm:
     """(Φ) ▷ F  -- a thm parameterized over a Φ-telescope.
 
-    Φ is a telescope of Tyvar | Var | Assume binders, same vocabulary as
-    on `new_type` and `new_constant`. The underlying thm carries the
-    Assume formulas of Φ as its asl, and F as its conclusion.
+    Carries the prop-level J-tag explicitly: a `PropBody(F)` body
+    paired with a Φ-telescope of Tyvar | Var | Assume binders. The
+    asl-as-Assume-formulas view is reconstructed by `_phi_asl(phi)`
+    when the projected thm is needed (e.g. for printing).
 
     Use `interpret(staged, σ)` to instantiate to a concrete thm; σ
     matches Φ pointwise (hol_type for Tyvar, typing_thm for Var, thm
     for Assume), validated by the same `_apply_phi_subst` walker used
     by `mk_type` and `CONST`."""
 
-    __slots__ = ("_phi", "_thm")
+    __slots__ = ("_phi", "_body")
 
-    def __init__(self, phi, th):
+    def __init__(self, phi, body):
+        if not isinstance(body, PropBody):
+            raise HolError(
+                "StagedThm: body must be a PropBody (got "
+                f"{type(body).__name__})"
+            )
         self._phi = tuple(phi)
-        self._thm = th
+        self._body = body
+
+    @property
+    def thm(self) -> "thm":
+        """Projected validity view: `[Assume-formulas-of-Φ] ⊢ F`."""
+        return thm(_phi_asl(self._phi), self._body.formula)
 
     def __repr__(self):
+        projected = self.thm
         if not self._phi:
-            return repr(self._thm)
-        return f"({_pp_phi(self._phi)}) ▷ {self._thm!r}"
+            return repr(projected)
+        return f"({_pp_phi(self._phi)}) ▷ {projected!r}"
+
+
+def _phi_asl(phi) -> list:
+    """The Assume-formulas of Φ in declaration order -- the asl carried
+    by the projected `thm` view of a `StagedThm`."""
+    asl: list = []
+    for b in phi:
+        if isinstance(b, Assume):
+            asl = term_union(asl, [b.formula])
+    return asl
 
 
 def _pp_phi(phi) -> str:
@@ -236,31 +272,93 @@ def _pp_phi(phi) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Type constants (kinded) and term constants
+# Declarations and the Judgment ADT
 #
-# Each type symbol carries a *context* of binders -- an ordered telescope
-# of Tyvar | Var entries. A Tyvar entry binds a type variable in scope for
-# later entries; a Var entry binds a term variable whose type may reference
-# earlier Tyvar or Var binders. This unifies rank-1 polymorphism in type
-# declarations with dependent term parameters (cf. the 2026 paper's `a(Φ)`
-# declarations). The flat-arity case is recovered by an empty context;
-# rank-1 polymorphism alone by a context of Tyvars only; the older
-# dependent-parameter case by a context of Vars only.
+# DHOL has three judgment levels, each with its own body shape:
+#
+#   tp        Γ; Φ ⊢ name(Φ) : tp     -- TpBody()         (no body data)
+#   term      Γ; Φ ⊢ name(Φ) : ty     -- TmBody(ty)       (a hol_type)
+#   prop      Γ; Φ ▷ F                -- PropBody(F)      (a term : bool)
+#
+# `Judgment = TpBody | TmBody | PropBody` reifies the body tag of a
+# staged declaration. The two named-declaration species (tp and term)
+# live in the unified `the_decls` registry; the prop species is
+# carried by `StagedThm` (axioms are anonymous and live in
+# `the_axioms`, but their body shape is exactly the same Judgment
+# discriminator -- this is the J-level symmetry from the audit doc).
+#
+# A type symbol's body is just `TpBody()` -- inhabitation is the
+# responsibility of the associated witness Decl, a separate TmBody
+# entry registered atomically with the type by `new_type`.
+#
+# Each Decl's Φ is an ordered telescope of Slot binders (Tyvar / Var /
+# Assume); later entries may reference earlier ones. The flat-arity
+# case is recovered by an empty Φ; rank-1 polymorphism alone by a Φ
+# of Tyvars; the dependent-parameter case by a Φ of Vars.
 # ---------------------------------------------------------------------------
 
-the_type_constants: list = [("bool", ())]
+
+@dataclass(frozen=True, slots=True)
+class TpBody:
+    """tp-level body: `name(Φ) : tp`. Carries no body data of its own;
+    inhabitation is the responsibility of the associated witness Decl,
+    registered atomically by `new_type`."""
+
+
+@dataclass(frozen=True, slots=True)
+class TmBody:
+    """term-level body: `name(Φ) : ty`."""
+    ty: hol_type
+
+
+@dataclass(frozen=True, slots=True)
+class PropBody:
+    """prop-level body: validity body `F : bool`. The Φ-Assume binders
+    carry F's hypotheses implicitly -- the projection-as-thm view of
+    a staged prop reconstructs them via `_phi_asl(phi)`."""
+    formula: term
+
+
+Judgment = TpBody | TmBody | PropBody
+
+
+@dataclass(frozen=True, slots=True)
+class Decl:
+    """A staged declaration: `name(Φ)` with a body discriminator.
+
+    Φ is a tuple of Slot binders (Tyvar | Var | Assume), interpreted
+    sequentially; body discriminates the judgment level:
+      * TpBody    -- name(Φ) : tp
+      * TmBody    -- name(Φ) : ty
+      * PropBody  -- (Φ) ▷ F  (used internally by `StagedThm`; not
+                     registered by name in `the_decls`)
+    """
+    name: str
+    phi: tuple
+    body: Judgment
+
+
+# Insertion order = declaration order; newer entries shadow older ones
+# in iteration, mirroring HOL Light's "latest first" discipline (and
+# the previous insert(0, ...) lists). Lookup is direct via dict[name].
+the_decls: dict = {"bool": Decl("bool", (), TpBody())}
 
 
 def types() -> list:
-    return list(the_type_constants)
+    """Public view: `(name, phi)` tuples for type symbols, newest first."""
+    return [
+        (d.name, d.phi)
+        for d in reversed(the_decls.values())
+        if isinstance(d.body, TpBody)
+    ]
 
 
 def get_type_kind(s: str) -> tuple:
-    """Return the declared context (a tuple of Tyvar | Var binders)."""
-    for name, ctx in the_type_constants:
-        if name == s:
-            return ctx
-    raise KeyError(s)
+    """Return the declared Φ-telescope of a type symbol."""
+    d = the_decls.get(s)
+    if d is None or not isinstance(d.body, TpBody):
+        raise KeyError(s)
+    return d.phi
 
 
 def _head_tyop(ty: hol_type) -> str | None:
@@ -304,11 +402,11 @@ def new_type(
             f"Pass witness=(const_name, const_ty) where const_ty's head "
             f"(after Pi-stripping) is {name}."
         )
-    if any(n == name for n, _ in the_type_constants):
+    if name in the_decls:
         raise HolError(f"new_type: type {name} has already been declared")
     _check_phi(phi, f"new_type({name})")
     witness_name, witness_ty = witness
-    if any(n == witness_name for n, _, _ in the_term_constants):
+    if witness_name in the_decls:
         raise HolError(
             f"new_type: witness constant {witness_name} already declared"
         )
@@ -319,56 +417,65 @@ def new_type(
             f"(got {head})"
         )
     # All checks passed -- commit atomically.
-    the_type_constants.insert(0, (name, tuple(phi)))
+    the_decls[name] = Decl(name, tuple(phi), TpBody())
     witness_phi = tuple(Tyvar(tv.name) for tv in tyvars(witness_ty))
-    the_term_constants.insert(0, (witness_name, witness_phi, witness_ty))
+    the_decls[witness_name] = Decl(witness_name, witness_phi, TmBody(witness_ty))
 
 
 bool_ty: hol_type = Tyapp("bool", (), ())
 aty: hol_type = Tyvar("A")
 
-# Each entry is (name, phi, ty) where:
-#   * phi  is a Φ-telescope (tuple of Tyvar | Var | Assume binders) that
-#          stages the constant's parameters: rank-1 polymorphism (Tyvar),
-#          dependent term parameters (Var), and declaration-time
-#          preconditions (Assume).
-#   * ty   is the body type, well-formed under phi. Free Tyvars of ty
-#          must be bound by Tyvar entries in phi.
-the_term_constants: list = [
-    ("=",
-     (Tyvar("A"),),
-     Pi(Var("_", aty), Pi(Var("_", aty), bool_ty))),
-    ("==>",
-     (),
-     Pi(Var("_", bool_ty), Pi(Var("_", bool_ty), bool_ty))),
-]
+
+def _seed_constant(name: str, phi: tuple, ty: hol_type) -> None:
+    the_decls[name] = Decl(name, phi, TmBody(ty))
+
+
+# Seed the registry with the two kernel-primitive term constants:
+#   = : (A:tp) → Pi(_:A). Pi(_:A). bool
+#   ==> : Pi(_:bool). Pi(_:bool). bool
+_seed_constant(
+    "=",
+    (Tyvar("A"),),
+    Pi(Var("_", aty), Pi(Var("_", aty), bool_ty)),
+)
+_seed_constant(
+    "==>",
+    (),
+    Pi(Var("_", bool_ty), Pi(Var("_", bool_ty), bool_ty)),
+)
 
 
 def constants() -> list:
-    return list(the_term_constants)
+    """Public view: `(name, phi, ty)` tuples for term constants,
+    newest first."""
+    return [
+        (d.name, d.phi, d.body.ty)
+        for d in reversed(the_decls.values())
+        if isinstance(d.body, TmBody)
+    ]
 
 
 def get_const_phi(s: str) -> tuple:
     """Return the declared Φ-telescope of a term constant."""
-    for name, phi, _ in the_term_constants:
-        if name == s:
-            return phi
-    raise KeyError(s)
+    d = the_decls.get(s)
+    if d is None or not isinstance(d.body, TmBody):
+        raise KeyError(s)
+    return d.phi
 
 
 def get_const_type(s: str) -> hol_type:
     """Return the constant's declared body type (well-formed under Φ)."""
-    for name, _, ty in the_term_constants:
-        if name == s:
-            return ty
-    raise KeyError(s)
+    d = the_decls.get(s)
+    if d is None or not isinstance(d.body, TmBody):
+        raise KeyError(s)
+    return d.body.ty
 
 
 def new_constant(name: str, ty: hol_type,
                  phi: tuple | None = None) -> None:
     """Declare a staged constant `name(Φ) : ty`.
 
-    Φ is a telescope of binders that may interleave:
+    Φ is a telescope of Slot binders that may interleave:
       * Tyvar(α)   -- rank-1 polymorphism
       * Var(x, A)  -- dependent term parameter
       * Assume(F)  -- declaration-time precondition
@@ -379,16 +486,16 @@ def new_constant(name: str, ty: hol_type,
     When `phi` is None, Φ defaults to the free Tyvars of `ty` (in
     first-appearance order) as Tyvar entries. Pass `phi` explicitly to
     add Var/Assume entries or to control the order of the Tyvar slots."""
-    if any(n == name for n, _, _ in the_term_constants):
+    if name in the_decls:
         raise HolError(
-            f"new_constant: constant {name} has already been declared"
+            f"new_constant: name {name} has already been declared"
         )
     if phi is None:
         phi = tuple(Tyvar(tv.name) for tv in tyvars(ty))
     else:
         _check_phi(phi, f"new_constant({name})")
         phi = tuple(phi)
-    the_term_constants.insert(0, (name, phi, ty))
+    the_decls[name] = Decl(name, phi, TmBody(ty))
 
 
 def mk_arrow(a: hol_type, b: hol_type) -> hol_type:
@@ -475,6 +582,10 @@ def _apply_phi_subst(phi, sigma, ctx: str) -> PhiSubstResult:
     the corresponding binder species (under the running substitution
     from earlier entries).
 
+    Per-slot work is dispatched through `_SLOT_DISPATCH` (defined
+    below, with all the type-equality helpers in scope); each entry
+    handles its J-level's evidence-shape check + theta/asl extraction.
+
     The caller decides how to consume the result (e.g. mk_type rejects
     any non-empty asl_extra; CONST absorbs it into the result's asl)."""
     if len(phi) != len(sigma):
@@ -484,38 +595,10 @@ def _apply_phi_subst(phi, sigma, ctx: str) -> PhiSubstResult:
         )
     out = PhiSubstResult(theta_ty=[], theta_tm=[], term_args=[], asl_extra=[])
     for binder, arg in zip(phi, sigma):
-        if isinstance(binder, Tyvar):
-            if not isinstance(arg, (Tyvar, Tyapp, Pi)):
-                raise HolError(
-                    f"{ctx}: argument for Tyvar binder {binder.name} "
-                    f"must be a hol_type"
-                )
-            out.theta_ty.append((arg, binder))
-        elif isinstance(binder, Var):
-            if not isinstance(arg, typing_thm):
-                raise HolError(
-                    f"{ctx}: argument for Var binder {binder.name} "
-                    f"must be a typing_thm"
-                )
-            expected = type_subst(
-                out.theta_ty, subst_in_type(out.theta_tm, binder.ty)
-            )
-            if not type_eq(expected, arg._ty):
-                raise HolError(
-                    f"{ctx}: term argument for {binder.name} has wrong "
-                    f"type (expected {_pp_ty(expected)}, "
-                    f"got {_pp_ty(arg._ty)})"
-                )
-            out.theta_tm.append((arg._tm, binder))
-            out.term_args.append(arg._tm)
-            out.asl_extra[:] = term_union(out.asl_extra, arg._asl)
-        elif isinstance(binder, Assume):
-            _check_assume_proof(
-                arg, binder.formula, out.theta_ty, out.theta_tm, ctx
-            )
-            out.asl_extra[:] = term_union(out.asl_extra, arg._asl)
-        else:
+        handlers = _SLOT_DISPATCH.get(type(binder))
+        if handlers is None:
             raise HolError(f"{ctx}: ill-formed context binder")
+        handlers.subst(binder, arg, out, ctx)
     return out
 
 
@@ -1329,9 +1412,126 @@ class PhiDualResult(NamedTuple):
     asl_extra: list
 
 
+# ---------------------------------------------------------------------------
+# Per-slot dispatch
+#
+# `_SLOT_DISPATCH` is the table that captures the Slot ↔ J-level
+# correspondence in one place. Each Slot variant maps to a pair of
+# handlers -- one for the single-σ walker (`_apply_phi_subst`) and
+# one for the paired σ_l/σ_r walker (`_apply_phi_dual`). Each handler
+# checks the evidence's shape (the J-level appropriate type) and
+# extracts the per-slot contribution to θ_ty / θ_tm / term_args /
+# asl_extra.
+#
+# Adding a new Slot kind is one new pair of handlers plus one entry
+# here -- no edits to either walker.
+# ---------------------------------------------------------------------------
+
+
+def _subst_tyvar(binder, arg, out, ctx):
+    if not isinstance(arg, (Tyvar, Tyapp, Pi)):
+        raise HolError(
+            f"{ctx}: argument for Tyvar binder {binder.name} "
+            "must be a hol_type"
+        )
+    out.theta_ty.append((arg, binder))
+
+
+def _subst_var(binder, arg, out, ctx):
+    if not isinstance(arg, typing_thm):
+        raise HolError(
+            f"{ctx}: argument for Var binder {binder.name} "
+            "must be a typing_thm"
+        )
+    expected = type_subst(
+        out.theta_ty, subst_in_type(out.theta_tm, binder.ty)
+    )
+    if not type_eq(expected, arg._ty):
+        raise HolError(
+            f"{ctx}: term argument for {binder.name} has wrong type "
+            f"(expected {_pp_ty(expected)}, got {_pp_ty(arg._ty)})"
+        )
+    out.theta_tm.append((arg._tm, binder))
+    out.term_args.append(arg._tm)
+    out.asl_extra[:] = term_union(out.asl_extra, arg._asl)
+
+
+def _subst_assume(binder, arg, out, ctx):
+    _check_assume_proof(arg, binder.formula, out.theta_ty, out.theta_tm, ctx)
+    out.asl_extra[:] = term_union(out.asl_extra, arg._asl)
+
+
+def _dual_tyvar(binder, arg, lhs, rhs, asl_extra, ctx):
+    if not isinstance(arg, type_eq_thm):
+        raise HolError(
+            f"{ctx}: argument for Tyvar binder {binder.name} "
+            "must be a type_eq_thm"
+        )
+    lhs.type_args.append(arg._lhs)
+    rhs.type_args.append(arg._rhs)
+    lhs.theta_ty.append((arg._lhs, binder))
+    rhs.theta_ty.append((arg._rhs, binder))
+    asl_extra[:] = term_union(asl_extra, arg._asl)
+
+
+def _dual_var(binder, arg, lhs, rhs, asl_extra, ctx):
+    if not isinstance(arg, thm) or not _is_eq(arg._concl):
+        raise HolError(
+            f"{ctx}: argument for Var binder {binder.name} "
+            "must be an equation thm"
+        )
+    tag = _eq_tag(arg._concl)
+    expected = type_subst(
+        lhs.theta_ty, subst_in_type(lhs.theta_tm, binder.ty)
+    )
+    if not type_eq(expected, tag):
+        raise HolError(
+            f"{ctx}: equation tag {_pp_ty(tag)} does not match "
+            f"expected {_pp_ty(expected)} at {binder.name}"
+        )
+    lhs_tm = _lhs(arg._concl)
+    rhs_tm = _rhs(arg._concl)
+    lhs.term_args.append(lhs_tm)
+    rhs.term_args.append(rhs_tm)
+    lhs.theta_tm.append((lhs_tm, binder))
+    rhs.theta_tm.append((rhs_tm, binder))
+    asl_extra[:] = term_union(asl_extra, arg._asl)
+
+
+def _dual_assume(binder, arg, lhs, rhs, asl_extra, ctx):
+    needed_l = _check_assume_proof(
+        arg, binder.formula, lhs.theta_ty, lhs.theta_tm, ctx
+    )
+    needed_r = _inst_in_term(
+        [], rhs.theta_ty, _vsubst(rhs.theta_tm, binder.formula)
+    )
+    if not _tm_alpha([], needed_l, needed_r):
+        raise HolError(
+            f"{ctx}: Assume formula's LHS and RHS substitutions "
+            "differ; this kernel ships the rule only for the case "
+            "where the obligation is symmetric across the two "
+            "sides of the congruence"
+        )
+    asl_extra[:] = term_union(asl_extra, arg._asl)
+
+
+class _SlotHandlers(NamedTuple):
+    """Per-slot dispatch: shape-check + per-J-level extraction."""
+    subst: Callable    # (binder, arg, out, ctx) -> None
+    dual:  Callable    # (binder, arg, lhs, rhs, asl_extra, ctx) -> None
+
+
+_SLOT_DISPATCH: dict = {
+    Tyvar:  _SlotHandlers(subst=_subst_tyvar,  dual=_dual_tyvar),
+    Var:    _SlotHandlers(subst=_subst_var,    dual=_dual_var),
+    Assume: _SlotHandlers(subst=_subst_assume, dual=_dual_assume),
+}
+
+
 def _apply_phi_dual(phi, args, ctx: str) -> PhiDualResult:
     """Dual-substitution Φ-walker shared by `TY_CONG_BASE` (type-side
-    congruence) and `TM_CONG_BASE` (term-side congruence).
+    congruence), `TM_CONG_BASE` (term-side congruence), and
+    `THM_CONG_BASE` (staged-axiom congruence).
 
     Each `args[i]` pairs an LHS and RHS replacement for Φ entry i:
       * Tyvar  -> type_eq_thm `A_l == A_r`
@@ -1339,7 +1539,9 @@ def _apply_phi_dual(phi, args, ctx: str) -> PhiDualResult:
                   with all earlier-LHS substitutions applied
       * Assume -> thm proving the formula; the LHS and RHS
                   substitutions of the Assume formula must coincide
-                  (kernel ships only this symmetric case)."""
+                  (kernel ships only this symmetric case).
+
+    Per-slot work is dispatched through `_SLOT_DISPATCH`."""
     if len(phi) != len(args):
         raise HolError(
             f"{ctx}: wrong number of arguments "
@@ -1349,56 +1551,10 @@ def _apply_phi_dual(phi, args, ctx: str) -> PhiDualResult:
     rhs = PhiSide.empty()
     asl_extra: list = []
     for binder, arg in zip(phi, args):
-        if isinstance(binder, Tyvar):
-            if not isinstance(arg, type_eq_thm):
-                raise HolError(
-                    f"{ctx}: argument for Tyvar binder {binder.name} "
-                    f"must be a type_eq_thm"
-                )
-            lhs.type_args.append(arg._lhs)
-            rhs.type_args.append(arg._rhs)
-            lhs.theta_ty.append((arg._lhs, binder))
-            rhs.theta_ty.append((arg._rhs, binder))
-            asl_extra = term_union(asl_extra, arg._asl)
-        elif isinstance(binder, Var):
-            if not isinstance(arg, thm) or not _is_eq(arg._concl):
-                raise HolError(
-                    f"{ctx}: argument for Var binder {binder.name} "
-                    f"must be an equation thm"
-                )
-            tag = _eq_tag(arg._concl)
-            expected = type_subst(
-                lhs.theta_ty, subst_in_type(lhs.theta_tm, binder.ty)
-            )
-            if not type_eq(expected, tag):
-                raise HolError(
-                    f"{ctx}: equation tag {_pp_ty(tag)} does not match "
-                    f"expected {_pp_ty(expected)} at {binder.name}"
-                )
-            lhs_tm = _lhs(arg._concl)
-            rhs_tm = _rhs(arg._concl)
-            lhs.term_args.append(lhs_tm)
-            rhs.term_args.append(rhs_tm)
-            lhs.theta_tm.append((lhs_tm, binder))
-            rhs.theta_tm.append((rhs_tm, binder))
-            asl_extra = term_union(asl_extra, arg._asl)
-        elif isinstance(binder, Assume):
-            needed_l = _check_assume_proof(
-                arg, binder.formula, lhs.theta_ty, lhs.theta_tm, ctx
-            )
-            needed_r = _inst_in_term(
-                [], rhs.theta_ty, _vsubst(rhs.theta_tm, binder.formula)
-            )
-            if not _tm_alpha([], needed_l, needed_r):
-                raise HolError(
-                    f"{ctx}: Assume formula's LHS and RHS substitutions "
-                    "differ; this kernel ships the rule only for the case "
-                    "where the obligation is symmetric across the two "
-                    "sides of the congruence"
-                )
-            asl_extra = term_union(asl_extra, arg._asl)
-        else:
+        handlers = _SLOT_DISPATCH.get(type(binder))
+        if handlers is None:
             raise HolError(f"{ctx}: ill-formed Φ entry")
+        handlers.dual(binder, arg, lhs, rhs, asl_extra, ctx)
     return PhiDualResult(lhs=lhs, rhs=rhs, asl_extra=asl_extra)
 
 
@@ -1474,7 +1630,7 @@ def THM_CONG_BASE(staged: StagedThm, args: list) -> thm:
     if not isinstance(staged, StagedThm):
         raise HolError("THM_CONG_BASE: first argument must be a StagedThm")
     phi = staged._phi
-    F = staged._thm._concl
+    F = staged._body.formula
     result = _apply_phi_dual(phi, args, "THM_CONG_BASE")
     F_l = _inst_in_term(
         [], result.lhs.theta_ty, _vsubst(result.lhs.theta_tm, F)
@@ -1817,10 +1973,7 @@ def new_axiom(F_th: typing_thm, phi: tuple | None = None) -> StagedThm:
     _check_phi(phi, "new_axiom")
     phi = tuple(phi)
 
-    expected_asl: list = []
-    for b in phi:
-        if isinstance(b, Assume):
-            expected_asl = term_union(expected_asl, [b.formula])
+    expected_asl = _phi_asl(phi)
     for a in F_th._asl:
         if not any(_tm_alpha([], a, f) for f in expected_asl):
             raise HolError(
@@ -1843,8 +1996,7 @@ def new_axiom(F_th: typing_thm, phi: tuple | None = None) -> StagedThm:
                 f"new_axiom: type-var {tv.name} is not reflected in Φ"
             )
 
-    underlying = thm(expected_asl, F_th._tm)
-    staged = StagedThm(phi, underlying)
+    staged = StagedThm(phi, PropBody(F_th._tm))
     the_axioms.append(staged)
     return staged
 
@@ -1869,12 +2021,41 @@ def interpret(staged: StagedThm, sigma: tuple) -> thm:
     if not isinstance(staged, StagedThm):
         raise HolError("interpret: first argument must be a StagedThm")
     phi = staged._phi
-    body = staged._thm
+    F = staged._body.formula
     result = _apply_phi_subst(phi, tuple(sigma), "interpret")
     f = lambda tm: _inst_in_term(
         [], result.theta_ty, _vsubst(result.theta_tm, tm)
     )
-    return thm(result.asl_extra, f(body._concl))
+    return thm(result.asl_extra, f(F))
+
+
+def instantiate(target, sigma: tuple):
+    """Unified Φ-substitution dispatcher.
+
+    Dispatches by J-level of `target`:
+      * type-name str (TpBody)  -- `mk_type(target, sigma)` → hol_type
+      * const-name str (TmBody) -- `CONST(target, sigma)`   → typing_thm
+      * StagedThm               -- `interpret(target, sigma)` → thm
+
+    The three primary entry points (`mk_type`, `CONST`, `interpret`)
+    remain available; `instantiate` is the J-agnostic alias that all
+    three share -- the validator `_apply_phi_subst` is the same in
+    every case, and the only difference is which evidence-shape the
+    target's body asks for."""
+    if isinstance(target, StagedThm):
+        return interpret(target, sigma)
+    if isinstance(target, str):
+        d = the_decls.get(target)
+        if d is None:
+            raise HolError(f"instantiate: unknown name {target}")
+        if isinstance(d.body, TpBody):
+            return mk_type(target, list(sigma))
+        if isinstance(d.body, TmBody):
+            return CONST(target, tuple(sigma))
+    raise HolError(
+        f"instantiate: target must be a declared name or a StagedThm "
+        f"(got {target!r})"
+    )
 
 
 the_definitions: list = []
@@ -2613,6 +2794,14 @@ if __name__ == "__main__":
     )
     print("empty-Φ axiom     ::", triv_ax)
     print("interpret ()      ::", interpret(triv_ax, ()))
+
+    # Unified `instantiate` dispatcher: same σ-shape, three J-levels.
+    inst_type = instantiate("vec", [zero_th])          # hol_type
+    inst_const = instantiate("0", ())                  # typing_thm
+    inst_thm = instantiate(add_zero, (zero_th,))       # thm
+    print("instantiate vec  ::", _pp_ty(inst_type))
+    print("instantiate 0    ::", inst_const)
+    print("instantiate axiom::", inst_thm)
 
     # Rejection paths: shape mismatch (σ arity), wrong slot evidence,
     # and unbound free var in F.
