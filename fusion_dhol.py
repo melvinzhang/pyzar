@@ -1,43 +1,38 @@
-# DHOL kernel spike: Dependently-Typed Higher-Order Logic
+# DHOL kernel with typing as derivation
 #
-# Based on the formulation in Rothgang, Rabe, Benzmueller,
-# "Dependently-Typed Higher-Order Logic" (2023): HOL extended with
-# dependent function types and term-indexed type families.
+# Based on Rothgang/Rabe/Benzmueller, "Dependently-Typed Higher-Order Logic"
+# (ACM TOCL, 2025; arXiv:2305.15382). Term well-typedness is itself a
+# judgement, not a meta-level function. The kernel exposes three families
+# of certificates:
 #
-# Differences vs. fusion.py (HOL):
+#   typing_thm    Gamma |- t : A           (well-typed term)
+#   type_eq_thm   Gamma |- A == B          (propositional type equality)
+#   thm           Gamma |- F               (validity, as in HOL)
 #
-#   1. Dependent function type `Pi(x:A, B)` replaces the special "fun"
-#      type constant. Non-dependent A -> B is `Pi(Var("_", A), B)` with
-#      the bound variable not free in B.
+# Every term that enters a theorem has been built by typing rules, so its
+# well-typedness is witnessed by a typing_thm whose asl already contains
+# whatever boolean assumptions Gamma needs. The dependent application rule
+# (appl' in the paper):
 #
-#   2. Type constants carry a *kind*: a type-arity (number of type-variable
-#      parameters) AND a tuple of term-parameter types. So `vec : nat -> tp`
-#      is `new_type("vec", type_arity=0, term_params=(nat_ty,))`, and
-#      `vec(3)` is `Tyapp("vec", (), (numeral_3,))`.
+#     Gamma |- f : Pi(x:A). B    Gamma |- a : A
+#     ------------------------------------------
+#                Gamma |- f a : B[x/a]
 #
-#   3. `type_of(Comb(f, a))` substitutes `a` for the Pi binder in the body,
-#      so applying `f : Pi(n:nat, vec n)` to `3` yields `vec 3`.
+# is implemented as APP(f_th, a_th, eq=None) where eq witnesses the
+# propositional bridge expected ~ got when typing wouldn't otherwise agree
+# definitionally. Type equality is derived from term equality via
+# TY_CONG_BASE (congBase' in the paper) and Pi-congruence via TY_CONG_PI.
 #
-#   4. `Abs(v, body)` has type `Pi(v, type_of(body))` -- abstraction always
-#      yields a (possibly dependent) Pi.
+# Variables carry their types intrinsically (Var.name, Var.ty), so the
+# "x:A in Gamma" portion of a context is implicit -- a typing_thm produced
+# by VAR(Var("x", A)) is justified under any Gamma that binds x at A.
+# The boolean portion of Gamma lives in typing_thm._asl, just like thm._asl.
 #
-#   5. INST / INST_TYPE propagate substitutions into type annotations
-#      (Var.ty, Const.ty, Pi.bvar.ty, Tyapp.term_args), since types
-#      themselves mention terms in DHOL.
-#
-# Deliberate simplifications vs. full DHOL (clearly marked as TODO):
-#
-#   - Type equality is purely *definitional* (alpha + structural). Full
-#     DHOL needs *provable* type equality (e.g. `vec (n+0) == vec n` via
-#     a derivation), which entangles typing and the deduction system.
-#     A `TYPE_EQ` rule that lifts term equalities into type equalities
-#     is sketched but does not feed back into mk_comb's domain check.
-#
-#   - Type-constant kinds have a flat list of term-parameter types;
-#     later params cannot depend on earlier ones in a kind. (Real DHOL
-#     kinds are themselves dependent: K ::= tp | (x:A) -> K.)
-#
-#   - No predicate subtyping, no eta in alpha-equivalence at Pi.
+# Deliberate spike-level simplifications:
+#   - INST / INST_TYPE require definitionally-matching types; substitutions
+#     that need propositional bridges must be built via APP + CONV.
+#   - new_basic_type_definition is omitted.
+#   - eta is not part of alpha at Pi.
 
 from __future__ import annotations
 import sys
@@ -58,7 +53,7 @@ class Clash(Exception):
 
 
 # ---------------------------------------------------------------------------
-# Types: Tyvar, Tyapp (with type AND term arguments), Pi (dependent function)
+# Types
 # ---------------------------------------------------------------------------
 
 
@@ -70,8 +65,8 @@ class Tyvar:
 @dataclass(frozen=True, slots=True)
 class Tyapp:
     tyop: str
-    type_args: tuple  # tuple[hol_type]
-    term_args: tuple  # tuple[term]
+    type_args: tuple
+    term_args: tuple
 
     def __post_init__(self):
         if not isinstance(self.type_args, tuple):
@@ -90,7 +85,7 @@ hol_type = Tyvar | Tyapp | Pi
 
 
 # ---------------------------------------------------------------------------
-# Terms (unchanged from HOL)
+# Terms
 # ---------------------------------------------------------------------------
 
 
@@ -122,11 +117,43 @@ term = Var | Const | Comb | Abs
 
 
 # ---------------------------------------------------------------------------
-# Theorems
+# Certificates
 # ---------------------------------------------------------------------------
 
 
+class typing_thm:
+    """Gamma |- t : A."""
+
+    __slots__ = ("_asl", "_tm", "_ty")
+
+    def __init__(self, asl, tm, ty):
+        self._asl = list(asl)
+        self._tm = tm
+        self._ty = ty
+
+    def __repr__(self):
+        a = ", ".join(_pp_tm(x) for x in self._asl)
+        return f"[{a}] |- {_pp_tm(self._tm)} : {_pp_ty(self._ty)}"
+
+
+class type_eq_thm:
+    """Gamma |- A == B."""
+
+    __slots__ = ("_asl", "_lhs", "_rhs")
+
+    def __init__(self, asl, lhs, rhs):
+        self._asl = list(asl)
+        self._lhs = lhs
+        self._rhs = rhs
+
+    def __repr__(self):
+        a = ", ".join(_pp_tm(x) for x in self._asl)
+        return f"[{a}] |- {_pp_ty(self._lhs)} == {_pp_ty(self._rhs)}"
+
+
 class thm:
+    """Gamma |- F  (boolean validity)."""
+
     __slots__ = ("_asl", "_concl")
 
     def __init__(self, asl, concl):
@@ -134,8 +161,8 @@ class thm:
         self._concl = concl
 
     def __repr__(self):
-        asl = ", ".join(_pp_tm(a) for a in self._asl)
-        return f"Sequent([{asl}], {_pp_tm(self._concl)})"
+        a = ", ".join(_pp_tm(x) for x in self._asl)
+        return f"Sequent([{a}], {_pp_tm(self._concl)})"
 
     def __eq__(self, other):
         return (
@@ -149,10 +176,9 @@ class thm:
 
 
 # ---------------------------------------------------------------------------
-# Type constants: each carries a *kind* = (type_arity, term_param_types)
+# Type constants (kinded) and term constants
 # ---------------------------------------------------------------------------
 
-# Built-in: bool is nullary. There is NO built-in "fun" -- Pi replaces it.
 the_type_constants: list = [("bool", 0, ())]
 
 
@@ -173,52 +199,11 @@ def new_type(name: str, type_arity: int = 0, term_params: tuple = ()) -> None:
     the_type_constants.insert(0, (name, type_arity, tuple(term_params)))
 
 
-# ---------------------------------------------------------------------------
-# Type / term constructors
-# ---------------------------------------------------------------------------
-
-
-def mk_type(tyop: str, type_args: list, term_args: list = ()) -> hol_type:
-    try:
-        arity, term_params = get_type_kind(tyop)
-    except KeyError:
-        raise HolError(f"mk_type: type {tyop} has not been defined")
-    if arity != len(type_args):
-        raise HolError(f"mk_type: wrong number of type arguments to {tyop}")
-    if len(term_params) != len(term_args):
-        raise HolError(f"mk_type: wrong number of term arguments to {tyop}")
-    # Check each term argument has the declared parameter type.
-    # NOTE: definitional equality only; provable equality is not consulted.
-    for expected, given in zip(term_params, term_args):
-        if not type_eq(expected, type_of(given)):
-            raise HolError(
-                f"mk_type: term argument to {tyop} has wrong type "
-                f"(expected {_pp_ty(expected)}, got {_pp_ty(type_of(given))})"
-            )
-    return Tyapp(tyop, tuple(type_args), tuple(term_args))
-
-
-def mk_pi(v: "Var", body: hol_type) -> hol_type:
-    return Pi(v, body)
-
-
-def mk_arrow(a: hol_type, b: hol_type) -> hol_type:
-    """Non-dependent function type A -> B."""
-    # Use a fresh placeholder name; alpha-equivalence at Pi ignores it.
-    return Pi(Var("_", a), b)
-
-
 bool_ty: hol_type = Tyapp("bool", (), ())
 aty: hol_type = Tyvar("A")
 
-
-# ---------------------------------------------------------------------------
-# Term constants
-# ---------------------------------------------------------------------------
-
-# Equality: = : A -> A -> bool, encoded as Pi(_:A, Pi(_:A, bool)).
 the_term_constants: list = [
-    ("=", mk_arrow(aty, mk_arrow(aty, bool_ty))),
+    ("=", Pi(Var("_", aty), Pi(Var("_", aty), bool_ty))),
 ]
 
 
@@ -239,281 +224,40 @@ def new_constant(name: str, ty: hol_type) -> None:
     the_term_constants.insert(0, (name, ty))
 
 
-# ---------------------------------------------------------------------------
-# Definitional type equality (alpha at Pi, structural elsewhere)
-#
-# TODO: full DHOL needs *propositional* type equality. Lifting a term
-# equality `|- s = t : A` to type equality `vec s == vec t` requires the
-# deduction system to feed back into typing. See TYPE_EQ stub below.
-# ---------------------------------------------------------------------------
+def mk_arrow(a: hol_type, b: hol_type) -> hol_type:
+    return Pi(Var("_", a), b)
 
 
-def type_eq(t1: hol_type, t2: hol_type) -> bool:
-    return _ty_eq([], t1, t2)
-
-
-def _ty_eq(env: list, t1: hol_type, t2: hol_type) -> bool:
-    if isinstance(t1, Tyvar) and isinstance(t2, Tyvar):
-        return t1.name == t2.name
-    if isinstance(t1, Tyapp) and isinstance(t2, Tyapp):
-        if t1.tyop != t2.tyop:
-            return False
-        if len(t1.type_args) != len(t2.type_args):
-            return False
-        if len(t1.term_args) != len(t2.term_args):
-            return False
-        if not all(_ty_eq(env, a, b) for a, b in zip(t1.type_args, t2.type_args)):
-            return False
-        return all(_tm_alpha(env, a, b) for a, b in zip(t1.term_args, t2.term_args))
-    if isinstance(t1, Pi) and isinstance(t2, Pi):
-        if not _ty_eq(env, t1.bvar.ty, t2.bvar.ty):
-            return False
-        return _ty_eq([(t1.bvar, t2.bvar), *env], t1.body, t2.body)
-    return False
-
-
-def _tm_alpha(env: list, a: term, b: term) -> bool:
-    """Alpha-equivalence of terms under a binder environment that mixes
-    Pi-bound type variables and Abs-bound term variables."""
-    if isinstance(a, Var) and isinstance(b, Var):
-        for x, y in env:
-            if a == x:
-                return b == y
-            if b == y:
-                return False
-        return a == b
-    if isinstance(a, Const) and isinstance(b, Const):
-        return a.name == b.name and _ty_eq(env, a.ty, b.ty)
-    if isinstance(a, Comb) and isinstance(b, Comb):
-        return _tm_alpha(env, a.fun, b.fun) and _tm_alpha(env, a.arg, b.arg)
-    if isinstance(a, Abs) and isinstance(b, Abs):
-        if not _ty_eq(env, a.bvar.ty, b.bvar.ty):
-            return False
-        return _tm_alpha([(a.bvar, b.bvar), *env], a.body, b.body)
-    return False
+def mk_type(tyop: str, type_args: list, term_arg_typings: list = ()) -> hol_type:
+    """Build a Tyapp from a type-constant name and certified term arguments.
+    Each entry in term_arg_typings must be a typing_thm. For this spike the
+    asls of those typing_thms must be empty (so the resulting type is
+    well-formed absolutely)."""
+    try:
+        arity, params = get_type_kind(tyop)
+    except KeyError:
+        raise HolError(f"mk_type: type {tyop} has not been defined")
+    if arity != len(type_args):
+        raise HolError(f"mk_type: wrong number of type arguments to {tyop}")
+    if len(params) != len(term_arg_typings):
+        raise HolError(f"mk_type: wrong number of term arguments to {tyop}")
+    args = []
+    for expected, ath in zip(params, term_arg_typings):
+        if not isinstance(ath, typing_thm):
+            raise HolError("mk_type: term arguments must be typing_thms")
+        if ath._asl:
+            raise HolError("mk_type: term-argument typing must be unconditional")
+        if not type_eq(expected, ath._ty):
+            raise HolError(
+                f"mk_type: term argument has wrong type "
+                f"(expected {_pp_ty(expected)}, got {_pp_ty(ath._ty)})"
+            )
+        args.append(ath._tm)
+    return Tyapp(tyop, tuple(type_args), tuple(args))
 
 
 # ---------------------------------------------------------------------------
-# Term substitution into TYPES
-#
-# Needed because Tyapp now carries term arguments and Pi bodies mention
-# the binder. type_of(Comb(f, a)) must substitute `a` for the Pi binder.
-# ---------------------------------------------------------------------------
-
-
-def subst_in_type(theta: list, ty: hol_type) -> hol_type:
-    """theta : list of (replacement_term, var_to_replace)."""
-    if not theta:
-        return ty
-    if isinstance(ty, Tyvar):
-        return ty
-    if isinstance(ty, Tyapp):
-        new_type_args = tuple(subst_in_type(theta, a) for a in ty.type_args)
-        new_term_args = tuple(_vsubst(theta, a) for a in ty.term_args)
-        if (
-            all(a is b for a, b in zip(new_type_args, ty.type_args))
-            and all(a is b for a, b in zip(new_term_args, ty.term_args))
-        ):
-            return ty
-        return Tyapp(ty.tyop, new_type_args, new_term_args)
-    if isinstance(ty, Pi):
-        # Drop any substitution targeting the bound variable.
-        theta2 = [(t, x) for t, x in theta if x != ty.bvar]
-        new_bvar_ty = subst_in_type(theta2, ty.bvar.ty)
-        if not theta2:
-            return Pi(Var(ty.bvar.name, new_bvar_ty), ty.body) if new_bvar_ty is not ty.bvar.ty else ty
-        # Capture avoidance: if any replacement term has bvar free,
-        # alpha-rename the binder.
-        if any(vfree_in(ty.bvar, t) and _occurs_in_type(x, ty.body) for t, x in theta2):
-            fresh = variant([t for t, _ in theta2] + [Var("dummy", ty.body) if False else ty.bvar for _ in [0]], ty.bvar)
-            # Replace bound var with fresh in the body, then substitute.
-            fresh_var = Var(fresh.name, new_bvar_ty)
-            body2 = subst_in_type([(fresh_var, ty.bvar)], ty.body)
-            return Pi(fresh_var, subst_in_type(theta2, body2))
-        new_body = subst_in_type(theta2, ty.body)
-        new_bvar = Var(ty.bvar.name, new_bvar_ty)
-        return Pi(new_bvar, new_body)
-    raise HolError("subst_in_type: ill-formed type")
-
-
-def _occurs_in_type(v: "Var", ty: hol_type) -> bool:
-    if isinstance(ty, Tyvar):
-        return False
-    if isinstance(ty, Tyapp):
-        return any(_occurs_in_type(v, a) for a in ty.type_args) or any(
-            vfree_in(v, a) for a in ty.term_args
-        )
-    if isinstance(ty, Pi):
-        if ty.bvar == v:
-            return _occurs_in_type(v, ty.bvar.ty)
-        return _occurs_in_type(v, ty.bvar.ty) or _occurs_in_type(v, ty.body)
-    return False
-
-
-# ---------------------------------------------------------------------------
-# Type variable substitution (still needed -- DHOL has type polymorphism)
-# ---------------------------------------------------------------------------
-
-
-def tyvars(ty: hol_type) -> list:
-    if isinstance(ty, Tyvar):
-        return [ty]
-    if isinstance(ty, Tyapp):
-        seen = []
-        for a in ty.type_args:
-            for tv in tyvars(a):
-                if tv not in seen:
-                    seen.append(tv)
-        for a in ty.term_args:
-            for tv in type_vars_in_term(a):
-                if tv not in seen:
-                    seen.append(tv)
-        return seen
-    if isinstance(ty, Pi):
-        seen = list(tyvars(ty.bvar.ty))
-        for tv in tyvars(ty.body):
-            if tv not in seen:
-                seen.append(tv)
-        return seen
-    raise HolError("tyvars: ill-formed type")
-
-
-def type_subst(i: list, ty: hol_type) -> hol_type:
-    """i : list of (replacement_type, tyvar_to_replace)."""
-    if isinstance(ty, Tyvar):
-        for src, dst in i:
-            if dst == ty:
-                return src
-        return ty
-    if isinstance(ty, Tyapp):
-        new_type_args = tuple(type_subst(i, a) for a in ty.type_args)
-        new_term_args = tuple(_inst_in_term(i, a) for a in ty.term_args)
-        return Tyapp(ty.tyop, new_type_args, new_term_args)
-    if isinstance(ty, Pi):
-        new_bvar_ty = type_subst(i, ty.bvar.ty)
-        new_body = type_subst(i, ty.body)
-        # Refresh bvar with new type; no name capture for type vars.
-        return Pi(Var(ty.bvar.name, new_bvar_ty), new_body)
-    raise HolError("type_subst: ill-formed type")
-
-
-def _inst_in_term(tyin: list, tm: term) -> term:
-    """Apply a type-variable substitution to type annotations inside a term.
-    Simplified: assumes no name clashes (sufficient for spike)."""
-    if isinstance(tm, Var):
-        return Var(tm.name, type_subst(tyin, tm.ty))
-    if isinstance(tm, Const):
-        return Const(tm.name, type_subst(tyin, tm.ty))
-    if isinstance(tm, Comb):
-        return Comb(_inst_in_term(tyin, tm.fun), _inst_in_term(tyin, tm.arg))
-    if isinstance(tm, Abs):
-        return Abs(
-            Var(tm.bvar.name, type_subst(tyin, tm.bvar.ty)),
-            _inst_in_term(tyin, tm.body),
-        )
-    raise HolError("_inst_in_term: ill-formed term")
-
-
-# ---------------------------------------------------------------------------
-# type_of: with Pi substitution at Comb, Pi formation at Abs
-# ---------------------------------------------------------------------------
-
-
-def type_of(tm: term) -> hol_type:
-    if isinstance(tm, Var) or isinstance(tm, Const):
-        return tm.ty
-    if isinstance(tm, Comb):
-        f_ty = type_of(tm.fun)
-        if isinstance(f_ty, Pi):
-            # Substitute the argument into the codomain.
-            return subst_in_type([(tm.arg, f_ty.bvar)], f_ty.body)
-        raise HolError("type_of: head of application is not a Pi")
-    if isinstance(tm, Abs):
-        return Pi(tm.bvar, type_of(tm.body))
-    raise HolError("type_of: ill-typed term")
-
-
-# ---------------------------------------------------------------------------
-# mk_comb: dependent domain check + dependent codomain
-# ---------------------------------------------------------------------------
-
-
-def mk_comb(f: term, a: term) -> term:
-    f_ty = type_of(f)
-    a_ty = type_of(a)
-    if not isinstance(f_ty, Pi):
-        raise HolError(
-            f"mk_comb: head is not a function (type {_pp_ty(f_ty)})"
-        )
-    if not type_eq(f_ty.bvar.ty, a_ty):
-        raise HolError(
-            f"mk_comb: types do not agree -- "
-            f"function expects {_pp_ty(f_ty.bvar.ty)} but got {_pp_ty(a_ty)}\n"
-            f"  head : {_pp_tm(f)} :: {_pp_ty(f_ty)}\n"
-            f"  arg  : {_pp_tm(a)} :: {_pp_ty(a_ty)}"
-        )
-    return Comb(f, a)
-
-
-# ---------------------------------------------------------------------------
-# Pretty-printing
-# ---------------------------------------------------------------------------
-
-
-def _pp_ty(ty, _max=160):
-    s = _pp_ty_raw(ty)
-    return s if len(s) <= _max else s[: _max - 3] + "..."
-
-
-def _pp_ty_raw(ty):
-    if isinstance(ty, Tyvar):
-        return ty.name
-    if isinstance(ty, Tyapp):
-        parts = []
-        if ty.type_args:
-            parts.append(", ".join(_pp_ty_raw(a) for a in ty.type_args))
-        if ty.term_args:
-            parts.append(", ".join(_pp_tm_raw(a) for a in ty.term_args))
-        if not parts:
-            return ty.tyop
-        return f"{ty.tyop}({'; '.join(parts)})"
-    if isinstance(ty, Pi):
-        # Display non-dependent Pi as plain arrow.
-        if not _occurs_in_type(ty.bvar, ty.body) and not _occurs_in_type_through_terms(ty.bvar, ty.body):
-            return f"({_pp_ty_raw(ty.bvar.ty)} -> {_pp_ty_raw(ty.body)})"
-        return f"(Pi {ty.bvar.name}:{_pp_ty_raw(ty.bvar.ty)}. {_pp_ty_raw(ty.body)})"
-    return repr(ty)
-
-
-def _occurs_in_type_through_terms(v: Var, ty: hol_type) -> bool:
-    if isinstance(ty, Tyapp):
-        return any(vfree_in(v, a) for a in ty.term_args) or any(
-            _occurs_in_type_through_terms(v, a) for a in ty.type_args
-        )
-    if isinstance(ty, Pi):
-        if ty.bvar == v:
-            return False
-        return _occurs_in_type_through_terms(v, ty.bvar.ty) or _occurs_in_type_through_terms(v, ty.body)
-    return False
-
-
-def _pp_tm(tm, _max=200):
-    s = _pp_tm_raw(tm)
-    return s if len(s) <= _max else s[: _max - 3] + "..."
-
-
-def _pp_tm_raw(tm):
-    if isinstance(tm, (Var, Const)):
-        return tm.name
-    if isinstance(tm, Abs):
-        return f"(\\{tm.bvar.name}:{_pp_ty_raw(tm.bvar.ty)}. {_pp_tm_raw(tm.body)})"
-    if isinstance(tm, Comb):
-        return f"({_pp_tm_raw(tm.fun)} {_pp_tm_raw(tm.arg)})"
-    return repr(tm)
-
-
-# ---------------------------------------------------------------------------
-# Free variables, type variables in terms
+# Free variables, type variables
 # ---------------------------------------------------------------------------
 
 
@@ -553,6 +297,29 @@ def vfree_in(v: term, tm: term) -> bool:
     return tm == v
 
 
+def tyvars(ty: hol_type) -> list:
+    if isinstance(ty, Tyvar):
+        return [ty]
+    if isinstance(ty, Tyapp):
+        seen: list = []
+        for a in ty.type_args:
+            for tv in tyvars(a):
+                if tv not in seen:
+                    seen.append(tv)
+        for a in ty.term_args:
+            for tv in type_vars_in_term(a):
+                if tv not in seen:
+                    seen.append(tv)
+        return seen
+    if isinstance(ty, Pi):
+        seen = list(tyvars(ty.bvar.ty))
+        for tv in tyvars(ty.body):
+            if tv not in seen:
+                seen.append(tv)
+        return seen
+    raise HolError("tyvars: ill-formed type")
+
+
 def type_vars_in_term(tm: term) -> list:
     if isinstance(tm, Var) or isinstance(tm, Const):
         return tyvars(tm.ty)
@@ -571,11 +338,6 @@ def type_vars_in_term(tm: term) -> list:
     raise HolError("type_vars_in_term: ill-formed term")
 
 
-# ---------------------------------------------------------------------------
-# Fresh variables
-# ---------------------------------------------------------------------------
-
-
 def variant(avoid: list, v: term) -> term:
     if not any(vfree_in(v, t) for t in avoid):
         return v
@@ -585,9 +347,144 @@ def variant(avoid: list, v: term) -> term:
 
 
 # ---------------------------------------------------------------------------
-# Term substitution (capture-avoiding). Note: types of remaining vars may
-# also change if the substitution mentions term vars used in dependent types
-# -- but here we only substitute closed terms (per vsubst's contract).
+# Definitional type equality (alpha at Pi, alpha at term indices)
+# ---------------------------------------------------------------------------
+
+
+def type_eq(t1: hol_type, t2: hol_type) -> bool:
+    return _ty_eq([], t1, t2)
+
+
+def _ty_eq(env: list, t1: hol_type, t2: hol_type) -> bool:
+    if isinstance(t1, Tyvar) and isinstance(t2, Tyvar):
+        return t1.name == t2.name
+    if isinstance(t1, Tyapp) and isinstance(t2, Tyapp):
+        if t1.tyop != t2.tyop:
+            return False
+        if len(t1.type_args) != len(t2.type_args):
+            return False
+        if len(t1.term_args) != len(t2.term_args):
+            return False
+        if not all(_ty_eq(env, a, b) for a, b in zip(t1.type_args, t2.type_args)):
+            return False
+        return all(_tm_alpha(env, a, b) for a, b in zip(t1.term_args, t2.term_args))
+    if isinstance(t1, Pi) and isinstance(t2, Pi):
+        if not _ty_eq(env, t1.bvar.ty, t2.bvar.ty):
+            return False
+        return _ty_eq([(t1.bvar, t2.bvar), *env], t1.body, t2.body)
+    return False
+
+
+def _tm_alpha(env: list, a: term, b: term) -> bool:
+    if isinstance(a, Var) and isinstance(b, Var):
+        for x, y in env:
+            if a == x:
+                return b == y
+            if b == y:
+                return False
+        return a == b
+    if isinstance(a, Const) and isinstance(b, Const):
+        return a.name == b.name and _ty_eq(env, a.ty, b.ty)
+    if isinstance(a, Comb) and isinstance(b, Comb):
+        return _tm_alpha(env, a.fun, b.fun) and _tm_alpha(env, a.arg, b.arg)
+    if isinstance(a, Abs) and isinstance(b, Abs):
+        if not _ty_eq(env, a.bvar.ty, b.bvar.ty):
+            return False
+        return _tm_alpha([(a.bvar, b.bvar), *env], a.body, b.body)
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Term substitution into types (capture avoiding)
+# ---------------------------------------------------------------------------
+
+
+def subst_in_type(theta: list, ty: hol_type) -> hol_type:
+    if not theta:
+        return ty
+    if isinstance(ty, Tyvar):
+        return ty
+    if isinstance(ty, Tyapp):
+        new_type_args = tuple(subst_in_type(theta, a) for a in ty.type_args)
+        new_term_args = tuple(_vsubst(theta, a) for a in ty.term_args)
+        return Tyapp(ty.tyop, new_type_args, new_term_args)
+    if isinstance(ty, Pi):
+        theta2 = [(t, x) for t, x in theta if x != ty.bvar]
+        new_bvar_ty = subst_in_type(theta2, ty.bvar.ty)
+        if not theta2:
+            return Pi(Var(ty.bvar.name, new_bvar_ty), ty.body)
+        if any(
+            vfree_in(ty.bvar, t) and _occurs_in_type(x, ty.body)
+            for t, x in theta2
+        ):
+            avoid = [t for t, _ in theta2]
+            fresh = variant(avoid, ty.bvar)
+            fresh_var = Var(fresh.name, new_bvar_ty)
+            body2 = subst_in_type([(fresh_var, ty.bvar)], ty.body)
+            return Pi(fresh_var, subst_in_type(theta2, body2))
+        new_body = subst_in_type(theta2, ty.body)
+        return Pi(Var(ty.bvar.name, new_bvar_ty), new_body)
+    raise HolError("subst_in_type: ill-formed type")
+
+
+def _occurs_in_type(v: Var, ty: hol_type) -> bool:
+    if isinstance(ty, Tyvar):
+        return False
+    if isinstance(ty, Tyapp):
+        return any(_occurs_in_type(v, a) for a in ty.type_args) or any(
+            vfree_in(v, a) for a in ty.term_args
+        )
+    if isinstance(ty, Pi):
+        if ty.bvar == v:
+            return _occurs_in_type(v, ty.bvar.ty)
+        return _occurs_in_type(v, ty.bvar.ty) or _occurs_in_type(v, ty.body)
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Type-variable substitution
+# ---------------------------------------------------------------------------
+
+
+def type_subst(i: list, ty: hol_type) -> hol_type:
+    if not i:
+        return ty
+    if isinstance(ty, Tyvar):
+        for src, dst in i:
+            if dst == ty:
+                return src
+        return ty
+    if isinstance(ty, Tyapp):
+        return Tyapp(
+            ty.tyop,
+            tuple(type_subst(i, a) for a in ty.type_args),
+            tuple(_inst_in_term(i, a) for a in ty.term_args),
+        )
+    if isinstance(ty, Pi):
+        return Pi(
+            Var(ty.bvar.name, type_subst(i, ty.bvar.ty)),
+            type_subst(i, ty.body),
+        )
+    raise HolError("type_subst: ill-formed type")
+
+
+def _inst_in_term(tyin: list, tm: term) -> term:
+    if isinstance(tm, Var):
+        return Var(tm.name, type_subst(tyin, tm.ty))
+    if isinstance(tm, Const):
+        return Const(tm.name, type_subst(tyin, tm.ty))
+    if isinstance(tm, Comb):
+        return Comb(_inst_in_term(tyin, tm.fun), _inst_in_term(tyin, tm.arg))
+    if isinstance(tm, Abs):
+        return Abs(
+            Var(tm.bvar.name, type_subst(tyin, tm.bvar.ty)),
+            _inst_in_term(tyin, tm.body),
+        )
+    raise HolError("_inst_in_term: ill-formed term")
+
+
+# ---------------------------------------------------------------------------
+# Term-variable substitution (capture avoiding)
 # ---------------------------------------------------------------------------
 
 
@@ -600,108 +497,95 @@ def _vsubst(ilist: list, tm: term) -> term:
     if isinstance(tm, Const):
         return tm
     if isinstance(tm, Comb):
-        f2 = _vsubst(ilist, tm.fun)
-        a2 = _vsubst(ilist, tm.arg)
-        if f2 is tm.fun and a2 is tm.arg:
-            return tm
-        return Comb(f2, a2)
+        return Comb(_vsubst(ilist, tm.fun), _vsubst(ilist, tm.arg))
     if isinstance(tm, Abs):
         ilist2 = [(t, x) for (t, x) in ilist if x != tm.bvar]
         if not ilist2:
             return tm
-        body2 = _vsubst(ilist2, tm.body)
-        if body2 is tm.body:
-            return tm
         if any(vfree_in(tm.bvar, t) and vfree_in(x, tm.body) for t, x in ilist2):
-            v2 = variant([body2], tm.bvar)
+            v2 = variant([_vsubst(ilist2, tm.body)], tm.bvar)
             return Abs(v2, _vsubst([(v2, tm.bvar), *ilist2], tm.body))
-        return Abs(tm.bvar, body2)
+        return Abs(tm.bvar, _vsubst(ilist2, tm.body))
     raise HolError("vsubst: ill-formed term")
 
 
-def vsubst(theta: list) -> Callable[[term], term]:
-    if not theta:
-        return lambda tm: tm
-    if not all(isinstance(x, Var) and type_eq(type_of(t), x.ty) for t, x in theta):
-        raise HolError("vsubst: bad substitution list")
-    return lambda tm: _vsubst(theta, tm)
-
-
 # ---------------------------------------------------------------------------
-# Type instantiation: substitute Tyvars for Types throughout a term,
-# including in type annotations on Vars/Consts/Abs.
+# Pretty printing
 # ---------------------------------------------------------------------------
 
 
-def _inst(env: list, tyin: list, tm: term) -> term:
-    if isinstance(tm, Var):
-        ty2 = type_subst(tyin, tm.ty)
-        tm2 = tm if ty2 is tm.ty else Var(tm.name, ty2)
-        for orig, new in env:
-            if new == tm2:
-                if orig != tm:
-                    raise Clash(tm2)
-                return tm2
-        return tm2
-    if isinstance(tm, Const):
-        ty2 = type_subst(tyin, tm.ty)
-        return tm if ty2 is tm.ty else Const(tm.name, ty2)
-    if isinstance(tm, Comb):
-        f2 = _inst(env, tyin, tm.fun)
-        a2 = _inst(env, tyin, tm.arg)
-        if f2 is tm.fun and a2 is tm.arg:
-            return tm
-        return Comb(f2, a2)
+def _pp_ty(ty, _max=180):
+    s = _pp_ty_raw(ty)
+    return s if len(s) <= _max else s[: _max - 3] + "..."
+
+
+def _pp_ty_raw(ty):
+    if isinstance(ty, Tyvar):
+        return ty.name
+    if isinstance(ty, Tyapp):
+        parts = []
+        if ty.type_args:
+            parts.append(", ".join(_pp_ty_raw(a) for a in ty.type_args))
+        if ty.term_args:
+            parts.append(", ".join(_pp_tm_raw(a) for a in ty.term_args))
+        if not parts:
+            return ty.tyop
+        return f"{ty.tyop}({'; '.join(parts)})"
+    if isinstance(ty, Pi):
+        if not _occurs_in_type(ty.bvar, ty.body):
+            return f"({_pp_ty_raw(ty.bvar.ty)} -> {_pp_ty_raw(ty.body)})"
+        return f"(Pi {ty.bvar.name}:{_pp_ty_raw(ty.bvar.ty)}. {_pp_ty_raw(ty.body)})"
+    return repr(ty)
+
+
+def _pp_tm(tm, _max=220):
+    s = _pp_tm_raw(tm)
+    return s if len(s) <= _max else s[: _max - 3] + "..."
+
+
+def _pp_tm_raw(tm):
+    if isinstance(tm, (Var, Const)):
+        return tm.name
     if isinstance(tm, Abs):
-        bvar2 = _inst([], tyin, tm.bvar)
-        env2 = [(tm.bvar, bvar2), *env]
-        try:
-            body2 = _inst(env2, tyin, tm.body)
-            if bvar2 is tm.bvar and body2 is tm.body:
-                return tm
-            return Abs(bvar2, body2)
-        except Clash as ex:
-            if ex.tm != bvar2:
-                raise
-            ifrees = [_inst([], tyin, v) for v in frees(tm.body)]
-            bvar3 = variant(ifrees, bvar2)
-            z = Var(bvar3.name, tm.bvar.ty)
-            return _inst(env, tyin, Abs(z, _vsubst([(z, tm.bvar)], tm.body)))
-    raise HolError("inst: ill-formed term")
-
-
-def inst(tyin: list) -> Callable[[term], term]:
-    if not tyin:
-        return lambda tm: tm
-    return lambda tm: _inst([], tyin, tm)
+        return f"(\\{tm.bvar.name}:{_pp_ty_raw(tm.bvar.ty)}. {_pp_tm_raw(tm.body)})"
+    if isinstance(tm, Comb):
+        return f"({_pp_tm_raw(tm.fun)} {_pp_tm_raw(tm.arg)})"
+    return repr(tm)
 
 
 # ---------------------------------------------------------------------------
-# Equality construction
+# type_of (pure function: terms inside certificates are well-formed by
+# construction, so this always succeeds on them)
 # ---------------------------------------------------------------------------
 
 
-def safe_mk_eq(lhs: term, r: term) -> term:
-    ty = type_of(lhs)
-    eq = Const("=", mk_arrow(ty, mk_arrow(ty, bool_ty)))
-    return Comb(Comb(eq, lhs), r)
+def type_of(tm: term) -> hol_type:
+    if isinstance(tm, Var) or isinstance(tm, Const):
+        return tm.ty
+    if isinstance(tm, Comb):
+        f_ty = type_of(tm.fun)
+        if isinstance(f_ty, Pi):
+            return subst_in_type([(tm.arg, f_ty.bvar)], f_ty.body)
+        raise HolError("type_of: head of application is not a Pi")
+    if isinstance(tm, Abs):
+        return Pi(tm.bvar, type_of(tm.body))
+    raise HolError("type_of: ill-typed term")
 
 
 # ---------------------------------------------------------------------------
-# Alpha ordering for term-union assumption lists
+# Term-set operations (alpha-aware assumption lists)
 # ---------------------------------------------------------------------------
 
 
 def alphaorder(tm1: term, tm2: term) -> int:
     if _tm_alpha([], tm1, tm2):
         return 0
-    # Fall back to a total order via repr; sufficient for this spike.
     r1, r2 = repr(tm1), repr(tm2)
     return (r1 > r2) - (r1 < r2)
 
 
 def term_union(l1: list, l2: list) -> list:
-    result = []
+    result: list = []
     i, j = 0, 0
     while i < len(l1) and j < len(l2):
         c = alphaorder(l1[i], l2[j])
@@ -738,102 +622,244 @@ def term_image(f: Callable[[term], term], lst: list) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Theorem destructors
+# Equation helpers (terms of shape Comb(Comb(Const("=",_), s), t))
 # ---------------------------------------------------------------------------
 
 
-def dest_thm(th: thm):
-    return list(th._asl), th._concl
+def _is_eq(c: term) -> bool:
+    return (
+        isinstance(c, Comb)
+        and isinstance(c.fun, Comb)
+        and isinstance(c.fun.fun, Const)
+        and c.fun.fun.name == "="
+    )
 
 
-def hyp(th: thm) -> list:
-    return list(th._asl)
+def _lhs(c: term) -> term:
+    return c.fun.arg
 
 
-def concl(th: thm) -> term:
-    return th._concl
+def _rhs(c: term) -> term:
+    return c.arg
+
+
+def safe_mk_eq(lhs: term, r: term) -> term:
+    ty = type_of(lhs)
+    eq_ty = Pi(Var("_", ty), Pi(Var("_", ty), bool_ty))
+    return Comb(Comb(Const("=", eq_ty), lhs), r)
 
 
 # ---------------------------------------------------------------------------
-# Inference rules. Each closely mirrors fusion.py; the changes are in the
-# typing primitives they call (mk_comb, type_of, etc.).
+# Typing rules: VAR, CONST, APP, LAMBDA, CONV
+#
+# These are the *only* legal ways to build a typing_thm. Term construction
+# outside of these rules has no certifying force.
 # ---------------------------------------------------------------------------
 
 
-def REFL(tm: term) -> thm:
-    return thm([], safe_mk_eq(tm, tm))
+def VAR(v: Var) -> typing_thm:
+    """var-intro: Gamma, x:A |- x : A  (the x:A binding is intrinsic to v)."""
+    return typing_thm([], v, v.ty)
+
+
+def CONST(name: str, tyin: list = ()) -> typing_thm:
+    """const-intro: |- c : tyin(A) where c:A is in the theory."""
+    decl_ty = get_const_type(name)
+    inst_ty = type_subst(tyin, decl_ty)
+    return typing_thm([], Const(name, inst_ty), inst_ty)
+
+
+def APP(f_th: typing_thm, a_th: typing_thm,
+        eq: type_eq_thm | None = None) -> typing_thm:
+    """appl':  Gamma |- f : Pi(x:A). B   Gamma |- a : A
+              ------------------------------------------
+                        Gamma |- f a : B[x/a]
+
+    If type_of(a) doesn't match A definitionally, eq must witness A == A'."""
+    f_ty = f_th._ty
+    if not isinstance(f_ty, Pi):
+        raise HolError(f"APP: head not a Pi -- got {_pp_ty(f_ty)}")
+    expected = f_ty.bvar.ty
+    got = a_th._ty
+    asl = term_union(f_th._asl, a_th._asl)
+    if not type_eq(expected, got):
+        if eq is None:
+            raise HolError(
+                f"APP: domain mismatch -- expected {_pp_ty(expected)}, "
+                f"got {_pp_ty(got)} (no bridge supplied)"
+            )
+        if not _bridge_matches(eq, expected, got):
+            raise HolError(
+                f"APP: bridge does not match -- "
+                f"witness {_pp_ty(eq._lhs)} == {_pp_ty(eq._rhs)} "
+                f"does not connect {_pp_ty(expected)} and {_pp_ty(got)}"
+            )
+        asl = term_union(asl, eq._asl)
+    result_ty = subst_in_type([(a_th._tm, f_ty.bvar)], f_ty.body)
+    return typing_thm(asl, Comb(f_th._tm, a_th._tm), result_ty)
+
+
+def LAMBDA(v: Var, body_th: typing_thm) -> typing_thm:
+    """lambda':  Gamma, x:A |- t : B
+                ----------------------------
+                Gamma |- (\\x:A. t) : Pi(x:A). B
+    Any assumption mentioning v is discharged (it's no longer in scope)."""
+    asl = [a for a in body_th._asl if not vfree_in(v, a)]
+    return typing_thm(asl, Abs(v, body_th._tm), Pi(v, body_th._ty))
+
+
+def CONV(t_th: typing_thm, eq: type_eq_thm) -> typing_thm:
+    """Admissible conversion rule: Gamma |- t : A   Gamma |- A == B
+                                    -------------------------------
+                                          Gamma |- t : B"""
+    asl = term_union(t_th._asl, eq._asl)
+    if type_eq(t_th._ty, eq._lhs):
+        return typing_thm(asl, t_th._tm, eq._rhs)
+    if type_eq(t_th._ty, eq._rhs):
+        return typing_thm(asl, t_th._tm, eq._lhs)
+    raise HolError(
+        f"CONV: term type {_pp_ty(t_th._ty)} matches neither side of "
+        f"{_pp_ty(eq._lhs)} == {_pp_ty(eq._rhs)}"
+    )
+
+
+def _bridge_matches(eq: type_eq_thm, A: hol_type, B: hol_type) -> bool:
+    return (type_eq(eq._lhs, A) and type_eq(eq._rhs, B)) or (
+        type_eq(eq._lhs, B) and type_eq(eq._rhs, A)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Type-equality rules: TY_REFL, TY_SYM, TY_TRANS, TY_CONG_BASE, TY_CONG_PI
+# ---------------------------------------------------------------------------
+
+
+def TY_REFL(ty: hol_type) -> type_eq_thm:
+    return type_eq_thm([], ty, ty)
+
+
+def TY_SYM(e: type_eq_thm) -> type_eq_thm:
+    return type_eq_thm(e._asl, e._rhs, e._lhs)
+
+
+def TY_TRANS(e1: type_eq_thm, e2: type_eq_thm) -> type_eq_thm:
+    if not type_eq(e1._rhs, e2._lhs):
+        raise HolError("TY_TRANS: middle types do not match")
+    return type_eq_thm(term_union(e1._asl, e2._asl), e1._lhs, e2._rhs)
+
+
+def TY_CONG_BASE(tyop: str, type_args: list, term_eqs: list) -> type_eq_thm:
+    """congBase':  a : Pi(x1:A1)...(xn:An). tp in T
+                    Gamma |- s_i = t_i  (regular term-equality thms)
+                  -------------------------------------------------
+                  Gamma |- a s1...sn == a t1...tn
+
+    Each term_eqs[i] must be a thm whose conclusion is an equation."""
+    try:
+        arity, params = get_type_kind(tyop)
+    except KeyError:
+        raise HolError(f"TY_CONG_BASE: unknown type {tyop}")
+    if arity != len(type_args):
+        raise HolError("TY_CONG_BASE: wrong type-arg count")
+    if len(params) != len(term_eqs):
+        raise HolError("TY_CONG_BASE: wrong term-arg count")
+    asl: list = []
+    lhss: list = []
+    rhss: list = []
+    for eq in term_eqs:
+        if not isinstance(eq, thm) or not _is_eq(eq._concl):
+            raise HolError("TY_CONG_BASE: each argument must be an equation thm")
+        lhss.append(_lhs(eq._concl))
+        rhss.append(_rhs(eq._concl))
+        asl = term_union(asl, eq._asl)
+    return type_eq_thm(
+        asl,
+        Tyapp(tyop, tuple(type_args), tuple(lhss)),
+        Tyapp(tyop, tuple(type_args), tuple(rhss)),
+    )
+
+
+def TY_CONG_PI(v: Var, dom_eq: type_eq_thm, cod_eq: type_eq_thm) -> type_eq_thm:
+    """congPi:  Gamma |- A == A'   Gamma, x:A |- B == B'
+               --------------------------------------------
+               Gamma |- Pi(x:A). B == Pi(x:A'). B'
+    v carries the binder name and its type; v.ty must be dom_eq._lhs."""
+    if not type_eq(v.ty, dom_eq._lhs):
+        raise HolError("TY_CONG_PI: binder type does not match domain LHS")
+    asl = term_union(dom_eq._asl, cod_eq._asl)
+    return type_eq_thm(
+        asl,
+        Pi(v, cod_eq._lhs),
+        Pi(Var(v.name, dom_eq._rhs), cod_eq._rhs),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Validity rules: REFL, ASSUME, BETA, TRANS, MK_COMB, ABS, EQ_MP,
+# DEDUCT_ANTISYM_RULE, INST, INST_TYPE
+# ---------------------------------------------------------------------------
+
+
+def REFL(t_th: typing_thm) -> thm:
+    return thm(t_th._asl, safe_mk_eq(t_th._tm, t_th._tm))
+
+
+def ASSUME(F_th: typing_thm) -> thm:
+    if not type_eq(F_th._ty, bool_ty):
+        raise HolError("ASSUME: not a proposition")
+    return thm([F_th._tm, *F_th._asl], F_th._tm)
+
+
+def BETA(redex_th: typing_thm) -> thm:
+    tm = redex_th._tm
+    if not (
+        isinstance(tm, Comb)
+        and isinstance(tm.fun, Abs)
+        and tm.arg == tm.fun.bvar
+    ):
+        raise HolError("BETA: not a trivial beta-redex")
+    return thm(redex_th._asl, safe_mk_eq(tm, tm.fun.body))
 
 
 def TRANS(th1: thm, th2: thm) -> thm:
     c1, c2 = th1._concl, th2._concl
-    if (
-        isinstance(c1, Comb) and isinstance(c1.fun, Comb)
-        and isinstance(c1.fun.fun, Const) and c1.fun.fun.name == "="
-        and isinstance(c2, Comb) and isinstance(c2.fun, Comb)
-        and isinstance(c2.fun.fun, Const) and c2.fun.fun.name == "="
-        and alphaorder(c1.arg, c2.fun.arg) == 0
-    ):
-        return thm(term_union(th1._asl, th2._asl), Comb(c1.fun, c2.arg))
+    if _is_eq(c1) and _is_eq(c2) and alphaorder(_rhs(c1), _lhs(c2)) == 0:
+        return thm(term_union(th1._asl, th2._asl), Comb(c1.fun, _rhs(c2)))
     raise HolError("TRANS")
 
 
-def MK_COMB(th1: thm, th2: thm) -> thm:
+def MK_COMB(th1: thm, th2: thm, eq: type_eq_thm | None = None) -> thm:
     c1, c2 = th1._concl, th2._concl
-    if not (
-        isinstance(c1, Comb) and isinstance(c1.fun, Comb)
-        and isinstance(c1.fun.fun, Const) and c1.fun.fun.name == "="
-        and isinstance(c2, Comb) and isinstance(c2.fun, Comb)
-        and isinstance(c2.fun.fun, Const) and c2.fun.fun.name == "="
-    ):
+    if not (_is_eq(c1) and _is_eq(c2)):
         raise HolError("MK_COMB: not both equations")
-    l1, r1 = c1.fun.arg, c1.arg
-    l2, r2 = c2.fun.arg, c2.arg
+    l1, r1 = _lhs(c1), _rhs(c1)
+    l2, r2 = _lhs(c2), _rhs(c2)
     f_ty = type_of(l1)
-    if isinstance(f_ty, Pi) and type_eq(f_ty.bvar.ty, type_of(l2)):
-        return thm(
-            term_union(th1._asl, th2._asl),
-            safe_mk_eq(Comb(l1, l2), Comb(r1, r2)),
-        )
-    raise HolError("MK_COMB: types do not agree")
+    if not isinstance(f_ty, Pi):
+        raise HolError("MK_COMB: head type is not Pi")
+    expected, got = f_ty.bvar.ty, type_of(l2)
+    asl = term_union(th1._asl, th2._asl)
+    if not type_eq(expected, got):
+        if eq is None or not _bridge_matches(eq, expected, got):
+            raise HolError("MK_COMB: domain types do not agree")
+        asl = term_union(asl, eq._asl)
+    return thm(asl, safe_mk_eq(Comb(l1, l2), Comb(r1, r2)))
 
 
-def ABS(v: term, th: thm) -> thm:
-    if not isinstance(v, Var):
-        raise HolError("ABS: not a variable")
+def ABS(v: Var, th: thm) -> thm:
     c = th._concl
-    if (
-        isinstance(c, Comb) and isinstance(c.fun, Comb)
-        and isinstance(c.fun.fun, Const) and c.fun.fun.name == "="
-        and not any(vfree_in(v, t) for t in th._asl)
-    ):
-        l, r = c.fun.arg, c.arg
-        return thm(th._asl, safe_mk_eq(Abs(v, l), Abs(v, r)))
-    raise HolError("ABS")
-
-
-def BETA(tm: term) -> thm:
-    if (
-        isinstance(tm, Comb) and isinstance(tm.fun, Abs)
-        and tm.arg == tm.fun.bvar
-    ):
-        return thm([], safe_mk_eq(tm, tm.fun.body))
-    raise HolError("BETA: not a trivial beta-redex")
-
-
-def ASSUME(tm: term) -> thm:
-    if not type_eq(type_of(tm), bool_ty):
-        raise HolError("ASSUME: not a proposition")
-    return thm([tm], tm)
+    if not _is_eq(c):
+        raise HolError("ABS: conclusion not an equation")
+    if any(vfree_in(v, a) for a in th._asl):
+        raise HolError("ABS: bound variable occurs free in hypotheses")
+    l, r = _lhs(c), _rhs(c)
+    return thm(th._asl, safe_mk_eq(Abs(v, l), Abs(v, r)))
 
 
 def EQ_MP(th1: thm, th2: thm) -> thm:
     c = th1._concl
-    if (
-        isinstance(c, Comb) and isinstance(c.fun, Comb)
-        and isinstance(c.fun.fun, Const) and c.fun.fun.name == "="
-        and alphaorder(c.fun.arg, th2._concl) == 0
-    ):
-        return thm(term_union(th1._asl, th2._asl), c.arg)
+    if _is_eq(c) and alphaorder(_lhs(c), th2._concl) == 0:
+        return thm(term_union(th1._asl, th2._asl), _rhs(c))
     raise HolError("EQ_MP")
 
 
@@ -843,39 +869,30 @@ def DEDUCT_ANTISYM_RULE(th1: thm, th2: thm) -> thm:
     return thm(term_union(asl1, asl2), safe_mk_eq(th1._concl, th2._concl))
 
 
-def INST_TYPE(theta: list, th: thm) -> thm:
-    inst_fn = inst(theta)
-    return thm(term_image(inst_fn, th._asl), inst_fn(th._concl))
-
-
 def INST(theta: list, th: thm) -> thm:
-    inst_fn = vsubst(theta)
-    return thm(term_image(inst_fn, th._asl), inst_fn(th._concl))
+    """theta : list of (replacement_term, var_to_replace).
+    Spike limitation: replacement_term's type must definitionally equal
+    var_to_replace's type."""
+    if not theta:
+        return th
+    for t, x in theta:
+        if not isinstance(x, Var):
+            raise HolError("INST: rhs must be a variable")
+        if not type_eq(type_of(t), x.ty):
+            raise HolError("INST: type mismatch (use APP+CONV for prop. cases)")
+    f = lambda tm: _vsubst(theta, tm)
+    return thm(term_image(f, th._asl), f(th._concl))
+
+
+def INST_TYPE(theta: list, th: thm) -> thm:
+    if not theta:
+        return th
+    f = lambda tm: _inst_in_term(theta, tm)
+    return thm(term_image(f, th._asl), f(th._concl))
 
 
 # ---------------------------------------------------------------------------
-# TYPE_EQ: sketch of lifting term equality to type equality.
-#
-# In full DHOL, from `|- s = t : A` one can derive `T(s) == T(t)` for any
-# type family T. The kernel would need a rule like:
-#
-#     |- s = t : A     T : A -> tp
-#     ----------------------------    (TYPE_EQ_CONG)
-#         |- T(s) == T(t)
-#
-# Then mk_comb / type_of would consult provable type equalities. Wiring
-# that in cleanly means either:
-#   (a) Making typing a derivation (judgement-as-theorem), OR
-#   (b) A confluent rewriting system on types that the kernel runs.
-#
-# For this spike we leave the rule unimplemented and stick to definitional
-# type equality. Downstream proof scripts must α-rename / β-normalize
-# indices themselves before applying rules.
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Axioms and definitions (HOL Light style)
+# Axioms and definitions
 # ---------------------------------------------------------------------------
 
 the_axioms: list = []
@@ -885,10 +902,12 @@ def axioms() -> list:
     return list(the_axioms)
 
 
-def new_axiom(tm: term) -> thm:
-    if not type_eq(type_of(tm), bool_ty):
+def new_axiom(F_th: typing_thm) -> thm:
+    if not type_eq(F_th._ty, bool_ty):
         raise HolError("new_axiom: not a proposition")
-    th = thm([], tm)
+    if F_th._asl:
+        raise HolError("new_axiom: axiom must be unconditional")
+    th = thm([], F_th._tm)
     the_axioms.append(th)
     return th
 
@@ -900,95 +919,128 @@ def definitions() -> list:
     return list(the_definitions)
 
 
-def new_basic_definition(tm: term) -> thm:
-    if not (
-        isinstance(tm, Comb) and isinstance(tm.fun, Comb)
-        and isinstance(tm.fun.fun, Const) and tm.fun.fun.name == "="
-    ):
-        raise HolError("new_basic_definition: not an equation")
-    lhs, r = tm.fun.arg, tm.arg
-    if isinstance(lhs, Const):
-        raise HolError(f"new_basic_definition: '{lhs.name}' is already defined")
-    if not isinstance(lhs, Var):
-        raise HolError("new_basic_definition: lhs is not a variable")
-    if not freesin([], r):
-        fv_names = [v.name for v in frees(r)]
-        raise HolError(
-            "new_definition: term not closed: " + ", ".join(fv_names)
-        )
+def new_basic_definition(lhs: Var, rhs_th: typing_thm) -> thm:
+    if rhs_th._asl:
+        raise HolError("new_basic_definition: rhs must be unconditional")
+    if not freesin([], rhs_th._tm):
+        fv = [v.name for v in frees(rhs_th._tm)]
+        raise HolError("new_basic_definition: rhs not closed: " + ", ".join(fv))
+    if not type_eq(lhs.ty, rhs_th._ty):
+        raise HolError("new_basic_definition: declared type does not match rhs")
     allowed = tyvars(lhs.ty)
-    if not all(tv in allowed for tv in type_vars_in_term(r)):
-        raise HolError("new_definition: type variables not reflected in constant")
+    if not all(tv in allowed for tv in type_vars_in_term(rhs_th._tm)):
+        raise HolError(
+            "new_basic_definition: type variables not reflected in constant"
+        )
     new_constant(lhs.name, lhs.ty)
     c = Const(lhs.name, lhs.ty)
-    dth = thm([], safe_mk_eq(c, r))
+    dth = thm([], safe_mk_eq(c, rhs_th._tm))
     the_definitions.append(dth)
     return dth
 
 
-# new_basic_type_definition is omitted for this spike. The HOL-style
-# version goes through; the only change is that `abs`/`rep` constants
-# now have Pi types `Pi(r:rty, new_aty)` rather than `rty -> new_aty`,
-# and `new_aty` is `Tyapp(tyname, tvs, ())` (or with term args if the
-# definition introduces a term-indexed family).
-
-
 # ---------------------------------------------------------------------------
-# Demo: vectors indexed by nat
+# Demo: vectors indexed by nat, with a propositional type bridge
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # Declare nat as a base type and 0, S, vec, nil, cons as constants.
+    # nat as a base type
     new_type("nat", type_arity=0, term_params=())
     nat_ty = Tyapp("nat", (), ())
-
     new_constant("0", nat_ty)
     new_constant("S", mk_arrow(nat_ty, nat_ty))
+    new_constant("add", mk_arrow(nat_ty, mk_arrow(nat_ty, nat_ty)))
 
-    zero = Const("0", nat_ty)
-    succ = Const("S", mk_arrow(nat_ty, nat_ty))
-    one = Comb(succ, zero)
-    two = Comb(succ, one)
+    zero_th = CONST("0")
+    succ_th = CONST("S")
+    add_th = CONST("add")
+    one_th = APP(succ_th, zero_th)
+    two_th = APP(succ_th, one_th)
+    print("0   ::", _pp_ty(zero_th._ty))
+    print("S 0 ::", _pp_ty(one_th._ty))
+    print()
 
-    # vec : nat -> tp   (a term-indexed type family)
+    # vec : nat -> tp
     new_type("vec", type_arity=0, term_params=(nat_ty,))
 
-    def vec(n):
-        return mk_type("vec", [], [n])
+    def vec(n_th):
+        return mk_type("vec", [], [n_th])
 
     # nil : vec 0
-    new_constant("nil", vec(zero))
-    nil = Const("nil", vec(zero))
+    new_constant("nil", vec(zero_th))
+    nil_th = CONST("nil")
+    print("nil ::", _pp_ty(nil_th._ty))
 
-    # cons : Pi (n:nat). nat -> vec n -> vec (S n)
+    # cons : Pi(n:nat). nat -> vec n -> vec (S n)
     n_var = Var("n", nat_ty)
-    cons_ty = Pi(
-        n_var,
-        mk_arrow(nat_ty, mk_arrow(vec(n_var), vec(Comb(succ, n_var)))),
-    )
+    n_th = VAR(n_var)
+    vec_n = vec(n_th)
+    vec_Sn = vec(APP(succ_th, n_th))
+    cons_ty = Pi(n_var, mk_arrow(nat_ty, mk_arrow(vec_n, vec_Sn)))
     new_constant("cons", cons_ty)
-    cons = Const("cons", cons_ty)
+    cons_th = CONST("cons")
 
-    # Build cons 0 (the head element) nil  -- but cons takes n first.
-    # cons applied to 0 has type:  nat -> vec 0 -> vec (S 0)
-    cons_0 = mk_comb(cons, zero)
-    print("cons 0  ::", _pp_ty(type_of(cons_0)))
+    # Build cons 0 0 nil  ::  vec (S 0)
+    v1_th = APP(APP(APP(cons_th, zero_th), zero_th), nil_th)
+    print("cons 0 0 nil           ::", _pp_ty(v1_th._ty))
 
-    # cons 0 5? we don't have a numeral; pretend cons 0 zero nil makes sense.
-    cons_0_zero = mk_comb(cons_0, zero)
-    print("cons 0 0  ::", _pp_ty(type_of(cons_0_zero)))
+    # Build cons 1 0 (cons 0 0 nil)  ::  vec (S (S 0))
+    v2_th = APP(APP(APP(cons_th, one_th), zero_th), v1_th)
+    print("cons 1 0 (cons 0 0 nil)::", _pp_ty(v2_th._ty))
 
-    v1 = mk_comb(cons_0_zero, nil)
-    print("cons 0 0 nil  ::", _pp_ty(type_of(v1)))
-
-    # And a longer one: cons 1 0 (cons 0 0 nil)  :  vec (S (S 0))
-    cons_1 = mk_comb(cons, one)
-    cons_1_zero = mk_comb(cons_1, zero)
-    v2 = mk_comb(cons_1_zero, v1)
-    print("cons 1 0 (cons 0 0 nil)  ::", _pp_ty(type_of(v2)))
-
-    # Domain check: feeding a vec 0 where a vec (S 0) is expected fails.
+    # Definitional mismatch: cons 1 0 nil rejected (expects vec 1, got vec 0)
     try:
-        mk_comb(cons_1_zero, nil)  # expects vec (S 0), got vec 0
+        APP(APP(APP(cons_th, one_th), zero_th), nil_th)
     except HolError as e:
-        print("expected failure:", str(e).splitlines()[0])
+        print("\nexpected failure:", str(e).splitlines()[0])
+
+    # ----------------------------------------------------------------
+    # Propositional type bridge.
+    #
+    # Axiom: forall n. add 0 n = n  -- we encode just the free-variable form
+    # |- add 0 n = n   (n a free variable of type nat).
+    # Then specialize to n := 0, lift to vec(add 0 0) == vec 0 via TY_CONG_BASE,
+    # and use the bridge to apply a function expecting vec 0 to a value
+    # whose type is vec(add 0 0).
+    # ----------------------------------------------------------------
+
+    print()
+    add_0_n = APP(APP(add_th, zero_th), VAR(n_var))
+    eq_form = APP(APP(CONST("=", [(nat_ty, aty)]), add_0_n), VAR(n_var))
+    print("axiom term ::", _pp_tm(eq_form._tm), ":", _pp_ty(eq_form._ty))
+    add_zero = new_axiom(eq_form)  # |- add 0 n = n
+    print("axiom      ::", add_zero)
+
+    # Specialize n := 0
+    add_0_0_eq_0 = INST([(zero_th._tm, n_var)], add_zero)
+    print("specialised::", add_0_0_eq_0)
+
+    # Lift to type equality vec(add 0 0) == vec 0
+    vec_bridge = TY_CONG_BASE("vec", [], [add_0_0_eq_0])
+    print("type bridge::", vec_bridge)
+
+    # Build a value of type vec(add 0 0) by CONV-ing nil : vec 0
+    nil_at_add = CONV(nil_th, TY_SYM(vec_bridge))
+    print("nil viewed as vec(add 0 0) ::", _pp_ty(nil_at_add._ty))
+
+    # Define a consumer  g : vec 0 -> nat
+    g_v = Var("v", vec(zero_th))
+    g_th = LAMBDA(g_v, zero_th)  # \v:vec(0). 0
+    print("g          ::", _pp_ty(g_th._ty))
+
+    # Now apply g to nil_at_add (whose type is vec(add 0 0), not vec 0).
+    # Without a bridge, APP rejects:
+    try:
+        APP(g_th, nil_at_add)
+    except HolError as e:
+        print("without bridge:", str(e).splitlines()[0])
+
+    # With the bridge, APP succeeds and the resulting typing absorbs the
+    # bridge's hypotheses (here empty, since the axiom was unconditional).
+    g_nil = APP(g_th, nil_at_add, eq=vec_bridge)
+    print("with bridge: g (nil :vec(add 0 0)) ::", _pp_ty(g_nil._ty))
+    print("             asl =", g_nil._asl)
+
+    # Wrap it into a regular theorem.
+    g_nil_refl = REFL(g_nil)
+    print("REFL(g nil) ::", g_nil_refl)
