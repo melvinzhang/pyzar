@@ -860,6 +860,55 @@ def BETA(redex_th: typing_thm) -> thm:
     return thm(redex_th._asl, safe_mk_eq(tm, tm.fun.body))
 
 
+def ETA(t_th: typing_thm) -> thm:
+    """etaPi:  Gamma |- t : Pi(x:A). B
+              -----------------------------
+              Gamma |- t = (\\x:A. t x)
+
+    The bound variable name is chosen fresh to avoid capture in t."""
+    f_ty = t_th._ty
+    if not isinstance(f_ty, Pi):
+        raise HolError(f"ETA: term type is not a Pi (got {_pp_ty(f_ty)})")
+    fresh_v = variant(frees(t_th._tm), f_ty.bvar)
+    eta_form = Abs(fresh_v, Comb(t_th._tm, fresh_v))
+    return thm(t_th._asl, safe_mk_eq(t_th._tm, eta_form))
+
+
+def EQ_TY_CONV(eq_th: thm, ty_eq: type_eq_thm) -> thm:
+    """Validity-level conversion:
+                Gamma |- s =A t    Delta |- A == B
+                ----------------------------------
+                       Gamma + Delta |- s =B t
+
+    Re-tags an equation's = constant at a propositionally-equal type.
+    The bridge may run in either direction (A == B or B == A). The
+    bridge's hypotheses are absorbed into the result theorem.
+
+    This plugs the gap where DHOL admits the conversion rule
+        Gamma |- F : bool    Gamma |- F == F'   (with F, F' = s =T t)
+        Gamma |- F     ===>  Gamma |- F'
+    but the kernel had no way to apply it at the validity layer."""
+    c = eq_th._concl
+    if not _is_eq(c):
+        raise HolError("EQ_TY_CONV: conclusion is not an equation")
+    eq_const = c.fun.fun
+    # The = constant's type is Pi(_:A, Pi(_:A, bool)); read A off the outer Pi.
+    A = eq_const.ty.bvar.ty
+    if type_eq(ty_eq._lhs, A):
+        B = ty_eq._rhs
+    elif type_eq(ty_eq._rhs, A):
+        B = ty_eq._lhs
+    else:
+        raise HolError(
+            f"EQ_TY_CONV: bridge {_pp_ty(ty_eq._lhs)} == {_pp_ty(ty_eq._rhs)} "
+            f"does not connect equation type {_pp_ty(A)}"
+        )
+    new_eq_const = Const("=", Pi(Var("_", B), Pi(Var("_", B), bool_ty)))
+    s, t = _lhs(c), _rhs(c)
+    new_concl = Comb(Comb(new_eq_const, s), t)
+    return thm(term_union(eq_th._asl, ty_eq._asl), new_concl)
+
+
 def TRANS(th1: thm, th2: thm) -> thm:
     c1, c2 = th1._concl, th2._concl
     if _is_eq(c1) and _is_eq(c2) and alphaorder(_rhs(c1), _lhs(c2)) == 0:
@@ -1162,3 +1211,50 @@ if __name__ == "__main__":
     print("INST [n:=add 0 0, v:=nil (coerced)] ::", bridged_inst)
     for free in frees(bridged_inst._concl):
         print(f"  free var {free.name} :: {_pp_ty(free.ty)}")
+
+    # ----------------------------------------------------------------
+    # ETA: eta-expand a Pi-typed term.
+    # ----------------------------------------------------------------
+    print()
+    succ_eta = ETA(succ_th)
+    print("ETA(S) ::", succ_eta)
+
+    # Eta-expanding cons applied to 0 (type nat -> vec 0 -> vec (S 0)).
+    cons0_eta = ETA(APP(cons_th, zero_th))
+    print("ETA(cons 0) ::", cons0_eta)
+
+    # Eta-expanding cons itself (dependent Pi: Pi(n:nat). ...).
+    cons_eta = ETA(cons_th)
+    print("ETA(cons)   ::", cons_eta)
+
+    # ----------------------------------------------------------------
+    # EQ_TY_CONV: re-tag an equation at a propositionally-equal type.
+    # ----------------------------------------------------------------
+    print()
+    def _eq_tag(th):
+        return _pp_ty(th._concl.fun.fun.ty.bvar.ty)
+
+    nil_refl = REFL(nil_th)
+    print(f"REFL(nil)                :: {nil_refl}  [= tagged at {_eq_tag(nil_refl)}]")
+    # nil_refl's = constant is tagged at vec(0). Re-tag via the bridge
+    # vec(add 0 0) == vec(0) (which here happens to have empty asl).
+    nil_refl_at_add = EQ_TY_CONV(nil_refl, vec_bridge)
+    print(f"EQ_TY_CONV via vec_bridge:: {nil_refl_at_add}  [= tagged at {_eq_tag(nil_refl_at_add)}]")
+
+    # Demonstrate hypothesis propagation: ASSUME the same equation
+    # add 0 0 = 0, lift it, and use the resulting bridge in EQ_TY_CONV;
+    # the assumption should appear in the result's asl.
+    print()
+    assumed_eq = ASSUME(eq_form)  # not quite -- eq_form is the universally
+                                  # quantified form. Let's specialise:
+    # Build an assumption form with n bound to 0:
+    n0_eq = APP(APP(CONST("=", [(nat_ty, aty)]),
+                    APP(APP(add_th, zero_th), zero_th)),
+                zero_th)
+    print("assumption term ::", _pp_tm(n0_eq._tm))
+    assumed_n0 = ASSUME(n0_eq)
+    print("ASSUME           ::", assumed_n0)
+    vec_bridge_hyp = TY_CONG_BASE("vec", [], [assumed_n0])
+    print("derived bridge   ::", vec_bridge_hyp)
+    nil_refl_hyp = EQ_TY_CONV(nil_refl, vec_bridge_hyp)
+    print(f"EQ_TY_CONV w/ hyp:: {nil_refl_hyp}  [= tagged at {_eq_tag(nil_refl_hyp)}]")
