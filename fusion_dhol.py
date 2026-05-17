@@ -197,6 +197,44 @@ class thm:
         return hash((tuple(self._asl), self._concl))
 
 
+class StagedThm:
+    """(Φ) ▷ F  -- a thm parameterized over a Φ-telescope.
+
+    Φ is a telescope of Tyvar | Var | Assume binders, same vocabulary as
+    on `new_type` and `new_constant`. The underlying thm carries the
+    Assume formulas of Φ as its asl, and F as its conclusion.
+
+    Use `interpret(staged, σ)` to instantiate to a concrete thm; σ
+    matches Φ pointwise (hol_type for Tyvar, typing_thm for Var, thm
+    for Assume), validated by the same `_apply_phi_subst` walker used
+    by `mk_type` and `CONST`."""
+
+    __slots__ = ("_phi", "_thm")
+
+    def __init__(self, phi, th):
+        self._phi = tuple(phi)
+        self._thm = th
+
+    def __repr__(self):
+        if not self._phi:
+            return repr(self._thm)
+        return f"({_pp_phi(self._phi)}) ▷ {self._thm!r}"
+
+
+def _pp_phi(phi) -> str:
+    parts = []
+    for e in phi:
+        if isinstance(e, Tyvar):
+            parts.append(e.name)
+        elif isinstance(e, Var):
+            parts.append(f"{e.name}:{_pp_ty(e.ty)}")
+        elif isinstance(e, Assume):
+            parts.append(f"▷{_pp_tm(e.formula)}")
+        else:
+            parts.append(repr(e))
+    return ", ".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Type constants (kinded) and term constants
 #
@@ -1425,6 +1463,28 @@ def TM_CONG_BASE(name: str, args: list,
     return thm(asl, safe_mk_eq(inst_ty_l, lhs_const, rhs_const))
 
 
+def THM_CONG_BASE(staged: StagedThm, args: list) -> thm:
+    """Staged-axiom congruence (analogue of TY_CONG_BASE / TM_CONG_BASE
+    for a staged axiom):
+            (Φ) ▷ F in theory      per-slot Φ-args
+            -------------------------------------------
+                  Gamma |- F[σ_l] = F[σ_r]  : bool
+
+    Each `args[i]` matches Φ entry i (see `_apply_phi_dual`)."""
+    if not isinstance(staged, StagedThm):
+        raise HolError("THM_CONG_BASE: first argument must be a StagedThm")
+    phi = staged._phi
+    F = staged._thm._concl
+    result = _apply_phi_dual(phi, args, "THM_CONG_BASE")
+    F_l = _inst_in_term(
+        [], result.lhs.theta_ty, _vsubst(result.lhs.theta_tm, F)
+    )
+    F_r = _inst_in_term(
+        [], result.rhs.theta_ty, _vsubst(result.rhs.theta_tm, F)
+    )
+    return thm(result.asl_extra, safe_mk_eq(bool_ty, F_l, F_r))
+
+
 def TY_CONG_PI(v: Var, dom_eq: type_eq_thm, cod_eq: type_eq_thm) -> type_eq_thm:
     """congPi:  Gamma |- A == A'   Gamma, x:A |- B == B'
                --------------------------------------------
@@ -1737,13 +1797,84 @@ def axioms() -> list:
     return list(the_axioms)
 
 
-def new_axiom(F_th: typing_thm) -> thm:
+def new_axiom(F_th: typing_thm, phi: tuple | None = None) -> StagedThm:
+    """Declare an axiom `(Φ) ▷ F`. Returns a StagedThm; use
+    `interpret(staged, σ)` to instantiate.
+
+    Φ is a telescope of Tyvar | Var | Assume binders, same vocabulary
+    as on `new_type` / `new_constant`. When Φ is empty (the default),
+    the axiom is concrete: `F_th` must be unconditional, free of Vars,
+    and free of Tyvars not already in Φ.
+
+    Otherwise Φ binds the axiom's parameters:
+      * `F_th._asl` entries must alpha-match Assume formulas in Φ;
+      * free Vars of `F_th._tm` must be bound by Var entries in Φ;
+      * free Tyvars of `F_th._tm` must be bound by Tyvar entries in Φ.
+    """
     _require_bool(F_th, "new_axiom")
-    if F_th._asl:
-        raise HolError("new_axiom: axiom must be unconditional")
-    th = thm([], F_th._tm)
-    the_axioms.append(th)
-    return th
+    if phi is None:
+        phi = ()
+    _check_phi(phi, "new_axiom")
+    phi = tuple(phi)
+
+    expected_asl: list = []
+    for b in phi:
+        if isinstance(b, Assume):
+            expected_asl = term_union(expected_asl, [b.formula])
+    for a in F_th._asl:
+        if not any(_tm_alpha([], a, f) for f in expected_asl):
+            raise HolError(
+                "new_axiom: asl entry "
+                f"{_pp_tm(a)} is not declared by any Assume entry in Φ"
+            )
+
+    bound_vars = [b for b in phi if isinstance(b, Var)]
+    for fv in frees(F_th._tm):
+        if fv not in bound_vars:
+            raise HolError(
+                f"new_axiom: free var {fv.name} is not bound by "
+                f"any Var entry in Φ"
+            )
+
+    allowed_tvs = [b for b in phi if isinstance(b, Tyvar)]
+    for tv in type_vars_in_term(F_th._tm):
+        if tv not in allowed_tvs:
+            raise HolError(
+                f"new_axiom: type-var {tv.name} is not reflected in Φ"
+            )
+
+    underlying = thm(expected_asl, F_th._tm)
+    staged = StagedThm(phi, underlying)
+    the_axioms.append(staged)
+    return staged
+
+
+def interpret(staged: StagedThm, sigma: tuple) -> thm:
+    """One-shot interpretation of a staged thm at σ.
+
+    Walks Φ left-to-right, discharging slot-by-slot:
+      * Tyvar slot  -- σ-entry is a `hol_type` (INST_TYPE-style);
+      * Var slot    -- σ-entry is a `typing_thm` (INST-style; its
+                       _ty must match the binder type under
+                       earlier substitutions);
+      * Assume slot -- σ-entry is a `thm` discharging the Assume
+                       formula under earlier substitutions (MP-style).
+
+    σ-shape is validated by `_apply_phi_subst` -- the same walker
+    `mk_type` and `CONST` use.
+
+    The result is a closed `thm`: Γ |- F[σ], whose asl absorbs the
+    typing_thm and Assume-proof assumptions from σ; the original
+    Assume-formula asl entries are discharged."""
+    if not isinstance(staged, StagedThm):
+        raise HolError("interpret: first argument must be a StagedThm")
+    phi = staged._phi
+    body = staged._thm
+    result = _apply_phi_subst(phi, tuple(sigma), "interpret")
+    f = lambda tm: _inst_in_term(
+        [], result.theta_ty, _vsubst(result.theta_tm, tm)
+    )
+    return thm(result.asl_extra, f(body._concl))
 
 
 the_definitions: list = []
@@ -1891,12 +2022,12 @@ if __name__ == "__main__":
     add_0_n = APP(APP(add_th, zero_th), VAR(n_var))
     eq_form = APP(APP(CONST("=", (nat_ty,)), add_0_n), VAR(n_var))
     print("axiom term ::", _pp_tm(eq_form._tm), ":", _pp_ty(eq_form._ty))
-    add_zero = new_axiom(eq_form)  # |- add 0 n = n
+    add_zero = new_axiom(eq_form, phi=(n_var,))  # (n:nat) ▷ add 0 n = n
     print("axiom      ::", add_zero)
 
-    # Specialize n := 0
-    add_0_0_eq_0 = INST([(zero_th, n_var)], add_zero)
-    print("specialised::", add_0_0_eq_0)
+    # Specialize n := 0 in one step via interpret(σ).
+    add_0_0_eq_0 = interpret(add_zero, (zero_th,))
+    print("interpreted::", add_0_0_eq_0)
 
     # Lift to type equality vec(add 0 0) == vec 0
     vec_bridge = TY_CONG_BASE("vec", [add_0_0_eq_0])
@@ -2426,4 +2557,76 @@ if __name__ == "__main__":
     # the Pi-encoded body.
     dbl_cong = TM_CONG_BASE("dbl", [add_0_0_eq_0])
     print("dbl(add 0 0) = dbl(0) ::", dbl_cong)
+
+    # ----------------------------------------------------------------
+    # Staged theorems: (Φ) ▷ F as a first-class shape on axioms.
+    #
+    # Exercise each slot species: Tyvar (polymorphism), Var (dependent
+    # term parameter), Assume (precondition). `interpret(staged, σ)`
+    # fans the three discharge axes in one step; THM_CONG_BASE relates
+    # two interpretations σ_l / σ_r via per-slot equations.
+    # ----------------------------------------------------------------
+    print()
+
+    # Polymorphic axiom over a Tyvar slot. Declare a polymorphic
+    # `default : Pi(A:tp). A` constant, then state the axiom
+    #   (A:tp) ▷ default(A) = default(A)
+    # (trivially true, but it exercises the Tyvar slot of new_axiom).
+    A_tv = Tyvar("A")
+    new_constant("default", A_tv, phi=(A_tv,))
+    default_A = CONST("default", (A_tv,))
+    eq_A = APP(APP(CONST("=", (A_tv,)), default_A), default_A)
+    poly_ax = new_axiom(eq_A, phi=(A_tv,))
+    print("poly axiom        ::", poly_ax)
+    # Interpret at A := nat: |- default(nat) = default(nat).
+    poly_at_nat = interpret(poly_ax, (nat_ty,))
+    print("interpret @ nat   ::", poly_at_nat)
+    # Interpret at A := bool: |- default(bool) = default(bool).
+    poly_at_bool = interpret(poly_ax, (bool_ty,))
+    print("interpret @ bool  ::", poly_at_bool)
+
+    # Dependent axiom over an Assume slot. State the conditional
+    # axiom (n:nat, ▷ add 0 n = 0) ▷ n = 0. The Assume entry's formula
+    # joins the underlying thm's asl; interpret(σ) discharges it via
+    # the σ-entry that proves the formula at the chosen n.
+    n_eq_form = APP(APP(CONST("=", (nat_ty,)), add_0_n), zero_th)
+    inner_eq = APP(APP(CONST("=", (nat_ty,)), VAR(n_var)), zero_th)
+    F_assume = Assume(n_eq_form._tm)
+    cond_ax = new_axiom(inner_eq, phi=(n_var, F_assume))
+    print("cond axiom        ::", cond_ax)
+    # Interpret at n := 0 with a proof that add 0 0 = 0 (via add_0_0_eq_0).
+    # The Assume formula at n := 0 is `add 0 0 = 0`, which add_0_0_eq_0
+    # proves -- so the result discharges the precondition.
+    cond_at_0 = interpret(cond_ax, (zero_th, add_0_0_eq_0))
+    print("interpret σ = (0, |- add 0 0 = 0) ::", cond_at_0)
+
+    # THM_CONG_BASE: from per-slot equations relate two interpretations
+    # of `add_zero` (the staged axiom (n:nat) ▷ add 0 n = n). With the
+    # per-slot equation `add 0 0 = 0` on the n slot, derive
+    #     |- (add 0 (add 0 0) = add 0 0) = (add 0 0 = 0)     at bool.
+    add_zero_cong = THM_CONG_BASE(add_zero, [add_0_0_eq_0])
+    print("THM_CONG_BASE     ::", add_zero_cong)
+
+    # Empty Φ (no slots) -- the staged form degenerates to a plain thm.
+    triv_ax = new_axiom(
+        APP(APP(CONST("=", (nat_ty,)), zero_th), zero_th)
+    )
+    print("empty-Φ axiom     ::", triv_ax)
+    print("interpret ()      ::", interpret(triv_ax, ()))
+
+    # Rejection paths: shape mismatch (σ arity), wrong slot evidence,
+    # and unbound free var in F.
+    try:
+        interpret(add_zero, ())
+    except HolError as e:
+        print("interpret wrong arity ::", str(e).splitlines()[0])
+    try:
+        interpret(add_zero, (nat_ty,))  # Tyvar arg for a Var slot
+    except HolError as e:
+        print("interpret wrong shape ::", str(e).splitlines()[0])
+    try:
+        # unbound free var: F has `n` but Φ is empty.
+        new_axiom(eq_form)
+    except HolError as e:
+        print("axiom unbound var     ::", str(e).splitlines()[0])
 

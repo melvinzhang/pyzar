@@ -24,6 +24,7 @@ Language extensions:
 - ✓ Assumption entries in `new_type` Φ-contexts (item 14, type-declaration half) — `Assume(F)` joins `Tyvar` / `Var` as a binder species; `mk_type` / `TY_CONG_BASE` demand a proof of `F[earlier-subst]`.
 - ✓ Staged term-side declarations (item 14, term-declaration half) — `Phi = tuple[Tyvar | Var | Assume, ...]` and `PhiSubst = tuple[hol_type | typing_thm | thm, ...]` are first-class kernel concepts shared with the type side. `new_constant(name, ty, phi=...)` declares `c(Φ) : ty`; `CONST(name, σ)` applies σ to Φ in one step; `new_basic_definition(lhs, rhs_th, phi=...)` emits `[asl] |- c(σ_Φ) = rhs`. `Const` carries `term_args` so chosen Var-arg values survive as part of the term AST (locale-internal nullary appearance). `_apply_phi_subst` (single-σ walk) and `_apply_phi_dual` (LHS+RHS walk) are the shared validators used by `mk_type`/`CONST` and `TY_CONG_BASE`/`TM_CONG_BASE` respectively. Legacy `tyin=` / `prec_proofs=` / `preconds=` paths fully retired; one API surface. `new_type`'s declaration param renamed `context=` → `phi=` for parity with the term side.
 - ✓ Term-side congruence (`TM_CONG_BASE`) — analogue of `TY_CONG_BASE` for staged term constants: from per-Φ-slot equations derives `Γ ⊢ c(σ_l) =A[σ_l] c(σ_r)`. Optional `cod_eq` bridges A[σ_l] vs A[σ_r] when the body type's two-side substitutions differ. Closes the structural asymmetry between term- and type-side staged constants.
+- ✓ Staged theorems (`StagedThm`, `new_axiom(F, phi=...)`, `interpret(staged, σ)`, `THM_CONG_BASE`) — `(Φ) ▷ F` is now first-class on the theorem side, symmetric with `mk_type` / `CONST` on the declaration sides. `new_axiom` validates Φ-shape (asl entries alpha-match Assume formulas; free Vars / Tyvars must be bound). `interpret(staged, σ)` fans `INST_TYPE` / `INST` / `MP`-against-`DISCH` in one step, reusing `_apply_phi_subst`'s shape check. `THM_CONG_BASE(staged, args)` derives `Γ ⊢ F[σ_l] = F[σ_r]` at bool from per-Φ-slot equations, reusing `_apply_phi_dual`.
 
 ## Conversion / definitional equality
 
@@ -35,7 +36,7 @@ Language extensions:
 
 5. **Higher-kinded dependency.** The 2025/26 papers' kind grammar is `K ::= tp | (x:A) → K`. Our `new_type` context telescope handles all kinds *ending* in `tp` (including arbitrary Tyvar/Var/Assume interleavings — see the unified-context entry in "shipped"). What's not yet representable is a type symbol whose *result* of a partial application is itself a kind (kinds of kinds). All concrete examples in the paper use telescope-ending-in-`tp` kinds, so this is theoretical headroom rather than an exercised gap; closing it would need `Kind` as its own datatype.
 
-14. **Staged theorems / polymorphic axioms** (item 14 residual). Term-side *declarations* are now shipped (see `Phi`/`PhiSubst` in the "Language extensions" list above). What's still encoded-only is the *theorem* side: `(Φ) ▷ F` as a first-class shape on `thm`, and a Φ-parameter on `new_axiom`. Polymorphic axioms and locale-style theorems live today as `thm`s whose Φ-entries appear as free Tyvars (instantiable via `INST_TYPE`), free Vars (`INST`), and asl-hypotheses (`DISCH`/`MP`). Discharge is one-axis-at-a-time; the missing piece is a `StagedThm(Phi, thm)` or analogous packaging plus a single-step `interpret(σ)` that fans the three discharge axes simultaneously. Useful as ergonomics for a locale layer; not a kernel-rule gap.
+14. ~~**Staged theorems / polymorphic axioms** (item 14 residual).~~ Shipped — see the `StagedThm` entry in "Language extensions". The remaining locale-layer ergonomics (e.g. staged definitions / staged constants returning `StagedThm` instead of plain `thm`) are downstream concerns, not kernel gaps.
 
 ## Missing definitions
 
@@ -51,7 +52,8 @@ Soundness rests on callers using the documented kernel API only:
 - Construct term constants via `new_constant(name, ty, phi=...)` and instantiate via `CONST(name, sigma)`; `sigma` is a `PhiSubst` matching the declared Φ. Direct `Const(name, ty, term_args)` is public-but-discouraged — go through `CONST` so `_apply_phi_subst` validates σ.
 - Construct `typing_thm`s only via `VAR` / `CONST` / `APP` / `LAMBDA` / `CONV`.
 - Construct `type_eq_thm`s only via `TY_REFL` / `TY_SYM` / `TY_TRANS` / `TY_CONG_BASE` / `TY_CONG_PI`.
-- Construct `thm`s only via `REFL` / `ASSUME` / `BETA` / `ETA` / `TRANS` / `MK_COMB` / `ABS` / `EQ_MP` / `DEDUCT_ANTISYM_RULE` / `INST` / `INST_TYPE` / `EQ_TY_CONV` / `new_axiom` / `new_basic_definition`.
+- Construct `thm`s only via `REFL` / `ASSUME` / `BETA` / `ETA` / `TRANS` / `MK_COMB` / `ABS` / `EQ_MP` / `DEDUCT_ANTISYM_RULE` / `INST` / `INST_TYPE` / `EQ_TY_CONV` / `THM_CONG_BASE` / `interpret` / `new_basic_definition`.
+- Construct `StagedThm`s only via `new_axiom(F, phi=...)`.
 
 Direct construction of certificate dataclasses, or of raw term/type values intended to bypass the smart constructors, is explicitly out of the threat model. This is the same kind of perimeter HOL Light gets from OCaml module abstraction, without any extra Python machinery. Intrinsic `Var.ty` / `Const.ty` / `Abs.bvar.ty` annotations survive only for alpha-equivalence distinguishability and are not load-bearing for inference.
 
@@ -77,4 +79,4 @@ Highest-leverage next steps, roughly increasing effort:
 - **Item 13's residual: P4 precondition-subtyping and heterogeneous-precondition congruence** — `BETA` / `ETA` / `MK_COMB` currently reject preconditioned inputs. Lifting that requires per-side precondition discharge; not hard, but each rule needs its own design.
 - **Item 11 (translation to HOL)** — the paper's main artifact. PER predicates, axiom translation, ATP wiring. Worth its own milestone — recovers the paper's automation story.
 
-Items 7–8 are housekeeping. Items 9, 10, 12, 14 (theorem-side residual only — declarations now shipped), 16, 18 are extensions / notational gaps beyond the base kernel. Items 2, 5 (telescope), 13 (P2+P3), and the bulk of 14 (both type- and term-side declarations) are shipped; item 15 is fully shipped and dropped from the gap list. Item 17 is a known deliberate deviation.
+Items 7–8 are housekeeping. Items 9, 10, 12, 16, 18 are extensions / notational gaps beyond the base kernel. Items 2, 5 (telescope), 13 (P2+P3), and 14 (declarations + theorem side) are fully shipped; item 15 is fully shipped and dropped from the gap list. Item 17 is a known deliberate deviation.
