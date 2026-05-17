@@ -182,19 +182,29 @@ class thm:
 
 # ---------------------------------------------------------------------------
 # Type constants (kinded) and term constants
+#
+# Each type symbol carries a *context* of binders -- an ordered telescope
+# of Tyvar | Var entries. A Tyvar entry binds a type variable in scope for
+# later entries; a Var entry binds a term variable whose type may reference
+# earlier Tyvar or Var binders. This unifies rank-1 polymorphism in type
+# declarations with dependent term parameters (cf. the 2026 paper's `a(Φ)`
+# declarations). The flat-arity case is recovered by an empty context;
+# rank-1 polymorphism alone by a context of Tyvars only; the older
+# dependent-parameter case by a context of Vars only.
 # ---------------------------------------------------------------------------
 
-the_type_constants: list = [("bool", 0, ())]
+the_type_constants: list = [("bool", ())]
 
 
 def types() -> list:
     return list(the_type_constants)
 
 
-def get_type_kind(s: str):
-    for name, arity, params in the_type_constants:
+def get_type_kind(s: str) -> tuple:
+    """Return the declared context (a tuple of Tyvar | Var binders)."""
+    for name, ctx in the_type_constants:
         if name == s:
-            return arity, params
+            return ctx
     raise KeyError(s)
 
 
@@ -211,11 +221,22 @@ def _head_tyop(ty: hol_type) -> str | None:
 
 def new_type(
     name: str,
-    type_arity: int = 0,
-    term_params: tuple = (),
+    context: tuple = (),
     witness: tuple | None = None,
 ) -> None:
-    """Declares a new type constant, atomically with an inhabitation witness.
+    """Declares a new type constant with an ordered context of binders,
+    atomically with an inhabitation witness.
+
+    `context` is a tuple of `Tyvar | Var` binders forming a telescope:
+
+      * `Tyvar(u)` declares a type-variable parameter `u` in scope for
+        later entries.
+      * `Var(x, A)` declares a term-variable parameter `x:A`, where `A`
+        may reference any Tyvar/Var bound earlier in the context.
+
+    The flat-arity case is `context=()`. Rank-1 polymorphism alone uses
+    only Tyvar entries; pure dependent parameters use only Var entries;
+    the two can be interleaved freely.
 
     The `witness` argument is a (const_name, const_ty) pair. const_ty
     (after stripping leading Pi binders) must have `name` as its head;
@@ -227,10 +248,6 @@ def new_type(
 
     `bool` is the sole exception: it's the kernel's primitive type and
     requires no user call to new_type.
-
-    Because witness is mandatory, no uninhabited type can ever exist in
-    the kernel. Downstream axiom builders (Hilbert ε, choice, ...) get
-    inhabitation for free and don't need runtime checks.
     """
     if witness is None:
         raise HolError(
@@ -238,8 +255,13 @@ def new_type(
             f"Pass witness=(const_name, const_ty) where const_ty's head "
             f"(after Pi-stripping) is {name}."
         )
-    if any(n == name for n, _, _ in the_type_constants):
+    if any(n == name for n, _ in the_type_constants):
         raise HolError(f"new_type: type {name} has already been declared")
+    for entry in context:
+        if not isinstance(entry, (Tyvar, Var)):
+            raise HolError(
+                f"new_type: context entries must be Tyvar or Var (got {entry!r})"
+            )
     witness_name, witness_ty = witness
     if any(n == witness_name for n, _ in the_term_constants):
         raise HolError(
@@ -252,7 +274,7 @@ def new_type(
             f"(got {head})"
         )
     # All checks passed -- commit atomically.
-    the_type_constants.insert(0, (name, type_arity, tuple(term_params)))
+    the_type_constants.insert(0, (name, tuple(context)))
     the_term_constants.insert(0, (witness_name, witness_ty))
 
 
@@ -286,32 +308,62 @@ def mk_arrow(a: hol_type, b: hol_type) -> hol_type:
     return Pi(Var("_", a), b)
 
 
-def mk_type(tyop: str, type_args: list, term_arg_typings: list = ()) -> hol_type:
-    """Build a Tyapp from a type-constant name and certified term arguments.
-    Each entry in term_arg_typings must be a typing_thm. For this spike the
-    asls of those typing_thms must be empty (so the resulting type is
-    well-formed absolutely)."""
+def mk_type(tyop: str, args: list) -> hol_type:
+    """Build a Tyapp from a type-constant name and an ordered list of
+    arguments matching the declared context shape.
+
+    Each `args[i]` corresponds to context entry `i`:
+      * Tyvar binder -> args[i] is a `hol_type`.
+      * Var binder   -> args[i] is a `typing_thm` whose `_ty` matches
+        the binder's declared type with all earlier args substituted in.
+        The typing must be unconditional (empty asl).
+
+    The result Tyapp stores Tyvar-slot choices in `type_args` (in
+    declaration order) and Var-slot terms in `term_args` (in declaration
+    order); the declared context recovers the original interleaving."""
     try:
-        arity, params = get_type_kind(tyop)
+        ctx = get_type_kind(tyop)
     except KeyError:
         raise HolError(f"mk_type: type {tyop} has not been defined")
-    if arity != len(type_args):
-        raise HolError(f"mk_type: wrong number of type arguments to {tyop}")
-    if len(params) != len(term_arg_typings):
-        raise HolError(f"mk_type: wrong number of term arguments to {tyop}")
-    args = []
-    for expected, ath in zip(params, term_arg_typings):
-        if not isinstance(ath, typing_thm):
-            raise HolError("mk_type: term arguments must be typing_thms")
-        if ath._asl:
-            raise HolError("mk_type: term-argument typing must be unconditional")
-        if not type_eq(expected, ath._ty):
-            raise HolError(
-                f"mk_type: term argument has wrong type "
-                f"(expected {_pp_ty(expected)}, got {_pp_ty(ath._ty)})"
-            )
-        args.append(ath._tm)
-    return Tyapp(tyop, tuple(type_args), tuple(args))
+    if len(ctx) != len(args):
+        raise HolError(
+            f"mk_type: wrong number of arguments to {tyop} "
+            f"(expected {len(ctx)}, got {len(args)})"
+        )
+    theta_ty: list = []   # (chosen_hol_type, Tyvar binder)
+    theta_tm: list = []   # (chosen_term, Var binder)
+    type_args: list = []
+    term_args: list = []
+    for binder, arg in zip(ctx, args):
+        if isinstance(binder, Tyvar):
+            if not isinstance(arg, (Tyvar, Tyapp, Pi)):
+                raise HolError(
+                    f"mk_type: argument for Tyvar binder {binder.name} "
+                    f"must be a hol_type"
+                )
+            type_args.append(arg)
+            theta_ty.append((arg, binder))
+        elif isinstance(binder, Var):
+            if not isinstance(arg, typing_thm):
+                raise HolError(
+                    f"mk_type: argument for Var binder {binder.name} "
+                    f"must be a typing_thm"
+                )
+            if arg._asl:
+                raise HolError(
+                    "mk_type: term-argument typing must be unconditional"
+                )
+            expected = type_subst(theta_ty, subst_in_type(theta_tm, binder.ty))
+            if not type_eq(expected, arg._ty):
+                raise HolError(
+                    f"mk_type: term argument has wrong type "
+                    f"(expected {_pp_ty(expected)}, got {_pp_ty(arg._ty)})"
+                )
+            term_args.append(arg._tm)
+            theta_tm.append((arg._tm, binder))
+        else:
+            raise HolError("mk_type: ill-formed context binder")
+    return Tyapp(tyop, tuple(type_args), tuple(term_args))
 
 
 # ---------------------------------------------------------------------------
@@ -894,34 +946,73 @@ def TY_TRANS(e1: type_eq_thm, e2: type_eq_thm) -> type_eq_thm:
     return type_eq_thm(term_union(e1._asl, e2._asl), e1._lhs, e2._rhs)
 
 
-def TY_CONG_BASE(tyop: str, type_args: list, term_eqs: list) -> type_eq_thm:
-    """congBase':  a : Pi(x1:A1)...(xn:An). tp in T
-                    Gamma |- s_i = t_i  (regular term-equality thms)
+def TY_CONG_BASE(tyop: str, args: list) -> type_eq_thm:
+    """congBase':  a declared with context (b_1, ..., b_n)
+                    Gamma |- arg_i (matching b_i)
                   -------------------------------------------------
-                  Gamma |- a s1...sn == a t1...tn
+                  Gamma |- a <lhs_args> == a <rhs_args>
 
-    Each term_eqs[i] must be a thm whose conclusion is an equation."""
+    `args[i]` matches context entry `i`:
+      * Tyvar binder -> args[i] is a type_eq_thm `A_i == A_i'`
+      * Var binder   -> args[i] is a thm whose conclusion is an
+        equation `s_i = t_i`, tagged at the binder's declared type with
+        all earlier (LHS) substitutions applied.
+
+    Assumptions of every argument are absorbed into the result."""
     try:
-        arity, params = get_type_kind(tyop)
+        ctx = get_type_kind(tyop)
     except KeyError:
         raise HolError(f"TY_CONG_BASE: unknown type {tyop}")
-    if arity != len(type_args):
-        raise HolError("TY_CONG_BASE: wrong type-arg count")
-    if len(params) != len(term_eqs):
-        raise HolError("TY_CONG_BASE: wrong term-arg count")
+    if len(ctx) != len(args):
+        raise HolError(
+            f"TY_CONG_BASE: wrong number of arguments to {tyop} "
+            f"(expected {len(ctx)}, got {len(args)})"
+        )
     asl: list = []
-    lhss: list = []
-    rhss: list = []
-    for eq in term_eqs:
-        if not isinstance(eq, thm) or not _is_eq(eq._concl):
-            raise HolError("TY_CONG_BASE: each argument must be an equation thm")
-        lhss.append(_lhs(eq._concl))
-        rhss.append(_rhs(eq._concl))
-        asl = term_union(asl, eq._asl)
+    theta_ty_l: list = []
+    theta_tm_l: list = []
+    lhs_type_args: list = []
+    lhs_term_args: list = []
+    rhs_type_args: list = []
+    rhs_term_args: list = []
+    for binder, arg in zip(ctx, args):
+        if isinstance(binder, Tyvar):
+            if not isinstance(arg, type_eq_thm):
+                raise HolError(
+                    f"TY_CONG_BASE: argument for Tyvar binder {binder.name} "
+                    f"must be a type_eq_thm"
+                )
+            lhs_type_args.append(arg._lhs)
+            rhs_type_args.append(arg._rhs)
+            theta_ty_l.append((arg._lhs, binder))
+            asl = term_union(asl, arg._asl)
+        elif isinstance(binder, Var):
+            if not isinstance(arg, thm) or not _is_eq(arg._concl):
+                raise HolError(
+                    f"TY_CONG_BASE: argument for Var binder {binder.name} "
+                    f"must be an equation thm"
+                )
+            tag = _eq_tag(arg._concl)
+            expected = type_subst(
+                theta_ty_l, subst_in_type(theta_tm_l, binder.ty)
+            )
+            if not type_eq(expected, tag):
+                raise HolError(
+                    f"TY_CONG_BASE: equation tag {_pp_ty(tag)} does not "
+                    f"match expected {_pp_ty(expected)} at {binder.name}"
+                )
+            lhs_tm = _lhs(arg._concl)
+            rhs_tm = _rhs(arg._concl)
+            lhs_term_args.append(lhs_tm)
+            rhs_term_args.append(rhs_tm)
+            theta_tm_l.append((lhs_tm, binder))
+            asl = term_union(asl, arg._asl)
+        else:
+            raise HolError("TY_CONG_BASE: ill-formed context binder")
     return type_eq_thm(
         asl,
-        Tyapp(tyop, tuple(type_args), tuple(lhss)),
-        Tyapp(tyop, tuple(type_args), tuple(rhss)),
+        Tyapp(tyop, tuple(lhs_type_args), tuple(lhs_term_args)),
+        Tyapp(tyop, tuple(rhs_type_args), tuple(rhs_term_args)),
     )
 
 
@@ -1286,7 +1377,7 @@ def new_basic_definition(lhs: Var, rhs_th: typing_thm) -> thm:
 if __name__ == "__main__":
     # nat as a base type, with "0" as the atomic inhabitation witness.
     nat_ty = Tyapp("nat", (), ())
-    new_type("nat", type_arity=0, term_params=(), witness=("0", nat_ty))
+    new_type("nat", context=(), witness=("0", nat_ty))
     new_constant("S", mk_arrow(nat_ty, nat_ty))
     new_constant("add", mk_arrow(nat_ty, mk_arrow(nat_ty, nat_ty)))
 
@@ -1299,18 +1390,17 @@ if __name__ == "__main__":
     print("S 0 ::", _pp_ty(one_th._ty))
     print()
 
-    # vec : nat -> tp, with nil : vec(0) as the atomic inhabitation witness.
+    # vec : (n:nat) -> tp, with nil : vec(0) as the atomic inhabitation witness.
     zero_const = Const("0", nat_ty)
     nil_ty = Tyapp("vec", (), (zero_const,))
     new_type(
         "vec",
-        type_arity=0,
-        term_params=(nat_ty,),
+        context=(Var("n", nat_ty),),
         witness=("nil", nil_ty),
     )
 
     def vec(n_th):
-        return mk_type("vec", [], [n_th])
+        return mk_type("vec", [n_th])
 
     nil_th = CONST("nil")
     print("nil ::", _pp_ty(nil_th._ty))
@@ -1360,7 +1450,7 @@ if __name__ == "__main__":
     print("specialised::", add_0_0_eq_0)
 
     # Lift to type equality vec(add 0 0) == vec 0
-    vec_bridge = TY_CONG_BASE("vec", [], [add_0_0_eq_0])
+    vec_bridge = TY_CONG_BASE("vec", [add_0_0_eq_0])
     print("type bridge::", vec_bridge)
 
     # Build a value of type vec(add 0 0) by CONV-ing nil : vec 0
@@ -1486,7 +1576,7 @@ if __name__ == "__main__":
     print("assumption term ::", _pp_tm(n0_eq._tm))
     assumed_n0 = ASSUME(n0_eq)
     print("ASSUME           ::", assumed_n0)
-    vec_bridge_hyp = TY_CONG_BASE("vec", [], [assumed_n0])
+    vec_bridge_hyp = TY_CONG_BASE("vec", [assumed_n0])
     print("derived bridge   ::", vec_bridge_hyp)
     nil_refl_hyp = EQ_TY_CONV(nil_refl, vec_bridge_hyp)
     print(f"EQ_TY_CONV w/ hyp:: {nil_refl_hyp}  [= tagged at {_eq_tag_str(nil_refl_hyp)}]")
@@ -1497,19 +1587,19 @@ if __name__ == "__main__":
     # no theory-layer check to forget.
     # ----------------------------------------------------------------
     print()
-    new_type("phantom", 0, (), witness=("ghost", Tyapp("phantom", (), ())))
+    new_type("phantom", (), witness=("ghost", Tyapp("phantom", (), ())))
     print("declared phantom with witness ghost")
 
     # Missing witness -> rejected at the kernel boundary:
     try:
-        new_type("orphan", 0, ())
+        new_type("orphan", ())
     except HolError as e:
         print("rejects missing witness ::", str(e).splitlines()[0])
 
     # Witness with wrong head -> rejected:
     try:
         new_type(
-            "stranger", 0, (),
+            "stranger", (),
             witness=("misfit", Tyapp("nat", (), ())),
         )
     except HolError as e:
@@ -1567,7 +1657,7 @@ if __name__ == "__main__":
     # through that bridge lifts nil's certificate, and REFL emits a thm
     # whose asl tracks the dependency. Then we wrap as a bool typing_thm.
     assumed_F = ASSUME(ant_typing)
-    bridge_under_F = TY_CONG_BASE("vec", [], [assumed_F])
+    bridge_under_F = TY_CONG_BASE("vec", [assumed_F])
     nil_under_F = CONV(nil_th, TY_SYM(bridge_under_F))
     print("nil under ▷F  ::", nil_under_F)
 
@@ -1594,4 +1684,110 @@ if __name__ == "__main__":
     # Now MP with the axiom add_0_0_eq_0 (which is [] |- add 0 0 = 0).
     g_thm = MP(imp_thm, add_0_0_eq_0)
     print("MP(F⇒G, F) ::", g_thm)
+
+    # ----------------------------------------------------------------
+    # Unified declaration context: rank-1 polymorphism interleaved with
+    # dependent term parameters. Declare
+    #
+    #   pvec : (u:Type, n:nat) -> tp        -- vector of u of length n
+    #   pnil : pvec(bool, 0)                -- inhabitation witness
+    #   pcons : Pi(u:Type). Pi(n:nat). u -> pvec(u, n) -> pvec(u, S n)
+    #
+    # This exercises a context with BOTH a Tyvar binder and a Var
+    # binder, demonstrating that later context entries may use earlier
+    # ones (here `n:nat` could in principle reference `u:Type` -- not
+    # exercised, but the shape is general).
+    # ----------------------------------------------------------------
+    print()
+    u_tv = Tyvar("u")
+    pvec_pnil_ty = Tyapp("pvec", (bool_ty,), (Const("0", nat_ty),))
+    new_type(
+        "pvec",
+        context=(u_tv, Var("n", nat_ty)),
+        witness=("pnil", pvec_pnil_ty),
+    )
+
+    def pvec(u_ty, n_th):
+        return mk_type("pvec", [u_ty, n_th])
+
+    pnil_th = CONST("pnil")
+    print("pnil ::", _pp_ty(pnil_th._ty))
+    print("pvec(nat, 0) ::", _pp_ty(pvec(nat_ty, zero_th)))
+    print("pvec(bool, S 0) ::", _pp_ty(pvec(bool_ty, one_th)))
+
+    # Build a value at pvec(bool, 0) (just pnil) and a wrong-arity call.
+    try:
+        mk_type("pvec", [bool_ty])  # missing the term arg
+    except HolError as e:
+        print("wrong arity ::", str(e).splitlines()[0])
+
+    # Wrong shape: pass a hol_type where a typing_thm is expected.
+    try:
+        mk_type("pvec", [bool_ty, nat_ty])
+    except HolError as e:
+        print("wrong shape ::", str(e).splitlines()[0])
+
+    # TY_CONG_BASE with mixed argument shapes: pvec(bool, add 0 0) ==
+    # pvec(bool, 0) via type-refl on the u slot and add_0_0_eq_0 on n.
+    bool_refl = TY_REFL(bool_ty)
+    pvec_bridge = TY_CONG_BASE("pvec", [bool_refl, add_0_0_eq_0])
+    print("pvec bridge ::", pvec_bridge)
+
+    # Cross-instantiation: pvec(nat, 0) == pvec(bool, 0) would need a
+    # non-trivial type equality on u, which we can't prove (and rightly
+    # so). Show that passing TY_REFL of two different types in the u
+    # slot via the bridge yields well-formed but distinct Tyapps.
+    # Instead, exercise the typing-bridge inside CONV using pvec_bridge.
+    pnil_at_add = CONV(pnil_th, TY_SYM(pvec_bridge))
+    print("pnil viewed as pvec(bool, add 0 0) ::", _pp_ty(pnil_at_add._ty))
+
+    # ----------------------------------------------------------------
+    # Cross-binder dependence: a Var binder whose type mentions an
+    # earlier Tyvar binder.
+    #
+    #   tagged : (u:Type, x:u) -> tp
+    #
+    # Here the second context entry x has type `u`, which is bound by
+    # the first. At use sites we substitute the chosen hol_type for u
+    # into x's expected type before tag-checking. This is the case the
+    # 2026 paper's `Φ`-contexts make routine and the old flat
+    # `term_params: tuple[hol_type,...]` cannot express.
+    # ----------------------------------------------------------------
+    print()
+    u_tv2 = Tyvar("u")
+    x_var2 = Var("x", u_tv2)
+    tagged_witness_ty = Tyapp("tagged", (nat_ty,), (Const("0", nat_ty),))
+    new_type(
+        "tagged",
+        context=(u_tv2, x_var2),
+        witness=("tagzero", tagged_witness_ty),
+    )
+
+    # Use: tagged(nat, 0) is well-formed because zero_th : nat matches
+    # the binder type u with u := nat.
+    tagged_nat0 = mk_type("tagged", [nat_ty, zero_th])
+    print("tagged(nat, 0)  ::", _pp_ty(tagged_nat0))
+
+    # tagged(bool, nil_th) would fail: nil_th : vec(0) does not match
+    # the binder type u with u := bool.
+    try:
+        mk_type("tagged", [bool_ty, zero_th])
+    except HolError as e:
+        print("cross-dep mismatch ::", str(e).splitlines()[0])
+
+    # TY_CONG_BASE on tagged: the n-position equation's tag must be
+    # whatever type the earlier Tyvar slot chose. Use TY_REFL on u
+    # to keep the type slot at nat, and add_0_0_eq_0 (tagged at nat)
+    # for the x slot.
+    nat_refl = TY_REFL(nat_ty)
+    tagged_bridge = TY_CONG_BASE("tagged", [nat_refl, add_0_0_eq_0])
+    print("tagged bridge   ::", tagged_bridge)
+
+    # The tag-vs-prefix check actually fires: if we pick u := bool but
+    # supply an equation tagged at nat (add_0_0_eq_0), it's rejected.
+    bool_refl_again = TY_REFL(bool_ty)
+    try:
+        TY_CONG_BASE("tagged", [bool_refl_again, add_0_0_eq_0])
+    except HolError as e:
+        print("cross-dep cong  ::", str(e).splitlines()[0])
 
