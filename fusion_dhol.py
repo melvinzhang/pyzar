@@ -1018,7 +1018,8 @@ def INST_TYPE(theta: list, th: thm) -> thm:
     """theta is a list of (replacement_type, Tyvar). Propagates the
     substitution into every type annotation, using Clash-driven alpha-
     rename when type instantiation would cause a bound variable to
-    collide with a free one in the body."""
+    collide with a free one in the body. Well-formedness of replacement
+    types is the caller's responsibility (honest-caller perimeter)."""
     if not theta:
         return th
     f = lambda tm: _inst_in_term([], theta, tm)
@@ -1280,3 +1281,4 @@ if __name__ == "__main__":
     print("derived bridge   ::", vec_bridge_hyp)
     nil_refl_hyp = EQ_TY_CONV(nil_refl, vec_bridge_hyp)
     print(f"EQ_TY_CONV w/ hyp:: {nil_refl_hyp}  [= tagged at {_eq_tag_str(nil_refl_hyp)}]")
+

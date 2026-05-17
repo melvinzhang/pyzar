@@ -27,19 +27,18 @@ Audit of `fusion_dhol.py` vs. Rothgang/Rabe/Benzmüller's DHOL.
 ## Kind system
 
 6. **Flat kinds.** `new_type("foo", type_arity=N, term_params=(T1, T2, ...))` lists term-param types as a tuple where later types can't depend on earlier params. Real DHOL kinds are themselves dependent: `K ::= tp | (x:A) → K`. So you can declare `vec : nat → tp` and `matrix : nat → nat → tp` but not, say, a kind where the second arg's type mentions the first.
-7. **No kind-level checking on type-arg substitution.** `INST_TYPE` substitutes types for tyvars freely; if the tyvar was used at a position expecting a specific kind, we don't notice.
 
 ## Missing definitions
 
-8. **No `new_basic_type_definition`.** Paper's type-introduction recipe (and HOL Light's) is omitted; we have no way to introduce a new dependent type family from a non-emptiness proof.
-9. **No dest helpers** (`dest_thm`, `dest_typing`, `dest_eq`, `dest_comb`, `dest_abs`). Trivial to add but absent.
-10. **No `freesin`-style hypothesis-tracking helpers** updated for `typing_thm`.
+7. **No `new_basic_type_definition`.** Paper's type-introduction recipe (and HOL Light's) is omitted; we have no way to introduce a new dependent type family from a non-emptiness proof.
+8. **No dest helpers** (`dest_thm`, `dest_typing`, `dest_eq`, `dest_comb`, `dest_abs`). Trivial to add but absent.
+9. **No `freesin`-style hypothesis-tracking helpers** updated for `typing_thm`.
 
 ## Soundness perimeter (honest-caller model, accepted)
 
 Soundness rests on callers using the documented kernel API only:
 
-- Construct types via `mk_type` / `mk_arrow`. Raw `Tyapp` / `Pi` dataclasses exist but are public-but-discouraged.
+- Construct types via `mk_type` / `mk_arrow`. Raw `Tyapp` / `Pi` dataclasses exist but are public-but-discouraged. `INST_TYPE` does not re-check well-formedness of its replacement types; callers who used `mk_type` get that for free, callers who used raw dataclasses are on their own.
 - Construct `typing_thm`s only via `VAR` / `CONST` / `APP` / `LAMBDA` / `CONV`.
 - Construct `type_eq_thm`s only via `TY_REFL` / `TY_SYM` / `TY_TRANS` / `TY_CONG_BASE` / `TY_CONG_PI`.
 - Construct `thm`s only via `REFL` / `ASSUME` / `BETA` / `ETA` / `TRANS` / `MK_COMB` / `ABS` / `EQ_MP` / `DEDUCT_ANTISYM_RULE` / `INST` / `INST_TYPE` / `EQ_TY_CONV` / `new_axiom` / `new_basic_definition`.
@@ -48,10 +47,10 @@ Direct construction of certificate dataclasses, or of raw term/type values inten
 
 ## Beyond the base paper
 
-11. **No theorem-prover-as-oracle.** The paper's whole story is "type-checking generates HOL proof obligations and ships them to an ATP." Our kernel inverts this: it demands the user supply the obligations as `thm` / `type_eq_thm` witnesses. Fine for an interactive kernel; doesn't recover the paper's automation story.
-12. **No predicate subtypes** (`A|p`, paper §4, Figure 2). All the `<:I`/`<:Pi`/`|p tp` etc. rules are absent.
-13. **No translation to HOL** (paper §3.2, the PER `A*`, definitions PT1–PT21). The paper's main contribution is the sound+complete embedding; we have nothing analogous, so we can't farm DHOL goals out to LEO-III / cvc5.
-14. **No refinement / quotient types** (the follow-up work, arXiv:2507.02855).
+10. **No theorem-prover-as-oracle.** The paper's whole story is "type-checking generates HOL proof obligations and ships them to an ATP." Our kernel inverts this: it demands the user supply the obligations as `thm` / `type_eq_thm` witnesses. Fine for an interactive kernel; doesn't recover the paper's automation story.
+11. **No predicate subtypes** (`A|p`, paper §4, Figure 2). All the `<:I`/`<:Pi`/`|p tp` etc. rules are absent.
+12. **No translation to HOL** (paper §3.2, the PER `A*`, definitions PT1–PT21). The paper's main contribution is the sound+complete embedding; we have nothing analogous, so we can't farm DHOL goals out to LEO-III / cvc5.
+13. **No refinement / quotient types** (the follow-up work, arXiv:2507.02855).
 
 ## Priorities if you keep going
 
@@ -60,7 +59,7 @@ Highest-leverage next steps, roughly increasing effort:
 - **Item 5 (β in `type_eq`)** — fold a head-β step into `_ty_eq` for term-args, so substitution products are recognized definitionally. Five lines. Removes a whole class of bridging boilerplate that's currently needed.
 - **Item 4 (`MK_COMB` codomain bridge)** — take an optional second `type_eq_thm` parameter and certify the result at the right codomain. Localized fix.
 - **Item 1 (`congλ'`)** — a fully general ABS rule. Useful once propositional binder-type changes start appearing in proofs.
-- **Item 8 (`new_basic_type_definition`)** — the only way to get new dependent type families backed by real models.
-- **Item 13 (translation to HOL)** — the paper's main artifact. PER predicates, axiom translation, ATP wiring. Worth its own milestone — recovers the paper's automation story.
+- **Item 7 (`new_basic_type_definition`)** — the only way to get new dependent type families backed by real models.
+- **Item 12 (translation to HOL)** — the paper's main artifact. PER predicates, axiom translation, ATP wiring. Worth its own milestone — recovers the paper's automation story.
 
-Items 2, 3, 6, 7 are deeper restructurings. Items 9–10 are housekeeping. Items 11, 12, 14 are extensions beyond the base paper.
+Items 2, 3, 6 are deeper restructurings. Items 8–9 are housekeeping. Items 10, 11, 13 are extensions beyond the base paper.
