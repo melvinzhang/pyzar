@@ -28,6 +28,11 @@
 # by VAR(Var("x", A)) is justified under any Gamma that binds x at A.
 # The boolean portion of Gamma lives in typing_thm._asl, just like thm._asl.
 #
+# Both MK_COMB and ABS accept an optional type-equality bridge for the
+# dependent case: MK_COMB's cod_eq witnesses B[l2/x] == B[r2/x] when the
+# substituted codomains differ; ABS's ty_eq witnesses A == A' so the
+# binder type may differ between the two sides of the abstraction.
+#
 # Deliberate spike-level simplifications:
 #   - INST / INST_TYPE require definitionally-matching types; substitutions
 #     that need propositional bridges must be built via APP + CONV.
@@ -964,7 +969,19 @@ def TRANS(th1: thm, th2: thm) -> thm:
     return thm(term_union(th1._asl, th2._asl), Comb(c1.fun, _rhs(c2)))
 
 
-def MK_COMB(th1: thm, th2: thm, eq: type_eq_thm | None = None) -> thm:
+def MK_COMB(th1: thm, th2: thm,
+            eq: type_eq_thm | None = None,
+            cod_eq: type_eq_thm | None = None) -> thm:
+    """congAppl':  Gamma |- f =Pi(x:A).B f'    Gamma |- a =A a'
+                  --------------------------------------------------
+                            Gamma |- f a =B[a/x] f' a'
+
+    With a dependent codomain B and a propositional (rather than
+    definitional) argument equation l2 = r2, the natural LHS type
+    B[l2/x] and RHS type B[r2/x] differ. ``cod_eq`` witnesses that
+    bridge; the result is tagged at B[l2/x]. ``eq`` is the domain
+    bridge (used when the argument's equation tag doesn't match the
+    function's Pi-domain definitionally)."""
     c1, c2 = th1._concl, th2._concl
     if not (_is_eq(c1) and _is_eq(c2)):
         raise HolError("MK_COMB: not both equations")
@@ -986,20 +1003,59 @@ def MK_COMB(th1: thm, th2: thm, eq: type_eq_thm | None = None) -> thm:
         asl = term_union(asl, eq._asl)
     l1, r1 = _lhs(c1), _rhs(c1)
     l2, r2 = _lhs(c2), _rhs(c2)
-    result_ty = subst_in_type([(l2, f_ty.bvar)], f_ty.body)
-    return thm(asl, safe_mk_eq(result_ty, Comb(l1, l2), Comb(r1, r2)))
+    result_ty_l = subst_in_type([(l2, f_ty.bvar)], f_ty.body)
+    result_ty_r = subst_in_type([(r2, f_ty.bvar)], f_ty.body)
+    if not type_eq(result_ty_l, result_ty_r):
+        if cod_eq is None or not _bridge_matches(
+            cod_eq, result_ty_l, result_ty_r
+        ):
+            raise HolError(
+                f"MK_COMB: codomain types do not agree "
+                f"({_pp_ty(result_ty_l)} vs {_pp_ty(result_ty_r)}); "
+                f"supply cod_eq witnessing B[l2/x] == B[r2/x]"
+            )
+        asl = term_union(asl, cod_eq._asl)
+    return thm(asl, safe_mk_eq(result_ty_l, Comb(l1, l2), Comb(r1, r2)))
 
 
-def ABS(v: Var, th: thm) -> thm:
+def ABS(v: Var, th: thm, ty_eq: type_eq_thm | None = None) -> thm:
+    """congLambda':  Gamma |- A == A'    Gamma, x:A |- t =B t'
+                    ------------------------------------------------
+                    Gamma |- (\\x:A. t) =Pi(x:A).B (\\x:A'. t')
+
+    Without ``ty_eq`` this is the homogeneous case (A == A'). With
+    ``ty_eq``, ``v.ty`` must match one side of the bridge and the
+    other side becomes the RHS binder type; the result is tagged at
+    Pi(x:A). B (the LHS view). ``v`` must not occur free in any
+    hypothesis, including the bridge's."""
     c = th._concl
     if not _is_eq(c):
         raise HolError("ABS: conclusion not an equation")
     if any(vfree_in(v, a) for a in th._asl):
         raise HolError("ABS: bound variable occurs free in hypotheses")
     body_ty = _eq_tag(c)
-    new_ty = Pi(v, body_ty)
     l, r = _lhs(c), _rhs(c)
-    return thm(th._asl, safe_mk_eq(new_ty, Abs(v, l), Abs(v, r)))
+    if ty_eq is None:
+        v_rhs = v
+        asl = th._asl
+    else:
+        if any(vfree_in(v, a) for a in ty_eq._asl):
+            raise HolError(
+                "ABS: bound variable occurs free in bridge hypotheses"
+            )
+        if type_eq(ty_eq._lhs, v.ty):
+            rhs_ty = ty_eq._rhs
+        elif type_eq(ty_eq._rhs, v.ty):
+            rhs_ty = ty_eq._lhs
+        else:
+            raise HolError(
+                f"ABS: bridge {_pp_ty(ty_eq._lhs)} == {_pp_ty(ty_eq._rhs)} "
+                f"does not connect binder type {_pp_ty(v.ty)}"
+            )
+        v_rhs = Var(v.name, rhs_ty)
+        asl = term_union(th._asl, ty_eq._asl)
+    new_ty = Pi(v, body_ty)
+    return thm(asl, safe_mk_eq(new_ty, Abs(v, l), Abs(v_rhs, r)))
 
 
 def EQ_MP(th1: thm, th2: thm) -> thm:
@@ -1361,4 +1417,38 @@ if __name__ == "__main__":
         )
     except HolError as e:
         print("rejects wrong-head witness ::", str(e).splitlines()[0])
+
+    # ----------------------------------------------------------------
+    # congLambda' (ABS with binder-type bridge) and congAppl'
+    # (MK_COMB with codomain bridge): exercise the heterogeneous case.
+    # ----------------------------------------------------------------
+    print()
+    # Build (\v:vec 0. 0) = (\v:vec(add 0 0). 0) via ABS + the type
+    # bridge vec(0) == vec(add 0 0). REFL gives the body equality; the
+    # bridge is precisely vec_bridge (or its TY_SYM).
+    body_zero = REFL(zero_th)  # |- 0 = 0  at type nat
+    v_at_vec0 = Var("v", vec(zero_th))
+    abs_hetero = ABS(v_at_vec0, body_zero, ty_eq=TY_SYM(vec_bridge))
+    print("ABS with ty_eq ::", abs_hetero)
+
+    # Now MK_COMB with a dependent codomain. f = g at Pi(n:nat). vec n,
+    # applied to an argument equation l2 = r2 where l2 != r2 forces the
+    # natural codomain types vec(l2) and vec(r2) to differ.
+    #
+    # Construct a constant family `mkvec : Pi(n:nat). vec n` so REFL
+    # gives us |- mkvec = mkvec at Pi(n:nat). vec n. Pair with the
+    # specialised argument equation add 0 0 = 0 (i.e. add_0_0_eq_0):
+    # MK_COMB now needs cod_eq witnessing vec(add 0 0) == vec(0).
+    print()
+    new_constant("mkvec", Pi(n_var, vec(n_th)))
+    mkvec_th = CONST("mkvec")
+    f_eq = REFL(mkvec_th)
+    # We need add_0_0_eq_0 tagged at nat (it already is).
+    try:
+        # First show the call fails without cod_eq:
+        MK_COMB(f_eq, add_0_0_eq_0)
+    except HolError as e:
+        print("without cod_eq ::", str(e).splitlines()[0])
+    bridged = MK_COMB(f_eq, add_0_0_eq_0, cod_eq=vec_bridge)
+    print("MK_COMB with cod_eq ::", bridged)
 

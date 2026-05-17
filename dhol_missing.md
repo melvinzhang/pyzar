@@ -13,15 +13,15 @@ Audit of `fusion_dhol.py` vs. Rothgang/Rabe/Benzmüller's DHOL.
 - ✓ `INST_TYPE` Clash/alpha-rename recovery.
 - ✓ `type_of` deleted — no kernel rule consults intrinsic types any more; the certificate is the only source of truth for typing inside rules.
 - ✓ Atomic `new_type` with mandatory inhabitation witness (paper's modified non-emptiness rule, §3). `new_type(name, ..., witness=(const_name, const_ty))` declares the type and a witness constant in one transaction; `const_ty`'s head (after Pi-stripping) must match `name`. Bool stays primitive. Result: no uninhabited types can exist in the kernel — soundness is guaranteed by construction, and there's no runtime inhabitation state to track or query (no `inhabited_types()`, no `is_inhabited(ty)`, no propagation through `new_constant`).
+- ✓ `congλ'` — `ABS(v, th, ty_eq=...)` accepts an optional binder-type bridge `A ≡ A'`. The LHS uses `v:A`, the RHS uses `Var(v.name, A')`; result is tagged at `Π(v:A). B`. Without `ty_eq` the homogeneous case is unchanged. The bridge's hypotheses are absorbed; `v` must not occur free in them.
+- ✓ `congAppl'` codomain bridge — `MK_COMB(f_eq, a_eq, eq=..., cod_eq=...)` now takes a second optional `type_eq_thm` witnessing `B[l2/x] ≡ B[r2/x]` when the substituted codomains differ. Result is tagged at `B[l2/x]` (the LHS view) and `cod_eq`'s hypotheses join the result.
 
 ## Typing-rule gaps
 
-1. **No `congλ'`.** The paper's lambda-congruence allows the *bound variable's type* to differ between the two sides: `Γ ⊢ A ≡ A'   Γ, x:A ⊢ t =B t'  ⟹  Γ ⊢ λx:A. t =Π(x:A).B λx:A'. t'`. Our `ABS(v, th)` forces the same `v` (and hence the same type) on both sides.
 2. **No dependent implication typing.** The paper's `⇒type'` rule lets you assume `F` while type-checking `G` in `F ⇒ G`. Example 3 in the paper (`x = y ⇒ id_x = id_y`) literally can't be type-checked without it — and we'd hit the same wall. We don't have `⇒`/`∀`/`∃` as primitives with their own typing rules; if they're defined via β-reducible constants downstream, the dependency is lost.
 
 ## Conversion / definitional equality
 
-3. **`MK_COMB`'s bridge applies only to the domain.** If the codomain types `B[l2/x]` and `B[r2/x]` differ propositionally (e.g. because `l2 ≠ r2` and `B` is dependent), there's no place to supply that bridge. The paper's `congAppl'` doesn't have this issue because the resulting equation is at type `B[l2/x]` (or `B[r2/x]`; symmetric by the term equality) — we should probably take both views and certify with a derived type equality.
 4. **Beta is syntactic only.** `BETA` only fires on `Comb(Abs(x, body), x)` — the trivial redex. The paper assumes β-conversion is part of definitional equality at every typing step; our `type_eq` doesn't β-reduce, so a Pi codomain like `(\n. vec n) zero` is *not* judged equal to `vec zero` even definitionally. In practice this surfaces every time `subst_in_type` produces an un-reduced application.
 
 ## Kind system
@@ -57,8 +57,6 @@ Direct construction of certificate dataclasses, or of raw term/type values inten
 Highest-leverage next steps, roughly increasing effort:
 
 - **Item 4 (β in `type_eq`)** — fold a head-β step into `_ty_eq` for term-args, so substitution products are recognized definitionally. Five lines. Removes a whole class of bridging boilerplate that's currently needed.
-- **Item 3 (`MK_COMB` codomain bridge)** — take an optional second `type_eq_thm` parameter and certify the result at the right codomain. Localized fix.
-- **Item 1 (`congλ'`)** — a fully general ABS rule. Useful once propositional binder-type changes start appearing in proofs.
 - **Item 6 (`new_basic_type_definition`)** — the only way to get new dependent type families backed by real models.
 - **Item 11 (translation to HOL)** — the paper's main artifact. PER predicates, axiom translation, ATP wiring. Worth its own milestone — recovers the paper's automation story.
 
