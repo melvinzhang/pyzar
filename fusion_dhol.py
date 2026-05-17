@@ -458,7 +458,7 @@ def type_subst(i: list, ty: hol_type) -> hol_type:
         return Tyapp(
             ty.tyop,
             tuple(type_subst(i, a) for a in ty.type_args),
-            tuple(_inst_in_term(i, a) for a in ty.term_args),
+            tuple(_inst_in_term([], i, a) for a in ty.term_args),
         )
     if isinstance(ty, Pi):
         return Pi(
@@ -468,18 +468,47 @@ def type_subst(i: list, ty: hol_type) -> hol_type:
     raise HolError("type_subst: ill-formed type")
 
 
-def _inst_in_term(tyin: list, tm: term) -> term:
+def _inst_in_term(env: list, tyin: list, tm: term) -> term:
+    """Type-variable instantiation with capture-avoiding rename. env
+    pairs original bound variables with their type-instantiated images;
+    when a free variable in the body collides with a renamed binder we
+    raise Clash, which the Abs case catches and recovers by alpha-
+    renaming the binder before retrying."""
     if isinstance(tm, Var):
-        return Var(tm.name, type_subst(tyin, tm.ty))
+        ty2 = type_subst(tyin, tm.ty)
+        tm2 = tm if ty2 is tm.ty else Var(tm.name, ty2)
+        for orig, new in env:
+            if new == tm2:
+                if orig != tm:
+                    raise Clash(tm2)
+                return tm2
+        return tm2
     if isinstance(tm, Const):
-        return Const(tm.name, type_subst(tyin, tm.ty))
+        ty2 = type_subst(tyin, tm.ty)
+        return tm if ty2 is tm.ty else Const(tm.name, ty2)
     if isinstance(tm, Comb):
-        return Comb(_inst_in_term(tyin, tm.fun), _inst_in_term(tyin, tm.arg))
+        f2 = _inst_in_term(env, tyin, tm.fun)
+        a2 = _inst_in_term(env, tyin, tm.arg)
+        if f2 is tm.fun and a2 is tm.arg:
+            return tm
+        return Comb(f2, a2)
     if isinstance(tm, Abs):
-        return Abs(
-            Var(tm.bvar.name, type_subst(tyin, tm.bvar.ty)),
-            _inst_in_term(tyin, tm.body),
-        )
+        bvar2 = _inst_in_term([], tyin, tm.bvar)
+        env2 = [(tm.bvar, bvar2), *env]
+        try:
+            body2 = _inst_in_term(env2, tyin, tm.body)
+            if bvar2 is tm.bvar and body2 is tm.body:
+                return tm
+            return Abs(bvar2, body2)
+        except Clash as ex:
+            if ex.tm != bvar2:
+                raise
+            ifrees = [_inst_in_term([], tyin, v) for v in frees(tm.body)]
+            bvar3 = variant(ifrees, bvar2)
+            z = Var(bvar3.name, tm.bvar.ty)
+            return _inst_in_term(
+                env, tyin, Abs(z, _vsubst([(z, tm.bvar)], tm.body))
+            )
     raise HolError("_inst_in_term: ill-formed term")
 
 
@@ -489,23 +518,33 @@ def _inst_in_term(tyin: list, tm: term) -> term:
 
 
 def _vsubst(ilist: list, tm: term) -> term:
+    """DHOL-aware capture-avoiding term substitution. Also propagates the
+    substitution into type annotations of Var/Const/Abs binders, since a
+    Var's declared type may mention term variables being substituted."""
     if isinstance(tm, Var):
         for src, dst in ilist:
             if dst == tm:
                 return src
-        return tm
+        new_ty = subst_in_type(ilist, tm.ty)
+        return tm if new_ty is tm.ty else Var(tm.name, new_ty)
     if isinstance(tm, Const):
-        return tm
+        new_ty = subst_in_type(ilist, tm.ty)
+        return tm if new_ty is tm.ty else Const(tm.name, new_ty)
     if isinstance(tm, Comb):
         return Comb(_vsubst(ilist, tm.fun), _vsubst(ilist, tm.arg))
     if isinstance(tm, Abs):
         ilist2 = [(t, x) for (t, x) in ilist if x != tm.bvar]
+        new_bvar_ty = subst_in_type(ilist, tm.bvar.ty)
+        new_bvar = (
+            tm.bvar if new_bvar_ty is tm.bvar.ty
+            else Var(tm.bvar.name, new_bvar_ty)
+        )
         if not ilist2:
-            return tm
-        if any(vfree_in(tm.bvar, t) and vfree_in(x, tm.body) for t, x in ilist2):
-            v2 = variant([_vsubst(ilist2, tm.body)], tm.bvar)
+            return tm if new_bvar is tm.bvar else Abs(new_bvar, tm.body)
+        if any(vfree_in(new_bvar, t) and vfree_in(x, tm.body) for t, x in ilist2):
+            v2 = variant([_vsubst(ilist2, tm.body)], new_bvar)
             return Abs(v2, _vsubst([(v2, tm.bvar), *ilist2], tm.body))
-        return Abs(tm.bvar, _vsubst(ilist2, tm.body))
+        return Abs(new_bvar, _vsubst(ilist2, tm.body))
     raise HolError("vsubst: ill-formed term")
 
 
@@ -870,24 +909,55 @@ def DEDUCT_ANTISYM_RULE(th1: thm, th2: thm) -> thm:
 
 
 def INST(theta: list, th: thm) -> thm:
-    """theta : list of (replacement_term, var_to_replace).
-    Spike limitation: replacement_term's type must definitionally equal
-    var_to_replace's type."""
+    """theta is a list of (typing_thm, Var). Each replacement carries its
+    own typing certificate, whose assumptions are absorbed into the
+    result.
+
+    Sequential semantics: the i-th replacement's type must match the i-th
+    variable's declared type with the *earlier* replacements already
+    applied (paper's substitution lemma, linearly-ordered context). So
+    for [(t1, x1), (t2, x2)] with x2:A2 depending on x1, t2 must have
+    type A2[x1/t1].
+
+    Propositional bridging is handled by CONV: pre-coerce a replacement
+    to the (sequentially-)expected type before passing it in."""
     if not theta:
         return th
-    for t, x in theta:
+    tm_theta: list = []
+    asl_extra: list = []
+    for i, (t_th, x) in enumerate(theta):
+        if not isinstance(t_th, typing_thm):
+            raise HolError(
+                "INST: replacement must be a typing_thm "
+                "(wrap with VAR/CONST/APP/... or CONV)"
+            )
         if not isinstance(x, Var):
-            raise HolError("INST: rhs must be a variable")
-        if not type_eq(type_of(t), x.ty):
-            raise HolError("INST: type mismatch (use APP+CONV for prop. cases)")
-    f = lambda tm: _vsubst(theta, tm)
-    return thm(term_image(f, th._asl), f(th._concl))
+            raise HolError("INST: target must be a Var")
+        expected_ty = subst_in_type(tm_theta, x.ty)
+        if not type_eq(t_th._ty, expected_ty):
+            raise HolError(
+                f"INST: type mismatch at position {i} "
+                f"(replacement {_pp_ty(t_th._ty)} vs expected "
+                f"{_pp_ty(expected_ty)} after earlier substitutions); "
+                f"pre-apply CONV"
+            )
+        tm_theta.append((t_th._tm, x))
+        asl_extra = term_union(asl_extra, t_th._asl)
+    f = lambda tm: _vsubst(tm_theta, tm)
+    return thm(
+        term_union(term_image(f, th._asl), asl_extra),
+        f(th._concl),
+    )
 
 
 def INST_TYPE(theta: list, th: thm) -> thm:
+    """theta is a list of (replacement_type, Tyvar). Propagates the
+    substitution into every type annotation, using Clash-driven alpha-
+    rename when type instantiation would cause a bound variable to
+    collide with a free one in the body."""
     if not theta:
         return th
-    f = lambda tm: _inst_in_term(theta, tm)
+    f = lambda tm: _inst_in_term([], theta, tm)
     return thm(term_image(f, th._asl), f(th._concl))
 
 
@@ -1012,7 +1082,7 @@ if __name__ == "__main__":
     print("axiom      ::", add_zero)
 
     # Specialize n := 0
-    add_0_0_eq_0 = INST([(zero_th._tm, n_var)], add_zero)
+    add_0_0_eq_0 = INST([(zero_th, n_var)], add_zero)
     print("specialised::", add_0_0_eq_0)
 
     # Lift to type equality vec(add 0 0) == vec 0
@@ -1044,3 +1114,51 @@ if __name__ == "__main__":
     # Wrap it into a regular theorem.
     g_nil_refl = REFL(g_nil)
     print("REFL(g nil) ::", g_nil_refl)
+
+    # ----------------------------------------------------------------
+    # INST also propagates the substitution into type annotations.
+    # Build |- cons n x v = cons n x v with v : vec n free, then INST
+    # n := zero. The free v should reappear as v : vec 0 in the result.
+    # ----------------------------------------------------------------
+    print()
+    x_var = Var("x", nat_ty)
+    v_var = Var("v", vec(n_th))  # v : vec n
+    cons_nxv_th = APP(APP(APP(cons_th, n_th), VAR(x_var)), VAR(v_var))
+    print("cons n x v ::", _pp_ty(cons_nxv_th._ty))
+    refl_cons = REFL(cons_nxv_th)
+    print("REFL       ::", refl_cons)
+    refl_cons_at_0 = INST([(zero_th, n_var)], refl_cons)
+    print("INST n:=0  ::", refl_cons_at_0)
+    # Inspect the Var occurrences in the new conclusion to confirm v's
+    # type annotation was rewritten from vec(n) to vec(0).
+    for free in frees(refl_cons_at_0._concl):
+        print(f"  free var {free.name} :: {_pp_ty(free.ty)}")
+
+    # ----------------------------------------------------------------
+    # Sequential semantics: INST [(zero, n), (v_th, v)] where v_th has
+    # type vec(0) — matching v's declared type vec(n) only AFTER the
+    # earlier substitution n := 0 has been applied.
+    # ----------------------------------------------------------------
+    print()
+    nil_th_again = CONST("nil")  # vec(0)
+    seq_inst = INST([(zero_th, n_var), (nil_th_again, v_var)], refl_cons)
+    print("seq INST [n:=0, v:=nil] ::", seq_inst)
+
+    # ----------------------------------------------------------------
+    # Propositional bridging via CONV-then-INST. We have nil : vec(0)
+    # and want to substitute it for v : vec(n) with n eventually becoming
+    # `add 0 0`. The replacement's type after the n:=add 0 0 step would
+    # be vec(add 0 0), so we CONV nil from vec(0) to vec(add 0 0) using
+    # the bridge derived earlier, then INST sequentially.
+    # ----------------------------------------------------------------
+    print()
+    add00_th = APP(APP(add_th, zero_th), zero_th)        # add 0 0 : nat
+    nil_at_add00 = CONV(nil_th, vec_bridge)              # nil : vec(add 0 0)
+    print("nil : vec(0)  ==CONV==>  vec(add 0 0)  ::", _pp_ty(nil_at_add00._ty))
+    bridged_inst = INST(
+        [(add00_th, n_var), (nil_at_add00, v_var)],
+        refl_cons,
+    )
+    print("INST [n:=add 0 0, v:=nil (coerced)] ::", bridged_inst)
+    for free in frees(bridged_inst._concl):
+        print(f"  free var {free.name} :: {_pp_ty(free.ty)}")
