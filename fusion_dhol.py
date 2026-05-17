@@ -261,6 +261,7 @@ aty: hol_type = Tyvar("A")
 
 the_term_constants: list = [
     ("=", Pi(Var("_", aty), Pi(Var("_", aty), bool_ty))),
+    ("==>", Pi(Var("_", bool_ty), Pi(Var("_", bool_ty), bool_ty))),
 ]
 
 
@@ -736,6 +737,42 @@ def safe_mk_eq(ty: hol_type, lhs: term, r: term) -> term:
 
 
 # ---------------------------------------------------------------------------
+# Implication helpers (terms of shape Comb(Comb(Const("==>", _), F), G))
+#
+# Implication is primitive (not derived from equality, as in classic HOL)
+# because typing the consequent in dependent setups requires assuming the
+# antecedent -- see Rule D in Rabe's 2026 "Semantics for DHOL".
+# ---------------------------------------------------------------------------
+
+
+_imp_const_ty: hol_type = Pi(Var("_", bool_ty), Pi(Var("_", bool_ty), bool_ty))
+
+
+def mk_imp(F: term, G: term) -> term:
+    """Build the term `F ==> G` at type bool. Both arguments are assumed
+    to be of type bool (the typing rule IMP_TYPE certifies this; this
+    helper is purely a term constructor)."""
+    return Comb(Comb(Const("==>", _imp_const_ty), F), G)
+
+
+def _is_imp(c: term) -> bool:
+    return (
+        isinstance(c, Comb)
+        and isinstance(c.fun, Comb)
+        and isinstance(c.fun.fun, Const)
+        and c.fun.fun.name == "==>"
+    )
+
+
+def _imp_ant(c: term) -> term:
+    return c.fun.arg
+
+
+def _imp_con(c: term) -> term:
+    return c.arg
+
+
+# ---------------------------------------------------------------------------
 # Typing rules: VAR, CONST, APP, LAMBDA, CONV
 #
 # These are the *only* legal ways to build a typing_thm. Term construction
@@ -815,6 +852,29 @@ def _bridge_matches(eq: type_eq_thm, A: hol_type, B: hol_type) -> bool:
     )
 
 
+def IMP_TYPE(F_th: typing_thm, G_th: typing_thm) -> typing_thm:
+    """Rule D (dependent implication typing):
+            Gamma |- F : bool    Gamma, ▷F |- G : bool
+            -------------------------------------------
+                      Gamma |- F ⇒ G : bool
+
+    The consequent's typing may depend on F being assumed; if G_th's asl
+    contains F (typically introduced via a bridge derived from ASSUME(F)),
+    that occurrence is discharged in the result, mirroring the paper's
+    `▷F` context entry being absorbed by the implication."""
+    if not type_eq(F_th._ty, bool_ty):
+        raise HolError(
+            f"IMP_TYPE: antecedent has non-bool type {_pp_ty(F_th._ty)}"
+        )
+    if not type_eq(G_th._ty, bool_ty):
+        raise HolError(
+            f"IMP_TYPE: consequent has non-bool type {_pp_ty(G_th._ty)}"
+        )
+    F_tm = F_th._tm
+    asl = term_union(F_th._asl, term_remove(F_tm, G_th._asl))
+    return typing_thm(asl, mk_imp(F_tm, G_th._tm), bool_ty)
+
+
 # ---------------------------------------------------------------------------
 # Type-equality rules: TY_REFL, TY_SYM, TY_TRANS, TY_CONG_BASE, TY_CONG_PI
 # ---------------------------------------------------------------------------
@@ -881,8 +941,10 @@ def TY_CONG_PI(v: Var, dom_eq: type_eq_thm, cod_eq: type_eq_thm) -> type_eq_thm:
 
 
 # ---------------------------------------------------------------------------
-# Validity rules: REFL, ASSUME, BETA, TRANS, MK_COMB, ABS, EQ_MP,
-# DEDUCT_ANTISYM_RULE, INST, INST_TYPE
+# Validity rules: REFL, ASSUME, BETA, ETA, EQ_TY_CONV, TRANS, MK_COMB, ABS,
+# EQ_MP, DISCH, MP, DEDUCT_ANTISYM_RULE, INST, INST_TYPE
+# (DISCH / MP are the implication-intro / modus ponens pair for the
+# primitive `==>`; their typing-layer companion is IMP_TYPE / Rule D.)
 # ---------------------------------------------------------------------------
 
 
@@ -1069,6 +1131,41 @@ def EQ_MP(th1: thm, th2: thm) -> thm:
     if alphaorder(_lhs(c), th2._concl) != 0:
         raise HolError("EQ_MP: lhs of equation does not match th2's conclusion")
     return thm(term_union(th1._asl, th2._asl), _rhs(c))
+
+
+def DISCH(F_th: typing_thm, th: thm) -> thm:
+    """Implication introduction:
+            Gamma |- F : bool    Gamma, F |- G
+            ----------------------------------
+                  Gamma |- F ⇒ G
+
+    The antecedent's typing is supplied by F_th; its assumptions (if any)
+    join the result's. F is removed from th._asl. A vacuous discharge --
+    F not in th._asl -- is permitted, matching HOL Light's DISCH."""
+    if not type_eq(F_th._ty, bool_ty):
+        raise HolError(
+            f"DISCH: antecedent has non-bool type {_pp_ty(F_th._ty)}"
+        )
+    F_tm = F_th._tm
+    asl = term_union(F_th._asl, term_remove(F_tm, th._asl))
+    return thm(asl, mk_imp(F_tm, th._concl))
+
+
+def MP(imp_th: thm, ant_th: thm) -> thm:
+    """Modus ponens:
+            Gamma1 |- F ⇒ G    Gamma2 |- F
+            ------------------------------
+                  Gamma1 ∪ Gamma2 |- G"""
+    c = imp_th._concl
+    if not _is_imp(c):
+        raise HolError("MP: first argument is not an implication")
+    F = _imp_ant(c)
+    G = _imp_con(c)
+    if alphaorder(F, ant_th._concl) != 0:
+        raise HolError(
+            "MP: antecedent does not match second argument's conclusion"
+        )
+    return thm(term_union(imp_th._asl, ant_th._asl), G)
 
 
 def DEDUCT_ANTISYM_RULE(th1: thm, th2: thm) -> thm:
@@ -1451,4 +1548,50 @@ if __name__ == "__main__":
         print("without cod_eq ::", str(e).splitlines()[0])
     bridged = MK_COMB(f_eq, add_0_0_eq_0, cod_eq=vec_bridge)
     print("MK_COMB with cod_eq ::", bridged)
+
+    # ----------------------------------------------------------------
+    # Primitive `==>` and Rule D (dependent implication typing).
+    # Example 3 from the paper, adapted: x = y ⇒ f x = f y where f is a
+    # dependent function. Type-checking the consequent f x = f y at
+    # type bool needs the assumption x = y to bridge vec(x) ≡ vec(y)
+    # (here we use add 0 0 = 0 ⇒ nil =vec(0) nil-coerced, since we have
+    # that bridge already).
+    # ----------------------------------------------------------------
+    print()
+    # Antecedent: add 0 0 = 0  (as a bool typing_thm)
+    ant_typing = APP(APP(CONST("=", [(nat_ty, aty)]), add00_th), zero_th)
+    print("antecedent F ::", _pp_tm(ant_typing._tm), ":", _pp_ty(ant_typing._ty))
+
+    # Consequent G typed under ▷F: build nil =vec(0) (nil viewed via bridge).
+    # The ASSUMEd equation builds a bridge whose asl mentions F; CONV
+    # through that bridge lifts nil's certificate, and REFL emits a thm
+    # whose asl tracks the dependency. Then we wrap as a bool typing_thm.
+    assumed_F = ASSUME(ant_typing)
+    bridge_under_F = TY_CONG_BASE("vec", [], [assumed_F])
+    nil_under_F = CONV(nil_th, TY_SYM(bridge_under_F))
+    print("nil under ▷F  ::", nil_under_F)
+
+    # Consequent term: nil =vec(add 0 0) nil  (well-typed under ▷F).
+    cons_eq_term = APP(
+        APP(CONST("=", [(nil_under_F._ty, aty)]), nil_under_F),
+        nil_under_F,
+    )
+    print("consequent G typing ::", cons_eq_term)
+
+    # IMP_TYPE discharges F from the consequent's asl.
+    imp_typing = IMP_TYPE(ant_typing, cons_eq_term)
+    print("F ⇒ G typing ::", imp_typing)
+    print("            asl =", imp_typing._asl)  # F should be gone
+
+    # Now exercise the validity-layer pair. Build `[F] |- G` as a thm,
+    # DISCH F to get `|- F ⇒ G`, then MP-apply with an axiom that
+    # provides F.
+    g_under_F = REFL(nil_under_F)  # [F] |- (nil =vec(0) nil)
+    print("[F] |- G  ::", g_under_F)
+    imp_thm = DISCH(ant_typing, g_under_F)
+    print("DISCH F   ::", imp_thm)
+
+    # Now MP with the axiom add_0_0_eq_0 (which is [] |- add 0 0 = 0).
+    g_thm = MP(imp_thm, add_0_0_eq_0)
+    print("MP(F⇒G, F) ::", g_thm)
 
