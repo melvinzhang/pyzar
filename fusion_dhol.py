@@ -335,6 +335,23 @@ def mk_arrow(a: hol_type, b: hol_type) -> hol_type:
     return Pi(Var("_", a), b)
 
 
+def _check_assume_proof(arg, formula: term, theta_ty: list,
+                        theta_tm: list, ctx: str) -> term:
+    """Validate that `arg` is a `thm` whose conclusion alpha-matches
+    `formula` after applying the term substitution `theta_tm` and the
+    type substitution `theta_ty`. Returns the substituted `formula`
+    (`needed`); the caller decides what to do with `arg._asl`."""
+    if not isinstance(arg, thm):
+        raise HolError(f"{ctx}: argument for Assume binder must be a thm")
+    needed = _inst_in_term([], theta_ty, _vsubst(theta_tm, formula))
+    if not _tm_alpha([], arg._concl, needed):
+        raise HolError(
+            f"{ctx}: Assume proof concludes {_pp_tm(arg._concl)} "
+            f"but required is {_pp_tm(needed)}"
+        )
+    return needed
+
+
 def mk_type(tyop: str, args: list) -> hol_type:
     """Build a Tyapp from a type-constant name and an ordered list of
     arguments matching the declared context shape.
@@ -389,22 +406,13 @@ def mk_type(tyop: str, args: list) -> hol_type:
             term_args.append(arg._tm)
             theta_tm.append((arg._tm, binder))
         elif isinstance(binder, Assume):
-            if not isinstance(arg, thm):
-                raise HolError(
-                    "mk_type: argument for Assume binder must be a thm"
-                )
+            _check_assume_proof(
+                arg, binder.formula, theta_ty, theta_tm, "mk_type"
+            )
             if arg._asl:
                 raise HolError(
                     "mk_type: Assume proof must be unconditional (empty asl); "
                     "mk_type returns a hol_type with no asl tracking"
-                )
-            needed = _inst_in_term(
-                [], theta_ty, _vsubst(theta_tm, binder.formula)
-            )
-            if not _tm_alpha([], arg._concl, needed):
-                raise HolError(
-                    f"mk_type: Assume proof concludes {_pp_tm(arg._concl)} "
-                    f"but required (after earlier args) is {_pp_tm(needed)}"
                 )
         else:
             raise HolError("mk_type: ill-formed context binder")
@@ -416,6 +424,15 @@ def mk_type(tyop: str, args: list) -> hol_type:
 # ---------------------------------------------------------------------------
 
 
+def _uniq_extend(seen: list, items) -> list:
+    """Append each item to `seen` if not already present (by ==).
+    Mutates `seen` in place and returns it for chaining."""
+    for x in items:
+        if x not in seen:
+            seen.append(x)
+    return seen
+
+
 def frees(tm: term) -> list:
     if isinstance(tm, Var):
         return [tm]
@@ -424,16 +441,10 @@ def frees(tm: term) -> list:
     if isinstance(tm, Abs):
         seen = [v for v in frees(tm.body) if v != tm.bvar]
         if tm.precondition is not None:
-            for v in frees(tm.precondition):
-                if v != tm.bvar and v not in seen:
-                    seen.append(v)
+            _uniq_extend(seen, (v for v in frees(tm.precondition) if v != tm.bvar))
         return seen
     if isinstance(tm, Comb):
-        seen = list(frees(tm.fun))
-        for v in frees(tm.arg):
-            if v not in seen:
-                seen.append(v)
-        return seen
+        return _uniq_extend(list(frees(tm.fun)), frees(tm.arg))
     raise HolError("frees: ill-formed term")
 
 
@@ -472,23 +483,14 @@ def tyvars(ty: hol_type) -> list:
     if isinstance(ty, Tyapp):
         seen: list = []
         for a in ty.type_args:
-            for tv in tyvars(a):
-                if tv not in seen:
-                    seen.append(tv)
+            _uniq_extend(seen, tyvars(a))
         for a in ty.term_args:
-            for tv in type_vars_in_term(a):
-                if tv not in seen:
-                    seen.append(tv)
+            _uniq_extend(seen, type_vars_in_term(a))
         return seen
     if isinstance(ty, Pi):
-        seen = list(tyvars(ty.bvar.ty))
-        for tv in tyvars(ty.body):
-            if tv not in seen:
-                seen.append(tv)
+        seen = _uniq_extend(list(tyvars(ty.bvar.ty)), tyvars(ty.body))
         if ty.precondition is not None:
-            for tv in type_vars_in_term(ty.precondition):
-                if tv not in seen:
-                    seen.append(tv)
+            _uniq_extend(seen, type_vars_in_term(ty.precondition))
         return seen
     raise HolError("tyvars: ill-formed type")
 
@@ -497,20 +499,16 @@ def type_vars_in_term(tm: term) -> list:
     if isinstance(tm, Var) or isinstance(tm, Const):
         return tyvars(tm.ty)
     if isinstance(tm, Comb):
-        seen = list(type_vars_in_term(tm.fun))
-        for tv in type_vars_in_term(tm.arg):
-            if tv not in seen:
-                seen.append(tv)
-        return seen
+        return _uniq_extend(
+            list(type_vars_in_term(tm.fun)),
+            type_vars_in_term(tm.arg),
+        )
     if isinstance(tm, Abs):
-        seen = list(tyvars(tm.bvar.ty))
-        for tv in type_vars_in_term(tm.body):
-            if tv not in seen:
-                seen.append(tv)
+        seen = _uniq_extend(
+            list(tyvars(tm.bvar.ty)), type_vars_in_term(tm.body)
+        )
         if tm.precondition is not None:
-            for tv in type_vars_in_term(tm.precondition):
-                if tv not in seen:
-                    seen.append(tv)
+            _uniq_extend(seen, type_vars_in_term(tm.precondition))
         return seen
     raise HolError("type_vars_in_term: ill-formed term")
 
@@ -592,6 +590,49 @@ def _tm_alpha(env: list, a: term, b: term) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _vsubst_opt(theta: list, prec):
+    """`_vsubst` lifted over `None`-valued preconditions."""
+    return None if prec is None else _vsubst(theta, prec)
+
+
+def _inst_in_term_opt(env: list, tyin: list, prec):
+    """`_inst_in_term` lifted over `None`-valued preconditions."""
+    return None if prec is None else _inst_in_term(env, tyin, prec)
+
+
+def _subst_binder(theta: list, bvar: Var, body, prec,
+                  subst_body, free_in_body, ctor):
+    """Capture-avoiding substitution under a binder, shared between
+    `subst_in_type` (Pi) and `_vsubst` (Abs). `subst_body` recurses
+    into `body` (`subst_in_type` / `_vsubst`); `free_in_body` is the
+    free-occurrence predicate matching `body`'s shape (`_occurs_in_type`
+    / `vfree_in`); `ctor` builds the result binder (`Pi` / `Abs`)."""
+    theta2 = [(t, x) for t, x in theta if x != bvar]
+    new_bvar_ty = subst_in_type(theta, bvar.ty)
+    new_bvar = (
+        bvar if new_bvar_ty is bvar.ty
+        else Var(bvar.name, new_bvar_ty)
+    )
+    if not theta2:
+        return ctor(new_bvar, body, prec)
+    body_uses = lambda x: (
+        free_in_body(x, body)
+        or (prec is not None and vfree_in(x, prec))
+    )
+    if any(vfree_in(new_bvar, t) and body_uses(x) for t, x in theta2):
+        avoid = [subst_body(theta2, body)]
+        if prec is not None:
+            avoid.append(_vsubst(theta2, prec))
+        fresh = variant(avoid, new_bvar)
+        rename = [(fresh, bvar), *theta2]
+        return ctor(
+            fresh, subst_body(rename, body), _vsubst_opt(rename, prec)
+        )
+    return ctor(
+        new_bvar, subst_body(theta2, body), _vsubst_opt(theta2, prec)
+    )
+
+
 def subst_in_type(theta: list, ty: hol_type) -> hol_type:
     if not theta:
         return ty
@@ -602,35 +643,10 @@ def subst_in_type(theta: list, ty: hol_type) -> hol_type:
         new_term_args = tuple(_vsubst(theta, a) for a in ty.term_args)
         return Tyapp(ty.tyop, new_type_args, new_term_args)
     if isinstance(ty, Pi):
-        theta2 = [(t, x) for t, x in theta if x != ty.bvar]
-        new_bvar_ty = subst_in_type(theta2, ty.bvar.ty)
-        if not theta2:
-            return Pi(Var(ty.bvar.name, new_bvar_ty), ty.body, ty.precondition)
-        clash = any(
-            vfree_in(ty.bvar, t) and (
-                _occurs_in_type(x, ty.body)
-                or (ty.precondition is not None and vfree_in(x, ty.precondition))
-            )
-            for t, x in theta2
+        return _subst_binder(
+            theta, ty.bvar, ty.body, ty.precondition,
+            subst_in_type, _occurs_in_type, Pi,
         )
-        if clash:
-            avoid = [t for t, _ in theta2]
-            fresh = variant(avoid, ty.bvar)
-            fresh_var = Var(fresh.name, new_bvar_ty)
-            body2 = subst_in_type([(fresh_var, ty.bvar)], ty.body)
-            prec2 = (
-                None if ty.precondition is None
-                else _vsubst([(fresh_var, ty.bvar)], ty.precondition)
-            )
-            new_body = subst_in_type(theta2, body2)
-            new_prec = None if prec2 is None else _vsubst(theta2, prec2)
-            return Pi(fresh_var, new_body, new_prec)
-        new_body = subst_in_type(theta2, ty.body)
-        new_prec = (
-            None if ty.precondition is None
-            else _vsubst(theta2, ty.precondition)
-        )
-        return Pi(Var(ty.bvar.name, new_bvar_ty), new_body, new_prec)
     raise HolError("subst_in_type: ill-formed type")
 
 
@@ -676,8 +692,7 @@ def type_subst(i: list, ty: hol_type) -> hol_type:
         return Pi(
             Var(ty.bvar.name, type_subst(i, ty.bvar.ty)),
             type_subst(i, ty.body),
-            None if ty.precondition is None
-            else _inst_in_term([], i, ty.precondition),
+            _inst_in_term_opt([], i, ty.precondition),
         )
     raise HolError("type_subst: ill-formed type")
 
@@ -711,10 +726,7 @@ def _inst_in_term(env: list, tyin: list, tm: term) -> term:
         env2 = [(tm.bvar, bvar2), *env]
         try:
             body2 = _inst_in_term(env2, tyin, tm.body)
-            prec2 = (
-                None if tm.precondition is None
-                else _inst_in_term(env2, tyin, tm.precondition)
-            )
+            prec2 = _inst_in_term_opt(env2, tyin, tm.precondition)
             if (
                 bvar2 is tm.bvar
                 and body2 is tm.body
@@ -729,10 +741,7 @@ def _inst_in_term(env: list, tyin: list, tm: term) -> term:
             bvar3 = variant(ifrees, bvar2)
             z = Var(bvar3.name, tm.bvar.ty)
             renamed = _vsubst([(z, tm.bvar)], tm.body)
-            renamed_prec = (
-                None if tm.precondition is None
-                else _vsubst([(z, tm.bvar)], tm.precondition)
-            )
+            renamed_prec = _vsubst_opt([(z, tm.bvar)], tm.precondition)
             return _inst_in_term(
                 env, tyin, Abs(z, renamed, renamed_prec)
             )
@@ -760,33 +769,10 @@ def _vsubst(ilist: list, tm: term) -> term:
     if isinstance(tm, Comb):
         return Comb(_vsubst(ilist, tm.fun), _vsubst(ilist, tm.arg))
     if isinstance(tm, Abs):
-        ilist2 = [(t, x) for (t, x) in ilist if x != tm.bvar]
-        new_bvar_ty = subst_in_type(ilist, tm.bvar.ty)
-        new_bvar = (
-            tm.bvar if new_bvar_ty is tm.bvar.ty
-            else Var(tm.bvar.name, new_bvar_ty)
+        return _subst_binder(
+            ilist, tm.bvar, tm.body, tm.precondition,
+            _vsubst, vfree_in, Abs,
         )
-        prec = tm.precondition
-        if not ilist2:
-            if new_bvar is tm.bvar:
-                return tm
-            return Abs(new_bvar, tm.body, prec)
-        body_or_prec_uses = lambda x: (
-            vfree_in(x, tm.body)
-            or (prec is not None and vfree_in(x, prec))
-        )
-        if any(vfree_in(new_bvar, t) and body_or_prec_uses(x) for t, x in ilist2):
-            avoid_basis = [_vsubst(ilist2, tm.body)]
-            if prec is not None:
-                avoid_basis.append(_vsubst(ilist2, prec))
-            v2 = variant(avoid_basis, new_bvar)
-            rename = [(v2, tm.bvar), *ilist2]
-            new_body = _vsubst(rename, tm.body)
-            new_prec = None if prec is None else _vsubst(rename, prec)
-            return Abs(v2, new_body, new_prec)
-        new_body = _vsubst(ilist2, tm.body)
-        new_prec = None if prec is None else _vsubst(ilist2, prec)
-        return Abs(new_bvar, new_body, new_prec)
     raise HolError("vsubst: ill-formed term")
 
 
@@ -1090,20 +1076,38 @@ def CONV(t_th: typing_thm, eq: type_eq_thm) -> typing_thm:
                                     -------------------------------
                                           Gamma |- t : B"""
     asl = term_union(t_th._asl, eq._asl)
-    if type_eq(t_th._ty, eq._lhs):
-        return typing_thm(asl, t_th._tm, eq._rhs)
-    if type_eq(t_th._ty, eq._rhs):
-        return typing_thm(asl, t_th._tm, eq._lhs)
-    raise HolError(
-        f"CONV: term type {_pp_ty(t_th._ty)} matches neither side of "
-        f"{_pp_ty(eq._lhs)} == {_pp_ty(eq._rhs)}"
-    )
+    return typing_thm(asl, t_th._tm, _other_side(eq, t_th._ty, "CONV"))
 
 
 def _bridge_matches(eq: type_eq_thm, A: hol_type, B: hol_type) -> bool:
     return (type_eq(eq._lhs, A) and type_eq(eq._rhs, B)) or (
         type_eq(eq._lhs, B) and type_eq(eq._rhs, A)
     )
+
+
+def _other_side(eq: type_eq_thm, ty: hol_type, ctx: str) -> hol_type:
+    """Return whichever side of `eq` is not definitionally `ty`. Raises
+    HolError tagged with `ctx` if neither side matches `ty`."""
+    if type_eq(eq._lhs, ty):
+        return eq._rhs
+    if type_eq(eq._rhs, ty):
+        return eq._lhs
+    raise HolError(
+        f"{ctx}: bridge {_pp_ty(eq._lhs)} == {_pp_ty(eq._rhs)} "
+        f"does not connect {_pp_ty(ty)}"
+    )
+
+
+def _require_bool(t_th: typing_thm, ctx: str) -> None:
+    """Reject typing_thms whose type isn't definitionally bool."""
+    if not type_eq(t_th._ty, bool_ty):
+        raise HolError(f"{ctx}: non-bool type {_pp_ty(t_th._ty)}")
+
+
+def _require_eq(c: term, ctx: str) -> None:
+    """Reject conclusions that aren't a `=`-headed equation."""
+    if not _is_eq(c):
+        raise HolError(f"{ctx}: conclusion is not an equation")
 
 
 def IMP_TYPE(F_th: typing_thm, G_th: typing_thm) -> typing_thm:
@@ -1116,14 +1120,8 @@ def IMP_TYPE(F_th: typing_thm, G_th: typing_thm) -> typing_thm:
     contains F (typically introduced via a bridge derived from ASSUME(F)),
     that occurrence is discharged in the result, mirroring the paper's
     `▷F` context entry being absorbed by the implication."""
-    if not type_eq(F_th._ty, bool_ty):
-        raise HolError(
-            f"IMP_TYPE: antecedent has non-bool type {_pp_ty(F_th._ty)}"
-        )
-    if not type_eq(G_th._ty, bool_ty):
-        raise HolError(
-            f"IMP_TYPE: consequent has non-bool type {_pp_ty(G_th._ty)}"
-        )
+    _require_bool(F_th, "IMP_TYPE antecedent")
+    _require_bool(G_th, "IMP_TYPE consequent")
     F_tm = F_th._tm
     asl = term_union(F_th._asl, term_remove(F_tm, G_th._asl))
     return typing_thm(asl, mk_imp(F_tm, G_th._tm), bool_ty)
@@ -1214,12 +1212,8 @@ def TY_CONG_BASE(tyop: str, args: list) -> type_eq_thm:
             theta_tm_r.append((rhs_tm, binder))
             asl = term_union(asl, arg._asl)
         elif isinstance(binder, Assume):
-            if not isinstance(arg, thm):
-                raise HolError(
-                    "TY_CONG_BASE: argument for Assume binder must be a thm"
-                )
-            needed_l = _inst_in_term(
-                [], theta_ty_l, _vsubst(theta_tm_l, binder.formula)
+            needed_l = _check_assume_proof(
+                arg, binder.formula, theta_ty_l, theta_tm_l, "TY_CONG_BASE"
             )
             needed_r = _inst_in_term(
                 [], theta_ty_r, _vsubst(theta_tm_r, binder.formula)
@@ -1230,11 +1224,6 @@ def TY_CONG_BASE(tyop: str, args: list) -> type_eq_thm:
                     "substitutions differ; this kernel ships the rule only "
                     "for the case where the obligation is symmetric across "
                     "the two sides of the congruence"
-                )
-            if not _tm_alpha([], arg._concl, needed_l):
-                raise HolError(
-                    f"TY_CONG_BASE: Assume proof concludes "
-                    f"{_pp_tm(arg._concl)} but required is {_pp_tm(needed_l)}"
                 )
             asl = term_union(asl, arg._asl)
         else:
@@ -1274,8 +1263,7 @@ def REFL(t_th: typing_thm) -> thm:
 
 
 def ASSUME(F_th: typing_thm) -> thm:
-    if not type_eq(F_th._ty, bool_ty):
-        raise HolError("ASSUME: not a proposition")
+    _require_bool(F_th, "ASSUME")
     return thm([F_th._tm, *F_th._asl], F_th._tm)
 
 
@@ -1332,18 +1320,9 @@ def EQ_TY_CONV(eq_th: thm, ty_eq: type_eq_thm) -> thm:
         Gamma |- F     ===>  Gamma |- F'
     but the kernel had no way to apply it at the validity layer."""
     c = eq_th._concl
-    if not _is_eq(c):
-        raise HolError("EQ_TY_CONV: conclusion is not an equation")
+    _require_eq(c, "EQ_TY_CONV")
     A = _eq_tag(c)
-    if type_eq(ty_eq._lhs, A):
-        B = ty_eq._rhs
-    elif type_eq(ty_eq._rhs, A):
-        B = ty_eq._lhs
-    else:
-        raise HolError(
-            f"EQ_TY_CONV: bridge {_pp_ty(ty_eq._lhs)} == {_pp_ty(ty_eq._rhs)} "
-            f"does not connect equation type {_pp_ty(A)}"
-        )
+    B = _other_side(ty_eq, A, "EQ_TY_CONV")
     new_eq_const = Const("=", Pi(Var("_", B), Pi(Var("_", B), bool_ty)))
     s, t = _lhs(c), _rhs(c)
     new_concl = Comb(Comb(new_eq_const, s), t)
@@ -1352,15 +1331,15 @@ def EQ_TY_CONV(eq_th: thm, ty_eq: type_eq_thm) -> thm:
 
 def TRANS(th1: thm, th2: thm) -> thm:
     c1, c2 = th1._concl, th2._concl
-    if not (_is_eq(c1) and _is_eq(c2)):
-        raise HolError("TRANS: not both equations")
+    _require_eq(c1, "TRANS")
+    _require_eq(c2, "TRANS")
     if not type_eq(_eq_tag(c1), _eq_tag(c2)):
         raise HolError(
             f"TRANS: equation types differ "
             f"({_pp_ty(_eq_tag(c1))} vs {_pp_ty(_eq_tag(c2))}); "
             f"use EQ_TY_CONV to align first"
         )
-    if alphaorder(_rhs(c1), _lhs(c2)) != 0:
+    if not _tm_alpha([], _rhs(c1), _lhs(c2)):
         raise HolError("TRANS: middle terms do not match")
     return thm(term_union(th1._asl, th2._asl), Comb(c1.fun, _rhs(c2)))
 
@@ -1379,8 +1358,8 @@ def MK_COMB(th1: thm, th2: thm,
     bridge (used when the argument's equation tag doesn't match the
     function's Pi-domain definitionally)."""
     c1, c2 = th1._concl, th2._concl
-    if not (_is_eq(c1) and _is_eq(c2)):
-        raise HolError("MK_COMB: not both equations")
+    _require_eq(c1, "MK_COMB")
+    _require_eq(c2, "MK_COMB")
     f_ty = _eq_tag(c1)
     arg_ty = _eq_tag(c2)
     if not isinstance(f_ty, Pi):
@@ -1431,8 +1410,7 @@ def ABS(v: Var, th: thm, ty_eq: type_eq_thm | None = None) -> thm:
     Pi(x:A). B (the LHS view). ``v`` must not occur free in any
     hypothesis, including the bridge's."""
     c = th._concl
-    if not _is_eq(c):
-        raise HolError("ABS: conclusion not an equation")
+    _require_eq(c, "ABS")
     if any(vfree_in(v, a) for a in th._asl):
         raise HolError("ABS: bound variable occurs free in hypotheses")
     body_ty = _eq_tag(c)
@@ -1445,16 +1423,7 @@ def ABS(v: Var, th: thm, ty_eq: type_eq_thm | None = None) -> thm:
             raise HolError(
                 "ABS: bound variable occurs free in bridge hypotheses"
             )
-        if type_eq(ty_eq._lhs, v.ty):
-            rhs_ty = ty_eq._rhs
-        elif type_eq(ty_eq._rhs, v.ty):
-            rhs_ty = ty_eq._lhs
-        else:
-            raise HolError(
-                f"ABS: bridge {_pp_ty(ty_eq._lhs)} == {_pp_ty(ty_eq._rhs)} "
-                f"does not connect binder type {_pp_ty(v.ty)}"
-            )
-        v_rhs = Var(v.name, rhs_ty)
+        v_rhs = Var(v.name, _other_side(ty_eq, v.ty, "ABS"))
         asl = term_union(th._asl, ty_eq._asl)
     new_ty = Pi(v, body_ty)
     return thm(asl, safe_mk_eq(new_ty, Abs(v, l), Abs(v_rhs, r)))
@@ -1462,13 +1431,12 @@ def ABS(v: Var, th: thm, ty_eq: type_eq_thm | None = None) -> thm:
 
 def EQ_MP(th1: thm, th2: thm) -> thm:
     c = th1._concl
-    if not _is_eq(c):
-        raise HolError("EQ_MP: th1 is not an equation")
+    _require_eq(c, "EQ_MP")
     if not type_eq(_eq_tag(c), bool_ty):
         raise HolError(
             f"EQ_MP: equation tag must be bool (got {_pp_ty(_eq_tag(c))})"
         )
-    if alphaorder(_lhs(c), th2._concl) != 0:
+    if not _tm_alpha([], _lhs(c), th2._concl):
         raise HolError("EQ_MP: lhs of equation does not match th2's conclusion")
     return thm(term_union(th1._asl, th2._asl), _rhs(c))
 
@@ -1482,10 +1450,7 @@ def DISCH(F_th: typing_thm, th: thm) -> thm:
     The antecedent's typing is supplied by F_th; its assumptions (if any)
     join the result's. F is removed from th._asl. A vacuous discharge --
     F not in th._asl -- is permitted, matching HOL Light's DISCH."""
-    if not type_eq(F_th._ty, bool_ty):
-        raise HolError(
-            f"DISCH: antecedent has non-bool type {_pp_ty(F_th._ty)}"
-        )
+    _require_bool(F_th, "DISCH antecedent")
     F_tm = F_th._tm
     asl = term_union(F_th._asl, term_remove(F_tm, th._asl))
     return thm(asl, mk_imp(F_tm, th._concl))
@@ -1501,7 +1466,7 @@ def MP(imp_th: thm, ant_th: thm) -> thm:
         raise HolError("MP: first argument is not an implication")
     F = _imp_ant(c)
     G = _imp_con(c)
-    if alphaorder(F, ant_th._concl) != 0:
+    if not _tm_alpha([], F, ant_th._concl):
         raise HolError(
             "MP: antecedent does not match second argument's conclusion"
         )
@@ -1583,8 +1548,7 @@ def axioms() -> list:
 
 
 def new_axiom(F_th: typing_thm) -> thm:
-    if not type_eq(F_th._ty, bool_ty):
-        raise HolError("new_axiom: not a proposition")
+    _require_bool(F_th, "new_axiom")
     if F_th._asl:
         raise HolError("new_axiom: axiom must be unconditional")
     th = thm([], F_th._tm)
