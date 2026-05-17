@@ -593,25 +593,6 @@ def _pp_tm_raw(tm):
 
 
 # ---------------------------------------------------------------------------
-# type_of (pure function: terms inside certificates are well-formed by
-# construction, so this always succeeds on them)
-# ---------------------------------------------------------------------------
-
-
-def type_of(tm: term) -> hol_type:
-    if isinstance(tm, Var) or isinstance(tm, Const):
-        return tm.ty
-    if isinstance(tm, Comb):
-        f_ty = type_of(tm.fun)
-        if isinstance(f_ty, Pi):
-            return subst_in_type([(tm.arg, f_ty.bvar)], f_ty.body)
-        raise HolError("type_of: head of application is not a Pi")
-    if isinstance(tm, Abs):
-        return Pi(tm.bvar, type_of(tm.body))
-    raise HolError("type_of: ill-typed term")
-
-
-# ---------------------------------------------------------------------------
 # Term-set operations (alpha-aware assumption lists)
 # ---------------------------------------------------------------------------
 
@@ -682,8 +663,17 @@ def _rhs(c: term) -> term:
     return c.arg
 
 
-def safe_mk_eq(lhs: term, r: term) -> term:
-    ty = type_of(lhs)
+def _eq_tag(c: term) -> hol_type:
+    """Read an equation's type tag off its = constant. Use this instead
+    of type_of(_lhs(c)) so that the type honoured matches what the rule
+    that built the equation certified, not the term's intrinsic shape."""
+    return c.fun.fun.ty.bvar.ty
+
+
+def safe_mk_eq(ty: hol_type, lhs: term, r: term) -> term:
+    """Build an equation tagged at the given type. The caller supplies
+    the type (typically from a typing_thm._ty or from another equation's
+    tag), so type_of is never consulted during equation construction."""
     eq_ty = Pi(Var("_", ty), Pi(Var("_", ty), bool_ty))
     return Comb(Comb(Const("=", eq_ty), lhs), r)
 
@@ -714,7 +704,7 @@ def APP(f_th: typing_thm, a_th: typing_thm,
               ------------------------------------------
                         Gamma |- f a : B[x/a]
 
-    If type_of(a) doesn't match A definitionally, eq must witness A == A'."""
+    If a_th._ty doesn't match A definitionally, eq must witness A == A'."""
     f_ty = f_th._ty
     if not isinstance(f_ty, Pi):
         raise HolError(f"APP: head not a Pi -- got {_pp_ty(f_ty)}")
@@ -840,7 +830,7 @@ def TY_CONG_PI(v: Var, dom_eq: type_eq_thm, cod_eq: type_eq_thm) -> type_eq_thm:
 
 
 def REFL(t_th: typing_thm) -> thm:
-    return thm(t_th._asl, safe_mk_eq(t_th._tm, t_th._tm))
+    return thm(t_th._asl, safe_mk_eq(t_th._ty, t_th._tm, t_th._tm))
 
 
 def ASSUME(F_th: typing_thm) -> thm:
@@ -857,7 +847,7 @@ def BETA(redex_th: typing_thm) -> thm:
         and tm.arg == tm.fun.bvar
     ):
         raise HolError("BETA: not a trivial beta-redex")
-    return thm(redex_th._asl, safe_mk_eq(tm, tm.fun.body))
+    return thm(redex_th._asl, safe_mk_eq(redex_th._ty, tm, tm.fun.body))
 
 
 def ETA(t_th: typing_thm) -> thm:
@@ -871,7 +861,7 @@ def ETA(t_th: typing_thm) -> thm:
         raise HolError(f"ETA: term type is not a Pi (got {_pp_ty(f_ty)})")
     fresh_v = variant(frees(t_th._tm), f_ty.bvar)
     eta_form = Abs(fresh_v, Comb(t_th._tm, fresh_v))
-    return thm(t_th._asl, safe_mk_eq(t_th._tm, eta_form))
+    return thm(t_th._asl, safe_mk_eq(t_th._ty, t_th._tm, eta_form))
 
 
 def EQ_TY_CONV(eq_th: thm, ty_eq: type_eq_thm) -> thm:
@@ -891,9 +881,7 @@ def EQ_TY_CONV(eq_th: thm, ty_eq: type_eq_thm) -> thm:
     c = eq_th._concl
     if not _is_eq(c):
         raise HolError("EQ_TY_CONV: conclusion is not an equation")
-    eq_const = c.fun.fun
-    # The = constant's type is Pi(_:A, Pi(_:A, bool)); read A off the outer Pi.
-    A = eq_const.ty.bvar.ty
+    A = _eq_tag(c)
     if type_eq(ty_eq._lhs, A):
         B = ty_eq._rhs
     elif type_eq(ty_eq._rhs, A):
@@ -911,27 +899,43 @@ def EQ_TY_CONV(eq_th: thm, ty_eq: type_eq_thm) -> thm:
 
 def TRANS(th1: thm, th2: thm) -> thm:
     c1, c2 = th1._concl, th2._concl
-    if _is_eq(c1) and _is_eq(c2) and alphaorder(_rhs(c1), _lhs(c2)) == 0:
-        return thm(term_union(th1._asl, th2._asl), Comb(c1.fun, _rhs(c2)))
-    raise HolError("TRANS")
+    if not (_is_eq(c1) and _is_eq(c2)):
+        raise HolError("TRANS: not both equations")
+    if not type_eq(_eq_tag(c1), _eq_tag(c2)):
+        raise HolError(
+            f"TRANS: equation types differ "
+            f"({_pp_ty(_eq_tag(c1))} vs {_pp_ty(_eq_tag(c2))}); "
+            f"use EQ_TY_CONV to align first"
+        )
+    if alphaorder(_rhs(c1), _lhs(c2)) != 0:
+        raise HolError("TRANS: middle terms do not match")
+    return thm(term_union(th1._asl, th2._asl), Comb(c1.fun, _rhs(c2)))
 
 
 def MK_COMB(th1: thm, th2: thm, eq: type_eq_thm | None = None) -> thm:
     c1, c2 = th1._concl, th2._concl
     if not (_is_eq(c1) and _is_eq(c2)):
         raise HolError("MK_COMB: not both equations")
+    f_ty = _eq_tag(c1)
+    arg_ty = _eq_tag(c2)
+    if not isinstance(f_ty, Pi):
+        raise HolError(
+            f"MK_COMB: function-side equation type is not Pi "
+            f"(got {_pp_ty(f_ty)})"
+        )
+    expected = f_ty.bvar.ty
+    asl = term_union(th1._asl, th2._asl)
+    if not type_eq(expected, arg_ty):
+        if eq is None or not _bridge_matches(eq, expected, arg_ty):
+            raise HolError(
+                f"MK_COMB: domain types do not agree "
+                f"(expected {_pp_ty(expected)}, got {_pp_ty(arg_ty)})"
+            )
+        asl = term_union(asl, eq._asl)
     l1, r1 = _lhs(c1), _rhs(c1)
     l2, r2 = _lhs(c2), _rhs(c2)
-    f_ty = type_of(l1)
-    if not isinstance(f_ty, Pi):
-        raise HolError("MK_COMB: head type is not Pi")
-    expected, got = f_ty.bvar.ty, type_of(l2)
-    asl = term_union(th1._asl, th2._asl)
-    if not type_eq(expected, got):
-        if eq is None or not _bridge_matches(eq, expected, got):
-            raise HolError("MK_COMB: domain types do not agree")
-        asl = term_union(asl, eq._asl)
-    return thm(asl, safe_mk_eq(Comb(l1, l2), Comb(r1, r2)))
+    result_ty = subst_in_type([(l2, f_ty.bvar)], f_ty.body)
+    return thm(asl, safe_mk_eq(result_ty, Comb(l1, l2), Comb(r1, r2)))
 
 
 def ABS(v: Var, th: thm) -> thm:
@@ -940,21 +944,32 @@ def ABS(v: Var, th: thm) -> thm:
         raise HolError("ABS: conclusion not an equation")
     if any(vfree_in(v, a) for a in th._asl):
         raise HolError("ABS: bound variable occurs free in hypotheses")
+    body_ty = _eq_tag(c)
+    new_ty = Pi(v, body_ty)
     l, r = _lhs(c), _rhs(c)
-    return thm(th._asl, safe_mk_eq(Abs(v, l), Abs(v, r)))
+    return thm(th._asl, safe_mk_eq(new_ty, Abs(v, l), Abs(v, r)))
 
 
 def EQ_MP(th1: thm, th2: thm) -> thm:
     c = th1._concl
-    if _is_eq(c) and alphaorder(_lhs(c), th2._concl) == 0:
-        return thm(term_union(th1._asl, th2._asl), _rhs(c))
-    raise HolError("EQ_MP")
+    if not _is_eq(c):
+        raise HolError("EQ_MP: th1 is not an equation")
+    if not type_eq(_eq_tag(c), bool_ty):
+        raise HolError(
+            f"EQ_MP: equation tag must be bool (got {_pp_ty(_eq_tag(c))})"
+        )
+    if alphaorder(_lhs(c), th2._concl) != 0:
+        raise HolError("EQ_MP: lhs of equation does not match th2's conclusion")
+    return thm(term_union(th1._asl, th2._asl), _rhs(c))
 
 
 def DEDUCT_ANTISYM_RULE(th1: thm, th2: thm) -> thm:
     asl1 = term_remove(th2._concl, th1._asl)
     asl2 = term_remove(th1._concl, th2._asl)
-    return thm(term_union(asl1, asl2), safe_mk_eq(th1._concl, th2._concl))
+    return thm(
+        term_union(asl1, asl2),
+        safe_mk_eq(bool_ty, th1._concl, th2._concl),
+    )
 
 
 def INST(theta: list, th: thm) -> thm:
@@ -1053,7 +1068,7 @@ def new_basic_definition(lhs: Var, rhs_th: typing_thm) -> thm:
         )
     new_constant(lhs.name, lhs.ty)
     c = Const(lhs.name, lhs.ty)
-    dth = thm([], safe_mk_eq(c, rhs_th._tm))
+    dth = thm([], safe_mk_eq(rhs_th._ty, c, rhs_th._tm))
     the_definitions.append(dth)
     return dth
 
@@ -1231,15 +1246,22 @@ if __name__ == "__main__":
     # EQ_TY_CONV: re-tag an equation at a propositionally-equal type.
     # ----------------------------------------------------------------
     print()
-    def _eq_tag(th):
-        return _pp_ty(th._concl.fun.fun.ty.bvar.ty)
+    def _eq_tag_str(th):
+        return _pp_ty(_eq_tag(th._concl))
 
     nil_refl = REFL(nil_th)
-    print(f"REFL(nil)                :: {nil_refl}  [= tagged at {_eq_tag(nil_refl)}]")
+    print(f"REFL(nil)                :: {nil_refl}  [= tagged at {_eq_tag_str(nil_refl)}]")
+    # The CONV'd typing_thm (nil_at_add : vec(add 0 0)) now flows its
+    # certificate type into REFL, so the equation gets tagged at
+    # vec(add 0 0), not at the intrinsic vec(0). Pre-fix this would
+    # have read type_of(nil) = vec(0).
+    nil_refl_via_cert = REFL(nil_at_add)
+    print(f"REFL(nil_at_add)         :: {nil_refl_via_cert}  "
+          f"[= tagged at {_eq_tag_str(nil_refl_via_cert)}]")
     # nil_refl's = constant is tagged at vec(0). Re-tag via the bridge
     # vec(add 0 0) == vec(0) (which here happens to have empty asl).
     nil_refl_at_add = EQ_TY_CONV(nil_refl, vec_bridge)
-    print(f"EQ_TY_CONV via vec_bridge:: {nil_refl_at_add}  [= tagged at {_eq_tag(nil_refl_at_add)}]")
+    print(f"EQ_TY_CONV via vec_bridge:: {nil_refl_at_add}  [= tagged at {_eq_tag_str(nil_refl_at_add)}]")
 
     # Demonstrate hypothesis propagation: ASSUME the same equation
     # add 0 0 = 0, lift it, and use the resulting bridge in EQ_TY_CONV;
@@ -1257,4 +1279,4 @@ if __name__ == "__main__":
     vec_bridge_hyp = TY_CONG_BASE("vec", [], [assumed_n0])
     print("derived bridge   ::", vec_bridge_hyp)
     nil_refl_hyp = EQ_TY_CONV(nil_refl, vec_bridge_hyp)
-    print(f"EQ_TY_CONV w/ hyp:: {nil_refl_hyp}  [= tagged at {_eq_tag(nil_refl_hyp)}]")
+    print(f"EQ_TY_CONV w/ hyp:: {nil_refl_hyp}  [= tagged at {_eq_tag_str(nil_refl_hyp)}]")
