@@ -12,27 +12,27 @@ Audit of `fusion_dhol.py` vs. Rothgang/Rabe/Benzmüller's DHOL.
 - ✓ `_vsubst` propagates the substitution into Var / Const / Abs-binder type annotations.
 - ✓ `INST_TYPE` Clash/alpha-rename recovery.
 - ✓ `type_of` deleted — no kernel rule consults intrinsic types any more; the certificate is the only source of truth for typing inside rules.
+- ✓ Atomic `new_type` with mandatory inhabitation witness (paper's modified non-emptiness rule, §3). `new_type(name, ..., witness=(const_name, const_ty))` declares the type and a witness constant in one transaction; `const_ty`'s head (after Pi-stripping) must match `name`. Bool stays primitive. Result: no uninhabited types can exist in the kernel — soundness is guaranteed by construction, and there's no runtime inhabitation state to track or query (no `inhabited_types()`, no `is_inhabited(ty)`, no propagation through `new_constant`).
 
 ## Typing-rule gaps
 
 1. **No `congλ'`.** The paper's lambda-congruence allows the *bound variable's type* to differ between the two sides: `Γ ⊢ A ≡ A'   Γ, x:A ⊢ t =B t'  ⟹  Γ ⊢ λx:A. t =Π(x:A).B λx:A'. t'`. Our `ABS(v, th)` forces the same `v` (and hence the same type) on both sides.
 2. **No dependent implication typing.** The paper's `⇒type'` rule lets you assume `F` while type-checking `G` in `F ⇒ G`. Example 3 in the paper (`x = y ⇒ id_x = id_y`) literally can't be type-checked without it — and we'd hit the same wall. We don't have `⇒`/`∀`/`∃` as primitives with their own typing rules; if they're defined via β-reducible constants downstream, the dependency is lost.
-3. **No non-emptiness condition** on type declarations (paper's modified rule, §3). Empty dependent types are allowed silently.
 
 ## Conversion / definitional equality
 
-4. **`MK_COMB`'s bridge applies only to the domain.** If the codomain types `B[l2/x]` and `B[r2/x]` differ propositionally (e.g. because `l2 ≠ r2` and `B` is dependent), there's no place to supply that bridge. The paper's `congAppl'` doesn't have this issue because the resulting equation is at type `B[l2/x]` (or `B[r2/x]`; symmetric by the term equality) — we should probably take both views and certify with a derived type equality.
-5. **Beta is syntactic only.** `BETA` only fires on `Comb(Abs(x, body), x)` — the trivial redex. The paper assumes β-conversion is part of definitional equality at every typing step; our `type_eq` doesn't β-reduce, so a Pi codomain like `(\n. vec n) zero` is *not* judged equal to `vec zero` even definitionally. In practice this surfaces every time `subst_in_type` produces an un-reduced application.
+3. **`MK_COMB`'s bridge applies only to the domain.** If the codomain types `B[l2/x]` and `B[r2/x]` differ propositionally (e.g. because `l2 ≠ r2` and `B` is dependent), there's no place to supply that bridge. The paper's `congAppl'` doesn't have this issue because the resulting equation is at type `B[l2/x]` (or `B[r2/x]`; symmetric by the term equality) — we should probably take both views and certify with a derived type equality.
+4. **Beta is syntactic only.** `BETA` only fires on `Comb(Abs(x, body), x)` — the trivial redex. The paper assumes β-conversion is part of definitional equality at every typing step; our `type_eq` doesn't β-reduce, so a Pi codomain like `(\n. vec n) zero` is *not* judged equal to `vec zero` even definitionally. In practice this surfaces every time `subst_in_type` produces an un-reduced application.
 
 ## Kind system
 
-6. **Flat kinds.** `new_type("foo", type_arity=N, term_params=(T1, T2, ...))` lists term-param types as a tuple where later types can't depend on earlier params. Real DHOL kinds are themselves dependent: `K ::= tp | (x:A) → K`. So you can declare `vec : nat → tp` and `matrix : nat → nat → tp` but not, say, a kind where the second arg's type mentions the first.
+5. **Flat kinds.** `new_type("foo", type_arity=N, term_params=(T1, T2, ...))` lists term-param types as a tuple where later types can't depend on earlier params. Real DHOL kinds are themselves dependent: `K ::= tp | (x:A) → K`. So you can declare `vec : nat → tp` and `matrix : nat → nat → tp` but not, say, a kind where the second arg's type mentions the first.
 
 ## Missing definitions
 
-7. **No `new_basic_type_definition`.** Paper's type-introduction recipe (and HOL Light's) is omitted; we have no way to introduce a new dependent type family from a non-emptiness proof.
-8. **No dest helpers** (`dest_thm`, `dest_typing`, `dest_eq`, `dest_comb`, `dest_abs`). Trivial to add but absent.
-9. **No `freesin`-style hypothesis-tracking helpers** updated for `typing_thm`.
+6. **No `new_basic_type_definition`.** Paper's type-introduction recipe (and HOL Light's) is omitted; we have no way to introduce a new dependent type family from a non-emptiness proof.
+7. **No dest helpers** (`dest_thm`, `dest_typing`, `dest_eq`, `dest_comb`, `dest_abs`). Trivial to add but absent.
+8. **No `freesin`-style hypothesis-tracking helpers** updated for `typing_thm`.
 
 ## Soundness perimeter (honest-caller model, accepted)
 
@@ -47,19 +47,19 @@ Direct construction of certificate dataclasses, or of raw term/type values inten
 
 ## Beyond the base paper
 
-10. **No theorem-prover-as-oracle.** The paper's whole story is "type-checking generates HOL proof obligations and ships them to an ATP." Our kernel inverts this: it demands the user supply the obligations as `thm` / `type_eq_thm` witnesses. Fine for an interactive kernel; doesn't recover the paper's automation story.
-11. **No predicate subtypes** (`A|p`, paper §4, Figure 2). All the `<:I`/`<:Pi`/`|p tp` etc. rules are absent.
-12. **No translation to HOL** (paper §3.2, the PER `A*`, definitions PT1–PT21). The paper's main contribution is the sound+complete embedding; we have nothing analogous, so we can't farm DHOL goals out to LEO-III / cvc5.
-13. **No refinement / quotient types** (the follow-up work, arXiv:2507.02855).
+9. **No theorem-prover-as-oracle.** The paper's whole story is "type-checking generates HOL proof obligations and ships them to an ATP." Our kernel inverts this: it demands the user supply the obligations as `thm` / `type_eq_thm` witnesses. Fine for an interactive kernel; doesn't recover the paper's automation story.
+10. **No predicate subtypes** (`A|p`, paper §4, Figure 2). All the `<:I`/`<:Pi`/`|p tp` etc. rules are absent.
+11. **No translation to HOL** (paper §3.2, the PER `A*`, definitions PT1–PT21). The paper's main contribution is the sound+complete embedding; we have nothing analogous, so we can't farm DHOL goals out to LEO-III / cvc5.
+12. **No refinement / quotient types** (the follow-up work, arXiv:2507.02855).
 
 ## Priorities if you keep going
 
 Highest-leverage next steps, roughly increasing effort:
 
-- **Item 5 (β in `type_eq`)** — fold a head-β step into `_ty_eq` for term-args, so substitution products are recognized definitionally. Five lines. Removes a whole class of bridging boilerplate that's currently needed.
-- **Item 4 (`MK_COMB` codomain bridge)** — take an optional second `type_eq_thm` parameter and certify the result at the right codomain. Localized fix.
+- **Item 4 (β in `type_eq`)** — fold a head-β step into `_ty_eq` for term-args, so substitution products are recognized definitionally. Five lines. Removes a whole class of bridging boilerplate that's currently needed.
+- **Item 3 (`MK_COMB` codomain bridge)** — take an optional second `type_eq_thm` parameter and certify the result at the right codomain. Localized fix.
 - **Item 1 (`congλ'`)** — a fully general ABS rule. Useful once propositional binder-type changes start appearing in proofs.
-- **Item 7 (`new_basic_type_definition`)** — the only way to get new dependent type families backed by real models.
-- **Item 12 (translation to HOL)** — the paper's main artifact. PER predicates, axiom translation, ATP wiring. Worth its own milestone — recovers the paper's automation story.
+- **Item 6 (`new_basic_type_definition`)** — the only way to get new dependent type families backed by real models.
+- **Item 11 (translation to HOL)** — the paper's main artifact. PER predicates, axiom translation, ATP wiring. Worth its own milestone — recovers the paper's automation story.
 
-Items 2, 3, 6 are deeper restructurings. Items 8–9 are housekeeping. Items 10, 11, 13 are extensions beyond the base paper.
+Items 2, 5 are deeper restructurings. Items 7–8 are housekeeping. Items 9, 10, 12 are extensions beyond the base paper.

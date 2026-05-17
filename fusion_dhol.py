@@ -193,10 +193,62 @@ def get_type_kind(s: str):
     raise KeyError(s)
 
 
-def new_type(name: str, type_arity: int = 0, term_params: tuple = ()) -> None:
+def _head_tyop(ty: hol_type) -> str | None:
+    """Type-constant name at the head of ty, after stripping leading
+    Pi binders. Used by new_type to validate that an inhabitation
+    witness's type targets the right family."""
+    while isinstance(ty, Pi):
+        ty = ty.body
+    if isinstance(ty, Tyapp):
+        return ty.tyop
+    return None
+
+
+def new_type(
+    name: str,
+    type_arity: int = 0,
+    term_params: tuple = (),
+    witness: tuple | None = None,
+) -> None:
+    """Declares a new type constant, atomically with an inhabitation witness.
+
+    The `witness` argument is a (const_name, const_ty) pair. const_ty
+    (after stripping leading Pi binders) must have `name` as its head;
+    declaring const_name at const_ty establishes the new type family as
+    inhabited per the paper's modified non-emptiness rule (§3). Both
+    the type and the witness constant land in the kernel in a single
+    operation -- there is no observable intermediate state where the
+    type exists without inhabitation.
+
+    `bool` is the sole exception: it's the kernel's primitive type and
+    requires no user call to new_type.
+
+    Because witness is mandatory, no uninhabited type can ever exist in
+    the kernel. Downstream axiom builders (Hilbert ε, choice, ...) get
+    inhabitation for free and don't need runtime checks.
+    """
+    if witness is None:
+        raise HolError(
+            f"new_type: {name} requires an inhabitation witness. "
+            f"Pass witness=(const_name, const_ty) where const_ty's head "
+            f"(after Pi-stripping) is {name}."
+        )
     if any(n == name for n, _, _ in the_type_constants):
         raise HolError(f"new_type: type {name} has already been declared")
+    witness_name, witness_ty = witness
+    if any(n == witness_name for n, _ in the_term_constants):
+        raise HolError(
+            f"new_type: witness constant {witness_name} already declared"
+        )
+    head = _head_tyop(witness_ty)
+    if head != name:
+        raise HolError(
+            f"new_type: witness type must have {name} as its head "
+            f"(got {head})"
+        )
+    # All checks passed -- commit atomically.
     the_type_constants.insert(0, (name, type_arity, tuple(term_params)))
+    the_term_constants.insert(0, (witness_name, witness_ty))
 
 
 bool_ty: hol_type = Tyapp("bool", (), ())
@@ -1079,10 +1131,9 @@ def new_basic_definition(lhs: Var, rhs_th: typing_thm) -> thm:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # nat as a base type
-    new_type("nat", type_arity=0, term_params=())
+    # nat as a base type, with "0" as the atomic inhabitation witness.
     nat_ty = Tyapp("nat", (), ())
-    new_constant("0", nat_ty)
+    new_type("nat", type_arity=0, term_params=(), witness=("0", nat_ty))
     new_constant("S", mk_arrow(nat_ty, nat_ty))
     new_constant("add", mk_arrow(nat_ty, mk_arrow(nat_ty, nat_ty)))
 
@@ -1095,14 +1146,19 @@ if __name__ == "__main__":
     print("S 0 ::", _pp_ty(one_th._ty))
     print()
 
-    # vec : nat -> tp
-    new_type("vec", type_arity=0, term_params=(nat_ty,))
+    # vec : nat -> tp, with nil : vec(0) as the atomic inhabitation witness.
+    zero_const = Const("0", nat_ty)
+    nil_ty = Tyapp("vec", (), (zero_const,))
+    new_type(
+        "vec",
+        type_arity=0,
+        term_params=(nat_ty,),
+        witness=("nil", nil_ty),
+    )
 
     def vec(n_th):
         return mk_type("vec", [], [n_th])
 
-    # nil : vec 0
-    new_constant("nil", vec(zero_th))
     nil_th = CONST("nil")
     print("nil ::", _pp_ty(nil_th._ty))
 
@@ -1281,4 +1337,28 @@ if __name__ == "__main__":
     print("derived bridge   ::", vec_bridge_hyp)
     nil_refl_hyp = EQ_TY_CONV(nil_refl, vec_bridge_hyp)
     print(f"EQ_TY_CONV w/ hyp:: {nil_refl_hyp}  [= tagged at {_eq_tag_str(nil_refl_hyp)}]")
+
+    # ----------------------------------------------------------------
+    # Atomic new_type: every type lands in the kernel with its witness.
+    # Inhabitation is correct by construction -- no runtime tracking,
+    # no theory-layer check to forget.
+    # ----------------------------------------------------------------
+    print()
+    new_type("phantom", 0, (), witness=("ghost", Tyapp("phantom", (), ())))
+    print("declared phantom with witness ghost")
+
+    # Missing witness -> rejected at the kernel boundary:
+    try:
+        new_type("orphan", 0, ())
+    except HolError as e:
+        print("rejects missing witness ::", str(e).splitlines()[0])
+
+    # Witness with wrong head -> rejected:
+    try:
+        new_type(
+            "stranger", 0, (),
+            witness=("misfit", Tyapp("nat", (), ())),
+        )
+    except HolError as e:
+        print("rejects wrong-head witness ::", str(e).splitlines()[0])
 
