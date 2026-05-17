@@ -42,7 +42,7 @@
 from __future__ import annotations
 import sys
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, NamedTuple
 
 sys.setrecursionlimit(10000)
 
@@ -238,22 +238,16 @@ def _head_tyop(ty: hol_type) -> str | None:
 
 def new_type(
     name: str,
-    context: tuple = (),
+    phi: tuple = (),
     witness: tuple | None = None,
 ) -> None:
-    """Declares a new type constant with an ordered context of binders,
-    atomically with an inhabitation witness.
+    """Declares a new type constant `name(Φ) : tp`, atomically with
+    an inhabitation witness.
 
-    `context` is a tuple of `Tyvar | Var` binders forming a telescope:
-
-      * `Tyvar(u)` declares a type-variable parameter `u` in scope for
-        later entries.
-      * `Var(x, A)` declares a term-variable parameter `x:A`, where `A`
-        may reference any Tyvar/Var bound earlier in the context.
-
-    The flat-arity case is `context=()`. Rank-1 polymorphism alone uses
-    only Tyvar entries; pure dependent parameters use only Var entries;
-    the two can be interleaved freely.
+    `phi` is a Φ-telescope of `Tyvar | Var | Assume` binders. Same
+    vocabulary as on term constants -- later entries may reference
+    earlier ones (rank-1 polymorphism interleaved with dependent term
+    params and assumption obligations).
 
     The `witness` argument is a (const_name, const_ty) pair. const_ty
     (after stripping leading Pi binders) must have `name` as its head;
@@ -274,12 +268,7 @@ def new_type(
         )
     if any(n == name for n, _ in the_type_constants):
         raise HolError(f"new_type: type {name} has already been declared")
-    for entry in context:
-        if not isinstance(entry, (Tyvar, Var, Assume)):
-            raise HolError(
-                f"new_type: context entries must be Tyvar, Var, or Assume "
-                f"(got {entry!r})"
-            )
+    _check_phi(phi, f"new_type({name})")
     witness_name, witness_ty = witness
     if any(n == witness_name for n, _, _ in the_term_constants):
         raise HolError(
@@ -292,7 +281,7 @@ def new_type(
             f"(got {head})"
         )
     # All checks passed -- commit atomically.
-    the_type_constants.insert(0, (name, tuple(context)))
+    the_type_constants.insert(0, (name, tuple(phi)))
     witness_phi = tuple(Tyvar(tv.name) for tv in tyvars(witness_ty))
     the_term_constants.insert(0, (witness_name, witness_phi, witness_ty))
 
@@ -431,16 +420,22 @@ def _check_phi(phi, ctx: str) -> None:
             )
 
 
-def _apply_phi_subst(phi, sigma, ctx: str):
-    """Walk Φ and σ in parallel, validating each replacement against
-    the corresponding binder species (under the running substitution
-    from earlier entries). Returns:
-
+class PhiSubstResult(NamedTuple):
+    """Output of `_apply_phi_subst`. Fields:
       theta_ty:  list of (chosen_hol_type, Tyvar) -- type substitution
       theta_tm:  list of (chosen_term, Var)        -- term substitution
-      term_args: list of chosen terms for Var entries (in declaration order)
-      asl_extra: list of assumptions absorbed from Var-typings and
-                 Assume-proofs (alpha-ordered union)
+      term_args: chosen terms for Var entries (declaration order)
+      asl_extra: assumptions absorbed from Var-typings + Assume-proofs"""
+    theta_ty: list
+    theta_tm: list
+    term_args: list
+    asl_extra: list
+
+
+def _apply_phi_subst(phi, sigma, ctx: str) -> PhiSubstResult:
+    """Walk Φ and σ in parallel, validating each replacement against
+    the corresponding binder species (under the running substitution
+    from earlier entries).
 
     The caller decides how to consume the result (e.g. mk_type rejects
     any non-empty asl_extra; CONST absorbs it into the result's asl)."""
@@ -449,10 +444,7 @@ def _apply_phi_subst(phi, sigma, ctx: str):
             f"{ctx}: wrong number of arguments "
             f"(expected {len(phi)}, got {len(sigma)})"
         )
-    theta_ty: list = []
-    theta_tm: list = []
-    term_args: list = []
-    asl_extra: list = []
+    out = PhiSubstResult(theta_ty=[], theta_tm=[], term_args=[], asl_extra=[])
     for binder, arg in zip(phi, sigma):
         if isinstance(binder, Tyvar):
             if not isinstance(arg, (Tyvar, Tyapp, Pi)):
@@ -460,7 +452,7 @@ def _apply_phi_subst(phi, sigma, ctx: str):
                     f"{ctx}: argument for Tyvar binder {binder.name} "
                     f"must be a hol_type"
                 )
-            theta_ty.append((arg, binder))
+            out.theta_ty.append((arg, binder))
         elif isinstance(binder, Var):
             if not isinstance(arg, typing_thm):
                 raise HolError(
@@ -468,7 +460,7 @@ def _apply_phi_subst(phi, sigma, ctx: str):
                     f"must be a typing_thm"
                 )
             expected = type_subst(
-                theta_ty, subst_in_type(theta_tm, binder.ty)
+                out.theta_ty, subst_in_type(out.theta_tm, binder.ty)
             )
             if not type_eq(expected, arg._ty):
                 raise HolError(
@@ -476,17 +468,17 @@ def _apply_phi_subst(phi, sigma, ctx: str):
                     f"type (expected {_pp_ty(expected)}, "
                     f"got {_pp_ty(arg._ty)})"
                 )
-            theta_tm.append((arg._tm, binder))
-            term_args.append(arg._tm)
-            asl_extra = term_union(asl_extra, arg._asl)
+            out.theta_tm.append((arg._tm, binder))
+            out.term_args.append(arg._tm)
+            out.asl_extra[:] = term_union(out.asl_extra, arg._asl)
         elif isinstance(binder, Assume):
             _check_assume_proof(
-                arg, binder.formula, theta_ty, theta_tm, ctx
+                arg, binder.formula, out.theta_ty, out.theta_tm, ctx
             )
-            asl_extra = term_union(asl_extra, arg._asl)
+            out.asl_extra[:] = term_union(out.asl_extra, arg._asl)
         else:
             raise HolError(f"{ctx}: ill-formed context binder")
-    return theta_ty, theta_tm, term_args, asl_extra
+    return out
 
 
 def mk_type(tyop: str, args: list) -> hol_type:
@@ -508,16 +500,14 @@ def mk_type(tyop: str, args: list) -> hol_type:
         phi = get_type_kind(tyop)
     except KeyError:
         raise HolError(f"mk_type: type {tyop} has not been defined")
-    theta_ty, theta_tm, term_args, asl_extra = _apply_phi_subst(
-        phi, tuple(args), f"mk_type({tyop})"
-    )
-    if asl_extra:
+    result = _apply_phi_subst(phi, tuple(args), f"mk_type({tyop})")
+    if result.asl_extra:
         raise HolError(
             "mk_type: Φ arguments must be unconditional (empty asl); "
             "mk_type returns a hol_type with no asl tracking"
         )
-    type_args = [t for t, _ in theta_ty]
-    return Tyapp(tyop, tuple(type_args), tuple(term_args))
+    type_args = tuple(t for t, _ in result.theta_ty)
+    return Tyapp(tyop, type_args, tuple(result.term_args))
 
 
 # ---------------------------------------------------------------------------
@@ -1120,13 +1110,13 @@ def CONST(name: str, sigma: tuple = ()) -> typing_thm:
         decl_ty = get_const_type(name)
     except KeyError:
         raise HolError(f"CONST: constant {name} is not declared")
-    theta_ty, theta_tm, term_args, asl_extra = _apply_phi_subst(
-        phi, tuple(sigma), f"CONST({name})"
+    result = _apply_phi_subst(phi, tuple(sigma), f"CONST({name})")
+    inst_ty = type_subst(
+        result.theta_ty, subst_in_type(result.theta_tm, decl_ty)
     )
-    inst_ty = type_subst(theta_ty, subst_in_type(theta_tm, decl_ty))
     return typing_thm(
-        asl_extra,
-        Const(name, inst_ty, tuple(term_args)),
+        result.asl_extra,
+        Const(name, inst_ty, tuple(result.term_args)),
         inst_ty,
     )
 
@@ -1280,93 +1270,159 @@ def TY_TRANS(e1: type_eq_thm, e2: type_eq_thm) -> type_eq_thm:
     return type_eq_thm(term_union(e1._asl, e2._asl), e1._lhs, e2._rhs)
 
 
-def TY_CONG_BASE(tyop: str, args: list) -> type_eq_thm:
-    """congBase':  a declared with context (b_1, ..., b_n)
-                    Gamma |- arg_i (matching b_i)
-                  -------------------------------------------------
-                  Gamma |- a <lhs_args> == a <rhs_args>
+class PhiSide(NamedTuple):
+    """One side of a dual Φ-walk -- the σ chosen for either the LHS or
+    the RHS of a congruence rule."""
+    theta_ty: list      # (chosen_hol_type, Tyvar)
+    theta_tm: list      # (chosen_term, Var)
+    type_args: list     # chosen hol_types for Tyvar entries (decl. order)
+    term_args: list     # chosen terms for Var entries (decl. order)
 
-    `args[i]` matches context entry `i`:
-      * Tyvar binder -> args[i] is a type_eq_thm `A_i == A_i'`
-      * Var binder   -> args[i] is a thm whose conclusion is an
-        equation `s_i = t_i`, tagged at the binder's declared type with
-        all earlier (LHS) substitutions applied.
+    @classmethod
+    def empty(cls) -> "PhiSide":
+        return cls(theta_ty=[], theta_tm=[], type_args=[], term_args=[])
 
-    Assumptions of every argument are absorbed into the result."""
-    try:
-        ctx = get_type_kind(tyop)
-    except KeyError:
-        raise HolError(f"TY_CONG_BASE: unknown type {tyop}")
-    if len(ctx) != len(args):
+
+class PhiDualResult(NamedTuple):
+    """Output of `_apply_phi_dual`: an LHS side, an RHS side, and the
+    asl absorbed from the per-slot certificates."""
+    lhs: PhiSide
+    rhs: PhiSide
+    asl_extra: list
+
+
+def _apply_phi_dual(phi, args, ctx: str) -> PhiDualResult:
+    """Dual-substitution Φ-walker shared by `TY_CONG_BASE` (type-side
+    congruence) and `TM_CONG_BASE` (term-side congruence).
+
+    Each `args[i]` pairs an LHS and RHS replacement for Φ entry i:
+      * Tyvar  -> type_eq_thm `A_l == A_r`
+      * Var    -> equation thm `s_l = s_r` tagged at the binder type
+                  with all earlier-LHS substitutions applied
+      * Assume -> thm proving the formula; the LHS and RHS
+                  substitutions of the Assume formula must coincide
+                  (kernel ships only this symmetric case)."""
+    if len(phi) != len(args):
         raise HolError(
-            f"TY_CONG_BASE: wrong number of arguments to {tyop} "
-            f"(expected {len(ctx)}, got {len(args)})"
+            f"{ctx}: wrong number of arguments "
+            f"(expected {len(phi)}, got {len(args)})"
         )
-    asl: list = []
-    theta_ty_l: list = []
-    theta_tm_l: list = []
-    lhs_type_args: list = []
-    lhs_term_args: list = []
-    rhs_type_args: list = []
-    rhs_term_args: list = []
-    theta_ty_r: list = []
-    theta_tm_r: list = []
-    for binder, arg in zip(ctx, args):
+    lhs = PhiSide.empty()
+    rhs = PhiSide.empty()
+    asl_extra: list = []
+    for binder, arg in zip(phi, args):
         if isinstance(binder, Tyvar):
             if not isinstance(arg, type_eq_thm):
                 raise HolError(
-                    f"TY_CONG_BASE: argument for Tyvar binder {binder.name} "
+                    f"{ctx}: argument for Tyvar binder {binder.name} "
                     f"must be a type_eq_thm"
                 )
-            lhs_type_args.append(arg._lhs)
-            rhs_type_args.append(arg._rhs)
-            theta_ty_l.append((arg._lhs, binder))
-            theta_ty_r.append((arg._rhs, binder))
-            asl = term_union(asl, arg._asl)
+            lhs.type_args.append(arg._lhs)
+            rhs.type_args.append(arg._rhs)
+            lhs.theta_ty.append((arg._lhs, binder))
+            rhs.theta_ty.append((arg._rhs, binder))
+            asl_extra = term_union(asl_extra, arg._asl)
         elif isinstance(binder, Var):
             if not isinstance(arg, thm) or not _is_eq(arg._concl):
                 raise HolError(
-                    f"TY_CONG_BASE: argument for Var binder {binder.name} "
+                    f"{ctx}: argument for Var binder {binder.name} "
                     f"must be an equation thm"
                 )
             tag = _eq_tag(arg._concl)
             expected = type_subst(
-                theta_ty_l, subst_in_type(theta_tm_l, binder.ty)
+                lhs.theta_ty, subst_in_type(lhs.theta_tm, binder.ty)
             )
             if not type_eq(expected, tag):
                 raise HolError(
-                    f"TY_CONG_BASE: equation tag {_pp_ty(tag)} does not "
-                    f"match expected {_pp_ty(expected)} at {binder.name}"
+                    f"{ctx}: equation tag {_pp_ty(tag)} does not match "
+                    f"expected {_pp_ty(expected)} at {binder.name}"
                 )
             lhs_tm = _lhs(arg._concl)
             rhs_tm = _rhs(arg._concl)
-            lhs_term_args.append(lhs_tm)
-            rhs_term_args.append(rhs_tm)
-            theta_tm_l.append((lhs_tm, binder))
-            theta_tm_r.append((rhs_tm, binder))
-            asl = term_union(asl, arg._asl)
+            lhs.term_args.append(lhs_tm)
+            rhs.term_args.append(rhs_tm)
+            lhs.theta_tm.append((lhs_tm, binder))
+            rhs.theta_tm.append((rhs_tm, binder))
+            asl_extra = term_union(asl_extra, arg._asl)
         elif isinstance(binder, Assume):
             needed_l = _check_assume_proof(
-                arg, binder.formula, theta_ty_l, theta_tm_l, "TY_CONG_BASE"
+                arg, binder.formula, lhs.theta_ty, lhs.theta_tm, ctx
             )
             needed_r = _inst_in_term(
-                [], theta_ty_r, _vsubst(theta_tm_r, binder.formula)
+                [], rhs.theta_ty, _vsubst(rhs.theta_tm, binder.formula)
             )
             if not _tm_alpha([], needed_l, needed_r):
                 raise HolError(
-                    "TY_CONG_BASE: Assume formula's LHS and RHS "
-                    "substitutions differ; this kernel ships the rule only "
-                    "for the case where the obligation is symmetric across "
-                    "the two sides of the congruence"
+                    f"{ctx}: Assume formula's LHS and RHS substitutions "
+                    "differ; this kernel ships the rule only for the case "
+                    "where the obligation is symmetric across the two "
+                    "sides of the congruence"
                 )
-            asl = term_union(asl, arg._asl)
+            asl_extra = term_union(asl_extra, arg._asl)
         else:
-            raise HolError("TY_CONG_BASE: ill-formed context binder")
+            raise HolError(f"{ctx}: ill-formed Φ entry")
+    return PhiDualResult(lhs=lhs, rhs=rhs, asl_extra=asl_extra)
+
+
+def TY_CONG_BASE(tyop: str, args: list) -> type_eq_thm:
+    """congBase':  a(Φ) declared in theory      per-slot Φ-args
+                  ----------------------------------------------
+                          Gamma |- a(σ_l) == a(σ_r)
+
+    Each `args[i]` matches Φ entry i (see `_apply_phi_dual`)."""
+    try:
+        phi = get_type_kind(tyop)
+    except KeyError:
+        raise HolError(f"TY_CONG_BASE: unknown type {tyop}")
+    result = _apply_phi_dual(phi, args, f"TY_CONG_BASE({tyop})")
     return type_eq_thm(
-        asl,
-        Tyapp(tyop, tuple(lhs_type_args), tuple(lhs_term_args)),
-        Tyapp(tyop, tuple(rhs_type_args), tuple(rhs_term_args)),
+        result.asl_extra,
+        Tyapp(tyop, tuple(result.lhs.type_args), tuple(result.lhs.term_args)),
+        Tyapp(tyop, tuple(result.rhs.type_args), tuple(result.rhs.term_args)),
     )
+
+
+def TM_CONG_BASE(name: str, args: list,
+                 cod_eq: type_eq_thm | None = None) -> thm:
+    """Term-side congruence (analogue of TY_CONG_BASE for a staged
+    term constant):
+            c(Φ) : A in theory      per-slot Φ-args
+            -----------------------------------------------
+                  Gamma |- c(σ_l) =A[σ_l] c(σ_r)
+
+    Each `args[i]` matches Φ entry i (see `_apply_phi_dual`). The
+    equation is tagged at the LHS view `A[σ_l]`.
+
+    With a dependent body type whose two sides differ -- A[σ_l] !=
+    A[σ_r] -- supply `cod_eq` witnessing the bridge; the equation is
+    still tagged at A[σ_l] and the RHS Const carries its native type
+    A[σ_r]."""
+    try:
+        phi = get_const_phi(name)
+        decl_ty = get_const_type(name)
+    except KeyError:
+        raise HolError(f"TM_CONG_BASE: unknown constant {name}")
+    result = _apply_phi_dual(phi, args, f"TM_CONG_BASE({name})")
+    inst_ty_l = type_subst(
+        result.lhs.theta_ty, subst_in_type(result.lhs.theta_tm, decl_ty)
+    )
+    inst_ty_r = type_subst(
+        result.rhs.theta_ty, subst_in_type(result.rhs.theta_tm, decl_ty)
+    )
+    asl = result.asl_extra
+    if not type_eq(inst_ty_l, inst_ty_r):
+        if cod_eq is None or not _bridge_matches(
+            cod_eq, inst_ty_l, inst_ty_r
+        ):
+            raise HolError(
+                f"TM_CONG_BASE: instantiated types differ "
+                f"({_pp_ty(inst_ty_l)} vs {_pp_ty(inst_ty_r)}); "
+                f"supply cod_eq witnessing A[σ_l] == A[σ_r]"
+            )
+        asl = term_union(asl, cod_eq._asl)
+    lhs_const = Const(name, inst_ty_l, tuple(result.lhs.term_args))
+    rhs_const = Const(name, inst_ty_r, tuple(result.rhs.term_args))
+    return thm(asl, safe_mk_eq(inst_ty_l, lhs_const, rhs_const))
 
 
 def TY_CONG_PI(v: Var, dom_eq: type_eq_thm, cod_eq: type_eq_thm) -> type_eq_thm:
@@ -1770,7 +1826,7 @@ def new_basic_definition(lhs: Var, rhs_th: typing_thm,
 if __name__ == "__main__":
     # nat as a base type, with "0" as the atomic inhabitation witness.
     nat_ty = Tyapp("nat", (), ())
-    new_type("nat", context=(), witness=("0", nat_ty))
+    new_type("nat", phi=(), witness=("0", nat_ty))
     new_constant("S", mk_arrow(nat_ty, nat_ty))
     new_constant("add", mk_arrow(nat_ty, mk_arrow(nat_ty, nat_ty)))
 
@@ -1788,7 +1844,7 @@ if __name__ == "__main__":
     nil_ty = Tyapp("vec", (), (zero_const,))
     new_type(
         "vec",
-        context=(Var("n", nat_ty),),
+        phi=(Var("n", nat_ty),),
         witness=("nil", nil_ty),
     )
 
@@ -2096,7 +2152,7 @@ if __name__ == "__main__":
     pvec_pnil_ty = Tyapp("pvec", (bool_ty,), (Const("0", nat_ty),))
     new_type(
         "pvec",
-        context=(u_tv, Var("n", nat_ty)),
+        phi=(u_tv, Var("n", nat_ty)),
         witness=("pnil", pvec_pnil_ty),
     )
 
@@ -2152,7 +2208,7 @@ if __name__ == "__main__":
     tagged_witness_ty = Tyapp("tagged", (nat_ty,), (Const("0", nat_ty),))
     new_type(
         "tagged",
-        context=(u_tv2, x_var2),
+        phi=(u_tv2, x_var2),
         witness=("tagzero", tagged_witness_ty),
     )
 
@@ -2257,7 +2313,7 @@ if __name__ == "__main__":
     n_self_eq = safe_mk_eq(nat_ty, n_ctx, n_ctx)
     new_type(
         "pos_vec",
-        context=(n_ctx, Assume(n_self_eq)),
+        phi=(n_ctx, Assume(n_self_eq)),
         witness=("pos_nil", Tyapp("pos_vec", (), (Const("0", nat_ty),))),
     )
 
@@ -2295,7 +2351,7 @@ if __name__ == "__main__":
     pos_vec2_witness = Tyapp("pos_vec2", (), (Const("0", nat_ty),))
     new_type(
         "pos_vec2",
-        context=(Var("n", nat_ty), Assume(F)),  # F = (add 0 0 = 0)
+        phi=(Var("n", nat_ty), Assume(F)),  # F = (add 0 0 = 0)
         witness=("pos_nil2", pos_vec2_witness),
     )
     # mk_type at pos_vec2(0) discharges F via add_0_0_eq_0.
@@ -2353,4 +2409,21 @@ if __name__ == "__main__":
         "gated_inc", sigma=(zero_th, add_0_0_eq_0)
     )
     print("gated_inc(0)      ::", gated_inc_at_0)
+
+    # ----------------------------------------------------------------
+    # TM_CONG_BASE: term-side congruence for a staged constant. From
+    # add 0 0 = 0 (per-slot Var-arg equation) derive
+    #   |- inc(add 0 0) = inc(0)   tagged at nat.
+    # The analogue of TY_CONG_BASE for term constants -- the gap that
+    # closed the term/type-side symmetry.
+    # ----------------------------------------------------------------
+    print()
+    inc_cong = TM_CONG_BASE("inc", [add_0_0_eq_0])
+    print("inc(add 0 0) = inc(0) ::", inc_cong)
+
+    # Multi-slot example: dbl(n) := add n n. TM_CONG_BASE on a Var-only
+    # Φ derives dbl(add 0 0) = dbl(0) without going through MK_COMB on
+    # the Pi-encoded body.
+    dbl_cong = TM_CONG_BASE("dbl", [add_0_0_eq_0])
+    print("dbl(add 0 0) = dbl(0) ::", dbl_cong)
 
