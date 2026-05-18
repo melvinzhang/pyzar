@@ -17,6 +17,7 @@ Rules:
 - ✓ `congλ'` — `ABS(v, th, ty_eq=...)` accepts an optional binder-type bridge.
 - ✓ `congAppl'` codomain bridge — `MK_COMB(..., cod_eq=...)` witnesses `B[l2/x] ≡ B[r2/x]`.
 - ✓ Primitive `==>` + Rule D — `IMP_TYPE` (typing layer), `DISCH` / `MP` (validity).
+- ✓ Heterogeneous-precondition congruence (item 13 residual) — `BETA` discharges the Abs's F; `ETA` threads the Pi's F onto the RHS Abs (binder alpha-renamed to avoid capture in F); `MK_COMB` discharges `F[l2/x]` and `F[r2/x]`. Discharge surface is declarative via a shared `_discharge(prec, F, asl, ...)` helper: each side accepts either an explicit `prec=thm` (asl absorbed) or asl-implicit (`prec=None`; the needed F-instance must already be alpha-present in the running asl, typically introduced upstream by `ASSUME`). `MK_COMB` uses one `prec=` kwarg that accepts `thm` (single, when `F[l2/x]` and `F[r2/x]` coincide alpha-eq), `(left, right)` tuple of `thm | None` (per-side, with `None` slots asl-implicit), or `None` (both asl-implicit).
 
 Language extensions:
 - ✓ Unified declaration-context model (items 5 + 14a) — `new_type(name, context, witness)`'s `context` is an ordered telescope of `Tyvar | Var` binders; later entries may reference earlier ones (rank-1 polymorphism interleaved with dependent term params). `mk_type` and `TY_CONG_BASE` take a single shape-matching args list and thread substitutions through.
@@ -31,7 +32,7 @@ Language extensions:
 
 4. **Beta is syntactic only.** `BETA` only fires on `Comb(Abs(x, body), x)` — the trivial redex. The paper assumes β-conversion is part of definitional equality at every typing step; our `type_eq` doesn't β-reduce, so a Pi codomain like `(\n. vec n) zero` is *not* judged equal to `vec zero` even definitionally. In practice this surfaces every time `subst_in_type` produces an un-reduced application.
 
-13. **Heterogeneous-precondition congruence is unsupported** (item 13 residual). `BETA`, `ETA`, and `MK_COMB` reject inputs whose Pi/Abs carries a precondition rather than discharge it. `BETA(λx:A|F. t) x → t` would need a `thm` proving F; `ETA(t : Π|F. B)` would build `t = λx:A|F. t x` (RHS Abs needs precondition F threaded); `MK_COMB(f=g : Π|F. B, a=b : A)` would need separate discharges of `F[a/x]` and `F[b/x]` plus a precondition-equality bridge. The shape of the rules is clear; each just needs its own design pass. Also missing: **P4 precondition-subtyping** (`Γ ⊢_T G ⇒ F` ⟹ `Π|F. B <: Π|G. B`), which the paper notes is "almost but not quite derivable from η" — needs a dedicated rule or admissible derivation.
+13. ~~**Heterogeneous-precondition congruence is unsupported**~~ Shipped — see the entry in "Shipped since the last audit". Remaining precondition gap: **P4 precondition-subtyping** (`Γ ⊢_T G ⇒ F` ⟹ `Π|F. B <: Π|G. B`), which the paper notes is "almost but not quite derivable from η" — needs a dedicated rule or admissible derivation.
 
 ## Declarations
 
@@ -77,7 +78,7 @@ Highest-leverage next steps, roughly increasing effort:
 
 - **Item 4 (β in `type_eq`)** — fold a head-β step into `_ty_eq` for term-args, so substitution products are recognized definitionally. Five lines. Removes a whole class of bridging boilerplate that's currently needed.
 - **Item 6 (`new_basic_type_definition`)** — the only way to get new dependent type families backed by real models.
-- **Item 13's residual: P4 precondition-subtyping and heterogeneous-precondition congruence** — `BETA` / `ETA` / `MK_COMB` currently reject preconditioned inputs. Lifting that requires per-side precondition discharge; not hard, but each rule needs its own design.
+- **Item 13's residual: P4 precondition-subtyping** — heterogeneous-precondition congruence on `BETA` / `ETA` / `MK_COMB` is now shipped; P4 (`Γ ⊢_T G ⇒ F` ⟹ `Π|F. B <: Π|G. B`) is the only remaining precondition gap.
 - **Item 11 (translation to HOL)** — the paper's main artifact. PER predicates, axiom translation, ATP wiring. Worth its own milestone — recovers the paper's automation story.
 
-Items 7–8 are housekeeping. Items 9, 10, 12, 16, 18 are extensions / notational gaps beyond the base kernel. Items 2, 5 (telescope), 13 (P2+P3), and 14 (declarations + theorem side) are fully shipped; item 15 is fully shipped and dropped from the gap list. Item 17 is a known deliberate deviation.
+Items 7–8 are housekeeping. Items 9, 10, 12, 16, 18 are extensions / notational gaps beyond the base kernel. Items 2, 5 (telescope), 13 (P2+P3 + heterogeneous-precondition congruence; only P4 remains), and 14 (declarations + theorem side) are fully shipped; item 15 is fully shipped and dropped from the gap list. Item 17 is a known deliberate deviation.

@@ -1355,6 +1355,38 @@ def _require_eq(c: term, ctx: str) -> None:
         raise HolError(f"{ctx}: conclusion is not an equation")
 
 
+def _discharge(prec: "thm | None", F: term, asl: list,
+               ctx: str, side: str) -> list:
+    """Validate a precondition discharge against `F` and return the
+    asl-with-extras.
+
+    Two modes, ordered by user effort:
+      - **Explicit:** `prec` is a `thm` whose conclusion is alpha-eq to
+        `F`; its asl is absorbed into the result.
+      - **Asl-implicit:** `prec is None` and `F` is already alpha-present
+        in `asl` (typically because it was introduced upstream by
+        `ASSUME` or carried from a typing chain). No new asl entries.
+
+    Used by BETA / MK_COMB / APP to keep the precondition surface
+    declarative: if the obligation is already a hypothesis, the user
+    doesn't have to re-prove it. `ctx`/`side` are for error labels."""
+    if prec is None:
+        if not any(_tm_alpha([], a, F) for a in asl):
+            raise HolError(
+                f"{ctx}: {side} precondition {_pp_tm(F)} not discharged "
+                f"(neither supplied as prec nor present in asl)"
+            )
+        return asl
+    if not isinstance(prec, thm):
+        raise HolError(f"{ctx}: {side} prec must be a thm")
+    if not _tm_alpha([], prec._concl, F):
+        raise HolError(
+            f"{ctx}: {side} prec concludes {_pp_tm(prec._concl)} but "
+            f"required is {_pp_tm(F)}"
+        )
+    return term_union(asl, prec._asl)
+
+
 def IMP_TYPE(F_th: typing_thm, G_th: typing_thm) -> typing_thm:
     """Rule D (dependent implication typing):
             Gamma |- F : bool    Gamma, ▷F |- G : bool
@@ -1673,7 +1705,17 @@ def ASSUME(F_th: typing_thm) -> thm:
     return thm([F_th._tm, *F_th._asl], F_th._tm)
 
 
-def BETA(redex_th: typing_thm) -> thm:
+def BETA(redex_th: typing_thm, prec: "thm | None" = None) -> thm:
+    """Trivial beta:  Gamma |- (\\x:A|F. t) x : B
+                     [prec : Gamma' |- F  OR  F in Gamma]
+                     -------------------------------------
+                     Gamma (+ Gamma') |- (\\x:A|F. t) x = t
+
+    When the Abs carries a precondition F, the discharge is required:
+    either pass `prec=` a thm proving F (its asl is absorbed), or have
+    F already alpha-present in `redex_th._asl` (the asl-implicit form;
+    no extra asl). Since the redex is trivial (arg == bvar), no
+    substitution is applied to F."""
     tm = redex_th._tm
     if not (
         isinstance(tm, Comb)
@@ -1681,33 +1723,36 @@ def BETA(redex_th: typing_thm) -> thm:
         and tm.arg == tm.fun.bvar
     ):
         raise HolError("BETA: not a trivial beta-redex")
-    if tm.fun.precondition is not None:
-        raise HolError(
-            "BETA: redex's abstraction has a precondition; reducing "
-            "would require discharging it, which BETA does not do"
-        )
-    return thm(redex_th._asl, safe_mk_eq(redex_th._ty, tm, tm.fun.body))
+    abs_node = tm.fun
+    asl = redex_th._asl
+    if abs_node.precondition is not None:
+        asl = _discharge(prec, abs_node.precondition, asl, "BETA", "redex")
+    elif prec is not None:
+        raise HolError("BETA: Abs has no precondition; do not supply prec")
+    return thm(asl, safe_mk_eq(redex_th._ty, tm, abs_node.body))
 
 
 def ETA(t_th: typing_thm) -> thm:
-    """etaPi:  Gamma |- t : Pi(x:A). B
-              -----------------------------
-              Gamma |- t = (\\x:A. t x)
+    """etaPi:  Gamma |- t : Pi(x:A|F). B
+              ---------------------------------
+              Gamma |- t = (\\x:A|F. t x)
 
-    The bound variable name is chosen fresh to avoid capture in t.
-    Preconditioned Pi types are rejected: eta-expanding through a
-    precondition F would require the RHS abstraction to thread F, and
-    type-checking `t x` inside it would require discharging F."""
+    The bound variable is chosen fresh to avoid capture in t and in F.
+    The precondition F (if any) is threaded onto the RHS abstraction
+    (with the binder renamed). The equation itself doesn't discharge F:
+    semantically, at non-F arguments both sides are equally undefined."""
     f_ty = t_th._ty
     if not isinstance(f_ty, Pi):
         raise HolError(f"ETA: term type is not a Pi (got {_pp_ty(f_ty)})")
+    avoid = frees(t_th._tm)
     if f_ty.precondition is not None:
-        raise HolError(
-            "ETA: Pi has a precondition; preconditioned eta is not "
-            "supported by this rule"
-        )
-    fresh_v = variant(frees(t_th._tm), f_ty.bvar)
-    eta_form = Abs(fresh_v, Comb(t_th._tm, fresh_v))
+        avoid = term_union(avoid, frees(f_ty.precondition))
+    fresh_v = variant(avoid, f_ty.bvar)
+    new_prec = (
+        None if f_ty.precondition is None
+        else _vsubst([(fresh_v, f_ty.bvar)], f_ty.precondition)
+    )
+    eta_form = Abs(fresh_v, Comb(t_th._tm, fresh_v), new_prec)
     return thm(t_th._asl, safe_mk_eq(t_th._ty, t_th._tm, eta_form))
 
 
@@ -1752,17 +1797,34 @@ def TRANS(th1: thm, th2: thm) -> thm:
 
 def MK_COMB(th1: thm, th2: thm,
             eq: type_eq_thm | None = None,
-            cod_eq: type_eq_thm | None = None) -> thm:
-    """congAppl':  Gamma |- f =Pi(x:A).B f'    Gamma |- a =A a'
-                  --------------------------------------------------
-                            Gamma |- f a =B[a/x] f' a'
+            cod_eq: type_eq_thm | None = None,
+            prec: "thm | tuple | None" = None) -> thm:
+    """congAppl':  Gamma |- f =Pi(x:A|F).B f'    Gamma |- a =A a'
+                  prec_l : Gamma_l |- F[a/x]   prec_r : Gamma_r |- F[a'/x]
+                  ----------------------------------------------------------
+                            Gamma + ... |- f a =B[a/x] f' a'
 
     With a dependent codomain B and a propositional (rather than
     definitional) argument equation l2 = r2, the natural LHS type
     B[l2/x] and RHS type B[r2/x] differ. ``cod_eq`` witnesses that
     bridge; the result is tagged at B[l2/x]. ``eq`` is the domain
     bridge (used when the argument's equation tag doesn't match the
-    function's Pi-domain definitionally)."""
+    function's Pi-domain definitionally).
+
+    When the function's Pi carries a precondition F, each side's
+    obligation `F[l2/x]` / `F[r2/x]` must be discharged. ``prec`` is
+    one of:
+
+      - ``thm`` -- single discharge used for both sides; requires
+        `F[l2/x]` and `F[r2/x]` to coincide alpha-eq (typical when F
+        is closed in x). The thm's asl is absorbed once.
+      - ``(left, right)`` -- per-side tuple; each entry is a ``thm``
+        or ``None``.
+      - ``None`` -- equivalent to ``(None, None)``.
+
+    A ``None`` slot is the asl-implicit form: that side's F-instance
+    must already be alpha-present in the running asl (typically
+    introduced upstream by ``ASSUME``)."""
     c1, c2 = th1._concl, th2._concl
     _require_eq(c1, "MK_COMB")
     _require_eq(c2, "MK_COMB")
@@ -1772,12 +1834,6 @@ def MK_COMB(th1: thm, th2: thm,
         raise HolError(
             f"MK_COMB: function-side equation type is not Pi "
             f"(got {_pp_ty(f_ty)})"
-        )
-    if f_ty.precondition is not None:
-        raise HolError(
-            "MK_COMB: function's Pi has a precondition; preconditioned "
-            "congruence is not supported (would require discharging "
-            "F[l2/x] and F[r2/x] and a precondition-equality bridge)"
         )
     expected = f_ty.bvar.ty
     asl = term_union(th1._asl, th2._asl)
@@ -1790,6 +1846,30 @@ def MK_COMB(th1: thm, th2: thm,
         asl = term_union(asl, eq._asl)
     l1, r1 = _lhs(c1), _rhs(c1)
     l2, r2 = _lhs(c2), _rhs(c2)
+    if f_ty.precondition is not None:
+        needed_l = _vsubst([(l2, f_ty.bvar)], f_ty.precondition)
+        needed_r = _vsubst([(r2, f_ty.bvar)], f_ty.precondition)
+        if isinstance(prec, tuple):
+            if len(prec) != 2:
+                raise HolError(
+                    f"MK_COMB: prec tuple must be (left, right), got "
+                    f"length {len(prec)}"
+                )
+            prec_l, prec_r = prec
+            asl = _discharge(prec_l, needed_l, asl, "MK_COMB", "F[l2/x]")
+            asl = _discharge(prec_r, needed_r, asl, "MK_COMB", "F[r2/x]")
+        else:
+            if prec is not None and not _tm_alpha([], needed_l, needed_r):
+                raise HolError(
+                    f"MK_COMB: single-thm prec requires F[l2/x] and "
+                    f"F[r2/x] to coincide alpha-eq (got {_pp_tm(needed_l)} "
+                    f"vs {_pp_tm(needed_r)}); pass prec=(left, right)"
+                )
+            asl = _discharge(prec, needed_l, asl, "MK_COMB", "F[l2/x]=F[r2/x]")
+    elif prec is not None:
+        raise HolError(
+            "MK_COMB: function's Pi has no precondition; do not supply prec"
+        )
     result_ty_l = subst_in_type([(l2, f_ty.bvar)], f_ty.body)
     result_ty_r = subst_in_type([(r2, f_ty.bvar)], f_ty.body)
     if not type_eq(result_ty_l, result_ty_r):
@@ -2584,12 +2664,64 @@ if __name__ == "__main__":
     app_with_prec = APP(lam_with_prec, zero_th, prec=add_0_0_eq_0)
     print("APP with prec     ::", app_with_prec)
 
-    # BETA on a preconditioned redex is rejected (no machinery to
-    # discharge F).
+    # BETA on a preconditioned redex: F must be discharged. The user
+    # has two declarative options:
+    #   (i) pass prec= a thm proving F;
+    #  (ii) leave prec= None when F is already a hypothesis in
+    #       redex_th._asl (asl-implicit).
+    redex_th = typing_thm([F], Comb(lam_with_prec._tm, n_for_lam), nat_ty)
+    # Asl-implicit: F is in redex_th._asl, so no extra prec needed.
+    beta_implicit = BETA(redex_th)
+    print("BETA asl-implicit ::", beta_implicit)
+    # Explicit prec: works too. add_0_0_eq_0 is the axiom |- F.
+    beta_with_prec = BETA(redex_th, prec=add_0_0_eq_0)
+    print("BETA with prec    ::", beta_with_prec)
+    # Wrong prec: rejected.
     try:
-        BETA(typing_thm([F], Comb(lam_with_prec._tm, n_for_lam), nat_ty))
+        BETA(redex_th, prec=REFL(zero_th))
     except HolError as e:
-        print("BETA refuses prec ::", str(e).splitlines()[0])
+        print("BETA wrong-prec   ::", str(e).splitlines()[0])
+    # When F is in neither asl nor prec: rejected.
+    bare_redex_th = typing_thm([], Comb(lam_with_prec._tm, n_for_lam), nat_ty)
+    try:
+        BETA(bare_redex_th)
+    except HolError as e:
+        print("BETA no discharge ::", str(e).splitlines()[0])
+
+    # ETA on a preconditioned Pi: the RHS Abs threads F (with binder
+    # alpha-renamed if needed); no discharge is required.
+    t_prec_var = Var("g", lam_with_prec._ty)
+    t_prec_th = VAR(t_prec_var)
+    eta_with_prec = ETA(t_prec_th)
+    print("ETA with prec     ::", eta_with_prec)
+
+    # MK_COMB on a preconditioned Pi. F = (add 0 0 = 0) is closed in n,
+    # so F[l2/n] and F[r2/n] coincide, and a single prec= covers both
+    # sides.
+    f_eq_th = REFL(LAMBDA(  # f = f at Pi(n:nat|F). nat
+        Var("n", nat_ty),
+        typing_thm([F], zero_th._tm, nat_ty),
+        precondition=F,
+    ))
+    try:
+        MK_COMB(f_eq_th, add_0_0_eq_0)
+    except HolError as e:
+        print("MK_COMB no-prec   ::", str(e).splitlines()[0])
+    # Single thm: covers both sides when F[l2/x] and F[r2/x] coincide.
+    mk_comb_prec_single = MK_COMB(f_eq_th, add_0_0_eq_0, prec=add_0_0_eq_0)
+    print("MK_COMB prec=thm  ::", mk_comb_prec_single)
+    # Tuple form: per-side, each slot is thm | None.
+    mk_comb_prec_pair = MK_COMB(
+        f_eq_th, add_0_0_eq_0,
+        prec=(add_0_0_eq_0, add_0_0_eq_0),
+    )
+    print("MK_COMB prec=tuple::", mk_comb_prec_pair)
+    # Tuple with a None slot mixes explicit (left) with asl-implicit
+    # (right). Here F isn't in asl, so it's rejected.
+    try:
+        MK_COMB(f_eq_th, add_0_0_eq_0, prec=(add_0_0_eq_0, None))
+    except HolError as e:
+        print("MK_COMB asl-miss  ::", str(e).splitlines()[0])
 
     # ----------------------------------------------------------------
     # Item 14b.1: constants with declaration-time preconditions.
