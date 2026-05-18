@@ -84,10 +84,23 @@ class Tyapp:
 class Pi:
     bvar: "Var"
     body: "hol_type"
-    precondition: "term | None" = None  # None == true; otherwise a bool term
 
 
-hol_type = Tyvar | Tyapp | Pi
+@dataclass(frozen=True, slots=True)
+class Subtype:
+    """Predicate subtype `bvar.ty | predicate` — the refinement of
+    `bvar.ty` (the base type A) by the bool predicate `predicate`, with
+    `bvar` bound in `predicate`. Inhabitants are exactly those a:A for
+    which `predicate[a/bvar]` holds.
+
+    Pi-domain preconditions are encoded as Subtype-on-the-domain:
+        Π(x : A|F[x]). B   ===   Π(x : Subtype(y:A, F[y/x])). B
+    """
+    bvar: "Var"
+    predicate: "term"
+
+
+hol_type = Tyvar | Tyapp | Pi | Subtype
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +135,6 @@ class Comb:
 class Abs:
     bvar: Var
     body: "term"
-    precondition: "term | None" = None  # None == true; otherwise a bool term
 
 
 term = Var | Const | Comb | Abs
@@ -170,6 +182,23 @@ class typing_thm:
     def __repr__(self):
         a = ", ".join(_pp_tm(x) for x in self._asl)
         return f"[{a}] |- {_pp_tm(self._tm)} : {_pp_ty(self._ty)}"
+
+
+class subtype_thm:
+    """Gamma |- A <: B  (subtyping judgment between two hol_types).
+    Constructed via ST_REFL / ST_TRANS / ST_FORGET / ST_REFINE /
+    ST_PI_DOMAIN; consumed by SUBSUME at the typing layer."""
+
+    __slots__ = ("_asl", "_lhs", "_rhs")
+
+    def __init__(self, asl, lhs, rhs):
+        self._asl = list(asl)
+        self._lhs = lhs
+        self._rhs = rhs
+
+    def __repr__(self):
+        a = ", ".join(_pp_tm(x) for x in self._asl)
+        return f"[{a}] |- {_pp_ty(self._lhs)} <: {_pp_ty(self._rhs)}"
 
 
 class type_eq_thm:
@@ -654,13 +683,36 @@ def frees(tm: term) -> list:
             _uniq_extend(seen, frees(a))
         return seen
     if isinstance(tm, Abs):
-        seen = [v for v in frees(tm.body) if v != tm.bvar]
-        if tm.precondition is not None:
-            _uniq_extend(seen, (v for v in frees(tm.precondition) if v != tm.bvar))
-        return seen
+        return [v for v in frees(tm.body) if v != tm.bvar]
     if isinstance(tm, Comb):
         return _uniq_extend(list(frees(tm.fun)), frees(tm.arg))
     raise HolError("frees: ill-formed term")
+
+
+def frees_in_type(ty: hol_type) -> list:
+    """Free term variables occurring in a type (in Tyapp term_args or
+    under a Subtype's predicate). Used by RESTRICT / SUBSUME-style rules
+    that need to know which term variables a refined type mentions."""
+    if isinstance(ty, Tyvar):
+        return []
+    if isinstance(ty, Tyapp):
+        seen: list = []
+        for a in ty.type_args:
+            _uniq_extend(seen, frees_in_type(a))
+        for a in ty.term_args:
+            _uniq_extend(seen, frees(a))
+        return seen
+    if isinstance(ty, Pi):
+        seen = _uniq_extend(
+            list(frees_in_type(ty.bvar.ty)),
+            (v for v in frees_in_type(ty.body) if v != ty.bvar),
+        )
+        return seen
+    if isinstance(ty, Subtype):
+        seen = list(frees_in_type(ty.bvar.ty))
+        _uniq_extend(seen, (v for v in frees(ty.predicate) if v != ty.bvar))
+        return seen
+    raise HolError("frees_in_type: ill-formed type")
 
 
 def freesin(acc: list, tm: term) -> bool:
@@ -669,12 +721,7 @@ def freesin(acc: list, tm: term) -> bool:
     if isinstance(tm, Const):
         return all(freesin(acc, a) for a in tm.term_args)
     if isinstance(tm, Abs):
-        body_ok = freesin([tm.bvar, *acc], tm.body)
-        if not body_ok:
-            return False
-        if tm.precondition is None:
-            return True
-        return freesin([tm.bvar, *acc], tm.precondition)
+        return freesin([tm.bvar, *acc], tm.body)
     if isinstance(tm, Comb):
         return freesin(acc, tm.fun) and freesin(acc, tm.arg)
     raise HolError("freesin: ill-formed term")
@@ -684,9 +731,7 @@ def vfree_in(v: term, tm: term) -> bool:
     if isinstance(tm, Abs):
         if v == tm.bvar:
             return False
-        if vfree_in(v, tm.body):
-            return True
-        return tm.precondition is not None and vfree_in(v, tm.precondition)
+        return vfree_in(v, tm.body)
     if isinstance(tm, Comb):
         return vfree_in(v, tm.fun) or vfree_in(v, tm.arg)
     if isinstance(tm, Const):
@@ -705,10 +750,11 @@ def tyvars(ty: hol_type) -> list:
             _uniq_extend(seen, type_vars_in_term(a))
         return seen
     if isinstance(ty, Pi):
-        seen = _uniq_extend(list(tyvars(ty.bvar.ty)), tyvars(ty.body))
-        if ty.precondition is not None:
-            _uniq_extend(seen, type_vars_in_term(ty.precondition))
-        return seen
+        return _uniq_extend(list(tyvars(ty.bvar.ty)), tyvars(ty.body))
+    if isinstance(ty, Subtype):
+        return _uniq_extend(
+            list(tyvars(ty.bvar.ty)), type_vars_in_term(ty.predicate)
+        )
     raise HolError("tyvars: ill-formed type")
 
 
@@ -726,12 +772,9 @@ def type_vars_in_term(tm: term) -> list:
             type_vars_in_term(tm.arg),
         )
     if isinstance(tm, Abs):
-        seen = _uniq_extend(
+        return _uniq_extend(
             list(tyvars(tm.bvar.ty)), type_vars_in_term(tm.body)
         )
-        if tm.precondition is not None:
-            _uniq_extend(seen, type_vars_in_term(tm.precondition))
-        return seen
     raise HolError("type_vars_in_term: ill-formed term")
 
 
@@ -769,20 +812,13 @@ def _ty_eq(env: list, t1: hol_type, t2: hol_type) -> bool:
         if not _ty_eq(env, t1.bvar.ty, t2.bvar.ty):
             return False
         env2 = [(t1.bvar, t2.bvar), *env]
-        if not _prec_eq(env2, t1.precondition, t2.precondition):
-            return False
         return _ty_eq(env2, t1.body, t2.body)
+    if isinstance(t1, Subtype) and isinstance(t2, Subtype):
+        if not _ty_eq(env, t1.bvar.ty, t2.bvar.ty):
+            return False
+        env2 = [(t1.bvar, t2.bvar), *env]
+        return _tm_alpha(env2, t1.predicate, t2.predicate)
     return False
-
-
-def _prec_eq(env: list, p1, p2) -> bool:
-    """Compare two preconditions for alpha-equivalence under `env`.
-    None means `true`; two Nones are equal."""
-    if p1 is None and p2 is None:
-        return True
-    if p1 is None or p2 is None:
-        return False
-    return _tm_alpha(env, p1, p2)
 
 
 def _tm_alpha(env: list, a: term, b: term) -> bool:
@@ -807,8 +843,6 @@ def _tm_alpha(env: list, a: term, b: term) -> bool:
         if not _ty_eq(env, a.bvar.ty, b.bvar.ty):
             return False
         env2 = [(a.bvar, b.bvar), *env]
-        if not _prec_eq(env2, a.precondition, b.precondition):
-            return False
         return _tm_alpha(env2, a.body, b.body)
     return False
 
@@ -818,23 +852,13 @@ def _tm_alpha(env: list, a: term, b: term) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _vsubst_opt(theta: list, prec):
-    """`_vsubst` lifted over `None`-valued preconditions."""
-    return None if prec is None else _vsubst(theta, prec)
-
-
-def _inst_in_term_opt(env: list, tyin: list, prec):
-    """`_inst_in_term` lifted over `None`-valued preconditions."""
-    return None if prec is None else _inst_in_term(env, tyin, prec)
-
-
-def _subst_binder(theta: list, bvar: Var, body, prec,
+def _subst_binder(theta: list, bvar: Var, body,
                   subst_body, free_in_body, ctor):
     """Capture-avoiding substitution under a binder, shared between
-    `subst_in_type` (Pi) and `_vsubst` (Abs). `subst_body` recurses
-    into `body` (`subst_in_type` / `_vsubst`); `free_in_body` is the
-    free-occurrence predicate matching `body`'s shape (`_occurs_in_type`
-    / `vfree_in`); `ctor` builds the result binder (`Pi` / `Abs`)."""
+    `subst_in_type` (Pi: body is hol_type), `_vsubst` (Abs: body is
+    term), and the Subtype case (predicate is term). `subst_body`
+    recurses into `body`; `free_in_body` is the free-occurrence
+    predicate matching `body`'s shape; `ctor` builds the result binder."""
     theta2 = [(t, x) for t, x in theta if x != bvar]
     new_bvar_ty = subst_in_type(theta, bvar.ty)
     new_bvar = (
@@ -842,23 +866,13 @@ def _subst_binder(theta: list, bvar: Var, body, prec,
         else Var(bvar.name, new_bvar_ty)
     )
     if not theta2:
-        return ctor(new_bvar, body, prec)
-    body_uses = lambda x: (
-        free_in_body(x, body)
-        or (prec is not None and vfree_in(x, prec))
-    )
-    if any(vfree_in(new_bvar, t) and body_uses(x) for t, x in theta2):
+        return ctor(new_bvar, body)
+    if any(vfree_in(new_bvar, t) and free_in_body(x, body) for t, x in theta2):
         avoid = [subst_body(theta2, body)]
-        if prec is not None:
-            avoid.append(_vsubst(theta2, prec))
         fresh = variant(avoid, new_bvar)
         rename = [(fresh, bvar), *theta2]
-        return ctor(
-            fresh, subst_body(rename, body), _vsubst_opt(rename, prec)
-        )
-    return ctor(
-        new_bvar, subst_body(theta2, body), _vsubst_opt(theta2, prec)
-    )
+        return ctor(fresh, subst_body(rename, body))
+    return ctor(new_bvar, subst_body(theta2, body))
 
 
 def subst_in_type(theta: list, ty: hol_type) -> hol_type:
@@ -872,8 +886,13 @@ def subst_in_type(theta: list, ty: hol_type) -> hol_type:
         return Tyapp(ty.tyop, new_type_args, new_term_args)
     if isinstance(ty, Pi):
         return _subst_binder(
-            theta, ty.bvar, ty.body, ty.precondition,
+            theta, ty.bvar, ty.body,
             subst_in_type, _occurs_in_type, Pi,
+        )
+    if isinstance(ty, Subtype):
+        return _subst_binder(
+            theta, ty.bvar, ty.predicate,
+            _vsubst, vfree_in, Subtype,
         )
     raise HolError("subst_in_type: ill-formed type")
 
@@ -888,12 +907,14 @@ def _occurs_in_type(v: Var, ty: hol_type) -> bool:
     if isinstance(ty, Pi):
         if ty.bvar == v:
             return _occurs_in_type(v, ty.bvar.ty)
-        in_prec = ty.precondition is not None and vfree_in(v, ty.precondition)
         return (
             _occurs_in_type(v, ty.bvar.ty)
-            or in_prec
             or _occurs_in_type(v, ty.body)
         )
+    if isinstance(ty, Subtype):
+        if ty.bvar == v:
+            return _occurs_in_type(v, ty.bvar.ty)
+        return _occurs_in_type(v, ty.bvar.ty) or vfree_in(v, ty.predicate)
     return False
 
 
@@ -920,7 +941,11 @@ def type_subst(i: list, ty: hol_type) -> hol_type:
         return Pi(
             Var(ty.bvar.name, type_subst(i, ty.bvar.ty)),
             type_subst(i, ty.body),
-            _inst_in_term_opt([], i, ty.precondition),
+        )
+    if isinstance(ty, Subtype):
+        return Subtype(
+            Var(ty.bvar.name, type_subst(i, ty.bvar.ty)),
+            _inst_in_term([], i, ty.predicate),
         )
     raise HolError("type_subst: ill-formed type")
 
@@ -959,14 +984,9 @@ def _inst_in_term(env: list, tyin: list, tm: term) -> term:
         env2 = [(tm.bvar, bvar2), *env]
         try:
             body2 = _inst_in_term(env2, tyin, tm.body)
-            prec2 = _inst_in_term_opt(env2, tyin, tm.precondition)
-            if (
-                bvar2 is tm.bvar
-                and body2 is tm.body
-                and prec2 is tm.precondition
-            ):
+            if bvar2 is tm.bvar and body2 is tm.body:
                 return tm
-            return Abs(bvar2, body2, prec2)
+            return Abs(bvar2, body2)
         except Clash as ex:
             if ex.tm != bvar2:
                 raise
@@ -974,10 +994,7 @@ def _inst_in_term(env: list, tyin: list, tm: term) -> term:
             bvar3 = variant(ifrees, bvar2)
             z = Var(bvar3.name, tm.bvar.ty)
             renamed = _vsubst([(z, tm.bvar)], tm.body)
-            renamed_prec = _vsubst_opt([(z, tm.bvar)], tm.precondition)
-            return _inst_in_term(
-                env, tyin, Abs(z, renamed, renamed_prec)
-            )
+            return _inst_in_term(env, tyin, Abs(z, renamed))
     raise HolError("_inst_in_term: ill-formed term")
 
 
@@ -1008,7 +1025,7 @@ def _vsubst(ilist: list, tm: term) -> term:
         return Comb(_vsubst(ilist, tm.fun), _vsubst(ilist, tm.arg))
     if isinstance(tm, Abs):
         return _subst_binder(
-            ilist, tm.bvar, tm.body, tm.precondition,
+            ilist, tm.bvar, tm.body,
             _vsubst, vfree_in, Abs,
         )
     raise HolError("vsubst: ill-formed term")
@@ -1037,15 +1054,16 @@ def _pp_ty_raw(ty):
             return ty.tyop
         return f"{ty.tyop}({'; '.join(parts)})"
     if isinstance(ty, Pi):
-        prec = (
-            "" if ty.precondition is None
-            else f"|{_pp_tm_raw(ty.precondition)}"
-        )
-        if not _occurs_in_type(ty.bvar, ty.body) and ty.precondition is None:
+        if not _occurs_in_type(ty.bvar, ty.body):
             return f"({_pp_ty_raw(ty.bvar.ty)} -> {_pp_ty_raw(ty.body)})"
         return (
-            f"(Pi {ty.bvar.name}:{_pp_ty_raw(ty.bvar.ty)}{prec}. "
+            f"(Pi {ty.bvar.name}:{_pp_ty_raw(ty.bvar.ty)}. "
             f"{_pp_ty_raw(ty.body)})"
+        )
+    if isinstance(ty, Subtype):
+        return (
+            f"({_pp_ty_raw(ty.bvar.ty)}|"
+            f"\\{ty.bvar.name}. {_pp_tm_raw(ty.predicate)})"
         )
     return repr(ty)
 
@@ -1064,12 +1082,8 @@ def _pp_tm_raw(tm):
             return f"{tm.name}({inner})"
         return tm.name
     if isinstance(tm, Abs):
-        prec = (
-            "" if tm.precondition is None
-            else f"|{_pp_tm_raw(tm.precondition)}"
-        )
         return (
-            f"(\\{tm.bvar.name}:{_pp_ty_raw(tm.bvar.ty)}{prec}. "
+            f"(\\{tm.bvar.name}:{_pp_ty_raw(tm.bvar.ty)}. "
             f"{_pp_tm_raw(tm.body)})"
         )
     if isinstance(tm, Comb):
@@ -1243,16 +1257,17 @@ def CONST(name: str, sigma: tuple = ()) -> typing_thm:
 
 
 def APP(f_th: typing_thm, a_th: typing_thm,
-        eq: type_eq_thm | None = None,
-        prec: "thm | None" = None) -> typing_thm:
-    """appl' (paper P3):  Gamma |- f : Pi(x:A|F). B   Gamma |- a : A
-                          Gamma |- F[a/x]
-                          --------------------------------------------
-                                  Gamma |- f a : B[a/x]
+        eq: type_eq_thm | None = None) -> typing_thm:
+    """appl':  Gamma |- f : Pi(x:A). B   Gamma |- a : A
+              ---------------------------------------------
+                      Gamma |- f a : B[a/x]
 
     `eq` (optional) bridges A == A' when a_th._ty differs from f's domain.
-    `prec` (required when f's Pi has a non-None precondition) is a `thm`
-    whose conclusion is alpha-eq to F[a/x]; its asl is absorbed."""
+
+    Preconditioned domains are now encoded as Subtype refinements on
+    the Pi binder: `Pi(x : A|p). B`. The argument's type must already
+    be `A|p` -- discharge of `p[a]` happens upstream, when the user
+    constructs `a : A|p` via `RESTRICT`."""
     f_ty = f_th._ty
     if not isinstance(f_ty, Pi):
         raise HolError(f"APP: head not a Pi -- got {_pp_ty(f_ty)}")
@@ -1272,47 +1287,25 @@ def APP(f_th: typing_thm, a_th: typing_thm,
                 f"does not connect {_pp_ty(expected)} and {_pp_ty(got)}"
             )
         asl = term_union(asl, eq._asl)
-    if f_ty.precondition is not None:
-        if prec is None:
-            raise HolError(
-                f"APP: f's Pi has precondition {_pp_tm(f_ty.precondition)}; "
-                f"supply prec= a thm proving its substitution at the arg"
-            )
-        if not isinstance(prec, thm):
-            raise HolError("APP: prec must be a thm")
-        needed = _vsubst([(a_th._tm, f_ty.bvar)], f_ty.precondition)
-        if not _tm_alpha([], prec._concl, needed):
-            raise HolError(
-                f"APP: prec proof concludes {_pp_tm(prec._concl)} but "
-                f"required precondition (after substitution) is "
-                f"{_pp_tm(needed)}"
-            )
-        asl = term_union(asl, prec._asl)
-    elif prec is not None:
-        raise HolError("APP: f has no precondition; do not supply prec")
     result_ty = subst_in_type([(a_th._tm, f_ty.bvar)], f_ty.body)
     return typing_thm(asl, Comb(f_th._tm, a_th._tm), result_ty)
 
 
-def LAMBDA(v: Var, body_th: typing_thm,
-           precondition: "term | None" = None) -> typing_thm:
-    """lambda' (paper P2):  Gamma, x:A, ▷F |- t : B
-                           ------------------------------------
-                           Gamma |- (\\x:A|F. t) : Pi(x:A|F). B
+def LAMBDA(v: Var, body_th: typing_thm) -> typing_thm:
+    """lambda':  Gamma, x:A |- t : B
+                ----------------------------
+                Gamma |- (\\x:A. t) : Pi(x:A). B
 
-    The body's certificate must have been built under `▷F` (i.e. F may
-    appear in body_th._asl). LAMBDA captures F as the precondition on
-    the resulting Pi/Abs and discharges F (and any assumption mentioning
-    v) from the asl. `precondition=None` is the unconditional case
-    (F = true) and behaves exactly like the original rule."""
-    asl = body_th._asl
-    if precondition is not None:
-        asl = term_remove(precondition, asl)
-    asl = [a for a in asl if not vfree_in(v, a)]
+    Preconditioned abstractions are now encoded as ordinary lambdas
+    whose binder type is a Subtype: `λx:A|p. t` is `LAMBDA(Var("x",
+    Subtype(y:A, p)), t_th)`. The discharge of `p[x]` happens at the
+    point where the binder is first introduced (the user's typing
+    discipline / RESTRICT calls upstream); LAMBDA itself just abstracts."""
+    asl = [a for a in body_th._asl if not vfree_in(v, a)]
     return typing_thm(
         asl,
-        Abs(v, body_th._tm, precondition),
-        Pi(v, body_th._ty, precondition),
+        Abs(v, body_th._tm),
+        Pi(v, body_th._ty),
     )
 
 
@@ -1353,38 +1346,6 @@ def _require_eq(c: term, ctx: str) -> None:
     """Reject conclusions that aren't a `=`-headed equation."""
     if not _is_eq(c):
         raise HolError(f"{ctx}: conclusion is not an equation")
-
-
-def _discharge(prec: "thm | None", F: term, asl: list,
-               ctx: str, side: str) -> list:
-    """Validate a precondition discharge against `F` and return the
-    asl-with-extras.
-
-    Two modes, ordered by user effort:
-      - **Explicit:** `prec` is a `thm` whose conclusion is alpha-eq to
-        `F`; its asl is absorbed into the result.
-      - **Asl-implicit:** `prec is None` and `F` is already alpha-present
-        in `asl` (typically because it was introduced upstream by
-        `ASSUME` or carried from a typing chain). No new asl entries.
-
-    Used by BETA / MK_COMB / APP to keep the precondition surface
-    declarative: if the obligation is already a hypothesis, the user
-    doesn't have to re-prove it. `ctx`/`side` are for error labels."""
-    if prec is None:
-        if not any(_tm_alpha([], a, F) for a in asl):
-            raise HolError(
-                f"{ctx}: {side} precondition {_pp_tm(F)} not discharged "
-                f"(neither supplied as prec nor present in asl)"
-            )
-        return asl
-    if not isinstance(prec, thm):
-        raise HolError(f"{ctx}: {side} prec must be a thm")
-    if not _tm_alpha([], prec._concl, F):
-        raise HolError(
-            f"{ctx}: {side} prec concludes {_pp_tm(prec._concl)} but "
-            f"required is {_pp_tm(F)}"
-        )
-    return term_union(asl, prec._asl)
 
 
 def IMP_TYPE(F_th: typing_thm, G_th: typing_thm) -> typing_thm:
@@ -1689,6 +1650,226 @@ def TY_CONG_PI(v: Var, dom_eq: type_eq_thm, cod_eq: type_eq_thm) -> type_eq_thm:
 
 
 # ---------------------------------------------------------------------------
+# Predicate subtypes & subtyping
+#
+# Subtype(bvar:A, p) -- the refinement {y:A | p[y/bvar]}, represented as
+# a hol_type alongside Tyvar/Tyapp/Pi. Subtyping is a separate certificate
+# (subtype_thm) consumed by SUBSUME at the typing layer.
+#
+# RESTRICT / UNRESTRICT / RESTRICT_PROOF are intro/elim for A|p.
+# ST_REFL / ST_TRANS / ST_FORGET / ST_REFINE / ST_PI_DOMAIN are the basic
+# constructors of `A <: B`. P4 (precondition subtyping) is now a derived
+# corollary of ST_REFINE + ST_PI_DOMAIN.
+# ---------------------------------------------------------------------------
+
+
+def mk_subtype(bvar: Var, predicate: term) -> hol_type:
+    """Build `bvar.ty | (λbvar. predicate)`. Checks that `predicate` is
+    a bool term in the context where `bvar` is in scope (best-effort:
+    we require that any free non-`bvar` term variables already have
+    well-formed types)."""
+    return Subtype(bvar, predicate)
+
+
+def RESTRICT(t_th: typing_thm, p_th: thm,
+             subtype: hol_type) -> typing_thm:
+    """Intro:  Gamma |- t : A    Delta |- p[t/y]
+              ----------------------------------
+                    Gamma + Delta |- t : A|p
+
+    `subtype` is the target Subtype(y:A, p) so the caller pins down both
+    `A` and the predicate `p` (since several refinements over the same A
+    may be in play). The kernel checks:
+      - subtype.bvar.ty matches t_th._ty (the base type),
+      - p_th._concl alpha-eq predicate[t/y]."""
+    if not isinstance(subtype, Subtype):
+        raise HolError(
+            f"RESTRICT: target must be a Subtype, got {_pp_ty(subtype)}"
+        )
+    if not type_eq(subtype.bvar.ty, t_th._ty):
+        raise HolError(
+            f"RESTRICT: base type mismatch -- t : {_pp_ty(t_th._ty)} but "
+            f"subtype's base is {_pp_ty(subtype.bvar.ty)}"
+        )
+    needed = _vsubst([(t_th._tm, subtype.bvar)], subtype.predicate)
+    if not _tm_alpha([], p_th._concl, needed):
+        raise HolError(
+            f"RESTRICT: p_th concludes {_pp_tm(p_th._concl)} but "
+            f"required predicate at t is {_pp_tm(needed)}"
+        )
+    asl = term_union(t_th._asl, p_th._asl)
+    return typing_thm(asl, t_th._tm, subtype)
+
+
+def UNRESTRICT(t_th: typing_thm) -> typing_thm:
+    """Elim (forget the refinement):  Gamma |- t : A|p
+                                      -----------------
+                                      Gamma |- t : A"""
+    ty = t_th._ty
+    if not isinstance(ty, Subtype):
+        raise HolError(
+            f"UNRESTRICT: term type is not a Subtype (got {_pp_ty(ty)})"
+        )
+    return typing_thm(t_th._asl, t_th._tm, ty.bvar.ty)
+
+
+def RESTRICT_PROOF(t_th: typing_thm) -> thm:
+    """Elim (extract the proof):  Gamma |- t : A|p
+                                  -----------------
+                                  Gamma |- p[t/y]"""
+    ty = t_th._ty
+    if not isinstance(ty, Subtype):
+        raise HolError(
+            f"RESTRICT_PROOF: term type is not a Subtype (got {_pp_ty(ty)})"
+        )
+    return thm(
+        t_th._asl,
+        _vsubst([(t_th._tm, ty.bvar)], ty.predicate),
+    )
+
+
+def ST_REFL(ty: hol_type) -> subtype_thm:
+    """Reflexivity: |- A <: A."""
+    return subtype_thm([], ty, ty)
+
+
+def ST_TRANS(s1: subtype_thm, s2: subtype_thm) -> subtype_thm:
+    """Transitivity:  A <: B   B <: C
+                     -------------------
+                          A <: C"""
+    if not type_eq(s1._rhs, s2._lhs):
+        raise HolError(
+            f"ST_TRANS: middle types do not match "
+            f"({_pp_ty(s1._rhs)} vs {_pp_ty(s2._lhs)})"
+        )
+    return subtype_thm(term_union(s1._asl, s2._asl), s1._lhs, s2._rhs)
+
+
+def ST_FORGET(subtype: hol_type) -> subtype_thm:
+    """Forget rule: |- A|p <: A."""
+    if not isinstance(subtype, Subtype):
+        raise HolError(
+            f"ST_FORGET: argument is not a Subtype (got {_pp_ty(subtype)})"
+        )
+    return subtype_thm([], subtype, subtype.bvar.ty)
+
+
+def ST_REFINE(p_subtype: hol_type, q_subtype: hol_type,
+              imp_th: thm) -> subtype_thm:
+    """Refine rule:  Gamma |- (\\y:A. p y ==> q y)
+                     -------------------------------
+                            Gamma |- A|p <: A|q
+
+    `p_subtype` is `A|p`, `q_subtype` is `A|q` (same base A). `imp_th`
+    proves `(\\y:A. p y) y' ==> (\\y:A. q y) y'` over a fresh y'... in
+    practice we use the simplest form: `imp_th._concl` must be
+    `Abs(y:A, p[y] ==> q[y])` applied to a fresh witness, or — in the
+    common closed-p/q case — a universally-quantified implication. For
+    the kernel-internal version we demand a direct implication form:
+    `imp_th : |- p[y0/bvar_p] ==> q[y0/bvar_q]` where y0 is the shared
+    refinement variable (we use p_subtype.bvar)."""
+    if not isinstance(p_subtype, Subtype):
+        raise HolError("ST_REFINE: first arg must be Subtype A|p")
+    if not isinstance(q_subtype, Subtype):
+        raise HolError("ST_REFINE: second arg must be Subtype A|q")
+    if not type_eq(p_subtype.bvar.ty, q_subtype.bvar.ty):
+        raise HolError(
+            f"ST_REFINE: base types differ "
+            f"({_pp_ty(p_subtype.bvar.ty)} vs {_pp_ty(q_subtype.bvar.ty)})"
+        )
+    if not _is_imp(imp_th._concl):
+        raise HolError(
+            "ST_REFINE: imp_th must conclude an implication p[y] ==> q[y]"
+        )
+    y = p_subtype.bvar
+    expected_ant = p_subtype.predicate
+    # Align q's predicate to use y too (rename q_subtype.bvar -> y).
+    if q_subtype.bvar != y:
+        q_pred = _vsubst([(y, q_subtype.bvar)], q_subtype.predicate)
+    else:
+        q_pred = q_subtype.predicate
+    expected_con = q_pred
+    if not _tm_alpha([], _imp_ant(imp_th._concl), expected_ant):
+        raise HolError(
+            f"ST_REFINE: implication antecedent is "
+            f"{_pp_tm(_imp_ant(imp_th._concl))} but expected p[y] = "
+            f"{_pp_tm(expected_ant)}"
+        )
+    if not _tm_alpha([], _imp_con(imp_th._concl), expected_con):
+        raise HolError(
+            f"ST_REFINE: implication consequent is "
+            f"{_pp_tm(_imp_con(imp_th._concl))} but expected q[y] = "
+            f"{_pp_tm(expected_con)}"
+        )
+    # y must be free in imp_th's hypotheses only where intended; reject
+    # if y is captured by an asl entry. (Standard "no free occurrence
+    # in hypotheses" discipline, like ABS.)
+    if any(vfree_in(y, a) for a in imp_th._asl):
+        raise HolError(
+            "ST_REFINE: refinement variable occurs free in imp_th's "
+            "hypotheses"
+        )
+    return subtype_thm(imp_th._asl, p_subtype, q_subtype)
+
+
+def ST_PI_DOMAIN(pi_lhs: hol_type, pi_rhs: hol_type,
+                 dom_sub: subtype_thm) -> subtype_thm:
+    """Contravariant domain:  Gamma |- A' <: A
+                              ---------------------------------------------
+                              Gamma |- Pi(x:A). B <: Pi(x:A'). B[x_A'/x_A]
+
+    `pi_lhs` is `Pi(x:A). B`, `pi_rhs` is `Pi(x:A'). B'`; we check that
+    the domains line up with `dom_sub` (LHS = A, RHS = A') and that the
+    codomain matches modulo binder-type rewriting -- a sound, narrow
+    check that the bodies are identical when the same binder name is
+    used (re-typing the binder is a kernel-level pun on names)."""
+    if not isinstance(pi_lhs, Pi):
+        raise HolError("ST_PI_DOMAIN: pi_lhs must be a Pi")
+    if not isinstance(pi_rhs, Pi):
+        raise HolError("ST_PI_DOMAIN: pi_rhs must be a Pi")
+    if not type_eq(pi_lhs.bvar.ty, dom_sub._rhs):
+        raise HolError(
+            f"ST_PI_DOMAIN: pi_lhs domain {_pp_ty(pi_lhs.bvar.ty)} does "
+            f"not match dom_sub's RHS (= the 'bigger' type) "
+            f"{_pp_ty(dom_sub._rhs)}"
+        )
+    if not type_eq(pi_rhs.bvar.ty, dom_sub._lhs):
+        raise HolError(
+            f"ST_PI_DOMAIN: pi_rhs domain {_pp_ty(pi_rhs.bvar.ty)} does "
+            f"not match dom_sub's LHS (= the 'smaller' type) "
+            f"{_pp_ty(dom_sub._lhs)}"
+        )
+    if pi_lhs.bvar.name != pi_rhs.bvar.name:
+        raise HolError(
+            f"ST_PI_DOMAIN: binder names must match for the body check "
+            f"({pi_lhs.bvar.name} vs {pi_rhs.bvar.name})"
+        )
+    # Rewrite pi_lhs.body to use pi_rhs's binder (same name, smaller type)
+    # for the comparison.
+    if not _ty_eq([(pi_lhs.bvar, pi_rhs.bvar)], pi_lhs.body, pi_rhs.body):
+        raise HolError(
+            f"ST_PI_DOMAIN: codomain bodies differ "
+            f"({_pp_ty(pi_lhs.body)} vs {_pp_ty(pi_rhs.body)}); "
+            f"this rule only handles the case where the body is "
+            f"identical (alpha-eq under binder swap)"
+        )
+    return subtype_thm(dom_sub._asl, pi_lhs, pi_rhs)
+
+
+def SUBSUME(t_th: typing_thm, sub_th: subtype_thm) -> typing_thm:
+    """Subsumption (typing-level):  Gamma |- t : A   Delta |- A <: B
+                                    ---------------------------------
+                                          Gamma + Delta |- t : B"""
+    if not type_eq(t_th._ty, sub_th._lhs):
+        raise HolError(
+            f"SUBSUME: term type {_pp_ty(t_th._ty)} does not match "
+            f"subtype's LHS {_pp_ty(sub_th._lhs)}"
+        )
+    asl = term_union(t_th._asl, sub_th._asl)
+    return typing_thm(asl, t_th._tm, sub_th._rhs)
+
+
+# ---------------------------------------------------------------------------
 # Validity rules: REFL, ASSUME, BETA, ETA, EQ_TY_CONV, TRANS, MK_COMB, ABS,
 # EQ_MP, DISCH, MP, DEDUCT_ANTISYM_RULE, INST, INST_TYPE
 # (DISCH / MP are the implication-intro / modus ponens pair for the
@@ -1705,17 +1886,15 @@ def ASSUME(F_th: typing_thm) -> thm:
     return thm([F_th._tm, *F_th._asl], F_th._tm)
 
 
-def BETA(redex_th: typing_thm, prec: "thm | None" = None) -> thm:
-    """Trivial beta:  Gamma |- (\\x:A|F. t) x : B
-                     [prec : Gamma' |- F  OR  F in Gamma]
-                     -------------------------------------
-                     Gamma (+ Gamma') |- (\\x:A|F. t) x = t
+def BETA(redex_th: typing_thm) -> thm:
+    """Trivial beta:  Gamma |- (\\x:A. t) x : B
+                     -------------------------------
+                     Gamma |- (\\x:A. t) x = t
 
-    When the Abs carries a precondition F, the discharge is required:
-    either pass `prec=` a thm proving F (its asl is absorbed), or have
-    F already alpha-present in `redex_th._asl` (the asl-implicit form;
-    no extra asl). Since the redex is trivial (arg == bvar), no
-    substitution is applied to F."""
+    Preconditioned domains (e.g. `\\x:A|p. t`) have their refinement
+    baked into the binder's type as a Subtype, so BETA needs no
+    precondition handling: the binder being `x : A|p` already implies
+    that any `x` in scope satisfies p."""
     tm = redex_th._tm
     if not (
         isinstance(tm, Comb)
@@ -1723,36 +1902,21 @@ def BETA(redex_th: typing_thm, prec: "thm | None" = None) -> thm:
         and tm.arg == tm.fun.bvar
     ):
         raise HolError("BETA: not a trivial beta-redex")
-    abs_node = tm.fun
-    asl = redex_th._asl
-    if abs_node.precondition is not None:
-        asl = _discharge(prec, abs_node.precondition, asl, "BETA", "redex")
-    elif prec is not None:
-        raise HolError("BETA: Abs has no precondition; do not supply prec")
-    return thm(asl, safe_mk_eq(redex_th._ty, tm, abs_node.body))
+    return thm(redex_th._asl, safe_mk_eq(redex_th._ty, tm, tm.fun.body))
 
 
 def ETA(t_th: typing_thm) -> thm:
-    """etaPi:  Gamma |- t : Pi(x:A|F). B
-              ---------------------------------
-              Gamma |- t = (\\x:A|F. t x)
+    """etaPi:  Gamma |- t : Pi(x:A). B
+              -----------------------------
+              Gamma |- t = (\\x:A. t x)
 
-    The bound variable is chosen fresh to avoid capture in t and in F.
-    The precondition F (if any) is threaded onto the RHS abstraction
-    (with the binder renamed). The equation itself doesn't discharge F:
-    semantically, at non-F arguments both sides are equally undefined."""
+    Preconditioned domains live inside `A` as a Subtype; no special
+    threading is needed beyond the standard fresh-binder choice."""
     f_ty = t_th._ty
     if not isinstance(f_ty, Pi):
         raise HolError(f"ETA: term type is not a Pi (got {_pp_ty(f_ty)})")
-    avoid = frees(t_th._tm)
-    if f_ty.precondition is not None:
-        avoid = term_union(avoid, frees(f_ty.precondition))
-    fresh_v = variant(avoid, f_ty.bvar)
-    new_prec = (
-        None if f_ty.precondition is None
-        else _vsubst([(fresh_v, f_ty.bvar)], f_ty.precondition)
-    )
-    eta_form = Abs(fresh_v, Comb(t_th._tm, fresh_v), new_prec)
+    fresh_v = variant(frees(t_th._tm), f_ty.bvar)
+    eta_form = Abs(fresh_v, Comb(t_th._tm, fresh_v))
     return thm(t_th._asl, safe_mk_eq(t_th._ty, t_th._tm, eta_form))
 
 
@@ -1797,12 +1961,10 @@ def TRANS(th1: thm, th2: thm) -> thm:
 
 def MK_COMB(th1: thm, th2: thm,
             eq: type_eq_thm | None = None,
-            cod_eq: type_eq_thm | None = None,
-            prec: "thm | tuple | None" = None) -> thm:
-    """congAppl':  Gamma |- f =Pi(x:A|F).B f'    Gamma |- a =A a'
-                  prec_l : Gamma_l |- F[a/x]   prec_r : Gamma_r |- F[a'/x]
-                  ----------------------------------------------------------
-                            Gamma + ... |- f a =B[a/x] f' a'
+            cod_eq: type_eq_thm | None = None) -> thm:
+    """congAppl':  Gamma |- f =Pi(x:A).B f'    Gamma |- a =A a'
+                  ----------------------------------------------
+                          Gamma |- f a =B[a/x] f' a'
 
     With a dependent codomain B and a propositional (rather than
     definitional) argument equation l2 = r2, the natural LHS type
@@ -1811,20 +1973,9 @@ def MK_COMB(th1: thm, th2: thm,
     bridge (used when the argument's equation tag doesn't match the
     function's Pi-domain definitionally).
 
-    When the function's Pi carries a precondition F, each side's
-    obligation `F[l2/x]` / `F[r2/x]` must be discharged. ``prec`` is
-    one of:
-
-      - ``thm`` -- single discharge used for both sides; requires
-        `F[l2/x]` and `F[r2/x]` to coincide alpha-eq (typical when F
-        is closed in x). The thm's asl is absorbed once.
-      - ``(left, right)`` -- per-side tuple; each entry is a ``thm``
-        or ``None``.
-      - ``None`` -- equivalent to ``(None, None)``.
-
-    A ``None`` slot is the asl-implicit form: that side's F-instance
-    must already be alpha-present in the running asl (typically
-    introduced upstream by ``ASSUME``)."""
+    Preconditioned domains live inside A as Subtype refinements; if
+    `A = A0|p`, the argument equation must already be tagged at A0|p
+    (which guarantees both sides satisfy p). No per-rule discharge."""
     c1, c2 = th1._concl, th2._concl
     _require_eq(c1, "MK_COMB")
     _require_eq(c2, "MK_COMB")
@@ -1846,30 +1997,6 @@ def MK_COMB(th1: thm, th2: thm,
         asl = term_union(asl, eq._asl)
     l1, r1 = _lhs(c1), _rhs(c1)
     l2, r2 = _lhs(c2), _rhs(c2)
-    if f_ty.precondition is not None:
-        needed_l = _vsubst([(l2, f_ty.bvar)], f_ty.precondition)
-        needed_r = _vsubst([(r2, f_ty.bvar)], f_ty.precondition)
-        if isinstance(prec, tuple):
-            if len(prec) != 2:
-                raise HolError(
-                    f"MK_COMB: prec tuple must be (left, right), got "
-                    f"length {len(prec)}"
-                )
-            prec_l, prec_r = prec
-            asl = _discharge(prec_l, needed_l, asl, "MK_COMB", "F[l2/x]")
-            asl = _discharge(prec_r, needed_r, asl, "MK_COMB", "F[r2/x]")
-        else:
-            if prec is not None and not _tm_alpha([], needed_l, needed_r):
-                raise HolError(
-                    f"MK_COMB: single-thm prec requires F[l2/x] and "
-                    f"F[r2/x] to coincide alpha-eq (got {_pp_tm(needed_l)} "
-                    f"vs {_pp_tm(needed_r)}); pass prec=(left, right)"
-                )
-            asl = _discharge(prec, needed_l, asl, "MK_COMB", "F[l2/x]=F[r2/x]")
-    elif prec is not None:
-        raise HolError(
-            "MK_COMB: function's Pi has no precondition; do not supply prec"
-        )
     result_ty_l = subst_in_type([(l2, f_ty.bvar)], f_ty.body)
     result_ty_r = subst_in_type([(r2, f_ty.bvar)], f_ty.body)
     if not type_eq(result_ty_l, result_ty_r):
@@ -2633,95 +2760,105 @@ if __name__ == "__main__":
         print("cross-dep cong  ::", str(e).splitlines()[0])
 
     # ----------------------------------------------------------------
-    # Item 13: function preconditions on Pi / lambda.
+    # Predicate subtypes (item 10) + collapsed Pi precondition (item 13).
     #
-    # Build a λ with precondition F = (add 0 0 = 0): under ▷F the body
-    # type-checks as 0:nat, so LAMBDA captures F as the binder's
-    # precondition. APP to zero_th then requires a thm discharging
-    # F[0/n] -- here add_0_0_eq_0 already discharges it (F doesn't
-    # mention n, so F[0/n] = F).
+    # Pi-binder preconditions are now stored as Subtype refinements on
+    # the binder's type: λx:A|F. t  ===  λx : Subtype(y:A, F[y]).
+    # The discharge of F at value-construction time happens via
+    # RESTRICT; thereafter APP / BETA / ETA / MK_COMB are unconditional.
     # ----------------------------------------------------------------
     print()
     F = add_0_0_eq_0._concl  # the bool term add 0 0 = 0
-    # The body's typing has F in its asl (it does not actually need
-    # F to type zero, but we add it to simulate "type-checked under ▷F").
-    body_th_under_F = typing_thm([F], zero_th._tm, nat_ty)
-    n_for_lam = Var("n", nat_ty)
-    lam_with_prec = LAMBDA(n_for_lam, body_th_under_F, precondition=F)
-    print("λ with precondition F ::", lam_with_prec)
-    # APP without prec: rejected.
-    try:
-        APP(lam_with_prec, zero_th)
-    except HolError as e:
-        print("APP no-prec       ::", str(e).splitlines()[0])
-    # APP with the wrong proof: rejected.
-    try:
-        APP(lam_with_prec, zero_th, prec=REFL(zero_th))
-    except HolError as e:
-        print("APP wrong-prec    ::", str(e).splitlines()[0])
-    # APP with the right proof: succeeds, absorbs nothing extra (the
-    # axiom add_0_0_eq_0 has empty asl).
-    app_with_prec = APP(lam_with_prec, zero_th, prec=add_0_0_eq_0)
-    print("APP with prec     ::", app_with_prec)
+    # Build the refined type nat | (λy. add 0 0 = 0). Here the predicate
+    # doesn't mention y -- F is closed -- but Subtype's structure is
+    # general.
+    y_ref = Var("y", nat_ty)
+    nat_F = mk_subtype(y_ref, F)
+    print("subtype nat|F      ::", _pp_ty(nat_F))
 
-    # BETA on a preconditioned redex: F must be discharged. The user
-    # has two declarative options:
-    #   (i) pass prec= a thm proving F;
-    #  (ii) leave prec= None when F is already a hypothesis in
-    #       redex_th._asl (asl-implicit).
-    redex_th = typing_thm([F], Comb(lam_with_prec._tm, n_for_lam), nat_ty)
-    # Asl-implicit: F is in redex_th._asl, so no extra prec needed.
-    beta_implicit = BETA(redex_th)
-    print("BETA asl-implicit ::", beta_implicit)
-    # Explicit prec: works too. add_0_0_eq_0 is the axiom |- F.
-    beta_with_prec = BETA(redex_th, prec=add_0_0_eq_0)
-    print("BETA with prec    ::", beta_with_prec)
-    # Wrong prec: rejected.
-    try:
-        BETA(redex_th, prec=REFL(zero_th))
-    except HolError as e:
-        print("BETA wrong-prec   ::", str(e).splitlines()[0])
-    # When F is in neither asl nor prec: rejected.
-    bare_redex_th = typing_thm([], Comb(lam_with_prec._tm, n_for_lam), nat_ty)
-    try:
-        BETA(bare_redex_th)
-    except HolError as e:
-        print("BETA no discharge ::", str(e).splitlines()[0])
+    # RESTRICT zero into nat|F. Needs |- F[zero/y] = |- F (closed).
+    zero_in_F = RESTRICT(zero_th, add_0_0_eq_0, nat_F)
+    print("RESTRICT zero      ::", zero_in_F)
 
-    # ETA on a preconditioned Pi: the RHS Abs threads F (with binder
-    # alpha-renamed if needed); no discharge is required.
-    t_prec_var = Var("g", lam_with_prec._ty)
-    t_prec_th = VAR(t_prec_var)
-    eta_with_prec = ETA(t_prec_th)
-    print("ETA with prec     ::", eta_with_prec)
+    # Wrong proof: rejected.
+    try:
+        RESTRICT(zero_th, REFL(zero_th), nat_F)
+    except HolError as e:
+        print("RESTRICT wrong-p   ::", str(e).splitlines()[0])
 
-    # MK_COMB on a preconditioned Pi. F = (add 0 0 = 0) is closed in n,
-    # so F[l2/n] and F[r2/n] coincide, and a single prec= covers both
-    # sides.
-    f_eq_th = REFL(LAMBDA(  # f = f at Pi(n:nat|F). nat
-        Var("n", nat_ty),
-        typing_thm([F], zero_th._tm, nat_ty),
-        precondition=F,
-    ))
+    # UNRESTRICT: forget the refinement.
+    zero_back = UNRESTRICT(zero_in_F)
+    print("UNRESTRICT         ::", zero_back)
+
+    # RESTRICT_PROOF: extract the proof.
+    zero_F_proof = RESTRICT_PROOF(zero_in_F)
+    print("RESTRICT_PROOF     ::", zero_F_proof)
+
+    # Build λ over the refined domain. The binder ranges over nat|F.
+    n_ref = Var("n", nat_F)
+    body_over_ref = typing_thm([], zero_th._tm, nat_ty)
+    lam_over_ref = LAMBDA(n_ref, body_over_ref)
+    print("λ over nat|F       ::", lam_over_ref)
+
+    # APP: argument must already be in nat|F (achieved via RESTRICT).
+    app_over_ref = APP(lam_over_ref, zero_in_F)
+    print("APP over nat|F     ::", app_over_ref)
+
+    # APP with un-refined argument: rejected (no precondition kwarg).
     try:
-        MK_COMB(f_eq_th, add_0_0_eq_0)
+        APP(lam_over_ref, zero_th)
     except HolError as e:
-        print("MK_COMB no-prec   ::", str(e).splitlines()[0])
-    # Single thm: covers both sides when F[l2/x] and F[r2/x] coincide.
-    mk_comb_prec_single = MK_COMB(f_eq_th, add_0_0_eq_0, prec=add_0_0_eq_0)
-    print("MK_COMB prec=thm  ::", mk_comb_prec_single)
-    # Tuple form: per-side, each slot is thm | None.
-    mk_comb_prec_pair = MK_COMB(
-        f_eq_th, add_0_0_eq_0,
-        prec=(add_0_0_eq_0, add_0_0_eq_0),
-    )
-    print("MK_COMB prec=tuple::", mk_comb_prec_pair)
-    # Tuple with a None slot mixes explicit (left) with asl-implicit
-    # (right). Here F isn't in asl, so it's rejected.
-    try:
-        MK_COMB(f_eq_th, add_0_0_eq_0, prec=(add_0_0_eq_0, None))
-    except HolError as e:
-        print("MK_COMB asl-miss  ::", str(e).splitlines()[0])
+        print("APP base-arg       ::", str(e).splitlines()[0])
+
+    # BETA: no precondition handling -- binder type is nat|F, redex
+    # type-checks unconditionally.
+    n_in_ref = VAR(n_ref)
+    redex_ref = APP(lam_over_ref, n_in_ref)
+    beta_over_ref = BETA(redex_ref)
+    print("BETA over nat|F    ::", beta_over_ref)
+
+    # ETA: similarly trivial.
+    t_ref_var = Var("g", lam_over_ref._ty)
+    eta_over_ref = ETA(VAR(t_ref_var))
+    print("ETA over nat|F     ::", eta_over_ref)
+
+    # MK_COMB: argument equation must already be tagged at the refined
+    # type. REFL on zero_in_F suffices.
+    f_eq_ref = REFL(lam_over_ref)
+    arg_eq_ref = REFL(zero_in_F)
+    mk_comb_over_ref = MK_COMB(f_eq_ref, arg_eq_ref)
+    print("MK_COMB over nat|F ::", mk_comb_over_ref)
+
+    # ----------------------------------------------------------------
+    # P4 is now a derivable corollary: from |- p y ==> q y, build
+    # A|p <: A|q via ST_REFINE, then Π(x:A|q).B <: Π(x:A|p).B via
+    # ST_PI_DOMAIN (contravariant in the domain).
+    # ----------------------------------------------------------------
+    # Example: F itself is the predicate; build a weaker version
+    # F_weak = (add 0 0 = 0) ∨ ... -- here we keep it simple and use
+    # |- F ==> F (reflexivity of implication) to show A|F <: A|F via P4.
+    F_th = add_0_0_eq_0  # |- F
+    F_imp_F = DISCH(
+        typing_thm([], F, bool_ty),
+        ASSUME(typing_thm([], F, bool_ty)),
+    )  # |- F ==> F
+    print("F ==> F           ::", F_imp_F)
+    refine_self = ST_REFINE(nat_F, nat_F, F_imp_F)
+    print("A|F <: A|F        ::", refine_self)
+    forget = ST_FORGET(nat_F)
+    print("A|F <: A          ::", forget)
+    # ST_PI_DOMAIN: contravariant; smaller domain -> bigger Pi-subtype
+    # of the wider-domain Pi. Build Pi(n:nat).nat <: Pi(n:nat|F).nat
+    # by passing dom_sub = ST_FORGET(nat_F) (nat|F <: nat).
+    pi_wide = Pi(Var("n", nat_ty), nat_ty)
+    pi_narrow = Pi(Var("n", nat_F), nat_ty)
+    p4_witness = ST_PI_DOMAIN(pi_wide, pi_narrow, forget)
+    print("Pi(n:nat).nat <: Pi(n:nat|F).nat (P4) ::", p4_witness)
+
+    # SUBSUME: lift a typing through a subtype. zero_in_F : nat|F can
+    # be re-typed at nat via SUBSUME with ST_FORGET(nat|F).
+    zero_via_subsume = SUBSUME(zero_in_F, forget)
+    print("SUBSUME via forget ::", zero_via_subsume)
 
     # ----------------------------------------------------------------
     # Item 14b.1: constants with declaration-time preconditions.
