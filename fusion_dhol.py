@@ -64,7 +64,7 @@
 
 from __future__ import annotations
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, NamedTuple
 
 sys.setrecursionlimit(10000)
@@ -99,34 +99,29 @@ class Tyapp:
 
 @dataclass(frozen=True, slots=True)
 class Pi:
-    """Dependent function type `Πx:A|F.B` -- precondition `F : bool` may
-    be `None` (semantically `true`), in which case the type is the usual
-    `Πx:A.B`. The precondition is bound by `bvar` (so `F` may mention
-    `x`) and, when not None, makes `F` available as a hypothesis when
-    type-checking `B` (paper Rule P1)."""
+    """Dependent function type `Πx:A.B`. Pi-domain refinement is
+    encoded by giving `bvar` a `Subtype`-typed `ty`:
+        Π(x : A|F[x]). B   ≡   Pi(Var("x", Subtype(y:A, F[y/x])), B)
+    There is no separate precondition slot -- `Subtype` is the
+    canonical refinement type former, used uniformly at every position
+    (top-level, codomain, equality index, AND Pi-domain). The
+    refinement F becomes available as a hypothesis inside the body via
+    `RESTRICT_PROOF` on the bvar's typing certificate."""
     bvar: "Var"
     body: "hol_type"
-    predicate: "term | None" = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
 class Subtype:
-    """Predicate subtype `bvar.ty | predicate` — the refinement of
-    `bvar.ty` (the base type A) by the bool predicate `predicate`, with
-    `bvar` bound in `predicate`. Inhabitants are exactly those a:A for
-    which `predicate[a/bvar]` holds.
+    """Predicate subtype `bvar.ty | predicate` -- the refinement of
+    `bvar.ty` (the base type A) by the bool predicate `predicate`,
+    with `bvar` bound in `predicate`. Inhabitants are exactly those
+    a:A for which `predicate[a/bvar]` holds.
 
-    Pi-domain preconditions have two equivalent encodings, both
-    accepted by the kernel (`_pi_effective_domain` bridges them):
-
-      (a) legacy:    Π(x : A|F[x]). B  ≡  Π(x : Subtype(y:A, F[y/x])). B
-      (b) Rabe P1:   Π(x : A|F[x]). B  ≡  Pi(Var("x", A), B, predicate=F)
-
-    Form (b) -- the precondition slot on Pi itself -- is preferred
-    going forward and is what `APP` / `MK_COMB` canonicalise to via
-    `_pi_effective_domain`. Form (a) survives for
-    backward compatibility while LAMBDA-over-Subtype-bvar paths are
-    migrated.
+    The canonical encoding of Pi-domain refinement: a Pi whose binder
+    has type `Subtype(y:A, p)` is the dependent function type over
+    `A|p`. Single canonical form -- there is no parallel precondition
+    slot on Pi.
     """
     bvar: "Var"
     predicate: "term"
@@ -901,11 +896,6 @@ def frees_in_type(ty: hol_type) -> list:
             list(frees_in_type(ty.bvar.ty)),
             (v for v in frees_in_type(ty.body) if v != ty.bvar),
         )
-        if ty.predicate is not None:
-            _uniq_extend(
-                seen,
-                (v for v in frees(ty.predicate) if v != ty.bvar),
-            )
         return seen
     if isinstance(ty, Subtype):
         seen = list(frees_in_type(ty.bvar.ty))
@@ -954,10 +944,7 @@ def tyvars(ty: hol_type) -> list:
             _uniq_extend(seen, type_vars_in_term(a))
         return seen
     if isinstance(ty, Pi):
-        seen = _uniq_extend(list(tyvars(ty.bvar.ty)), tyvars(ty.body))
-        if ty.predicate is not None:
-            _uniq_extend(seen, type_vars_in_term(ty.predicate))
-        return seen
+        return _uniq_extend(list(tyvars(ty.bvar.ty)), tyvars(ty.body))
     if isinstance(ty, Subtype):
         return _uniq_extend(
             list(tyvars(ty.bvar.ty)), type_vars_in_term(ty.predicate)
@@ -983,13 +970,10 @@ def tyop_names_in_type(ty: hol_type) -> list:
             _uniq_extend(seen, tyop_names_in_term(a))
         return seen
     if isinstance(ty, Pi):
-        seen = _uniq_extend(
+        return _uniq_extend(
             list(tyop_names_in_type(ty.bvar.ty)),
             tyop_names_in_type(ty.body),
         )
-        if ty.predicate is not None:
-            _uniq_extend(seen, tyop_names_in_term(ty.predicate))
-        return seen
     if isinstance(ty, Subtype):
         return _uniq_extend(
             list(tyop_names_in_type(ty.bvar.ty)),
@@ -1057,20 +1041,6 @@ def variant(avoid: list, v: term) -> term:
 # ---------------------------------------------------------------------------
 
 
-def _pi_effective_domain(pi_ty) -> "hol_type":
-    """Effective domain of a Pi-type for argument matching.
-
-    For `Πx:A.B` (no precondition) returns `A`. For `Πx:A|F.B`
-    (precondition) returns `Subtype(x:A, F)` -- the refinement of A by
-    F, which is what an argument must inhabit. This bridges the two
-    encodings of Pi-domain refinement (precondition slot vs Subtype
-    inside bvar.ty) so callers that need to validate arguments don't
-    have to care which form was used."""
-    if pi_ty.predicate is None:
-        return pi_ty.bvar.ty
-    return Subtype(pi_ty.bvar, pi_ty.predicate)
-
-
 def type_eq(t1: hol_type, t2: hol_type) -> bool:
     return _ty_eq([], t1, t2)
 
@@ -1091,12 +1061,7 @@ def _ty_eq(env: list, t1: hol_type, t2: hol_type) -> bool:
     if isinstance(t1, Pi) and isinstance(t2, Pi):
         if not _ty_eq(env, t1.bvar.ty, t2.bvar.ty):
             return False
-        if (t1.predicate is None) != (t2.predicate is None):
-            return False
         env2 = [(t1.bvar, t2.bvar), *env]
-        if t1.predicate is not None:
-            if not _tm_alpha(env2, t1.predicate, t2.predicate):
-                return False
         return _ty_eq(env2, t1.body, t2.body)
     if isinstance(t1, Subtype) and isinstance(t2, Subtype):
         if not _ty_eq(env, t1.bvar.ty, t2.bvar.ty):
@@ -1166,16 +1131,9 @@ def _map_type(f_ty: Callable, f_tm: Callable, ty: hol_type) -> hol_type:
             else Var(ty.bvar.name, new_bv_ty)
         )
         new_body = f_ty(ty.body)
-        new_pred = (
-            None if ty.predicate is None else f_tm(ty.predicate)
-        )
-        if (
-            new_bv is ty.bvar
-            and new_body is ty.body
-            and new_pred is ty.predicate
-        ):
+        if new_bv is ty.bvar and new_body is ty.body:
             return ty
-        return Pi(new_bv, new_body, predicate=new_pred)
+        return Pi(new_bv, new_body)
     if isinstance(ty, Subtype):
         new_bv_ty = f_ty(ty.bvar.ty)
         new_bv = (
@@ -1258,46 +1216,9 @@ def subst_in_type(theta: list, ty: hol_type) -> hol_type:
     if not theta:
         return ty
     if isinstance(ty, Pi):
-        if ty.predicate is None:
-            return _subst_binder(
-                theta, ty.bvar, ty.body,
-                subst_in_type, _occurs_in_type, Pi,
-            )
-        # Pi with precondition: body (type) and predicate (term) share
-        # the bvar binder. Apply capture-avoidance against both.
-        bvar = ty.bvar
-        theta2 = [(t, x) for t, x in theta if x != bvar]
-        new_bvar_ty = subst_in_type(theta, bvar.ty)
-        new_bvar = (
-            bvar if new_bvar_ty is bvar.ty
-            else Var(bvar.name, new_bvar_ty)
-        )
-        if not theta2:
-            if new_bvar is bvar:
-                return ty
-            return Pi(new_bvar, ty.body, predicate=ty.predicate)
-        capture = any(
-            vfree_in(new_bvar, t) and (
-                _occurs_in_type(x, ty.body) or vfree_in(x, ty.predicate)
-            )
-            for t, x in theta2
-        )
-        if capture:
-            avoid = [
-                subst_in_type(theta2, ty.body),
-                _vsubst(theta2, ty.predicate),
-            ]
-            fresh = variant(avoid, new_bvar)
-            rename = [(fresh, bvar), *theta2]
-            return Pi(
-                fresh,
-                subst_in_type(rename, ty.body),
-                predicate=_vsubst(rename, ty.predicate),
-            )
-        return Pi(
-            new_bvar,
-            subst_in_type(theta2, ty.body),
-            predicate=_vsubst(theta2, ty.predicate),
+        return _subst_binder(
+            theta, ty.bvar, ty.body,
+            subst_in_type, _occurs_in_type, Pi,
         )
     if isinstance(ty, Subtype):
         return _subst_binder(
@@ -1321,9 +1242,10 @@ def _occurs_in_type(v: Var, ty: hol_type) -> bool:
     if isinstance(ty, Pi):
         if ty.bvar == v:
             return _occurs_in_type(v, ty.bvar.ty)
-        if _occurs_in_type(v, ty.bvar.ty) or _occurs_in_type(v, ty.body):
-            return True
-        return ty.predicate is not None and vfree_in(v, ty.predicate)
+        return (
+            _occurs_in_type(v, ty.bvar.ty)
+            or _occurs_in_type(v, ty.body)
+        )
     if isinstance(ty, Subtype):
         if ty.bvar == v:
             return _occurs_in_type(v, ty.bvar.ty)
@@ -1521,14 +1443,10 @@ def _pp_ty_raw(ty):
             return ty.tyop
         return f"{ty.tyop}({'; '.join(parts)})"
     if isinstance(ty, Pi):
-        pre = (
-            "" if ty.predicate is None
-            else f"|\\{ty.bvar.name}. {_pp_tm_raw(ty.predicate)}"
-        )
-        if not _occurs_in_type(ty.bvar, ty.body) and ty.predicate is None:
+        if not _occurs_in_type(ty.bvar, ty.body):
             return f"({_pp_ty_raw(ty.bvar.ty)} -> {_pp_ty_raw(ty.body)})"
         return (
-            f"(Pi {ty.bvar.name}:{_pp_ty_raw(ty.bvar.ty)}{pre}. "
+            f"(Pi {ty.bvar.name}:{_pp_ty_raw(ty.bvar.ty)}. "
             f"{_pp_ty_raw(ty.body)})"
         )
     if isinstance(ty, Subtype):
@@ -1705,17 +1623,14 @@ def APP(f_th: typing_thm, a_th: typing_thm) -> typing_thm:
     For a propositional bridge A == A', pre-CONV the argument
     (basics_dhol exposes an APP wrapper that does this automatically).
 
-    Preconditioned domains can be encoded two equivalent ways:
-    (a) `Pi(x : Subtype(y:A, p)). B` -- legacy encoding, predicate
-        lives in the bvar's type.
-    (b) `Pi(x : A, predicate=p). B` -- Rabe-style precondition slot.
-    Both forms are accepted; `_pi_effective_domain` canonicalises to
-    `Subtype(x:A, p)` for argument matching, so the user still must
-    supply an argument typed at `A|p` (via RESTRICT)."""
+    Preconditioned domains are encoded as Subtype-typed bvars:
+    `Pi(x : Subtype(y:A, p)). B`. The argument must already inhabit
+    the refined type `A|p` -- discharge of `p[a]` happens upstream
+    when the caller constructs `a : A|p` via `RESTRICT`."""
     f_ty = f_th._ty
     if not isinstance(f_ty, Pi):
         raise HolError(f"APP: head not a Pi -- got {_pp_ty(f_ty)}")
-    expected = _pi_effective_domain(f_ty)
+    expected = f_ty.bvar.ty
     got = a_th._ty
     if not type_eq(expected, got):
         raise HolError(
@@ -1784,10 +1699,9 @@ def _walk_type(tm: term) -> hol_type:
                 f"TYPE_OF: function position has non-Pi type "
                 f"{_pp_ty(f_ty)}"
             )
-        expected_dom = _pi_effective_domain(f_ty)
-        if not type_eq(expected_dom, a_ty):
+        if not type_eq(f_ty.bvar.ty, a_ty):
             raise HolError(
-                f"TYPE_OF: domain mismatch (expected {_pp_ty(expected_dom)}, "
+                f"TYPE_OF: domain mismatch (expected {_pp_ty(f_ty.bvar.ty)}, "
                 f"got {_pp_ty(a_ty)}); term was typed via a propositional "
                 f"bridge that TYPE_OF can't see -- use the equation-side "
                 f"accessors instead"
@@ -2285,13 +2199,14 @@ def THM_CONG_BASE(staged: Staged, args: list) -> thm:
 # Predicate subtypes & subtyping
 #
 # Subtype(bvar:A, p) -- the refinement {y:A | p[y/bvar]}, represented
-# as a hol_type alongside Tyvar/Tyapp/Pi. Following Rabe 2026, the
-# system no longer carries a separate `<:` judgment: refinement has
-# three typing-layer primitives -- RESTRICT (intro from base typing +
-# predicate proof), RESTRICT_PROOF (elim to the predicate), and
-# FORGET_TYPING (elim to the base type). Pi-domain refinement is
-# expressed via Pi's `predicate` slot and absorbed by `APP` via
-# `_pi_effective_domain`.
+# as a hol_type alongside Tyvar/Tyapp/Pi. The system carries no
+# separate `<:` judgment: refinement has three typing-layer primitives
+# -- RESTRICT (intro from base typing + predicate proof),
+# RESTRICT_PROOF (elim to the predicate), and FORGET_TYPING (elim to
+# the base type). Subtype is the single canonical refinement type
+# former; it appears at every position (top-level, codomain, equality
+# index, Pi-domain) and Pi-domain refinement is encoded by a
+# Subtype-typed bvar.
 # ---------------------------------------------------------------------------
 
 
@@ -2446,7 +2361,7 @@ def MK_COMB(th1: thm, th2: thm) -> thm:
             f"MK_COMB: function-side equation type is not Pi "
             f"(got {_pp_ty(f_ty)})"
         )
-    expected = _pi_effective_domain(f_ty)
+    expected = f_ty.bvar.ty
     if not type_eq(expected, arg_ty):
         raise HolError(
             f"MK_COMB: domain types do not agree "

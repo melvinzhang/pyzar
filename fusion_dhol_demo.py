@@ -470,14 +470,11 @@ except HolError as e:
 # ----------------------------------------------------------------
 # Predicate subtypes (item 10) + collapsed Pi precondition (item 13).
 #
-# Pi-binder preconditions now have two equivalent encodings:
-#   (a) legacy:  λx : Subtype(y:A, F[y]).   -- predicate in bvar.ty
-#   (b) Rabe P1: Pi(Var(x,A), B, predicate=F)  -- precondition slot
-# The kernel canonicalises both via `_pi_effective_domain` for arg
-# matching. RESTRICT is still the value-level intro for `A|F`;
-# thereafter APP / BETA / ETA / MK_COMB are unconditional.
-# This section exercises form (a) for LAMBDA over a Subtype-typed
-# binder; `pi_narrow` below exercises form (b).
+# Pi-binder refinement is encoded by a Subtype-typed bvar:
+#   λx : Subtype(y:A, F[y]).  ===  λx:A|F[x].
+# RESTRICT is the value-level intro for `A|F`; thereafter APP /
+# BETA / ETA / MK_COMB are unconditional (the bvar's refined type
+# carries the precondition).
 # ----------------------------------------------------------------
 print()
 F = add_0_0_eq_0._concl  # the bool term add 0 0 = 0
