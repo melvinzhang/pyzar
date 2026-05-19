@@ -13,20 +13,20 @@ from fusion_dhol import (
     bool_ty, aty,
     HolError, Clash,
     VAR, CONST, APP, LAMBDA, CONV,
-    REFL, ASSUME, BETA, EQ_TY_CONV, TRANS, MK_COMB, ABS, EQ_MP,
+    REFL, ASSUME, BETA, EQ_TY_CONV, MK_COMB, ABS, EQ_MP,
     DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
     TY_REFL, TY_SYM, TY_TRANS, TY_CONG_BASE, TY_CONG_PI,
     TM_CONG_BASE, THM_CONG_BASE,
     ST_REFL, ST_TRANS, ST_FORGET, ST_REFINE, ST_PI_DOMAIN, SUBSUME,
-    RESTRICT, UNRESTRICT, RESTRICT_PROOF,
+    RESTRICT, RESTRICT_PROOF,
     mk_subtype, mk_type, mk_arrow, safe_mk_eq,
     new_type, new_constant, new_axiom, new_basic_definition,
     interpret, instantiate, frees,
     _pp_ty, _pp_tm, _eq_tag, _tm_alpha,
 )
 
-# ETA / DISCH / MP / IMP_TYPE / mk_imp now live in basics_dhol.
-from basics_dhol import ETA, DISCH, MP, IMP_TYPE, mk_imp
+# ETA, TRANS, UNRESTRICT, DISCH, MP, IMP_TYPE, mk_imp now live in basics_dhol.
+from basics_dhol import ETA, TRANS, UNRESTRICT, DISCH, MP, IMP_TYPE, mk_imp
 
 # nat as a base type, with "0" as the atomic inhabitation witness.
 nat_ty = Tyapp("nat", (), ())

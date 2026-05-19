@@ -1718,18 +1718,6 @@ def RESTRICT(t_th: typing_thm, p_th: thm,
     return typing_thm(asl, t_th._tm, subtype)
 
 
-def UNRESTRICT(t_th: typing_thm) -> typing_thm:
-    """Elim (forget the refinement):  Gamma |- t : A|p
-                                      -----------------
-                                      Gamma |- t : A"""
-    ty = t_th._ty
-    if not isinstance(ty, Subtype):
-        raise HolError(
-            f"UNRESTRICT: term type is not a Subtype (got {_pp_ty(ty)})"
-        )
-    return typing_thm(t_th._asl, t_th._tm, ty.bvar.ty)
-
-
 def RESTRICT_PROOF(t_th: typing_thm) -> thm:
     """Elim (extract the proof):  Gamma |- t : A|p
                                   -----------------
@@ -1884,10 +1872,11 @@ def SUBSUME(t_th: typing_thm, sub_th: subtype_thm) -> typing_thm:
 
 
 # ---------------------------------------------------------------------------
-# Validity rules: REFL, ASSUME, BETA, EQ_TY_CONV, TRANS, MK_COMB, ABS,
+# Validity rules: REFL, ASSUME, BETA, EQ_TY_CONV, MK_COMB, ABS,
 # EQ_MP, DEDUCT_ANTISYM_RULE, INST, INST_TYPE
-# (The HOL Light 10-rule core, lifted to typing-as-derivation. ETA,
-#  DISCH, MP, IMP_TYPE and the ==> constant are derived in basics_dhol.)
+# (HOL Light's 10-rule core minus TRANS, lifted to typing-as-derivation.
+#  ETA, TRANS, DISCH, MP, IMP_TYPE and the ==> constant are derived in
+#  basics_dhol.)
 # ---------------------------------------------------------------------------
 
 
@@ -1941,21 +1930,6 @@ def EQ_TY_CONV(eq_th: thm, ty_eq: type_eq_thm) -> thm:
     s, t = _lhs(c), _rhs(c)
     new_concl = Comb(Comb(new_eq_const, s), t)
     return thm(term_union(eq_th._asl, ty_eq._asl), new_concl)
-
-
-def TRANS(th1: thm, th2: thm) -> thm:
-    c1, c2 = th1._concl, th2._concl
-    _require_eq(c1, "TRANS")
-    _require_eq(c2, "TRANS")
-    if not type_eq(_eq_tag(c1), _eq_tag(c2)):
-        raise HolError(
-            f"TRANS: equation types differ "
-            f"({_pp_ty(_eq_tag(c1))} vs {_pp_ty(_eq_tag(c2))}); "
-            f"use EQ_TY_CONV to align first"
-        )
-    if not _tm_alpha([], _rhs(c1), _lhs(c2)):
-        raise HolError("TRANS: middle terms do not match")
-    return thm(term_union(th1._asl, th2._asl), Comb(c1.fun, _rhs(c2)))
 
 
 def MK_COMB(th1: thm, th2: thm,

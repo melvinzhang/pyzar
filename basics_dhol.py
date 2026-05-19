@@ -31,8 +31,9 @@ from fusion_dhol import (
     typing_thm, thm, type_eq_thm,
     bool_ty, aty, safe_mk_eq, mk_arrow,
     VAR, CONST, APP, LAMBDA, CONV,
-    REFL, ASSUME, BETA, TRANS, MK_COMB, ABS,
+    REFL, ASSUME, BETA, MK_COMB, ABS,
     EQ_MP, DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
+    SUBSUME, ST_FORGET,
     TYPE_OF, LHS_TYPING, RHS_TYPING, CONCL_TYPING,
     new_basic_definition, new_axiom, interpret,
     HolError, frees, vfree_in,
@@ -60,6 +61,37 @@ def SYM(th: thm) -> thm:
     refl_a = REFL(lhs_th)                       # |- a = a
     eq_eq = MK_COMB(partial, refl_a)            # |- (a = a) = (b = a)
     return EQ_MP(eq_eq, refl_a)                 # |- b = a
+
+
+def TRANS(th1: thm, th2: thm) -> thm:
+    """th1: asl1 |- a = b at A,  th2: asl2 |- b = c at A
+                         → asl1 ∪ asl2 |- a = c at A.
+
+    Derived (HOL Light keeps it primitive for performance, not
+    minimality). Equation types must agree definitionally; align with
+    EQ_TY_CONV first if they differ. Middle terms must α-match.
+
+    Construction: AP_TERM (= a) th2 gives |- (a = b) = (a = c); EQ_MP
+    with th1 lands a = c."""
+    a_th = LHS_TYPING(th1)
+    A = a_th._ty
+    eq_const_th = CONST("=", (A,))
+    eq_a_th = APP(eq_const_th, a_th)             # |- (= a) : A → bool
+    refl_eq_a = REFL(eq_a_th)                    # |- (= a) = (= a)
+    # MK_COMB enforces both the type-tag and middle-term checks.
+    eq_eq = MK_COMB(refl_eq_a, th2)              # |- (a = b) = (a = c)
+    return EQ_MP(eq_eq, th1)                     # |- a = c
+
+
+def UNRESTRICT(t_th: typing_thm) -> typing_thm:
+    """Elim (forget the refinement):  Gamma |- t : A|p
+                                      -----------------
+                                      Gamma |- t : A
+
+    Derived as `SUBSUME(t_th, ST_FORGET(A|p))`. The kernel doesn't
+    need to ship this rule -- forget-and-subsume is the standard
+    factoring."""
+    return SUBSUME(t_th, ST_FORGET(t_th._ty))
 
 
 # ---------------------------------------------------------------------------
