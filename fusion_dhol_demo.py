@@ -9,7 +9,6 @@ boundaries."""
 
 from fusion_dhol import (
     Tyvar, Tyapp, Pi, Subtype, Var, Const, Comb, Abs, Assume,
-    typing_thm, thm, type_eq_thm,
     bool_ty, aty,
     HolError,
     VAR, CONST, LAMBDA, CONV,
@@ -18,6 +17,7 @@ from fusion_dhol import (
     TY_REFL, TY_SYM, TY_TRANS, TY_CONG_BASE,
     THM_CONG_BASE,
     RESTRICT, RESTRICT_PROOF, FORGET_TYPING,
+    CONCL_TYPING,
     mk_type, safe_mk_eq,
     new_type, new_constant, new_axiom, new_basic_definition,
     interpret, frees,
@@ -503,7 +503,7 @@ print("RESTRICT_PROOF     ::", zero_F_proof)
 
 # Build λ over the refined domain. The binder ranges over nat|F.
 n_ref = Var("n", nat_F)
-body_over_ref = typing_thm([], zero_th._tm, nat_ty)
+body_over_ref = zero_th                          # |- 0 : nat
 lam_over_ref = LAMBDA(n_ref, body_over_ref)
 print("λ over nat|F       ::", lam_over_ref)
 
@@ -562,7 +562,7 @@ print("CONST with prec   ::", gated_th)
 
 # The constant's asl tracks the proof's. If we use an assumed
 # version of F (via ASSUME), the asl picks it up.
-F_assumed = ASSUME(typing_thm([], F, bool_ty))
+F_assumed = ASSUME(CONCL_TYPING(add_0_0_eq_0))
 gated_under_F = CONST("gated", (F_assumed,))
 print("CONST under ▷F    ::", gated_under_F)
 

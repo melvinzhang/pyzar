@@ -640,17 +640,14 @@ _B_op = TyopVar("B", (_x_A_var,))
 _B_at_x = TyopApp("B", (_x_A_var,))
 _f_dep_ty = Pi(_x_A_var, _B_at_x)
 _f_dep_var = Var("f", _f_dep_ty)
-# (\x:A. f x) : Pi(x:A). B(x)
+# (\x:A. f x) = f, with the equation typed via kernel rules (CONST + APP)
+# rather than direct typing_thm construction.
 _lam_fx_th = LAMBDA(_x_A_var, APP(VAR(_f_dep_var), VAR(_x_A_var)))
-_eta_form = safe_mk_eq(
-    _f_dep_ty,
-    _lam_fx_th._tm,
-    VAR(_f_dep_var)._tm,
+_eta_eq_th = APP(
+    APP(CONST("=", (_f_dep_ty,)), _lam_fx_th),
+    VAR(_f_dep_var),
 )
-ETA_AX = new_axiom(
-    typing_thm([], _eta_form, bool_ty),
-    phi=(_A_tv, _B_op, _f_dep_var),
-)
+ETA_AX = new_axiom(_eta_eq_th, phi=(_A_tv, _B_op, _f_dep_var))
 
 
 def ETA(t_th: typing_thm) -> thm:
@@ -741,8 +738,9 @@ if __name__ == "__main__":
     add_th = CONST("add")
     add_0 = APP(add_th, zero_th)                       # add 0 : nat -> nat
     add_0_0 = APP(add_0, zero_th)                      # add 0 0 : nat
-    # axiom: |- add 0 0 = 0
-    add_eq_0_ax = new_axiom(typing_thm([], safe_mk_eq(n_ty, add_0_0._tm, zero_th._tm), bool_ty))
+    # axiom: |- add 0 0 = 0  (typing built via kernel APP + CONST)
+    _add00_eq_z_th = APP(APP(CONST("=", (n_ty,)), add_0_0), zero_th)
+    add_eq_0_ax = new_axiom(_add00_eq_z_th)
     add_eq_0 = interpret(add_eq_0_ax, ())
     # type bridge vec(add 0 0) == vec(0) via TY_CONG_BASE
     from fusion_dhol import TY_CONG_BASE

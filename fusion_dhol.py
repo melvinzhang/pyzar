@@ -304,6 +304,26 @@ class JTyping:
     ty: hol_type
 
 
+def _require_kernel_caller(cls_name: str) -> None:
+    """Reject direct construction of kernel-private types from outside
+    `fusion_dhol`. `Cert` subclasses and `Staged` are introduction-rule
+    outputs: their constructors are the kernel's entry points and must
+    only be invoked by the kernel itself. External code obtains
+    certificates via VAR / CONST / APP / LAMBDA / CONV / REFL / ASSUME /
+    ... / new_axiom / interpret.
+
+    Frame layout: _require_kernel_caller is called from inside the
+    subclass `__init__`, so frame 2 is the original `typing_thm(...)`
+    (or similar) call site."""
+    caller = sys._getframe(2).f_globals.get('__name__')
+    if caller != __name__:
+        raise HolError(
+            f"{cls_name}: direct construction is forbidden outside the "
+            f"kernel (caller module: {caller!r}). Use the kernel's "
+            f"introduction rules to obtain certificates."
+        )
+
+
 class Cert:
     """`[asl] ⊢ judgement` -- the J-agnostic certificate carrier.
 
@@ -314,7 +334,10 @@ class Cert:
     Backward-compat attribute properties (`_tm`, `_ty`, `_concl`,
     `_lhs`, `_rhs`) mirror the pre-refactor per-class field names so
     existing call sites read fields directly off the cert without
-    going through `_j`."""
+    going through `_j`.
+
+    Construction is kernel-private (see `_require_kernel_caller`); the
+    subclasses' `__init__`s gate the constructor."""
 
     __slots__ = ("_asl", "_j")
 
@@ -383,6 +406,7 @@ class typing_thm(Cert):
     __slots__ = ()
 
     def __init__(self, asl, tm, ty):
+        _require_kernel_caller("typing_thm")
         super().__init__(asl, JTyping(tm, ty))
 
 
@@ -391,6 +415,7 @@ class type_eq_thm(Cert):
     __slots__ = ()
 
     def __init__(self, asl, lhs, rhs):
+        _require_kernel_caller("type_eq_thm")
         super().__init__(asl, JEq(lhs, rhs))
 
 
@@ -399,6 +424,7 @@ class thm(Cert):
     __slots__ = ()
 
     def __init__(self, asl, concl):
+        _require_kernel_caller("thm")
         super().__init__(asl, JProp(concl))
 
 
@@ -419,6 +445,7 @@ class Staged:
     __slots__ = ("_phi", "_body")
 
     def __init__(self, phi, body):
+        _require_kernel_caller("Staged")
         if not isinstance(body, (JProp, JEq)):
             raise HolError(
                 "Staged: body must be a JProp or JEq (got "
