@@ -213,6 +213,17 @@ class TyEqAssume:
 
 
 @dataclass(frozen=True, slots=True)
+class SubAssume:
+    """Φ-slot asserting a subtyping `lhs <: rhs`. σ-evidence is a
+    `subtype_thm` whose sides match `lhs` / `rhs` after accumulated
+    earlier substitutions. The subtyping analogue of `Assume(F)` /
+    `TyEqAssume(..., lhs, rhs)`; contributes no bool asl from the
+    projection."""
+    lhs: "hol_type"
+    rhs: "hol_type"
+
+
+@dataclass(frozen=True, slots=True)
 class TypeAbs:
     """Meta-level type abstraction `λ(x1:A1, ..., xn:An). body`.
 
@@ -230,20 +241,21 @@ class TypeAbs:
             object.__setattr__(self, "bvars", tuple(self.bvars))
 
 
-# A Φ-slot is a binder at one of the five DHOL judgment levels:
+# A Φ-slot is a binder at one of the six DHOL judgement levels:
 #
-#   Tyvar(α)               -- binds at tp           (`Γ ⊢ α : tp`)
-#   TyopVar(F, p)          -- binds at (p...)→tp    (rank-1 type op)
-#   Var(x, A)              -- binds at term         (`Γ ⊢ x : A`)
-#   Assume(F)              -- binds at validity     (`Γ ⊢ F`)
-#   TyEqAssume(b, lhs, rhs)-- binds at type-eq      (`Γ ⊢ lhs == rhs`)
+#   Tyvar(α)                -- binds at tp           (`Γ ⊢ α : tp`)
+#   TyopVar(F, p)           -- binds at (p...)→tp    (rank-1 type op)
+#   Var(x, A)               -- binds at term         (`Γ ⊢ x : A`)
+#   Assume(F)               -- binds at validity     (`Γ ⊢ F`)
+#   TyEqAssume(b, lhs, rhs) -- binds at type-eq      (`Γ ⊢ lhs == rhs`)
+#   SubAssume(lhs, rhs)     -- binds at subtype      (`Γ ⊢ lhs <: rhs`)
 #
 # The PhiSubst evidence for each slot is the corresponding J-witness:
 # hol_type for Tyvar, TypeAbs for TyopVar, typing_thm for Var, thm
-# for Assume, and type_eq_thm for TyEqAssume. This pointwise mapping
-# is what makes `_apply_phi_subst` and `_apply_phi_dual` J-agnostic
-# walkers.
-Slot = Tyvar | TyopVar | Var | Assume | TyEqAssume
+# for Assume, type_eq_thm for TyEqAssume, and subtype_thm for
+# SubAssume. This pointwise mapping is what makes `_apply_phi_subst`
+# and `_apply_phi_dual` J-agnostic walkers.
+Slot = Tyvar | TyopVar | Var | Assume | TyEqAssume | SubAssume
 
 
 # ---------------------------------------------------------------------------
@@ -322,72 +334,56 @@ class thm:
         return hash((tuple(self._asl), self._concl))
 
 
-class StagedThm:
-    """(Φ) ▷ F  -- a thm parameterized over a Φ-telescope.
+class Staged:
+    """(Φ) ▷ body  -- a relational judgement parameterised over a
+    Φ-telescope. body is one of `JProp(F)`, `JEq(L, R)`, `JSub(L, R)`,
+    and discriminates which concrete certificate `interpret(staged, σ)`
+    produces (`thm`, `type_eq_thm`, `subtype_thm` respectively).
 
-    Carries the prop-level J-tag explicitly: a `PropBody(F)` body
-    paired with a Φ-telescope of Tyvar | Var | Assume binders. The
-    asl-as-Assume-formulas view is reconstructed by `_phi_asl(phi)`
-    when the projected thm is needed (e.g. for printing).
+    The asl-as-Assume-formulas view is reconstructed by `_phi_asl(phi)`
+    when the projected certificate is needed (e.g. for printing).
 
-    Use `interpret(staged, σ)` to instantiate to a concrete thm; σ
-    matches Φ pointwise (hol_type for Tyvar, typing_thm for Var, thm
-    for Assume), validated by the same `_apply_phi_subst` walker used
-    by `mk_type` and `CONST`."""
+    Use `interpret(staged, σ)` to instantiate; σ matches Φ pointwise
+    (hol_type for Tyvar, typing_thm for Var, thm for Assume, etc),
+    validated by the same `_apply_phi_subst` walker used by `mk_type`
+    and `CONST`."""
 
     __slots__ = ("_phi", "_body")
 
     def __init__(self, phi, body):
-        if not isinstance(body, PropBody):
+        if not isinstance(body, (JProp, JEq, JSub)):
             raise HolError(
-                "StagedThm: body must be a PropBody (got "
+                "Staged: body must be a JProp, JEq, or JSub (got "
                 f"{type(body).__name__})"
             )
         self._phi = tuple(phi)
         self._body = body
 
     @property
-    def thm(self) -> "thm":
-        """Projected validity view: `[Assume-formulas-of-Φ] ⊢ F`."""
-        return thm(_phi_asl(self._phi), self._body.formula)
+    def cert(self):
+        """Projected certificate view, dispatched on body shape."""
+        asl = _phi_asl(self._phi)
+        b = self._body
+        if isinstance(b, JProp):
+            return thm(asl, b.formula)
+        if isinstance(b, JEq):
+            return type_eq_thm(asl, b.lhs, b.rhs)
+        if isinstance(b, JSub):
+            return subtype_thm(asl, b.lhs, b.rhs)
+        raise HolError(f"Staged.cert: unknown body {type(b).__name__}")
 
     def __repr__(self):
-        projected = self.thm
+        projected = self.cert
         if not self._phi:
             return repr(projected)
         return f"({_pp_phi(self._phi)}) ▷ {projected!r}"
 
 
-class StagedTypeEq:
-    """(Φ) ▷ A == B — a type_eq_thm parameterised over a Φ-telescope.
-
-    The type-equality analogue of `StagedThm`. Projected as
-    `type_eq_thm(_phi_asl(phi), lhs, rhs)` (only `Assume` slots
-    contribute bool hypotheses; `TyEqAssume` slots are type-equality
-    obligations discharged at σ-time and absorb no bool asl from the
-    projection)."""
-
-    __slots__ = ("_phi", "_body")
-
-    def __init__(self, phi, body):
-        if not isinstance(body, TyEqBody):
-            raise HolError(
-                "StagedTypeEq: body must be a TyEqBody (got "
-                f"{type(body).__name__})"
-            )
-        self._phi = tuple(phi)
-        self._body = body
-
-    @property
-    def type_eq_thm(self) -> "type_eq_thm":
-        """Projected type-equality view."""
-        return type_eq_thm(_phi_asl(self._phi), self._body.lhs, self._body.rhs)
-
-    def __repr__(self):
-        projected = self.type_eq_thm
-        if not self._phi:
-            return repr(projected)
-        return f"({_pp_phi(self._phi)}) ▷ {projected!r}"
+# Backward-compatibility aliases for the old per-J Staged classes.
+# basics_dhol.py uses `StagedThm` as a return-type annotation; the
+# union behaviour is now carried by the body discriminator.
+StagedThm = Staged
+StagedTypeEq = Staged
 
 
 def _phi_asl(phi) -> list:
@@ -416,53 +412,58 @@ def _pp_phi(phi) -> str:
             bvs = ", ".join(f"{b.name}:{_pp_ty(b.ty)}" for b in e.binders)
             sig = f" ⟨{bvs}⟩" if bvs else ""
             parts.append(f"▷{sig} {_pp_ty(e.lhs)} == {_pp_ty(e.rhs)}")
+        elif isinstance(e, SubAssume):
+            parts.append(f"▷ {_pp_ty(e.lhs)} <: {_pp_ty(e.rhs)}")
         else:
             parts.append(repr(e))
     return ", ".join(parts)
 
 
 # ---------------------------------------------------------------------------
-# Declarations and the Judgment ADT
+# Declarations and the Judgement ADT
 #
-# DHOL has three judgment levels, each with its own body shape:
+# The Judgement ADT is the single sort of the DHOL GAT: each variant
+# carries the payload of one judgement level.
 #
-#   tp        Γ; Φ ⊢ name(Φ) : tp     -- TpBody()         (no body data)
-#   term      Γ; Φ ⊢ name(Φ) : ty     -- TmBody(ty)       (a hol_type)
-#   prop      Γ; Φ ▷ F                -- PropBody(F)      (a term : bool)
+#   JTp                       Γ; Φ ⊢ name(Φ) : tp
+#   JTm(ty)                   Γ; Φ ⊢ name(Φ) : ty
+#   JProp(formula)            (Φ) ▷ F
+#   JEq(lhs, rhs)             (Φ) ▷ A == B
+#   JSub(lhs, rhs)            (Φ) ▷ A <: B
 #
-# `Judgment = TpBody | TmBody | PropBody` reifies the body tag of a
-# staged declaration. The two named-declaration species (tp and term)
-# live in the unified `the_decls` registry; the prop species is
-# carried by `StagedThm` (axioms are anonymous and live in
-# `the_axioms`, but their body shape is exactly the same Judgment
-# discriminator -- this is the J-level symmetry from the audit doc).
+# Named declarations (JTp / JTm bodies) live in the unified `the_decls`
+# registry as `Decl(name, phi, body)`; relational bodies (JProp / JEq /
+# JSub) are anonymous and travel as `Staged(phi, body)`. Both share the
+# same Judgement discriminator -- this is the J-level symmetry the
+# kernel is built around.
 #
-# A type symbol's body is just `TpBody()` -- inhabitation is the
-# responsibility of the associated witness Decl, a separate TmBody
-# entry registered atomically with the type by `new_type`.
+# A type symbol's body is just `JTp()` -- inhabitation is the
+# responsibility of the associated witness Decl, a separate JTm entry
+# registered atomically with the type by `new_type`.
 #
-# Each Decl's Φ is an ordered telescope of Slot binders (Tyvar / Var /
-# Assume); later entries may reference earlier ones. The flat-arity
-# case is recovered by an empty Φ; rank-1 polymorphism alone by a Φ
-# of Tyvars; the dependent-parameter case by a Φ of Vars.
+# Each Decl's Φ is an ordered telescope of Slot binders (Tyvar /
+# TyopVar / Var / Assume / TyEqAssume / SubAssume); later entries may
+# reference earlier ones. The flat-arity case is recovered by an empty
+# Φ; rank-1 polymorphism alone by a Φ of Tyvars; the dependent-parameter
+# case by a Φ of Vars.
 # ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
-class TpBody:
+class JTp:
     """tp-level body: `name(Φ) : tp`. Carries no body data of its own;
     inhabitation is the responsibility of the associated witness Decl,
     registered atomically by `new_type`."""
 
 
 @dataclass(frozen=True, slots=True)
-class TmBody:
+class JTm:
     """term-level body: `name(Φ) : ty`."""
     ty: hol_type
 
 
 @dataclass(frozen=True, slots=True)
-class PropBody:
+class JProp:
     """prop-level body: validity body `F : bool`. The Φ-Assume binders
     carry F's hypotheses implicitly -- the projection-as-thm view of
     a staged prop reconstructs them via `_phi_asl(phi)`."""
@@ -470,7 +471,7 @@ class PropBody:
 
 
 @dataclass(frozen=True, slots=True)
-class TyEqBody:
+class JEq:
     """type-equality-level body: `(Φ) ▷ lhs == rhs`. Φ-TyEqAssume
     binders carry the type-equality hypotheses; the projection-as-
     type_eq_thm view reconstructs the bool-side asl via `_phi_asl(phi)`
@@ -479,29 +480,39 @@ class TyEqBody:
     rhs: hol_type
 
 
-Judgment = TpBody | TmBody | PropBody | TyEqBody
+@dataclass(frozen=True, slots=True)
+class JSub:
+    """subtyping-level body: `(Φ) ▷ lhs <: rhs`. Φ-SubAssume binders
+    carry the subtyping hypotheses; the projection-as-subtype_thm view
+    reconstructs the bool-side asl via `_phi_asl(phi)` (SubAssume
+    entries contribute no bool asl)."""
+    lhs: hol_type
+    rhs: hol_type
+
+
+Judgement = JTp | JTm | JProp | JEq | JSub
 
 
 @dataclass(frozen=True, slots=True)
 class Decl:
-    """A staged declaration: `name(Φ)` with a body discriminator.
+    """A named staged declaration: `name(Φ)` with a Judgement body.
 
-    Φ is a tuple of Slot binders (Tyvar | Var | Assume), interpreted
-    sequentially; body discriminates the judgment level:
-      * TpBody    -- name(Φ) : tp
-      * TmBody    -- name(Φ) : ty
-      * PropBody  -- (Φ) ▷ F  (used internally by `StagedThm`; not
-                     registered by name in `the_decls`)
+    Φ is a tuple of Slot binders, interpreted sequentially. Only the
+    named-declaration levels appear here:
+      * JTp        -- name(Φ) : tp
+      * JTm(ty)    -- name(Φ) : ty
+    The relational levels (JProp / JEq / JSub) are anonymous and live
+    in `Staged`, not in `the_decls`.
     """
     name: str
     phi: tuple
-    body: Judgment
+    body: Judgement
 
 
 # Insertion order = declaration order; newer entries shadow older ones
 # in iteration, mirroring HOL Light's "latest first" discipline (and
 # the previous insert(0, ...) lists). Lookup is direct via dict[name].
-the_decls: dict = {"bool": Decl("bool", (), TpBody())}
+the_decls: dict = {"bool": Decl("bool", (), JTp())}
 
 
 def types() -> list:
@@ -509,14 +520,14 @@ def types() -> list:
     return [
         (d.name, d.phi)
         for d in reversed(the_decls.values())
-        if isinstance(d.body, TpBody)
+        if isinstance(d.body, JTp)
     ]
 
 
 def get_type_kind(s: str) -> tuple:
     """Return the declared Φ-telescope of a type symbol."""
     d = the_decls.get(s)
-    if d is None or not isinstance(d.body, TpBody):
+    if d is None or not isinstance(d.body, JTp):
         raise KeyError(s)
     return d.phi
 
@@ -585,9 +596,9 @@ def new_type(
             f"(got {head})"
         )
     # All checks passed -- commit atomically.
-    the_decls[name] = Decl(name, tuple(phi), TpBody())
+    the_decls[name] = Decl(name, tuple(phi), JTp())
     witness_phi = tuple(Tyvar(tv.name) for tv in tyvars(witness_ty))
-    the_decls[witness_name] = Decl(witness_name, witness_phi, TmBody(witness_ty))
+    the_decls[witness_name] = Decl(witness_name, witness_phi, JTm(witness_ty))
 
 
 bool_ty: hol_type = Tyapp("bool", (), ())
@@ -595,7 +606,7 @@ aty: hol_type = Tyvar("A")
 
 
 def _seed_constant(name: str, phi: tuple, ty: hol_type) -> None:
-    the_decls[name] = Decl(name, phi, TmBody(ty))
+    the_decls[name] = Decl(name, phi, JTm(ty))
 
 
 # Seed the registry with the one kernel-primitive term constant:
@@ -615,14 +626,14 @@ def constants() -> list:
     return [
         (d.name, d.phi, d.body.ty)
         for d in reversed(the_decls.values())
-        if isinstance(d.body, TmBody)
+        if isinstance(d.body, JTm)
     ]
 
 
 def get_const_phi(s: str) -> tuple:
     """Return the declared Φ-telescope of a term constant."""
     d = the_decls.get(s)
-    if d is None or not isinstance(d.body, TmBody):
+    if d is None or not isinstance(d.body, JTm):
         raise KeyError(s)
     return d.phi
 
@@ -630,7 +641,7 @@ def get_const_phi(s: str) -> tuple:
 def get_const_type(s: str) -> hol_type:
     """Return the constant's declared body type (well-formed under Φ)."""
     d = the_decls.get(s)
-    if d is None or not isinstance(d.body, TmBody):
+    if d is None or not isinstance(d.body, JTm):
         raise KeyError(s)
     return d.body.ty
 
@@ -659,7 +670,7 @@ def new_constant(name: str, ty: hol_type,
     else:
         _check_phi(phi, f"new_constant({name})")
         phi = tuple(phi)
-    the_decls[name] = Decl(name, phi, TmBody(ty))
+    the_decls[name] = Decl(name, phi, JTm(ty))
 
 
 def mk_arrow(a: hol_type, b: hol_type) -> hol_type:
@@ -722,15 +733,17 @@ PhiSubst = tuple            # tuple[hol_type | typing_thm | thm, ...]
 
 def _check_phi(phi, ctx: str) -> None:
     """Light syntactic check: every entry is a Tyvar, TyopVar, Var,
-    Assume, or TyEqAssume. Well-formedness of binder annotations under
-    earlier entries is the caller's responsibility (honest-caller
-    perimeter, mirroring how `new_type` accepts raw `Var(x, A)` without
-    re-checking A)."""
+    Assume, TyEqAssume, or SubAssume. Well-formedness of binder
+    annotations under earlier entries is the caller's responsibility
+    (honest-caller perimeter, mirroring how `new_type` accepts raw
+    `Var(x, A)` without re-checking A)."""
     for entry in phi:
-        if not isinstance(entry, (Tyvar, TyopVar, Var, Assume, TyEqAssume)):
+        if not isinstance(
+            entry, (Tyvar, TyopVar, Var, Assume, TyEqAssume, SubAssume)
+        ):
             raise HolError(
                 f"{ctx}: context entries must be Tyvar, TyopVar, Var, "
-                f"Assume, or TyEqAssume (got {entry!r})"
+                f"Assume, TyEqAssume, or SubAssume (got {entry!r})"
             )
 
 
@@ -2008,6 +2021,54 @@ def _dual_ty_eq_assume(binder, arg, lhs, rhs, asl_extra, ctx):
     asl_extra[:] = term_union(asl_extra, ty_eq._asl)
 
 
+def _check_sub_assume(arg, lhs_ty, rhs_ty,
+                      theta_ty, theta_tm, tyop_theta, ctx):
+    """Validate a `SubAssume` σ-evidence. σ is a `subtype_thm` whose
+    sides match `lhs_ty` / `rhs_ty` after accumulated substitutions."""
+    if not isinstance(arg, subtype_thm):
+        raise HolError(
+            f"{ctx}: argument for SubAssume binder must be a subtype_thm"
+        )
+    expected_lhs = _resolve_tyops_in_type(
+        tyop_theta,
+        type_subst(theta_ty, subst_in_type(theta_tm, lhs_ty)),
+    )
+    expected_rhs = _resolve_tyops_in_type(
+        tyop_theta,
+        type_subst(theta_ty, subst_in_type(theta_tm, rhs_ty)),
+    )
+    if not type_eq(expected_lhs, arg._lhs):
+        raise HolError(
+            f"{ctx}: SubAssume lhs {_pp_ty(arg._lhs)} does not match "
+            f"expected {_pp_ty(expected_lhs)}"
+        )
+    if not type_eq(expected_rhs, arg._rhs):
+        raise HolError(
+            f"{ctx}: SubAssume rhs {_pp_ty(arg._rhs)} does not match "
+            f"expected {_pp_ty(expected_rhs)}"
+        )
+    return arg
+
+
+def _subst_sub_assume(binder, arg, out, ctx):
+    sub = _check_sub_assume(
+        arg, binder.lhs, binder.rhs,
+        out.theta_ty, out.theta_tm, out.tyop_theta, ctx,
+    )
+    out.asl_extra[:] = term_union(out.asl_extra, sub._asl)
+
+
+def _dual_sub_assume(binder, arg, lhs, rhs, asl_extra, ctx):
+    """Symmetric case only: a single `subtype_thm` discharges the
+    obligation on both sides of the congruence (matches `Assume` /
+    `TyEqAssume` / `TyopVar` handling)."""
+    sub = _check_sub_assume(
+        arg, binder.lhs, binder.rhs,
+        lhs.theta_ty, lhs.theta_tm, lhs.tyop_theta, ctx,
+    )
+    asl_extra[:] = term_union(asl_extra, sub._asl)
+
+
 _SLOT_DISPATCH: dict = {
     Tyvar:      _SlotHandlers(subst=_subst_tyvar,       dual=_dual_tyvar),
     TyopVar:    _SlotHandlers(subst=_subst_tyop,        dual=_dual_tyop),
@@ -2015,6 +2076,8 @@ _SLOT_DISPATCH: dict = {
     Assume:     _SlotHandlers(subst=_subst_assume,      dual=_dual_assume),
     TyEqAssume: _SlotHandlers(subst=_subst_ty_eq_assume,
                               dual=_dual_ty_eq_assume),
+    SubAssume:  _SlotHandlers(subst=_subst_sub_assume,
+                              dual=_dual_sub_assume),
 }
 
 
@@ -2108,7 +2171,7 @@ def TM_CONG_BASE(name: str, args: list) -> thm:
     return thm(result.asl_extra, safe_mk_eq(inst_ty_l, lhs_const, rhs_const))
 
 
-def THM_CONG_BASE(staged: StagedThm, args: list) -> thm:
+def THM_CONG_BASE(staged: Staged, args: list) -> thm:
     """Staged-axiom congruence (analogue of TY_CONG_BASE / TM_CONG_BASE
     for a staged axiom):
             (Φ) ▷ F in theory      per-slot Φ-args
@@ -2116,8 +2179,10 @@ def THM_CONG_BASE(staged: StagedThm, args: list) -> thm:
                   Gamma |- F[σ_l] = F[σ_r]  : bool
 
     Each `args[i]` matches Φ entry i (see `_apply_phi_dual`)."""
-    if not isinstance(staged, StagedThm):
-        raise HolError("THM_CONG_BASE: first argument must be a StagedThm")
+    if not isinstance(staged, Staged) or not isinstance(staged._body, JProp):
+        raise HolError(
+            "THM_CONG_BASE: first argument must be a Staged with JProp body"
+        )
     phi = staged._phi
     F = staged._body.formula
     result = _apply_phi_dual(phi, args, "THM_CONG_BASE")
@@ -2556,9 +2621,9 @@ def axioms() -> list:
     return list(the_axioms)
 
 
-def new_axiom(F_th: typing_thm, phi: tuple | None = None) -> StagedThm:
-    """Declare an axiom `(Φ) ▷ F`. Returns a StagedThm; use
-    `interpret(staged, σ)` to instantiate.
+def new_axiom(F_th: typing_thm, phi: tuple | None = None) -> Staged:
+    """Declare an axiom `(Φ) ▷ F`. Returns a `Staged` with a `JProp`
+    body; use `interpret(staged, σ)` to instantiate.
 
     Φ is a telescope of Tyvar | Var | Assume binders, same vocabulary
     as on `new_type` / `new_constant`. When Φ is empty (the default),
@@ -2607,15 +2672,16 @@ def new_axiom(F_th: typing_thm, phi: tuple | None = None) -> StagedThm:
                 f"TyopVar entry in Φ"
             )
 
-    staged = StagedThm(phi, PropBody(F_th._tm))
+    staged = Staged(phi, JProp(F_th._tm))
     the_axioms.append(staged)
     return staged
 
 
 def new_type_eq_axiom(eq_th: type_eq_thm,
-                      phi: tuple | None = None) -> StagedTypeEq:
+                      phi: tuple | None = None) -> Staged:
     """Declare a type-equality axiom `(Φ) ▷ lhs == rhs`. Returns a
-    `StagedTypeEq`; use `interpret(staged, σ)` to instantiate.
+    `Staged` with a `JEq` body; use `interpret(staged, σ)` to
+    instantiate.
 
     Φ is a telescope of `Tyvar | TyopVar | Var | Assume | TyEqAssume`
     binders. The boolean asl of `eq_th` must alpha-match `Assume`
@@ -2666,17 +2732,74 @@ def new_type_eq_axiom(eq_th: type_eq_thm,
                     f"reflected by any TyopVar entry in Φ"
                 )
 
-    staged = StagedTypeEq(phi, TyEqBody(eq_th._lhs, eq_th._rhs))
+    staged = Staged(phi, JEq(eq_th._lhs, eq_th._rhs))
     the_axioms.append(staged)
     return staged
 
 
-def interpret(staged, sigma: tuple):
-    """One-shot interpretation of a staged thm or type-equality at σ.
+def new_sub_axiom(sub_th: subtype_thm,
+                  phi: tuple | None = None) -> Staged:
+    """Declare a subtyping axiom `(Φ) ▷ lhs <: rhs`. Returns a
+    `Staged` with a `JSub` body; use `interpret(staged, σ)` to
+    instantiate.
 
-    Dispatches on `staged`'s body shape:
-      * `StagedThm`    → returns a concrete `thm`.
-      * `StagedTypeEq` → returns a concrete `type_eq_thm`.
+    Φ is a telescope of the usual Slot kinds. The boolean asl of
+    `sub_th` must alpha-match `Assume` formulas in Φ; free term-Vars
+    of `sub_th._lhs / _rhs` must be bound by `Var` entries; free
+    Tyvars must be bound by `Tyvar` entries; `TyopApp` names must be
+    bound by `TyopVar` entries."""
+    if phi is None:
+        phi = ()
+    _check_phi(phi, "new_sub_axiom")
+    phi = tuple(phi)
+
+    expected_asl = _phi_asl(phi)
+    for a in sub_th._asl:
+        if not any(_tm_alpha([], a, f) for f in expected_asl):
+            raise HolError(
+                "new_sub_axiom: asl entry "
+                f"{_pp_tm(a)} is not declared by any Assume entry in Φ"
+            )
+
+    bound_vars = [b for b in phi if isinstance(b, Var)]
+    for ty in (sub_th._lhs, sub_th._rhs):
+        for fv in frees_in_type(ty):
+            if fv not in bound_vars:
+                raise HolError(
+                    f"new_sub_axiom: free var {fv.name} is not bound "
+                    f"by any Var entry in Φ"
+                )
+
+    allowed_tvs = [b for b in phi if isinstance(b, Tyvar)]
+    for ty in (sub_th._lhs, sub_th._rhs):
+        for tv in tyvars(ty):
+            if tv not in allowed_tvs:
+                raise HolError(
+                    f"new_sub_axiom: type-var {tv.name} is not "
+                    f"reflected in Φ"
+                )
+
+    allowed_tyops = {b.name for b in phi if isinstance(b, TyopVar)}
+    for ty in (sub_th._lhs, sub_th._rhs):
+        for name in tyop_names_in_type(ty):
+            if name not in allowed_tyops:
+                raise HolError(
+                    f"new_sub_axiom: TyopApp {name!r} is not "
+                    f"reflected by any TyopVar entry in Φ"
+                )
+
+    staged = Staged(phi, JSub(sub_th._lhs, sub_th._rhs))
+    the_axioms.append(staged)
+    return staged
+
+
+def interpret(staged: Staged, sigma: tuple):
+    """One-shot interpretation of a `Staged` judgement at σ.
+
+    Dispatches on `staged._body`:
+      * `JProp(F)`       → returns a concrete `thm`.
+      * `JEq(L, R)`      → returns a concrete `type_eq_thm`.
+      * `JSub(L, R)`     → returns a concrete `subtype_thm`.
 
     Walks Φ left-to-right, discharging slot-by-slot:
       * Tyvar slot       -- σ-entry is a `hol_type` (INST_TYPE-style);
@@ -2684,60 +2807,61 @@ def interpret(staged, sigma: tuple):
       * Var slot         -- σ-entry is a `typing_thm` (INST-style);
       * Assume slot      -- σ-entry is a `thm` (MP-style);
       * TyEqAssume slot  -- σ-entry is a `type_eq_thm` (sides matching
-                            the schematic, freshness on binders).
+                            the schematic, freshness on binders);
+      * SubAssume slot   -- σ-entry is a `subtype_thm` (sides matching
+                            the schematic).
 
     σ-shape is validated by `_apply_phi_subst` -- the same walker
     `mk_type` and `CONST` use. asl from σ-evidences is absorbed; the
-    original Assume / TyEqAssume obligations are discharged."""
-    if isinstance(staged, StagedThm):
-        phi = staged._phi
-        F = staged._body.formula
-        result = _apply_phi_subst(phi, tuple(sigma), "interpret")
-        f = lambda tm: _resolve_tyops_in_term(
-            result.tyop_theta,
-            _inst_in_term([], result.theta_ty, _vsubst(result.theta_tm, tm)),
-        )
-        return thm(result.asl_extra, f(F))
-    if isinstance(staged, StagedTypeEq):
-        phi = staged._phi
-        result = _apply_phi_subst(phi, tuple(sigma), "interpret")
-        f_ty = lambda ty: _resolve_tyops_in_type(
-            result.tyop_theta,
-            type_subst(result.theta_ty, subst_in_type(result.theta_tm, ty)),
-        )
-        return type_eq_thm(
-            result.asl_extra, f_ty(staged._body.lhs), f_ty(staged._body.rhs),
-        )
-    raise HolError(
-        "interpret: first argument must be a StagedThm or StagedTypeEq"
+    original Assume / TyEqAssume / SubAssume obligations are
+    discharged."""
+    if not isinstance(staged, Staged):
+        raise HolError("interpret: first argument must be a Staged")
+    phi = staged._phi
+    result = _apply_phi_subst(phi, tuple(sigma), "interpret")
+    f_tm = lambda tm: _resolve_tyops_in_term(
+        result.tyop_theta,
+        _inst_in_term([], result.theta_ty, _vsubst(result.theta_tm, tm)),
     )
+    f_ty = lambda ty: _resolve_tyops_in_type(
+        result.tyop_theta,
+        type_subst(result.theta_ty, subst_in_type(result.theta_tm, ty)),
+    )
+    b = staged._body
+    if isinstance(b, JProp):
+        return thm(result.asl_extra, f_tm(b.formula))
+    if isinstance(b, JEq):
+        return type_eq_thm(result.asl_extra, f_ty(b.lhs), f_ty(b.rhs))
+    if isinstance(b, JSub):
+        return subtype_thm(result.asl_extra, f_ty(b.lhs), f_ty(b.rhs))
+    raise HolError(f"interpret: unknown Staged body {type(b).__name__}")
 
 
 def instantiate(target, sigma: tuple):
     """Unified Φ-substitution dispatcher.
 
     Dispatches by J-level of `target`:
-      * type-name str (TpBody)  -- `mk_type(target, sigma)` → hol_type
-      * const-name str (TmBody) -- `CONST(target, sigma)`   → typing_thm
-      * StagedThm               -- `interpret(target, sigma)` → thm
+      * type-name str (JTp body)  -- `mk_type(target, sigma)`   → hol_type
+      * const-name str (JTm body) -- `CONST(target, sigma)`     → typing_thm
+      * Staged                    -- `interpret(target, sigma)` → cert
 
     The three primary entry points (`mk_type`, `CONST`, `interpret`)
     remain available; `instantiate` is the J-agnostic alias that all
     three share -- the validator `_apply_phi_subst` is the same in
     every case, and the only difference is which evidence-shape the
     target's body asks for."""
-    if isinstance(target, (StagedThm, StagedTypeEq)):
+    if isinstance(target, Staged):
         return interpret(target, sigma)
     if isinstance(target, str):
         d = the_decls.get(target)
         if d is None:
             raise HolError(f"instantiate: unknown name {target}")
-        if isinstance(d.body, TpBody):
+        if isinstance(d.body, JTp):
             return mk_type(target, list(sigma))
-        if isinstance(d.body, TmBody):
+        if isinstance(d.body, JTm):
             return CONST(target, tuple(sigma))
     raise HolError(
-        f"instantiate: target must be a declared name or a StagedThm "
+        f"instantiate: target must be a declared name or a Staged "
         f"(got {target!r})"
     )
 
@@ -2810,6 +2934,12 @@ def new_basic_definition(lhs: Var, rhs_th: typing_thm,
         raise HolError(
             "new_basic_definition: TyEqAssume in Φ unsupported -- the "
             "self-application σ has no canonical type_eq_thm to supply "
+            "for a refl-like assertion."
+        )
+    if any(isinstance(b, SubAssume) for b in phi):
+        raise HolError(
+            "new_basic_definition: SubAssume in Φ unsupported -- the "
+            "self-application σ has no canonical subtype_thm to supply "
             "for a refl-like assertion."
         )
     new_constant(lhs.name, lhs.ty, phi=phi)
