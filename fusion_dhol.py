@@ -2430,22 +2430,24 @@ def ASSUME(F_th: typing_thm) -> thm:
 
 
 def BETA(redex_th: typing_thm) -> thm:
-    """Trivial beta:  Gamma |- (\\x:A. t) x : B
-                     -------------------------------
-                     Gamma |- (\\x:A. t) x = t
+    """Beta:  Gamma |- (\\x:A. t) u : B
+             ----------------------------
+             Gamma |- (\\x:A. t) u = t[u/x]
+
+    Full beta a la Rabe 2026: the argument is arbitrary, not just the
+    bound variable. Well-typedness of the redex (which `redex_th`
+    certifies) is sufficient -- substitution preserves typing, so the
+    RHS is typeable at the same type B = body-type[u/x].
 
     Preconditioned domains (e.g. `\\x:A|p. t`) have their refinement
     baked into the binder's type as a Subtype, so BETA needs no
     precondition handling: the binder being `x : A|p` already implies
     that any `x` in scope satisfies p."""
     tm = redex_th._tm
-    if not (
-        isinstance(tm, Comb)
-        and isinstance(tm.fun, Abs)
-        and tm.arg == tm.fun.bvar
-    ):
-        raise HolError("BETA: not a trivial beta-redex")
-    return thm(redex_th._asl, safe_mk_eq(redex_th._ty, tm, tm.fun.body))
+    if not (isinstance(tm, Comb) and isinstance(tm.fun, Abs)):
+        raise HolError("BETA: not a beta-redex")
+    rhs = _vsubst([(tm.arg, tm.fun.bvar)], tm.fun.body)
+    return thm(redex_th._asl, safe_mk_eq(redex_th._ty, tm, rhs))
 
 
 def EQ_TY_CONV(eq_th: thm, ty_eq: type_eq_thm) -> thm:

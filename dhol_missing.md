@@ -6,7 +6,7 @@ This document tracks only what remains. The kernel as it stands ships rank-1 pol
 
 ## Conversion / definitional equality
 
-4. **Beta is syntactic only.** `BETA` only fires on `Comb(Abs(x, body), x)` — the trivial redex. The paper assumes β-conversion is part of definitional equality at every typing step; our `type_eq` doesn't β-reduce, so a Pi codomain like `(\n. vec n) zero` is *not* judged equal to `vec zero` even definitionally. In practice this surfaces every time `subst_in_type` produces an un-reduced application.
+4. **β does not fire inside `type_eq`.** Term-level β is now full (`BETA` accepts arbitrary `Comb(Abs(x, t), u)` and produces `t[u/x]`, matching Rabe 2026). The remaining gap is that `type_eq` itself doesn't β-reduce: a Pi codomain like `(\n. vec n) zero` is not judged equal to `vec zero` even definitionally. The paper treats β as part of definitional equality at every typing step, so any subterm produced by `subst_in_type` that contains an un-reduced application needs an explicit equality bridge before it lines up with the reduced form.
 
 ## Declarations
 
