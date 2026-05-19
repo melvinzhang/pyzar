@@ -190,6 +190,29 @@ class TyopVar:
 
 
 @dataclass(frozen=True, slots=True)
+class TyEqAssume:
+    """Φ-slot asserting a type equality `lhs == rhs`, schematically
+    over a binder telescope.
+
+    `binders` is a tuple of `Var`s acting as universally-bound
+    placeholders that may appear free in `lhs` / `rhs` (but not in
+    later Φ entries). σ-evidence is a `type_eq_thm` whose sides match
+    `lhs` / `rhs` (with `binders` carried through as free Vars) and
+    whose `_asl` does not mention any binder -- the freshness
+    discipline that makes the binders effectively universal.
+
+    The type-equality analogue of `Assume(F)`. With empty binders this
+    is a flat type-equality assumption."""
+    binders: tuple
+    lhs: "hol_type"
+    rhs: "hol_type"
+
+    def __post_init__(self):
+        if not isinstance(self.binders, tuple):
+            object.__setattr__(self, "binders", tuple(self.binders))
+
+
+@dataclass(frozen=True, slots=True)
 class TypeAbs:
     """Meta-level type abstraction `λ(x1:A1, ..., xn:An). body`.
 
@@ -207,18 +230,20 @@ class TypeAbs:
             object.__setattr__(self, "bvars", tuple(self.bvars))
 
 
-# A Φ-slot is a binder at one of the four DHOL judgment levels:
+# A Φ-slot is a binder at one of the five DHOL judgment levels:
 #
-#   Tyvar(α)        -- binds at tp        (`Γ ⊢ α : tp`)
-#   TyopVar(F, p)   -- binds at (p...)→tp (rank-1 type operator)
-#   Var(x, A)       -- binds at term      (`Γ ⊢ x : A`)
-#   Assume(F)       -- binds at validity  (`Γ ⊢ F`)
+#   Tyvar(α)               -- binds at tp           (`Γ ⊢ α : tp`)
+#   TyopVar(F, p)          -- binds at (p...)→tp    (rank-1 type op)
+#   Var(x, A)              -- binds at term         (`Γ ⊢ x : A`)
+#   Assume(F)              -- binds at validity     (`Γ ⊢ F`)
+#   TyEqAssume(b, lhs, rhs)-- binds at type-eq      (`Γ ⊢ lhs == rhs`)
 #
 # The PhiSubst evidence for each slot is the corresponding J-witness:
-# hol_type for Tyvar, TypeAbs for TyopVar, typing_thm for Var, and thm
-# for Assume. This pointwise mapping is what makes `_apply_phi_subst`
-# and `_apply_phi_dual` J-agnostic walkers.
-Slot = Tyvar | TyopVar | Var | Assume
+# hol_type for Tyvar, TypeAbs for TyopVar, typing_thm for Var, thm
+# for Assume, and type_eq_thm for TyEqAssume. This pointwise mapping
+# is what makes `_apply_phi_subst` and `_apply_phi_dual` J-agnostic
+# walkers.
+Slot = Tyvar | TyopVar | Var | Assume | TyEqAssume
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +358,38 @@ class StagedThm:
         return f"({_pp_phi(self._phi)}) ▷ {projected!r}"
 
 
+class StagedTypeEq:
+    """(Φ) ▷ A == B — a type_eq_thm parameterised over a Φ-telescope.
+
+    The type-equality analogue of `StagedThm`. Projected as
+    `type_eq_thm(_phi_asl(phi), lhs, rhs)` (only `Assume` slots
+    contribute bool hypotheses; `TyEqAssume` slots are type-equality
+    obligations discharged at σ-time and absorb no bool asl from the
+    projection)."""
+
+    __slots__ = ("_phi", "_body")
+
+    def __init__(self, phi, body):
+        if not isinstance(body, TyEqBody):
+            raise HolError(
+                "StagedTypeEq: body must be a TyEqBody (got "
+                f"{type(body).__name__})"
+            )
+        self._phi = tuple(phi)
+        self._body = body
+
+    @property
+    def type_eq_thm(self) -> "type_eq_thm":
+        """Projected type-equality view."""
+        return type_eq_thm(_phi_asl(self._phi), self._body.lhs, self._body.rhs)
+
+    def __repr__(self):
+        projected = self.type_eq_thm
+        if not self._phi:
+            return repr(projected)
+        return f"({_pp_phi(self._phi)}) ▷ {projected!r}"
+
+
 def _phi_asl(phi) -> list:
     """The Assume-formulas of Φ in declaration order -- the asl carried
     by the projected `thm` view of a `StagedThm`."""
@@ -355,6 +412,10 @@ def _pp_phi(phi) -> str:
             parts.append(f"{e.name}:{_pp_ty(e.ty)}")
         elif isinstance(e, Assume):
             parts.append(f"▷{_pp_tm(e.formula)}")
+        elif isinstance(e, TyEqAssume):
+            bvs = ", ".join(f"{b.name}:{_pp_ty(b.ty)}" for b in e.binders)
+            sig = f" ⟨{bvs}⟩" if bvs else ""
+            parts.append(f"▷{sig} {_pp_ty(e.lhs)} == {_pp_ty(e.rhs)}")
         else:
             parts.append(repr(e))
     return ", ".join(parts)
@@ -408,7 +469,17 @@ class PropBody:
     formula: term
 
 
-Judgment = TpBody | TmBody | PropBody
+@dataclass(frozen=True, slots=True)
+class TyEqBody:
+    """type-equality-level body: `(Φ) ▷ lhs == rhs`. Φ-TyEqAssume
+    binders carry the type-equality hypotheses; the projection-as-
+    type_eq_thm view reconstructs the bool-side asl via `_phi_asl(phi)`
+    (TyEqAssume entries contribute no bool asl)."""
+    lhs: hol_type
+    rhs: hol_type
+
+
+Judgment = TpBody | TmBody | PropBody | TyEqBody
 
 
 @dataclass(frozen=True, slots=True)
@@ -650,15 +721,16 @@ PhiSubst = tuple            # tuple[hol_type | typing_thm | thm, ...]
 
 
 def _check_phi(phi, ctx: str) -> None:
-    """Light syntactic check: every entry is a Tyvar, TyopVar, Var, or
-    Assume. Well-formedness of binder annotations under earlier entries
-    is the caller's responsibility (honest-caller perimeter, mirroring
-    how `new_type` accepts raw `Var(x, A)` without re-checking A)."""
+    """Light syntactic check: every entry is a Tyvar, TyopVar, Var,
+    Assume, or TyEqAssume. Well-formedness of binder annotations under
+    earlier entries is the caller's responsibility (honest-caller
+    perimeter, mirroring how `new_type` accepts raw `Var(x, A)` without
+    re-checking A)."""
     for entry in phi:
-        if not isinstance(entry, (Tyvar, TyopVar, Var, Assume)):
+        if not isinstance(entry, (Tyvar, TyopVar, Var, Assume, TyEqAssume)):
             raise HolError(
-                f"{ctx}: context entries must be Tyvar, TyopVar, Var, or "
-                f"Assume (got {entry!r})"
+                f"{ctx}: context entries must be Tyvar, TyopVar, Var, "
+                f"Assume, or TyEqAssume (got {entry!r})"
             )
 
 
@@ -1807,6 +1879,97 @@ def _dual_tyop(binder, arg, lhs, rhs, asl_extra, ctx):
     rhs.tyop_theta.append((arg, binder.name))
 
 
+def _check_ty_eq_assume(arg, binders, lhs, rhs,
+                       theta_ty, theta_tm, tyop_theta, ctx):
+    """Validate a `TyEqAssume` σ-evidence.
+
+    σ-shape depends on `binders`:
+      * Empty binders   -- σ is a `type_eq_thm` directly.
+      * Non-empty       -- σ is `(user_vars, type_eq_thm)`, where
+                           `user_vars` is a tuple of `Var`s aligning
+                           positionally with `binders` (the user's
+                           chosen names for the schematic positions).
+
+    Computes the expected sides under accumulated substitutions, then
+    substitutes `user_vars` for `binders` (with binders' types
+    ty-substituted), compares to `arg._lhs` / `arg._rhs` definitionally,
+    and enforces freshness of each user_var (not free in any
+    `arg._asl` entry) -- the discipline that makes the binders
+    effectively universal."""
+    if binders:
+        if not (isinstance(arg, tuple) and len(arg) == 2):
+            raise HolError(
+                f"{ctx}: TyEqAssume with binders requires σ "
+                f"= (user_vars, type_eq_thm)"
+            )
+        user_vars, ty_eq = arg
+        user_vars = tuple(user_vars)
+        if len(user_vars) != len(binders):
+            raise HolError(
+                f"{ctx}: TyEqAssume σ has {len(user_vars)} user_vars "
+                f"for {len(binders)} binders"
+            )
+        for uv, b in zip(user_vars, binders):
+            if not isinstance(uv, Var):
+                raise HolError(
+                    f"{ctx}: TyEqAssume user_var must be a Var (got "
+                    f"{uv!r})"
+                )
+            b_ty = type_subst(theta_ty, b.ty)
+            if not type_eq(uv.ty, b_ty):
+                raise HolError(
+                    f"{ctx}: TyEqAssume user_var {uv.name} type "
+                    f"{_pp_ty(uv.ty)} does not match binder type "
+                    f"{_pp_ty(b_ty)}"
+                )
+    else:
+        ty_eq = arg
+        user_vars = ()
+    if not isinstance(ty_eq, type_eq_thm):
+        raise HolError(
+            f"{ctx}: argument for TyEqAssume must be a type_eq_thm"
+        )
+    expected_lhs = _resolve_tyops_in_type(
+        tyop_theta,
+        type_subst(theta_ty, subst_in_type(theta_tm, lhs)),
+    )
+    expected_rhs = _resolve_tyops_in_type(
+        tyop_theta,
+        type_subst(theta_ty, subst_in_type(theta_tm, rhs)),
+    )
+    if binders:
+        rename = [(uv, Var(b.name, type_subst(theta_ty, b.ty)))
+                  for uv, b in zip(user_vars, binders)]
+        expected_lhs = subst_in_type(rename, expected_lhs)
+        expected_rhs = subst_in_type(rename, expected_rhs)
+    if not type_eq(expected_lhs, ty_eq._lhs):
+        raise HolError(
+            f"{ctx}: TyEqAssume lhs {_pp_ty(ty_eq._lhs)} does not match "
+            f"expected {_pp_ty(expected_lhs)}"
+        )
+    if not type_eq(expected_rhs, ty_eq._rhs):
+        raise HolError(
+            f"{ctx}: TyEqAssume rhs {_pp_ty(ty_eq._rhs)} does not match "
+            f"expected {_pp_ty(expected_rhs)}"
+        )
+    for uv in user_vars:
+        for a in ty_eq._asl:
+            if vfree_in(uv, a):
+                raise HolError(
+                    f"{ctx}: user_var {uv.name} occurs free in "
+                    f"TyEqAssume hypothesis {_pp_tm(a)}"
+                )
+    return ty_eq
+
+
+def _subst_ty_eq_assume(binder, arg, out, ctx):
+    ty_eq = _check_ty_eq_assume(
+        arg, binder.binders, binder.lhs, binder.rhs,
+        out.theta_ty, out.theta_tm, out.tyop_theta, ctx,
+    )
+    out.asl_extra[:] = term_union(out.asl_extra, ty_eq._asl)
+
+
 def _dual_assume(binder, arg, lhs, rhs, asl_extra, ctx):
     needed_l = _check_assume_proof(
         arg, binder.formula, lhs.theta_ty, lhs.theta_tm, ctx,
@@ -1834,11 +1997,24 @@ class _SlotHandlers(NamedTuple):
     dual:  Callable    # (binder, arg, lhs, rhs, asl_extra, ctx) -> None
 
 
+def _dual_ty_eq_assume(binder, arg, lhs, rhs, asl_extra, ctx):
+    """Symmetric case only: a single `type_eq_thm` discharges the
+    obligation on both sides of the congruence (matches the symmetric
+    `Assume` / `TyopVar` handling)."""
+    ty_eq = _check_ty_eq_assume(
+        arg, binder.binders, binder.lhs, binder.rhs,
+        lhs.theta_ty, lhs.theta_tm, lhs.tyop_theta, ctx,
+    )
+    asl_extra[:] = term_union(asl_extra, ty_eq._asl)
+
+
 _SLOT_DISPATCH: dict = {
-    Tyvar:   _SlotHandlers(subst=_subst_tyvar,  dual=_dual_tyvar),
-    TyopVar: _SlotHandlers(subst=_subst_tyop,   dual=_dual_tyop),
-    Var:     _SlotHandlers(subst=_subst_var,    dual=_dual_var),
-    Assume:  _SlotHandlers(subst=_subst_assume, dual=_dual_assume),
+    Tyvar:      _SlotHandlers(subst=_subst_tyvar,       dual=_dual_tyvar),
+    TyopVar:    _SlotHandlers(subst=_subst_tyop,        dual=_dual_tyop),
+    Var:        _SlotHandlers(subst=_subst_var,         dual=_dual_var),
+    Assume:     _SlotHandlers(subst=_subst_assume,      dual=_dual_assume),
+    TyEqAssume: _SlotHandlers(subst=_subst_ty_eq_assume,
+                              dual=_dual_ty_eq_assume),
 }
 
 
@@ -1890,8 +2066,7 @@ def TY_CONG_BASE(tyop: str, args: list) -> type_eq_thm:
     )
 
 
-def TM_CONG_BASE(name: str, args: list,
-                 cod_eq: type_eq_thm | None = None) -> thm:
+def TM_CONG_BASE(name: str, args: list) -> thm:
     """Term-side congruence (analogue of TY_CONG_BASE for a staged
     term constant):
             c(Φ) : A in theory      per-slot Φ-args
@@ -1899,12 +2074,10 @@ def TM_CONG_BASE(name: str, args: list,
                   Gamma |- c(σ_l) =A[σ_l] c(σ_r)
 
     Each `args[i]` matches Φ entry i (see `_apply_phi_dual`). The
-    equation is tagged at the LHS view `A[σ_l]`.
-
-    With a dependent body type whose two sides differ -- A[σ_l] !=
-    A[σ_r] -- supply `cod_eq` witnessing the bridge; the equation is
-    still tagged at A[σ_l] and the RHS Const carries its native type
-    A[σ_r]."""
+    equation is tagged at the LHS view `A[σ_l]` and requires the
+    instantiated body types `A[σ_l]` and `A[σ_r]` to agree
+    definitionally. For the heterogeneous case, basics_dhol's
+    `TM_CONG_BASE` wrapper lifts via `TM_CONG_HETERO_AX`."""
     try:
         phi = get_const_phi(name)
         decl_ty = get_const_type(name)
@@ -1923,20 +2096,16 @@ def TM_CONG_BASE(name: str, args: list,
             result.rhs.theta_ty, subst_in_type(result.rhs.theta_tm, decl_ty)
         ),
     )
-    asl = result.asl_extra
     if not type_eq(inst_ty_l, inst_ty_r):
-        if cod_eq is None or not _bridge_matches(
-            cod_eq, inst_ty_l, inst_ty_r
-        ):
-            raise HolError(
-                f"TM_CONG_BASE: instantiated types differ "
-                f"({_pp_ty(inst_ty_l)} vs {_pp_ty(inst_ty_r)}); "
-                f"supply cod_eq witnessing A[σ_l] == A[σ_r]"
-            )
-        asl = term_union(asl, cod_eq._asl)
+        raise HolError(
+            f"TM_CONG_BASE: instantiated types differ "
+            f"({_pp_ty(inst_ty_l)} vs {_pp_ty(inst_ty_r)}); "
+            f"use basics_dhol.TM_CONG_BASE with cod_eq to discharge "
+            f"via TM_CONG_HETERO_AX"
+        )
     lhs_const = Const(name, inst_ty_l, tuple(result.lhs.term_args))
     rhs_const = Const(name, inst_ty_r, tuple(result.rhs.term_args))
-    return thm(asl, safe_mk_eq(inst_ty_l, lhs_const, rhs_const))
+    return thm(result.asl_extra, safe_mk_eq(inst_ty_l, lhs_const, rhs_const))
 
 
 def THM_CONG_BASE(staged: StagedThm, args: list) -> thm:
@@ -1963,19 +2132,10 @@ def THM_CONG_BASE(staged: StagedThm, args: list) -> thm:
     return thm(result.asl_extra, safe_mk_eq(bool_ty, F_l, F_r))
 
 
-def TY_CONG_PI(v: Var, dom_eq: type_eq_thm, cod_eq: type_eq_thm) -> type_eq_thm:
-    """congPi:  Gamma |- A == A'   Gamma, x:A |- B == B'
-               --------------------------------------------
-               Gamma |- Pi(x:A). B == Pi(x:A'). B'
-    v carries the binder name and its type; v.ty must be dom_eq._lhs."""
-    if not type_eq(v.ty, dom_eq._lhs):
-        raise HolError("TY_CONG_PI: binder type does not match domain LHS")
-    asl = term_union(dom_eq._asl, cod_eq._asl)
-    return type_eq_thm(
-        asl,
-        Pi(v, cod_eq._lhs),
-        Pi(Var(v.name, dom_eq._rhs), cod_eq._rhs),
-    )
+# Pi congruence (TY_CONG_PI) lives in basics_dhol as `PI_CONG_AX`, an
+# axiom over a TyEqAssume premise -- the kernel no longer ships a
+# dedicated rule, only the Φ-stage infrastructure that lets the axiom
+# express the universal codomain equality.
 
 
 # ---------------------------------------------------------------------------
@@ -2244,19 +2404,17 @@ def EQ_TY_CONV(eq_th: thm, ty_eq: type_eq_thm) -> thm:
     return thm(term_union(eq_th._asl, ty_eq._asl), new_concl)
 
 
-def MK_COMB(th1: thm, th2: thm,
-            cod_eq: type_eq_thm | None = None) -> thm:
+def MK_COMB(th1: thm, th2: thm) -> thm:
     """congAppl':  Gamma |- f =Pi(x:A).B f'    Gamma |- a =A a'
                   ----------------------------------------------
                           Gamma |- f a =B[a/x] f' a'
 
-    Homogeneous on the domain: th2's eq tag must definitionally match
-    f's Pi-domain. For a propositional domain bridge, pre-EQ_TY_CONV
-    th2 (basics_dhol exposes an MK_COMB wrapper that does this).
-
-    `cod_eq` is the irreducible heterogeneous-codomain bridge: with a
-    dependent codomain B and a propositional argument equation l2=r2,
-    B[l2/x] and B[r2/x] can differ; the result is tagged at B[l2/x].
+    Homogeneous on the domain and codomain: th2's eq tag must
+    definitionally match f's Pi-domain, and the substituted codomains
+    `B[l2/x]` and `B[r2/x]` must agree. For propositional bridges,
+    basics_dhol's `MK_COMB` wrapper accepts an optional `eq` (domain)
+    and `cod_eq` (codomain) and discharges them via EQ_TY_CONV +
+    `MK_COMB_HETERO_AX`.
 
     Preconditioned domains live inside A as Subtype refinements; if
     `A = A0|p`, the argument equation must already be tagged at A0|p
@@ -2284,46 +2442,32 @@ def MK_COMB(th1: thm, th2: thm,
     result_ty_l = subst_in_type([(l2, f_ty.bvar)], f_ty.body)
     result_ty_r = subst_in_type([(r2, f_ty.bvar)], f_ty.body)
     if not type_eq(result_ty_l, result_ty_r):
-        if cod_eq is None or not _bridge_matches(
-            cod_eq, result_ty_l, result_ty_r
-        ):
-            raise HolError(
-                f"MK_COMB: codomain types do not agree "
-                f"({_pp_ty(result_ty_l)} vs {_pp_ty(result_ty_r)}); "
-                f"supply cod_eq witnessing B[l2/x] == B[r2/x]"
-            )
-        asl = term_union(asl, cod_eq._asl)
+        raise HolError(
+            f"MK_COMB: codomain types do not agree "
+            f"({_pp_ty(result_ty_l)} vs {_pp_ty(result_ty_r)}); "
+            f"use basics_dhol.MK_COMB with cod_eq to discharge via "
+            f"MK_COMB_HETERO_AX"
+        )
     return thm(asl, safe_mk_eq(result_ty_l, Comb(l1, l2), Comb(r1, r2)))
 
 
-def ABS(v: Var, th: thm, ty_eq: type_eq_thm | None = None) -> thm:
-    """congLambda':  Gamma |- A == A'    Gamma, x:A |- t =B t'
-                    ------------------------------------------------
-                    Gamma |- (\\x:A. t) =Pi(x:A).B (\\x:A'. t')
+def ABS(v: Var, th: thm) -> thm:
+    """congLambda' (homogeneous case):
+                    Gamma, x:A |- t =B t'
+                    ----------------------------------
+                    Gamma |- (\\x:A. t) =Pi(x:A).B (\\x:A. t')
 
-    Without ``ty_eq`` this is the homogeneous case (A == A'). With
-    ``ty_eq``, ``v.ty`` must match one side of the bridge and the
-    other side becomes the RHS binder type; the result is tagged at
-    Pi(x:A). B (the LHS view). ``v`` must not occur free in any
-    hypothesis, including the bridge's."""
+    For the heterogeneous binder-type case (A == A' bridge),
+    basics_dhol exposes an `ABS` wrapper that lifts via
+    `ABS_HETERO_AX`. ``v`` must not occur free in any hypothesis."""
     c = th._concl
     _require_eq(c, "ABS")
     if any(vfree_in(v, a) for a in th._asl):
         raise HolError("ABS: bound variable occurs free in hypotheses")
     body_ty = _eq_tag(c)
     l, r = _lhs(c), _rhs(c)
-    if ty_eq is None:
-        v_rhs = v
-        asl = th._asl
-    else:
-        if any(vfree_in(v, a) for a in ty_eq._asl):
-            raise HolError(
-                "ABS: bound variable occurs free in bridge hypotheses"
-            )
-        v_rhs = Var(v.name, _other_side(ty_eq, v.ty, "ABS"))
-        asl = term_union(th._asl, ty_eq._asl)
     new_ty = Pi(v, body_ty)
-    return thm(asl, safe_mk_eq(new_ty, Abs(v, l), Abs(v_rhs, r)))
+    return thm(th._asl, safe_mk_eq(new_ty, Abs(v, l), Abs(v, r)))
 
 
 def EQ_MP(th1: thm, th2: thm) -> thm:
@@ -2468,33 +2612,105 @@ def new_axiom(F_th: typing_thm, phi: tuple | None = None) -> StagedThm:
     return staged
 
 
-def interpret(staged: StagedThm, sigma: tuple) -> thm:
-    """One-shot interpretation of a staged thm at σ.
+def new_type_eq_axiom(eq_th: type_eq_thm,
+                      phi: tuple | None = None) -> StagedTypeEq:
+    """Declare a type-equality axiom `(Φ) ▷ lhs == rhs`. Returns a
+    `StagedTypeEq`; use `interpret(staged, σ)` to instantiate.
+
+    Φ is a telescope of `Tyvar | TyopVar | Var | Assume | TyEqAssume`
+    binders. The boolean asl of `eq_th` must alpha-match `Assume`
+    formulas in Φ; free term-Vars of `eq_th._lhs / _rhs` must be bound
+    by `Var` entries; free Tyvars must be bound by `Tyvar` entries;
+    and any `TyopApp` names appearing in the sides must be bound by
+    `TyopVar` entries. TyEqAssume entries are pure type-equality
+    preconditions and contribute no bool asl."""
+    if phi is None:
+        phi = ()
+    _check_phi(phi, "new_type_eq_axiom")
+    phi = tuple(phi)
+
+    expected_asl = _phi_asl(phi)
+    for a in eq_th._asl:
+        if not any(_tm_alpha([], a, f) for f in expected_asl):
+            raise HolError(
+                "new_type_eq_axiom: asl entry "
+                f"{_pp_tm(a)} is not declared by any Assume entry in Φ"
+            )
+
+    # TyEqAssume binders are slot-local universal binders; they are not
+    # in scope as named binders for free vars / tyvars in the body.
+    bound_vars = [b for b in phi if isinstance(b, Var)]
+    for ty in (eq_th._lhs, eq_th._rhs):
+        for fv in frees_in_type(ty):
+            if fv not in bound_vars:
+                raise HolError(
+                    f"new_type_eq_axiom: free var {fv.name} is not bound "
+                    f"by any Var entry in Φ"
+                )
+
+    allowed_tvs = [b for b in phi if isinstance(b, Tyvar)]
+    for ty in (eq_th._lhs, eq_th._rhs):
+        for tv in tyvars(ty):
+            if tv not in allowed_tvs:
+                raise HolError(
+                    f"new_type_eq_axiom: type-var {tv.name} is not "
+                    f"reflected in Φ"
+                )
+
+    allowed_tyops = {b.name for b in phi if isinstance(b, TyopVar)}
+    for ty in (eq_th._lhs, eq_th._rhs):
+        for name in tyop_names_in_type(ty):
+            if name not in allowed_tyops:
+                raise HolError(
+                    f"new_type_eq_axiom: TyopApp {name!r} is not "
+                    f"reflected by any TyopVar entry in Φ"
+                )
+
+    staged = StagedTypeEq(phi, TyEqBody(eq_th._lhs, eq_th._rhs))
+    the_axioms.append(staged)
+    return staged
+
+
+def interpret(staged, sigma: tuple):
+    """One-shot interpretation of a staged thm or type-equality at σ.
+
+    Dispatches on `staged`'s body shape:
+      * `StagedThm`    → returns a concrete `thm`.
+      * `StagedTypeEq` → returns a concrete `type_eq_thm`.
 
     Walks Φ left-to-right, discharging slot-by-slot:
-      * Tyvar slot  -- σ-entry is a `hol_type` (INST_TYPE-style);
-      * Var slot    -- σ-entry is a `typing_thm` (INST-style; its
-                       _ty must match the binder type under
-                       earlier substitutions);
-      * Assume slot -- σ-entry is a `thm` discharging the Assume
-                       formula under earlier substitutions (MP-style).
+      * Tyvar slot       -- σ-entry is a `hol_type` (INST_TYPE-style);
+      * TyopVar slot     -- σ-entry is a `TypeAbs` (rank-1 type op);
+      * Var slot         -- σ-entry is a `typing_thm` (INST-style);
+      * Assume slot      -- σ-entry is a `thm` (MP-style);
+      * TyEqAssume slot  -- σ-entry is a `type_eq_thm` (sides matching
+                            the schematic, freshness on binders).
 
     σ-shape is validated by `_apply_phi_subst` -- the same walker
-    `mk_type` and `CONST` use.
-
-    The result is a closed `thm`: Γ |- F[σ], whose asl absorbs the
-    typing_thm and Assume-proof assumptions from σ; the original
-    Assume-formula asl entries are discharged."""
-    if not isinstance(staged, StagedThm):
-        raise HolError("interpret: first argument must be a StagedThm")
-    phi = staged._phi
-    F = staged._body.formula
-    result = _apply_phi_subst(phi, tuple(sigma), "interpret")
-    f = lambda tm: _resolve_tyops_in_term(
-        result.tyop_theta,
-        _inst_in_term([], result.theta_ty, _vsubst(result.theta_tm, tm)),
+    `mk_type` and `CONST` use. asl from σ-evidences is absorbed; the
+    original Assume / TyEqAssume obligations are discharged."""
+    if isinstance(staged, StagedThm):
+        phi = staged._phi
+        F = staged._body.formula
+        result = _apply_phi_subst(phi, tuple(sigma), "interpret")
+        f = lambda tm: _resolve_tyops_in_term(
+            result.tyop_theta,
+            _inst_in_term([], result.theta_ty, _vsubst(result.theta_tm, tm)),
+        )
+        return thm(result.asl_extra, f(F))
+    if isinstance(staged, StagedTypeEq):
+        phi = staged._phi
+        result = _apply_phi_subst(phi, tuple(sigma), "interpret")
+        f_ty = lambda ty: _resolve_tyops_in_type(
+            result.tyop_theta,
+            type_subst(result.theta_ty, subst_in_type(result.theta_tm, ty)),
+        )
+        return type_eq_thm(
+            result.asl_extra, f_ty(staged._body.lhs), f_ty(staged._body.rhs),
+        )
+    raise HolError(
+        "interpret: first argument must be a StagedThm or StagedTypeEq"
     )
-    return thm(result.asl_extra, f(F))
 
 
 def instantiate(target, sigma: tuple):
@@ -2510,7 +2726,7 @@ def instantiate(target, sigma: tuple):
     three share -- the validator `_apply_phi_subst` is the same in
     every case, and the only difference is which evidence-shape the
     target's body asks for."""
-    if isinstance(target, StagedThm):
+    if isinstance(target, (StagedThm, StagedTypeEq)):
         return interpret(target, sigma)
     if isinstance(target, str):
         d = the_decls.get(target)
@@ -2589,6 +2805,12 @@ def new_basic_definition(lhs: Var, rhs_th: typing_thm,
             "defining equation would need to keep the operator unresolved, "
             "and the kernel has no representation for free TyopVars "
             "outside Φ."
+        )
+    if any(isinstance(b, TyEqAssume) for b in phi):
+        raise HolError(
+            "new_basic_definition: TyEqAssume in Φ unsupported -- the "
+            "self-application σ has no canonical type_eq_thm to supply "
+            "for a refl-like assertion."
         )
     new_constant(lhs.name, lhs.ty, phi=phi)
     # Apply Φ to itself: σ replaces each binder with itself.

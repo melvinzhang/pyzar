@@ -13,10 +13,10 @@ from fusion_dhol import (
     bool_ty, aty,
     HolError, Clash,
     VAR, CONST, LAMBDA, CONV,
-    REFL, ASSUME, BETA, EQ_TY_CONV, ABS, EQ_MP,
+    REFL, ASSUME, BETA, EQ_TY_CONV, EQ_MP,
     DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
-    TY_REFL, TY_SYM, TY_TRANS, TY_CONG_BASE, TY_CONG_PI,
-    TM_CONG_BASE, THM_CONG_BASE,
+    TY_REFL, TY_SYM, TY_TRANS, TY_CONG_BASE,
+    THM_CONG_BASE,
     ST_REFL, ST_TRANS, ST_FORGET, ST_REFINE, ST_PI_DOMAIN, SUBSUME,
     RESTRICT, RESTRICT_PROOF,
     mk_subtype, mk_type, mk_arrow, safe_mk_eq,
@@ -26,11 +26,13 @@ from fusion_dhol import (
 )
 
 # ETA, TRANS, UNRESTRICT, DISCH, MP, IMP_TYPE, mk_imp now live in basics_dhol.
-# APP and MK_COMB are also imported from basics_dhol so the optional
-# eq / cod_eq bridges are available (the kernel's APP/MK_COMB are
-# strictly homogeneous).
+# APP, MK_COMB, ABS, TM_CONG_BASE, TY_CONG_PI are imported from basics_dhol
+# so that the optional propositional bridges (`eq`, `cod_eq`, `ty_eq`) are
+# available -- the kernel ships only the strictly homogeneous forms; the
+# heterogeneous cases are discharged via axioms in basics_dhol.
 from basics_dhol import (
-    APP, MK_COMB, ETA, TRANS, UNRESTRICT, DISCH, MP, IMP_TYPE, mk_imp,
+    APP, MK_COMB, ABS, TM_CONG_BASE, TY_CONG_PI,
+    ETA, TRANS, UNRESTRICT, DISCH, MP, IMP_TYPE, mk_imp,
 )
 
 # nat as a base type, with "0" as the atomic inhabitation witness.

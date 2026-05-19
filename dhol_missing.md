@@ -2,7 +2,7 @@
 
 Audit of `fusion_dhol.py` vs. Rothgang/Rabe/Benzmüller's DHOL (TOCL 2025, `arXiv:2305.15382`) plus Rabe's 2026 follow-up `rabe_dholmodels_26.pdf` ("Semantics for Dependently-Typed HOL"). The 2026 paper is the reference definition going forward — it subsumes the 2025 RRB calculus and adds rank-1 polymorphism, function preconditions, and a model theory.
 
-This document tracks only what remains. The kernel as it stands ships rank-1 polymorphism via telescopes (including rank-1 type operators, see item 19), predicate subtypes (with preconditions collapsed onto them), staged theorems / declarations, primitive implication, and the full congruence / conversion surface.
+This document tracks only what remains. The kernel as it stands ships rank-1 polymorphism via telescopes (including rank-1 type operators, see item 19), predicate subtypes (with preconditions collapsed onto them), staged theorems / declarations / type-equalities (via `TyEqAssume` Φ-slots and `new_type_eq_axiom`), and the homogeneous congruence / conversion surface. Heterogeneous-type bridges (Pi-congruence, MK_COMB's `cod_eq`, ABS's `ty_eq`, TM_CONG_BASE's `cod_eq`) now live in `basics_dhol` as axioms, not as kernel rules.
 
 ## Conversion / definitional equality
 
@@ -25,10 +25,11 @@ Soundness rests on callers using the documented kernel API only:
 - Construct types via `mk_type` / `mk_arrow` / `mk_subtype` (or the unified `instantiate(name, σ)` for a declared type). Raw `Tyapp` / `Pi` / `Subtype` dataclasses exist but are public-but-discouraged. `INST_TYPE` does not re-check well-formedness of its replacement types; callers who used the constructors get that for free, callers who used raw dataclasses are on their own.
 - Construct term constants via `new_constant(name, ty, phi=...)` and instantiate via `CONST(name, sigma)` (or the unified `instantiate(name, σ)`); `sigma` is a `PhiSubst` matching the declared Φ. Direct `Const(name, ty, term_args)` is public-but-discouraged — go through `CONST` so `_apply_phi_subst` validates σ.
 - Construct `typing_thm`s only via `VAR` / `CONST` / `APP` / `LAMBDA` / `CONV` / `RESTRICT` / `UNRESTRICT` / `SUBSUME`.
-- Construct `type_eq_thm`s only via `TY_REFL` / `TY_SYM` / `TY_TRANS` / `TY_CONG_BASE` / `TY_CONG_PI`.
+- Construct `type_eq_thm`s only via `TY_REFL` / `TY_SYM` / `TY_TRANS` / `TY_CONG_BASE` / `interpret(StagedTypeEq, σ)`.
 - Construct `subtype_thm`s only via `ST_REFL` / `ST_TRANS` / `ST_FORGET` / `ST_REFINE` / `ST_PI_DOMAIN`. Consume them at the typing layer via `SUBSUME`.
-- Construct `thm`s only via `REFL` / `ASSUME` / `BETA` / `ETA` / `TRANS` / `MK_COMB` / `ABS` / `EQ_MP` / `DEDUCT_ANTISYM_RULE` / `DISCH` / `MP` / `INST` / `INST_TYPE` / `EQ_TY_CONV` / `THM_CONG_BASE` / `interpret` / `new_basic_definition` / `RESTRICT_PROOF`.
+- Construct `thm`s only via `REFL` / `ASSUME` / `BETA` / `TRANS` / `MK_COMB` (homogeneous) / `ABS` (homogeneous) / `EQ_MP` / `DEDUCT_ANTISYM_RULE` / `INST` / `INST_TYPE` / `EQ_TY_CONV` / `TM_CONG_BASE` (homogeneous) / `THM_CONG_BASE` / `interpret` / `new_basic_definition` / `RESTRICT_PROOF`. Heterogeneous-bridge versions (`MK_COMB(... cod_eq)`, `ABS(... ty_eq)`, `TM_CONG_BASE(... cod_eq)`) and derived rules (`ETA`, `DISCH`, `MP`) live in `basics_dhol`.
 - Construct `StagedThm`s only via `new_axiom(F, phi=...)`.
+- Construct `StagedTypeEq`s only via `new_type_eq_axiom(eq, phi=...)`.
 
 Direct construction of certificate dataclasses, or of raw term/type values intended to bypass the smart constructors, is explicitly out of the threat model. This is the same kind of perimeter HOL Light gets from OCaml module abstraction, without any extra Python machinery. Intrinsic `Var.ty` / `Const.ty` / `Abs.bvar.ty` annotations survive only for alpha-equivalence distinguishability and are not load-bearing for inference.
 
