@@ -71,12 +71,6 @@ class HolError(Exception):
     pass
 
 
-class Clash(Exception):
-    def __init__(self, tm):
-        super().__init__()
-        self.tm = tm
-
-
 # ---------------------------------------------------------------------------
 # Types
 # ---------------------------------------------------------------------------
@@ -1147,9 +1141,7 @@ def _map_type(f_ty: Callable, f_tm: Callable, ty: hol_type) -> hol_type:
     walker preserves it).
 
     Used by `subst_in_type`, `type_subst`, `_resolve_tyops_in_type`,
-    which only differ at their leaf nodes (Tyvar / TyopApp) and at
-    their Pi / Subtype binder strategies. `_inst_in_term`'s
-    Clash-recovery machinery is too custom to route through here."""
+    and (for its non-binder cases) `_inst_in_term`."""
     if isinstance(ty, Tyvar):
         return ty
     if isinstance(ty, Tyapp):
@@ -1190,9 +1182,10 @@ def _map_type(f_ty: Callable, f_tm: Callable, ty: hol_type) -> hol_type:
 def _map_term(f_ty: Callable, f_tm: Callable, tm) -> term:
     """Identity-walk over a term, mapping nested types via `f_ty`
     and nested terms via `f_tm`. Identity-aliasing-preserving, like
-    `_map_type`. Used by `_vsubst` and `_resolve_tyops_in_term` for
-    their non-binder / non-leaf cases; `_inst_in_term` does not go
-    through here because its Var / Abs handling carries Clash state."""
+    `_map_type`. Used by `_vsubst`, `_resolve_tyops_in_term`, and
+    `_inst_in_term` for their non-Abs / non-Var-leaf cases (each
+    overrides only the cases where it differs from a plain identity
+    walk)."""
     if isinstance(tm, Var):
         new_ty = f_ty(tm.ty)
         return tm if new_ty is tm.ty else Var(tm.name, new_ty)
@@ -1304,57 +1297,43 @@ def type_subst(i: list, ty: hol_type) -> hol_type:
         return ty
     return _map_type(
         lambda x: type_subst(i, x),
-        lambda x: _inst_in_term([], i, x),
+        lambda x: _inst_in_term(i, x),
         ty,
     )
 
 
-def _inst_in_term(env: list, tyin: list, tm: term) -> term:
-    """Type-variable instantiation with capture-avoiding rename. env
-    pairs original bound variables with their type-instantiated images;
-    when a free variable in the body collides with a renamed binder we
-    raise Clash, which the Abs case catches and recovers by alpha-
-    renaming the binder before retrying."""
-    if isinstance(tm, Var):
-        ty2 = type_subst(tyin, tm.ty)
-        tm2 = tm if ty2 is tm.ty else Var(tm.name, ty2)
-        for orig, new in env:
-            if new == tm2:
-                if orig != tm:
-                    raise Clash(tm2)
-                return tm2
-        return tm2
-    if isinstance(tm, Const):
-        ty2 = type_subst(tyin, tm.ty)
-        new_args = tuple(_inst_in_term(env, tyin, a) for a in tm.term_args)
-        if ty2 is tm.ty and all(
-            n is o for n, o in zip(new_args, tm.term_args)
-        ):
-            return tm
-        return Const(tm.name, ty2, new_args)
-    if isinstance(tm, Comb):
-        f2 = _inst_in_term(env, tyin, tm.fun)
-        a2 = _inst_in_term(env, tyin, tm.arg)
-        if f2 is tm.fun and a2 is tm.arg:
-            return tm
-        return Comb(f2, a2)
+def _inst_in_term(tyin: list, tm: term) -> term:
+    """Type-variable instantiation, propagated into every type
+    annotation. Capture-avoiding under Abs: at each binder, the
+    renamed bvar2 is checked against the type-instantiated free
+    variables of the body upfront, and the binder is alpha-renamed
+    via `variant` if (and only if) a collision exists. Non-binder
+    cases delegate to `_map_term` for the structural walk."""
+    if not tyin:
+        return tm
     if isinstance(tm, Abs):
-        bvar2 = _inst_in_term([], tyin, tm.bvar)
-        env2 = [(tm.bvar, bvar2), *env]
-        try:
-            body2 = _inst_in_term(env2, tyin, tm.body)
-            if bvar2 is tm.bvar and body2 is tm.body:
-                return tm
-            return Abs(bvar2, body2)
-        except Clash as ex:
-            if ex.tm != bvar2:
-                raise
-            ifrees = [_inst_in_term([], tyin, v) for v in frees(tm.body)]
-            bvar3 = variant(ifrees, bvar2)
-            z = Var(bvar3.name, tm.bvar.ty)
-            renamed = _vsubst([(z, tm.bvar)], tm.body)
-            return _inst_in_term(env, tyin, Abs(z, renamed))
-    raise HolError("_inst_in_term: ill-formed term")
+        bvar2 = Var(tm.bvar.name, type_subst(tyin, tm.bvar.ty))
+        body_free_subst = [
+            _inst_in_term(tyin, v) for v in frees(tm.body) if v != tm.bvar
+        ]
+        fresh_bvar = variant(body_free_subst, bvar2)
+        if fresh_bvar != bvar2:
+            # Renaming the binder dodges the collision; retry the walk
+            # on the renamed Abs so the inner pre-scan runs over the
+            # alpha-renamed body.
+            z = Var(fresh_bvar.name, tm.bvar.ty)
+            return _inst_in_term(
+                tyin, Abs(z, _vsubst([(z, tm.bvar)], tm.body))
+            )
+        body2 = _inst_in_term(tyin, tm.body)
+        if bvar2 is tm.bvar and body2 is tm.body:
+            return tm
+        return Abs(bvar2, body2)
+    return _map_term(
+        lambda x: type_subst(tyin, x),
+        lambda x: _inst_in_term(tyin, x),
+        tm,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1437,7 +1416,7 @@ def _subst_full_term(theta_ty, theta_tm, tyop_theta, tm: term) -> term:
     """Apply (theta_tm, theta_ty, tyop_theta) to `tm` in the canonical
     order: Var → term, then Tyvar → hol_type, then TyopVar → TypeAbs."""
     return _resolve_tyops_in_term(
-        tyop_theta, _inst_in_term([], theta_ty, _vsubst(theta_tm, tm)),
+        tyop_theta, _inst_in_term(theta_ty, _vsubst(theta_tm, tm)),
     )
 
 
@@ -2676,13 +2655,13 @@ def INST(theta: list, th: thm) -> thm:
 
 def INST_TYPE(theta: list, th: thm) -> thm:
     """theta is a list of (replacement_type, Tyvar). Propagates the
-    substitution into every type annotation, using Clash-driven alpha-
-    rename when type instantiation would cause a bound variable to
+    substitution into every type annotation, alpha-renaming bound
+    variables when type instantiation would otherwise cause them to
     collide with a free one in the body. Well-formedness of replacement
     types is the caller's responsibility (honest-caller perimeter)."""
     if not theta:
         return th
-    f = lambda tm: _inst_in_term([], theta, tm)
+    f = lambda tm: _inst_in_term(theta, tm)
     return thm(term_image(f, th._asl), f(th._concl))
 
 

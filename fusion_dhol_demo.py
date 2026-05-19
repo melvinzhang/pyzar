@@ -11,7 +11,7 @@ from fusion_dhol import (
     Tyvar, Tyapp, Pi, Subtype, Var, Const, Comb, Abs, Assume,
     typing_thm, thm, type_eq_thm,
     bool_ty, aty,
-    HolError, Clash,
+    HolError,
     VAR, CONST, LAMBDA, CONV,
     REFL, ASSUME, BETA, EQ_TY_CONV, EQ_MP,
     DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
