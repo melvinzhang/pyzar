@@ -30,9 +30,12 @@ from fusion_dhol import (
     Var, Const, Comb, Abs, Pi, Tyvar, Tyapp,
     typing_thm, thm, type_eq_thm,
     bool_ty, aty, safe_mk_eq, mk_arrow,
-    VAR, CONST, APP, LAMBDA, CONV,
-    REFL, ASSUME, BETA, MK_COMB, ABS,
+    VAR, CONST, LAMBDA, CONV,
+    APP as _kernel_APP,
+    MK_COMB as _kernel_MK_COMB,
+    REFL, ASSUME, BETA, ABS,
     EQ_MP, DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
+    EQ_TY_CONV,
     SUBSUME, ST_FORGET,
     TYPE_OF, LHS_TYPING, RHS_TYPING, CONCL_TYPING,
     new_basic_definition, new_axiom, interpret,
@@ -40,6 +43,38 @@ from fusion_dhol import (
     _is_eq, _lhs, _rhs, _eq_tag,
     _pp_tm, _pp_ty,
 )
+
+
+# ---------------------------------------------------------------------------
+# Bridge-wrapping APP and MK_COMB.
+#
+# The kernel ships strictly-homogeneous APP / MK_COMB (definitional
+# domain match required). We expose the same names as wrappers that
+# accept an optional propositional domain bridge and pre-CONV /
+# pre-EQ_TY_CONV the argument before delegating. basics_dhol's own
+# internal calls pass eq=None and so go straight through.
+# ---------------------------------------------------------------------------
+
+
+def APP(f_th: typing_thm, a_th: typing_thm,
+        eq: type_eq_thm | None = None) -> typing_thm:
+    """`Γ |- f : Pi(x:A). B`, `Γ |- a : A'` and optional `Γ |- A == A'`
+       →  `Γ |- f a : B[a/x]`. Without `eq`, equivalent to kernel APP."""
+    if eq is not None:
+        a_th = CONV(a_th, eq)
+    return _kernel_APP(f_th, a_th)
+
+
+def MK_COMB(th1: thm, th2: thm,
+            eq: type_eq_thm | None = None,
+            cod_eq: type_eq_thm | None = None) -> thm:
+    """`Γ |- f =_Pi(x:A).B f'`, `Γ |- a =_A' a'` and optional `eq : A == A'`
+       →  `Γ |- f a =_B[a/x] f' a'`. `cod_eq` is forwarded to the kernel
+       for the dependent-codomain bridge (irreducible). Without `eq`,
+       equivalent to kernel MK_COMB."""
+    if eq is not None:
+        th2 = EQ_TY_CONV(th2, eq)
+    return _kernel_MK_COMB(th1, th2, cod_eq=cod_eq)
 
 
 # ---------------------------------------------------------------------------

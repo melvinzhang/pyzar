@@ -12,8 +12,8 @@ from fusion_dhol import (
     typing_thm, thm, type_eq_thm,
     bool_ty, aty,
     HolError, Clash,
-    VAR, CONST, APP, LAMBDA, CONV,
-    REFL, ASSUME, BETA, EQ_TY_CONV, MK_COMB, ABS, EQ_MP,
+    VAR, CONST, LAMBDA, CONV,
+    REFL, ASSUME, BETA, EQ_TY_CONV, ABS, EQ_MP,
     DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
     TY_REFL, TY_SYM, TY_TRANS, TY_CONG_BASE, TY_CONG_PI,
     TM_CONG_BASE, THM_CONG_BASE,
@@ -26,7 +26,12 @@ from fusion_dhol import (
 )
 
 # ETA, TRANS, UNRESTRICT, DISCH, MP, IMP_TYPE, mk_imp now live in basics_dhol.
-from basics_dhol import ETA, TRANS, UNRESTRICT, DISCH, MP, IMP_TYPE, mk_imp
+# APP and MK_COMB are also imported from basics_dhol so the optional
+# eq / cod_eq bridges are available (the kernel's APP/MK_COMB are
+# strictly homogeneous).
+from basics_dhol import (
+    APP, MK_COMB, ETA, TRANS, UNRESTRICT, DISCH, MP, IMP_TYPE, mk_imp,
+)
 
 # nat as a base type, with "0" as the atomic inhabitation witness.
 nat_ty = Tyapp("nat", (), ())

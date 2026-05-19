@@ -1216,13 +1216,14 @@ def CONST(name: str, sigma: tuple = ()) -> typing_thm:
     )
 
 
-def APP(f_th: typing_thm, a_th: typing_thm,
-        eq: type_eq_thm | None = None) -> typing_thm:
+def APP(f_th: typing_thm, a_th: typing_thm) -> typing_thm:
     """appl':  Gamma |- f : Pi(x:A). B   Gamma |- a : A
               ---------------------------------------------
                       Gamma |- f a : B[a/x]
 
-    `eq` (optional) bridges A == A' when a_th._ty differs from f's domain.
+    Homogeneous form: a_th._ty must definitionally match f's domain.
+    For a propositional bridge A == A', pre-CONV the argument
+    (basics_dhol exposes an APP wrapper that does this automatically).
 
     Preconditioned domains are now encoded as Subtype refinements on
     the Pi binder: `Pi(x : A|p). B`. The argument's type must already
@@ -1233,20 +1234,12 @@ def APP(f_th: typing_thm, a_th: typing_thm,
         raise HolError(f"APP: head not a Pi -- got {_pp_ty(f_ty)}")
     expected = f_ty.bvar.ty
     got = a_th._ty
-    asl = term_union(f_th._asl, a_th._asl)
     if not type_eq(expected, got):
-        if eq is None:
-            raise HolError(
-                f"APP: domain mismatch -- expected {_pp_ty(expected)}, "
-                f"got {_pp_ty(got)} (no bridge supplied)"
-            )
-        if not _bridge_matches(eq, expected, got):
-            raise HolError(
-                f"APP: bridge does not match -- "
-                f"witness {_pp_ty(eq._lhs)} == {_pp_ty(eq._rhs)} "
-                f"does not connect {_pp_ty(expected)} and {_pp_ty(got)}"
-            )
-        asl = term_union(asl, eq._asl)
+        raise HolError(
+            f"APP: domain mismatch -- expected {_pp_ty(expected)}, "
+            f"got {_pp_ty(got)} (pre-CONV the argument to bridge)"
+        )
+    asl = term_union(f_th._asl, a_th._asl)
     result_ty = subst_in_type([(a_th._tm, f_ty.bvar)], f_ty.body)
     return typing_thm(asl, Comb(f_th._tm, a_th._tm), result_ty)
 
@@ -1933,18 +1926,18 @@ def EQ_TY_CONV(eq_th: thm, ty_eq: type_eq_thm) -> thm:
 
 
 def MK_COMB(th1: thm, th2: thm,
-            eq: type_eq_thm | None = None,
             cod_eq: type_eq_thm | None = None) -> thm:
     """congAppl':  Gamma |- f =Pi(x:A).B f'    Gamma |- a =A a'
                   ----------------------------------------------
                           Gamma |- f a =B[a/x] f' a'
 
-    With a dependent codomain B and a propositional (rather than
-    definitional) argument equation l2 = r2, the natural LHS type
-    B[l2/x] and RHS type B[r2/x] differ. ``cod_eq`` witnesses that
-    bridge; the result is tagged at B[l2/x]. ``eq`` is the domain
-    bridge (used when the argument's equation tag doesn't match the
-    function's Pi-domain definitionally).
+    Homogeneous on the domain: th2's eq tag must definitionally match
+    f's Pi-domain. For a propositional domain bridge, pre-EQ_TY_CONV
+    th2 (basics_dhol exposes an MK_COMB wrapper that does this).
+
+    `cod_eq` is the irreducible heterogeneous-codomain bridge: with a
+    dependent codomain B and a propositional argument equation l2=r2,
+    B[l2/x] and B[r2/x] can differ; the result is tagged at B[l2/x].
 
     Preconditioned domains live inside A as Subtype refinements; if
     `A = A0|p`, the argument equation must already be tagged at A0|p
@@ -1960,14 +1953,13 @@ def MK_COMB(th1: thm, th2: thm,
             f"(got {_pp_ty(f_ty)})"
         )
     expected = f_ty.bvar.ty
-    asl = term_union(th1._asl, th2._asl)
     if not type_eq(expected, arg_ty):
-        if eq is None or not _bridge_matches(eq, expected, arg_ty):
-            raise HolError(
-                f"MK_COMB: domain types do not agree "
-                f"(expected {_pp_ty(expected)}, got {_pp_ty(arg_ty)})"
-            )
-        asl = term_union(asl, eq._asl)
+        raise HolError(
+            f"MK_COMB: domain types do not agree "
+            f"(expected {_pp_ty(expected)}, got {_pp_ty(arg_ty)}); "
+            f"pre-EQ_TY_CONV th2 to align"
+        )
+    asl = term_union(th1._asl, th2._asl)
     l1, r1 = _lhs(c1), _rhs(c1)
     l2, r2 = _lhs(c2), _rhs(c2)
     result_ty_l = subst_in_type([(l2, f_ty.bvar)], f_ty.body)
