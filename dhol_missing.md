@@ -2,11 +2,7 @@
 
 Audit of `fusion_dhol.py` vs. Rothgang/Rabe/Benzmüller's DHOL (TOCL 2025, `arXiv:2305.15382`) plus Rabe's 2026 follow-up `rabe_dholmodels_26.pdf` ("Semantics for Dependently-Typed HOL"). The 2026 paper is the reference definition going forward — it subsumes the 2025 RRB calculus and adds rank-1 polymorphism, function preconditions, and a model theory.
 
-This document tracks only what remains. The kernel as it stands ships rank-1 polymorphism via telescopes (including rank-1 type operators, see item 19), predicate subtypes (with preconditions collapsed onto them), staged theorems / declarations / type-equalities (via `TyEqAssume` Φ-slots and `new_type_eq_axiom`), and the homogeneous congruence / conversion surface. Heterogeneous-type bridges (Pi-congruence, MK_COMB's `cod_eq`, ABS's `ty_eq`, TM_CONG_BASE's `cod_eq`) now live in `basics_dhol` as axioms, not as kernel rules.
-
-## Conversion / definitional equality
-
-4. **β does not fire inside `type_eq`.** Term-level β is now full (`BETA` accepts arbitrary `Comb(Abs(x, t), u)` and produces `t[u/x]`, matching Rabe 2026). The remaining gap is that `type_eq` itself doesn't β-reduce: a Pi codomain like `(\n. vec n) zero` is not judged equal to `vec zero` even definitionally. The paper treats β as part of definitional equality at every typing step, so any subterm produced by `subst_in_type` that contains an un-reduced application needs an explicit equality bridge before it lines up with the reduced form.
+This document tracks only what remains. The kernel as it stands ships rank-1 polymorphism via telescopes (including rank-1 type operators, see item 19), predicate subtypes (with preconditions collapsed onto them), staged theorems / declarations / type-equalities (via `TyEqAssume` Φ-slots and `new_type_eq_axiom`), the homogeneous congruence / conversion surface, and β as definitional equality (full BETA rule plus hereditary substitution in `_vsubst` / `subst_in_type` keeping stored types and terms β-normal). Heterogeneous-type bridges (Pi-congruence, MK_COMB's `cod_eq`, ABS's `ty_eq`, TM_CONG_BASE's `cod_eq`) now live in `basics_dhol` as axioms, not as kernel rules.
 
 ## Declarations
 

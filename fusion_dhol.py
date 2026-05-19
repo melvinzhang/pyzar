@@ -1388,9 +1388,23 @@ def _subst_full_term(theta_ty, theta_tm, tyop_theta, tm: term) -> term:
 
 
 def _vsubst(ilist: list, tm: term) -> term:
-    """DHOL-aware capture-avoiding term substitution. Also propagates the
-    substitution into type annotations of Var/Const/Abs binders, since a
-    Var's declared type may mention term variables being substituted."""
+    """DHOL-aware capture-avoiding term substitution. Hereditary:
+    when substitution produces a `Comb(Abs(x, body), arg)` redex, it
+    is β-reduced on the fly, so the output is β-normal w.r.t. any
+    head-redexes that the substitution could have created or surfaced.
+
+    Hereditary β is what makes β part of definitional equality (Rabe
+    2026): stored types and terms are β-normal, and `type_eq` stays a
+    pure α-walk because applied type-level / term-level lambdas inside
+    types are reduced as types are built. User-built `Comb(Abs, _)`
+    redexes (e.g. APP(LAMBDA(...), _) for an explicit BETA step) still
+    reduce on the *next* substitution that touches them -- if you
+    need to preserve a suspended redex, call BETA on it before any
+    INST / interpret / SUBSUME / CONV substitution runs.
+
+    Also propagates the substitution into type annotations of
+    Var/Const/Abs binders, since a Var's declared type may mention
+    term variables being substituted."""
     if isinstance(tm, Var):
         for src, dst in ilist:
             if dst == tm:
@@ -1402,6 +1416,14 @@ def _vsubst(ilist: list, tm: term) -> term:
             ilist, tm.bvar, tm.body,
             _vsubst, vfree_in, Abs,
         )
+    if isinstance(tm, Comb):
+        new_fun = _vsubst(ilist, tm.fun)
+        new_arg = _vsubst(ilist, tm.arg)
+        if isinstance(new_fun, Abs):
+            return _vsubst([(new_arg, new_fun.bvar)], new_fun.body)
+        if new_fun is tm.fun and new_arg is tm.arg:
+            return tm
+        return Comb(new_fun, new_arg)
     return _map_term(
         lambda x: subst_in_type(ilist, x),
         lambda x: _vsubst(ilist, x),

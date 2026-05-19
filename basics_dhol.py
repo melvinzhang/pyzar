@@ -372,62 +372,19 @@ def _build_conjunct1_pth() -> thm:
     sel1_lam_inner = LAMBDA(_q_var, VAR(_p_var))       # \q. p   : bool -> bool
     sel1_th = LAMBDA(_p_var, sel1_lam_inner)           # \p q. p : bool -> bool -> bool
 
-    # MK_COMB sel1_th into asm_eq:
-    # asm_eq: [pq] |- (\f. f p q) = (\f. f T T)
-    # Use MK_COMB(asm_eq, REFL(sel1)) — no, asm_eq's both sides take f.
-    # We need to apply both sides to sel1 separately:
-    # |- (\f. f p q) sel1 = (\f. f T T) sel1
-    # MK_COMB(asm_eq, REFL(sel1_th)) gives that.
-    refl_sel = REFL(sel1_th)
-    app_eq = MK_COMB(asm_eq, refl_sel)
+    # Apply both sides of asm_eq to sel1.
+    app_eq = MK_COMB(asm_eq, REFL(sel1_th))
     # app_eq: [pq] |- (\f. f p q) sel1 = (\f. f T T) sel1
 
-    # BETA-reduce both sides. The LHS redex (\f. f p q) sel1 is NOT a trivial
-    # redex (arg sel1 != f). We need a workaround: build (\f. f p q) f as a
-    # trivial redex, BETA it, then INST [sel1/f].
-    redex_lhs_trivial = APP(_fpq_th, VAR(_f_var))      # (\f. f p q) f
-    beta_lhs = BETA(redex_lhs_trivial)                  # |- (\f. f p q) f = f p q
-    # INST [sel1_th / f] to get |- (\f. f p q) sel1 = sel1 p q
-    beta_lhs_at_sel = INST([(sel1_th, _f_var)], beta_lhs)
+    # General BETA + hereditary substitution collapses each nested
+    # selector redex in one step: (\f. f p q) sel1 reduces all the way
+    # to p, and (\f. f T T) sel1 reduces all the way to T.
+    beta_lhs = BETA(APP(_fpq_th, sel1_th))             # |- (\f. f p q) sel1 = p
+    beta_rhs = BETA(APP(_fTT_th, sel1_th))             # |- (\f. f T T) sel1 = T
 
-    # Same for RHS:
-    redex_rhs_trivial = APP(_fTT_th, VAR(_f_var))       # (\f. f T T) f
-    beta_rhs = BETA(redex_rhs_trivial)                   # |- (\f. f T T) f = f T T
-    beta_rhs_at_sel = INST([(sel1_th, _f_var)], beta_rhs)
-
-    # Chain to extract sel1 p q = sel1 T T from app_eq.
-    # app_eq : (\f. f p q) sel1 = (\f. f T T) sel1
-    # SYM(beta_lhs_at_sel) : sel1 p q = (\f. f p q) sel1
-    # SYM(beta_rhs_at_sel) flipped via TRANS:
-    sym_lhs = SYM(beta_lhs_at_sel)
-    step1 = TRANS(sym_lhs, app_eq)
-    # step1: [pq] |- sel1 p q = (\f. f T T) sel1
-    step2 = TRANS(step1, beta_rhs_at_sel)
-    # step2: [pq] |- sel1 p q = sel1 T T
-
-    # Now sel1 p q reduces to p (by 2 BETAs); sel1 T T reduces to T.
-    # sel1 = \p q. p, so (\p q. p) p q = p by trivial redexes.
-    beta_sel_p_outer = BETA(APP(sel1_th, VAR(_p_var)))  # |- (\p q. p) p = \q. p
-    refl_q_var = REFL(VAR(_q_var))
-    sel_p_after1 = MK_COMB(beta_sel_p_outer, refl_q_var)
-    # (\q. p) q = p — trivial redex.
-    lam_q_p_th = LAMBDA(_q_var, VAR(_p_var))
-    beta_inner_sel = BETA(APP(lam_q_p_th, VAR(_q_var)))
-    sel_p_fully = TRANS(sel_p_after1, beta_inner_sel)
-    # sel_p_fully : |- (\p q. p) p q = p
-
-    # sel1 T T = T via INST [T/p_var, T/q_var] on sel_p_fully.
-    # The bound vars inside sel1's abstraction are alpha-renamed away from
-    # the outer free p_var, q_var by the substitution discipline.
-    sel_T_fully = INST([(_T_const_th, _p_var), (_T_const_th, _q_var)], sel_p_fully)
-    # sel_T_fully : |- (\p q. p) T T = T
-
-    # Combine: step2 says sel1 p q = sel1 T T.
-    # sel1 p q = p (sel_p_fully) and sel1 T T = T (sel_T_fully).
-    sym_sel_p = SYM(sel_p_fully)                       # |- p = (\p q. p) p q
-    step3 = TRANS(sym_sel_p, step2)                    # [pq] |- p = (\p q. p) T T
-    step4 = TRANS(step3, sel_T_fully)                  # [pq] |- p = T
-    return EQT_ELIM(step4)
+    step = TRANS(TRANS(SYM(beta_lhs), app_eq), beta_rhs)
+    # step: [pq] |- p = T
+    return EQT_ELIM(step)
 
 
 def _build_conjunct2_pth() -> thm:
@@ -447,37 +404,17 @@ def _build_conjunct2_pth() -> thm:
     and_pq_unfolded = TRANS(and_pq_eq, beta_inner)
     asm_eq = EQ_MP(and_pq_unfolded, asm_pq)
 
-    sel2_lam_inner = LAMBDA(_q_var, VAR(_q_var))       # \q. q
-    sel2_th = LAMBDA(_p_var, sel2_lam_inner)           # \p q. q
+    sel2_th = LAMBDA(_p_var, LAMBDA(_q_var, VAR(_q_var)))    # \p q. q
 
-    refl_sel = REFL(sel2_th)
-    app_eq = MK_COMB(asm_eq, refl_sel)
+    app_eq = MK_COMB(asm_eq, REFL(sel2_th))
+    # app_eq: [pq] |- (\f. f p q) sel2 = (\f. f T T) sel2
 
-    beta_lhs = BETA(APP(_fpq_th, VAR(_f_var)))
-    beta_lhs_at_sel = INST([(sel2_th, _f_var)], beta_lhs)
-    beta_rhs = BETA(APP(_fTT_th, VAR(_f_var)))
-    beta_rhs_at_sel = INST([(sel2_th, _f_var)], beta_rhs)
+    beta_lhs = BETA(APP(_fpq_th, sel2_th))             # |- (\f. f p q) sel2 = q
+    beta_rhs = BETA(APP(_fTT_th, sel2_th))             # |- (\f. f T T) sel2 = T
 
-    sym_lhs = SYM(beta_lhs_at_sel)
-    step1 = TRANS(sym_lhs, app_eq)
-    step2 = TRANS(step1, beta_rhs_at_sel)
-
-    sel_p_outer = APP(sel2_th, VAR(_p_var))
-    beta_sel_p_outer = BETA(sel_p_outer)               # (\p q. q) p = \q. q
-    refl_q_var = REFL(VAR(_q_var))
-    sel_p_after1 = MK_COMB(beta_sel_p_outer, refl_q_var)
-    lam_q_q_th = LAMBDA(_q_var, VAR(_q_var))
-    beta_inner_sel = BETA(APP(lam_q_q_th, VAR(_q_var)))
-    sel_p_fully = TRANS(sel_p_after1, beta_inner_sel)
-    # sel_p_fully : |- (\p q. q) p q = q
-
-    sel_T_fully = INST([(_T_const_th, _p_var), (_T_const_th, _q_var)], sel_p_fully)
-    # sel_T_fully : |- (\p q. q) T T = T
-
-    sym_sel_p = SYM(sel_p_fully)
-    step3 = TRANS(sym_sel_p, step2)
-    step4 = TRANS(step3, sel_T_fully)                  # [pq] |- q = T
-    return EQT_ELIM(step4)
+    step = TRANS(TRANS(SYM(beta_lhs), app_eq), beta_rhs)
+    # step: [pq] |- q = T
+    return EQT_ELIM(step)
 
 
 _CONJUNCT1_PTH = _build_conjunct1_pth()
