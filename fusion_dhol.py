@@ -753,9 +753,7 @@ def _check_assume_proof(arg, formula: term, theta_ty: list,
     (`needed`); the caller decides what to do with `arg._asl`."""
     if not isinstance(arg, thm):
         raise HolError(f"{ctx}: argument for Assume binder must be a thm")
-    needed = _inst_in_term([], theta_ty, _vsubst(theta_tm, formula))
-    if tyop_theta:
-        needed = _resolve_tyops_in_term(tyop_theta, needed)
+    needed = _subst_full_term(theta_ty, theta_tm, tyop_theta or [], formula)
     if not _tm_alpha([], arg._concl, needed):
         raise HolError(
             f"{ctx}: Assume proof concludes {_pp_tm(arg._concl)} "
@@ -1390,6 +1388,36 @@ def _resolve_tyops_in_term(tyop_theta: list, tm: term) -> term:
 
 
 # ---------------------------------------------------------------------------
+# Composite Φ-substitution shortcuts
+#
+# Every Φ-walker accumulates three substitutions in lockstep:
+#   theta_ty    -- Tyvar → hol_type    (from Tyvar slots)
+#   theta_tm    -- Var   → term        (from Var slots)
+#   tyop_theta  -- TyopVar → TypeAbs   (from TyopVar slots)
+#
+# Applying these to an expected schema (Var-typing, Assume formula,
+# TyEqAssume side, SubAssume side, TypeAbs param, …) always uses the
+# same composition. These two helpers capture it once.
+# ---------------------------------------------------------------------------
+
+
+def _subst_full_type(theta_ty, theta_tm, tyop_theta, ty: hol_type) -> hol_type:
+    """Apply (theta_tm, theta_ty, tyop_theta) to `ty` in the canonical
+    order: Var → term, then Tyvar → hol_type, then TyopVar → TypeAbs."""
+    return _resolve_tyops_in_type(
+        tyop_theta, type_subst(theta_ty, subst_in_type(theta_tm, ty)),
+    )
+
+
+def _subst_full_term(theta_ty, theta_tm, tyop_theta, tm: term) -> term:
+    """Apply (theta_tm, theta_ty, tyop_theta) to `tm` in the canonical
+    order: Var → term, then Tyvar → hol_type, then TyopVar → TypeAbs."""
+    return _resolve_tyops_in_term(
+        tyop_theta, _inst_in_term([], theta_ty, _vsubst(theta_tm, tm)),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Term-variable substitution (capture avoiding)
 # ---------------------------------------------------------------------------
 
@@ -1850,9 +1878,8 @@ def _subst_var(binder, arg, out, ctx):
             f"{ctx}: argument for Var binder {binder.name} "
             "must be a typing_thm"
         )
-    expected = _resolve_tyops_in_type(
-        out.tyop_theta,
-        type_subst(out.theta_ty, subst_in_type(out.theta_tm, binder.ty)),
+    expected = _subst_full_type(
+        out.theta_ty, out.theta_tm, out.tyop_theta, binder.ty
     )
     if not type_eq(expected, arg._ty):
         raise HolError(
@@ -1889,10 +1916,7 @@ def _check_typeabs_shape(arg, params, theta_ty, theta_tm, tyop_theta,
             f"(expected {len(params)}, got {len(arg.bvars)})"
         )
     for bv, p in zip(arg.bvars, params):
-        expected = _resolve_tyops_in_type(
-            tyop_theta,
-            type_subst(theta_ty, subst_in_type(theta_tm, p.ty)),
-        )
+        expected = _subst_full_type(theta_ty, theta_tm, tyop_theta, p.ty)
         if not type_eq(expected, bv.ty):
             raise HolError(
                 f"{ctx}: TypeAbs bvar {bv.name} for {who} has type "
@@ -1928,9 +1952,8 @@ def _dual_var(binder, arg, lhs, rhs, asl_extra, ctx):
             "must be an equation thm"
         )
     tag = _eq_tag(arg._concl)
-    expected = _resolve_tyops_in_type(
-        lhs.tyop_theta,
-        type_subst(lhs.theta_ty, subst_in_type(lhs.theta_tm, binder.ty)),
+    expected = _subst_full_type(
+        lhs.theta_ty, lhs.theta_tm, lhs.tyop_theta, binder.ty
     )
     if not type_eq(expected, tag):
         raise HolError(
@@ -2008,14 +2031,8 @@ def _check_ty_eq_assume(arg, binders, lhs, rhs,
         raise HolError(
             f"{ctx}: argument for TyEqAssume must be a type_eq_thm"
         )
-    expected_lhs = _resolve_tyops_in_type(
-        tyop_theta,
-        type_subst(theta_ty, subst_in_type(theta_tm, lhs)),
-    )
-    expected_rhs = _resolve_tyops_in_type(
-        tyop_theta,
-        type_subst(theta_ty, subst_in_type(theta_tm, rhs)),
-    )
+    expected_lhs = _subst_full_type(theta_ty, theta_tm, tyop_theta, lhs)
+    expected_rhs = _subst_full_type(theta_ty, theta_tm, tyop_theta, rhs)
     if binders:
         rename = [(uv, Var(b.name, type_subst(theta_ty, b.ty)))
                   for uv, b in zip(user_vars, binders)]
@@ -2054,11 +2071,8 @@ def _dual_assume(binder, arg, lhs, rhs, asl_extra, ctx):
         arg, binder.formula, lhs.theta_ty, lhs.theta_tm, ctx,
         tyop_theta=lhs.tyop_theta,
     )
-    needed_r = _resolve_tyops_in_term(
-        rhs.tyop_theta,
-        _inst_in_term(
-            [], rhs.theta_ty, _vsubst(rhs.theta_tm, binder.formula)
-        ),
+    needed_r = _subst_full_term(
+        rhs.theta_ty, rhs.theta_tm, rhs.tyop_theta, binder.formula
     )
     if not _tm_alpha([], needed_l, needed_r):
         raise HolError(
@@ -2095,14 +2109,8 @@ def _check_sub_assume(arg, lhs_ty, rhs_ty,
         raise HolError(
             f"{ctx}: argument for SubAssume binder must be a subtype_thm"
         )
-    expected_lhs = _resolve_tyops_in_type(
-        tyop_theta,
-        type_subst(theta_ty, subst_in_type(theta_tm, lhs_ty)),
-    )
-    expected_rhs = _resolve_tyops_in_type(
-        tyop_theta,
-        type_subst(theta_ty, subst_in_type(theta_tm, rhs_ty)),
-    )
+    expected_lhs = _subst_full_type(theta_ty, theta_tm, tyop_theta, lhs_ty)
+    expected_rhs = _subst_full_type(theta_ty, theta_tm, tyop_theta, rhs_ty)
     if not type_eq(expected_lhs, arg._lhs):
         raise HolError(
             f"{ctx}: SubAssume lhs {_pp_ty(arg._lhs)} does not match "
@@ -2213,17 +2221,11 @@ def TM_CONG_BASE(name: str, args: list) -> thm:
     except KeyError:
         raise HolError(f"TM_CONG_BASE: unknown constant {name}")
     result = _apply_phi_dual(phi, args, f"TM_CONG_BASE({name})")
-    inst_ty_l = _resolve_tyops_in_type(
-        result.lhs.tyop_theta,
-        type_subst(
-            result.lhs.theta_ty, subst_in_type(result.lhs.theta_tm, decl_ty)
-        ),
+    inst_ty_l = _subst_full_type(
+        result.lhs.theta_ty, result.lhs.theta_tm, result.lhs.tyop_theta, decl_ty
     )
-    inst_ty_r = _resolve_tyops_in_type(
-        result.rhs.tyop_theta,
-        type_subst(
-            result.rhs.theta_ty, subst_in_type(result.rhs.theta_tm, decl_ty)
-        ),
+    inst_ty_r = _subst_full_type(
+        result.rhs.theta_ty, result.rhs.theta_tm, result.rhs.tyop_theta, decl_ty
     )
     if not type_eq(inst_ty_l, inst_ty_r):
         raise HolError(
@@ -2252,13 +2254,11 @@ def THM_CONG_BASE(staged: Staged, args: list) -> thm:
     phi = staged._phi
     F = staged._body.formula
     result = _apply_phi_dual(phi, args, "THM_CONG_BASE")
-    F_l = _resolve_tyops_in_term(
-        result.lhs.tyop_theta,
-        _inst_in_term([], result.lhs.theta_ty, _vsubst(result.lhs.theta_tm, F)),
+    F_l = _subst_full_term(
+        result.lhs.theta_ty, result.lhs.theta_tm, result.lhs.tyop_theta, F
     )
-    F_r = _resolve_tyops_in_term(
-        result.rhs.tyop_theta,
-        _inst_in_term([], result.rhs.theta_ty, _vsubst(result.rhs.theta_tm, F)),
+    F_r = _subst_full_term(
+        result.rhs.theta_ty, result.rhs.theta_tm, result.rhs.tyop_theta, F
     )
     return thm(result.asl_extra, safe_mk_eq(bool_ty, F_l, F_r))
 
@@ -2687,176 +2687,132 @@ def axioms() -> list:
     return list(the_axioms)
 
 
+def _validate_phi_body(asl, free_vars, free_tyvars, free_tyops,
+                       phi, ctx, *, extra_allowed_tvs=()) -> None:
+    """Validate that a cert payload is well-formed under Φ:
+      * every asl entry alpha-matches an Assume(F) formula in Φ;
+      * every free Var is bound by a Var entry in Φ;
+      * every free Tyvar is bound by a Tyvar entry in Φ (or in
+        `extra_allowed_tvs`, used by `new_basic_definition` where
+        the constant's own lhs.ty already binds some tyvars);
+      * every TyopApp name is bound by a TyopVar entry in Φ.
+
+    Shared by every Φ-staged former (`new_axiom`, `new_type_eq_axiom`,
+    `new_sub_axiom`, `new_basic_definition`); the only thing the caller
+    decides is which scanners to use to enumerate the free variables /
+    tyvars / tyops of its specific payload."""
+    expected_asl = _phi_asl(phi)
+    for a in asl:
+        if not any(_tm_alpha([], a, f) for f in expected_asl):
+            raise HolError(
+                f"{ctx}: asl entry {_pp_tm(a)} is not declared by any "
+                f"Assume entry in Φ"
+            )
+    bound_vars = [b for b in phi if isinstance(b, Var)]
+    for fv in free_vars:
+        if fv not in bound_vars:
+            raise HolError(
+                f"{ctx}: free var {fv.name} is not bound by any Var "
+                f"entry in Φ"
+            )
+    allowed_tvs = list(extra_allowed_tvs)
+    for b in phi:
+        if isinstance(b, Tyvar) and b not in allowed_tvs:
+            allowed_tvs.append(b)
+    for tv in free_tyvars:
+        if tv not in allowed_tvs:
+            raise HolError(
+                f"{ctx}: type-var {tv.name} is not reflected in Φ"
+            )
+    allowed_tyops = {b.name for b in phi if isinstance(b, TyopVar)}
+    for name in free_tyops:
+        if name not in allowed_tyops:
+            raise HolError(
+                f"{ctx}: TyopApp {name!r} is not reflected by any "
+                f"TyopVar entry in Φ"
+            )
+
+
+def _scan_J_payload(j: Judgement):
+    """Compute `(free_vars, free_tyvars, free_tyops)` of a cert
+    J-variant's payload. Lifts the term-vs-type scanner choice out of
+    the axiom-formers so they share `_validate_phi_body`."""
+    if isinstance(j, JProp):
+        F = j.formula
+        return frees(F), type_vars_in_term(F), tyop_names_in_term(F)
+    if isinstance(j, JTyping):
+        tm = j.tm
+        return frees(tm), type_vars_in_term(tm), tyop_names_in_term(tm)
+    if isinstance(j, (JEq, JSub)):
+        fvs: list = []
+        tvs: list = []
+        tos: list = []
+        for ty in (j.lhs, j.rhs):
+            _uniq_extend(fvs, frees_in_type(ty))
+            _uniq_extend(tvs, tyvars(ty))
+            _uniq_extend(tos, tyop_names_in_type(ty))
+        return fvs, tvs, tos
+    raise HolError(f"_scan_J_payload: unsupported J {type(j).__name__}")
+
+
+def _new_J_axiom(cert: Cert, phi, ctx: str) -> Staged:
+    """Generic staged-axiom former. Dispatches on `cert._j`:
+      * `JTyping(F, bool)` → `Staged(phi, JProp(F))` -- a validity axiom.
+      * `JEq(L, R)`        → `Staged(phi, JEq(L, R))`.
+      * `JSub(L, R)`       → `Staged(phi, JSub(L, R))`.
+    The Φ-body well-formedness scan is shared (`_validate_phi_body`).
+    Registered in `the_axioms` and returned."""
+    if phi is None:
+        phi = ()
+    _check_phi(phi, ctx)
+    phi = tuple(phi)
+    j = cert._j
+    if isinstance(j, JTyping):
+        if not type_eq(j.ty, bool_ty):
+            raise HolError(f"{ctx}: non-bool type {_pp_ty(j.ty)}")
+        body: Judgement = JProp(j.tm)
+    elif isinstance(j, (JEq, JSub)):
+        body = j
+    else:
+        raise HolError(
+            f"{ctx}: unsupported certificate kind {type(cert).__name__}"
+        )
+    free_vars, free_tyvars, free_tyops = _scan_J_payload(body)
+    _validate_phi_body(cert._asl, free_vars, free_tyvars, free_tyops,
+                       phi, ctx)
+    staged = Staged(phi, body)
+    the_axioms.append(staged)
+    return staged
+
+
 def new_axiom(F_th: typing_thm, phi: tuple | None = None) -> Staged:
     """Declare an axiom `(Φ) ▷ F`. Returns a `Staged` with a `JProp`
     body; use `interpret(staged, σ)` to instantiate.
 
-    Φ is a telescope of Tyvar | Var | Assume binders, same vocabulary
-    as on `new_type` / `new_constant`. When Φ is empty (the default),
-    the axiom is concrete: `F_th` must be unconditional, free of Vars,
-    and free of Tyvars not already in Φ.
-
-    Otherwise Φ binds the axiom's parameters:
-      * `F_th._asl` entries must alpha-match Assume formulas in Φ;
-      * free Vars of `F_th._tm` must be bound by Var entries in Φ;
-      * free Tyvars of `F_th._tm` must be bound by Tyvar entries in Φ.
-    """
-    _require_bool(F_th, "new_axiom")
-    if phi is None:
-        phi = ()
-    _check_phi(phi, "new_axiom")
-    phi = tuple(phi)
-
-    expected_asl = _phi_asl(phi)
-    for a in F_th._asl:
-        if not any(_tm_alpha([], a, f) for f in expected_asl):
-            raise HolError(
-                "new_axiom: asl entry "
-                f"{_pp_tm(a)} is not declared by any Assume entry in Φ"
-            )
-
-    bound_vars = [b for b in phi if isinstance(b, Var)]
-    for fv in frees(F_th._tm):
-        if fv not in bound_vars:
-            raise HolError(
-                f"new_axiom: free var {fv.name} is not bound by "
-                f"any Var entry in Φ"
-            )
-
-    allowed_tvs = [b for b in phi if isinstance(b, Tyvar)]
-    for tv in type_vars_in_term(F_th._tm):
-        if tv not in allowed_tvs:
-            raise HolError(
-                f"new_axiom: type-var {tv.name} is not reflected in Φ"
-            )
-
-    allowed_tyops = {b.name for b in phi if isinstance(b, TyopVar)}
-    for name in tyop_names_in_term(F_th._tm):
-        if name not in allowed_tyops:
-            raise HolError(
-                f"new_axiom: TyopApp {name!r} is not reflected by any "
-                f"TyopVar entry in Φ"
-            )
-
-    staged = Staged(phi, JProp(F_th._tm))
-    the_axioms.append(staged)
-    return staged
+    Φ is a telescope of the usual Slot kinds. When Φ is empty (the
+    default), the axiom is concrete: `F_th` must be unconditional, free
+    of Vars, and free of Tyvars. Otherwise Φ binds the axiom's
+    parameters per `_validate_phi_body` (asl matches Assume formulas,
+    free Vars / Tyvars / TyopApps are reflected in Φ)."""
+    return _new_J_axiom(F_th, phi, "new_axiom")
 
 
 def new_type_eq_axiom(eq_th: type_eq_thm,
                       phi: tuple | None = None) -> Staged:
     """Declare a type-equality axiom `(Φ) ▷ lhs == rhs`. Returns a
     `Staged` with a `JEq` body; use `interpret(staged, σ)` to
-    instantiate.
-
-    Φ is a telescope of `Tyvar | TyopVar | Var | Assume | TyEqAssume`
-    binders. The boolean asl of `eq_th` must alpha-match `Assume`
-    formulas in Φ; free term-Vars of `eq_th._lhs / _rhs` must be bound
-    by `Var` entries; free Tyvars must be bound by `Tyvar` entries;
-    and any `TyopApp` names appearing in the sides must be bound by
-    `TyopVar` entries. TyEqAssume entries are pure type-equality
+    instantiate. TyEqAssume entries in Φ are pure type-equality
     preconditions and contribute no bool asl."""
-    if phi is None:
-        phi = ()
-    _check_phi(phi, "new_type_eq_axiom")
-    phi = tuple(phi)
-
-    expected_asl = _phi_asl(phi)
-    for a in eq_th._asl:
-        if not any(_tm_alpha([], a, f) for f in expected_asl):
-            raise HolError(
-                "new_type_eq_axiom: asl entry "
-                f"{_pp_tm(a)} is not declared by any Assume entry in Φ"
-            )
-
-    # TyEqAssume binders are slot-local universal binders; they are not
-    # in scope as named binders for free vars / tyvars in the body.
-    bound_vars = [b for b in phi if isinstance(b, Var)]
-    for ty in (eq_th._lhs, eq_th._rhs):
-        for fv in frees_in_type(ty):
-            if fv not in bound_vars:
-                raise HolError(
-                    f"new_type_eq_axiom: free var {fv.name} is not bound "
-                    f"by any Var entry in Φ"
-                )
-
-    allowed_tvs = [b for b in phi if isinstance(b, Tyvar)]
-    for ty in (eq_th._lhs, eq_th._rhs):
-        for tv in tyvars(ty):
-            if tv not in allowed_tvs:
-                raise HolError(
-                    f"new_type_eq_axiom: type-var {tv.name} is not "
-                    f"reflected in Φ"
-                )
-
-    allowed_tyops = {b.name for b in phi if isinstance(b, TyopVar)}
-    for ty in (eq_th._lhs, eq_th._rhs):
-        for name in tyop_names_in_type(ty):
-            if name not in allowed_tyops:
-                raise HolError(
-                    f"new_type_eq_axiom: TyopApp {name!r} is not "
-                    f"reflected by any TyopVar entry in Φ"
-                )
-
-    staged = Staged(phi, JEq(eq_th._lhs, eq_th._rhs))
-    the_axioms.append(staged)
-    return staged
+    return _new_J_axiom(eq_th, phi, "new_type_eq_axiom")
 
 
 def new_sub_axiom(sub_th: subtype_thm,
                   phi: tuple | None = None) -> Staged:
     """Declare a subtyping axiom `(Φ) ▷ lhs <: rhs`. Returns a
     `Staged` with a `JSub` body; use `interpret(staged, σ)` to
-    instantiate.
-
-    Φ is a telescope of the usual Slot kinds. The boolean asl of
-    `sub_th` must alpha-match `Assume` formulas in Φ; free term-Vars
-    of `sub_th._lhs / _rhs` must be bound by `Var` entries; free
-    Tyvars must be bound by `Tyvar` entries; `TyopApp` names must be
-    bound by `TyopVar` entries."""
-    if phi is None:
-        phi = ()
-    _check_phi(phi, "new_sub_axiom")
-    phi = tuple(phi)
-
-    expected_asl = _phi_asl(phi)
-    for a in sub_th._asl:
-        if not any(_tm_alpha([], a, f) for f in expected_asl):
-            raise HolError(
-                "new_sub_axiom: asl entry "
-                f"{_pp_tm(a)} is not declared by any Assume entry in Φ"
-            )
-
-    bound_vars = [b for b in phi if isinstance(b, Var)]
-    for ty in (sub_th._lhs, sub_th._rhs):
-        for fv in frees_in_type(ty):
-            if fv not in bound_vars:
-                raise HolError(
-                    f"new_sub_axiom: free var {fv.name} is not bound "
-                    f"by any Var entry in Φ"
-                )
-
-    allowed_tvs = [b for b in phi if isinstance(b, Tyvar)]
-    for ty in (sub_th._lhs, sub_th._rhs):
-        for tv in tyvars(ty):
-            if tv not in allowed_tvs:
-                raise HolError(
-                    f"new_sub_axiom: type-var {tv.name} is not "
-                    f"reflected in Φ"
-                )
-
-    allowed_tyops = {b.name for b in phi if isinstance(b, TyopVar)}
-    for ty in (sub_th._lhs, sub_th._rhs):
-        for name in tyop_names_in_type(ty):
-            if name not in allowed_tyops:
-                raise HolError(
-                    f"new_sub_axiom: TyopApp {name!r} is not "
-                    f"reflected by any TyopVar entry in Φ"
-                )
-
-    staged = Staged(phi, JSub(sub_th._lhs, sub_th._rhs))
-    the_axioms.append(staged)
-    return staged
+    instantiate. SubAssume entries in Φ are pure subtyping
+    preconditions and contribute no bool asl."""
+    return _new_J_axiom(sub_th, phi, "new_sub_axiom")
 
 
 def interpret(staged: Staged, sigma: tuple):
@@ -2885,13 +2841,11 @@ def interpret(staged: Staged, sigma: tuple):
         raise HolError("interpret: first argument must be a Staged")
     phi = staged._phi
     result = _apply_phi_subst(phi, tuple(sigma), "interpret")
-    f_tm = lambda tm: _resolve_tyops_in_term(
-        result.tyop_theta,
-        _inst_in_term([], result.theta_ty, _vsubst(result.theta_tm, tm)),
+    f_tm = lambda tm: _subst_full_term(
+        result.theta_ty, result.theta_tm, result.tyop_theta, tm
     )
-    f_ty = lambda ty: _resolve_tyops_in_type(
-        result.tyop_theta,
-        type_subst(result.theta_ty, subst_in_type(result.theta_tm, ty)),
+    f_ty = lambda ty: _subst_full_type(
+        result.theta_ty, result.theta_tm, result.tyop_theta, ty
     )
     b = staged._body
     if isinstance(b, JProp):
@@ -2957,38 +2911,17 @@ def new_basic_definition(lhs: Var, rhs_th: typing_thm,
     introduced at its declaration-site Φ-application."""
     if not type_eq(lhs.ty, rhs_th._ty):
         raise HolError("new_basic_definition: declared type does not match rhs")
+    ctx = f"new_basic_definition({lhs.name})"
     if phi is None:
         phi = tuple(Tyvar(tv.name) for tv in tyvars(lhs.ty))
     else:
-        _check_phi(phi, f"new_basic_definition({lhs.name})")
+        _check_phi(phi, ctx)
         phi = tuple(phi)
-    bound_vars = [b for b in phi if isinstance(b, Var)]
-    expected_asl: list = []
-    for b in phi:
-        if isinstance(b, Assume):
-            expected_asl = term_union(expected_asl, [b.formula])
-    for a in rhs_th._asl:
-        if not any(_tm_alpha([], a, f) for f in expected_asl):
-            raise HolError(
-                "new_basic_definition: rhs asl entry "
-                f"{_pp_tm(a)} is not declared by any Assume entry in Φ"
-            )
-    for fv in frees(rhs_th._tm):
-        if fv not in bound_vars:
-            raise HolError(
-                f"new_basic_definition: rhs free var {fv.name} is not "
-                f"bound by any Var entry in Φ"
-            )
-    allowed_tvs = list(tyvars(lhs.ty))
-    for b in phi:
-        if isinstance(b, Tyvar) and b not in allowed_tvs:
-            allowed_tvs.append(b)
-    for tv in type_vars_in_term(rhs_th._tm):
-        if tv not in allowed_tvs:
-            raise HolError(
-                f"new_basic_definition: rhs type-var {tv.name} is not "
-                f"reflected in Φ or in lhs type"
-            )
+    free_vars, free_tyvars, free_tyops = _scan_J_payload(JTyping(rhs_th._tm, rhs_th._ty))
+    _validate_phi_body(
+        rhs_th._asl, free_vars, free_tyvars, free_tyops, phi, ctx,
+        extra_allowed_tvs=tyvars(lhs.ty),
+    )
     if any(isinstance(b, TyopVar) for b in phi):
         raise HolError(
             "new_basic_definition: TyopVar in Φ unsupported -- the "
