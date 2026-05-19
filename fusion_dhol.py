@@ -1277,6 +1277,80 @@ def CONV(t_th: typing_thm, eq: type_eq_thm) -> typing_thm:
     return typing_thm(asl, t_th._tm, _other_side(eq, t_th._ty, "CONV"))
 
 
+# ---------------------------------------------------------------------------
+# Typing reconstruction: recover a typing_thm from a term or thm.
+#
+# DHOL's typing-as-derivation discipline taxes derived rules: any
+# derived rule that invokes REFL on a sub-expression has to thread a
+# typing certificate for that sub-expression, and those threads
+# compound through theory layers. These constructors eliminate the tax
+# by re-deriving the typing from the term's intrinsic annotations.
+#
+# Sound because DHOL terms carry their types intrinsically on Var,
+# Const, and Abs.bvar -- a structural walk of a well-formed term
+# yields its type without ambiguity. TYPE_OF fails on Comb-nodes
+# whose argument's intrinsic type doesn't match the function's
+# domain (terms typed via a propositional CONV bridge upstream); use
+# the equation-side accessors instead for those.
+# ---------------------------------------------------------------------------
+
+
+def _walk_type(tm: term) -> hol_type:
+    if isinstance(tm, Var):
+        return tm.ty
+    if isinstance(tm, Const):
+        return tm.ty
+    if isinstance(tm, Comb):
+        f_ty = _walk_type(tm.fun)
+        a_ty = _walk_type(tm.arg)
+        if not isinstance(f_ty, Pi):
+            raise HolError(
+                f"TYPE_OF: function position has non-Pi type "
+                f"{_pp_ty(f_ty)}"
+            )
+        if not type_eq(f_ty.bvar.ty, a_ty):
+            raise HolError(
+                f"TYPE_OF: domain mismatch (expected {_pp_ty(f_ty.bvar.ty)}, "
+                f"got {_pp_ty(a_ty)}); term was typed via a propositional "
+                f"bridge that TYPE_OF can't see -- use the equation-side "
+                f"accessors instead"
+            )
+        return subst_in_type([(tm.arg, f_ty.bvar)], f_ty.body)
+    if isinstance(tm, Abs):
+        body_ty = _walk_type(tm.body)
+        return Pi(tm.bvar, body_ty)
+    raise HolError(f"TYPE_OF: unrecognised term shape {type(tm).__name__}")
+
+
+def TYPE_OF(asl: list, tm: term) -> typing_thm:
+    """Reconstruct `[asl] |- tm : ty` by walking tm's intrinsic
+    annotations. The walk re-derives the same type the kernel's
+    typing rules would have produced for a term with no propositional
+    bridges."""
+    return typing_thm(asl, tm, _walk_type(tm))
+
+
+def LHS_TYPING(th: thm) -> typing_thm:
+    """`th : asl |- a = b at A`  →  `[asl] |- a : A`. Inherits th's asl
+    and reads the equation's tag off the `=` constant."""
+    _require_eq(th._concl, "LHS_TYPING")
+    return typing_thm(th._asl, _lhs(th._concl), _eq_tag(th._concl))
+
+
+def RHS_TYPING(th: thm) -> typing_thm:
+    """`th : asl |- a = b at A`  →  `[asl] |- b : A`."""
+    _require_eq(th._concl, "RHS_TYPING")
+    return typing_thm(th._asl, _rhs(th._concl), _eq_tag(th._concl))
+
+
+def CONCL_TYPING(th: thm) -> typing_thm:
+    """`th : asl |- F`  →  `[] |- F : bool`. Every thm's conclusion is a
+    bool by kernel invariant. The typing is unconditional (bool is a
+    closed concrete type with no dependencies), so the asl is empty --
+    threading th's asl here would leak hypotheses into INST consumers."""
+    return typing_thm([], th._concl, bool_ty)
+
+
 def _bridge_matches(eq: type_eq_thm, A: hol_type, B: hol_type) -> bool:
     return (type_eq(eq._lhs, A) and type_eq(eq._rhs, B)) or (
         type_eq(eq._lhs, B) and type_eq(eq._rhs, A)

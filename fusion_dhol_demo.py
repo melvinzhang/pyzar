@@ -334,9 +334,18 @@ print("            asl =", imp_typing._asl)  # F should be gone
 # Now exercise the validity-layer pair. Build `[F] |- G` as a thm,
 # DISCH F to get `|- F ⇒ G`, then MP-apply with an axiom that
 # provides F.
-g_under_F = REFL(nil_under_F)  # [F] |- (nil =vec(0) nil)
-print("[F] |- G  ::", g_under_F)
-imp_thm = DISCH(ant_typing, g_under_F)
+#
+# Pre-DISCH normalisation: g_under_F's equation is tagged at the
+# bridged type vec(add 0 0), but the inner nil terms are intrinsically
+# vec(0). basics_dhol's DISCH (and MP) walk the conclusion's intrinsic
+# structure via TYPE_OF, so the equation must be retagged at the
+# intrinsic side first. EQ_TY_CONV does that retag at the validity
+# layer; the bridge moves from the term's `=` constant into the asl.
+g_under_F = REFL(nil_under_F)              # [F] |- nil =_vec(add 0 0) nil
+print("[F] |- G (bridged) ::", g_under_F)
+g_normalised = EQ_TY_CONV(g_under_F, bridge_under_F)  # [F] |- nil =_vec(0) nil
+print("[F] |- G (clean)   ::", g_normalised)
+imp_thm = DISCH(ant_typing, g_normalised)
 print("DISCH F   ::", imp_thm)
 
 # Now MP with the axiom add_0_0_eq_0 (which is [] |- add 0 0 = 0).

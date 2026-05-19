@@ -33,6 +33,7 @@ from fusion_dhol import (
     VAR, CONST, APP, LAMBDA, CONV,
     REFL, ASSUME, BETA, TRANS, MK_COMB, ABS,
     EQ_MP, DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
+    TYPE_OF, LHS_TYPING, RHS_TYPING, CONCL_TYPING,
     new_basic_definition, new_axiom, interpret,
     HolError, frees, vfree_in,
     _is_eq, _lhs, _rhs, _eq_tag,
@@ -45,15 +46,14 @@ from fusion_dhol import (
 # ---------------------------------------------------------------------------
 
 
-def SYM(th: thm, lhs_th: typing_thm) -> thm:
-    """asl |- a = b   and   |- a : A   →   asl |- b = a.
+def SYM(th: thm) -> thm:
+    """asl |- a = b   →   asl |- b = a.
 
     HOL Light's SYM uses REFL on the equation's LHS term; the DHOL
-    kernel's REFL requires a typing_thm, so callers must pass `lhs_th`.
-    """
-    if not _is_eq(th._concl):
-        raise HolError("SYM: conclusion is not an equation")
-    A = _eq_tag(th._concl)
+    kernel's REFL requires a typing_thm, which we recover from the
+    equation tag via LHS_TYPING. No threading tax."""
+    lhs_th = LHS_TYPING(th)
+    A = lhs_th._ty
     eq_const_th = CONST("=", (A,))
     refl_eq = REFL(eq_const_th)                 # |- (=) = (=)
     partial = MK_COMB(refl_eq, th)              # |- (=) a = (=) b
@@ -80,7 +80,7 @@ _T_const_th = CONST("T")                         # |- T : bool
 T_tm: term = _T_const_th._tm
 
 # TRUTH: |- T
-_T_DEF_SYM = SYM(T_DEF, _T_const_th)             # |- ((\p.p) = (\p.p)) = T
+_T_DEF_SYM = SYM(T_DEF)                          # |- ((\p.p) = (\p.p)) = T
 TRUTH = EQ_MP(_T_DEF_SYM, REFL(_lam_p_p_th))
 
 
@@ -114,9 +114,10 @@ AND_DEF = new_basic_definition(Var("/\\", _bbb), _and_body_th)
 # ---------------------------------------------------------------------------
 
 
-def EQT_INTRO(th: thm, p_th: typing_thm) -> thm:
-    """asl |- p   and   |- p : bool   →   asl |- p = T."""
-    # Build polymorphic lemma |- p = (p = T) for free p, then INST.
+def EQT_INTRO(th: thm) -> thm:
+    """asl |- p   →   asl |- p = T."""
+    # Build polymorphic lemma |- p = (p = T) for free p, then INST at the
+    # user's term via CONCL_TYPING.
     p_free = Var("p", bool_ty)
     p_free_th = VAR(p_free)
     p_eq_T_typing = APP(
@@ -128,17 +129,17 @@ def EQT_INTRO(th: thm, p_th: typing_thm) -> thm:
     th1 = DEDUCT_ANTISYM_RULE(asm_p, TRUTH)      # [p] |- p = T
 
     asm_eq = ASSUME(p_eq_T_typing)               # [p = T] |- p = T
-    sym_asm_eq = SYM(asm_eq, p_free_th)          # [p = T] |- T = p
+    sym_asm_eq = SYM(asm_eq)                     # [p = T] |- T = p
     th2 = EQ_MP(sym_asm_eq, TRUTH)               # [p = T] |- p
 
     pth = DEDUCT_ANTISYM_RULE(th2, th1)          # |- p = (p = T)
-    pth_at_p = INST([(p_th, p_free)], pth)       # |- p_th._tm = (p_th._tm = T)
-    return EQ_MP(pth_at_p, th)                   # asl |- p_th._tm = T
+    pth_at_p = INST([(CONCL_TYPING(th), p_free)], pth)
+    return EQ_MP(pth_at_p, th)                   # asl |- th._concl = T
 
 
-def EQT_ELIM(th: thm, p_th: typing_thm) -> thm:
-    """asl |- p = T   and   |- p : bool   →   asl |- p."""
-    return EQ_MP(SYM(th, p_th), TRUTH)
+def EQT_ELIM(th: thm) -> thm:
+    """asl |- p = T   →   asl |- p."""
+    return EQ_MP(SYM(th), TRUTH)
 
 
 # ---------------------------------------------------------------------------
@@ -155,8 +156,8 @@ def _build_conj_pth() -> thm:
     q_th = VAR(_q_var)
     asm_p = ASSUME(p_th)                              # [p] |- p
     asm_q = ASSUME(q_th)                              # [q] |- q
-    p_eq_T = EQT_INTRO(asm_p, p_th)                   # [p] |- p = T
-    q_eq_T = EQT_INTRO(asm_q, q_th)                   # [q] |- q = T
+    p_eq_T = EQT_INTRO(asm_p)                         # [p] |- p = T
+    q_eq_T = EQT_INTRO(asm_q)                         # [q] |- q = T
 
     refl_f = REFL(VAR(_f_var))                        # |- f = f
     fp_eq_fT = MK_COMB(refl_f, p_eq_T)                # [p] |- f p = f T
@@ -166,24 +167,14 @@ def _build_conj_pth() -> thm:
     # |- /\ p q = ((\f. f p q) = (\f. f T T))   (via AND_DEF + 2× BETA)
     refl_p = REFL(p_th)
     refl_q = REFL(q_th)
-    # MK_COMB(AND_DEF, refl_p) gives |- /\ p = ((\p q. ...) p)
     and_p_eq = MK_COMB(AND_DEF, refl_p)
-    # BETA on (\p. \q. ...) p:
-    redex_outer_th = APP(_and_body_th, VAR(_p_var))
-    beta_outer = BETA(redex_outer_th)                 # |- (\p. \q. ...) p = \q. ...
-    lam_after_p = TRANS(and_p_eq, beta_outer)         # |- /\ p = \q. (\f. f p q) = (\f. f T T)
-    # MK_COMB with refl_q: |- /\ p q = (\q. ...) q
+    beta_outer = BETA(APP(_and_body_th, VAR(_p_var)))
+    lam_after_p = TRANS(and_p_eq, beta_outer)
     and_pq_eq = MK_COMB(lam_after_p, refl_q)
-    redex_inner_th = APP(_and_body_q_th, VAR(_q_var))
-    beta_inner = BETA(redex_inner_th)                 # |- (\q. ...) q = ...
-    and_pq_eq_unfolded = TRANS(and_pq_eq, beta_inner) # |- /\ p q = ((\f. f p q) = (\f. f T T))
+    beta_inner = BETA(APP(_and_body_q_th, VAR(_q_var)))
+    and_pq_eq_unfolded = TRANS(and_pq_eq, beta_inner)
 
-    # Combine: lam_eq : [p, q] |- (\f. f p q) = (\f. f T T)
-    #          and_pq_eq_unfolded : |- /\ p q = ((\f. f p q) = (\f. f T T))
-    # Symm and EQ_MP to derive [p, q] |- /\ p q.
-    rhs_typing = APP(APP(CONST("=", (_fpq_th._ty,)), _fpq_th), _fTT_th)
-    sym_and = SYM(and_pq_eq_unfolded, _and_typing(p_th, q_th))
-    # sym_and : |- ((\f. f p q) = (\f. f T T)) = /\ p q
+    sym_and = SYM(and_pq_eq_unfolded)                 # |- ((\f. f p q) = (\f. f T T)) = /\ p q
     return EQ_MP(sym_and, lam_eq)                     # [p, q] |- /\ p q
 
 
@@ -196,15 +187,12 @@ def mk_and(p: term, q: term) -> term:
     return Comb(Comb(Const("/\\", and_ty), p), q)
 
 
-def CONJ(th1: thm, th2: thm,
-         p_th: typing_thm, q_th: typing_thm) -> thm:
-    """th1: asl1 |- p, th2: asl2 |- q   →   asl1 ∪ asl2 |- p /\\ q.
-
-    `p_th : |- p : bool` and `q_th : |- q : bool` certify the two
-    conjuncts at the type the kernel's polymorphic = needs."""
-    inst_th = INST([(p_th, _p_var), (q_th, _q_var)], _CONJ_PTH)
-    # inst_th: [p, q] |- p_th._tm /\ q_th._tm
-    # Discharge via PROVE_HYP using th1, th2.
+def CONJ(th1: thm, th2: thm) -> thm:
+    """th1: asl1 |- p, th2: asl2 |- q   →   asl1 ∪ asl2 |- p /\\ q."""
+    inst_th = INST(
+        [(CONCL_TYPING(th1), _p_var), (CONCL_TYPING(th2), _q_var)],
+        _CONJ_PTH,
+    )
     return PROVE_HYP(th2, PROVE_HYP(th1, inst_th))
 
 
@@ -282,9 +270,7 @@ def _build_conjunct1_pth() -> thm:
     # app_eq : (\f. f p q) sel1 = (\f. f T T) sel1
     # SYM(beta_lhs_at_sel) : sel1 p q = (\f. f p q) sel1
     # SYM(beta_rhs_at_sel) flipped via TRANS:
-    sel_pq_typing = APP(APP(sel1_th, p_th), q_th)
-    fpq_at_sel_typing = APP(_fpq_th, sel1_th)
-    sym_lhs = SYM(beta_lhs_at_sel, fpq_at_sel_typing)
+    sym_lhs = SYM(beta_lhs_at_sel)
     step1 = TRANS(sym_lhs, app_eq)
     # step1: [pq] |- sel1 p q = (\f. f T T) sel1
     step2 = TRANS(step1, beta_rhs_at_sel)
@@ -292,13 +278,7 @@ def _build_conjunct1_pth() -> thm:
 
     # Now sel1 p q reduces to p (by 2 BETAs); sel1 T T reduces to T.
     # sel1 = \p q. p, so (\p q. p) p q = p by trivial redexes.
-    sel_p_outer = APP(sel1_th, VAR(_p_var))
-    beta_sel_p_outer = BETA(sel_p_outer)
-    # beta_sel_p_outer : |- (\p q. p) p = \q. p
-    sel_p_full = APP(APP(sel1_th, VAR(_p_var)), VAR(_q_var))
-    # sel_p_full : typing for (\p q. p) p q.
-    # We've already reduced (\p q. p) p to (\q. p). MK_COMB-style:
-    # MK_COMB(beta_sel_p_outer, REFL q) gives |- (\p q. p) p q = (\q. p) q
+    beta_sel_p_outer = BETA(APP(sel1_th, VAR(_p_var)))  # |- (\p q. p) p = \q. p
     refl_q_var = REFL(VAR(_q_var))
     sel_p_after1 = MK_COMB(beta_sel_p_outer, refl_q_var)
     # (\q. p) q = p — trivial redex.
@@ -314,16 +294,11 @@ def _build_conjunct1_pth() -> thm:
     # sel_T_fully : |- (\p q. p) T T = T
 
     # Combine: step2 says sel1 p q = sel1 T T.
-    # We have sel1 p q = p (sel_p_fully) and sel1 T T = T (sel_T_fully).
-    # So p = T (via SYM and TRANS) under [pq].
-    sym_sel_p = SYM(sel_p_fully, sel_pq_typing)
-    # sym_sel_p : |- p = (\p q. p) p q
-    step3 = TRANS(sym_sel_p, step2)
-    # step3 : [pq] |- p = (\p q. p) T T
-    step4 = TRANS(step3, sel_T_fully)
-    # step4 : [pq] |- p = T
-    # EQT_ELIM gives [pq] |- p.
-    return EQT_ELIM(step4, p_th)
+    # sel1 p q = p (sel_p_fully) and sel1 T T = T (sel_T_fully).
+    sym_sel_p = SYM(sel_p_fully)                       # |- p = (\p q. p) p q
+    step3 = TRANS(sym_sel_p, step2)                    # [pq] |- p = (\p q. p) T T
+    step4 = TRANS(step3, sel_T_fully)                  # [pq] |- p = T
+    return EQT_ELIM(step4)
 
 
 def _build_conjunct2_pth() -> thm:
@@ -354,9 +329,7 @@ def _build_conjunct2_pth() -> thm:
     beta_rhs = BETA(APP(_fTT_th, VAR(_f_var)))
     beta_rhs_at_sel = INST([(sel2_th, _f_var)], beta_rhs)
 
-    sel_pq_typing = APP(APP(sel2_th, p_th), q_th)
-    fpq_at_sel_typing = APP(_fpq_th, sel2_th)
-    sym_lhs = SYM(beta_lhs_at_sel, fpq_at_sel_typing)
+    sym_lhs = SYM(beta_lhs_at_sel)
     step1 = TRANS(sym_lhs, app_eq)
     step2 = TRANS(step1, beta_rhs_at_sel)
 
@@ -372,24 +345,40 @@ def _build_conjunct2_pth() -> thm:
     sel_T_fully = INST([(_T_const_th, _p_var), (_T_const_th, _q_var)], sel_p_fully)
     # sel_T_fully : |- (\p q. q) T T = T
 
-    sym_sel_p = SYM(sel_p_fully, sel_pq_typing)
+    sym_sel_p = SYM(sel_p_fully)
     step3 = TRANS(sym_sel_p, step2)
-    step4 = TRANS(step3, sel_T_fully)
-    # step4 : [pq] |- q = T
-    return EQT_ELIM(step4, q_th)
+    step4 = TRANS(step3, sel_T_fully)                  # [pq] |- q = T
+    return EQT_ELIM(step4)
 
 
 _CONJUNCT1_PTH = _build_conjunct1_pth()
 _CONJUNCT2_PTH = _build_conjunct2_pth()
 
 
-def CONJUNCT1(th: thm, p_th: typing_thm, q_th: typing_thm) -> thm:
-    """`th : asl |- p /\\ q`  →  `asl |- p`. Needs typing for both."""
+def _conj_typings(th: thm) -> tuple:
+    """`th : asl |- p /\\ q`  →  (typing for p, typing for q), both at bool.
+
+    Uses TYPE_OF with empty asl. If the conjuncts contain propositional
+    CONV bridges in their intrinsic structure, TYPE_OF will fail --
+    normalize via EQ_TY_CONV at the boundary before applying CONJUNCT*.
+    """
+    concl = th._concl
+    if not (isinstance(concl, Comb) and isinstance(concl.fun, Comb)
+            and isinstance(concl.fun.fun, Const)
+            and concl.fun.fun.name == "/\\"):
+        raise HolError("CONJUNCT*: conclusion is not a /\\")
+    return (TYPE_OF([], concl.fun.arg), TYPE_OF([], concl.arg))
+
+
+def CONJUNCT1(th: thm) -> thm:
+    """`th : asl |- p /\\ q`  →  `asl |- p`."""
+    p_th, q_th = _conj_typings(th)
     return PROVE_HYP(th, INST([(p_th, _p_var), (q_th, _q_var)], _CONJUNCT1_PTH))
 
 
-def CONJUNCT2(th: thm, p_th: typing_thm, q_th: typing_thm) -> thm:
-    """`th : asl |- p /\\ q`  →  `asl |- q`. Needs typing for both."""
+def CONJUNCT2(th: thm) -> thm:
+    """`th : asl |- p /\\ q`  →  `asl |- q`."""
+    p_th, q_th = _conj_typings(th)
     return PROVE_HYP(th, INST([(p_th, _p_var), (q_th, _q_var)], _CONJUNCT2_PTH))
 
 
@@ -465,81 +454,33 @@ def _require_bool(t_th: typing_thm, ctx: str) -> None:
 def IMP_TYPE(F_th: typing_thm, G_th: typing_thm) -> typing_thm:
     """`Gamma |- F : bool, Gamma, ▷F |- G : bool  →  Gamma |- F ==> G : bool`.
 
-    Mirrors fusion_dhol's old kernel rule. Since ==> is now a defined
-    constant, we just call APP twice and let the kernel check the types;
-    F is removed from G_th's asl, matching the old `Rule D` behaviour."""
-    from fusion_dhol import term_union, term_remove
+    Mirrors fusion_dhol's old kernel rule. F is removed from G_th's
+    asl, matching the old `Rule D` behaviour."""
+    from fusion_dhol import term_remove
     _require_bool(F_th, "IMP_TYPE antecedent")
     _require_bool(G_th, "IMP_TYPE consequent")
-    imp_th = CONST("==>")
-    fG_th = APP(imp_th, F_th)
-    # Strip F from G_th's asl before the second APP (the kernel takes union):
-    G_th_cleaned = typing_thm(
+    G_cleaned = typing_thm(
         term_remove(F_th._tm, G_th._asl),
         G_th._tm,
         G_th._ty,
     )
-    return APP(fG_th, G_th_cleaned)
+    return APP(APP(CONST("==>"), F_th), G_cleaned)
 
 
 def DISCH(F_th: typing_thm, th: thm) -> thm:
     """asl, F |- G  →  asl |- F ==> G  (HOL Light bool.ml derivation).
 
-    F_th : Gamma |- F : bool certifies the antecedent."""
-    from fusion_dhol import type_eq as _type_eq, term_union
+    F_th : Gamma |- F : bool certifies the antecedent; the consequent's
+    typing is recovered via CONCL_TYPING on th."""
     _require_bool(F_th, "DISCH antecedent")
-    F_tm = F_th._tm
-    G_tm = th._concl
-
-    # We need typing for G. ASSUME(typing_thm([], G, bool)) would do — but only
-    # if G is closed and well-typed at bool. Conclusions of validity proofs
-    # are always at bool, so we trust the caller. Build a typing_thm directly
-    # via VAR-style construction is unsafe; instead, derive it from the
-    # asm-chain. The cleanest path: build typing_thm via a fresh ASSUME.
-    G_typing = typing_thm([G_tm], G_tm, bool_ty)
-    # (G_typing's asl contains G_tm; CONJ/etc absorb it into the proof asl,
-    #  and PROVE_HYP discharges it via th below. No new free hyps leak.)
-
-    # th1 = CONJ(ASSUME F, th)  : asl, F |- F /\ G
-    asm_F = ASSUME(F_th)
-    th1 = CONJ(asm_F, th, F_th, G_typing)
-    # th1's asl includes F_th._asl, th._asl, F, plus the bool-typing's [G] —
-    # but PROVE_HYP discharges G via th, see below.
-
-    # th2 = CONJUNCT1(ASSUME(F /\ G))  : [F /\ G] |- F
-    F_and_G_tm = mk_and(F_tm, G_tm)
+    G_typing = CONCL_TYPING(th)
     F_and_G_typing = _and_typing(F_th, G_typing)
-    asm_FG = ASSUME(F_and_G_typing)
-    th2 = CONJUNCT1(asm_FG, F_th, G_typing)
-    # asl of th2: [F /\ G, G]  (G from G_typing's asl threading through)
 
-    # th3 = DEDUCT_ANTISYM_RULE(th1, th2) : asl |- (F /\ G) = F
-    # th1 concl = F /\ G, th2 concl = F
-    # th1 asl includes F (we want it removed by DAR via th2.concl = F).
-    # th2 asl includes F /\ G (removed via th1.concl = F /\ G).
-    th3 = DEDUCT_ANTISYM_RULE(th1, th2)
-
-    # Now build |- (F /\ G = F) = (F ==> G), i.e. SYM of IMP_DEF unfolded.
-    imp_unfold = _imp_unfold_eq(F_th, G_typing)
-    # imp_unfold : |- (F ==> G) = ((F /\ G) = F)
-    fg_eq_F_typing = APP(
-        APP(CONST("=", (bool_ty,)), F_and_G_typing),
-        F_th,
-    )
-    imp_typing = APP(APP(CONST("==>"), F_th), G_typing)
-    # SYM expects lhs_th = imp_typing (the LHS of imp_unfold).
-    sym_imp = SYM(imp_unfold, imp_typing)
-    # sym_imp : |- ((F /\ G) = F) = (F ==> G)
-    result = EQ_MP(sym_imp, th3)
-
-    # Clean stray G-typing assumption (G_typing carried [G] through CONJ).
-    # The asl was threaded but never *added* to the result — DAR + EQ_MP
-    # don't introduce new asl beyond what came in. Let's verify by
-    # explicit removal of G if it crept in:
-    from fusion_dhol import term_remove
-    cleaned_asl = term_remove(G_tm, result._asl)
-    # G may appear because G_typing's [G] threaded through. Strip it.
-    return thm(cleaned_asl, result._concl)
+    th1 = CONJ(ASSUME(F_th), th)                       # asl, F |- F /\ G
+    th2 = CONJUNCT1(ASSUME(F_and_G_typing))            # [F /\ G] |- F
+    th3 = DEDUCT_ANTISYM_RULE(th1, th2)                # asl |- (F /\ G) = F
+    sym_imp = SYM(_imp_unfold_eq(F_th, G_typing))      # |- ((F /\ G) = F) = (F ==> G)
+    return EQ_MP(sym_imp, th3)
 
 
 def MP(imp_th: thm, ant_th: thm) -> thm:
@@ -552,26 +493,16 @@ def MP(imp_th: thm, ant_th: thm) -> thm:
     if not _alpha_eq(F_tm, ant_th._concl):
         raise HolError("MP: antecedent does not match")
 
-    F_typing = typing_thm([F_tm], F_tm, bool_ty)
-    G_typing = typing_thm([G_tm], G_tm, bool_ty)
-    # Use IMP_DEF unfolding: (F ==> G) = ((F /\ G) = F)
-    imp_unfold = _imp_unfold_eq(F_typing, G_typing)
-    # imp_unfold: |- (F ==> G) = ((F /\ G) = F)
-    fg_eq_F = EQ_MP(imp_unfold, imp_th)
-    # fg_eq_F: asl1 |- (F /\ G) = F
-
-    # SYM gives F = F /\ G, EQ_MP with ant_th gives asl1 ∪ asl2 |- F /\ G.
-    F_and_G_typing = _and_typing(F_typing, G_typing)
-    sym_fg = SYM(fg_eq_F, F_and_G_typing)
-    # sym_fg: asl1 |- F = (F /\ G)
-    f_and_g_thm = EQ_MP(sym_fg, ant_th)
-    # f_and_g_thm: asl1 ∪ asl2 |- F /\ G
-
-    g_thm = CONJUNCT2(f_and_g_thm, F_typing, G_typing)
-    # Strip stray F, G typing-assumptions threaded through CONJUNCT2.
-    from fusion_dhol import term_remove
-    cleaned = term_remove(G_tm, term_remove(F_tm, g_thm._asl))
-    return thm(cleaned, g_thm._concl)
+    # Both typings via the kernel's structural rules. If G carries a
+    # propositional CONV bridge inside its intrinsic shape, the caller
+    # must EQ_TY_CONV-normalize the implication before MP.
+    F_typing = CONCL_TYPING(ant_th)
+    G_typing = TYPE_OF([], G_tm)
+    imp_unfold = _imp_unfold_eq(F_typing, G_typing)    # |- (F ==> G) = ((F /\ G) = F)
+    fg_eq_F = EQ_MP(imp_unfold, imp_th)                # asl1 |- (F /\ G) = F
+    sym_fg = SYM(fg_eq_F)                              # asl1 |- F = (F /\ G)
+    f_and_g_thm = EQ_MP(sym_fg, ant_th)                # asl1 ∪ asl2 |- F /\ G
+    return CONJUNCT2(f_and_g_thm)
 
 
 def _alpha_eq(a, b) -> bool:
@@ -625,13 +556,8 @@ def ETA(t_th: typing_thm) -> thm:
             "codomain; needs rank-1 type operators (basics_dhol "
             "limitation, not a kernel one)"
         )
-    # Instantiate ETA_AX at (A := A_ty, B := B_ty, f := t_th).
     eta_at = interpret(ETA_AX, (A_ty, B_ty, t_th))
-    # eta_at : |- (\x:A. t x) = t. SYM to get t = (\x. t x).
-    # Need typing for the LHS = (\x:A. t x): build it.
-    fresh_x = Var(ty.bvar.name, A_ty)
-    lhs_th = LAMBDA(fresh_x, APP(t_th, VAR(fresh_x)))
-    return SYM(eta_at, lhs_th)
+    return SYM(eta_at)
 
 
 # ---------------------------------------------------------------------------
@@ -646,27 +572,23 @@ if __name__ == "__main__":
     print("ETA_AX     ::", ETA_AX)
 
     # CONJ smoke: from |- T (TRUTH) and |- T, derive |- T /\ T.
-    T_th = _T_const_th
-    truth_conj = CONJ(TRUTH, TRUTH, T_th, T_th)
+    truth_conj = CONJ(TRUTH, TRUTH)
     print("T /\\ T     ::", truth_conj)
 
     # CONJUNCT1 / CONJUNCT2 round-trip:
-    left = CONJUNCT1(truth_conj, T_th, T_th)
-    right = CONJUNCT2(truth_conj, T_th, T_th)
-    print("CONJUNCT1  ::", left)
-    print("CONJUNCT2  ::", right)
+    print("CONJUNCT1  ::", CONJUNCT1(truth_conj))
+    print("CONJUNCT2  ::", CONJUNCT2(truth_conj))
 
     # DISCH / MP round-trip: prove |- T ==> T, then MP with |- T.
-    T_typing = T_th  # |- T : bool
-    asm_T_thm = ASSUME(T_th)               # [T] |- T
-    imp_TT = DISCH(T_typing, asm_T_thm)    # |- T ==> T
+    T_typing = _T_const_th                          # |- T : bool
+    asm_T_thm = ASSUME(T_typing)                    # [T] |- T
+    imp_TT = DISCH(T_typing, asm_T_thm)             # |- T ==> T
     print("DISCH      ::", imp_TT)
-    mp_TT = MP(imp_TT, TRUTH)              # |- T
+    mp_TT = MP(imp_TT, TRUTH)                       # |- T
     print("MP         ::", mp_TT)
 
     # IMP_TYPE: type-level Rule D wrapper.
-    imp_type = IMP_TYPE(T_typing, T_typing)
-    print("IMP_TYPE   ::", imp_type)
+    print("IMP_TYPE   ::", IMP_TYPE(T_typing, T_typing))
 
     # ETA: non-dependent. Declare a stub constant f : bool -> bool.
     from fusion_dhol import new_constant
