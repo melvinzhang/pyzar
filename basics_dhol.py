@@ -10,11 +10,10 @@ the DHOL-specific typing layer:
                          is_imp / dest_imp helpers.
   IMP_TYPE               typing-layer derived rule for ==>.
   DISCH, MP              derived per HOL Light bool.ml.
-  ETA_AX, ETA            ETA_AX is an axiom at non-dependent (A -> B);
-                         ETA wraps it via INST_TYPE / INST.
-
-Limitation: ETA only fires at non-dependent Pi (A -> B). Fully
-dependent eta needs rank-1 type operators in Φ (dhol_missing.md #19).
+  ETA_AX, ETA            ETA_AX is an axiom polymorphic in a rank-1
+                         type operator `B : (x:A)→tp`; ETA wraps it by
+                         building the TypeAbs for B from the Pi codomain
+                         the user supplies.
 
 Several derived rules take an *extra typing certificate* alongside the
 `thm` they consume. In HOL Light the analogous derivation uses
@@ -28,6 +27,7 @@ from __future__ import annotations
 
 from fusion_dhol import (
     Var, Const, Comb, Abs, Pi, Tyvar, Tyapp,
+    TyopVar, TyopApp, TypeAbs,
     typing_thm, thm, type_eq_thm,
     bool_ty, aty, safe_mk_eq, mk_arrow,
     VAR, CONST, LAMBDA, CONV,
@@ -578,52 +578,49 @@ def _alpha_eq(a, b) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# ETA: axiomatised at non-dependent Pi.
+# ETA: axiomatised at a fully-dependent Pi via a rank-1 type operator B.
 #
-# ETA_AX : (A:tp, B:tp, f:A->B) ▷ (\x:A. f x) = f
+# ETA_AX : (A:tp, B:(x:A)→tp, f:Pi(x:A). B(x)) ▷ (\x:A. f x) = f
 #
-# Fully dependent eta (f : Pi(x:A). B(x)) is NOT covered -- that would
-# need B to vary with x, which requires rank-1 type operators in Φ.
+# The non-dependent case (B does not mention x) is recovered by passing
+# a constant TypeAbs: σ[B] = TypeAbs((x:A,), B_ty) where B_ty doesn't
+# mention x.
 # ---------------------------------------------------------------------------
 
 
 _A_tv = Tyvar("A")
-_B_tv = Tyvar("B")
-_f_AB_var = Var("f", mk_arrow(_A_tv, _B_tv))
 _x_A_var = Var("x", _A_tv)
-# (\x:A. f x) at A -> B
-_lam_fx_th = LAMBDA(_x_A_var, APP(VAR(_f_AB_var), VAR(_x_A_var)))
+_B_op = TyopVar("B", (_x_A_var,))
+# Pi(x:A). B(x)
+_B_at_x = TyopApp("B", (_x_A_var,))
+_f_dep_ty = Pi(_x_A_var, _B_at_x)
+_f_dep_var = Var("f", _f_dep_ty)
+# (\x:A. f x) : Pi(x:A). B(x)
+_lam_fx_th = LAMBDA(_x_A_var, APP(VAR(_f_dep_var), VAR(_x_A_var)))
 _eta_form = safe_mk_eq(
-    mk_arrow(_A_tv, _B_tv),
+    _f_dep_ty,
     _lam_fx_th._tm,
-    VAR(_f_AB_var)._tm,
+    VAR(_f_dep_var)._tm,
 )
 ETA_AX = new_axiom(
     typing_thm([], _eta_form, bool_ty),
-    phi=(_A_tv, _B_tv, _f_AB_var),
+    phi=(_A_tv, _B_op, _f_dep_var),
 )
 
 
 def ETA(t_th: typing_thm) -> thm:
-    """`Gamma |- t : Pi(x:A). B   →   Gamma |- t = (\\x:A. t x)`.
+    """`Gamma |- t : Pi(x:A). B(x)   →   Gamma |- t = (\\x:A. t x)`.
 
-    Only the *non-dependent* case (B does not mention x) is supported,
-    since ETA_AX is axiomatised at `f : A -> B`. Fully dependent eta
-    requires rank-1 type operators in Φ -- dhol_missing.md item 19."""
+    Handles the fully-dependent case: the Pi codomain may mention the
+    binder. The B operator's σ-evidence is built by wrapping the
+    codomain in a `TypeAbs` over the Pi binder; the non-dependent case
+    falls out as a TypeAbs whose body doesn't mention the bvar."""
     ty = t_th._ty
     if not isinstance(ty, Pi):
         raise HolError(f"ETA: term type is not a Pi (got {_pp_ty(ty)})")
     A_ty = ty.bvar.ty
-    B_ty = ty.body
-    # Reject the fully-dependent case: x must not occur in B.
-    from fusion_dhol import _occurs_in_type
-    if _occurs_in_type(ty.bvar, B_ty):
-        raise HolError(
-            "ETA: dependent Pi unsupported -- bound var occurs in "
-            "codomain; needs rank-1 type operators (basics_dhol "
-            "limitation, not a kernel one)"
-        )
-    eta_at = interpret(ETA_AX, (A_ty, B_ty, t_th))
+    B_typeabs = TypeAbs((ty.bvar,), ty.body)
+    eta_at = interpret(ETA_AX, (A_ty, B_typeabs, t_th))
     return SYM(eta_at)
 
 
@@ -657,20 +654,23 @@ if __name__ == "__main__":
     # IMP_TYPE: type-level Rule D wrapper.
     print("IMP_TYPE   ::", IMP_TYPE(T_typing, T_typing))
 
-    # ETA: non-dependent. Declare a stub constant f : bool -> bool.
-    from fusion_dhol import new_constant
+    # ETA: non-dependent. Declare a stub constant g : bool -> bool.
+    from fusion_dhol import new_constant, new_type, mk_type
     new_constant("g", mk_arrow(bool_ty, bool_ty))
     g_th = CONST("g")
     g_eta = ETA(g_th)
     print("ETA(g)     ::", g_eta)
 
-    # ETA on dependent Pi is rejected.
+    # ETA: fully dependent. Declare nat, vec(n:nat) : tp, and a constant
+    # h : Pi(n:nat). vec(n). ETA should give h = (\n:nat. h n) at the
+    # dependent Pi -- no more rejection.
     n_ty = Tyapp("nat", (), ())
-    try:
-        new_constant_failed = False
-        from fusion_dhol import new_type
-        new_type("nat", phi=(), witness=("0", n_ty))
-    except HolError:
-        pass  # already declared in repeated runs
-    # We can't easily build a Pi(x:nat). vec(x) here without more setup;
-    # the kernel's __main__ exercises that path.
+    new_type("nat", phi=(), witness=("0", n_ty))
+    n_var = Var("n", n_ty)
+    nil_ty = Tyapp("vec", (), (Const("0", n_ty),))
+    new_type("vec", phi=(n_var,), witness=("nil", nil_ty))
+    h_ty = Pi(n_var, mk_type("vec", [VAR(n_var)]))
+    new_constant("h", h_ty)
+    h_th = CONST("h")
+    h_eta = ETA(h_th)
+    print("ETA(h)     ::", h_eta)

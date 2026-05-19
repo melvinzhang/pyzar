@@ -100,7 +100,27 @@ class Subtype:
     predicate: "term"
 
 
-hol_type = Tyvar | Tyapp | Pi | Subtype
+@dataclass(frozen=True, slots=True)
+class TyopApp:
+    """Application of a Φ-bound rank-1 type operator to term arguments.
+
+    A `TyopApp(name, args)` is a placeholder type, parameterised by the
+    `args` terms, that resolves to a concrete `hol_type` when the
+    enclosing Φ-substitution supplies a `TypeAbs` for `name`. After
+    Φ-resolution no `TyopApp` should remain in a kernel certificate.
+
+    Distinct from `Tyapp`, which represents declared type constants:
+    `name` here refers to a Φ-bound `TyopVar` slot, not the `the_decls`
+    registry."""
+    name: str
+    args: tuple             # tuple[term, ...]
+
+    def __post_init__(self):
+        if not isinstance(self.args, tuple):
+            object.__setattr__(self, "args", tuple(self.args))
+
+
+hol_type = Tyvar | Tyapp | Pi | Subtype | TyopApp
 
 
 # ---------------------------------------------------------------------------
@@ -150,18 +170,55 @@ class Assume:
     formula: term
 
 
-# A Φ-slot is a binder at one of the three DHOL judgment levels:
+@dataclass(frozen=True, slots=True)
+class TyopVar:
+    """Φ-slot: a rank-1 type-operator variable with declared term
+    parameters. Bound name in scope for later Φ-entries (its applied
+    form is `TyopApp(name, args)`). All applications must yield `tp`;
+    no type-level lambda, no βη on types.
+
+    `params` is a telescope of `Var` binders interpreted under earlier
+    Φ entries; the operator's kind is `(params...) → tp`. The σ-evidence
+    is a `TypeAbs` whose bvar types match `params` modulo definitional
+    equality."""
+    name: str
+    params: tuple           # tuple[Var, ...]
+
+    def __post_init__(self):
+        if not isinstance(self.params, tuple):
+            object.__setattr__(self, "params", tuple(self.params))
+
+
+@dataclass(frozen=True, slots=True)
+class TypeAbs:
+    """Meta-level type abstraction `λ(x1:A1, ..., xn:An). body`.
+
+    σ-evidence for a `TyopVar` Φ-slot. The user supplies bvars and a
+    body type that may mention them; `_resolve_tyops_in_type` then
+    substitutes `TyopApp` arguments for the bvars to recover the
+    concrete codomain. Not a `hol_type` -- abstractions only exist as
+    σ-evidence at the meta level, in line with item 19's "no type-level
+    λ" constraint (the placeholder is consumed at instantiation)."""
+    bvars: tuple            # tuple[Var, ...]
+    body: "hol_type"
+
+    def __post_init__(self):
+        if not isinstance(self.bvars, tuple):
+            object.__setattr__(self, "bvars", tuple(self.bvars))
+
+
+# A Φ-slot is a binder at one of the four DHOL judgment levels:
 #
-#   Tyvar(α)   -- binds at tp        (`Γ ⊢ α : tp`)
-#   Var(x, A)  -- binds at term      (`Γ ⊢ x : A`)
-#   Assume(F)  -- binds at validity  (`Γ ⊢ F`)
+#   Tyvar(α)        -- binds at tp        (`Γ ⊢ α : tp`)
+#   TyopVar(F, p)   -- binds at (p...)→tp (rank-1 type operator)
+#   Var(x, A)       -- binds at term      (`Γ ⊢ x : A`)
+#   Assume(F)       -- binds at validity  (`Γ ⊢ F`)
 #
 # The PhiSubst evidence for each slot is the corresponding J-witness:
-# hol_type for Tyvar (carrying the tp-level fact implicitly), typing_thm
-# for Var (the term-level witness), and thm for Assume (the validity
-# witness). This pointwise mapping is what makes `_apply_phi_subst`
+# hol_type for Tyvar, TypeAbs for TyopVar, typing_thm for Var, and thm
+# for Assume. This pointwise mapping is what makes `_apply_phi_subst`
 # and `_apply_phi_dual` J-agnostic walkers.
-Slot = Tyvar | Var | Assume
+Slot = Tyvar | TyopVar | Var | Assume
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +348,9 @@ def _pp_phi(phi) -> str:
     for e in phi:
         if isinstance(e, Tyvar):
             parts.append(e.name)
+        elif isinstance(e, TyopVar):
+            params = ", ".join(f"{p.name}:{_pp_ty(p.ty)}" for p in e.params)
+            parts.append(f"{e.name}:({params})→tp" if params else f"{e.name}:tp")
         elif isinstance(e, Var):
             parts.append(f"{e.name}:{_pp_ty(e.ty)}")
         elif isinstance(e, Assume):
@@ -434,6 +494,14 @@ def new_type(
     if name in the_decls:
         raise HolError(f"new_type: type {name} has already been declared")
     _check_phi(phi, f"new_type({name})")
+    if any(isinstance(b, TyopVar) for b in phi):
+        raise HolError(
+            f"new_type({name}): TyopVar in Φ unsupported -- a declared "
+            f"`Tyapp` carries Tyvar/Var-slot σ choices in type_args / "
+            f"term_args but has no room to record the chosen TypeAbs. "
+            f"TyopVar is only available in `new_axiom` / `new_constant` "
+            f"telescopes, where σ is consumed at use site."
+        )
     witness_name, witness_ty = witness
     if witness_name in the_decls:
         raise HolError(
@@ -528,14 +596,18 @@ def mk_arrow(a: hol_type, b: hol_type) -> hol_type:
 
 
 def _check_assume_proof(arg, formula: term, theta_ty: list,
-                        theta_tm: list, ctx: str) -> term:
+                        theta_tm: list, ctx: str,
+                        tyop_theta: list | None = None) -> term:
     """Validate that `arg` is a `thm` whose conclusion alpha-matches
-    `formula` after applying the term substitution `theta_tm` and the
-    type substitution `theta_ty`. Returns the substituted `formula`
+    `formula` after applying the term substitution `theta_tm`, the
+    type substitution `theta_ty`, and (when supplied) the rank-1
+    tyop substitution `tyop_theta`. Returns the substituted `formula`
     (`needed`); the caller decides what to do with `arg._asl`."""
     if not isinstance(arg, thm):
         raise HolError(f"{ctx}: argument for Assume binder must be a thm")
     needed = _inst_in_term([], theta_ty, _vsubst(theta_tm, formula))
+    if tyop_theta:
+        needed = _resolve_tyops_in_term(tyop_theta, needed)
     if not _tm_alpha([], arg._concl, needed):
         raise HolError(
             f"{ctx}: Assume proof concludes {_pp_tm(arg._concl)} "
@@ -578,26 +650,28 @@ PhiSubst = tuple            # tuple[hol_type | typing_thm | thm, ...]
 
 
 def _check_phi(phi, ctx: str) -> None:
-    """Light syntactic check: every entry is a Tyvar, Var, or Assume.
-    Well-formedness of binder annotations under earlier entries is the
-    caller's responsibility (honest-caller perimeter, mirroring how
-    `new_type` accepts raw `Var(x, A)` without re-checking A)."""
+    """Light syntactic check: every entry is a Tyvar, TyopVar, Var, or
+    Assume. Well-formedness of binder annotations under earlier entries
+    is the caller's responsibility (honest-caller perimeter, mirroring
+    how `new_type` accepts raw `Var(x, A)` without re-checking A)."""
     for entry in phi:
-        if not isinstance(entry, (Tyvar, Var, Assume)):
+        if not isinstance(entry, (Tyvar, TyopVar, Var, Assume)):
             raise HolError(
-                f"{ctx}: context entries must be Tyvar, Var, or Assume "
-                f"(got {entry!r})"
+                f"{ctx}: context entries must be Tyvar, TyopVar, Var, or "
+                f"Assume (got {entry!r})"
             )
 
 
 class PhiSubstResult(NamedTuple):
     """Output of `_apply_phi_subst`. Fields:
-      theta_ty:  list of (chosen_hol_type, Tyvar) -- type substitution
-      theta_tm:  list of (chosen_term, Var)        -- term substitution
-      term_args: chosen terms for Var entries (declaration order)
-      asl_extra: assumptions absorbed from Var-typings + Assume-proofs"""
+      theta_ty:   list of (chosen_hol_type, Tyvar) -- type substitution
+      theta_tm:   list of (chosen_term, Var)        -- term substitution
+      tyop_theta: list of (TypeAbs, name)           -- tyop substitution
+      term_args:  chosen terms for Var entries (declaration order)
+      asl_extra:  assumptions absorbed from Var-typings + Assume-proofs"""
     theta_ty: list
     theta_tm: list
+    tyop_theta: list
     term_args: list
     asl_extra: list
 
@@ -618,7 +692,10 @@ def _apply_phi_subst(phi, sigma, ctx: str) -> PhiSubstResult:
             f"{ctx}: wrong number of arguments "
             f"(expected {len(phi)}, got {len(sigma)})"
         )
-    out = PhiSubstResult(theta_ty=[], theta_tm=[], term_args=[], asl_extra=[])
+    out = PhiSubstResult(
+        theta_ty=[], theta_tm=[], tyop_theta=[],
+        term_args=[], asl_extra=[],
+    )
     for binder, arg in zip(phi, sigma):
         handlers = _SLOT_DISPATCH.get(type(binder))
         if handlers is None:
@@ -652,6 +729,9 @@ def mk_type(tyop: str, args: list) -> hol_type:
             "mk_type: Φ arguments must be unconditional (empty asl); "
             "mk_type returns a hol_type with no asl tracking"
         )
+    # `new_type` rejects TyopVar slots, so tyop_theta is necessarily
+    # empty here -- the Tyapp's type_args / term_args have no place for
+    # TypeAbs evidence.
     type_args = tuple(t for t, _ in result.theta_ty)
     return Tyapp(tyop, type_args, tuple(result.term_args))
 
@@ -708,6 +788,11 @@ def frees_in_type(ty: hol_type) -> list:
         seen = list(frees_in_type(ty.bvar.ty))
         _uniq_extend(seen, (v for v in frees(ty.predicate) if v != ty.bvar))
         return seen
+    if isinstance(ty, TyopApp):
+        seen = []
+        for a in ty.args:
+            _uniq_extend(seen, frees(a))
+        return seen
     raise HolError("frees_in_type: ill-formed type")
 
 
@@ -751,7 +836,63 @@ def tyvars(ty: hol_type) -> list:
         return _uniq_extend(
             list(tyvars(ty.bvar.ty)), type_vars_in_term(ty.predicate)
         )
+    if isinstance(ty, TyopApp):
+        seen = []
+        for a in ty.args:
+            _uniq_extend(seen, type_vars_in_term(a))
+        return seen
     raise HolError("tyvars: ill-formed type")
+
+
+def tyop_names_in_type(ty: hol_type) -> list:
+    """Names of all `TyopApp`s appearing in `ty` (in first-appearance
+    order). A TyopApp's `name` is a Φ-bound TyopVar reference."""
+    if isinstance(ty, Tyvar):
+        return []
+    if isinstance(ty, Tyapp):
+        seen: list = []
+        for a in ty.type_args:
+            _uniq_extend(seen, tyop_names_in_type(a))
+        for a in ty.term_args:
+            _uniq_extend(seen, tyop_names_in_term(a))
+        return seen
+    if isinstance(ty, Pi):
+        return _uniq_extend(
+            list(tyop_names_in_type(ty.bvar.ty)),
+            tyop_names_in_type(ty.body),
+        )
+    if isinstance(ty, Subtype):
+        return _uniq_extend(
+            list(tyop_names_in_type(ty.bvar.ty)),
+            tyop_names_in_term(ty.predicate),
+        )
+    if isinstance(ty, TyopApp):
+        seen = [ty.name]
+        for a in ty.args:
+            _uniq_extend(seen, tyop_names_in_term(a))
+        return seen
+    raise HolError("tyop_names_in_type: ill-formed type")
+
+
+def tyop_names_in_term(tm: term) -> list:
+    if isinstance(tm, Var):
+        return tyop_names_in_type(tm.ty)
+    if isinstance(tm, Const):
+        seen = list(tyop_names_in_type(tm.ty))
+        for a in tm.term_args:
+            _uniq_extend(seen, tyop_names_in_term(a))
+        return seen
+    if isinstance(tm, Comb):
+        return _uniq_extend(
+            list(tyop_names_in_term(tm.fun)),
+            tyop_names_in_term(tm.arg),
+        )
+    if isinstance(tm, Abs):
+        return _uniq_extend(
+            list(tyop_names_in_type(tm.bvar.ty)),
+            tyop_names_in_term(tm.body),
+        )
+    raise HolError("tyop_names_in_term: ill-formed term")
 
 
 def type_vars_in_term(tm: term) -> list:
@@ -814,6 +955,10 @@ def _ty_eq(env: list, t1: hol_type, t2: hol_type) -> bool:
             return False
         env2 = [(t1.bvar, t2.bvar), *env]
         return _tm_alpha(env2, t1.predicate, t2.predicate)
+    if isinstance(t1, TyopApp) and isinstance(t2, TyopApp):
+        if t1.name != t2.name or len(t1.args) != len(t2.args):
+            return False
+        return all(_tm_alpha(env, a, b) for a, b in zip(t1.args, t2.args))
     return False
 
 
@@ -890,6 +1035,8 @@ def subst_in_type(theta: list, ty: hol_type) -> hol_type:
             theta, ty.bvar, ty.predicate,
             _vsubst, vfree_in, Subtype,
         )
+    if isinstance(ty, TyopApp):
+        return TyopApp(ty.name, tuple(_vsubst(theta, a) for a in ty.args))
     raise HolError("subst_in_type: ill-formed type")
 
 
@@ -911,6 +1058,8 @@ def _occurs_in_type(v: Var, ty: hol_type) -> bool:
         if ty.bvar == v:
             return _occurs_in_type(v, ty.bvar.ty)
         return _occurs_in_type(v, ty.bvar.ty) or vfree_in(v, ty.predicate)
+    if isinstance(ty, TyopApp):
+        return any(vfree_in(v, a) for a in ty.args)
     return False
 
 
@@ -943,6 +1092,8 @@ def type_subst(i: list, ty: hol_type) -> hol_type:
             Var(ty.bvar.name, type_subst(i, ty.bvar.ty)),
             _inst_in_term([], i, ty.predicate),
         )
+    if isinstance(ty, TyopApp):
+        return TyopApp(ty.name, tuple(_inst_in_term([], i, a) for a in ty.args))
     raise HolError("type_subst: ill-formed type")
 
 
@@ -992,6 +1143,99 @@ def _inst_in_term(env: list, tyin: list, tm: term) -> term:
             renamed = _vsubst([(z, tm.bvar)], tm.body)
             return _inst_in_term(env, tyin, Abs(z, renamed))
     raise HolError("_inst_in_term: ill-formed term")
+
+
+# ---------------------------------------------------------------------------
+# Rank-1 type-operator resolution
+#
+# A `tyop_theta` is a list of (TypeAbs, name) pairs, one per TyopVar
+# slot in the consumed Φ. The walkers below replace every
+# `TyopApp(name, args)` whose name is bound in `tyop_theta` with the
+# corresponding `TypeAbs.body` after substituting `args` for the
+# TypeAbs's bvars. After resolution no `TyopApp` referring to a name
+# in `tyop_theta` should remain in the result; references to other
+# names (e.g. outer-scope TyopVars in a nested staging) are left
+# alone, matching the way `_inst_in_term` leaves unbound `Tyvar`s
+# alone.
+# ---------------------------------------------------------------------------
+
+
+def _resolve_tyops_in_type(tyop_theta: list, ty: hol_type) -> hol_type:
+    if not tyop_theta:
+        return ty
+    if isinstance(ty, Tyvar):
+        return ty
+    if isinstance(ty, Tyapp):
+        new_type_args = tuple(
+            _resolve_tyops_in_type(tyop_theta, a) for a in ty.type_args
+        )
+        new_term_args = tuple(
+            _resolve_tyops_in_term(tyop_theta, a) for a in ty.term_args
+        )
+        return Tyapp(ty.tyop, new_type_args, new_term_args)
+    if isinstance(ty, Pi):
+        return Pi(
+            Var(ty.bvar.name, _resolve_tyops_in_type(tyop_theta, ty.bvar.ty)),
+            _resolve_tyops_in_type(tyop_theta, ty.body),
+        )
+    if isinstance(ty, Subtype):
+        return Subtype(
+            Var(ty.bvar.name, _resolve_tyops_in_type(tyop_theta, ty.bvar.ty)),
+            _resolve_tyops_in_term(tyop_theta, ty.predicate),
+        )
+    if isinstance(ty, TyopApp):
+        new_args = tuple(
+            _resolve_tyops_in_term(tyop_theta, a) for a in ty.args
+        )
+        for typeabs, F_name in tyop_theta:
+            if F_name == ty.name:
+                if len(typeabs.bvars) != len(new_args):
+                    raise HolError(
+                        f"_resolve_tyops_in_type: arity mismatch for "
+                        f"{ty.name} (got {len(new_args)}, "
+                        f"expected {len(typeabs.bvars)})"
+                    )
+                sub = list(zip(new_args, typeabs.bvars))
+                return _resolve_tyops_in_type(
+                    tyop_theta, subst_in_type(sub, typeabs.body)
+                )
+        return TyopApp(ty.name, new_args)
+    raise HolError("_resolve_tyops_in_type: ill-formed type")
+
+
+def _resolve_tyops_in_term(tyop_theta: list, tm: term) -> term:
+    if not tyop_theta:
+        return tm
+    if isinstance(tm, Var):
+        new_ty = _resolve_tyops_in_type(tyop_theta, tm.ty)
+        return tm if new_ty is tm.ty else Var(tm.name, new_ty)
+    if isinstance(tm, Const):
+        new_ty = _resolve_tyops_in_type(tyop_theta, tm.ty)
+        new_args = tuple(
+            _resolve_tyops_in_term(tyop_theta, a) for a in tm.term_args
+        )
+        if new_ty is tm.ty and all(
+            n is o for n, o in zip(new_args, tm.term_args)
+        ):
+            return tm
+        return Const(tm.name, new_ty, new_args)
+    if isinstance(tm, Comb):
+        f2 = _resolve_tyops_in_term(tyop_theta, tm.fun)
+        a2 = _resolve_tyops_in_term(tyop_theta, tm.arg)
+        if f2 is tm.fun and a2 is tm.arg:
+            return tm
+        return Comb(f2, a2)
+    if isinstance(tm, Abs):
+        new_bvar_ty = _resolve_tyops_in_type(tyop_theta, tm.bvar.ty)
+        new_bvar = (
+            tm.bvar if new_bvar_ty is tm.bvar.ty
+            else Var(tm.bvar.name, new_bvar_ty)
+        )
+        new_body = _resolve_tyops_in_term(tyop_theta, tm.body)
+        if new_bvar is tm.bvar and new_body is tm.body:
+            return tm
+        return Abs(new_bvar, new_body)
+    raise HolError("_resolve_tyops_in_term: ill-formed term")
 
 
 # ---------------------------------------------------------------------------
@@ -1061,6 +1305,10 @@ def _pp_ty_raw(ty):
             f"({_pp_ty_raw(ty.bvar.ty)}|"
             f"\\{ty.bvar.name}. {_pp_tm_raw(ty.predicate)})"
         )
+    if isinstance(ty, TyopApp):
+        if not ty.args:
+            return ty.name
+        return f"{ty.name}({', '.join(_pp_tm_raw(a) for a in ty.args)})"
     return repr(ty)
 
 
@@ -1209,6 +1457,7 @@ def CONST(name: str, sigma: tuple = ()) -> typing_thm:
     inst_ty = type_subst(
         result.theta_ty, subst_in_type(result.theta_tm, decl_ty)
     )
+    inst_ty = _resolve_tyops_in_type(result.tyop_theta, inst_ty)
     return typing_thm(
         result.asl_extra,
         Const(name, inst_ty, tuple(result.term_args)),
@@ -1399,12 +1648,16 @@ class PhiSide(NamedTuple):
     the RHS of a congruence rule."""
     theta_ty: list      # (chosen_hol_type, Tyvar)
     theta_tm: list      # (chosen_term, Var)
+    tyop_theta: list    # (TypeAbs, name) for TyopVar slots
     type_args: list     # chosen hol_types for Tyvar entries (decl. order)
     term_args: list     # chosen terms for Var entries (decl. order)
 
     @classmethod
     def empty(cls) -> "PhiSide":
-        return cls(theta_ty=[], theta_tm=[], type_args=[], term_args=[])
+        return cls(
+            theta_ty=[], theta_tm=[], tyop_theta=[],
+            type_args=[], term_args=[],
+        )
 
 
 class PhiDualResult(NamedTuple):
@@ -1446,8 +1699,9 @@ def _subst_var(binder, arg, out, ctx):
             f"{ctx}: argument for Var binder {binder.name} "
             "must be a typing_thm"
         )
-    expected = type_subst(
-        out.theta_ty, subst_in_type(out.theta_tm, binder.ty)
+    expected = _resolve_tyops_in_type(
+        out.tyop_theta,
+        type_subst(out.theta_ty, subst_in_type(out.theta_tm, binder.ty)),
     )
     if not type_eq(expected, arg._ty):
         raise HolError(
@@ -1460,8 +1714,47 @@ def _subst_var(binder, arg, out, ctx):
 
 
 def _subst_assume(binder, arg, out, ctx):
-    _check_assume_proof(arg, binder.formula, out.theta_ty, out.theta_tm, ctx)
+    _check_assume_proof(
+        arg, binder.formula, out.theta_ty, out.theta_tm, ctx,
+        tyop_theta=out.tyop_theta,
+    )
     out.asl_extra[:] = term_union(out.asl_extra, arg._asl)
+
+
+def _check_typeabs_shape(arg, params, theta_ty, theta_tm, tyop_theta,
+                         ctx, who):
+    """Validate a `TypeAbs` σ-evidence for a `TyopVar` slot: matching
+    arity, and each bvar type matches the declared `param.ty` modulo
+    earlier substitutions (definitional eq). Caller-supplied bvar
+    names need not match the declared params -- the substitution that
+    consumes the TypeAbs renames as needed."""
+    if not isinstance(arg, TypeAbs):
+        raise HolError(
+            f"{ctx}: argument for TyopVar binder {who} must be a TypeAbs"
+        )
+    if len(arg.bvars) != len(params):
+        raise HolError(
+            f"{ctx}: TypeAbs for {who} has wrong arity "
+            f"(expected {len(params)}, got {len(arg.bvars)})"
+        )
+    for bv, p in zip(arg.bvars, params):
+        expected = _resolve_tyops_in_type(
+            tyop_theta,
+            type_subst(theta_ty, subst_in_type(theta_tm, p.ty)),
+        )
+        if not type_eq(expected, bv.ty):
+            raise HolError(
+                f"{ctx}: TypeAbs bvar {bv.name} for {who} has type "
+                f"{_pp_ty(bv.ty)}, expected {_pp_ty(expected)}"
+            )
+
+
+def _subst_tyop(binder, arg, out, ctx):
+    _check_typeabs_shape(
+        arg, binder.params, out.theta_ty, out.theta_tm,
+        out.tyop_theta, ctx, binder.name,
+    )
+    out.tyop_theta.append((arg, binder.name))
 
 
 def _dual_tyvar(binder, arg, lhs, rhs, asl_extra, ctx):
@@ -1484,8 +1777,9 @@ def _dual_var(binder, arg, lhs, rhs, asl_extra, ctx):
             "must be an equation thm"
         )
     tag = _eq_tag(arg._concl)
-    expected = type_subst(
-        lhs.theta_ty, subst_in_type(lhs.theta_tm, binder.ty)
+    expected = _resolve_tyops_in_type(
+        lhs.tyop_theta,
+        type_subst(lhs.theta_ty, subst_in_type(lhs.theta_tm, binder.ty)),
     )
     if not type_eq(expected, tag):
         raise HolError(
@@ -1501,12 +1795,28 @@ def _dual_var(binder, arg, lhs, rhs, asl_extra, ctx):
     asl_extra[:] = term_union(asl_extra, arg._asl)
 
 
+def _dual_tyop(binder, arg, lhs, rhs, asl_extra, ctx):
+    """Symmetric case only: a single `TypeAbs` is required to coincide
+    on both sides of the congruence. The kernel ships only this case
+    (matching the symmetric `Assume` handling)."""
+    _check_typeabs_shape(
+        arg, binder.params, lhs.theta_ty, lhs.theta_tm,
+        lhs.tyop_theta, ctx, binder.name,
+    )
+    lhs.tyop_theta.append((arg, binder.name))
+    rhs.tyop_theta.append((arg, binder.name))
+
+
 def _dual_assume(binder, arg, lhs, rhs, asl_extra, ctx):
     needed_l = _check_assume_proof(
-        arg, binder.formula, lhs.theta_ty, lhs.theta_tm, ctx
+        arg, binder.formula, lhs.theta_ty, lhs.theta_tm, ctx,
+        tyop_theta=lhs.tyop_theta,
     )
-    needed_r = _inst_in_term(
-        [], rhs.theta_ty, _vsubst(rhs.theta_tm, binder.formula)
+    needed_r = _resolve_tyops_in_term(
+        rhs.tyop_theta,
+        _inst_in_term(
+            [], rhs.theta_ty, _vsubst(rhs.theta_tm, binder.formula)
+        ),
     )
     if not _tm_alpha([], needed_l, needed_r):
         raise HolError(
@@ -1525,9 +1835,10 @@ class _SlotHandlers(NamedTuple):
 
 
 _SLOT_DISPATCH: dict = {
-    Tyvar:  _SlotHandlers(subst=_subst_tyvar,  dual=_dual_tyvar),
-    Var:    _SlotHandlers(subst=_subst_var,    dual=_dual_var),
-    Assume: _SlotHandlers(subst=_subst_assume, dual=_dual_assume),
+    Tyvar:   _SlotHandlers(subst=_subst_tyvar,  dual=_dual_tyvar),
+    TyopVar: _SlotHandlers(subst=_subst_tyop,   dual=_dual_tyop),
+    Var:     _SlotHandlers(subst=_subst_var,    dual=_dual_var),
+    Assume:  _SlotHandlers(subst=_subst_assume, dual=_dual_assume),
 }
 
 
@@ -1600,11 +1911,17 @@ def TM_CONG_BASE(name: str, args: list,
     except KeyError:
         raise HolError(f"TM_CONG_BASE: unknown constant {name}")
     result = _apply_phi_dual(phi, args, f"TM_CONG_BASE({name})")
-    inst_ty_l = type_subst(
-        result.lhs.theta_ty, subst_in_type(result.lhs.theta_tm, decl_ty)
+    inst_ty_l = _resolve_tyops_in_type(
+        result.lhs.tyop_theta,
+        type_subst(
+            result.lhs.theta_ty, subst_in_type(result.lhs.theta_tm, decl_ty)
+        ),
     )
-    inst_ty_r = type_subst(
-        result.rhs.theta_ty, subst_in_type(result.rhs.theta_tm, decl_ty)
+    inst_ty_r = _resolve_tyops_in_type(
+        result.rhs.tyop_theta,
+        type_subst(
+            result.rhs.theta_ty, subst_in_type(result.rhs.theta_tm, decl_ty)
+        ),
     )
     asl = result.asl_extra
     if not type_eq(inst_ty_l, inst_ty_r):
@@ -1635,11 +1952,13 @@ def THM_CONG_BASE(staged: StagedThm, args: list) -> thm:
     phi = staged._phi
     F = staged._body.formula
     result = _apply_phi_dual(phi, args, "THM_CONG_BASE")
-    F_l = _inst_in_term(
-        [], result.lhs.theta_ty, _vsubst(result.lhs.theta_tm, F)
+    F_l = _resolve_tyops_in_term(
+        result.lhs.tyop_theta,
+        _inst_in_term([], result.lhs.theta_ty, _vsubst(result.lhs.theta_tm, F)),
     )
-    F_r = _inst_in_term(
-        [], result.rhs.theta_ty, _vsubst(result.rhs.theta_tm, F)
+    F_r = _resolve_tyops_in_term(
+        result.rhs.tyop_theta,
+        _inst_in_term([], result.rhs.theta_ty, _vsubst(result.rhs.theta_tm, F)),
     )
     return thm(result.asl_extra, safe_mk_eq(bool_ty, F_l, F_r))
 
@@ -2136,6 +2455,14 @@ def new_axiom(F_th: typing_thm, phi: tuple | None = None) -> StagedThm:
                 f"new_axiom: type-var {tv.name} is not reflected in Φ"
             )
 
+    allowed_tyops = {b.name for b in phi if isinstance(b, TyopVar)}
+    for name in tyop_names_in_term(F_th._tm):
+        if name not in allowed_tyops:
+            raise HolError(
+                f"new_axiom: TyopApp {name!r} is not reflected by any "
+                f"TyopVar entry in Φ"
+            )
+
     staged = StagedThm(phi, PropBody(F_th._tm))
     the_axioms.append(staged)
     return staged
@@ -2163,8 +2490,9 @@ def interpret(staged: StagedThm, sigma: tuple) -> thm:
     phi = staged._phi
     F = staged._body.formula
     result = _apply_phi_subst(phi, tuple(sigma), "interpret")
-    f = lambda tm: _inst_in_term(
-        [], result.theta_ty, _vsubst(result.theta_tm, tm)
+    f = lambda tm: _resolve_tyops_in_term(
+        result.tyop_theta,
+        _inst_in_term([], result.theta_ty, _vsubst(result.theta_tm, tm)),
     )
     return thm(result.asl_extra, f(F))
 
@@ -2255,6 +2583,13 @@ def new_basic_definition(lhs: Var, rhs_th: typing_thm,
                 f"new_basic_definition: rhs type-var {tv.name} is not "
                 f"reflected in Φ or in lhs type"
             )
+    if any(isinstance(b, TyopVar) for b in phi):
+        raise HolError(
+            "new_basic_definition: TyopVar in Φ unsupported -- the "
+            "defining equation would need to keep the operator unresolved, "
+            "and the kernel has no representation for free TyopVars "
+            "outside Φ."
+        )
     new_constant(lhs.name, lhs.ty, phi=phi)
     # Apply Φ to itself: σ replaces each binder with itself.
     self_sigma: list = []
