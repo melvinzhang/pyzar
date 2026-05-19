@@ -7,8 +7,9 @@ the DHOL-specific typing layer:
   T, TRUTH               via T_DEF.
   /\\, CONJ              via AND_DEF, with CONJUNCT1 / CONJUNCT2.
   ==>, mk_imp            via IMP_DEF (\\p q. (p /\\ q) = p), with
-                         is_imp / dest_imp helpers.
-  IMP_TYPE               typing-layer derived rule for ==>.
+                         is_imp / dest_imp helpers. The typing rule
+                         for ==> (Rabe 2026 Rule D) is the kernel's
+                         IMP_TYPE, re-exported here.
   DISCH, MP              derived per HOL Light bool.ml.
   ETA_AX, ETA            ETA_AX is an axiom polymorphic in a rank-1
                          type operator `B : (x:A)→tp`; ETA wraps it by
@@ -16,7 +17,7 @@ the DHOL-specific typing layer:
                          the user supplies.
 
 The kernel now ships the heterogeneous-bridge forms of MK_COMB, ABS,
-TM_CONG_BASE, and TY_CONG_PI directly (each accepts an optional
+TM_CONG_BASE, and TY_PI directly (each accepts an optional
 type-equality bridge for the dependent-codomain / binder-type case).
 basics_dhol re-exports them and adds the `eq` (domain pre-EQ_TY_CONV)
 convenience for MK_COMB; nothing in this layer extends trust.
@@ -40,7 +41,8 @@ from fusion_dhol import (
     APP as _kernel_APP,
     MK_COMB as _kernel_MK_COMB,
     REFL, ASSUME, BETA,
-    ABS, TM_CONG_BASE, TY_CONG_PI, TY_SYM,
+    ABS, TM_CONG_BASE, TY_PI, TY_SUBTYPE, TY_SYM,
+    IMP_TYPE,
     EQ_MP, DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
     EQ_TY_CONV,
     FORGET_TYPING,
@@ -568,30 +570,13 @@ def _imp_unfold_eq(p_th: typing_thm, q_th: typing_thm) -> thm:
 
 
 # ---------------------------------------------------------------------------
-# IMP_TYPE, DISCH, MP
+# DISCH, MP (IMP_TYPE is now a kernel rule, re-exported from fusion_dhol)
 # ---------------------------------------------------------------------------
 
 
 def _require_bool(t_th: typing_thm, ctx: str) -> None:
-    from fusion_dhol import type_eq as _type_eq
-    if not _type_eq(t_th._ty, bool_ty):
+    if not type_eq(t_th._ty, bool_ty):
         raise HolError(f"{ctx}: non-bool type {_pp_ty(t_th._ty)}")
-
-
-def IMP_TYPE(F_th: typing_thm, G_th: typing_thm) -> typing_thm:
-    """`Gamma |- F : bool, Gamma, ▷F |- G : bool  →  Gamma |- F ==> G : bool`.
-
-    Mirrors fusion_dhol's old kernel rule. F is removed from G_th's
-    asl, matching the old `Rule D` behaviour."""
-    from fusion_dhol import term_remove
-    _require_bool(F_th, "IMP_TYPE antecedent")
-    _require_bool(G_th, "IMP_TYPE consequent")
-    G_cleaned = typing_thm(
-        term_remove(F_th._tm, G_th._asl),
-        G_th._tm,
-        G_th._ty,
-    )
-    return APP(APP(CONST("==>"), F_th), G_cleaned)
 
 
 def DISCH(F_th: typing_thm, th: thm) -> thm:
@@ -735,13 +720,19 @@ if __name__ == "__main__":
     h_eta = ETA(h_th)
     print("ETA(h)     ::", h_eta)
 
-    # TY_CONG_PI: derive Pi(n:nat). bool == Pi(n:nat). bool from
+    # TY_PI: derive Pi(n:nat). bool == Pi(n:nat). bool from
     # nat == nat and bool == bool (both via TY_REFL).
     from fusion_dhol import TY_REFL
     nat_refl = TY_REFL(n_ty)
     bool_refl = TY_REFL(bool_ty)
-    pi_eq = TY_CONG_PI(n_var, nat_refl, bool_refl)
-    print("TY_CONG_PI ::", pi_eq)
+    pi_eq = TY_PI(n_var, nat_refl, bool_refl)
+    print("TY_PI      ::", pi_eq)
+
+    # TY_SUBTYPE: derive nat|T == nat|T from the bool-tagged predicate
+    # equation T = T.
+    T_eq_T = REFL(_T_const_th)
+    subtype_eq = TY_SUBTYPE(n_var, nat_refl, T_eq_T)
+    print("TY_SUBTYPE ::", subtype_eq)
 
     # MK_COMB heterogeneous: build add_0 0 = 0 to bridge vec(add 0 0)
     # vs vec(0).

@@ -24,15 +24,13 @@ from fusion_dhol import (
     _pp_ty, _pp_tm, _eq_tag, _tm_alpha,
 )
 
-# ETA, TRANS, UNRESTRICT, DISCH, MP, IMP_TYPE, mk_imp now live in basics_dhol.
-# APP, MK_COMB, ABS, TM_CONG_BASE, TY_CONG_PI are imported from basics_dhol
-# so that the optional propositional bridges (`eq`, `cod_eq`, `ty_eq`) are
-# available -- the kernel ships only the strictly homogeneous forms; the
-# heterogeneous cases are discharged via axioms in basics_dhol.
-# mk_arrow / mk_subtype / instantiate are non-kernel sugar living in
-# basics_dhol.
+# ETA, TRANS, UNRESTRICT, DISCH, MP, mk_imp now live in basics_dhol.
+# APP, MK_COMB are imported from basics_dhol so the propositional domain
+# bridge (`eq`) is available; ABS, TM_CONG_BASE, TY_PI, IMP_TYPE are
+# kernel rules re-exported through basics_dhol. mk_arrow / mk_subtype /
+# instantiate are non-kernel sugar living in basics_dhol.
 from basics_dhol import (
-    APP, MK_COMB, ABS, TM_CONG_BASE, TY_CONG_PI,
+    APP, MK_COMB, ABS, TM_CONG_BASE, TY_PI,
     ETA, TRANS, UNRESTRICT, DISCH, MP, IMP_TYPE, mk_imp,
     mk_arrow, mk_subtype, instantiate,
 )

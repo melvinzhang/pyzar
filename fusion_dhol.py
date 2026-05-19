@@ -44,7 +44,7 @@
 # is implemented as APP(f_th, a_th, eq=None) where eq witnesses the
 # propositional bridge expected ~ got when typing wouldn't otherwise agree
 # definitionally. Type equality is derived from term equality via
-# TY_CONG_BASE (congBase' in the paper) and Pi-congruence via TY_CONG_PI.
+# TY_CONG_BASE (congBase' in the paper) and Pi-congruence via TY_PI.
 #
 # Variables carry their types intrinsically (Var.name, Var.ty), so the
 # "x:A in Gamma" portion of a context is implicit -- a typing_thm produced
@@ -1774,7 +1774,25 @@ def _require_eq(c: term, ctx: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Type-equality rules: TY_REFL, TY_SYM, TY_TRANS, TY_CONG_BASE, TY_CONG_PI
+# Type-equality rules.
+#
+# Naming parallels the term-equality rules wherever the structure
+# matches:
+#
+#   TY_REFL          reflexivity              (parallels REFL)
+#   TY_SYM           symmetry                 (derived at term level)
+#   TY_TRANS         transitivity             (derived at term level)
+#   TY_CONG_BASE     atomic-type congruence   (parallels TM_CONG_BASE)
+#   TY_PI            Pi-binder congruence     (parallels ABS, the term
+#                                              binder congruence)
+#   TY_SUBTYPE       Subtype-binder congruence (no term analogue --
+#                                               refinement types are a
+#                                               type-only construct)
+#
+# TY_SYM / TY_TRANS are primitive here even though their term-level
+# counterparts are derived; types have no first-class application
+# (Comb-equivalent), so the term-level derivation route via MK_COMB +
+# REFL does not transfer.
 # ---------------------------------------------------------------------------
 
 
@@ -1792,11 +1810,15 @@ def TY_TRANS(e1: type_eq_thm, e2: type_eq_thm) -> type_eq_thm:
     return type_eq_thm(term_union(e1._asl, e2._asl), e1._lhs, e2._rhs)
 
 
-def TY_CONG_PI(v: Var, dom_eq: type_eq_thm,
-               cod_eq: type_eq_thm) -> type_eq_thm:
-    """congPi:  Gamma |- A == A'    Gamma, x:A |- B == B'
-               --------------------------------------------
-               Gamma |- Pi(x:A). B == Pi(x:A'). B'
+def TY_PI(v: Var, dom_eq: type_eq_thm,
+          cod_eq: type_eq_thm) -> type_eq_thm:
+    """Pi-binder congruence (Rabe 2026 Rule ξ, without the precondition
+    branch -- preconditions live inside Subtype binders and are bridged
+    by `TY_SUBTYPE`):
+
+      Gamma |- A == A'    Gamma, x:A |- B == B'
+      --------------------------------------------
+      Gamma |- Pi(x:A). B == Pi(x:A'). B'
 
     `v` is the binder of the LHS Pi; its type must match `dom_eq._lhs`.
     The RHS Pi binder is `Var(v.name, dom_eq._rhs)` and its body is
@@ -1809,18 +1831,18 @@ def TY_CONG_PI(v: Var, dom_eq: type_eq_thm,
     context)."""
     if not type_eq(v.ty, dom_eq._lhs):
         raise HolError(
-            f"TY_CONG_PI: binder type {_pp_ty(v.ty)} does not match "
+            f"TY_PI: binder type {_pp_ty(v.ty)} does not match "
             f"dom_eq lhs {_pp_ty(dom_eq._lhs)}"
         )
     for a in dom_eq._asl:
         if vfree_in(v, a):
             raise HolError(
-                "TY_CONG_PI: binder occurs free in dom_eq hypotheses"
+                "TY_PI: binder occurs free in dom_eq hypotheses"
             )
     for a in cod_eq._asl:
         if vfree_in(v, a):
             raise HolError(
-                "TY_CONG_PI: binder occurs free in cod_eq hypotheses"
+                "TY_PI: binder occurs free in cod_eq hypotheses"
             )
     v_rhs = Var(v.name, dom_eq._rhs)
     rhs_body = subst_in_type([(v_rhs, v)], cod_eq._rhs)
@@ -1828,6 +1850,51 @@ def TY_CONG_PI(v: Var, dom_eq: type_eq_thm,
         term_union(dom_eq._asl, cod_eq._asl),
         Pi(v, cod_eq._lhs),
         Pi(v_rhs, rhs_body),
+    )
+
+
+def TY_SUBTYPE(v: Var, dom_eq: type_eq_thm,
+               pred_eq: thm) -> type_eq_thm:
+    """Subtype-binder congruence:
+
+      Gamma |- A == A'    Gamma, x:A |- F =_bool F'
+      ---------------------------------------------
+            Gamma |- A|F == A'|F'
+
+    Completes the precondition branch of Rabe 2026 Rule ξ when combined
+    with `TY_PI` over a Subtype-typed Pi binder.
+
+    `pred_eq` must be a boolean-tagged equation `F =_bool F'` (both sides
+    are predicates in the x:A context). `v` re-indexes to the RHS side
+    just like in TY_PI."""
+    if not type_eq(v.ty, dom_eq._lhs):
+        raise HolError(
+            f"TY_SUBTYPE: binder type {_pp_ty(v.ty)} does not match "
+            f"dom_eq lhs {_pp_ty(dom_eq._lhs)}"
+        )
+    _require_eq(pred_eq._concl, "TY_SUBTYPE")
+    if not type_eq(_eq_tag(pred_eq._concl), bool_ty):
+        raise HolError(
+            f"TY_SUBTYPE: predicate equation must be tagged at bool "
+            f"(got {_pp_ty(_eq_tag(pred_eq._concl))})"
+        )
+    for a in dom_eq._asl:
+        if vfree_in(v, a):
+            raise HolError(
+                "TY_SUBTYPE: binder occurs free in dom_eq hypotheses"
+            )
+    for a in pred_eq._asl:
+        if vfree_in(v, a):
+            raise HolError(
+                "TY_SUBTYPE: binder occurs free in pred_eq hypotheses"
+            )
+    v_rhs = Var(v.name, dom_eq._rhs)
+    pred_lhs = _lhs(pred_eq._concl)
+    pred_rhs = _vsubst([(v_rhs, v)], _rhs(pred_eq._concl))
+    return type_eq_thm(
+        term_union(dom_eq._asl, pred_eq._asl),
+        Subtype(v, pred_lhs),
+        Subtype(v_rhs, pred_rhs),
     )
 
 
@@ -2319,10 +2386,47 @@ def FORGET_TYPING(t_th: typing_thm) -> typing_thm:
 
 
 # ---------------------------------------------------------------------------
+# Dependent implication formation (Rule D, Rabe 2026 Fig. 4).
+#
+# DHOL admits a typing rule that lets the consequent's well-formedness
+# depend on the antecedent's truth:
+#
+#     Gamma |- F : bool    Gamma, |>F |- G : bool
+#     -------------------------------------------
+#               Gamma |- F ==> G : bool
+#
+# Like `safe_mk_eq` builds `=` directly without consulting `the_decls`,
+# this rule synthesises the `==>` constant at type `bool -> bool -> bool`.
+# That fixes the implication's name and arity at the kernel level (callers
+# that prefer a different surface name should wrap this rule).
+# ---------------------------------------------------------------------------
+
+
+def IMP_TYPE(F_th: typing_thm, G_th: typing_thm) -> typing_thm:
+    """Rule D (Rabe 2026 Fig. 4): build the typing for a dependent
+    implication, discharging F from G's hypotheses.
+
+      Gamma |- F : bool    Gamma, |>F |- G : bool
+      -------------------------------------------
+                Gamma |- F ==> G : bool
+
+    The discharge is what makes this primitive: no structural typing
+    rule can shrink an asl, so the implication's typing has to be
+    introduced here rather than reassembled from APP + CONST."""
+    _require_bool(F_th, "IMP_TYPE antecedent")
+    _require_bool(G_th, "IMP_TYPE consequent")
+    imp_ty = Pi(Var("_", bool_ty), Pi(Var("_", bool_ty), bool_ty))
+    imp_const = Const("==>", imp_ty)
+    tm = Comb(Comb(imp_const, F_th._tm), G_th._tm)
+    asl = term_union(F_th._asl, term_remove(F_th._tm, G_th._asl))
+    return typing_thm(asl, tm, bool_ty)
+
+
+# ---------------------------------------------------------------------------
 # Validity rules: REFL, ASSUME, BETA, EQ_TY_CONV, MK_COMB, ABS,
 # EQ_MP, DEDUCT_ANTISYM_RULE, INST, INST_TYPE
 # (HOL Light's 10-rule core minus TRANS, lifted to typing-as-derivation.
-#  ETA, TRANS, DISCH, MP, IMP_TYPE and the ==> constant are derived in
+#  ETA, TRANS, DISCH, MP and the ==> defining equation are derived in
 #  basics_dhol.)
 # ---------------------------------------------------------------------------
 
