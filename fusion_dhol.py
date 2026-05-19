@@ -263,75 +263,142 @@ Slot = Tyvar | TyopVar | Var | Assume | TyEqAssume | SubAssume
 # ---------------------------------------------------------------------------
 
 
-class typing_thm:
-    """Gamma |- t : A."""
+# A certificate is `Γ ⊢ J`: a list of bool hypotheses (`_asl`) plus a
+# `Judgement` payload `_j` discriminating the J-level. The four named
+# cert classes below are marker subclasses of `Cert` -- each just routes
+# its constructor signature into the right payload variant. All shared
+# behaviour (repr / equality / hashing / `_asl` / payload accessors)
+# lives once in `Cert`.
+#
+# The J-payload variants used as certificates are:
+#   JTyping(tm, ty)    -- typing certificate `Γ ⊢ tm : ty`
+#   JProp(formula)     -- validity certificate `Γ ⊢ F`
+#   JEq(lhs, rhs)      -- type-equality certificate `Γ ⊢ lhs == rhs`
+#   JSub(lhs, rhs)     -- subtyping certificate `Γ ⊢ lhs <: rhs`
+#
+# Construction is the same JTyping/JProp/JEq/JSub used by `Staged`
+# bodies, so `Staged.cert` projects directly into the matching cert
+# subclass (`thm` / `type_eq_thm` / `subtype_thm`).
 
-    __slots__ = ("_asl", "_tm", "_ty")
 
-    def __init__(self, asl, tm, ty):
+@dataclass(frozen=True, slots=True)
+class JTyping:
+    """typing-cert payload: `Γ ⊢ tm : ty`. Used in `typing_thm`. Not
+    a `Decl.body` (a constant's declared body is `JTm(ty)`; the `tm`
+    is filled in at use-site by `CONST`)."""
+    tm: term
+    ty: hol_type
+
+
+class Cert:
+    """`[asl] ⊢ judgement` -- the J-agnostic certificate carrier.
+
+    Concrete cert subclasses (`typing_thm`, `subtype_thm`,
+    `type_eq_thm`, `thm`) just pick which `Judgement` variant
+    populates `_j`. All representation, equality, and per-payload
+    accessor logic is inherited.
+
+    Backward-compat attribute properties (`_tm`, `_ty`, `_concl`,
+    `_lhs`, `_rhs`) mirror the pre-refactor per-class field names so
+    existing call sites read fields directly off the cert without
+    going through `_j`."""
+
+    __slots__ = ("_asl", "_j")
+
+    def __init__(self, asl, j):
         self._asl = list(asl)
-        self._tm = tm
-        self._ty = ty
+        self._j = j
 
     def __repr__(self):
         a = ", ".join(_pp_tm(x) for x in self._asl)
-        return f"[{a}] |- {_pp_tm(self._tm)} : {_pp_ty(self._ty)}"
-
-
-class subtype_thm:
-    """Gamma |- A <: B  (subtyping judgment between two hol_types).
-    Constructed via ST_REFL / ST_TRANS / ST_FORGET / ST_REFINE /
-    ST_PI_DOMAIN; consumed by SUBSUME at the typing layer."""
-
-    __slots__ = ("_asl", "_lhs", "_rhs")
-
-    def __init__(self, asl, lhs, rhs):
-        self._asl = list(asl)
-        self._lhs = lhs
-        self._rhs = rhs
-
-    def __repr__(self):
-        a = ", ".join(_pp_tm(x) for x in self._asl)
-        return f"[{a}] |- {_pp_ty(self._lhs)} <: {_pp_ty(self._rhs)}"
-
-
-class type_eq_thm:
-    """Gamma |- A == B."""
-
-    __slots__ = ("_asl", "_lhs", "_rhs")
-
-    def __init__(self, asl, lhs, rhs):
-        self._asl = list(asl)
-        self._lhs = lhs
-        self._rhs = rhs
-
-    def __repr__(self):
-        a = ", ".join(_pp_tm(x) for x in self._asl)
-        return f"[{a}] |- {_pp_ty(self._lhs)} == {_pp_ty(self._rhs)}"
-
-
-class thm:
-    """Gamma |- F  (boolean validity)."""
-
-    __slots__ = ("_asl", "_concl")
-
-    def __init__(self, asl, concl):
-        self._asl = list(asl)
-        self._concl = concl
-
-    def __repr__(self):
-        a = ", ".join(_pp_tm(x) for x in self._asl)
-        return f"Sequent([{a}], {_pp_tm(self._concl)})"
+        j = self._j
+        if isinstance(j, JTyping):
+            return f"[{a}] |- {_pp_tm(j.tm)} : {_pp_ty(j.ty)}"
+        if isinstance(j, JSub):
+            return f"[{a}] |- {_pp_ty(j.lhs)} <: {_pp_ty(j.rhs)}"
+        if isinstance(j, JEq):
+            return f"[{a}] |- {_pp_ty(j.lhs)} == {_pp_ty(j.rhs)}"
+        if isinstance(j, JProp):
+            return f"Sequent([{a}], {_pp_tm(j.formula)})"
+        return f"Cert([{a}], {j!r})"
 
     def __eq__(self, other):
         return (
-            isinstance(other, thm)
+            isinstance(other, Cert)
+            and type(self) is type(other)
             and self._asl == other._asl
-            and self._concl == other._concl
+            and self._j == other._j
         )
 
     def __hash__(self):
-        return hash((tuple(self._asl), self._concl))
+        return hash((type(self), tuple(self._asl), self._j))
+
+    # Backward-compat field accessors -- raise AttributeError when the
+    # payload doesn't carry the requested field (matching the old
+    # per-class __slots__ behaviour).
+    @property
+    def _tm(self):
+        if isinstance(self._j, JTyping):
+            return self._j.tm
+        raise AttributeError("_tm")
+
+    @property
+    def _ty(self):
+        if isinstance(self._j, JTyping):
+            return self._j.ty
+        raise AttributeError("_ty")
+
+    @property
+    def _concl(self):
+        if isinstance(self._j, JProp):
+            return self._j.formula
+        raise AttributeError("_concl")
+
+    @property
+    def _lhs(self):
+        if isinstance(self._j, (JEq, JSub)):
+            return self._j.lhs
+        raise AttributeError("_lhs")
+
+    @property
+    def _rhs(self):
+        if isinstance(self._j, (JEq, JSub)):
+            return self._j.rhs
+        raise AttributeError("_rhs")
+
+
+class typing_thm(Cert):
+    """Gamma |- t : A."""
+    __slots__ = ()
+
+    def __init__(self, asl, tm, ty):
+        super().__init__(asl, JTyping(tm, ty))
+
+
+class subtype_thm(Cert):
+    """Gamma |- A <: B  (subtyping judgment between two hol_types).
+    Constructed via ST_REFL / ST_TRANS / ST_FORGET / ST_REFINE /
+    ST_PI_DOMAIN; consumed by SUBSUME at the typing layer."""
+    __slots__ = ()
+
+    def __init__(self, asl, lhs, rhs):
+        super().__init__(asl, JSub(lhs, rhs))
+
+
+class type_eq_thm(Cert):
+    """Gamma |- A == B."""
+    __slots__ = ()
+
+    def __init__(self, asl, lhs, rhs):
+        super().__init__(asl, JEq(lhs, rhs))
+
+
+class thm(Cert):
+    """Gamma |- F  (boolean validity)."""
+    __slots__ = ()
+
+    def __init__(self, asl, concl):
+        super().__init__(asl, JProp(concl))
 
 
 class Staged:
@@ -425,21 +492,20 @@ def _pp_phi(phi) -> str:
 # The Judgement ADT is the single sort of the DHOL GAT: each variant
 # carries the payload of one judgement level.
 #
-#   JTp                       Γ; Φ ⊢ name(Φ) : tp
-#   JTm(ty)                   Γ; Φ ⊢ name(Φ) : ty
-#   JProp(formula)            (Φ) ▷ F
-#   JEq(lhs, rhs)             (Φ) ▷ A == B
-#   JSub(lhs, rhs)            (Φ) ▷ A <: B
+#   JTp                       Γ; Φ ⊢ name(Φ) : tp     (decl-body only)
+#   JTm(ty)                   Γ; Φ ⊢ name(Φ) : ty     (decl-body only)
+#   JTyping(tm, ty)           Γ ⊢ tm : ty             (cert-payload only)
+#   JProp(formula)            (Φ) ▷ F                 (decl-body + cert)
+#   JEq(lhs, rhs)             (Φ) ▷ A == B            (decl-body + cert)
+#   JSub(lhs, rhs)            (Φ) ▷ A <: B            (decl-body + cert)
 #
 # Named declarations (JTp / JTm bodies) live in the unified `the_decls`
 # registry as `Decl(name, phi, body)`; relational bodies (JProp / JEq /
-# JSub) are anonymous and travel as `Staged(phi, body)`. Both share the
-# same Judgement discriminator -- this is the J-level symmetry the
-# kernel is built around.
-#
-# A type symbol's body is just `JTp()` -- inhabitation is the
-# responsibility of the associated witness Decl, a separate JTm entry
-# registered atomically with the type by `new_type`.
+# JSub) are anonymous and travel as `Staged(phi, body)`. The same
+# variants populate `Cert._j` for the projected certificate -- one
+# Judgement ADT, two roles. `JTyping` only appears as a cert payload:
+# named-constant declarations use `JTm(ty)` (the schema), and the `tm`
+# is constructed at instantiation time by `CONST`.
 #
 # Each Decl's Φ is an ordered telescope of Slot binders (Tyvar /
 # TyopVar / Var / Assume / TyEqAssume / SubAssume); later entries may
@@ -490,7 +556,7 @@ class JSub:
     rhs: hol_type
 
 
-Judgement = JTp | JTm | JProp | JEq | JSub
+Judgement = JTp | JTm | JTyping | JProp | JEq | JSub
 
 
 @dataclass(frozen=True, slots=True)
