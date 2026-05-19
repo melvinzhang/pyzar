@@ -1792,6 +1792,45 @@ def TY_TRANS(e1: type_eq_thm, e2: type_eq_thm) -> type_eq_thm:
     return type_eq_thm(term_union(e1._asl, e2._asl), e1._lhs, e2._rhs)
 
 
+def TY_CONG_PI(v: Var, dom_eq: type_eq_thm,
+               cod_eq: type_eq_thm) -> type_eq_thm:
+    """congPi:  Gamma |- A == A'    Gamma, x:A |- B == B'
+               --------------------------------------------
+               Gamma |- Pi(x:A). B == Pi(x:A'). B'
+
+    `v` is the binder of the LHS Pi; its type must match `dom_eq._lhs`.
+    The RHS Pi binder is `Var(v.name, dom_eq._rhs)` and its body is
+    `cod_eq._rhs` with the LHS binder re-indexed to the RHS binder via
+    the equal-by-bridge type ambient in scope.
+
+    Freshness: `v` must not occur free in either premise's hypotheses
+    (those are the ambient Gamma; the bound `x:A` would correspond to a
+    discharged hypothesis if cod_eq had been derived in an extended
+    context)."""
+    if not type_eq(v.ty, dom_eq._lhs):
+        raise HolError(
+            f"TY_CONG_PI: binder type {_pp_ty(v.ty)} does not match "
+            f"dom_eq lhs {_pp_ty(dom_eq._lhs)}"
+        )
+    for a in dom_eq._asl:
+        if vfree_in(v, a):
+            raise HolError(
+                "TY_CONG_PI: binder occurs free in dom_eq hypotheses"
+            )
+    for a in cod_eq._asl:
+        if vfree_in(v, a):
+            raise HolError(
+                "TY_CONG_PI: binder occurs free in cod_eq hypotheses"
+            )
+    v_rhs = Var(v.name, dom_eq._rhs)
+    rhs_body = subst_in_type([(v_rhs, v)], cod_eq._rhs)
+    return type_eq_thm(
+        term_union(dom_eq._asl, cod_eq._asl),
+        Pi(v, cod_eq._lhs),
+        Pi(v_rhs, rhs_body),
+    )
+
+
 class PhiSide(NamedTuple):
     """One side of a dual Φ-walk -- the σ chosen for either the LHS or
     the RHS of a congruence rule."""
@@ -2129,7 +2168,8 @@ def TY_CONG_BASE(tyop: str, args: list) -> type_eq_thm:
     )
 
 
-def TM_CONG_BASE(name: str, args: list) -> thm:
+def TM_CONG_BASE(name: str, args: list,
+                 cod_eq: type_eq_thm | None = None) -> thm:
     """Term-side congruence (analogue of TY_CONG_BASE for a staged
     term constant):
             c(Φ) : A in theory      per-slot Φ-args
@@ -2137,10 +2177,10 @@ def TM_CONG_BASE(name: str, args: list) -> thm:
                   Gamma |- c(σ_l) =A[σ_l] c(σ_r)
 
     Each `args[i]` matches Φ entry i (see `_apply_phi_dual`). The
-    equation is tagged at the LHS view `A[σ_l]` and requires the
-    instantiated body types `A[σ_l]` and `A[σ_r]` to agree
-    definitionally. For the heterogeneous case, basics_dhol's
-    `TM_CONG_BASE` wrapper lifts via `TM_CONG_HETERO_AX`."""
+    equation is tagged at the LHS view `A[σ_l]`. The instantiated body
+    types `A[σ_l]` and `A[σ_r]` must either agree definitionally, or
+    `cod_eq` must bridge them (in either orientation); the bridge's
+    hypotheses are absorbed."""
     try:
         phi = get_const_phi(name)
         decl_ty = get_const_type(name)
@@ -2153,16 +2193,25 @@ def TM_CONG_BASE(name: str, args: list) -> thm:
     inst_ty_r = _subst_full_type(
         result.rhs.theta_ty, result.rhs.theta_tm, result.rhs.tyop_theta, decl_ty
     )
+    asl = result.asl_extra
     if not type_eq(inst_ty_l, inst_ty_r):
-        raise HolError(
-            f"TM_CONG_BASE: instantiated types differ "
-            f"({_pp_ty(inst_ty_l)} vs {_pp_ty(inst_ty_r)}); "
-            f"use basics_dhol.TM_CONG_BASE with cod_eq to discharge "
-            f"via TM_CONG_HETERO_AX"
-        )
+        if cod_eq is None:
+            raise HolError(
+                f"TM_CONG_BASE: instantiated types differ "
+                f"({_pp_ty(inst_ty_l)} vs {_pp_ty(inst_ty_r)}); "
+                f"pass cod_eq to bridge them"
+            )
+        if not _bridge_matches(cod_eq, inst_ty_l, inst_ty_r):
+            raise HolError(
+                f"TM_CONG_BASE: cod_eq bridge "
+                f"{_pp_ty(cod_eq._lhs)} == {_pp_ty(cod_eq._rhs)} "
+                f"does not connect {_pp_ty(inst_ty_l)} and "
+                f"{_pp_ty(inst_ty_r)}"
+            )
+        asl = term_union(asl, cod_eq._asl)
     lhs_const = Const(name, inst_ty_l, tuple(result.lhs.term_args))
     rhs_const = Const(name, inst_ty_r, tuple(result.rhs.term_args))
-    return thm(result.asl_extra, safe_mk_eq(inst_ty_l, lhs_const, rhs_const))
+    return thm(asl, safe_mk_eq(inst_ty_l, lhs_const, rhs_const))
 
 
 def THM_CONG_BASE(staged: Staged, args: list) -> thm:
@@ -2187,12 +2236,6 @@ def THM_CONG_BASE(staged: Staged, args: list) -> thm:
         result.rhs.theta_ty, result.rhs.theta_tm, result.rhs.tyop_theta, F
     )
     return thm(result.asl_extra, safe_mk_eq(bool_ty, F_l, F_r))
-
-
-# Pi congruence (TY_CONG_PI) lives in basics_dhol as `PI_CONG_AX`, an
-# axiom over a TyEqAssume premise -- the kernel no longer ships a
-# dedicated rule, only the Φ-stage infrastructure that lets the axiom
-# express the universal codomain equality.
 
 
 # ---------------------------------------------------------------------------
@@ -2336,17 +2379,17 @@ def EQ_TY_CONV(eq_th: thm, ty_eq: type_eq_thm) -> thm:
     return thm(term_union(eq_th._asl, ty_eq._asl), new_concl)
 
 
-def MK_COMB(th1: thm, th2: thm) -> thm:
+def MK_COMB(th1: thm, th2: thm,
+            cod_eq: type_eq_thm | None = None) -> thm:
     """congAppl':  Gamma |- f =Pi(x:A).B f'    Gamma |- a =A a'
                   ----------------------------------------------
                           Gamma |- f a =B[a/x] f' a'
 
-    Homogeneous on the domain and codomain: th2's eq tag must
-    definitionally match f's Pi-domain, and the substituted codomains
-    `B[l2/x]` and `B[r2/x]` must agree. For propositional bridges,
-    basics_dhol's `MK_COMB` wrapper accepts an optional `eq` (domain)
-    and `cod_eq` (codomain) and discharges them via EQ_TY_CONV +
-    `MK_COMB_HETERO_AX`.
+    th2's eq tag must definitionally match f's Pi-domain (pre-EQ_TY_CONV
+    th2 to align if not). The substituted codomains `B[l2/x]` and
+    `B[r2/x]` must either agree definitionally, or `cod_eq` must bridge
+    them (in either orientation); the result is tagged at the LHS view
+    `B[l2/x]` and the bridge's hypotheses are absorbed.
 
     Preconditioned domains live inside A as Subtype refinements; if
     `A = A0|p`, the argument equation must already be tagged at A0|p
@@ -2374,24 +2417,35 @@ def MK_COMB(th1: thm, th2: thm) -> thm:
     result_ty_l = subst_in_type([(l2, f_ty.bvar)], f_ty.body)
     result_ty_r = subst_in_type([(r2, f_ty.bvar)], f_ty.body)
     if not type_eq(result_ty_l, result_ty_r):
-        raise HolError(
-            f"MK_COMB: codomain types do not agree "
-            f"({_pp_ty(result_ty_l)} vs {_pp_ty(result_ty_r)}); "
-            f"use basics_dhol.MK_COMB with cod_eq to discharge via "
-            f"MK_COMB_HETERO_AX"
-        )
+        if cod_eq is None:
+            raise HolError(
+                f"MK_COMB: codomain types do not agree "
+                f"({_pp_ty(result_ty_l)} vs {_pp_ty(result_ty_r)}); "
+                f"pass cod_eq to bridge them"
+            )
+        if not _bridge_matches(cod_eq, result_ty_l, result_ty_r):
+            raise HolError(
+                f"MK_COMB: cod_eq bridge "
+                f"{_pp_ty(cod_eq._lhs)} == {_pp_ty(cod_eq._rhs)} "
+                f"does not connect codomains "
+                f"{_pp_ty(result_ty_l)} and {_pp_ty(result_ty_r)}"
+            )
+        asl = term_union(asl, cod_eq._asl)
     return thm(asl, safe_mk_eq(result_ty_l, Comb(l1, l2), Comb(r1, r2)))
 
 
-def ABS(v: Var, th: thm) -> thm:
-    """congLambda' (homogeneous case):
-                    Gamma, x:A |- t =B t'
-                    ----------------------------------
-                    Gamma |- (\\x:A. t) =Pi(x:A).B (\\x:A. t')
+def ABS(v: Var, th: thm, ty_eq: type_eq_thm | None = None) -> thm:
+    """congLambda':  Gamma |- A == A'   Gamma, x:A |- t =B t'
+                    ------------------------------------------------
+                    Gamma |- (\\x:A. t) =Pi(x:A).B (\\x:A'. t')
 
-    For the heterogeneous binder-type case (A == A' bridge),
-    basics_dhol exposes an `ABS` wrapper that lifts via
-    `ABS_HETERO_AX`. ``v`` must not occur free in any hypothesis."""
+    Without `ty_eq` the binder type is shared (the standard
+    homogeneous case). With `ty_eq` bridging `v.ty == A'`, the RHS
+    abstraction is built over `Var(v.name, A')`; the bridge's
+    hypotheses are absorbed.
+
+    ``v`` must not occur free in any hypothesis of `th` or of
+    `ty_eq`."""
     c = th._concl
     _require_eq(c, "ABS")
     if any(vfree_in(v, a) for a in th._asl):
@@ -2399,7 +2453,26 @@ def ABS(v: Var, th: thm) -> thm:
     body_ty = _eq_tag(c)
     l, r = _lhs(c), _rhs(c)
     new_ty = Pi(v, body_ty)
-    return thm(th._asl, safe_mk_eq(new_ty, Abs(v, l), Abs(v, r)))
+    if ty_eq is None:
+        return thm(th._asl, safe_mk_eq(new_ty, Abs(v, l), Abs(v, r)))
+    if not type_eq(ty_eq._lhs, v.ty):
+        if type_eq(ty_eq._rhs, v.ty):
+            ty_eq = TY_SYM(ty_eq)
+        else:
+            raise HolError(
+                f"ABS: ty_eq bridge "
+                f"{_pp_ty(ty_eq._lhs)} == {_pp_ty(ty_eq._rhs)} does not "
+                f"connect binder type {_pp_ty(v.ty)}"
+            )
+    if any(vfree_in(v, a) for a in ty_eq._asl):
+        raise HolError(
+            "ABS: bound variable occurs free in ty_eq hypotheses"
+        )
+    v_rhs = Var(v.name, ty_eq._rhs)
+    return thm(
+        term_union(th._asl, ty_eq._asl),
+        safe_mk_eq(new_ty, Abs(v, l), Abs(v_rhs, r)),
+    )
 
 
 def EQ_MP(th1: thm, th2: thm) -> thm:
