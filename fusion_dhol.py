@@ -540,9 +540,11 @@ def _pp_phi(phi) -> str:
 
 @dataclass(frozen=True, slots=True)
 class JTp:
-    """tp-level body: `name(Φ) : tp`. Carries no body data of its own;
-    inhabitation is the responsibility of the associated witness Decl,
-    registered atomically by `new_type`."""
+    """tp-level body: `name(Φ) : tp`. Carries no body data of its own.
+    Following Rabe 2026, declared types are not required to be inhabited;
+    `∀x:A. F ⇒ ∃x:A. F` is correspondingly not a theorem. A theory that
+    wants `A` non-empty registers an inhabitant via a separate
+    `new_constant` call."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -602,47 +604,21 @@ def get_type_kind(s: str) -> tuple:
     return d.phi
 
 
-def _head_tyop(ty: hol_type) -> str | None:
-    """Type-constant name at the head of ty, after stripping leading
-    Pi binders. Used by new_type to validate that an inhabitation
-    witness's type targets the right family."""
-    while isinstance(ty, Pi):
-        ty = ty.body
-    if isinstance(ty, Tyapp):
-        return ty.tyop
-    return None
-
-
-def new_type(
-    name: str,
-    phi: tuple = (),
-    witness: tuple | None = None,
-) -> None:
-    """Declares a new type constant `name(Φ) : tp`, atomically with
-    an inhabitation witness.
+def new_type(name: str, phi: tuple = ()) -> None:
+    """Declares a new type constant `name(Φ) : tp`.
 
     `phi` is a Φ-telescope of `Tyvar | Var | Assume` binders. Same
     vocabulary as on term constants -- later entries may reference
     earlier ones (rank-1 polymorphism interleaved with dependent term
     params and assumption obligations).
 
-    The `witness` argument is a (const_name, const_ty) pair. const_ty
-    (after stripping leading Pi binders) must have `name` as its head;
-    declaring const_name at const_ty establishes the new type family as
-    inhabited per the paper's modified non-emptiness rule (§3). Both
-    the type and the witness constant land in the kernel in a single
-    operation -- there is no observable intermediate state where the
-    type exists without inhabitation.
+    Per Rabe 2026, declared types are not required to be inhabited; a
+    theory that wants `name` to be non-empty registers an inhabitant
+    via a separate `new_constant` call.
 
     `bool` is the sole exception: it's the kernel's primitive type and
     requires no user call to new_type.
     """
-    if witness is None:
-        raise HolError(
-            f"new_type: {name} requires an inhabitation witness. "
-            f"Pass witness=(const_name, const_ty) where const_ty's head "
-            f"(after Pi-stripping) is {name}."
-        )
     if name in the_decls:
         raise HolError(f"new_type: type {name} has already been declared")
     _check_phi(phi, f"new_type({name})")
@@ -654,21 +630,7 @@ def new_type(
             f"TyopVar is only available in `new_axiom` / `new_constant` "
             f"telescopes, where σ is consumed at use site."
         )
-    witness_name, witness_ty = witness
-    if witness_name in the_decls:
-        raise HolError(
-            f"new_type: witness constant {witness_name} already declared"
-        )
-    head = _head_tyop(witness_ty)
-    if head != name:
-        raise HolError(
-            f"new_type: witness type must have {name} as its head "
-            f"(got {head})"
-        )
-    # All checks passed -- commit atomically.
     the_decls[name] = Decl(name, tuple(phi), JTp())
-    witness_phi = tuple(Tyvar(tv.name) for tv in tyvars(witness_ty))
-    the_decls[witness_name] = Decl(witness_name, witness_phi, JTm(witness_ty))
 
 
 bool_ty: hol_type = Tyapp("bool", (), ())

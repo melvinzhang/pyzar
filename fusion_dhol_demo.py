@@ -35,9 +35,10 @@ from basics_dhol import (
     mk_arrow, mk_subtype, instantiate,
 )
 
-# nat as a base type, with "0" as the atomic inhabitation witness.
+# nat as a base type, with 0 / S / add as inhabitants.
 nat_ty = Tyapp("nat", (), ())
-new_type("nat", phi=(), witness=("0", nat_ty))
+new_type("nat", phi=())
+new_constant("0", nat_ty)
 new_constant("S", mk_arrow(nat_ty, nat_ty))
 new_constant("add", mk_arrow(nat_ty, mk_arrow(nat_ty, nat_ty)))
 
@@ -50,14 +51,11 @@ print("0   ::", _pp_ty(zero_th._ty))
 print("S 0 ::", _pp_ty(one_th._ty))
 print()
 
-# vec : (n:nat) -> tp, with nil : vec(0) as the atomic inhabitation witness.
+# vec : (n:nat) -> tp, with nil : vec(0) as a separately-declared inhabitant.
 zero_const = Const("0", nat_ty)
 nil_ty = Tyapp("vec", (), (zero_const,))
-new_type(
-    "vec",
-    phi=(Var("n", nat_ty),),
-    witness=("nil", nil_ty),
-)
+new_type("vec", phi=(Var("n", nat_ty),))
+new_constant("nil", nil_ty)
 
 def vec(n_th):
     return mk_type("vec", [n_th])
@@ -247,28 +245,21 @@ nil_refl_hyp = EQ_TY_CONV(nil_refl, vec_bridge_hyp)
 print(f"EQ_TY_CONV w/ hyp:: {nil_refl_hyp}  [= tagged at {_eq_tag_str(nil_refl_hyp)}]")
 
 # ----------------------------------------------------------------
-# Atomic new_type: every type lands in the kernel with its witness.
-# Inhabitation is correct by construction -- no runtime tracking,
-# no theory-layer check to forget.
+# new_type with no inhabitant: empty types are allowed (Rabe 2026
+# §2). A theory that wants the type non-empty registers an
+# inhabitant via a separate new_constant call.
 # ----------------------------------------------------------------
 print()
-new_type("phantom", (), witness=("ghost", Tyapp("phantom", (), ())))
-print("declared phantom with witness ghost")
+new_type("phantom", ())
+print("declared phantom (no inhabitant)")
+new_constant("ghost", Tyapp("phantom", (), ()))
+print("registered inhabitant ghost : phantom")
 
-# Missing witness -> rejected at the kernel boundary:
+# Re-declaration of an existing name is still rejected:
 try:
-    new_type("orphan", ())
+    new_type("phantom", ())
 except HolError as e:
-    print("rejects missing witness ::", str(e).splitlines()[0])
-
-# Witness with wrong head -> rejected:
-try:
-    new_type(
-        "stranger", (),
-        witness=("misfit", Tyapp("nat", (), ())),
-    )
-except HolError as e:
-    print("rejects wrong-head witness ::", str(e).splitlines()[0])
+    print("rejects re-declaration ::", str(e).splitlines()[0])
 
 # ----------------------------------------------------------------
 # congLambda' (ABS with binder-type bridge) and congAppl'
@@ -375,11 +366,8 @@ print("MP(F⇒G, F) ::", g_thm)
 print()
 u_tv = Tyvar("u")
 pvec_pnil_ty = Tyapp("pvec", (bool_ty,), (Const("0", nat_ty),))
-new_type(
-    "pvec",
-    phi=(u_tv, Var("n", nat_ty)),
-    witness=("pnil", pvec_pnil_ty),
-)
+new_type("pvec", phi=(u_tv, Var("n", nat_ty)))
+new_constant("pnil", pvec_pnil_ty)
 
 def pvec(u_ty, n_th):
     return mk_type("pvec", [u_ty, n_th])
@@ -431,11 +419,8 @@ print()
 u_tv2 = Tyvar("u")
 x_var2 = Var("x", u_tv2)
 tagged_witness_ty = Tyapp("tagged", (nat_ty,), (Const("0", nat_ty),))
-new_type(
-    "tagged",
-    phi=(u_tv2, x_var2),
-    witness=("tagzero", tagged_witness_ty),
-)
+new_type("tagged", phi=(u_tv2, x_var2))
+new_constant("tagzero", tagged_witness_ty)
 
 # Use: tagged(nat, 0) is well-formed because zero_th : nat matches
 # the binder type u with u := nat.
@@ -576,11 +561,8 @@ print("CONST under ▷F    ::", gated_under_F)
 print()
 n_ctx = Var("n", nat_ty)
 n_self_eq = safe_mk_eq(nat_ty, n_ctx, n_ctx)
-new_type(
-    "pos_vec",
-    phi=(n_ctx, Assume(n_self_eq)),
-    witness=("pos_nil", Tyapp("pos_vec", (), (Const("0", nat_ty),))),
-)
+new_type("pos_vec", phi=(n_ctx, Assume(n_self_eq)))
+new_constant("pos_nil", Tyapp("pos_vec", (), (Const("0", nat_ty),)))
 
 # mk_type without the Assume proof is rejected.
 try:
@@ -614,11 +596,8 @@ except HolError as e:
 # obligation. Then LHS and RHS substitutions coincide and
 # TY_CONG_BASE proceeds normally.
 pos_vec2_witness = Tyapp("pos_vec2", (), (Const("0", nat_ty),))
-new_type(
-    "pos_vec2",
-    phi=(Var("n", nat_ty), Assume(F)),  # F = (add 0 0 = 0)
-    witness=("pos_nil2", pos_vec2_witness),
-)
+new_type("pos_vec2", phi=(Var("n", nat_ty), Assume(F)))  # F = (add 0 0 = 0)
+new_constant("pos_nil2", pos_vec2_witness)
 # mk_type at pos_vec2(0) discharges F via add_0_0_eq_0.
 pv2_zero = mk_type("pos_vec2", [zero_th, add_0_0_eq_0])
 print("pos_vec2(0)              ::", _pp_ty(pv2_zero))

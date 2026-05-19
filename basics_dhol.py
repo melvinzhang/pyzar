@@ -707,10 +707,12 @@ if __name__ == "__main__":
     # h : Pi(n:nat). vec(n). ETA should give h = (\n:nat. h n) at the
     # dependent Pi -- no more rejection.
     n_ty = Tyapp("nat", (), ())
-    new_type("nat", phi=(), witness=("0", n_ty))
+    new_type("nat", phi=())
+    new_constant("0", n_ty)
     n_var = Var("n", n_ty)
     nil_ty = Tyapp("vec", (), (Const("0", n_ty),))
-    new_type("vec", phi=(n_var,), witness=("nil", nil_ty))
+    new_type("vec", phi=(n_var,))
+    new_constant("nil", nil_ty)
     h_ty = Pi(n_var, mk_type("vec", [VAR(n_var)]))
     new_constant("h", h_ty)
     h_th = CONST("h")
