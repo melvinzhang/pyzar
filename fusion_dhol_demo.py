@@ -17,8 +17,7 @@ from fusion_dhol import (
     DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
     TY_REFL, TY_SYM, TY_TRANS, TY_CONG_BASE,
     THM_CONG_BASE,
-    ST_REFL, ST_TRANS, ST_FORGET, ST_REFINE, ST_PI_DOMAIN, SUBSUME,
-    RESTRICT, RESTRICT_PROOF,
+    RESTRICT, RESTRICT_PROOF, FORGET_TYPING,
     mk_type, safe_mk_eq,
     new_type, new_constant, new_axiom, new_basic_definition,
     interpret, frees,
@@ -471,10 +470,14 @@ except HolError as e:
 # ----------------------------------------------------------------
 # Predicate subtypes (item 10) + collapsed Pi precondition (item 13).
 #
-# Pi-binder preconditions are now stored as Subtype refinements on
-# the binder's type: λx:A|F. t  ===  λx : Subtype(y:A, F[y]).
-# The discharge of F at value-construction time happens via
-# RESTRICT; thereafter APP / BETA / ETA / MK_COMB are unconditional.
+# Pi-binder preconditions now have two equivalent encodings:
+#   (a) legacy:  λx : Subtype(y:A, F[y]).   -- predicate in bvar.ty
+#   (b) Rabe P1: Pi(Var(x,A), B, predicate=F)  -- precondition slot
+# The kernel canonicalises both via `_pi_effective_domain` for arg
+# matching. RESTRICT is still the value-level intro for `A|F`;
+# thereafter APP / BETA / ETA / MK_COMB are unconditional.
+# This section exercises form (a) for LAMBDA over a Subtype-typed
+# binder; `pi_narrow` below exercises form (b).
 # ----------------------------------------------------------------
 print()
 F = add_0_0_eq_0._concl  # the bool term add 0 0 = 0
@@ -538,33 +541,13 @@ arg_eq_ref = REFL(zero_in_F)
 mk_comb_over_ref = MK_COMB(f_eq_ref, arg_eq_ref)
 print("MK_COMB over nat|F ::", mk_comb_over_ref)
 
-# ----------------------------------------------------------------
-# P4 is now a derivable corollary: from |- p y ==> q y, build
-# A|p <: A|q via ST_REFINE, then Π(x:A|q).B <: Π(x:A|p).B via
-# ST_PI_DOMAIN (contravariant in the domain).
-# ----------------------------------------------------------------
-# Example: F itself is the predicate; use the trivial discharged form
-# `[F] |- F` (ASSUME) to show A|F <: A|F via P4. ST_REFINE now takes the
-# discharged shape directly -- no implication needed at the kernel level.
-F_th = add_0_0_eq_0  # |- F
-F_under_F = ASSUME(typing_thm([], F, bool_ty))   # [F] |- F
-print("[F] |- F          ::", F_under_F)
-refine_self = ST_REFINE(nat_F, nat_F, F_under_F)
-print("A|F <: A|F        ::", refine_self)
-forget = ST_FORGET(nat_F)
-print("A|F <: A          ::", forget)
-# ST_PI_DOMAIN: contravariant; smaller domain -> bigger Pi-subtype
-# of the wider-domain Pi. Build Pi(n:nat).nat <: Pi(n:nat|F).nat
-# by passing dom_sub = ST_FORGET(nat_F) (nat|F <: nat).
-pi_wide = Pi(Var("n", nat_ty), nat_ty)
-pi_narrow = Pi(Var("n", nat_F), nat_ty)
-p4_witness = ST_PI_DOMAIN(pi_wide, pi_narrow, forget)
-print("Pi(n:nat).nat <: Pi(n:nat|F).nat (P4) ::", p4_witness)
-
-# SUBSUME: lift a typing through a subtype. zero_in_F : nat|F can
-# be re-typed at nat via SUBSUME with ST_FORGET(nat|F).
-zero_via_subsume = SUBSUME(zero_in_F, forget)
-print("SUBSUME via forget ::", zero_via_subsume)
+# FORGET_TYPING: typing-layer projection -- the value-level operation
+# that the now-retired subtype layer used to express. Drops the
+# refinement on a value's type directly. `zero_in_F : nat|F` becomes
+# `zero_via_forget : nat`. Replaces the legacy
+# `SUBSUME(zero_in_F, ST_FORGET(nat|F))` idiom.
+zero_via_forget = FORGET_TYPING(zero_in_F)
+print("FORGET_TYPING      ::", zero_via_forget)
 
 # ----------------------------------------------------------------
 # Item 14b.1: constants with declaration-time preconditions.

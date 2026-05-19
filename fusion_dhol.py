@@ -6,9 +6,12 @@
 # of certificates (all subclasses of `Cert`):
 #
 #   typing_thm    Gamma |- t : A           (well-typed term)
-#   subtype_thm   Gamma |- A <: B          (subtyping)
 #   type_eq_thm   Gamma |- A == B          (propositional type equality)
 #   thm           Gamma |- F               (validity, as in HOL)
+#
+# (The earlier `subtype_thm` cert and its rules have been retired; the
+# only refinement-related primitives now live at the typing layer as
+# RESTRICT / RESTRICT_PROOF / FORGET_TYPING.)
 #
 # === Trust boundary ===
 #
@@ -16,7 +19,7 @@
 # their constructors (the introduction rules), the Φ-walkers, the σ-evidence
 # validators, the substitution primitives, and the declaration introducers
 # (`new_type`, `new_constant`, `new_axiom`, `new_type_eq_axiom`,
-# `new_sub_axiom`, `new_basic_definition`) -- can affect soundness. A bug
+# `new_basic_definition`) -- can affect soundness. A bug
 # here can make a wrong sequent provable.
 #
 # Convenience helpers that do NOT extend trust live one layer up, in
@@ -61,7 +64,7 @@
 
 from __future__ import annotations
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, NamedTuple
 
 sys.setrecursionlimit(10000)
@@ -96,8 +99,14 @@ class Tyapp:
 
 @dataclass(frozen=True, slots=True)
 class Pi:
+    """Dependent function type `Πx:A|F.B` -- precondition `F : bool` may
+    be `None` (semantically `true`), in which case the type is the usual
+    `Πx:A.B`. The precondition is bound by `bvar` (so `F` may mention
+    `x`) and, when not None, makes `F` available as a hypothesis when
+    type-checking `B` (paper Rule P1)."""
     bvar: "Var"
     body: "hol_type"
+    predicate: "term | None" = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,8 +116,17 @@ class Subtype:
     `bvar` bound in `predicate`. Inhabitants are exactly those a:A for
     which `predicate[a/bvar]` holds.
 
-    Pi-domain preconditions are encoded as Subtype-on-the-domain:
-        Π(x : A|F[x]). B   ===   Π(x : Subtype(y:A, F[y/x])). B
+    Pi-domain preconditions have two equivalent encodings, both
+    accepted by the kernel (`_pi_effective_domain` bridges them):
+
+      (a) legacy:    Π(x : A|F[x]). B  ≡  Π(x : Subtype(y:A, F[y/x])). B
+      (b) Rabe P1:   Π(x : A|F[x]). B  ≡  Pi(Var("x", A), B, predicate=F)
+
+    Form (b) -- the precondition slot on Pi itself -- is preferred
+    going forward and is what `APP` / `MK_COMB` canonicalise to via
+    `_pi_effective_domain`. Form (a) survives for
+    backward compatibility while LAMBDA-over-Subtype-bvar paths are
+    migrated.
     """
     bvar: "Var"
     predicate: "term"
@@ -227,17 +245,6 @@ class TyEqAssume:
 
 
 @dataclass(frozen=True, slots=True)
-class SubAssume:
-    """Φ-slot asserting a subtyping `lhs <: rhs`. σ-evidence is a
-    `subtype_thm` whose sides match `lhs` / `rhs` after accumulated
-    earlier substitutions. The subtyping analogue of `Assume(F)` /
-    `TyEqAssume(..., lhs, rhs)`; contributes no bool asl from the
-    projection."""
-    lhs: "hol_type"
-    rhs: "hol_type"
-
-
-@dataclass(frozen=True, slots=True)
 class TypeAbs:
     """Meta-level type abstraction `λ(x1:A1, ..., xn:An). body`.
 
@@ -255,21 +262,20 @@ class TypeAbs:
             object.__setattr__(self, "bvars", tuple(self.bvars))
 
 
-# A Φ-slot is a binder at one of the six DHOL judgement levels:
+# A Φ-slot is a binder at one of five DHOL judgement levels:
 #
 #   Tyvar(α)                -- binds at tp           (`Γ ⊢ α : tp`)
 #   TyopVar(F, p)           -- binds at (p...)→tp    (rank-1 type op)
 #   Var(x, A)               -- binds at term         (`Γ ⊢ x : A`)
 #   Assume(F)               -- binds at validity     (`Γ ⊢ F`)
 #   TyEqAssume(b, lhs, rhs) -- binds at type-eq      (`Γ ⊢ lhs == rhs`)
-#   SubAssume(lhs, rhs)     -- binds at subtype      (`Γ ⊢ lhs <: rhs`)
 #
 # The PhiSubst evidence for each slot is the corresponding J-witness:
 # hol_type for Tyvar, TypeAbs for TyopVar, typing_thm for Var, thm
-# for Assume, type_eq_thm for TyEqAssume, and subtype_thm for
-# SubAssume. This pointwise mapping is what makes `_apply_phi_subst`
-# and `_apply_phi_dual` J-agnostic walkers.
-Slot = Tyvar | TyopVar | Var | Assume | TyEqAssume | SubAssume
+# for Assume, type_eq_thm for TyEqAssume. This pointwise mapping is
+# what makes `_apply_phi_subst` and `_apply_phi_dual` J-agnostic
+# walkers.
+Slot = Tyvar | TyopVar | Var | Assume | TyEqAssume
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +284,7 @@ Slot = Tyvar | TyopVar | Var | Assume | TyEqAssume | SubAssume
 
 
 # A certificate is `Γ ⊢ J`: a list of bool hypotheses (`_asl`) plus a
-# `Judgement` payload `_j` discriminating the J-level. The four named
+# `Judgement` payload `_j` discriminating the J-level. The three named
 # cert classes below are marker subclasses of `Cert` -- each just routes
 # its constructor signature into the right payload variant. All shared
 # behaviour (repr / equality / hashing / `_asl` / payload accessors)
@@ -288,11 +294,10 @@ Slot = Tyvar | TyopVar | Var | Assume | TyEqAssume | SubAssume
 #   JTyping(tm, ty)    -- typing certificate `Γ ⊢ tm : ty`
 #   JProp(formula)     -- validity certificate `Γ ⊢ F`
 #   JEq(lhs, rhs)      -- type-equality certificate `Γ ⊢ lhs == rhs`
-#   JSub(lhs, rhs)     -- subtyping certificate `Γ ⊢ lhs <: rhs`
 #
-# Construction is the same JTyping/JProp/JEq/JSub used by `Staged`
-# bodies, so `Staged.cert` projects directly into the matching cert
-# subclass (`thm` / `type_eq_thm` / `subtype_thm`).
+# Construction is the same JTyping/JProp/JEq used by `Staged` bodies,
+# so `Staged.cert` projects directly into the matching cert subclass
+# (`thm` / `type_eq_thm`).
 
 
 @dataclass(frozen=True, slots=True)
@@ -307,10 +312,9 @@ class JTyping:
 class Cert:
     """`[asl] ⊢ judgement` -- the J-agnostic certificate carrier.
 
-    Concrete cert subclasses (`typing_thm`, `subtype_thm`,
-    `type_eq_thm`, `thm`) just pick which `Judgement` variant
-    populates `_j`. All representation, equality, and per-payload
-    accessor logic is inherited.
+    Concrete cert subclasses (`typing_thm`, `type_eq_thm`, `thm`) just
+    pick which `Judgement` variant populates `_j`. All representation,
+    equality, and per-payload accessor logic is inherited.
 
     Backward-compat attribute properties (`_tm`, `_ty`, `_concl`,
     `_lhs`, `_rhs`) mirror the pre-refactor per-class field names so
@@ -328,8 +332,6 @@ class Cert:
         j = self._j
         if isinstance(j, JTyping):
             return f"[{a}] |- {_pp_tm(j.tm)} : {_pp_ty(j.ty)}"
-        if isinstance(j, JSub):
-            return f"[{a}] |- {_pp_ty(j.lhs)} <: {_pp_ty(j.rhs)}"
         if isinstance(j, JEq):
             return f"[{a}] |- {_pp_ty(j.lhs)} == {_pp_ty(j.rhs)}"
         if isinstance(j, JProp):
@@ -370,13 +372,13 @@ class Cert:
 
     @property
     def _lhs(self):
-        if isinstance(self._j, (JEq, JSub)):
+        if isinstance(self._j, JEq):
             return self._j.lhs
         raise AttributeError("_lhs")
 
     @property
     def _rhs(self):
-        if isinstance(self._j, (JEq, JSub)):
+        if isinstance(self._j, JEq):
             return self._j.rhs
         raise AttributeError("_rhs")
 
@@ -387,16 +389,6 @@ class typing_thm(Cert):
 
     def __init__(self, asl, tm, ty):
         super().__init__(asl, JTyping(tm, ty))
-
-
-class subtype_thm(Cert):
-    """Gamma |- A <: B  (subtyping judgment between two hol_types).
-    Constructed via ST_REFL / ST_TRANS / ST_FORGET / ST_REFINE /
-    ST_PI_DOMAIN; consumed by SUBSUME at the typing layer."""
-    __slots__ = ()
-
-    def __init__(self, asl, lhs, rhs):
-        super().__init__(asl, JSub(lhs, rhs))
 
 
 class type_eq_thm(Cert):
@@ -417,9 +409,9 @@ class thm(Cert):
 
 class Staged:
     """(Φ) ▷ body  -- a relational judgement parameterised over a
-    Φ-telescope. body is one of `JProp(F)`, `JEq(L, R)`, `JSub(L, R)`,
-    and discriminates which concrete certificate `interpret(staged, σ)`
-    produces (`thm`, `type_eq_thm`, `subtype_thm` respectively).
+    Φ-telescope. body is one of `JProp(F)` or `JEq(L, R)`, and
+    discriminates which concrete certificate `interpret(staged, σ)`
+    produces (`thm` or `type_eq_thm` respectively).
 
     The asl-as-Assume-formulas view is reconstructed by `_phi_asl(phi)`
     when the projected certificate is needed (e.g. for printing).
@@ -432,9 +424,9 @@ class Staged:
     __slots__ = ("_phi", "_body")
 
     def __init__(self, phi, body):
-        if not isinstance(body, (JProp, JEq, JSub)):
+        if not isinstance(body, (JProp, JEq)):
             raise HolError(
-                "Staged: body must be a JProp, JEq, or JSub (got "
+                "Staged: body must be a JProp or JEq (got "
                 f"{type(body).__name__})"
             )
         self._phi = tuple(phi)
@@ -449,8 +441,6 @@ class Staged:
             return thm(asl, b.formula)
         if isinstance(b, JEq):
             return type_eq_thm(asl, b.lhs, b.rhs)
-        if isinstance(b, JSub):
-            return subtype_thm(asl, b.lhs, b.rhs)
         raise HolError(f"Staged.cert: unknown body {type(b).__name__}")
 
     def __repr__(self):
@@ -493,8 +483,6 @@ def _pp_phi(phi) -> str:
             bvs = ", ".join(f"{b.name}:{_pp_ty(b.ty)}" for b in e.binders)
             sig = f" ⟨{bvs}⟩" if bvs else ""
             parts.append(f"▷{sig} {_pp_ty(e.lhs)} == {_pp_ty(e.rhs)}")
-        elif isinstance(e, SubAssume):
-            parts.append(f"▷ {_pp_ty(e.lhs)} <: {_pp_ty(e.rhs)}")
         else:
             parts.append(repr(e))
     return ", ".join(parts)
@@ -511,21 +499,20 @@ def _pp_phi(phi) -> str:
 #   JTyping(tm, ty)           Γ ⊢ tm : ty             (cert-payload only)
 #   JProp(formula)            (Φ) ▷ F                 (decl-body + cert)
 #   JEq(lhs, rhs)             (Φ) ▷ A == B            (decl-body + cert)
-#   JSub(lhs, rhs)            (Φ) ▷ A <: B            (decl-body + cert)
 #
 # Named declarations (JTp / JTm bodies) live in the unified `the_decls`
-# registry as `Decl(name, phi, body)`; relational bodies (JProp / JEq /
-# JSub) are anonymous and travel as `Staged(phi, body)`. The same
-# variants populate `Cert._j` for the projected certificate -- one
-# Judgement ADT, two roles. `JTyping` only appears as a cert payload:
+# registry as `Decl(name, phi, body)`; relational bodies (JProp / JEq)
+# are anonymous and travel as `Staged(phi, body)`. The same variants
+# populate `Cert._j` for the projected certificate -- one Judgement
+# ADT, two roles. `JTyping` only appears as a cert payload:
 # named-constant declarations use `JTm(ty)` (the schema), and the `tm`
 # is constructed at instantiation time by `CONST`.
 #
 # Each Decl's Φ is an ordered telescope of Slot binders (Tyvar /
-# TyopVar / Var / Assume / TyEqAssume / SubAssume); later entries may
-# reference earlier ones. The flat-arity case is recovered by an empty
-# Φ; rank-1 polymorphism alone by a Φ of Tyvars; the dependent-parameter
-# case by a Φ of Vars.
+# TyopVar / Var / Assume / TyEqAssume); later entries may reference
+# earlier ones. The flat-arity case is recovered by an empty Φ; rank-1
+# polymorphism alone by a Φ of Tyvars; the dependent-parameter case by
+# a Φ of Vars.
 # ---------------------------------------------------------------------------
 
 
@@ -560,17 +547,7 @@ class JEq:
     rhs: hol_type
 
 
-@dataclass(frozen=True, slots=True)
-class JSub:
-    """subtyping-level body: `(Φ) ▷ lhs <: rhs`. Φ-SubAssume binders
-    carry the subtyping hypotheses; the projection-as-subtype_thm view
-    reconstructs the bool-side asl via `_phi_asl(phi)` (SubAssume
-    entries contribute no bool asl)."""
-    lhs: hol_type
-    rhs: hol_type
-
-
-Judgement = JTp | JTm | JTyping | JProp | JEq | JSub
+Judgement = JTp | JTm | JTyping | JProp | JEq
 
 
 @dataclass(frozen=True, slots=True)
@@ -581,8 +558,8 @@ class Decl:
     named-declaration levels appear here:
       * JTp        -- name(Φ) : tp
       * JTm(ty)    -- name(Φ) : ty
-    The relational levels (JProp / JEq / JSub) are anonymous and live
-    in `Staged`, not in `the_decls`.
+    The relational levels (JProp / JEq) are anonymous and live in
+    `Staged`, not in `the_decls`.
     """
     name: str
     phi: tuple
@@ -788,17 +765,17 @@ PhiSubst = tuple            # tuple[hol_type | typing_thm | thm, ...]
 
 def _check_phi(phi, ctx: str) -> None:
     """Light syntactic check: every entry is a Tyvar, TyopVar, Var,
-    Assume, TyEqAssume, or SubAssume. Well-formedness of binder
-    annotations under earlier entries is the caller's responsibility
-    (honest-caller perimeter, mirroring how `new_type` accepts raw
-    `Var(x, A)` without re-checking A)."""
+    Assume, or TyEqAssume. Well-formedness of binder annotations under
+    earlier entries is the caller's responsibility (honest-caller
+    perimeter, mirroring how `new_type` accepts raw `Var(x, A)` without
+    re-checking A)."""
     for entry in phi:
         if not isinstance(
-            entry, (Tyvar, TyopVar, Var, Assume, TyEqAssume, SubAssume)
+            entry, (Tyvar, TyopVar, Var, Assume, TyEqAssume)
         ):
             raise HolError(
                 f"{ctx}: context entries must be Tyvar, TyopVar, Var, "
-                f"Assume, TyEqAssume, or SubAssume (got {entry!r})"
+                f"Assume, or TyEqAssume (got {entry!r})"
             )
 
 
@@ -906,9 +883,10 @@ def frees(tm: term) -> list:
 
 
 def frees_in_type(ty: hol_type) -> list:
-    """Free term variables occurring in a type (in Tyapp term_args or
-    under a Subtype's predicate). Used by RESTRICT / SUBSUME-style rules
-    that need to know which term variables a refined type mentions."""
+    """Free term variables occurring in a type (Tyapp term_args, a
+    Subtype's predicate, or a Pi's precondition). Used by refinement
+    rules (RESTRICT / RESTRICT_PROOF / FORGET_TYPING) that need to know
+    which term variables a refined type mentions."""
     if isinstance(ty, Tyvar):
         return []
     if isinstance(ty, Tyapp):
@@ -923,6 +901,11 @@ def frees_in_type(ty: hol_type) -> list:
             list(frees_in_type(ty.bvar.ty)),
             (v for v in frees_in_type(ty.body) if v != ty.bvar),
         )
+        if ty.predicate is not None:
+            _uniq_extend(
+                seen,
+                (v for v in frees(ty.predicate) if v != ty.bvar),
+            )
         return seen
     if isinstance(ty, Subtype):
         seen = list(frees_in_type(ty.bvar.ty))
@@ -971,7 +954,10 @@ def tyvars(ty: hol_type) -> list:
             _uniq_extend(seen, type_vars_in_term(a))
         return seen
     if isinstance(ty, Pi):
-        return _uniq_extend(list(tyvars(ty.bvar.ty)), tyvars(ty.body))
+        seen = _uniq_extend(list(tyvars(ty.bvar.ty)), tyvars(ty.body))
+        if ty.predicate is not None:
+            _uniq_extend(seen, type_vars_in_term(ty.predicate))
+        return seen
     if isinstance(ty, Subtype):
         return _uniq_extend(
             list(tyvars(ty.bvar.ty)), type_vars_in_term(ty.predicate)
@@ -997,10 +983,13 @@ def tyop_names_in_type(ty: hol_type) -> list:
             _uniq_extend(seen, tyop_names_in_term(a))
         return seen
     if isinstance(ty, Pi):
-        return _uniq_extend(
+        seen = _uniq_extend(
             list(tyop_names_in_type(ty.bvar.ty)),
             tyop_names_in_type(ty.body),
         )
+        if ty.predicate is not None:
+            _uniq_extend(seen, tyop_names_in_term(ty.predicate))
+        return seen
     if isinstance(ty, Subtype):
         return _uniq_extend(
             list(tyop_names_in_type(ty.bvar.ty)),
@@ -1068,6 +1057,20 @@ def variant(avoid: list, v: term) -> term:
 # ---------------------------------------------------------------------------
 
 
+def _pi_effective_domain(pi_ty) -> "hol_type":
+    """Effective domain of a Pi-type for argument matching.
+
+    For `Πx:A.B` (no precondition) returns `A`. For `Πx:A|F.B`
+    (precondition) returns `Subtype(x:A, F)` -- the refinement of A by
+    F, which is what an argument must inhabit. This bridges the two
+    encodings of Pi-domain refinement (precondition slot vs Subtype
+    inside bvar.ty) so callers that need to validate arguments don't
+    have to care which form was used."""
+    if pi_ty.predicate is None:
+        return pi_ty.bvar.ty
+    return Subtype(pi_ty.bvar, pi_ty.predicate)
+
+
 def type_eq(t1: hol_type, t2: hol_type) -> bool:
     return _ty_eq([], t1, t2)
 
@@ -1088,7 +1091,12 @@ def _ty_eq(env: list, t1: hol_type, t2: hol_type) -> bool:
     if isinstance(t1, Pi) and isinstance(t2, Pi):
         if not _ty_eq(env, t1.bvar.ty, t2.bvar.ty):
             return False
+        if (t1.predicate is None) != (t2.predicate is None):
+            return False
         env2 = [(t1.bvar, t2.bvar), *env]
+        if t1.predicate is not None:
+            if not _tm_alpha(env2, t1.predicate, t2.predicate):
+                return False
         return _ty_eq(env2, t1.body, t2.body)
     if isinstance(t1, Subtype) and isinstance(t2, Subtype):
         if not _ty_eq(env, t1.bvar.ty, t2.bvar.ty):
@@ -1158,9 +1166,16 @@ def _map_type(f_ty: Callable, f_tm: Callable, ty: hol_type) -> hol_type:
             else Var(ty.bvar.name, new_bv_ty)
         )
         new_body = f_ty(ty.body)
-        if new_bv is ty.bvar and new_body is ty.body:
+        new_pred = (
+            None if ty.predicate is None else f_tm(ty.predicate)
+        )
+        if (
+            new_bv is ty.bvar
+            and new_body is ty.body
+            and new_pred is ty.predicate
+        ):
             return ty
-        return Pi(new_bv, new_body)
+        return Pi(new_bv, new_body, predicate=new_pred)
     if isinstance(ty, Subtype):
         new_bv_ty = f_ty(ty.bvar.ty)
         new_bv = (
@@ -1243,9 +1258,46 @@ def subst_in_type(theta: list, ty: hol_type) -> hol_type:
     if not theta:
         return ty
     if isinstance(ty, Pi):
-        return _subst_binder(
-            theta, ty.bvar, ty.body,
-            subst_in_type, _occurs_in_type, Pi,
+        if ty.predicate is None:
+            return _subst_binder(
+                theta, ty.bvar, ty.body,
+                subst_in_type, _occurs_in_type, Pi,
+            )
+        # Pi with precondition: body (type) and predicate (term) share
+        # the bvar binder. Apply capture-avoidance against both.
+        bvar = ty.bvar
+        theta2 = [(t, x) for t, x in theta if x != bvar]
+        new_bvar_ty = subst_in_type(theta, bvar.ty)
+        new_bvar = (
+            bvar if new_bvar_ty is bvar.ty
+            else Var(bvar.name, new_bvar_ty)
+        )
+        if not theta2:
+            if new_bvar is bvar:
+                return ty
+            return Pi(new_bvar, ty.body, predicate=ty.predicate)
+        capture = any(
+            vfree_in(new_bvar, t) and (
+                _occurs_in_type(x, ty.body) or vfree_in(x, ty.predicate)
+            )
+            for t, x in theta2
+        )
+        if capture:
+            avoid = [
+                subst_in_type(theta2, ty.body),
+                _vsubst(theta2, ty.predicate),
+            ]
+            fresh = variant(avoid, new_bvar)
+            rename = [(fresh, bvar), *theta2]
+            return Pi(
+                fresh,
+                subst_in_type(rename, ty.body),
+                predicate=_vsubst(rename, ty.predicate),
+            )
+        return Pi(
+            new_bvar,
+            subst_in_type(theta2, ty.body),
+            predicate=_vsubst(theta2, ty.predicate),
         )
     if isinstance(ty, Subtype):
         return _subst_binder(
@@ -1269,10 +1321,9 @@ def _occurs_in_type(v: Var, ty: hol_type) -> bool:
     if isinstance(ty, Pi):
         if ty.bvar == v:
             return _occurs_in_type(v, ty.bvar.ty)
-        return (
-            _occurs_in_type(v, ty.bvar.ty)
-            or _occurs_in_type(v, ty.body)
-        )
+        if _occurs_in_type(v, ty.bvar.ty) or _occurs_in_type(v, ty.body):
+            return True
+        return ty.predicate is not None and vfree_in(v, ty.predicate)
     if isinstance(ty, Subtype):
         if ty.bvar == v:
             return _occurs_in_type(v, ty.bvar.ty)
@@ -1399,8 +1450,8 @@ def _resolve_tyops_in_term(tyop_theta: list, tm: term) -> term:
 #   tyop_theta  -- TyopVar → TypeAbs   (from TyopVar slots)
 #
 # Applying these to an expected schema (Var-typing, Assume formula,
-# TyEqAssume side, SubAssume side, TypeAbs param, …) always uses the
-# same composition. These two helpers capture it once.
+# TyEqAssume side, TypeAbs param, …) always uses the same composition.
+# These two helpers capture it once.
 # ---------------------------------------------------------------------------
 
 
@@ -1470,10 +1521,14 @@ def _pp_ty_raw(ty):
             return ty.tyop
         return f"{ty.tyop}({'; '.join(parts)})"
     if isinstance(ty, Pi):
-        if not _occurs_in_type(ty.bvar, ty.body):
+        pre = (
+            "" if ty.predicate is None
+            else f"|\\{ty.bvar.name}. {_pp_tm_raw(ty.predicate)}"
+        )
+        if not _occurs_in_type(ty.bvar, ty.body) and ty.predicate is None:
             return f"({_pp_ty_raw(ty.bvar.ty)} -> {_pp_ty_raw(ty.body)})"
         return (
-            f"(Pi {ty.bvar.name}:{_pp_ty_raw(ty.bvar.ty)}. "
+            f"(Pi {ty.bvar.name}:{_pp_ty_raw(ty.bvar.ty)}{pre}. "
             f"{_pp_ty_raw(ty.body)})"
         )
     if isinstance(ty, Subtype):
@@ -1650,14 +1705,17 @@ def APP(f_th: typing_thm, a_th: typing_thm) -> typing_thm:
     For a propositional bridge A == A', pre-CONV the argument
     (basics_dhol exposes an APP wrapper that does this automatically).
 
-    Preconditioned domains are now encoded as Subtype refinements on
-    the Pi binder: `Pi(x : A|p). B`. The argument's type must already
-    be `A|p` -- discharge of `p[a]` happens upstream, when the user
-    constructs `a : A|p` via `RESTRICT`."""
+    Preconditioned domains can be encoded two equivalent ways:
+    (a) `Pi(x : Subtype(y:A, p)). B` -- legacy encoding, predicate
+        lives in the bvar's type.
+    (b) `Pi(x : A, predicate=p). B` -- Rabe-style precondition slot.
+    Both forms are accepted; `_pi_effective_domain` canonicalises to
+    `Subtype(x:A, p)` for argument matching, so the user still must
+    supply an argument typed at `A|p` (via RESTRICT)."""
     f_ty = f_th._ty
     if not isinstance(f_ty, Pi):
         raise HolError(f"APP: head not a Pi -- got {_pp_ty(f_ty)}")
-    expected = f_ty.bvar.ty
+    expected = _pi_effective_domain(f_ty)
     got = a_th._ty
     if not type_eq(expected, got):
         raise HolError(
@@ -1726,9 +1784,10 @@ def _walk_type(tm: term) -> hol_type:
                 f"TYPE_OF: function position has non-Pi type "
                 f"{_pp_ty(f_ty)}"
             )
-        if not type_eq(f_ty.bvar.ty, a_ty):
+        expected_dom = _pi_effective_domain(f_ty)
+        if not type_eq(expected_dom, a_ty):
             raise HolError(
-                f"TYPE_OF: domain mismatch (expected {_pp_ty(f_ty.bvar.ty)}, "
+                f"TYPE_OF: domain mismatch (expected {_pp_ty(expected_dom)}, "
                 f"got {_pp_ty(a_ty)}); term was typed via a propositional "
                 f"bridge that TYPE_OF can't see -- use the equation-side "
                 f"accessors instead"
@@ -2098,48 +2157,6 @@ def _dual_ty_eq_assume(binder, arg, lhs, rhs, asl_extra, ctx):
     asl_extra[:] = term_union(asl_extra, ty_eq._asl)
 
 
-def _check_sub_assume(arg, lhs_ty, rhs_ty,
-                      theta_ty, theta_tm, tyop_theta, ctx):
-    """Validate a `SubAssume` σ-evidence. σ is a `subtype_thm` whose
-    sides match `lhs_ty` / `rhs_ty` after accumulated substitutions."""
-    if not isinstance(arg, subtype_thm):
-        raise HolError(
-            f"{ctx}: argument for SubAssume binder must be a subtype_thm"
-        )
-    expected_lhs = _subst_full_type(theta_ty, theta_tm, tyop_theta, lhs_ty)
-    expected_rhs = _subst_full_type(theta_ty, theta_tm, tyop_theta, rhs_ty)
-    if not type_eq(expected_lhs, arg._lhs):
-        raise HolError(
-            f"{ctx}: SubAssume lhs {_pp_ty(arg._lhs)} does not match "
-            f"expected {_pp_ty(expected_lhs)}"
-        )
-    if not type_eq(expected_rhs, arg._rhs):
-        raise HolError(
-            f"{ctx}: SubAssume rhs {_pp_ty(arg._rhs)} does not match "
-            f"expected {_pp_ty(expected_rhs)}"
-        )
-    return arg
-
-
-def _subst_sub_assume(binder, arg, out, ctx):
-    sub = _check_sub_assume(
-        arg, binder.lhs, binder.rhs,
-        out.theta_ty, out.theta_tm, out.tyop_theta, ctx,
-    )
-    out.asl_extra[:] = term_union(out.asl_extra, sub._asl)
-
-
-def _dual_sub_assume(binder, arg, lhs, rhs, asl_extra, ctx):
-    """Symmetric case only: a single `subtype_thm` discharges the
-    obligation on both sides of the congruence (matches `Assume` /
-    `TyEqAssume` / `TyopVar` handling)."""
-    sub = _check_sub_assume(
-        arg, binder.lhs, binder.rhs,
-        lhs.theta_ty, lhs.theta_tm, lhs.tyop_theta, ctx,
-    )
-    asl_extra[:] = term_union(asl_extra, sub._asl)
-
-
 _SLOT_DISPATCH: dict = {
     Tyvar:      _SlotHandlers(subst=_subst_tyvar,       dual=_dual_tyvar),
     TyopVar:    _SlotHandlers(subst=_subst_tyop,        dual=_dual_tyop),
@@ -2147,8 +2164,6 @@ _SLOT_DISPATCH: dict = {
     Assume:     _SlotHandlers(subst=_subst_assume,      dual=_dual_assume),
     TyEqAssume: _SlotHandlers(subst=_subst_ty_eq_assume,
                               dual=_dual_ty_eq_assume),
-    SubAssume:  _SlotHandlers(subst=_subst_sub_assume,
-                              dual=_dual_sub_assume),
 }
 
 
@@ -2269,14 +2284,14 @@ def THM_CONG_BASE(staged: Staged, args: list) -> thm:
 # ---------------------------------------------------------------------------
 # Predicate subtypes & subtyping
 #
-# Subtype(bvar:A, p) -- the refinement {y:A | p[y/bvar]}, represented as
-# a hol_type alongside Tyvar/Tyapp/Pi. Subtyping is a separate certificate
-# (subtype_thm) consumed by SUBSUME at the typing layer.
-#
-# RESTRICT / UNRESTRICT / RESTRICT_PROOF are intro/elim for A|p.
-# ST_REFL / ST_TRANS / ST_FORGET / ST_REFINE / ST_PI_DOMAIN are the basic
-# constructors of `A <: B`. P4 (precondition subtyping) is now a derived
-# corollary of ST_REFINE + ST_PI_DOMAIN.
+# Subtype(bvar:A, p) -- the refinement {y:A | p[y/bvar]}, represented
+# as a hol_type alongside Tyvar/Tyapp/Pi. Following Rabe 2026, the
+# system no longer carries a separate `<:` judgment: refinement has
+# three typing-layer primitives -- RESTRICT (intro from base typing +
+# predicate proof), RESTRICT_PROOF (elim to the predicate), and
+# FORGET_TYPING (elim to the base type). Pi-domain refinement is
+# expressed via Pi's `predicate` slot and absorbed by `APP` via
+# `_pi_effective_domain`.
 # ---------------------------------------------------------------------------
 
 
@@ -2325,142 +2340,24 @@ def RESTRICT_PROOF(t_th: typing_thm) -> thm:
     )
 
 
-def ST_REFL(ty: hol_type) -> subtype_thm:
-    """Reflexivity: |- A <: A."""
-    return subtype_thm([], ty, ty)
+def FORGET_TYPING(t_th: typing_thm) -> typing_thm:
+    """Refinement projection at the typing layer.
 
+      Gamma |- t : A|p
+      ----------------
+       Gamma |- t : A
 
-def ST_TRANS(s1: subtype_thm, s2: subtype_thm) -> subtype_thm:
-    """Transitivity:  A <: B   B <: C
-                     -------------------
-                          A <: C"""
-    if not type_eq(s1._rhs, s2._lhs):
+    The typing-level companion of `RESTRICT_PROOF` (which extracts the
+    predicate). Replaces the legacy `SUBSUME(t_th, ST_FORGET(t_th._ty))`
+    idiom -- the subtype detour is no longer needed when all you want
+    is to drop the refinement on a value's type. Follows Rabe 2026 where
+    refinement projection is a typing primitive, not a subtype operation."""
+    ty = t_th._ty
+    if not isinstance(ty, Subtype):
         raise HolError(
-            f"ST_TRANS: middle types do not match "
-            f"({_pp_ty(s1._rhs)} vs {_pp_ty(s2._lhs)})"
+            f"FORGET_TYPING: type is not a Subtype (got {_pp_ty(ty)})"
         )
-    return subtype_thm(term_union(s1._asl, s2._asl), s1._lhs, s2._rhs)
-
-
-def ST_FORGET(subtype: hol_type) -> subtype_thm:
-    """Forget rule: |- A|p <: A."""
-    if not isinstance(subtype, Subtype):
-        raise HolError(
-            f"ST_FORGET: argument is not a Subtype (got {_pp_ty(subtype)})"
-        )
-    return subtype_thm([], subtype, subtype.bvar.ty)
-
-
-def ST_REFINE(p_subtype: hol_type, q_subtype: hol_type,
-              imp_th: thm) -> subtype_thm:
-    """Refine rule:  Gamma, p[y] |- q[y]
-                     -------------------
-                     Gamma |- A|p <: A|q
-
-    `p_subtype` is `A|p`, `q_subtype` is `A|q` (same base A). `imp_th`
-    discharges `q[y]` from `p[y]` *directly*: its conclusion is `q[y]`
-    and its asl contains `p[y]` (plus any context-asl). The refinement
-    variable `y` is `p_subtype.bvar`; `q_subtype`'s predicate is
-    α-renamed to use the same variable.
-
-    Pre-Pi-refactor this rule took an `==>`-shaped thm; the discharged
-    form is equivalent under the IMP_DEF derivation in basics_dhol and
-    keeps the kernel free of implication."""
-    if not isinstance(p_subtype, Subtype):
-        raise HolError("ST_REFINE: first arg must be Subtype A|p")
-    if not isinstance(q_subtype, Subtype):
-        raise HolError("ST_REFINE: second arg must be Subtype A|q")
-    if not type_eq(p_subtype.bvar.ty, q_subtype.bvar.ty):
-        raise HolError(
-            f"ST_REFINE: base types differ "
-            f"({_pp_ty(p_subtype.bvar.ty)} vs {_pp_ty(q_subtype.bvar.ty)})"
-        )
-    y = p_subtype.bvar
-    expected_ant = p_subtype.predicate
-    if q_subtype.bvar != y:
-        q_pred = _vsubst([(y, q_subtype.bvar)], q_subtype.predicate)
-    else:
-        q_pred = q_subtype.predicate
-    expected_con = q_pred
-    if not _tm_alpha([], imp_th._concl, expected_con):
-        raise HolError(
-            f"ST_REFINE: thm conclusion is {_pp_tm(imp_th._concl)} "
-            f"but expected q[y] = {_pp_tm(expected_con)}"
-        )
-    if not any(_tm_alpha([], a, expected_ant) for a in imp_th._asl):
-        raise HolError(
-            f"ST_REFINE: thm asl does not contain p[y] = "
-            f"{_pp_tm(expected_ant)}"
-        )
-    # y must not occur free in any hypothesis other than p[y].
-    for a in imp_th._asl:
-        if _tm_alpha([], a, expected_ant):
-            continue
-        if vfree_in(y, a):
-            raise HolError(
-                "ST_REFINE: refinement variable occurs free in a "
-                "non-discharge hypothesis"
-            )
-    # Discharge p[y] from imp_th's asl in the result.
-    result_asl = [a for a in imp_th._asl if not _tm_alpha([], a, expected_ant)]
-    return subtype_thm(result_asl, p_subtype, q_subtype)
-
-
-def ST_PI_DOMAIN(pi_lhs: hol_type, pi_rhs: hol_type,
-                 dom_sub: subtype_thm) -> subtype_thm:
-    """Contravariant domain:  Gamma |- A' <: A
-                              ---------------------------------------------
-                              Gamma |- Pi(x:A). B <: Pi(x:A'). B[x_A'/x_A]
-
-    `pi_lhs` is `Pi(x:A). B`, `pi_rhs` is `Pi(x:A'). B'`; we check that
-    the domains line up with `dom_sub` (LHS = A, RHS = A') and that the
-    codomain matches modulo binder-type rewriting -- a sound, narrow
-    check that the bodies are identical when the same binder name is
-    used (re-typing the binder is a kernel-level pun on names)."""
-    if not isinstance(pi_lhs, Pi):
-        raise HolError("ST_PI_DOMAIN: pi_lhs must be a Pi")
-    if not isinstance(pi_rhs, Pi):
-        raise HolError("ST_PI_DOMAIN: pi_rhs must be a Pi")
-    if not type_eq(pi_lhs.bvar.ty, dom_sub._rhs):
-        raise HolError(
-            f"ST_PI_DOMAIN: pi_lhs domain {_pp_ty(pi_lhs.bvar.ty)} does "
-            f"not match dom_sub's RHS (= the 'bigger' type) "
-            f"{_pp_ty(dom_sub._rhs)}"
-        )
-    if not type_eq(pi_rhs.bvar.ty, dom_sub._lhs):
-        raise HolError(
-            f"ST_PI_DOMAIN: pi_rhs domain {_pp_ty(pi_rhs.bvar.ty)} does "
-            f"not match dom_sub's LHS (= the 'smaller' type) "
-            f"{_pp_ty(dom_sub._lhs)}"
-        )
-    if pi_lhs.bvar.name != pi_rhs.bvar.name:
-        raise HolError(
-            f"ST_PI_DOMAIN: binder names must match for the body check "
-            f"({pi_lhs.bvar.name} vs {pi_rhs.bvar.name})"
-        )
-    # Rewrite pi_lhs.body to use pi_rhs's binder (same name, smaller type)
-    # for the comparison.
-    if not _ty_eq([(pi_lhs.bvar, pi_rhs.bvar)], pi_lhs.body, pi_rhs.body):
-        raise HolError(
-            f"ST_PI_DOMAIN: codomain bodies differ "
-            f"({_pp_ty(pi_lhs.body)} vs {_pp_ty(pi_rhs.body)}); "
-            f"this rule only handles the case where the body is "
-            f"identical (alpha-eq under binder swap)"
-        )
-    return subtype_thm(dom_sub._asl, pi_lhs, pi_rhs)
-
-
-def SUBSUME(t_th: typing_thm, sub_th: subtype_thm) -> typing_thm:
-    """Subsumption (typing-level):  Gamma |- t : A   Delta |- A <: B
-                                    ---------------------------------
-                                          Gamma + Delta |- t : B"""
-    if not type_eq(t_th._ty, sub_th._lhs):
-        raise HolError(
-            f"SUBSUME: term type {_pp_ty(t_th._ty)} does not match "
-            f"subtype's LHS {_pp_ty(sub_th._lhs)}"
-        )
-    asl = term_union(t_th._asl, sub_th._asl)
-    return typing_thm(asl, t_th._tm, sub_th._rhs)
+    return typing_thm(t_th._asl, t_th._tm, ty.bvar.ty)
 
 
 # ---------------------------------------------------------------------------
@@ -2549,7 +2446,7 @@ def MK_COMB(th1: thm, th2: thm) -> thm:
             f"MK_COMB: function-side equation type is not Pi "
             f"(got {_pp_ty(f_ty)})"
         )
-    expected = f_ty.bvar.ty
+    expected = _pi_effective_domain(f_ty)
     if not type_eq(expected, arg_ty):
         raise HolError(
             f"MK_COMB: domain types do not agree "
@@ -2683,7 +2580,7 @@ def _validate_phi_body(asl, free_vars, free_tyvars, free_tyops,
       * every TyopApp name is bound by a TyopVar entry in Φ.
 
     Shared by every Φ-staged former (`new_axiom`, `new_type_eq_axiom`,
-    `new_sub_axiom`, `new_basic_definition`); the only thing the caller
+    `new_basic_definition`); the only thing the caller
     decides is which scanners to use to enumerate the free variables /
     tyvars / tyops of its specific payload."""
     expected_asl = _phi_asl(phi)
@@ -2728,7 +2625,7 @@ def _scan_J_payload(j: Judgement):
     if isinstance(j, JTyping):
         tm = j.tm
         return frees(tm), type_vars_in_term(tm), tyop_names_in_term(tm)
-    if isinstance(j, (JEq, JSub)):
+    if isinstance(j, JEq):
         fvs: list = []
         tvs: list = []
         tos: list = []
@@ -2744,7 +2641,6 @@ def _new_J_axiom(cert: Cert, phi, ctx: str) -> Staged:
     """Generic staged-axiom former. Dispatches on `cert._j`:
       * `JTyping(F, bool)` → `Staged(phi, JProp(F))` -- a validity axiom.
       * `JEq(L, R)`        → `Staged(phi, JEq(L, R))`.
-      * `JSub(L, R)`       → `Staged(phi, JSub(L, R))`.
     The Φ-body well-formedness scan is shared (`_validate_phi_body`).
     Registered in `the_axioms` and returned."""
     if phi is None:
@@ -2756,7 +2652,7 @@ def _new_J_axiom(cert: Cert, phi, ctx: str) -> Staged:
         if not type_eq(j.ty, bool_ty):
             raise HolError(f"{ctx}: non-bool type {_pp_ty(j.ty)}")
         body: Judgement = JProp(j.tm)
-    elif isinstance(j, (JEq, JSub)):
+    elif isinstance(j, JEq):
         body = j
     else:
         raise HolError(
@@ -2791,22 +2687,12 @@ def new_type_eq_axiom(eq_th: type_eq_thm,
     return _new_J_axiom(eq_th, phi, "new_type_eq_axiom")
 
 
-def new_sub_axiom(sub_th: subtype_thm,
-                  phi: tuple | None = None) -> Staged:
-    """Declare a subtyping axiom `(Φ) ▷ lhs <: rhs`. Returns a
-    `Staged` with a `JSub` body; use `interpret(staged, σ)` to
-    instantiate. SubAssume entries in Φ are pure subtyping
-    preconditions and contribute no bool asl."""
-    return _new_J_axiom(sub_th, phi, "new_sub_axiom")
-
-
 def interpret(staged: Staged, sigma: tuple):
     """One-shot interpretation of a `Staged` judgement at σ.
 
     Dispatches on `staged._body`:
       * `JProp(F)`       → returns a concrete `thm`.
       * `JEq(L, R)`      → returns a concrete `type_eq_thm`.
-      * `JSub(L, R)`     → returns a concrete `subtype_thm`.
 
     Walks Φ left-to-right, discharging slot-by-slot:
       * Tyvar slot       -- σ-entry is a `hol_type` (INST_TYPE-style);
@@ -2814,14 +2700,11 @@ def interpret(staged: Staged, sigma: tuple):
       * Var slot         -- σ-entry is a `typing_thm` (INST-style);
       * Assume slot      -- σ-entry is a `thm` (MP-style);
       * TyEqAssume slot  -- σ-entry is a `type_eq_thm` (sides matching
-                            the schematic, freshness on binders);
-      * SubAssume slot   -- σ-entry is a `subtype_thm` (sides matching
-                            the schematic).
+                            the schematic, freshness on binders).
 
     σ-shape is validated by `_apply_phi_subst` -- the same walker
     `mk_type` and `CONST` use. asl from σ-evidences is absorbed; the
-    original Assume / TyEqAssume / SubAssume obligations are
-    discharged."""
+    original Assume / TyEqAssume obligations are discharged."""
     if not isinstance(staged, Staged):
         raise HolError("interpret: first argument must be a Staged")
     phi = staged._phi
@@ -2837,8 +2720,6 @@ def interpret(staged: Staged, sigma: tuple):
         return thm(result.asl_extra, f_tm(b.formula))
     if isinstance(b, JEq):
         return type_eq_thm(result.asl_extra, f_ty(b.lhs), f_ty(b.rhs))
-    if isinstance(b, JSub):
-        return subtype_thm(result.asl_extra, f_ty(b.lhs), f_ty(b.rhs))
     raise HolError(f"interpret: unknown Staged body {type(b).__name__}")
 
 
@@ -2885,12 +2766,6 @@ def new_basic_definition(lhs: Var, rhs_th: typing_thm,
         raise HolError(
             "new_basic_definition: TyEqAssume in Φ unsupported -- the "
             "self-application σ has no canonical type_eq_thm to supply "
-            "for a refl-like assertion."
-        )
-    if any(isinstance(b, SubAssume) for b in phi):
-        raise HolError(
-            "new_basic_definition: SubAssume in Φ unsupported -- the "
-            "self-application σ has no canonical subtype_thm to supply "
             "for a refl-like assertion."
         )
     new_constant(lhs.name, lhs.ty, phi=phi)

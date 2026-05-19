@@ -38,7 +38,7 @@ from fusion_dhol import (
     TM_CONG_BASE as _kernel_TM_CONG_BASE,
     EQ_MP, DEDUCT_ANTISYM_RULE, INST, INST_TYPE,
     EQ_TY_CONV,
-    SUBSUME, ST_FORGET,
+    FORGET_TYPING,
     TYPE_OF, LHS_TYPING, RHS_TYPING, CONCL_TYPING,
     Assume, get_const_phi, get_const_type, type_eq, type_subst,
     subst_in_type, Subtype, Staged, JTp, JTm,
@@ -178,10 +178,11 @@ def UNRESTRICT(t_th: typing_thm) -> typing_thm:
                                       -----------------
                                       Gamma |- t : A
 
-    Derived as `SUBSUME(t_th, ST_FORGET(A|p))`. The kernel doesn't
-    need to ship this rule -- forget-and-subsume is the standard
-    factoring."""
-    return SUBSUME(t_th, ST_FORGET(t_th._ty))
+    Now a thin alias for the kernel's `FORGET_TYPING` (the typing-layer
+    primitive added in the Pi-precondition refactor). The legacy
+    derivation was `SUBSUME(t_th, ST_FORGET(t_th._ty))` -- the subtype
+    detour is no longer needed."""
+    return FORGET_TYPING(t_th)
 
 
 # ---------------------------------------------------------------------------
