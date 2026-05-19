@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from fusion_dhol import (
     Var, Const, Comb, Abs, Pi, Tyvar, Tyapp,
-    TyopVar, TyopApp, TypeAbs,
+    TyopVar, TyopApp, TypeAbs, Assume,
     typing_thm, thm, type_eq_thm,
     bool_ty, aty, safe_mk_eq,
     VAR, CONST, LAMBDA, CONV,
@@ -49,7 +49,7 @@ from fusion_dhol import (
     TYPE_OF, LHS_TYPING, RHS_TYPING, CONCL_TYPING,
     type_eq,
     subst_in_type, Subtype, Staged, JTp, JTm,
-    new_basic_definition, new_axiom, interpret,
+    new_constant, new_basic_definition, new_axiom, interpret,
     mk_type, the_decls,
     HolError, frees, vfree_in,
     _is_eq, _lhs, _rhs, _eq_tag,
@@ -667,6 +667,140 @@ def ETA(t_th: typing_thm) -> thm:
 
 
 # ---------------------------------------------------------------------------
+# Hilbert choice (ε), exhibited at both RBK24 strengths.
+#
+# RBK24 (Ranalter / Brown / Kaliszyk, LPAR-25 2024) propose two typing
+# rules for choice terms in dependently-typed HOL:
+#
+#   ε1 (strong): forming `@ A p` requires `?x:A. p x` -- a predicate
+#                witness. The select theorem `p (@ A p)` is then
+#                obtainable under the same precondition.
+#
+#   ε2 (weak):   forming `@ A p` requires only `?x:A. T` -- A is
+#                inhabited. The select theorem becomes a separate
+#                axiom guarded by `?x:A. p x` (HOL-Light shape).
+#
+# Both are sound in the presence of empty subtypes: an empty
+# `Subtype(y:A, q)` admits neither `?x:A|q. p x` nor `?x:A|q. T`, so
+# `@1` / `@2` cannot be formed at it. Neither lives in the kernel --
+# pyzar's `fusion_dhol` provides the Φ-`Assume` mechanism that both
+# rules use; the rules themselves are derived theory.
+#
+# We introduce `?` as a *primitive* constant here rather than the
+# HOL-Light-defined `?P := !q. (!x. P x ⇒ q) ⇒ q`. The aim of this
+# section is to exhibit the typing rules' shape, not to develop a
+# proof theory for the existential.
+# ---------------------------------------------------------------------------
+
+
+# ?  :  (A:tp) ▷ (A → bool) → bool
+new_constant(
+    "?",
+    mk_arrow(mk_arrow(aty, bool_ty), bool_ty),
+    phi=(Tyvar("A"),),
+)
+
+
+def mk_exists(bvar: Var, body: term) -> term:
+    """Build `?x:A. body` as a raw term, with `bvar = Var(x, A)`."""
+    return Comb(
+        Const("?", mk_arrow(mk_arrow(bvar.ty, bool_ty), bool_ty)),
+        Abs(bvar, body),
+    )
+
+
+# Shared Φ prefix for both choice variants: (A:tp, p:A → bool, ...).
+_choice_A_tv = Tyvar("A")
+_choice_p_var = Var("p", mk_arrow(_choice_A_tv, bool_ty))
+_choice_x_var = Var("x", _choice_A_tv)
+# p x   (predicate applied to a free witness)
+_choice_p_at_x_tm = Comb(_choice_p_var, _choice_x_var)
+# ?x:A. p x
+_choice_exists_p_x_tm = mk_exists(_choice_x_var, _choice_p_at_x_tm)
+# T as a raw term (for the type-inhabitation precondition)
+_choice_T_tm = Const("T", bool_ty)
+# ?x:A. T
+_choice_exists_T_tm = mk_exists(_choice_x_var, _choice_T_tm)
+
+
+# ε1 (strong): @1 : (A:tp, p:A→bool, ▷ ?x:A. p x) → A
+new_constant(
+    "@1",
+    _choice_A_tv,
+    phi=(
+        _choice_A_tv,
+        _choice_p_var,
+        Assume(_choice_exists_p_x_tm),
+    ),
+)
+
+
+def mk_select1(A: hol_type, p_th: typing_thm,
+               exists_th: thm) -> typing_thm:
+    """Form `@1 A p` under a proof of `?x:A. p x`. Returns the typing
+    `Gamma |- @1 A p : A`, with `Gamma` collecting the asls of `p_th`
+    and `exists_th` (the standard CONST σ-validator handles this)."""
+    return CONST("@1", sigma=(A, p_th, exists_th))
+
+
+# SELECT_AX_1 : (A:tp, p:A→bool, ▷ ?x:A. p x) ▷ |- p (@1 A p)
+#
+# Built by APP'ing `p` to a `@1 A p` typing under the same Φ-context
+# (so the precondition is in scope as a `thm` to discharge Assume).
+_sel1_p_th = VAR(_choice_p_var)
+_sel1_exists_th = ASSUME(TYPE_OF([], _choice_exists_p_x_tm))
+_sel1_at_th = CONST(
+    "@1", sigma=(_choice_A_tv, _sel1_p_th, _sel1_exists_th)
+)
+_sel1_concl_th = _kernel_APP(_sel1_p_th, _sel1_at_th)
+SELECT_AX_1 = new_axiom(
+    _sel1_concl_th,
+    phi=(_choice_A_tv, _choice_p_var, Assume(_choice_exists_p_x_tm)),
+)
+
+
+# ε2 (weak): @2 : (A:tp, p:A→bool, ▷ ?x:A. T) → A
+new_constant(
+    "@2",
+    _choice_A_tv,
+    phi=(
+        _choice_A_tv,
+        _choice_p_var,
+        Assume(_choice_exists_T_tm),
+    ),
+)
+
+
+def mk_select2(A: hol_type, p_th: typing_thm,
+               inhabited_th: thm) -> typing_thm:
+    """Form `@2 A p` under a proof of `?x:A. T` (A is inhabited)."""
+    return CONST("@2", sigma=(A, p_th, inhabited_th))
+
+
+# SELECT_AX_2 : (A:tp, p:A→bool, ▷ ?x:A. T, ▷ ?x:A. p x) ▷ |- p (@2 A p)
+#
+# Two preconditions in Φ: A-inhabitation gates @2's formation; the
+# predicate witness gates the conclusion. The conditional HOL-Light
+# shape `(?x:A. p x) ⇒ p (@P)` is recovered by DISCH-ing on the
+# second Assume.
+_sel2_p_th = VAR(_choice_p_var)
+_sel2_inh_th = ASSUME(TYPE_OF([], _choice_exists_T_tm))
+_sel2_exists_th = ASSUME(TYPE_OF([], _choice_exists_p_x_tm))
+_sel2_at_th = CONST(
+    "@2", sigma=(_choice_A_tv, _sel2_p_th, _sel2_inh_th)
+)
+_sel2_concl_th = _kernel_APP(_sel2_p_th, _sel2_at_th)
+SELECT_AX_2 = new_axiom(
+    _sel2_concl_th,
+    phi=(
+        _choice_A_tv, _choice_p_var,
+        Assume(_choice_exists_T_tm),
+        Assume(_choice_exists_p_x_tm),
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
 # Smoke test
 # ---------------------------------------------------------------------------
 
@@ -767,3 +901,51 @@ if __name__ == "__main__":
     # inc(add 0 0) = inc(0) via TM_CONG_BASE with cod_eq.
     inc_cong = TM_CONG_BASE("inc", [add_eq_0], cod_eq=vec_bridge)
     print("TM_CONG co ::", inc_cong)
+
+    # -----------------------------------------------------------------
+    # ε1 and ε2 staged axioms (`SELECT_AX_1`, `SELECT_AX_2`). Print
+    # both -- their Φ-context makes the precondition shape explicit --
+    # and exercise both formers using `add 0 0 = 0` as the standing
+    # witness fact.
+    #
+    # The predicate is `p n := (add 0 0 = n)`; both formers select an
+    # element of `nat` for which p holds. Existence is supplied as a
+    # primitive `?` term (the constant has no defining equation in
+    # basics_dhol, so the existence witness must come from a `?` axiom
+    # at use-site -- here we just `ASSUME` it for demonstration).
+    # -----------------------------------------------------------------
+    print()
+    print("SELECT_AX_1 ::", SELECT_AX_1)
+    print("SELECT_AX_2 ::", SELECT_AX_2)
+
+    # Predicate p_n n := (add 0 0 = n) at nat, packaged as a typing.
+    n_p = Var("n", n_ty)
+    p_body_th = APP(APP(CONST("=", (n_ty,)), add_0_0), VAR(n_p))
+    p_lam_th = LAMBDA(n_p, p_body_th)
+    print("p          ::", p_lam_th)
+
+    # Existence witness for `?n:nat. p n`: ASSUMEd here (a real theory
+    # would derive it from add_eq_0 plus an `EXISTS_INTRO` rule).
+    exists_p_tm = mk_exists(n_p, Comb(p_lam_th._tm, VAR(n_p)._tm))
+    exists_p_th = ASSUME(TYPE_OF([], exists_p_tm))
+    # ?n:nat. T -- A-inhabitation.
+    inhabited_tm = mk_exists(n_p, _T_const_th._tm)
+    inhabited_th = ASSUME(TYPE_OF([], inhabited_tm))
+
+    # ε1: form @1 nat p under the predicate-witness assumption.
+    sel1_th = mk_select1(n_ty, p_lam_th, exists_p_th)
+    print("@1 nat p   ::", sel1_th)
+    # Conclude p (@1 nat p) by instantiating SELECT_AX_1.
+    sel1_concl = interpret(SELECT_AX_1, (n_ty, p_lam_th, exists_p_th))
+    print("SEL1 concl ::", sel1_concl)
+
+    # ε2: form @2 nat p under the type-inhabitation assumption.
+    sel2_th = mk_select2(n_ty, p_lam_th, inhabited_th)
+    print("@2 nat p   ::", sel2_th)
+    # Conclude p (@2 nat p) by instantiating SELECT_AX_2 (the second
+    # Assume requires the predicate-witness proof, mirroring HOL
+    # Light's `?x. P x ⇒ P (@P)` shape).
+    sel2_concl = interpret(
+        SELECT_AX_2, (n_ty, p_lam_th, inhabited_th, exists_p_th)
+    )
+    print("SEL2 concl ::", sel2_concl)
