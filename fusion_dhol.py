@@ -2,12 +2,32 @@
 #
 # Based on Rothgang/Rabe/Benzmueller, "Dependently-Typed Higher-Order Logic"
 # (ACM TOCL, 2025; arXiv:2305.15382). Term well-typedness is itself a
-# judgement, not a meta-level function. The kernel exposes three families
-# of certificates:
+# judgement, not a meta-level function. The kernel exposes four families
+# of certificates (all subclasses of `Cert`):
 #
 #   typing_thm    Gamma |- t : A           (well-typed term)
+#   subtype_thm   Gamma |- A <: B          (subtyping)
 #   type_eq_thm   Gamma |- A == B          (propositional type equality)
 #   thm           Gamma |- F               (validity, as in HOL)
+#
+# === Trust boundary ===
+#
+# This module is the trust base. Everything in it -- the Cert subclasses,
+# their constructors (the introduction rules), the Φ-walkers, the σ-evidence
+# validators, the substitution primitives, and the declaration introducers
+# (`new_type`, `new_constant`, `new_axiom`, `new_type_eq_axiom`,
+# `new_sub_axiom`, `new_basic_definition`) -- can affect soundness. A bug
+# here can make a wrong sequent provable.
+#
+# Convenience helpers that do NOT extend trust live one layer up, in
+# `basics_dhol.py` alongside the propositional-bridge wrappers:
+#
+#   instantiate                -- pure router over mk_type / CONST / interpret
+#   mk_arrow, mk_subtype       -- thin type constructors (no Cert produced)
+#
+# Pretty-printers (`_pp_ty`, `_pp_tm`, `_pp_phi`) remain inside this module
+# despite being non-trust because they are used in `HolError` messages; the
+# choice of formatting cannot make a sequent provable.
 #
 # Every term that enters a theorem has been built by typing rules, so its
 # well-typedness is witnessed by a typing_thm whose asl already contains
@@ -581,15 +601,6 @@ class Decl:
 the_decls: dict = {"bool": Decl("bool", (), JTp())}
 
 
-def types() -> list:
-    """Public view: `(name, phi)` tuples for type symbols, newest first."""
-    return [
-        (d.name, d.phi)
-        for d in reversed(the_decls.values())
-        if isinstance(d.body, JTp)
-    ]
-
-
 def get_type_kind(s: str) -> tuple:
     """Return the declared Φ-telescope of a type symbol."""
     d = the_decls.get(s)
@@ -686,16 +697,6 @@ _seed_constant(
 )
 
 
-def constants() -> list:
-    """Public view: `(name, phi, ty)` tuples for term constants,
-    newest first."""
-    return [
-        (d.name, d.phi, d.body.ty)
-        for d in reversed(the_decls.values())
-        if isinstance(d.body, JTm)
-    ]
-
-
 def get_const_phi(s: str) -> tuple:
     """Return the declared Φ-telescope of a term constant."""
     d = the_decls.get(s)
@@ -737,10 +738,6 @@ def new_constant(name: str, ty: hol_type,
         _check_phi(phi, f"new_constant({name})")
         phi = tuple(phi)
     the_decls[name] = Decl(name, phi, JTm(ty))
-
-
-def mk_arrow(a: hol_type, b: hol_type) -> hol_type:
-    return Pi(Var("_", a), b)
 
 
 def _check_assume_proof(arg, formula: term, theta_ty: list,
@@ -1142,6 +1139,90 @@ def _tm_alpha(env: list, a: term, b: term) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _map_type(f_ty: Callable, f_tm: Callable, ty: hol_type) -> hol_type:
+    """Identity-walk over a hol_type, mapping nested types via `f_ty`
+    and nested terms via `f_tm`. Returns `ty` unchanged if every
+    sub-result is the same object as its source (the existing
+    substitutors all rely on this aliasing optimisation, so the
+    walker preserves it).
+
+    Used by `subst_in_type`, `type_subst`, `_resolve_tyops_in_type`,
+    which only differ at their leaf nodes (Tyvar / TyopApp) and at
+    their Pi / Subtype binder strategies. `_inst_in_term`'s
+    Clash-recovery machinery is too custom to route through here."""
+    if isinstance(ty, Tyvar):
+        return ty
+    if isinstance(ty, Tyapp):
+        new_t = tuple(f_ty(a) for a in ty.type_args)
+        new_m = tuple(f_tm(a) for a in ty.term_args)
+        if all(n is o for n, o in zip(new_t, ty.type_args)) and \
+           all(n is o for n, o in zip(new_m, ty.term_args)):
+            return ty
+        return Tyapp(ty.tyop, new_t, new_m)
+    if isinstance(ty, Pi):
+        new_bv_ty = f_ty(ty.bvar.ty)
+        new_bv = (
+            ty.bvar if new_bv_ty is ty.bvar.ty
+            else Var(ty.bvar.name, new_bv_ty)
+        )
+        new_body = f_ty(ty.body)
+        if new_bv is ty.bvar and new_body is ty.body:
+            return ty
+        return Pi(new_bv, new_body)
+    if isinstance(ty, Subtype):
+        new_bv_ty = f_ty(ty.bvar.ty)
+        new_bv = (
+            ty.bvar if new_bv_ty is ty.bvar.ty
+            else Var(ty.bvar.name, new_bv_ty)
+        )
+        new_pred = f_tm(ty.predicate)
+        if new_bv is ty.bvar and new_pred is ty.predicate:
+            return ty
+        return Subtype(new_bv, new_pred)
+    if isinstance(ty, TyopApp):
+        new_args = tuple(f_tm(a) for a in ty.args)
+        if all(n is o for n, o in zip(new_args, ty.args)):
+            return ty
+        return TyopApp(ty.name, new_args)
+    raise HolError("_map_type: ill-formed type")
+
+
+def _map_term(f_ty: Callable, f_tm: Callable, tm) -> term:
+    """Identity-walk over a term, mapping nested types via `f_ty`
+    and nested terms via `f_tm`. Identity-aliasing-preserving, like
+    `_map_type`. Used by `_vsubst` and `_resolve_tyops_in_term` for
+    their non-binder / non-leaf cases; `_inst_in_term` does not go
+    through here because its Var / Abs handling carries Clash state."""
+    if isinstance(tm, Var):
+        new_ty = f_ty(tm.ty)
+        return tm if new_ty is tm.ty else Var(tm.name, new_ty)
+    if isinstance(tm, Const):
+        new_ty = f_ty(tm.ty)
+        new_args = tuple(f_tm(a) for a in tm.term_args)
+        if new_ty is tm.ty and all(
+            n is o for n, o in zip(new_args, tm.term_args)
+        ):
+            return tm
+        return Const(tm.name, new_ty, new_args)
+    if isinstance(tm, Comb):
+        f2 = f_tm(tm.fun)
+        a2 = f_tm(tm.arg)
+        if f2 is tm.fun and a2 is tm.arg:
+            return tm
+        return Comb(f2, a2)
+    if isinstance(tm, Abs):
+        new_bv_ty = f_ty(tm.bvar.ty)
+        new_bv = (
+            tm.bvar if new_bv_ty is tm.bvar.ty
+            else Var(tm.bvar.name, new_bv_ty)
+        )
+        new_body = f_tm(tm.body)
+        if new_bv is tm.bvar and new_body is tm.body:
+            return tm
+        return Abs(new_bv, new_body)
+    raise HolError("_map_term: ill-formed term")
+
+
 def _subst_binder(theta: list, bvar: Var, body,
                   subst_body, free_in_body, ctor):
     """Capture-avoiding substitution under a binder, shared between
@@ -1168,12 +1249,6 @@ def _subst_binder(theta: list, bvar: Var, body,
 def subst_in_type(theta: list, ty: hol_type) -> hol_type:
     if not theta:
         return ty
-    if isinstance(ty, Tyvar):
-        return ty
-    if isinstance(ty, Tyapp):
-        new_type_args = tuple(subst_in_type(theta, a) for a in ty.type_args)
-        new_term_args = tuple(_vsubst(theta, a) for a in ty.term_args)
-        return Tyapp(ty.tyop, new_type_args, new_term_args)
     if isinstance(ty, Pi):
         return _subst_binder(
             theta, ty.bvar, ty.body,
@@ -1184,9 +1259,11 @@ def subst_in_type(theta: list, ty: hol_type) -> hol_type:
             theta, ty.bvar, ty.predicate,
             _vsubst, vfree_in, Subtype,
         )
-    if isinstance(ty, TyopApp):
-        return TyopApp(ty.name, tuple(_vsubst(theta, a) for a in ty.args))
-    raise HolError("subst_in_type: ill-formed type")
+    return _map_type(
+        lambda x: subst_in_type(theta, x),
+        lambda x: _vsubst(theta, x),
+        ty,
+    )
 
 
 def _occurs_in_type(v: Var, ty: hol_type) -> bool:
@@ -1225,25 +1302,11 @@ def type_subst(i: list, ty: hol_type) -> hol_type:
             if dst == ty:
                 return src
         return ty
-    if isinstance(ty, Tyapp):
-        return Tyapp(
-            ty.tyop,
-            tuple(type_subst(i, a) for a in ty.type_args),
-            tuple(_inst_in_term([], i, a) for a in ty.term_args),
-        )
-    if isinstance(ty, Pi):
-        return Pi(
-            Var(ty.bvar.name, type_subst(i, ty.bvar.ty)),
-            type_subst(i, ty.body),
-        )
-    if isinstance(ty, Subtype):
-        return Subtype(
-            Var(ty.bvar.name, type_subst(i, ty.bvar.ty)),
-            _inst_in_term([], i, ty.predicate),
-        )
-    if isinstance(ty, TyopApp):
-        return TyopApp(ty.name, tuple(_inst_in_term([], i, a) for a in ty.args))
-    raise HolError("type_subst: ill-formed type")
+    return _map_type(
+        lambda x: type_subst(i, x),
+        lambda x: _inst_in_term([], i, x),
+        ty,
+    )
 
 
 def _inst_in_term(env: list, tyin: list, tm: term) -> term:
@@ -1312,26 +1375,6 @@ def _inst_in_term(env: list, tyin: list, tm: term) -> term:
 def _resolve_tyops_in_type(tyop_theta: list, ty: hol_type) -> hol_type:
     if not tyop_theta:
         return ty
-    if isinstance(ty, Tyvar):
-        return ty
-    if isinstance(ty, Tyapp):
-        new_type_args = tuple(
-            _resolve_tyops_in_type(tyop_theta, a) for a in ty.type_args
-        )
-        new_term_args = tuple(
-            _resolve_tyops_in_term(tyop_theta, a) for a in ty.term_args
-        )
-        return Tyapp(ty.tyop, new_type_args, new_term_args)
-    if isinstance(ty, Pi):
-        return Pi(
-            Var(ty.bvar.name, _resolve_tyops_in_type(tyop_theta, ty.bvar.ty)),
-            _resolve_tyops_in_type(tyop_theta, ty.body),
-        )
-    if isinstance(ty, Subtype):
-        return Subtype(
-            Var(ty.bvar.name, _resolve_tyops_in_type(tyop_theta, ty.bvar.ty)),
-            _resolve_tyops_in_term(tyop_theta, ty.predicate),
-        )
     if isinstance(ty, TyopApp):
         new_args = tuple(
             _resolve_tyops_in_term(tyop_theta, a) for a in ty.args
@@ -1348,43 +1391,24 @@ def _resolve_tyops_in_type(tyop_theta: list, ty: hol_type) -> hol_type:
                 return _resolve_tyops_in_type(
                     tyop_theta, subst_in_type(sub, typeabs.body)
                 )
+        if all(n is o for n, o in zip(new_args, ty.args)):
+            return ty
         return TyopApp(ty.name, new_args)
-    raise HolError("_resolve_tyops_in_type: ill-formed type")
+    return _map_type(
+        lambda x: _resolve_tyops_in_type(tyop_theta, x),
+        lambda x: _resolve_tyops_in_term(tyop_theta, x),
+        ty,
+    )
 
 
 def _resolve_tyops_in_term(tyop_theta: list, tm: term) -> term:
     if not tyop_theta:
         return tm
-    if isinstance(tm, Var):
-        new_ty = _resolve_tyops_in_type(tyop_theta, tm.ty)
-        return tm if new_ty is tm.ty else Var(tm.name, new_ty)
-    if isinstance(tm, Const):
-        new_ty = _resolve_tyops_in_type(tyop_theta, tm.ty)
-        new_args = tuple(
-            _resolve_tyops_in_term(tyop_theta, a) for a in tm.term_args
-        )
-        if new_ty is tm.ty and all(
-            n is o for n, o in zip(new_args, tm.term_args)
-        ):
-            return tm
-        return Const(tm.name, new_ty, new_args)
-    if isinstance(tm, Comb):
-        f2 = _resolve_tyops_in_term(tyop_theta, tm.fun)
-        a2 = _resolve_tyops_in_term(tyop_theta, tm.arg)
-        if f2 is tm.fun and a2 is tm.arg:
-            return tm
-        return Comb(f2, a2)
-    if isinstance(tm, Abs):
-        new_bvar_ty = _resolve_tyops_in_type(tyop_theta, tm.bvar.ty)
-        new_bvar = (
-            tm.bvar if new_bvar_ty is tm.bvar.ty
-            else Var(tm.bvar.name, new_bvar_ty)
-        )
-        new_body = _resolve_tyops_in_term(tyop_theta, tm.body)
-        if new_bvar is tm.bvar and new_body is tm.body:
-            return tm
-        return Abs(new_bvar, new_body)
-    raise HolError("_resolve_tyops_in_term: ill-formed term")
+    return _map_term(
+        lambda x: _resolve_tyops_in_type(tyop_theta, x),
+        lambda x: _resolve_tyops_in_term(tyop_theta, x),
+        tm,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1432,22 +1456,16 @@ def _vsubst(ilist: list, tm: term) -> term:
                 return src
         new_ty = subst_in_type(ilist, tm.ty)
         return tm if new_ty is tm.ty else Var(tm.name, new_ty)
-    if isinstance(tm, Const):
-        new_ty = subst_in_type(ilist, tm.ty)
-        new_args = tuple(_vsubst(ilist, a) for a in tm.term_args)
-        if new_ty is tm.ty and all(
-            n is o for n, o in zip(new_args, tm.term_args)
-        ):
-            return tm
-        return Const(tm.name, new_ty, new_args)
-    if isinstance(tm, Comb):
-        return Comb(_vsubst(ilist, tm.fun), _vsubst(ilist, tm.arg))
     if isinstance(tm, Abs):
         return _subst_binder(
             ilist, tm.bvar, tm.body,
             _vsubst, vfree_in, Abs,
         )
-    raise HolError("vsubst: ill-formed term")
+    return _map_term(
+        lambda x: subst_in_type(ilist, x),
+        lambda x: _vsubst(ilist, x),
+        tm,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2283,14 +2301,6 @@ def THM_CONG_BASE(staged: Staged, args: list) -> thm:
 # ---------------------------------------------------------------------------
 
 
-def mk_subtype(bvar: Var, predicate: term) -> hol_type:
-    """Build `bvar.ty | (λbvar. predicate)`. Checks that `predicate` is
-    a bool term in the context where `bvar` is in scope (best-effort:
-    we require that any free non-`bvar` term variables already have
-    well-formed types)."""
-    return Subtype(bvar, predicate)
-
-
 def RESTRICT(t_th: typing_thm, p_th: thm,
              subtype: hol_type) -> typing_thm:
     """Intro:  Gamma |- t : A    Delta |- p[t/y]
@@ -2683,10 +2693,6 @@ def INST_TYPE(theta: list, th: thm) -> thm:
 the_axioms: list = []
 
 
-def axioms() -> list:
-    return list(the_axioms)
-
-
 def _validate_phi_body(asl, free_vars, free_tyvars, free_tyops,
                        phi, ctx, *, extra_allowed_tvs=()) -> None:
     """Validate that a cert payload is well-formed under Φ:
@@ -2857,40 +2863,7 @@ def interpret(staged: Staged, sigma: tuple):
     raise HolError(f"interpret: unknown Staged body {type(b).__name__}")
 
 
-def instantiate(target, sigma: tuple):
-    """Unified Φ-substitution dispatcher.
-
-    Dispatches by J-level of `target`:
-      * type-name str (JTp body)  -- `mk_type(target, sigma)`   → hol_type
-      * const-name str (JTm body) -- `CONST(target, sigma)`     → typing_thm
-      * Staged                    -- `interpret(target, sigma)` → cert
-
-    The three primary entry points (`mk_type`, `CONST`, `interpret`)
-    remain available; `instantiate` is the J-agnostic alias that all
-    three share -- the validator `_apply_phi_subst` is the same in
-    every case, and the only difference is which evidence-shape the
-    target's body asks for."""
-    if isinstance(target, Staged):
-        return interpret(target, sigma)
-    if isinstance(target, str):
-        d = the_decls.get(target)
-        if d is None:
-            raise HolError(f"instantiate: unknown name {target}")
-        if isinstance(d.body, JTp):
-            return mk_type(target, list(sigma))
-        if isinstance(d.body, JTm):
-            return CONST(target, tuple(sigma))
-    raise HolError(
-        f"instantiate: target must be a declared name or a Staged "
-        f"(got {target!r})"
-    )
-
-
 the_definitions: list = []
-
-
-def definitions() -> list:
-    return list(the_definitions)
 
 
 def new_basic_definition(lhs: Var, rhs_th: typing_thm,

@@ -19,9 +19,9 @@ from fusion_dhol import (
     THM_CONG_BASE,
     ST_REFL, ST_TRANS, ST_FORGET, ST_REFINE, ST_PI_DOMAIN, SUBSUME,
     RESTRICT, RESTRICT_PROOF,
-    mk_subtype, mk_type, mk_arrow, safe_mk_eq,
+    mk_type, safe_mk_eq,
     new_type, new_constant, new_axiom, new_basic_definition,
-    interpret, instantiate, frees,
+    interpret, frees,
     _pp_ty, _pp_tm, _eq_tag, _tm_alpha,
 )
 
@@ -30,9 +30,12 @@ from fusion_dhol import (
 # so that the optional propositional bridges (`eq`, `cod_eq`, `ty_eq`) are
 # available -- the kernel ships only the strictly homogeneous forms; the
 # heterogeneous cases are discharged via axioms in basics_dhol.
+# mk_arrow / mk_subtype / instantiate are non-kernel sugar living in
+# basics_dhol.
 from basics_dhol import (
     APP, MK_COMB, ABS, TM_CONG_BASE, TY_CONG_PI,
     ETA, TRANS, UNRESTRICT, DISCH, MP, IMP_TYPE, mk_imp,
+    mk_arrow, mk_subtype, instantiate,
 )
 
 # nat as a base type, with "0" as the atomic inhabitation witness.

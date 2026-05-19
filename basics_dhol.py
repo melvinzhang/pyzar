@@ -29,7 +29,7 @@ from fusion_dhol import (
     Var, Const, Comb, Abs, Pi, Tyvar, Tyapp,
     TyopVar, TyopApp, TypeAbs, TyEqAssume,
     typing_thm, thm, type_eq_thm,
-    bool_ty, aty, safe_mk_eq, mk_arrow,
+    bool_ty, aty, safe_mk_eq,
     VAR, CONST, LAMBDA, CONV,
     APP as _kernel_APP,
     MK_COMB as _kernel_MK_COMB,
@@ -41,12 +41,60 @@ from fusion_dhol import (
     SUBSUME, ST_FORGET,
     TYPE_OF, LHS_TYPING, RHS_TYPING, CONCL_TYPING,
     Assume, get_const_phi, get_const_type, type_eq, type_subst,
-    subst_in_type, Subtype,
+    subst_in_type, Subtype, Staged, JTp, JTm,
     new_basic_definition, new_axiom, new_type_eq_axiom, interpret,
+    mk_type, the_decls,
     HolError, frees, vfree_in,
     _is_eq, _lhs, _rhs, _eq_tag,
     _pp_tm, _pp_ty,
 )
+
+
+# ---------------------------------------------------------------------------
+# Non-kernel convenience helpers
+#
+# These compose trusted kernel primitives without extending trust. A bug
+# here can mis-route or build a misshapen type, but cannot forge a
+# certificate -- the kernel's σ-validators reject anything malformed
+# downstream.
+# ---------------------------------------------------------------------------
+
+
+def mk_arrow(a, b):
+    """Non-dependent arrow `a → b`, i.e. `Pi(_:a). b`."""
+    return Pi(Var("_", a), b)
+
+
+def mk_subtype(bvar, predicate):
+    """Build `bvar.ty | (λbvar. predicate)`. Sugar over the `Subtype`
+    dataclass."""
+    return Subtype(bvar, predicate)
+
+
+def instantiate(target, sigma):
+    """Unified Φ-substitution router. Dispatches by J-level of
+    `target`:
+      * type-name str (`JTp` body)  -- `mk_type(target, sigma)`
+      * const-name str (`JTm` body) -- `CONST(target, sigma)`
+      * `Staged`                    -- `interpret(target, sigma)`
+
+    Each branch hands off to a kernel primitive whose Φ-walker
+    validates σ-evidence identically; a bug here cannot forge a
+    sequent, only mis-route."""
+    if isinstance(target, Staged):
+        return interpret(target, sigma)
+    if isinstance(target, str):
+        d = the_decls.get(target)
+        if d is None:
+            raise HolError(f"instantiate: unknown name {target}")
+        if isinstance(d.body, JTp):
+            return mk_type(target, list(sigma))
+        if isinstance(d.body, JTm):
+            return CONST(target, tuple(sigma))
+    raise HolError(
+        f"instantiate: target must be a declared name or a Staged "
+        f"(got {target!r})"
+    )
 
 
 # ---------------------------------------------------------------------------
